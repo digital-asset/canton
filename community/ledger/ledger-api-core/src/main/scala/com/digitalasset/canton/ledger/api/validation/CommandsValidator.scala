@@ -85,7 +85,7 @@ final class CommandsValidator(
         prepareRequest.packageIdSelectionPreference
       )
     } yield domain.Commands(
-      // Will be provided in "execute"
+      // Not used for external submissions
       workflowId = None,
       applicationId = appId,
       commandId = commandId,
@@ -334,7 +334,11 @@ final class CommandsValidator(
               .asGrpcError
           )
         else
-          Right(DeduplicationPeriod.DeduplicationOffset(Offset.fromLong(offset)))
+          Right(
+            DeduplicationPeriod.DeduplicationOffset(
+              Option(Offset.tryFromLong(offset))
+            )
+          )
     }
 }
 

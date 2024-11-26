@@ -73,14 +73,18 @@ private[platform] final case class InitializeParallelIngestion(
       postProcessingEndOffset <- dbDispatcher.executeSql(metrics.index.db.getPostProcessingEnd)(
         parameterStorageBackend.postProcessingEnd
       )
-      potentiallyNonPostProcessedCompletions <- dbDispatcher.executeSql(
-        metrics.index.db.getPostProcessingEnd
-      )(
-        completionStorageBackend.commandCompletionsForRecovery(
-          startExclusive = postProcessingEndOffset.getOrElse(Offset.beforeBegin),
-          endInclusive = Offset.fromAbsoluteOffsetO(ledgerEnd.map(_.lastOffset)),
-        )
-      )
+      potentiallyNonPostProcessedCompletions <- ledgerEnd.map(_.lastOffset) match {
+        case Some(lastOffset) =>
+          dbDispatcher.executeSql(
+            metrics.index.db.getPostProcessingEnd
+          )(
+            completionStorageBackend.commandCompletionsForRecovery(
+              startInclusive = postProcessingEndOffset.fold(Offset.firstOffset)(_.increment),
+              endInclusive = lastOffset,
+            )
+          )
+        case None => Future.successful(Vector.empty)
+      }
       _ <- postProcessor(potentiallyNonPostProcessedCompletions, loggingContext.traceContext)
       _ <- dbDispatcher.executeSql(metrics.indexer.postProcessingEndIngestion)(
         parameterStorageBackend.updatePostProcessingEnd(ledgerEnd.map(_.lastOffset))

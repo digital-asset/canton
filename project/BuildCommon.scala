@@ -402,6 +402,7 @@ object BuildCommon {
       "com.digitalasset.canton.DirectGrpcServiceInvocation"
     ),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.DiscardedFuture"),
+    wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureAndThen"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.GlobalExecutionContext"),
     // NonUnitForEach is too aggressive for integration tests where we often ignore the result of console commands
@@ -924,7 +925,6 @@ object BuildCommon {
 
     lazy val `community-testing` = project
       .in(file("community/testing"))
-      .disablePlugins(WartRemover)
       .dependsOn(
         `community-base`,
         `magnolify-addon` % "compile->test",
@@ -1378,13 +1378,9 @@ object BuildCommon {
           `ledger-common` % "test->test",
           `community-testing` % "test->test",
         )
-        .disablePlugins(WartRemover) // to accommodate different daml repo coding style
         .enablePlugins(DamlPlugin)
         .settings(
           sharedSettings,
-          scalacOptions --= DamlProjects.removeCompileFlagsForDaml
-            // needed for foo.bar.{this as that} imports
-            .filterNot(_ == "-Xsource:3"),
           libraryDependencies ++= Seq(
             circe_parser,
             upickle,

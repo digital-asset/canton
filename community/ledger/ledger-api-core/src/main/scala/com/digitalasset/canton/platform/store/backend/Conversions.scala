@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.store.backend
 
 import anorm.*
 import anorm.Column.nonNull
-import com.digitalasset.canton.data.{AbsoluteOffset, Offset}
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref
@@ -99,25 +99,25 @@ private[backend] object Conversions {
       s.setString(index, v.toHexString)
   }
 
-  def offset(name: String): RowParser[Offset] =
-    SqlParser.get[String](name).map(v => Offset.fromHexString(Ref.HexString.assertFromString(v)))
-
-  def offset(position: Int): RowParser[Offset] =
-    SqlParser
-      .get[String](position)
-      .map(v => Offset.fromHexString(Ref.HexString.assertFromString(v)))
-
-  // AbsoluteOffset
-
-  implicit object AbsoluteOffsetToStatement extends ToStatement[AbsoluteOffset] {
-    override def set(s: PreparedStatement, index: Int, v: AbsoluteOffset): Unit =
+  implicit object OffsetOToStatement extends ToStatement[Option[Offset]] {
+    override def set(s: PreparedStatement, index: Int, v: Option[Offset]): Unit =
       s.setString(index, v.toHexString)
   }
 
-  def absoluteOffset(name: String): RowParser[AbsoluteOffset] =
+  def offset(name: String): RowParser[Offset] =
     SqlParser
       .get[String](name)
-      .map(v => Offset.fromHexString(Ref.HexString.assertFromString(v)).toAbsoluteOffset)
+      .map(v => Offset.fromHexString(Ref.HexString.assertFromString(v)))
+
+  def offsetO(name: String): RowParser[Option[Offset]] =
+    SqlParser
+      .get[String](name)
+      .map(v => Offset.fromHexStringO(Ref.HexString.assertFromString(v)))
+
+  def offsetO(position: Int): RowParser[Option[Offset]] =
+    SqlParser
+      .get[String](position)
+      .map(v => Offset.fromHexStringO(Ref.HexString.assertFromString(v)))
 
   // Timestamp
 

@@ -28,7 +28,7 @@ import com.digitalasset.canton.health.{
   GrpcHealthReporter,
   LivenessHealthService,
 }
-import com.digitalasset.canton.lifecycle.{Lifecycle, ShutdownFailedException}
+import com.digitalasset.canton.lifecycle.{LifeCycle, ShutdownFailedException}
 import com.digitalasset.canton.metrics.{
   CommonMockMetrics,
   DbStorageMetrics,
@@ -133,8 +133,7 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
       testingConfig = TestingConfigInternal(),
       futureSupervisor = FutureSupervisor.Noop,
       loggerFactory = loggerFactory,
-      writeHealthDumpToFile =
-        (file: File) => Future.failed(new RuntimeException("Not implemented")),
+      writeHealthDumpToFile = (_: File) => Future.failed(new RuntimeException("Not implemented")),
       configuredOpenTelemetry = ConfiguredOpenTelemetry(
         OpenTelemetrySdk.builder().build(),
         SdkTracerProvider.builder(),
@@ -156,7 +155,7 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
     PekkoUtil.createActorSystem(loggerFactory.threadName)(parallelExecutionContext)
 
   override def afterAll(): Unit = {
-    Lifecycle.toCloseableActorSystem(actorSystem, logger, timeouts).close()
+    LifeCycle.toCloseableActorSystem(actorSystem, logger, timeouts).close()
     super.afterAll()
   }
 
@@ -212,12 +211,13 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
     def setupCreate(result: => TestNodeBootstrap): Unit =
       createResult.set(new CreateResult(result))
 
-    def create(name: String, config: TestNodeConfig): TestNodeBootstrap = createResult.get.get
+    def create(): TestNodeBootstrap =
+      createResult.get.get
   }
 
   class TestNodes(factory: TestNodeFactory, configs: Map[String, TestNodeConfig])
       extends ManagedNodes[TestNode, TestNodeConfig, CantonNodeParameters, TestNodeBootstrap](
-        factory.create,
+        (_, _) => factory.create(),
         new CommunityDbMigrationsFactory(loggerFactory),
         timeouts,
         configs,

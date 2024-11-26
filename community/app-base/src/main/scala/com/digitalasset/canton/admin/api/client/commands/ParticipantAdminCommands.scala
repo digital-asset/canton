@@ -1052,6 +1052,9 @@ object ParticipantAdminCommands {
     final case class CommitmentContracts(
         observer: StreamObserver[v30.InspectCommitmentContracts.Response],
         contracts: Seq[LfContractId],
+        expectedDomain: DomainId,
+        timestamp: CantonTimestamp,
+        downloadPayload: Boolean,
     ) extends Base[
           v30.InspectCommitmentContracts.Request,
           CancellableContext,
@@ -1059,7 +1062,10 @@ object ParticipantAdminCommands {
         ] {
       override protected def createRequest() = Right(
         v30.InspectCommitmentContracts.Request(
-          contracts.map(_.toBytes.toByteString)
+          contracts.map(_.toBytes.toByteString),
+          expectedDomain.toProtoPrimitive,
+          Some(timestamp.toProtoTimestamp),
+          downloadPayload,
         )
       )
 
@@ -1763,7 +1769,7 @@ object ParticipantAdminCommands {
   object Replication {
 
     final case class SetPassiveCommand()
-        extends GrpcAdminCommand[SetPassive.Request, SetPassive.Response, Boolean] {
+        extends GrpcAdminCommand[SetPassive.Request, SetPassive.Response, Unit] {
       override type Svc = EnterpriseParticipantReplicationServiceStub
 
       override def createService(
@@ -1782,9 +1788,9 @@ object ParticipantAdminCommands {
 
       override protected def handleResponse(
           response: SetPassive.Response
-      ): Either[String, Boolean] =
+      ): Either[String, Unit] =
         response match {
-          case SetPassive.Response(becamePassive) => Right(becamePassive)
+          case SetPassive.Response() => Either.unit
         }
     }
   }

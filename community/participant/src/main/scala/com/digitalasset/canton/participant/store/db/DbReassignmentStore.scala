@@ -15,10 +15,9 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.CryptoPureApi
-import com.digitalasset.canton.data.{CantonTimestamp, FullUnassignmentTree}
+import com.digitalasset.canton.data.{CantonTimestamp, FullUnassignmentTree, Offset}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentData.ReassignmentGlobalOffset
 import com.digitalasset.canton.participant.protocol.reassignment.{
   IncompleteReassignmentData,
@@ -32,7 +31,7 @@ import com.digitalasset.canton.participant.store.db.DbReassignmentStore.{
 }
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.protocol.{ReassignmentId, SerializableContract}
+import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId, SerializableContract}
 import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.sequencing.protocol.{NoOpeningErrors, SequencedEvent, SignedContent}
@@ -183,8 +182,8 @@ class DbReassignmentStore(
       unassignmentResult = getResultDeliveredUnassignmentResult(sourceProtocolVersion).apply(r),
       reassignmentGlobalOffset = ReassignmentGlobalOffset
         .create(
-          r.nextLongOption().map(GlobalOffset.tryFromLong),
-          r.nextLongOption().map(GlobalOffset.tryFromLong),
+          r.nextLongOption().map(Offset.tryFromLong),
+          r.nextLongOption().map(Offset.tryFromLong),
         )
         .valueOr(err => throw new DbDeserializationException(err)),
     )
@@ -398,7 +397,7 @@ class DbReassignmentStore(
               target_domain_idx=$indexedTargetDomain and (""" ++ reassignmentIdsFilter ++ sql")"
 
       storage.query(
-        query.as[(Int, CantonTimestamp, Option[GlobalOffset], Option[GlobalOffset])],
+        query.as[(Int, CantonTimestamp, Option[Offset], Option[Offset])],
         functionFullName,
       )
     }
@@ -472,17 +471,19 @@ class DbReassignmentStore(
     sequentialQueue.executeEUS(task, "addReassignmentsOffsets")
   }
 
-  override def completeReassignment(reassignmentId: ReassignmentId, timeOfCompletion: TimeOfChange)(
-      implicit traceContext: TraceContext
+  override def completeReassignment(reassignmentId: ReassignmentId, toc: TimeOfChange)(implicit
+      traceContext: TraceContext
   ): CheckedT[FutureUnlessShutdown, Nothing, ReassignmentStoreError, Unit] = {
+    logger.debug(s"Marking reassignment $reassignmentId as completed at $toc")
+
     def updateSameOrUnset(indexedSourceDomain: Source[IndexedDomain]) =
       sqlu"""
         update par_reassignments
-          set time_of_completion_request_counter=${timeOfCompletion.rc}, time_of_completion_timestamp=${timeOfCompletion.timestamp}
+          set time_of_completion_request_counter=${toc.rc}, time_of_completion_timestamp=${toc.timestamp}
         where
           target_domain_idx=$indexedTargetDomain and source_domain_idx=$indexedSourceDomain and unassignment_timestamp=${reassignmentId.unassignmentTs}
           and (time_of_completion_request_counter is NULL
-            or (time_of_completion_request_counter = ${timeOfCompletion.rc} and time_of_completion_timestamp = ${timeOfCompletion.timestamp}))
+            or (time_of_completion_request_counter = ${toc.rc} and time_of_completion_timestamp = ${toc.timestamp}))
       """
 
     val doneE: EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] = for {
@@ -504,7 +505,7 @@ class DbReassignmentStore(
               Left(
                 ReassignmentAlreadyCompleted(
                   reassignmentId,
-                  timeOfCompletion,
+                  toc,
                 ): ReassignmentStoreError
               )
             }
@@ -618,7 +619,7 @@ class DbReassignmentStore(
 
   private def findIncomplete(
       sourceDomain: Option[Source[DomainId]],
-      validAt: GlobalOffset,
+      validAt: Offset,
       start: Long,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Seq[ReassignmentData]] = for {
     indexedSourceDomainO <- sourceDomain.fold(
@@ -688,7 +689,7 @@ class DbReassignmentStore(
 
   override def findIncomplete(
       sourceDomain: Option[Source[DomainId]],
-      validAt: GlobalOffset,
+      validAt: Offset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
       limit: NonNegativeInt,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Seq[IncompleteReassignmentData]] = {
@@ -712,14 +713,14 @@ class DbReassignmentStore(
 
   override def findEarliestIncomplete()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[(GlobalOffset, ReassignmentId, Target[DomainId])]] =
+  ): FutureUnlessShutdown[Option[(Offset, ReassignmentId, Target[DomainId])]] =
     for {
       queryResult <- storage
         .queryUnlessShutdown(
           {
             val maxCompletedOffset: SQLActionBuilder =
-              sql"""select min(coalesce(assignment_global_offset,${GlobalOffset.MaxValue})),
-                  min(coalesce(unassignment_global_offset,${GlobalOffset.MaxValue})),
+              sql"""select min(coalesce(assignment_global_offset,${Offset.MaxValue})),
+                  min(coalesce(unassignment_global_offset,${Offset.MaxValue})),
                   source_domain_idx, unassignment_timestamp
                   from par_reassignments
                   where target_domain_idx=$indexedTargetDomain and (unassignment_global_offset is null or assignment_global_offset is null)
@@ -727,7 +728,7 @@ class DbReassignmentStore(
                   """
 
             maxCompletedOffset
-              .as[(Option[GlobalOffset], Option[GlobalOffset], Int, CantonTimestamp)]
+              .as[(Option[Offset], Option[Offset], Int, CantonTimestamp)]
           },
           functionFullName,
         )
@@ -753,23 +754,78 @@ class DbReassignmentStore(
         }
         .foldLeft(
           (
-            GlobalOffset.MaxValue,
+            Offset.MaxValue,
             ReassignmentId(
               Source(targetDomainId.unwrap),
               CantonTimestamp.MaxValue,
             ),
           )
-        )((acc: (GlobalOffset, ReassignmentId), n) =>
+        )((acc: (Offset, ReassignmentId), n) =>
           n match {
             case (Some(o), tid) => if (acc._1 > o) (o, tid) else acc
             case (None, _) => acc
           }
         ) match {
         case (offset, reassignmentId) =>
-          if (offset == GlobalOffset.MaxValue) None
+          if (offset == Offset.MaxValue) None
           else Some((offset, reassignmentId, targetDomainId))
       }
     } yield res
+
+  override def findContractReassignmentId(
+      contractIds: Seq[LfContractId],
+      sourceDomain: Option[Source[DomainId]],
+      unassignmentTs: Option[CantonTimestamp],
+      completionTs: Option[CantonTimestamp],
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[LfContractId, Seq[ReassignmentId]]] = {
+
+    import DbStorage.Implicits.BuilderChain.*
+
+    for {
+      indexedSourceDomainO <- sourceDomain.fold(
+        FutureUnlessShutdown.pure(Option.empty[Source[IndexedDomain]])
+      )(sd => indexedDomainF(sd).map(Some(_)))
+
+      filterDomains = indexedSourceDomainO match {
+        case Some(source) => Some(sql"source_domain_idx=$source")
+        case None => None
+      }
+
+      filterUnassignmentTs = unassignmentTs match {
+        case Some(ts) => Some(sql"unassignment_timestamp=$ts")
+        case None => None
+      }
+
+      filterCompletionTs = completionTs match {
+        case Some(ts) => Some(sql"time_of_completion_timestamp=$ts")
+        case None => None
+      }
+
+      filter =
+        Seq(filterDomains, filterUnassignmentTs, filterCompletionTs)
+          .filter(_.nonEmpty)
+          .collect { case Some(i) => i }
+          .intercalate(sql" and ")
+          .toActionBuilder
+
+      query =
+        sql"select source_domain_idx, unassignment_timestamp, contract from par_reassignments where 1=1 and (" ++ filter ++ sql")"
+
+      res <- storage
+        .queryUnlessShutdown(
+          query.as[(Int, CantonTimestamp, SerializableContract)],
+          functionFullName,
+        )
+        .map(_.collect {
+          case (sDomainIdx, unassignTs, contract) if contractIds.contains(contract.contractId) =>
+            indexedDomainF(sDomainIdx, "source_domain_idx").map(sourceDomain =>
+              contract.contractId -> ReassignmentId(Source(sourceDomain.domainId), unassignTs)
+            )
+        }.sequence.map(_.groupBy(_._1).map { case (id, value) => id -> value.map(_._2) }))
+    } yield res
+  }.flatten
 
   private def insertDependentDeprecated[E, W, A, R](
       dbReassignmentId: DbReassignmentId,

@@ -9,7 +9,8 @@ import com.daml.metrics.{DatabaseMetrics, Timed}
 import com.daml.nameof.NameOf.qualifiedNameOfCurrentFunc
 import com.daml.tracing
 import com.daml.tracing.Spans
-import com.digitalasset.canton.data.AbsoluteOffset
+import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TraceIdentifiers
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
@@ -71,13 +72,15 @@ class TransactionsFlatStreamReader(
 
   private val paginatingAsyncStream = new PaginatingAsyncStream(loggerFactory)
 
+  private val directEC = DirectExecutionContext(logger)
+
   def streamFlatTransactions(
       queryRange: EventsRange,
       filteringConstraints: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[(AbsoluteOffset, GetUpdatesResponse), NotUsed] = {
+  ): Source[(Offset, GetUpdatesResponse), NotUsed] = {
     val span =
       Telemetry.Transactions.createSpan(
         tracer,
@@ -120,7 +123,7 @@ class TransactionsFlatStreamReader(
       eventProjectionProperties: EventProjectionProperties,
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[(AbsoluteOffset, GetUpdatesResponse), NotUsed] = {
+  ): Source[(Offset, GetUpdatesResponse), NotUsed] = {
     val createEventIdQueriesLimiter =
       new QueueBasedConcurrencyLimiter(maxParallelIdCreateQueries, executionContext)
     val consumingEventIdQueriesLimiter =
@@ -195,9 +198,9 @@ class TransactionsFlatStreamReader(
                 queryValidRange.withRangeNotPruned(
                   minOffsetInclusive = queryRange.startInclusiveOffset,
                   maxOffsetInclusive = queryRange.endInclusiveOffset,
-                  errorPruning = (prunedOffset: AbsoluteOffset) =>
+                  errorPruning = (prunedOffset: Offset) =>
                     s"Transactions request from ${queryRange.startInclusiveOffset.unwrap} to ${queryRange.endInclusiveOffset.unwrap} precedes pruned offset ${prunedOffset.unwrap}",
-                  errorLedgerEnd = (ledgerEndOffset: Option[AbsoluteOffset]) =>
+                  errorLedgerEnd = (ledgerEndOffset: Option[Offset]) =>
                     s"Transactions request from ${queryRange.startInclusiveOffset.unwrap} to ${queryRange.endInclusiveOffset.unwrap} is beyond ledger end offset ${ledgerEndOffset
                         .fold(0L)(_.unwrap)}",
                 ) {
@@ -252,7 +255,7 @@ class TransactionsFlatStreamReader(
       )
       .mapConcat { (groupOfPayloads: Seq[Entry[Event]]) =>
         val responses = TransactionConversions.toGetTransactionsResponse(groupOfPayloads)
-        responses.map { case (offset, response) => AbsoluteOffset.tryFromLong(offset) -> response }
+        responses.map { case (offset, response) => Offset.tryFromLong(offset) -> response }
       }
 
     val topologyTransactions =
@@ -304,10 +307,10 @@ class TransactionsFlatStreamReader(
 
     sourceOfTransactions
       .mergeSorted(topologyTransactions.map { case (offset, response) =>
-        offset.toAbsoluteOffset -> response
+        offset -> response
       })(Ordering.by(_._1))
       .mergeSorted(reassignments.map { case (offset, response) =>
-        offset.toAbsoluteOffset -> response
+        offset -> response
       })(Ordering.by(_._1))
   }
 
@@ -316,9 +319,13 @@ class TransactionsFlatStreamReader(
       eventProjectionProperties: EventProjectionProperties,
   )(implicit lc: LoggingContextWithTrace): Future[Seq[Entry[Event]]] =
     Timed.future(
-      future = MonadUtil.sequentialTraverse(rawEvents)(
-        TransactionsReader.deserializeFlatEvent(eventProjectionProperties, lfValueTranslation)
-      ),
+      future = Future.delegate {
+        implicit val executionContext: ExecutionContext =
+          directEC // Scala 2 implicit scope override: shadow the outer scope's implicit by name
+        MonadUtil.sequentialTraverse(rawEvents)(
+          TransactionsReader.deserializeFlatEvent(eventProjectionProperties, lfValueTranslation)
+        )
+      },
       timer = dbMetrics.flatTxStream.translationTimer,
     )
 

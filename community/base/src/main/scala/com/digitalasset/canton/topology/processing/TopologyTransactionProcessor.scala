@@ -15,7 +15,7 @@ import com.digitalasset.canton.crypto.DomainCryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.CantonNodeParameters
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
@@ -25,6 +25,10 @@ import com.digitalasset.canton.protocol.messages.{
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.protocol.{AllMembersOfDomain, Deliver, DeliverError}
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
+import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit.{
+  DefaultHeadStateInitializer,
+  HeadStateInitializer,
+}
 import com.digitalasset.canton.topology.client.{
   CachingDomainTopologyClient,
   DomainTopologyClientWithInit,
@@ -43,7 +47,6 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.topology.{DomainId, TopologyManagerError, TopologyStateProcessor}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, MonadUtil, SimpleExecutionQueue}
-import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.{ExecutionContext, Future}
@@ -390,7 +393,7 @@ class TopologyTransactionProcessor(
   }
 
   override def onClosed(): Unit =
-    Lifecycle.close(serializer)(logger)
+    LifeCycle.close(serializer)(logger)
 
   private val maxSequencedTimeAtInitializationF =
     TraceContext.withNewTraceContext(implicit traceContext =>
@@ -541,12 +544,12 @@ object TopologyTransactionProcessor {
   def createProcessorAndClientForDomain(
       topologyStore: TopologyStore[TopologyStoreId.DomainStore],
       domainId: DomainId,
-      protocolVersion: ProtocolVersion,
       pureCrypto: DomainCryptoPureApi,
       parameters: CantonNodeParameters,
       clock: Clock,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
+      headStateInitializer: HeadStateInitializer = DefaultHeadStateInitializer,
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
@@ -567,7 +570,6 @@ object TopologyTransactionProcessor {
     val cachingClientF = CachingDomainTopologyClient.create(
       clock,
       domainId,
-      protocolVersion,
       topologyStore,
       StoreBasedDomainTopologyClient.NoPackageDependencies,
       parameters.cachingConfigs,
@@ -575,6 +577,7 @@ object TopologyTransactionProcessor {
       parameters.processingTimeouts,
       futureSupervisor,
       loggerFactory,
+      headStateInitializer,
     )
 
     cachingClientF.map { client =>

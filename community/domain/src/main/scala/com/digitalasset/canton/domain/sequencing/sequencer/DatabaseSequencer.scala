@@ -30,8 +30,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.traffic.{
   SequencerRateLimitError,
   SequencerTrafficStatus,
 }
-import com.digitalasset.canton.domain.sequencing.traffic.store.TrafficConsumedStore
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.MetricsHelper
 import com.digitalasset.canton.resource.Storage
@@ -105,7 +104,6 @@ object DatabaseSequencer {
       clock,
       domainId,
       topologyClientMember,
-      trafficConsumedStore = None,
       protocolVersion,
       cryptoApi,
       metrics,
@@ -131,7 +129,6 @@ class DatabaseSequencer(
     clock: Clock,
     domainId: DomainId,
     topologyClientMember: Member,
-    trafficConsumedStore: Option[TrafficConsumedStore],
     protocolVersion: ProtocolVersion,
     cryptoApi: DomainSyncCryptoClient,
     metrics: SequencerMetrics,
@@ -275,7 +272,6 @@ class DatabaseSequencer(
       cryptoApi,
       eventSignaller,
       topologyClientMember,
-      trafficConsumedStore,
       protocolVersion,
       timeouts,
       loggerFactory,
@@ -467,10 +463,10 @@ class DatabaseSequencer(
     }
 
   override def onClosed(): Unit =
-    Lifecycle.close(
+    LifeCycle.close(
       () => super.onClosed(),
-      () => pruningScheduler foreach (Lifecycle.close(_)(logger)),
-      () => exclusiveStorage foreach (Lifecycle.close(_)(logger)),
+      () => pruningScheduler foreach (LifeCycle.close(_)(logger)),
+      () => exclusiveStorage foreach (LifeCycle.close(_)(logger)),
       writer,
       reader,
       eventSignaller,

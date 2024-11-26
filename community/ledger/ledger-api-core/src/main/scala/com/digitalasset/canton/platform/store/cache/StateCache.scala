@@ -7,8 +7,7 @@ import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricHandle.Timer
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.caching.Cache
-import com.digitalasset.canton.data.Offset.fromAbsoluteOffsetO
-import com.digitalasset.canton.data.{AbsoluteOffset, Offset}
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.store.cache.StateCache.PendingUpdatesState
 import com.digitalasset.canton.tracing.TraceContext
@@ -27,7 +26,7 @@ import scala.concurrent.{ExecutionContext, Future, blocking}
   */
 @SuppressWarnings(Array("org.wartremover.warts.FinalCaseClass")) // This class is mocked in tests
 private[platform] case class StateCache[K, V](
-    initialCacheIndex: Option[AbsoluteOffset],
+    initialCacheIndex: Option[Offset],
     cache: Cache[K, V],
     registerUpdateTimer: Timer,
     loggerFactory: NamedLoggerFactory,
@@ -58,20 +57,22 @@ private[platform] case class StateCache[K, V](
     * @param validAt ordering discriminator for pending updates for the same key
     * @param batch the batch of events updating the cache at `validAt`
     */
-  def putBatch(validAt: Offset, batch: Map[K, V])(implicit traceContext: TraceContext): Unit =
+  def putBatch(validAt: Offset, batch: Map[K, V])(implicit
+      traceContext: TraceContext
+  ): Unit =
     Timed.value(
       registerUpdateTimer,
       blocking(pendingUpdates.synchronized {
         // The mutable contract state cache update stream should generally increase the cacheIndex strictly monotonically.
         // However, the most recent updates can be replayed in case of failure of the mutable contract state cache update stream.
         // In this case, we must ignore the already seen updates (i.e. that have `validAt` before or at the cacheIndex).
-        if (validAt.toAbsoluteOffsetO > cacheIndex) {
+        if (Option(validAt) > cacheIndex) {
           batch.keySet.foreach { key =>
             pendingUpdates
               .get(key)
-              .foreach(_.latestValidAt = validAt.toAbsoluteOffsetO)
+              .foreach(_.latestValidAt = Some(validAt))
           }
-          cacheIndex = validAt.toAbsoluteOffsetO
+          cacheIndex = Some(validAt)
           cache.putAll(batch)
           logger.debug(
             s"Updated cache with a batch of ${batch
@@ -80,7 +81,7 @@ private[platform] case class StateCache[K, V](
           )
         } else
           logger.warn(
-            s"Ignoring incoming synchronous update at an index (${validAt.toLong}) equal to or before the cache index (${cacheIndex
+            s"Ignoring incoming synchronous update at an index (${validAt.unwrap}) equal to or before the cache index (${cacheIndex
                 .fold(0L)(_.unwrap)})"
           )
       }),
@@ -97,13 +98,13 @@ private[platform] case class StateCache[K, V](
     * @param fetchAsync fetches asynchronously the value for key `key` at the current cache index
     */
   @SuppressWarnings(Array("com.digitalasset.canton.SynchronizedFuture"))
-  def putAsync(key: K, fetchAsync: Offset => Future[V])(implicit
+  def putAsync(key: K, fetchAsync: Option[Offset] => Future[V])(implicit
       traceContext: TraceContext
   ): Future[V] = Timed.value(
     registerUpdateTimer,
     blocking(pendingUpdates.synchronized {
       val validAt = cacheIndex
-      val eventualValue = Future.delegate(fetchAsync(fromAbsoluteOffsetO(validAt)))
+      val eventualValue = Future.delegate(fetchAsync(validAt))
       val pendingUpdatesForKey = pendingUpdates.getOrElseUpdate(key, PendingUpdatesState.empty)
       if (pendingUpdatesForKey.latestValidAt < validAt) {
         pendingUpdatesForKey.latestValidAt = validAt
@@ -118,7 +119,7 @@ private[platform] case class StateCache[K, V](
     *
     * @param resetAtOffset The cache re-initialization offset
     */
-  def reset(resetAtOffset: Option[AbsoluteOffset]): Unit =
+  def reset(resetAtOffset: Option[Offset]): Unit =
     blocking(pendingUpdates.synchronized {
       cacheIndex = resetAtOffset
       pendingUpdates.clear()
@@ -128,7 +129,7 @@ private[platform] case class StateCache[K, V](
   private def registerEventualCacheUpdate(
       key: K,
       eventualUpdate: Future[V],
-      validAt: Option[AbsoluteOffset],
+      validAt: Option[Offset],
   )(implicit traceContext: TraceContext): Future[Unit] =
     eventualUpdate
       .map { (value: V) =>
@@ -198,7 +199,7 @@ object StateCache {
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private[cache] final case class PendingUpdatesState(
       var pendingCount: Long,
-      var latestValidAt: Option[AbsoluteOffset],
+      var latestValidAt: Option[Offset],
   )
   private[cache] object PendingUpdatesState {
     def empty: PendingUpdatesState = PendingUpdatesState(

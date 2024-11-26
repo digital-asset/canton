@@ -9,11 +9,10 @@ import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.protocol.reassignment
 import com.digitalasset.canton.participant.protocol.reassignment.{
   IncompleteReassignmentData,
@@ -21,8 +20,8 @@ import com.digitalasset.canton.participant.protocol.reassignment.{
 }
 import com.digitalasset.canton.participant.store.ReassignmentStore
 import com.digitalasset.canton.participant.util.TimeOfChange
-import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.protocol.messages.DeliveredUnassignmentResult
+import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
@@ -236,7 +235,7 @@ class InMemoryReassignmentStore(
 
   override def findIncomplete(
       sourceDomain: Option[Source[DomainId]],
-      validAt: GlobalOffset,
+      validAt: Offset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
       limit: NonNegativeInt,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Seq[IncompleteReassignmentData]] = {
@@ -270,7 +269,7 @@ class InMemoryReassignmentStore(
 
   override def findEarliestIncomplete()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[(GlobalOffset, ReassignmentId, Target[DomainId])]] =
+  ): FutureUnlessShutdown[Option[(Offset, ReassignmentId, Target[DomainId])]] =
     // empty table: there are no reassignments
     if (reassignmentDataMap.isEmpty) FutureUnlessShutdown.pure(None)
     else {
@@ -299,7 +298,7 @@ class InMemoryReassignmentStore(
         if (incompleteReassignmentOffsets.isEmpty) FutureUnlessShutdown.pure(None)
         else {
           val default = (
-            GlobalOffset.MaxValue,
+            Offset.MaxValue,
             ReassignmentId(Source(domain.unwrap), CantonTimestamp.MaxValue),
           )
           val minIncompleteTransferOffset =
@@ -310,4 +309,33 @@ class InMemoryReassignmentStore(
         }
       }
     }
+
+  override def findContractReassignmentId(
+      contractIds: Seq[LfContractId],
+      sourceDomain: Option[Source[DomainId]],
+      unassignmentTs: Option[CantonTimestamp],
+      completionTs: Option[CantonTimestamp],
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[LfContractId, Seq[ReassignmentId]]] =
+    FutureUnlessShutdown.outcomeF(
+      Future.successful(
+        reassignmentDataMap
+          .filter { case (_reassignmentId, transferData) =>
+            contractIds.contains(transferData.reassignmentData.contract.contractId) &&
+            sourceDomain.forall(_ == transferData.reassignmentData.sourceDomain) &&
+            unassignmentTs.forall(
+              _ == transferData.reassignmentData.reassignmentId.unassignmentTs
+            ) &&
+            completionTs.forall(ts =>
+              transferData.timeOfCompletion.forall(toc => ts == toc.timestamp)
+            )
+          }
+          .map { case (reassignmentId, entry) =>
+            (entry.reassignmentData.contract.contractId, reassignmentId)
+          }
+          .groupBy(_._1)
+          .map { case (cid, value) => (cid, value.values.toSeq) }
+      )
+    )
 }

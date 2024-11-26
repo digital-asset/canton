@@ -17,7 +17,7 @@ import com.digitalasset.canton.domain.mediator.store.{
 }
 import com.digitalasset.canton.domain.metrics.MediatorMetrics
 import com.digitalasset.canton.environment.CantonNodeParameters
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.mediator.admin.v30.MediatorAdministrationServiceGrpc
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
@@ -75,7 +75,7 @@ final class MediatorRuntime(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] =
     for {
-      _ <- EitherT.right(mediator.startFUS())
+      _ <- EitherT.right(mediator.start())
       // start the domainOutbox only after the mediator has been started, otherwise
       // the future returned by startup will not be complete, because any topology transactions pushed to the
       // domain aren't actually processed until after the runtime is up and ... running
@@ -84,7 +84,7 @@ final class MediatorRuntime(
     } yield ()
 
   override protected def onClosed(): Unit =
-    Lifecycle.close(pruningScheduler, domainOutbox, mediator)(logger)
+    LifeCycle.close(pruningScheduler, domainOutbox, mediator)(logger)
 }
 
 object MediatorRuntimeFactory {

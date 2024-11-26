@@ -27,7 +27,7 @@ import com.digitalasset.canton.domain.sequencing.traffic.{
   TrafficPurchasedManager,
 }
 import com.digitalasset.canton.environment.CantonNodeParameters
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, Lifecycle}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.traffic.EventCostCalculator
@@ -145,7 +145,6 @@ abstract class BlockSequencerFactory(
   @VisibleForTesting
   protected def makeRateLimitManager(
       trafficPurchasedManager: TrafficPurchasedManager,
-      futureSupervisor: FutureSupervisor,
       domainSyncCryptoApi: DomainSyncCryptoClient,
       protocolVersion: ProtocolVersion,
       trafficConfig: SequencerTrafficConfig,
@@ -199,14 +198,12 @@ abstract class BlockSequencerFactory(
       trafficConfig,
       futureSupervisor,
       metrics,
-      protocolVersion,
       nodeParameters.processingTimeouts,
       loggerFactory,
     )
 
     val rateLimitManager = makeRateLimitManager(
       balanceManager,
-      futureSupervisor,
       domainSyncCryptoApi,
       protocolVersion,
       trafficConfig,
@@ -215,9 +212,7 @@ abstract class BlockSequencerFactory(
     val domainLoggerFactory = loggerFactory.append("domainId", domainId.toString)
 
     val stateManager = BlockSequencerStateManager(
-      protocolVersion,
       domainId,
-      sequencerId,
       store,
       trafficConsumedStore,
       nodeParameters.enableAdditionalConsistencyChecks,
@@ -253,7 +248,7 @@ abstract class BlockSequencerFactory(
   }
 
   override def onClosed(): Unit =
-    Lifecycle.close(store)(logger)
+    LifeCycle.close(store)(logger)
 }
 
 object BlockSequencerFactory {

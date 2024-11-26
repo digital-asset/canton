@@ -413,16 +413,15 @@ private[reassignment] class AssignmentProcessingSteps(
 
       authenticationErrorO <- EitherT
         .right(AuthenticationValidator.verifyViewSignature(parsedRequest))
-        .mapK(FutureUnlessShutdown.outcomeK)
 
       confirmingSignatories <- EitherTUtil.rightUS(
         targetCrypto.ipsSnapshot.canConfirm(
           participantId,
-          fullViewTree.contract.metadata.signatories,
+          fullViewTree.confirmingParties,
         )
       )
 
-      isSignatoryAssigning = confirmingSignatories.nonEmpty &&
+      isConfirming = confirmingSignatories.nonEmpty &&
         fullViewTree.isReassigningParticipant(participantId)
 
       validationResultO <- assignmentValidation
@@ -431,7 +430,7 @@ private[reassignment] class AssignmentProcessingSteps(
           fullViewTree,
           reassignmentDataO,
           Target(targetCrypto),
-          isSignatoryAssigning = isSignatoryAssigning,
+          isConfirming,
         )
         .mapK(FutureUnlessShutdown.outcomeK)
 
@@ -508,7 +507,6 @@ private[reassignment] class AssignmentProcessingSteps(
   ): Option[(ConfirmationResponse, Recipients)] =
     validationResultO match {
       case None => None
-
       case Some(validationResult) =>
         val contractResult = activenessResult.contracts
 

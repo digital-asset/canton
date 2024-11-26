@@ -12,7 +12,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
-  Lifecycle,
+  LifeCycle,
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -27,7 +27,6 @@ import com.digitalasset.canton.topology.store.{
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.google.common.annotations.VisibleForTesting
 
@@ -118,7 +117,6 @@ trait TopologyAwaiter extends FlagCloseable {
 class StoreBasedDomainTopologyClient(
     val clock: Clock,
     val domainId: DomainId,
-    protocolVersion: ProtocolVersion,
     store: TopologyStore[TopologyStoreId],
     packageDependenciesResolver: PackageDependencyResolverUS,
     override val timeouts: ProcessingTimeout,
@@ -325,7 +323,7 @@ class StoreBasedDomainTopologyClient(
     effectiveTimeAwaiter.awaitKnownTimestamp(timestamp)
 
   override protected def onClosed(): Unit = {
-    Lifecycle.close(
+    LifeCycle.close(
       sequencedTimeAwaiter,
       effectiveTimeAwaiter,
     )(logger)

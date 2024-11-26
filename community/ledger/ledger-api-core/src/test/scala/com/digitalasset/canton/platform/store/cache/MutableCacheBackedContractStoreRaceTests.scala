@@ -207,7 +207,7 @@ private object MutableCacheBackedContractStoreRaceTests {
             )
         }
       _ <- indexViewContractsReader
-        .lookupContractState(event.contractId, event.offset)
+        .lookupContractState(event.contractId, Some(event.offset))
         .map {
           case Some(ActiveContract(actualContract, _, _, _, _, _, _))
               if event.created && event.contract == actualContract =>
@@ -318,7 +318,6 @@ private object MutableCacheBackedContractStoreRaceTests {
     val metrics = LedgerApiServerMetrics.ForTesting
     new MutableCacheBackedContractStore(
       contractsReader = indexViewContractsReader,
-      metrics = metrics,
       contractStateCaches = ContractStateCaches.build(
         initialCacheIndex = None,
         maxContractsCacheSize = 1L,
@@ -420,7 +419,7 @@ private object MutableCacheBackedContractStoreRaceTests {
         }
       }
 
-    override def lookupContractState(contractId: ContractId, validAt: Offset)(implicit
+    override def lookupContractState(contractId: ContractId, validAt: Option[Offset])(implicit
         loggingContext: LoggingContextWithTrace
     ): Future[Option[ContractState]] =
       Future {
@@ -428,8 +427,8 @@ private object MutableCacheBackedContractStoreRaceTests {
         contractStateStore
           .get(contractId)
           .flatMap { case ContractLifecycle(_, contract, createdAt, maybeArchivedAt) =>
-            if (validAt < createdAt) None
-            else if (maybeArchivedAt.forall(_ > validAt))
+            if (validAt < Some(createdAt)) None
+            else if (maybeArchivedAt.forall(Option(_) > validAt))
               Some(
                 ActiveContract(
                   contract,
@@ -465,15 +464,8 @@ private object MutableCacheBackedContractStoreRaceTests {
 
   private def offset(idx: Long) = {
     val base = BigInt(1L) << 32
-    Offset.fromLong((base + idx).toLong)
+    Offset.tryFromLong((base + idx).toLong)
   }
 
-  private def nextAfter(currentOffset: Offset) = {
-    val offsetBytes = currentOffset.toByteArray
-    if (offsetBytes.length == 0) {
-      offset(0L)
-    } else {
-      Offset.fromLong(currentOffset.toLong + 1)
-    }
-  }
+  private def nextAfter(currentOffset: Offset) = currentOffset.increment
 }

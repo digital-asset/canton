@@ -7,16 +7,14 @@ import cats.Eval
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.ledger.participant.state.Update.UnSequencedCommandRejected
 import com.digitalasset.canton.ledger.participant.state.{ParticipantUpdate, Update}
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.platform.indexer.IndexerState.RepairInProgress
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, LoggerUtil, MonadUtil, SimpleExecutionQueue}
+import com.digitalasset.canton.util.{ErrorUtil, LoggerUtil, SimpleExecutionQueue}
 import org.slf4j.event.Level
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -26,12 +24,10 @@ import scala.concurrent.{ExecutionContext, Future}
   *
   * ParticipantEventPublisher also encapsulates the participant clock generating unique participant recordTime.
   *
-  * @param participantId        participant id
   * @param participantClock     clock for the current time to stamp published events with
   * @param loggerFactory        named logger factory
   */
 class ParticipantEventPublisher(
-    participantId: ParticipantId,
     ledgerApiIndexer: Eval[LedgerApiIndexer],
     participantClock: Clock,
     exitOnFatalFailures: Boolean,
@@ -109,24 +105,7 @@ class ParticipantEventPublisher(
     )
   }
 
-  /** Events publication this way might fail if a repair-operation is ongoing.
-    * Clients need to ensure not to make this call during repair operations.
-    *
-    * @param events will be published after each other, maintaining the same order on the ledger as well
-    * @return A Future which will be only successful if all the event are successfully persisted by the indexer
-    */
-  def publishDomainRelatedEvents(
-      events: Seq[UnSequencedCommandRejected]
-  ): FutureUnlessShutdown[Unit] =
-    MonadUtil.sequentialTraverse_(events) { tracedEvent =>
-      implicit val tc: TraceContext = tracedEvent.traceContext
-      executionQueue.execute(
-        publishInternal(tracedEvent)(tracedEvent.traceContext),
-        s"publish event ${tracedEvent.show} with record time ${tracedEvent.recordTime}",
-      )
-    }
-
-  override protected def onClosed(): Unit = Lifecycle.close(executionQueue)(logger)
+  override protected def onClosed(): Unit = LifeCycle.close(executionQueue)(logger)
 }
 
 object ParticipantEventPublisher {

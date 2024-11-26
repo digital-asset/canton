@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
-import com.digitalasset.canton.data.{AbsoluteOffset, CantonTimestamp, Offset}
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.domain.ParticipantId
 import com.digitalasset.canton.ledger.participant.state.DomainIndex
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel
@@ -115,9 +115,9 @@ trait ParameterStorageBackend {
 
   /** Part of pruning process, this needs to be in the same transaction as the other pruning related database operations
     */
-  def updatePrunedUptoInclusive(prunedUpToInclusive: AbsoluteOffset)(connection: Connection): Unit
+  def updatePrunedUptoInclusive(prunedUpToInclusive: Offset)(connection: Connection): Unit
 
-  def prunedUpToInclusive(connection: Connection): Option[AbsoluteOffset]
+  def prunedUpToInclusive(connection: Connection): Option[Offset]
 
   def prunedUpToInclusiveAndLedgerEnd(connection: Connection): PruneUptoInclusiveAndLedgerEnd
 
@@ -130,7 +130,7 @@ trait ParameterStorageBackend {
   ): Option[Offset]
 
   def updatePostProcessingEnd(
-      postProcessingEnd: Option[AbsoluteOffset]
+      postProcessingEnd: Option[Offset]
   )(connection: Connection): Unit
 
   def postProcessingEnd(
@@ -156,7 +156,7 @@ trait ParameterStorageBackend {
 }
 
 object MeteringParameterStorageBackend {
-  final case class LedgerMeteringEnd(offset: Offset, timestamp: Timestamp)
+  final case class LedgerMeteringEnd(offset: Option[Offset], timestamp: Timestamp)
 }
 
 trait MeteringParameterStorageBackend {
@@ -180,7 +180,7 @@ trait MeteringParameterStorageBackend {
 
 object ParameterStorageBackend {
   final case class LedgerEnd(
-      lastOffset: AbsoluteOffset,
+      lastOffset: Offset,
       lastEventSeqId: Long,
       lastStringInterningId: Int,
       lastPublicationTime: CantonTimestamp,
@@ -193,17 +193,17 @@ object ParameterStorageBackend {
 
   final case class PruneUptoInclusiveAndLedgerEnd(
       pruneUptoInclusive: Option[Offset],
-      ledgerEnd: Offset,
+      ledgerEnd: Option[Offset],
   )
 }
 
 trait PartyStorageBackend {
   def partyEntries(
-      startInclusive: AbsoluteOffset,
-      endInclusive: AbsoluteOffset,
+      startInclusive: Offset,
+      endInclusive: Offset,
       pageSize: Int,
       queryOffset: Long,
-  )(connection: Connection): Vector[(AbsoluteOffset, PartyLedgerEntry)]
+  )(connection: Connection): Vector[(Offset, PartyLedgerEntry)]
   def parties(parties: Seq[Party])(connection: Connection): List[IndexerPartyDetails]
   def knownParties(fromExcl: Option[Party], maxResults: Int)(
       connection: Connection
@@ -212,22 +212,22 @@ trait PartyStorageBackend {
 
 trait CompletionStorageBackend {
   def commandCompletions(
-      startInclusive: AbsoluteOffset,
-      endInclusive: AbsoluteOffset,
+      startInclusive: Offset,
+      endInclusive: Offset,
       applicationId: ApplicationId,
       parties: Set[Party],
       limit: Int,
   )(connection: Connection): Vector[CompletionStreamResponse]
 
   def commandCompletionsForRecovery(
-      startExclusive: Offset,
+      startInclusive: Offset,
       endInclusive: Offset,
   )(connection: Connection): Vector[PostPublishData]
 
   /** Part of pruning process, this needs to be in the same transaction as the other pruning related database operations
     */
   def pruneCompletions(
-      pruneUpToInclusive: AbsoluteOffset
+      pruneUpToInclusive: Offset
   )(connection: Connection, traceContext: TraceContext): Unit
 }
 
@@ -276,9 +276,9 @@ trait EventStorageBackend {
   /** Part of pruning process, this needs to be in the same transaction as the other pruning related database operations
     */
   def pruneEvents(
-      pruneUpToInclusive: AbsoluteOffset,
+      pruneUpToInclusive: Offset,
       pruneAllDivulgedContracts: Boolean,
-      incompletReassignmentOffsets: Vector[AbsoluteOffset],
+      incompletReassignmentOffsets: Vector[Offset],
   )(implicit
       connection: Connection,
       traceContext: TraceContext,
@@ -338,7 +338,7 @@ trait EventStorageBackend {
       contractIds: Iterable[String]
   )(connection: Connection): Vector[Long]
 
-  def maxEventSequentialId(untilInclusiveOffset: Option[AbsoluteOffset])(
+  def maxEventSequentialId(untilInclusiveOffset: Option[Offset])(
       connection: Connection
   ): Long
 
@@ -588,21 +588,23 @@ trait MeteringStorageWriteBackend {
     * Note that the offset returned may not have been fully ingested. This is to allow the metering to wait if there
     * are still un-fully ingested records withing the time window.
     */
-  def transactionMeteringMaxOffset(from: Offset, to: Timestamp)(
+  def transactionMeteringMaxOffset(from: Option[Offset], to: Timestamp)(
       connection: Connection
   ): Option[Offset]
 
   /** This method will return all transaction metering records between the from offset (exclusive)
     * and the to offset (inclusive).  It is called prior to aggregation.
     */
-  def selectTransactionMetering(from: Offset, to: Offset)(
+  def selectTransactionMetering(from: Option[Offset], to: Offset)(
       connection: Connection
   ): Map[ApplicationId, Int]
 
   /** This method will delete transaction metering records between the from offset (exclusive)
     * and the to offset (inclusive).  It is called following aggregation.
     */
-  def deleteTransactionMetering(from: Offset, to: Offset)(connection: Connection): Unit
+  def deleteTransactionMetering(from: Option[Offset], to: Offset)(
+      connection: Connection
+  ): Unit
 
   def insertParticipantMetering(metering: Vector[ParticipantMetering])(connection: Connection): Unit
 

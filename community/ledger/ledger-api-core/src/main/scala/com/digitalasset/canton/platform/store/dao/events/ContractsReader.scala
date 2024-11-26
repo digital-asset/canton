@@ -39,7 +39,7 @@ private[dao] sealed class ContractsReader(
   /** Lookup a contract key state at a specific ledger offset.
     *
     * @param key the contract key
-    * @param validAt the event_sequential_id of the ledger at which to query for the key state
+    * @param validAt the offset of the ledger at which to query for the key state
     * @return the key state.
     */
   override def lookupKeyState(key: Key, validAt: Offset)(implicit
@@ -52,7 +52,7 @@ private[dao] sealed class ContractsReader(
       ),
     )
 
-  override def lookupContractState(contractId: ContractId, before: Offset)(implicit
+  override def lookupContractState(contractId: ContractId, before: Option[Offset])(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Option[ContractState]] =
     Timed.future(

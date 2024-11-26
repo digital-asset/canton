@@ -209,12 +209,7 @@ final class BftBlockOrderer(
       }
 
     awaitFuture(
-      orderingTopologyProvider.getOrderingTopologyAt(
-        topologyQueryTimestamp,
-        // TODO(#21999) workaround: skip `awaitMaxTimestamp` because, in the case of onboarded sequencers,
-        //  the last sequenced time detected is currently incorrect (too old).
-        assumePendingTopologyChanges = true,
-      ),
+      orderingTopologyProvider.getOrderingTopologyAt(topologyQueryTimestamp),
       "fetch bootstrap ordering topology",
     )
       .getOrElse {
@@ -293,7 +288,6 @@ final class BftBlockOrderer(
         epochStore,
         orderedBlocksReader = epochStore,
         outputStore,
-        outputBlocksReader = outputStore,
       )
     BftOrderingModuleSystemInitializer(
       sequencerId,
@@ -340,7 +334,7 @@ final class BftBlockOrderer(
 
   private def createServer(
       endpoint: Endpoint
-  ): UnlessShutdown[Lifecycle.CloseableServer] = {
+  ): UnlessShutdown[LifeCycle.CloseableServer] = {
     implicit val traceContext: TraceContext = TraceContext.empty
     performUnlessClosing("start-P2P-server") {
 
@@ -367,7 +361,7 @@ final class BftBlockOrderer(
         .build
       logger
         .info(s"successfully bound P2P endpoint $endpoint")
-      Lifecycle.toCloseableServer(activeServer, logger, "P2PServer")
+      LifeCycle.toCloseableServer(activeServer, logger, "P2PServer")
     }
   }
 
@@ -452,7 +446,7 @@ final class BftBlockOrderer(
     logger.info(
       s"shutting down the actor system"
     )(TraceContext.empty)
-    Lifecycle.close(
+    LifeCycle.close(
       new CloseableActorSystem(
         actorSystem,
         logger,

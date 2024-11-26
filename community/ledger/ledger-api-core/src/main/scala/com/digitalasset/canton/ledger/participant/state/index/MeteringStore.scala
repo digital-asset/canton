@@ -38,7 +38,7 @@ object MeteringStore {
       from: Timestamp,
       to: Timestamp,
       actionCount: Int,
-      ledgerOffset: Offset,
+      ledgerOffset: Option[Offset],
   )
 
 }

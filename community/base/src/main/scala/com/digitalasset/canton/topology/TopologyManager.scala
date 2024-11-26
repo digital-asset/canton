@@ -14,7 +14,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, Lifecycle}
+import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, StaticDomainParameters}
 import com.digitalasset.canton.time.Clock
@@ -43,6 +43,7 @@ import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, SimpleExecutionQueu
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
 
 import java.util.concurrent.atomic.AtomicReference
+import scala.annotation.unused
 import scala.concurrent.{ExecutionContext, Future}
 
 trait TopologyManagerObserver {
@@ -206,9 +207,9 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +PureCrypto <: Crypt
     * Only the participant has access to the package store.
     */
   def validatePackageVetting(
-      currentlyVettedPackages: Set[LfPackageId],
-      nextPackageIds: Set[LfPackageId],
-      forceFlags: ForceFlags,
+      @unused currentlyVettedPackages: Set[LfPackageId],
+      @unused nextPackageIds: Set[LfPackageId],
+      @unused forceFlags: ForceFlags,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] = {
@@ -216,7 +217,10 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +PureCrypto <: Crypt
     EitherT.rightT(())
   }
 
-  def checkCannotDisablePartyWithActiveContracts(partyId: PartyId, forceFlags: ForceFlags)(implicit
+  def checkCannotDisablePartyWithActiveContracts(
+      @unused partyId: PartyId,
+      @unused forceFlags: ForceFlags,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] = {
     traceContext.discard
@@ -807,7 +811,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +PureCrypto <: Crypt
     )
     .map(_ => ())
 
-  override protected def onClosed(): Unit = Lifecycle.close(store, sequentialQueue)(logger)
+  override protected def onClosed(): Unit = LifeCycle.close(store, sequentialQueue)(logger)
 
   override def toString: String = s"TopologyManager[${store.storeId}]"
 }

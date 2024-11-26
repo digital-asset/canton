@@ -8,7 +8,6 @@ import com.digitalasset.canton.ledger.participant.state.index
 import com.digitalasset.canton.ledger.participant.state.index.ContractStore
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.cache.ContractKeyStateValue.*
 import com.digitalasset.canton.platform.store.cache.ContractStateValue.*
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
@@ -17,13 +16,13 @@ import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReade
   ArchivedContract,
   ContractState,
   KeyState,
+  KeyUnassigned,
 }
 import com.digitalasset.daml.lf.transaction.GlobalKey
 
 import scala.concurrent.{ExecutionContext, Future}
 
 private[platform] class MutableCacheBackedContractStore(
-    metrics: LedgerApiServerMetrics,
     contractsReader: LedgerDaoContractsReader,
     val loggerFactory: NamedLoggerFactory,
     private[cache] val contractStateCaches: ContractStateCaches,
@@ -128,8 +127,11 @@ private[platform] class MutableCacheBackedContractStore(
   private def readThroughKeyCache(
       key: GlobalKey
   )(implicit loggingContext: LoggingContextWithTrace): Future[ContractKeyStateValue] = {
-    val readThroughRequest = (validAt: Offset) =>
-      contractsReader.lookupKeyState(key, validAt).map(toKeyCacheValue)
+    val readThroughRequest = (validAt: Option[Offset]) =>
+      validAt
+        .map(contractsReader.lookupKeyState(key, _))
+        .getOrElse(Future.successful(KeyUnassigned))
+        .map(toKeyCacheValue)
     contractStateCaches.keyState.putAsync(key, readThroughRequest)
   }
 

@@ -13,7 +13,7 @@ import com.daml.metrics.Tracked
 import com.daml.metrics.api.MetricsContext
 import com.daml.scalautil.future.FutureConversion.CompletionStageConversionOps
 import com.daml.tracing.Telemetry
-import com.digitalasset.canton.data.AbsoluteOffset
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.ValidationLogger
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors.*
@@ -42,6 +42,7 @@ import com.digitalasset.canton.platform.ApiOffset
 import com.digitalasset.canton.platform.apiserver.ApiException
 import com.digitalasset.canton.platform.apiserver.services.logging
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.daml.lf.data.Ref
 import io.grpc.protobuf.StatusProto
 import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
@@ -125,7 +126,7 @@ final class ApiParticipantPruningService private (
             )(MetricsContext(("phase", "ledgerApiServerIndex")))
 
           } yield pruneResponse)
-            .andThen(logger.logErrorsOnCall[PruneResponse](loggingContext.traceContext))
+            .thereafter(logger.logErrorsOnCall[PruneResponse](loggingContext.traceContext))
         },
     )
   }
@@ -135,7 +136,7 @@ final class ApiParticipantPruningService private (
   )(implicit
       loggingContext: LoggingContextWithTrace,
       errorLoggingContext: ContextualizedErrorLogger,
-  ): Future[AbsoluteOffset] =
+  ): Future[Offset] =
     (for {
       pruneUpToLong <- checkOffsetIsSpecified(request.pruneUpTo)
       pruneUpTo <- checkOffsetIsPositive(request.pruneUpTo)
@@ -146,7 +147,7 @@ final class ApiParticipantPruningService private (
       )
 
   private def pruneSyncService(
-      pruneUpTo: AbsoluteOffset,
+      pruneUpTo: Offset,
       submissionId: Ref.SubmissionId,
       pruneAllDivulgedContracts: Boolean,
   )(implicit loggingContext: LoggingContextWithTrace): Future[Unit] = {
@@ -167,9 +168,9 @@ final class ApiParticipantPruningService private (
   }
 
   private def pruneLedgerApiServerIndex(
-      pruneUpTo: AbsoluteOffset,
+      pruneUpTo: Offset,
       pruneAllDivulgedContracts: Boolean,
-      incompletReassignmentOffsets: Vector[AbsoluteOffset],
+      incompletReassignmentOffsets: Vector[Offset],
   )(implicit loggingContext: LoggingContextWithTrace): Future[PruneResponse] = {
     logger.info(s"About to prune ledger api server index to ${pruneUpTo.unwrap} inclusively.")
     readBackend
@@ -193,9 +194,9 @@ final class ApiParticipantPruningService private (
       pruneUpTo: Long
   )(implicit
       errorLogger: ContextualizedErrorLogger
-  ): Either[StatusRuntimeException, AbsoluteOffset] =
+  ): Either[StatusRuntimeException, Offset] =
     try {
-      Right(AbsoluteOffset.tryFromLong(pruneUpTo))
+      Right(Offset.tryFromLong(pruneUpTo))
     } catch {
       case illegalArg: IllegalArgumentException =>
         Left(
@@ -212,11 +213,11 @@ final class ApiParticipantPruningService private (
     }
 
   private def checkOffsetIsBeforeLedgerEnd(
-      pruneUpToProto: AbsoluteOffset,
+      pruneUpToProto: Offset,
       pruneUpToLong: Long,
   )(implicit
       errorLogger: ContextualizedErrorLogger
-  ): Future[AbsoluteOffset] =
+  ): Future[Offset] =
     for {
       ledgerEnd <- readBackend.currentLedgerEnd()
       _ <-

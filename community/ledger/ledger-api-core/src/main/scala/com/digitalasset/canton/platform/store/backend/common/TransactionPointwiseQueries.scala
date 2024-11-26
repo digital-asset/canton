@@ -31,12 +31,12 @@ class TransactionPointwiseQueries(
       updateId: data.UpdateId
   )(connection: Connection): Option[(Long, Long)] = {
     import com.digitalasset.canton.platform.store.backend.Conversions.ledgerStringToStatement
-    import com.digitalasset.canton.platform.store.backend.Conversions.OffsetToStatement
+    import com.digitalasset.canton.platform.store.backend.Conversions.OffsetOToStatement
     // 1. Checking whether "event_offset <= ledgerEndOffset" is needed because during indexing
     // the events and transaction_meta tables are written to prior to the ledger end being updated.
     // 2. Checking "event_offset > participant_pruned_up_to_inclusive" is needed in order to
     // prevent fetching data that is within the pruning offset. (Such data may only be accessed by retrieving an ACS)
-    val ledgerEndOffset: Offset = Offset.fromAbsoluteOffsetO(ledgerEndCache().map(_.lastOffset))
+    val ledgerEndOffset: Option[Offset] = ledgerEndCache().map(_.lastOffset)
     SQL"""
          SELECT
             t.event_sequential_id_first,

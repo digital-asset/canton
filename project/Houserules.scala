@@ -94,8 +94,10 @@ object JvmRulesPlugin extends AutoPlugin {
         "-Ywarn-dead-code",
         "-Ywarn-value-discard", // Gives a warning for functions declared as returning Unit, but the body returns a value
         "-Ywarn-unused:imports",
-        "-Ywarn-unused:implicits",
+        // Not enabled patvars
+        "-Ywarn-unused:privates",
         "-Ywarn-unused:locals",
+        "-Ywarn-unused:params",
         "-Ywarn-unused:nowarn",
       )
     else Seq.empty
@@ -107,11 +109,14 @@ object JvmRulesPlugin extends AutoPlugin {
 
   lazy val wartremoverErrorsForCompileScope =
     unlessWartsAreDisabledWithSystemProperty(
+      Wart.AnyVal,
       Wart.AsInstanceOf,
       Wart.DropTakeToSlice,
       Wart.EitherProjectionPartial,
       Wart.Enumeration,
       Wart.FinalCaseClass,
+      Wart.GetGetOrElse,
+      Wart.GetOrElseNull,
       Wart.IsInstanceOf,
       Wart.IterableOps,
       Wart.JavaConversions,
@@ -127,6 +132,7 @@ object JvmRulesPlugin extends AutoPlugin {
       Wart.SizeIs,
       Wart.SortedMaxMin,
       Wart.SortedMaxMinOption,
+      Wart.SortFilter,
       Wart.TryPartial,
       Wart.Var,
       Wart.While,

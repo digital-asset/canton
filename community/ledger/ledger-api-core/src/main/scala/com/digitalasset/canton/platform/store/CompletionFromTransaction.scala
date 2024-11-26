@@ -47,7 +47,7 @@ object CompletionFromTransaction {
           optDeduplicationOffset = optDeduplicationOffset,
           optDeduplicationDurationSeconds = optDeduplicationDurationSeconds,
           optDeduplicationDurationNanos = optDeduplicationDurationNanos,
-          offset = offset.toLong,
+          offset = offset.unwrap,
           domainTime = Some(toApiDomainTime(domainId, recordTime)),
         )
       )
@@ -80,7 +80,7 @@ object CompletionFromTransaction {
           optDeduplicationOffset = optDeduplicationOffset,
           optDeduplicationDurationSeconds = optDeduplicationDurationSeconds,
           optDeduplicationDurationNanos = optDeduplicationDurationNanos,
-          offset = offset.toLong,
+          offset = offset.unwrap,
           domainTime = Some(toApiDomainTime(domainId, recordTime)),
         )
       )

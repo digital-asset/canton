@@ -381,7 +381,7 @@ class SubmitRequestValidatorTest
           Table[DeduplicationPeriodProto, DeduplicationPeriod](
             ("input proto deduplication", "valid model deduplication"),
             DeduplicationPeriodProto.DeduplicationOffset(12345678L) -> DeduplicationPeriod
-              .DeduplicationOffset(Offset.fromLong(12345678L)),
+              .DeduplicationOffset(Some(Offset.tryFromLong(12345678L))),
             DeduplicationPeriodProto.DeduplicationDuration(
               deduplicationDuration
             ) -> DeduplicationPeriod

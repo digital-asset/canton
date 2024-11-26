@@ -451,6 +451,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
           disclosedContracts: Seq[DisclosedContract] = Seq.empty,
           applicationId: String = applicationId,
           userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
+          verboseHashing: Boolean = false,
       ): PrepareResponseProto =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -464,6 +465,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
               domainId,
               applicationId,
               userPackageSelectionPreference,
+              verboseHashing,
             )
           )
         }
@@ -802,7 +804,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
       // for reassignments are available over the Ladger API.
       private def submitReassignment(
           submitter: PartyId,
-          waitForParticipants: Map[ParticipantReference, PartyId] = Map.empty,
+          waitForParticipants: Map[ParticipantReference, PartyId],
           timeout: config.NonNegativeDuration,
       )(submit: String => Unit): ReassignmentWrapper = {
         val commandId = UUID.randomUUID().toString
@@ -1911,15 +1913,13 @@ trait BaseLedgerApiAdministration extends NoTracing {
             actAs: Seq[PartyId],
             commands: Seq[javab.data.Command],
             domainId: Option[DomainId] = None,
-            workflowId: String = "",
             commandId: String = "",
-            deduplicationPeriod: Option[DeduplicationPeriod] = None,
-            submissionId: String = "",
             minLedgerTimeAbs: Option[Instant] = None,
             readAs: Seq[PartyId] = Seq.empty,
             disclosedContracts: Seq[javab.data.DisclosedContract] = Seq.empty,
             applicationId: String = applicationId,
             userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
+            verboseHashing: Boolean = false,
         ): PrepareResponseProto =
           consoleEnvironment.run {
             ledgerApiCommand(
@@ -1933,6 +1933,7 @@ trait BaseLedgerApiAdministration extends NoTracing {
                 domainId,
                 applicationId,
                 userPackageSelectionPreference,
+                verboseHashing,
               )
             )
           }

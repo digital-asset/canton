@@ -68,7 +68,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
       )
     )
     executeSql(
-      updateLedgerEnd(absoluteOffset(1), ledgerEndSequentialId = 1L)
+      updateLedgerEnd(offset(1), ledgerEndSequentialId = 1L)
     )
     val eventsForSomeParty = executeSql(
       backend.event.fetchTopologyPartyEventIds(
@@ -95,7 +95,7 @@ private[backend] trait StorageBackendTestsPartyToParticipant
       )
     )
     executeSql(
-      updateLedgerEnd(absoluteOffset(4), ledgerEndSequentialId = 4L)
+      updateLedgerEnd(offset(4), ledgerEndSequentialId = 4L)
     )
     val eventsForSomeParty = executeSql(
       backend.event.fetchTopologyPartyEventIds(

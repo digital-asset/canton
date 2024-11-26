@@ -56,7 +56,7 @@ import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
   HasCloseContext,
-  Lifecycle,
+  LifeCycle,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.DbStorageMetrics
@@ -99,6 +99,7 @@ import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.actor.ActorSystem
 
 import java.util.concurrent.{Executors, ScheduledExecutorService}
+import scala.annotation.unused
 import scala.concurrent.{ExecutionContext, Future}
 
 /** When a canton node is created it first has to obtain an identity before most of its services can be started.
@@ -192,7 +193,7 @@ abstract class CantonNodeBootstrapImpl[
       nodeId: UniqueIdentifier,
       crypto: Crypto,
       authorizedStore: TopologyStore[AuthorizedStore],
-      storage: Storage,
+      @unused storage: Storage,
   ): AuthorizedTopologyManager =
     new AuthorizedTopologyManager(
       nodeId,
@@ -279,7 +280,6 @@ abstract class CantonNodeBootstrapImpl[
 
       new GrpcHealthServer(
         healthConfig,
-        arguments.metrics.openTelemetryMetricsFactory,
         executor,
         loggerFactory,
         parameterConfig.loggingConfig.api,
@@ -434,7 +434,7 @@ abstract class CantonNodeBootstrapImpl[
 
       val server = builder.build
         .start()
-      addCloseable(Lifecycle.toCloseableServer(server, logger, "AdminServer"))
+      addCloseable(LifeCycle.toCloseableServer(server, logger, "AdminServer"))
       addCloseable(registry)
       registry
     }
@@ -550,7 +550,6 @@ abstract class CantonNodeBootstrapImpl[
             new GrpcIdentityInitializationService(
               clock,
               this,
-              crypto.cryptoPublicStore,
               bootstrapStageCallback.loggerFactory,
             ),
             executionContext,
@@ -655,7 +654,6 @@ abstract class CantonNodeBootstrapImpl[
           .bindService(
             new GrpcTopologyManagerWriteService(
               sequencedTopologyManagers :+ topologyManager,
-              crypto,
               bootstrapStageCallback.loggerFactory,
             ),
             executionContext,
@@ -827,7 +825,7 @@ abstract class CantonNodeBootstrapImpl[
   }
 
   override protected def onClosed(): Unit = {
-    Lifecycle.close(clock, initQueue, startupStage)(
+    LifeCycle.close(clock, initQueue, startupStage)(
       logger
     )
     super.onClosed()
@@ -857,6 +855,7 @@ object CantonNodeBootstrapImpl {
 
   def getOrCreateSigningKeyByFingerprint(crypto: Crypto)(
       fingerprint: Fingerprint,
+      @unused
       usage: SigningKeyUsage,
   )(implicit
       traceContext: TraceContext,

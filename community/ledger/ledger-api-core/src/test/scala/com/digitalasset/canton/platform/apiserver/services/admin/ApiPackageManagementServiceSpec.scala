@@ -14,7 +14,7 @@ import com.daml.ledger.api.v2.admin.package_management_service.{
 import com.daml.tracing.DefaultOpenTelemetry
 import com.daml.tracing.TelemetrySpecBase.*
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.data.{AbsoluteOffset, ProcessedDisclosedContract}
+import com.digitalasset.canton.data.{Offset, ProcessedDisclosedContract}
 import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.{
@@ -28,6 +28,7 @@ import com.digitalasset.canton.ledger.participant.state.{
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.{TestTelemetrySetup, TraceContext}
+import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.daml.lf.data.Ref.{ApplicationId, CommandId, Party, SubmissionId, WorkflowId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.{GlobalKey, SubmittedTransaction}
@@ -74,7 +75,7 @@ class ApiPackageManagementServiceSpec
       val scope = span.makeCurrent()
       apiService
         .uploadDarFile(UploadDarFileRequest(ByteString.EMPTY, aSubmissionId))
-        .andThen { case _ =>
+        .thereafter { _ =>
           scope.close()
           span.end()
         }
@@ -189,7 +190,7 @@ object ApiPackageManagementServiceSpec {
       throw new UnsupportedOperationException()
 
     override def prune(
-        pruneUpToInclusive: AbsoluteOffset,
+        pruneUpToInclusive: Offset,
         submissionId: SubmissionId,
         pruneAllDivulgedContracts: Boolean,
     ): CompletionStage[PruningResult] =
