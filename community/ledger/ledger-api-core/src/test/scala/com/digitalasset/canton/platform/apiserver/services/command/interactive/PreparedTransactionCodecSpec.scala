@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver.services.command.interactive
 
+import com.daml.ledger.api.v2.interactive.transaction.v1.interactive_submission_data.Node.NodeType
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.PreparedTransactionCodec.*
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
@@ -110,6 +111,36 @@ class PreparedTransactionCodecSpec
         }
 
         timeouts.default.await_("Round trip")(result)
+      }
+    }
+
+    "sort sets of parties" in {
+      forAll { (transaction: VersionedTransaction, nodeSeeds: Option[ImmArray[(NodeId, Hash)]]) =>
+        val result = for {
+          encoded <- encoder.serializeTransaction(transaction, nodeSeeds)
+        } yield {
+          val partiesLists = encoded.nodes.flatMap {
+            _.versionedNode.v1.value.nodeType match {
+              case NodeType.Empty => Seq.empty
+              case NodeType.Create(value) => Seq(value.signatories, value.stakeholders)
+              case NodeType.Fetch(value) =>
+                Seq(value.signatories, value.stakeholders, value.actingParties)
+              case NodeType.Exercise(value) =>
+                Seq(
+                  value.signatories,
+                  value.stakeholders,
+                  value.actingParties,
+                  value.choiceObservers,
+                )
+              case NodeType.Rollback(_) => Seq.empty
+            }
+          }
+          partiesLists.foreach { partiesList =>
+            partiesList.sorted should contain theSameElementsInOrderAs (partiesList)
+          }
+        }
+
+        timeouts.default.await_("Encoded")(result)
       }
     }
   }
