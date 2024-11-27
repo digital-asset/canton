@@ -114,6 +114,10 @@ e.g: `int_to_string(42) = "42"`
 
 e.g: `encode(some(5)) = 0x01 || encode(5)`
 
+- `alphanumeric_sort`: Sort a list of strings in alphanumeric order: `alphanumeric_sort: List[String] => List[String]`
+
+e.g: `alphanumeric_sort(List("koala", "zorro", "21pilot", "canton")) = List("21pilot", "canton", "koala", "zorro")`
+
 See encoding of optional values below for details.
 
 ## Primitive Types
@@ -520,8 +524,8 @@ fn encode_node(create):
     encode(create.package_name) ||
     encode(create.template_id) ||
     encode(create.argument) ||
-    encode(create.signatories) ||
-    encode(create.stakeholders)
+    encode(alphanumeric_sort(create.signatories)) ||
+    encode(alphanumeric_sort(create.stakeholders))
 ```
 
 ### Exercise
@@ -535,15 +539,15 @@ fn encode_node(exercise):
     encode(exercise.contract_id) ||
     encode(exercise.package_name) ||
     encode(exercise.template_id) ||
-    encode(exercise.signatories) ||
-    encode(exercise.stakeholders) ||
-    encode(exercise.acting_parties) ||
+    encode(alphanumeric_sort(exercise.signatories)) ||
+    encode(alphanumeric_sort(exercise.stakeholders)) ||
+    encode(alphanumeric_sort(exercise.acting_parties)) ||
     encode(exercise.interface_id) ||
     encode(exercise.choice_id) ||
     encode(exercise.chosen_value) ||
     encode(exercise.consuming) ||
     encode(exercise.exercise_result) ||
-    encode(exercise.choice_observers) ||
+    encode(alphanumeric_sort(exercise.choice_observers)) ||
     encode(exercise.children)
 ```
 
@@ -565,9 +569,9 @@ fn encode_node(fetch):
     encode(fetch.contract_id) ||
     encode(fetch.package_name) ||
     encode(fetch.template_id) ||
-    encode(fetch.signatories) ||
-    encode(fetch.stakeholders) ||
-    encode(fetch.acting_parties)
+    encode(alphanumeric_sort(fetch.signatories)) ||
+    encode(alphanumeric_sort(fetch.stakeholders)) ||
+    encode(alphanumeric_sort(fetch.acting_parties))
 ```
 
 ### Rollback
