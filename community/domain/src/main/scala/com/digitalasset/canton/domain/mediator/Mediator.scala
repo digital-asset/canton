@@ -78,7 +78,7 @@ private[mediator] class Mediator(
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, tracer: Tracer)
     extends NamedLogging
-    with StartAndCloseable[Unit]
+    with FlagCloseableAsync
     with HasCloseContext {
 
   override protected def timeouts: ProcessingTimeout = parameters.processingTimeouts
@@ -118,29 +118,33 @@ private[mediator] class Mediator(
     topologyTransactionProcessor.createHandler(domain),
     processor,
     deduplicator,
-    metrics,
     loggerFactory,
   )
 
   val stateInspection: MediatorStateInspection = new MediatorStateInspection(state)
 
-  override protected def startAsync()(implicit
+  /** Starts the mediator. NOTE: Must only be called at most once on a mediator instance. */
+  private[mediator] def start()(implicit
       initializationTraceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] = for {
+  ): FutureUnlessShutdown[Unit] = performUnlessClosingUSF("start") {
+    for {
 
-    preheadO <- FutureUnlessShutdown.outcomeF(sequencerCounterTrackerStore.preheadSequencerCounter)
-    nextTs = preheadO.fold(CantonTimestamp.MinValue)(_.timestamp.immediateSuccessor)
-    _ <- state.deduplicationStore.initialize(nextTs)
-
-    _ <- FutureUnlessShutdown.outcomeF(
-      sequencerClient.subscribeTracking(
-        sequencerCounterTrackerStore,
-        DiscardIgnoredEvents(loggerFactory)(handler),
-        timeTracker,
-        onCleanHandler = onCleanSequencerCounterHandler,
+      preheadO <- FutureUnlessShutdown.outcomeF(
+        sequencerCounterTrackerStore.preheadSequencerCounter
       )
-    )
-  } yield ()
+      nextTs = preheadO.fold(CantonTimestamp.MinValue)(_.timestamp.immediateSuccessor)
+      _ <- state.deduplicationStore.initialize(nextTs)
+
+      _ <- FutureUnlessShutdown.outcomeF(
+        sequencerClient.subscribeTracking(
+          sequencerCounterTrackerStore,
+          DiscardIgnoredEvents(loggerFactory)(handler),
+          timeTracker,
+          onCleanHandler = onCleanSequencerCounterHandler,
+        )
+      )
+    } yield ()
+  }
 
   private def onCleanSequencerCounterHandler(
       newTracedPrehead: Traced[SequencerCounterCursorPrehead]
@@ -337,7 +341,7 @@ private[mediator] class Mediator(
     Seq(
       SyncCloseable(
         "mediator",
-        Lifecycle.close(
+        LifeCycle.close(
           topologyTransactionProcessor,
           syncCrypto.ips,
           timeTracker,

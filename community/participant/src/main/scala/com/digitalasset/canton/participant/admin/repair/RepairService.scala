@@ -25,7 +25,7 @@ import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
   HasCloseContext,
-  Lifecycle,
+  LifeCycle,
 }
 import com.digitalasset.canton.logging.{
   HasLoggerName,
@@ -206,13 +206,11 @@ final class RepairService(
   }
 
   /** Prepare contract for add, including re-computing metadata
-    * @param domain Domain data of the repair request
     * @param repairContract Contract to be added
     * @param acsState If the contract is known, its status
     * @param storedContract If the contract already exist in the ContractStore, the stored copy
     */
   private def readRepairContractCurrentState(
-      domain: RepairRequest.DomainData,
       repairContract: RepairContract,
       acsState: Option[ActiveContractStore.Status],
       storedContract: Option[SerializableContract],
@@ -367,7 +365,6 @@ final class RepairService(
             filteredContracts <- contracts.zip(contractStates).parTraverseFilter {
               case (contract, acsState) =>
                 readRepairContractCurrentState(
-                  domain,
                   repairContract = contract,
                   acsState = acsState,
                   storedContract = storedContracts.get(contract.contract.contractId),
@@ -1392,7 +1389,7 @@ final class RepairService(
     message
   }
 
-  override protected def onClosed(): Unit = Lifecycle.close(executionQueue)(logger)
+  override protected def onClosed(): Unit = LifeCycle.close(executionQueue)(logger)
 
   private def withRepairIndexer(code: FutureQueue[RepairUpdate] => EitherT[Future, String, Unit])(
       implicit traceContext: TraceContext

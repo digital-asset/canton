@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.reassignment
 
-import com.digitalasset.canton.data.{CantonTimestamp, FullUnassignmentTree}
-import com.digitalasset.canton.participant.GlobalOffset
+import com.digitalasset.canton.data.{CantonTimestamp, FullUnassignmentTree, Offset}
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentData.ReassignmentGlobalOffset
 import com.digitalasset.canton.protocol.messages.DeliveredUnassignmentResult
 import com.digitalasset.canton.protocol.{ReassignmentId, SerializableContract}
@@ -32,9 +31,10 @@ final case class ReassignmentData(
     s"Supplied contract with ID ${contract.contractId} differs from the ID ${unassignmentRequest.contractId} of the unassignment request.",
   )
 
-  def unassignmentGlobalOffset: Option[GlobalOffset] =
+  def unassignmentGlobalOffset: Option[Offset] =
     reassignmentGlobalOffset.flatMap(_.unassignment)
-  def assignmentGlobalOffset: Option[GlobalOffset] = reassignmentGlobalOffset.flatMap(_.assignment)
+  def assignmentGlobalOffset: Option[Offset] =
+    reassignmentGlobalOffset.flatMap(_.assignment)
 
   def targetDomain: Target[DomainId] = unassignmentRequest.targetDomain
 
@@ -95,14 +95,14 @@ object ReassignmentData {
   sealed trait ReassignmentGlobalOffset extends Product with Serializable {
     def merge(other: ReassignmentGlobalOffset): Either[String, ReassignmentGlobalOffset]
 
-    def unassignment: Option[GlobalOffset]
-    def assignment: Option[GlobalOffset]
+    def unassignment: Option[Offset]
+    def assignment: Option[Offset]
   }
 
   object ReassignmentGlobalOffset {
     def create(
-        unassignment: Option[GlobalOffset],
-        assignment: Option[GlobalOffset],
+        unassignment: Option[Offset],
+        assignment: Option[Offset],
     ): Either[String, Option[ReassignmentGlobalOffset]] =
       (unassignment, assignment) match {
         case (Some(unassignment), Some(assignment)) =>
@@ -113,7 +113,7 @@ object ReassignmentData {
       }
   }
 
-  final case class UnassignmentGlobalOffset(offset: GlobalOffset) extends ReassignmentGlobalOffset {
+  final case class UnassignmentGlobalOffset(offset: Offset) extends ReassignmentGlobalOffset {
     override def merge(
         other: ReassignmentGlobalOffset
     ): Either[String, ReassignmentGlobalOffset] =
@@ -134,11 +134,11 @@ object ReassignmentData {
           )
       }
 
-    override def unassignment: Option[GlobalOffset] = Some(offset)
-    override def assignment: Option[GlobalOffset] = None
+    override def unassignment: Option[Offset] = Some(offset)
+    override def assignment: Option[Offset] = None
   }
 
-  final case class AssignmentGlobalOffset(offset: GlobalOffset) extends ReassignmentGlobalOffset {
+  final case class AssignmentGlobalOffset(offset: Offset) extends ReassignmentGlobalOffset {
     override def merge(
         other: ReassignmentGlobalOffset
     ): Either[String, ReassignmentGlobalOffset] =
@@ -159,13 +159,13 @@ object ReassignmentData {
           )
       }
 
-    override def unassignment: Option[GlobalOffset] = None
-    override def assignment: Option[GlobalOffset] = Some(offset)
+    override def unassignment: Option[Offset] = None
+    override def assignment: Option[Offset] = Some(offset)
   }
 
   final case class ReassignmentGlobalOffsets private (
-      unassignmentOffset: GlobalOffset,
-      assignmentOffset: GlobalOffset,
+      unassignmentOffset: Offset,
+      assignmentOffset: Offset,
   ) extends ReassignmentGlobalOffset {
     require(
       unassignmentOffset != assignmentOffset,
@@ -196,14 +196,14 @@ object ReassignmentData {
           )
       }
 
-    override def unassignment: Option[GlobalOffset] = Some(unassignmentOffset)
-    override def assignment: Option[GlobalOffset] = Some(assignmentOffset)
+    override def unassignment: Option[Offset] = Some(unassignmentOffset)
+    override def assignment: Option[Offset] = Some(assignmentOffset)
   }
 
   object ReassignmentGlobalOffsets {
     def create(
-        unassignment: GlobalOffset,
-        assignment: GlobalOffset,
+        unassignment: Offset,
+        assignment: Offset,
     ): Either[String, ReassignmentGlobalOffsets] =
       Either.cond(
         unassignment != assignment,

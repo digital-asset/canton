@@ -168,14 +168,14 @@ object GeneratorsCrypto {
       } yield new SymmetricKey(format, key, scheme)
     )
 
-  implicit val asymmetricEncryptedArb: Arbitrary[AsymmetricEncrypted[SymmetricKey]] =
+  implicit def asymmetricEncryptedArb[T]: Arbitrary[AsymmetricEncrypted[T]] =
     Arbitrary(
       for {
         ciphertext <- Arbitrary.arbitrary[ByteString]
         encryptionAlgorithmSpec <- Arbitrary.arbitrary[EncryptionAlgorithmSpec]
         fingerprint <- Gen
           .stringOfN(68, Gen.alphaChar)
-          .map(str => Fingerprint.tryCreate(String68(str)()))
+          .map(str => Fingerprint.tryCreate(String68.tryCreate(str)))
       } yield AsymmetricEncrypted.apply(ciphertext, encryptionAlgorithmSpec, fingerprint)
     )
 }

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.store.cache
 
 import cats.data.NonEmptyVector
-import com.digitalasset.canton.data.{AbsoluteOffset, Offset}
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import com.digitalasset.canton.{HasExecutionContext, TestEssentials}
@@ -33,24 +33,24 @@ class ContractStateCachesSpec
     val cacheInitializationOffset = offset(1337)
     @SuppressWarnings(Array("com.digitalasset.canton.GlobalExecutionContext"))
     val contractStateCaches = ContractStateCaches.build(
-      cacheInitializationOffset.toAbsoluteOffsetO,
+      Some(cacheInitializationOffset),
       maxContractsCacheSize = 1L,
       maxKeyCacheSize = 1L,
       metrics = LedgerApiServerMetrics.ForTesting,
       loggerFactory,
     )
 
-    contractStateCaches.keyState.cacheIndex shouldBe cacheInitializationOffset.toAbsoluteOffsetO
-    contractStateCaches.contractState.cacheIndex shouldBe cacheInitializationOffset.toAbsoluteOffsetO
+    contractStateCaches.keyState.cacheIndex shouldBe Some(cacheInitializationOffset)
+    contractStateCaches.contractState.cacheIndex shouldBe Some(cacheInitializationOffset)
   }
 
   "push" should "update the caches with a batch of events" in new TestScope {
-    val previousCreate = createEvent(offset = offset(1), eventSequentialId = 1, withKey = true)
+    val previousCreate = createEvent(offset = offset(1), withKey = true)
 
-    val create1 = createEvent(offset = offset(2), eventSequentialId = 2, withKey = false)
-    val create2 = createEvent(offset = offset(3), eventSequentialId = 3, withKey = true)
-    val archive1 = archiveEvent(create1, offset(3), eventSequentialId = 4)
-    val archivedPrevious = archiveEvent(previousCreate, offset(4), eventSequentialId = 5)
+    val create1 = createEvent(offset = offset(2), withKey = false)
+    val create2 = createEvent(offset = offset(3), withKey = true)
+    val archive1 = archiveEvent(create1, offset(3))
+    val archivedPrevious = archiveEvent(previousCreate, offset(4))
 
     val batch = NonEmptyVector.of(create1, create2, archive1, archivedPrevious)
 
@@ -70,7 +70,7 @@ class ContractStateCachesSpec
   }
 
   "push" should "not update the key state cache if no key updates" in new TestScope {
-    val create1 = createEvent(offset = offset(2), eventSequentialId = 2, withKey = false)
+    val create1 = createEvent(offset = offset(2), withKey = false)
 
     val batch = NonEmptyVector.of(create1)
     val expectedContractStateUpdates = Map(create1.contractId -> contractActive(create1))
@@ -81,7 +81,7 @@ class ContractStateCachesSpec
   }
 
   "reset" should "reset the caches on `reset`" in new TestScope {
-    private val someOffset = Some(AbsoluteOffset.tryFromLong(112233L))
+    private val someOffset = Some(Offset.tryFromLong(112233L))
 
     contractStateCaches.reset(someOffset)
     verify(keyStateCache).reset(someOffset)
@@ -105,7 +105,6 @@ class ContractStateCachesSpec
 
     def createEvent(
         offset: Offset,
-        eventSequentialId: Long,
         withKey: Boolean,
     ): ContractStateEvent.Created = {
       val cId = contractIdx.incrementAndGet()
@@ -125,7 +124,6 @@ class ContractStateCachesSpec
     def archiveEvent(
         create: ContractStateEvent.Created,
         offset: Offset,
-        eventSequentialId: Long,
     ): ContractStateEvent.Archived =
       ContractStateEvent.Archived(
         contractId = create.contractId,
@@ -177,5 +175,5 @@ class ContractStateCachesSpec
     Versioned(LanguageVersion.StableVersions(LanguageVersion.Major.V2).max, contractInstance)
   }
 
-  private def offset(idx: Int) = Offset.fromLong(idx.toLong)
+  private def offset(idx: Int) = Offset.tryFromLong(idx.toLong)
 }

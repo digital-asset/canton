@@ -22,6 +22,7 @@ import sttp.tapir.generic.auto.*
 import sttp.tapir.json.circe.jsonBody
 import sttp.tapir.{AnyEndpoint, CodecFormat, Schema, path, streamBinaryBody}
 
+import scala.annotation.unused
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.IteratorHasAsScala
 
@@ -35,6 +36,7 @@ class JsPackageService(
     extends Endpoints {
   import JsPackageService.*
 
+  @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
   def endpoints() =
     List(
       withServerLogic(
@@ -62,7 +64,7 @@ class JsPackageService(
   }
 
   private def status(
-      caller: CallerContext
+      @unused caller: CallerContext
   ): TracedInput[String] => Future[
     Either[JsCantonError, package_service.GetPackageStatusResponse]
   ] = req => packageClient.getPackageStatus(req.in)(req.traceContext).resultToRight

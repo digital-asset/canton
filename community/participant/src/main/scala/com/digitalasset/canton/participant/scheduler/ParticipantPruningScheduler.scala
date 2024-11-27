@@ -9,7 +9,7 @@ import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.auth.CantonAdminToken
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
-import com.digitalasset.canton.config.{BatchingConfig, ClientConfig, ProcessingTimeout}
+import com.digitalasset.canton.config.{ClientConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.ledger.client.configuration.{
@@ -20,7 +20,6 @@ import com.digitalasset.canton.ledger.client.configuration.{
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.MetricsHelper
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
-import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.config.ParticipantStoreConfig
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.pruning.PruningProcessor
@@ -50,7 +49,6 @@ final class ParticipantPruningScheduler(
     storage: Storage, // storage to build the pruning scheduler store that tracks the current schedule
     adminToken: CantonAdminToken, // the admin token is needed to invoke pruning via the ledger-api
     pruningConfig: ParticipantStoreConfig,
-    batchingConfig: BatchingConfig,
     override val timeouts: ProcessingTimeout,
     loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -95,7 +93,7 @@ final class ParticipantPruningScheduler(
       offsetByRetention <- EitherT.right[ScheduledRunResult](
         participantNodePersistentState.value.ledgerApiStore
           .lastDomainOffsetBeforeOrAtPublicationTime(timestampByRetention)
-          .map(_.map(_.offset).map(GlobalOffset.tryFromLedgerOffset))
+          .map(_.map(_.offset))
       )
       _ = logger.debug(
         s"Calculating safe-to-prune offset by [offset-by-retention: $offsetByRetention, timestamp-by-retention: $timestampByRetention]"
@@ -133,7 +131,7 @@ final class ParticipantPruningScheduler(
           )
           EitherT.pure[Future, ScheduledRunResult](Done: ScheduledRunResult)
         } { offsetToPruneUpTo =>
-          val pruneUpTo = offsetToPruneUpTo.toLong
+          val pruneUpTo = offsetToPruneUpTo.unwrap
           val submissionId = UUID.randomUUID().toString
           val internally = if (pruneInternallyOnly) "internally" else ""
           logger.info(
@@ -153,7 +151,7 @@ final class ParticipantPruningScheduler(
               ledgerClient <- tryEnsureLedgerClient()
               result <- ledgerClient.participantPruningManagementClient
                 .prune(pruneUpTo, submissionId = Some(submissionId))
-                .map(_emptyResponse => doneOrMoreWorkToPerform.asRight[ScheduledRunResult])
+                .map(_ => doneOrMoreWorkToPerform.asRight[ScheduledRunResult])
             } yield result
             // Turn grpc errors returned as Future.failed into a Left ScheduledRunResult.
             EitherT(

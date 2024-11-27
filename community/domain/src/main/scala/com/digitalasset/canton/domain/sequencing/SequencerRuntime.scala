@@ -6,7 +6,6 @@ package com.digitalasset.canton.domain.sequencing
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
-import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.connection.GrpcApiInfoService
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
@@ -37,7 +36,7 @@ import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
   HasCloseContext,
-  Lifecycle,
+  LifeCycle,
   PromiseUnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -128,7 +127,6 @@ class SequencerRuntime(
     clock: Clock,
     authenticationConfig: SequencerAuthenticationConfig,
     staticMembersToRegister: Seq[Member],
-    futureSupervisor: FutureSupervisor,
     memberAuthenticationServiceFactory: MemberAuthenticationServiceFactory,
     topologyStateForInitializationService: TopologyStateForInitializationService,
     maybeDomainOutboxFactory: Option[DomainOutboxFactorySingleCreate],
@@ -190,7 +188,6 @@ class SequencerRuntime(
       staticDomainParameters,
       publicServerConfig.overrideMaxRequestSize,
       topologyClient,
-      futureSupervisor,
       loggerFactory,
     )
 
@@ -467,8 +464,8 @@ class SequencerRuntime(
     }
 
   override def onClosed(): Unit =
-    Lifecycle.close(
-      Lifecycle.toCloseableOption(sequencer.rateLimitManager),
+    LifeCycle.close(
+      LifeCycle.toCloseableOption(sequencer.rateLimitManager),
       timeTracker,
       syncCrypto,
       topologyClient,
@@ -476,7 +473,7 @@ class SequencerRuntime(
       topologyProcessor,
       topologyManagerSequencerCounterTrackerStore,
       sequencerService,
-      Lifecycle.toCloseableOption(sequencerChannelServiceO),
+      LifeCycle.toCloseableOption(sequencerChannelServiceO),
       authenticationServices.memberAuthenticationService,
       sequencer,
     )(logger)

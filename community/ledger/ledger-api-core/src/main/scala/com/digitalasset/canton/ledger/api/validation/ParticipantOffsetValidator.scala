@@ -46,7 +46,7 @@ object ParticipantOffsetValidator {
           .asGrpcError
       )
     else
-      Right(Offset.fromLong(ledgerOffset).toHexString)
+      Right(Offset.tryFromLong(ledgerOffset).toHexString)
 
   def validateNonNegative(ledgerOffset: Long, fieldName: String)(implicit
       contextualizedErrorLogger: ContextualizedErrorLogger
@@ -62,7 +62,7 @@ object ParticipantOffsetValidator {
           .asGrpcError
       )
     else
-      Right(Offset.fromLong(ledgerOffset).toHexString)
+      Right(Option.unless(ledgerOffset == 0)(Offset.tryFromLong(ledgerOffset)).toHexString)
 
   def offsetIsBeforeEnd(
       offsetType: String,

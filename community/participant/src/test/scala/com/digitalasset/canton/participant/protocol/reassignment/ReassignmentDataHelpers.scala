@@ -14,8 +14,12 @@ import com.digitalasset.canton.crypto.{
   Signature,
   TestHash,
 }
-import com.digitalasset.canton.data.{CantonTimestamp, ReassignmentSubmitterMetadata, ViewType}
-import com.digitalasset.canton.participant.GlobalOffset
+import com.digitalasset.canton.data.{
+  CantonTimestamp,
+  Offset,
+  ReassignmentSubmitterMetadata,
+  ViewType,
+}
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentData.UnassignmentGlobalOffset
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
 import com.digitalasset.canton.protocol.*
@@ -94,7 +98,7 @@ final case class ReassignmentDataHelpers(
     )
 
   def reassignmentData(reassignmentId: ReassignmentId, unassignmentRequest: UnassignmentRequest)(
-      unassignmentGlobalOffset: Option[GlobalOffset] = None
+      unassignmentGlobalOffset: Option[Offset] = None
   ): ReassignmentData = {
     val uuid = new UUID(10L, 0L)
     val seed = seedGenerator.generateSaltSeed()
@@ -134,7 +138,7 @@ final case class ReassignmentDataHelpers(
         requestId = RequestId(reassignmentData.unassignmentTs),
         rootHash = reassignmentData.unassignmentRequest.rootHash,
         verdict = Verdict.Approve(protocolVersion),
-        informees = reassignmentData.unassignmentRequest.stakeholders.all,
+        informees = reassignmentData.unassignmentRequest.informees,
         protocolVersion,
       )
 

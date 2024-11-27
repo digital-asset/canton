@@ -121,8 +121,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       topologyClient <- EitherT.right(
         performUnlessClosingF("create caching client")(
           topologyFactory.createCachingTopologyClient(
-            sequencerAggregatedInfo.staticDomainParameters.protocolVersion,
-            packageDependencyResolver,
+            packageDependencyResolver
           )
         )
       )
@@ -187,7 +186,6 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
             participantNodeParameters.exitOnFatalFailures,
             domainLoggerFactory,
             ProtocolVersionCompatibility.supportedProtocols(participantNodeParameters),
-            participantNodeParameters.protocolConfig.minimumProtocolVersion,
           ),
           Option.when(
             participantNodeParameters.unsafeEnableOnlinePartyReplication
@@ -399,7 +397,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
   private def isActive(
       domainAlias: DomainAlias,
       client: SequencerConnectClient,
-      waitForActive: Boolean = true,
+      waitForActive: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] =

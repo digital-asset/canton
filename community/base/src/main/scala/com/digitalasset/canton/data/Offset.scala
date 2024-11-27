@@ -5,147 +5,118 @@ package com.digitalasset.canton.data
 
 import cats.syntax.either.*
 import com.daml.logging.entries.{LoggingValue, ToLoggingValue}
-import com.digitalasset.canton.data.AbsoluteOffset.{firstOffset, tryFromLong}
-import com.digitalasset.canton.data.Offset.beforeBegin
+import com.digitalasset.canton.data.Offset.{firstOffset, toOldOffsetBytes, tryFromLong}
+import com.digitalasset.canton.logging.pretty.Pretty
+import com.digitalasset.canton.logging.pretty.Pretty.prettyOfString
 import com.digitalasset.canton.pekkostreams.dispatcher.DispatcherImpl.Incrementable
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.google.protobuf.ByteString
+import slick.jdbc.{GetResult, SetParameter}
 
-import java.io.InputStream
 import java.nio.{ByteBuffer, ByteOrder}
-
-/** Offsets into streams with hierarchical addressing.
-  *
-  * We use these [[Offset]]'s to address changes to the participant state.
-  * Offsets are opaque values that must be strictly
-  * increasing according to lexicographical ordering.
-  *
-  * Ledger implementations are advised to future proof their design
-  * of offsets by reserving the first (few) bytes for a version
-  * indicator, followed by the specific offset scheme for that version.
-  * This way it is possible in the future to switch to a different versioning
-  * scheme, while making sure that previously created offsets are always
-  * less than newer offsets.
-  */
-final case class Offset(bytes: Bytes) extends Ordered[Offset] {
-  override def compare(that: Offset): Int =
-    Bytes.ordering.compare(this.bytes, that.bytes)
-
-  def toByteString: ByteString = bytes.toByteString
-
-  def toByteArray: Array[Byte] = bytes.toByteArray
-
-  def toHexString: Ref.HexString = bytes.toHexString
-
-  def toLong: Long =
-    if (this == beforeBegin) 0L
-    else ByteBuffer.wrap(bytes.toByteArray).getLong(1)
-
-  // TODO(#21220) remove after the unification of Offsets
-  def toAbsoluteOffsetO: Option[AbsoluteOffset] =
-    if (this == beforeBegin) None
-    else Some(AbsoluteOffset.tryFromLong(this.toLong))
-
-  // TODO(#21220) remove after the unification of Offsets
-  def toAbsoluteOffset: AbsoluteOffset = AbsoluteOffset.tryFromLong(this.toLong)
-}
+import scala.util.{Failure, Success, Try}
 
 /** Offsets into streams with hierarchical addressing.
   *
   * We use these offsets to address changes to the participant state.
   * Offsets are opaque values that must be strictly increasing.
   */
-// TODO(#21220) rename to Offset
-class AbsoluteOffset private (val positive: Long)
+class Offset private (val positive: Long)
     extends AnyVal
-    with Ordered[AbsoluteOffset]
-    with Incrementable[AbsoluteOffset] {
+    with Ordered[Offset]
+    with Incrementable[Offset] {
   def unwrap: Long = positive
 
-  def compare(that: AbsoluteOffset): Int = this.positive.compare(that.positive)
+  def compare(that: Offset): Int = this.positive.compare(that.positive)
 
-  def increment: AbsoluteOffset = tryFromLong(positive + 1L)
+  def increment: Offset = tryFromLong(positive + 1L)
 
-  // TODO(#21220) remove after db operations use inclusive start
-  def decrement: Option[AbsoluteOffset] =
+  def min(other: Offset): Offset = new Offset(positive.min(other.unwrap))
+
+  def max(other: Offset): Offset = new Offset(positive.max(other.unwrap))
+
+  def decrement: Option[Offset] =
     Option.unless(this == firstOffset)(tryFromLong(positive - 1L))
 
-  override def toString: String = s"AbsoluteOffset($positive)"
+  override def toString: String = s"Offset($positive)"
 
   def toDecimalString: String = positive.toString
 
   // TODO(#22143) remove after Offsets are stored as integers in db
-  def toHexString: Ref.HexString = Offset.fromLong(positive).toHexString
-
-  // TODO(#21220) remove after the unification of Offsets
-  def toOffset: Offset = Offset.fromLong(this.unwrap)
-}
-
-object AbsoluteOffset {
-  lazy val firstOffset: AbsoluteOffset = AbsoluteOffset.tryFromLong(1L)
-  lazy val MaxValue: AbsoluteOffset = AbsoluteOffset.tryFromLong(Long.MaxValue)
-
-  def tryFromLong(num: Long): AbsoluteOffset =
-    fromLong(num).valueOr(err => throw new IllegalArgumentException(err))
-
-  def fromLong(num: Long): Either[String, AbsoluteOffset] =
-    Either.cond(
-      num > 0L,
-      new AbsoluteOffset(num),
-      s"Expecting positive value for offset, found $num.",
-    )
-
-  implicit val `AbsoluteOffset to LoggingValue`: ToLoggingValue[AbsoluteOffset] = value =>
-    LoggingValue.OfLong(value.unwrap)
-
-  implicit class AbsoluteOffsetOptionToHexString(val offsetO: Option[AbsoluteOffset])
-      extends AnyVal {
-    def toHexString: String = offsetO match {
-      case Some(offset) => offset.toHexString
-      case None => ""
-    }
-  }
+  def toHexString: Ref.HexString = toOldOffsetBytes(positive).toHexString
 }
 
 object Offset {
-  val beforeBegin: Offset = new Offset(Bytes.Empty)
-  private val longBasedByteLength: Int = 9 // One byte for the version plus 8 bytes for Long
-  private val versionUpstreamOffsetsAsLong: Byte = 0
-  val firstOffset: Offset = Offset.fromLong(1)
+  lazy val firstOffset: Offset = Offset.tryFromLong(1L)
+  lazy val MaxValue: Offset = Offset.tryFromLong(Long.MaxValue)
 
-  def fromByteString(bytes: ByteString) = new Offset(Bytes.fromByteString(bytes))
+  def tryFromLong(num: Long): Offset =
+    fromLong(num).valueOr(err => throw new IllegalArgumentException(err))
 
-  def fromByteArray(bytes: Array[Byte]) = new Offset(Bytes.fromByteArray(bytes))
+  def fromLong(num: Long): Either[String, Offset] =
+    Either.cond(
+      num > 0L,
+      new Offset(num),
+      s"Expecting positive value for offset, found $num.",
+    )
 
-  def fromInputStream(is: InputStream) = new Offset(Bytes.fromInputStream(is))
+  def fromHexString(s: Ref.HexString): Offset = {
+    val bytes = Bytes.fromHexString(s)
+    Offset.tryFromLong(ByteBuffer.wrap(bytes.toByteArray).getLong(1))
+  }
 
-  def fromHexString(s: Ref.HexString) = new Offset(Bytes.fromHexString(s))
+  def fromHexStringO(s: Ref.HexString): Option[Offset] =
+    if (s.isEmpty) None else Some(fromHexString(s))
 
-  def fromLong(l: Long): Offset =
-    if (l == 0L) beforeBegin
-    else
-      Offset(
-        com.digitalasset.daml.lf.data.Bytes.fromByteString(
-          ByteString.copyFrom(
-            ByteBuffer
-              .allocate(longBasedByteLength)
-              .order(ByteOrder.BIG_ENDIAN)
-              .put(0, versionUpstreamOffsetsAsLong)
-              .putLong(1, l)
-          )
-        )
-      )
-
-  // TODO(#21220) remove after the unification of Offsets
-  def fromAbsoluteOffsetO(valueO: Option[AbsoluteOffset]): Offset =
-    valueO match {
-      case None => beforeBegin
-      case Some(value) => fromLong(value.unwrap)
+  def tryFromString(s: String): Try[Option[Offset]] =
+    fromString(s) match {
+      case Left(msg) => Failure(new IllegalArgumentException(msg))
+      case Right(offset) => Success(offset)
     }
 
-  // TODO(#21220) remove after the unification of Offsets
-  def fromAbsoluteOffset(value: AbsoluteOffset): Offset = fromLong(value.unwrap)
+  private def fromString(s: String): Either[String, Option[Offset]] =
+    Ref.HexString
+      .fromString(s)
+      .map(Offset.fromHexStringO)
+
+  // TODO(#22143) move to SerializableDeduplicationPeriod since there should be the only place that uses it
+  private def toOldOffsetBytes(offset: Long): Bytes = {
+    val longBasedByteLength: Int = 9 // One byte for the version plus 8 bytes for Long
+    val versionUpstreamOffsetsAsLong: Byte = 0
+
+    com.digitalasset.daml.lf.data.Bytes.fromByteString(
+      ByteString.copyFrom(
+        ByteBuffer
+          .allocate(longBasedByteLength)
+          .order(ByteOrder.BIG_ENDIAN)
+          .put(0, versionUpstreamOffsetsAsLong)
+          .putLong(1, offset)
+      )
+    )
+  }
+
+  def toOldOffsetBytes(offsetO: Option[Offset]): Bytes =
+    offsetO.fold(Bytes.Empty)(off => toOldOffsetBytes(off.unwrap))
 
   implicit val `Offset to LoggingValue`: ToLoggingValue[Offset] = value =>
-    LoggingValue.OfLong(value.toLong)
+    LoggingValue.OfLong(value.unwrap)
+
+  implicit class OffsetOptionToHexString(val offsetO: Option[Offset]) extends AnyVal {
+    def toHexString: Ref.HexString = offsetO match {
+      case Some(offset) => offset.toHexString
+      case None => Bytes.Empty.toHexString
+    }
+  }
+
+  implicit val prettyOffset: Pretty[Offset] = prettyOfString(_.toDecimalString)
+
+  implicit val getResultOffset: GetResult[Offset] =
+    GetResult(_.nextLong()).andThen(Offset.tryFromLong)
+  implicit val getResultOffsetO: GetResult[Option[Offset]] =
+    GetResult(_.nextLongOption().map(Offset.tryFromLong))
+
+  implicit val setParameterOffset: SetParameter[Offset] = (off, pp) => pp >> off.unwrap
+  implicit val setParameterOffsetO: SetParameter[Option[Offset]] = (off, pp) =>
+    pp >> off.map(_.unwrap)
+
 }

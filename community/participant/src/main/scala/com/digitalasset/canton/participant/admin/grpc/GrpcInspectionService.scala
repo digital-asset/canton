@@ -10,7 +10,6 @@ import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.participant.v30.*
 import com.digitalasset.canton.admin.participant.v30.InspectionServiceGrpc.InspectionService
-import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.InspectionServiceErrorGroup
@@ -21,14 +20,17 @@ import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.{GrpcFUSExtended, 
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection.InFlightCount
 import com.digitalasset.canton.participant.domain.DomainAliasManager
-import com.digitalasset.canton.participant.pruning.CommitmentContractMetadata
-import com.digitalasset.canton.protocol.DomainParametersLookup
+import com.digitalasset.canton.participant.pruning.{
+  CommitmentContractMetadata,
+  CommitmentInspectContract,
+}
 import com.digitalasset.canton.protocol.messages.{
   CommitmentPeriodState,
   DomainSearchCommitmentPeriod,
   ReceivedAcsCommitment,
   SentAcsCommitment,
 }
+import com.digitalasset.canton.protocol.{DomainParametersLookup, LfContractId}
 import com.digitalasset.canton.pruning.{ConfigForDomainThresholds, ConfigForSlowCounterParticipants}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
@@ -36,6 +38,7 @@ import com.digitalasset.canton.topology.client.IdentityProvidingServiceClient
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils}
+import com.digitalasset.daml.lf.data.Bytes
 import io.grpc.stub.StreamObserver
 
 import java.io.OutputStream
@@ -46,7 +49,6 @@ class GrpcInspectionService(
     ips: IdentityProvidingServiceClient,
     indexedStringStore: IndexedStringStore,
     domainAliasManager: DomainAliasManager,
-    futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext
@@ -474,10 +476,9 @@ class GrpcInspectionService(
               .forAcsCommitmentDomainParameters(
                 pv,
                 topologySnapshot,
-                futureSupervisor,
                 loggerFactory,
               )
-              .get(cantonTickTs, false),
+              .get(cantonTickTs, warnOnUsingDefaults = false),
             err => InspectionServiceError.InternalServerError.Error(err.toString),
           )
           .leftWiden[CantonError]
@@ -554,7 +555,78 @@ class GrpcInspectionService(
   override def inspectCommitmentContracts(
       request: InspectCommitmentContracts.Request,
       responseObserver: StreamObserver[InspectCommitmentContracts.Response],
-  ): Unit = ???
+  ): Unit =
+    GrpcStreamingUtils.streamToClient(
+      (out: OutputStream) => inspectCommitmentContracts(request, out),
+      responseObserver,
+      byteString => InspectCommitmentContracts.Response(byteString),
+    )
+
+  private def inspectCommitmentContracts(
+      request: InspectCommitmentContracts.Request,
+      out: OutputStream,
+  ): Future[Unit] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val result =
+      for {
+        expectedDomainId <- CantonGrpcUtil.wrapErrUS(
+          DomainId.fromProtoPrimitive(request.expectedDomainId, "domainId")
+        )
+
+        expectedDomainAlias <- EitherT
+          .fromOption[FutureUnlessShutdown](
+            domainAliasManager.aliasForDomainId(expectedDomainId),
+            InspectionServiceError.IllegalArgumentError
+              .Error(s"Domain alias not found for $expectedDomainId"),
+          )
+          .leftWiden[CantonError]
+
+        cantonTs <- CantonGrpcUtil.wrapErrUS(
+          ProtoConverter.parseRequired(
+            CantonTimestamp.fromProtoTimestamp,
+            "timestamp",
+            request.timestamp,
+          )
+        )
+
+        pv <- EitherTUtil
+          .fromFuture(
+            FutureUnlessShutdown.outcomeF(
+              syncStateInspection.getProtocolVersion(expectedDomainAlias)
+            ),
+            err => InspectionServiceError.InternalServerError.Error(err.toString),
+          )
+          .leftWiden[CantonError]
+
+        cids <-
+          EitherT.fromEither[FutureUnlessShutdown](
+            request.cids
+              .traverse(cid => LfContractId.fromBytes(Bytes.fromByteString(cid)))
+              .leftMap(InspectionServiceError.IllegalArgumentError.Error(_))
+              .leftWiden[CantonError]
+          )
+
+        contractStates <- EitherTUtil
+          .fromFuture(
+            CommitmentInspectContract
+              .inspectContractState(
+                cids,
+                expectedDomainId,
+                cantonTs,
+                request.downloadPayload,
+                syncStateInspection,
+                indexedStringStore,
+                pv,
+              ),
+            err => InspectionServiceError.InternalServerError.Error(err.toString),
+          )
+          .leftWiden[CantonError]
+
+      } yield {
+        contractStates.foreach(c => c.writeDelimitedTo(out).foreach(_ => out.flush()))
+      }
+    CantonGrpcUtil.mapErrNewEUS(result)
+  }
 
   override def countInFlight(
       request: CountInFlight.Request

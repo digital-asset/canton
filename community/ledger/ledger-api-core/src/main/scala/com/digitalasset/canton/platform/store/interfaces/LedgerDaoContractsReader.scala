@@ -14,17 +14,17 @@ import scala.concurrent.Future
 
 private[platform] trait LedgerDaoContractsReader {
 
-  /** Looks up the contract by id at a specific ledger event sequential id.
+  /** Looks up the contract by id at a specific offset.
     *
     * @param contractId the contract id to query
-    * @param validAt the offset at which to resolve the contract state
+    * @param validAtO the offset at which to resolve the contract state
     * @return the optional [[ContractState]]
     */
-  def lookupContractState(contractId: ContractId, validAt: Offset)(implicit
+  def lookupContractState(contractId: ContractId, validAtO: Option[Offset])(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Option[ContractState]]
 
-  /** Looks up the state of a contract key at a specific event sequential id.
+  /** Looks up the state of a contract key at a specific offset.
     *
     * @param key the contract key to query
     * @param validAt the offset at which to resolve the key state

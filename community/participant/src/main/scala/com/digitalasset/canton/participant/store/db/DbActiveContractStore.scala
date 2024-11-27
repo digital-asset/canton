@@ -154,7 +154,6 @@ class DbActiveContractStore(
       _ <- bulkInsert(
         activeContractsData.asMap.fmap(builder),
         change = ChangeType.Activation,
-        operationName = operationName,
       )
       _ <-
         if (enableAdditionalConsistencyChecks) {
@@ -191,7 +190,6 @@ class DbActiveContractStore(
       _ <- bulkInsert(
         contracts.map(contract => (contract, operation)).toMap,
         change = ChangeType.Deactivation,
-        operationName = operationName,
       )
       _ <-
         if (enableAdditionalConsistencyChecks) {
@@ -213,7 +211,6 @@ class DbActiveContractStore(
       ],
       builder: (ReassignmentCounter, Int) => ReassignmentChangeDetail,
       change: ChangeType,
-      operationName: LengthLimitedString,
   )(implicit
       traceContext: TraceContext
   ): CheckedT[FutureUnlessShutdown, AcsError, AcsWarning, Unit] = {
@@ -245,7 +242,6 @@ class DbActiveContractStore(
       _ <- bulkInsert(
         preparedReassignments.toMap,
         change,
-        operationName = operationName,
       ).mapK(FutureUnlessShutdown.outcomeK)
 
       _ <- checkReassignmentsConsistency(preparedReassignments).mapK(FutureUnlessShutdown.outcomeK)
@@ -261,7 +257,6 @@ class DbActiveContractStore(
       assignments,
       Assignment.apply,
       ChangeType.Activation,
-      ActivenessChangeDetail.assign,
     )
 
   override def unassignContracts(
@@ -272,7 +267,6 @@ class DbActiveContractStore(
     unassignments,
     Unassignment.apply,
     ChangeType.Deactivation,
-    ActivenessChangeDetail.unassignment,
   )
 
   override def fetchStates(
@@ -393,6 +387,34 @@ class DbActiveContractStore(
       }
   }
 
+  override def activenessOf(contracts: Seq[LfContractId])(implicit
+      traceContext: TraceContext
+  ): Future[SortedMap[LfContractId, Seq[(CantonTimestamp, ActivenessChangeDetail)]]] = {
+    logger.debug(s"Obtaining activeness changes of contracts $contracts")
+
+    NonEmpty.from(contracts) match {
+      case None =>
+        Future.successful(
+          SortedMap.empty[LfContractId, Seq[(CantonTimestamp, ActivenessChangeDetail)]]
+        )
+      case Some(neContracts) =>
+        storage
+          .query(
+            activenessQuery(neContracts),
+            functionFullName,
+          )
+          .map { res =>
+            SortedMap.from(
+              res
+                .groupBy { case (cid, ts, operation) => cid }
+                .map { case (cid, seq) =>
+                  cid -> seq.map { case (cid2, ts, operation) => (ts, operation) }.toSeq
+                }
+            )
+          }
+    }
+  }
+
   override def contractSnapshot(contractIds: Set[LfContractId], timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Map[LfContractId, CantonTimestamp]] =
@@ -487,6 +509,23 @@ class DbActiveContractStore(
           where AC1.domain_idx = $indexedDomain and AC3.change = CAST(${ChangeType.Activation} as change_type)""" ++
           idsO.fold(sql"")(ids => sql" and AC1.contract_id in " ++ ids) ++ ordering)
           .as[(LfContractId, T, ReassignmentCounter)]
+    }
+  }
+
+  private[this] def activenessQuery(
+      contractIds: NonEmpty[Seq[LfContractId]]
+  ): DbAction.ReadOnly[Seq[(LfContractId, CantonTimestamp, ActivenessChangeDetail)]] = {
+    import DbStorage.Implicits.BuilderChain.*
+
+    storage.profile match {
+      case _: DbStorage.Profile.H2 | _: DbStorage.Profile.Postgres =>
+        (sql"""
+          select contract_id, ts, operation, reassignment_counter, remote_domain_idx
+          from par_active_contracts
+          where domain_idx = $indexedDomain and """ ++ DbStorage
+          .toInClause("contract_id", contractIds))
+          .as[(LfContractId, CantonTimestamp, ActivenessChangeDetail)]
+      case _ => throw new UnsupportedOperationException("Oracle not supported")
     }
   }
 
@@ -880,7 +919,6 @@ class DbActiveContractStore(
   private def bulkInsert(
       contractChanges: Map[(LfContractId, TimeOfChange), ActivenessChangeDetail],
       change: ChangeType,
-      operationName: LengthLimitedString,
   )(implicit traceContext: TraceContext): CheckedT[Future, AcsError, AcsWarning, Unit] = {
     val insertQuery = storage.profile match {
       case _: DbStorage.Profile.H2 | _: DbStorage.Profile.Postgres =>

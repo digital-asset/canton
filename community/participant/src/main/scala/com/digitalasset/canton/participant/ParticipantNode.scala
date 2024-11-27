@@ -448,7 +448,6 @@ class ParticipantNodeBootstrap(
         inFlightSubmissionTracker = new InFlightSubmissionTracker(
           persistentState.map(_.inFlightSubmissionStore),
           commandDeduplicator,
-          timeouts,
           loggerFactory,
         )
 
@@ -516,7 +515,6 @@ class ParticipantNodeBootstrap(
         }
 
         ephemeralState = ParticipantNodeEphemeralState(
-          participantId,
           ledgerApiIndexerContainer.asEval,
           inFlightSubmissionTracker,
           clock,
@@ -640,7 +638,6 @@ class ParticipantNodeBootstrap(
           storage,
           adminToken,
           parameterConfig.stores,
-          parameterConfig.batchingConfig,
           arguments.parameterConfig.processingTimeouts,
           arguments.loggerFactory,
         )
@@ -764,7 +761,6 @@ class ParticipantNodeBootstrap(
                 ips,
                 indexedStringStore,
                 domainAliasManager,
-                futureSupervisor,
                 loggerFactory,
               ),
               executionContext,
@@ -823,14 +819,12 @@ class ParticipantNodeBootstrap(
         addCloseable(domainAliasManager)
         addCloseable(syncDomainPersistentStateManager)
         addCloseable(domainRegistry)
-        addCloseable(inFlightSubmissionTracker)
         addCloseable(partyMetadataStore)
         persistentState.map(addCloseable).discard
         addCloseable((() => packageServiceContainer.closeCurrent()): AutoCloseable)
         addCloseable(indexedStringStore)
         addCloseable(partyNotifier)
         addCloseable(ephemeralState.participantEventPublisher)
-        addCloseable(ephemeralState.inFlightSubmissionTracker)
         addCloseable(topologyDispatcher)
         addCloseable(schedulers)
         addCloseable(ledgerApiServer)
@@ -1011,7 +1005,7 @@ object ParticipantNodeBootstrap {
         engine = engine,
         clock = arguments.clock,
         testingTimeService = testingTimeService,
-        allocateIndexerLockIds = _dbConfig => Option.empty[IndexerLockIds].asRight,
+        allocateIndexerLockIds = _ => Option.empty[IndexerLockIds].asRight,
         meteringReportKey = CommunityKey,
         futureSupervisor = arguments.futureSupervisor,
         loggerFactory = arguments.loggerFactory,

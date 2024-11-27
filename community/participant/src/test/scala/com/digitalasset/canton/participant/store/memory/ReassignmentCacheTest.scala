@@ -7,9 +7,8 @@ import cats.data.{Chain, EitherT}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.protocol.reassignment.{
   IncompleteReassignmentData,
   ReassignmentData,
@@ -18,8 +17,8 @@ import com.digitalasset.canton.participant.store.ReassignmentStore.*
 import com.digitalasset.canton.participant.store.memory.ReassignmentCacheTest.HookReassignmentStore
 import com.digitalasset.canton.participant.store.{ReassignmentStore, ReassignmentStoreTest}
 import com.digitalasset.canton.participant.util.TimeOfChange
-import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.protocol.messages.DeliveredUnassignmentResult
+import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
@@ -334,7 +333,7 @@ object ReassignmentCacheTest extends BaseTest {
 
     override def findIncomplete(
         sourceDomain: Option[Source[DomainId]],
-        validAt: GlobalOffset,
+        validAt: Offset,
         stakeholders: Option[NonEmpty[Set[LfPartyId]]],
         limit: NonNegativeInt,
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[Seq[IncompleteReassignmentData]] =
@@ -342,13 +341,28 @@ object ReassignmentCacheTest extends BaseTest {
 
     override def findEarliestIncomplete()(implicit
         traceContext: TraceContext
-    ): FutureUnlessShutdown[Option[(GlobalOffset, ReassignmentId, Target[DomainId])]] =
+    ): FutureUnlessShutdown[Option[(Offset, ReassignmentId, Target[DomainId])]] =
       baseStore.findEarliestIncomplete()
 
     override def lookup(reassignmentId: ReassignmentId)(implicit
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, ReassignmentLookupError, ReassignmentData] =
       baseStore.lookup(reassignmentId)
+
+    override def findContractReassignmentId(
+        contractIds: Seq[LfContractId],
+        sourceDomain: Option[Source[DomainId]],
+        unassignmentTs: Option[CantonTimestamp],
+        completionTs: Option[CantonTimestamp],
+    )(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Map[LfContractId, Seq[ReassignmentId]]] =
+      baseStore.findContractReassignmentId(
+        contractIds,
+        sourceDomain,
+        unassignmentTs,
+        completionTs,
+      )
   }
 
   object HookReassignmentStore {

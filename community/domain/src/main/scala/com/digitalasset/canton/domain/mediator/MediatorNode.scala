@@ -42,7 +42,7 @@ import com.digitalasset.canton.domain.service.GrpcSequencerConnectionService
 import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.*
 import com.digitalasset.canton.health.admin.data.{WaitingForExternalInput, WaitingForInitialization}
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext, Lifecycle}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.mediator.admin.v30.MediatorInitializationServiceGrpc
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, CantonMutableHandlerRegistry}
@@ -556,7 +556,6 @@ class MediatorNodeBootstrap(
             TopologyTransactionProcessor.createProcessorAndClientForDomain(
               domainTopologyStore,
               domainId,
-              domainConfig.domainParameters.protocolVersion,
               new DomainCryptoPureApi(staticDomainParameters, crypto.pureCrypto),
               arguments.parameterConfig,
               arguments.clock,
@@ -603,7 +602,6 @@ class MediatorNodeBootstrap(
         parameters.exitOnFatalFailures,
         domainLoggerFactory,
         ProtocolVersionCompatibility.supportedProtocols(parameters),
-        None,
       )
 
       // we wait here until the sequencer becomes active. this allows to reconfigure the
@@ -772,7 +770,7 @@ class MediatorNode(
   }
 
   override def close(): Unit =
-    Lifecycle.close(
+    LifeCycle.close(
       replicaManager,
       storage,
     )(logger)

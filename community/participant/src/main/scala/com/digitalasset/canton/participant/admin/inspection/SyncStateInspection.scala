@@ -18,7 +18,6 @@ import com.digitalasset.canton.ledger.participant.state.{DomainIndex, RequestInd
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcUSExtended
-import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection.{
   InFlightCount,
@@ -27,10 +26,10 @@ import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection.
 import com.digitalasset.canton.participant.protocol.RequestJournal
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervalsProviderFactory
 import com.digitalasset.canton.participant.store.*
+import com.digitalasset.canton.participant.store.ActiveContractStore.ActivenessChangeDetail
 import com.digitalasset.canton.participant.sync.{
   ConnectedDomainsLookup,
   SyncDomainPersistentStateManager,
-  UpstreamOffsetConvert,
 }
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.DomainOffset
 import com.digitalasset.canton.protocol.messages.*
@@ -38,7 +37,7 @@ import com.digitalasset.canton.protocol.messages.CommitmentPeriodState.{
   Matched,
   fromIntValidSentPeriodState,
 }
-import com.digitalasset.canton.protocol.{LfContractId, SerializableContract}
+import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId, SerializableContract}
 import com.digitalasset.canton.pruning.{
   ConfigForDomainThresholds,
   ConfigForSlowCounterParticipants,
@@ -58,6 +57,7 @@ import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.OptionUtils.OptionExtension
+import com.digitalasset.canton.util.ReassignmentTag.Source
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -66,6 +66,7 @@ import com.google.common.annotations.VisibleForTesting
 
 import java.io.OutputStream
 import java.time.Instant
+import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future}
 
 trait JournalGarbageCollectorControl {
@@ -103,6 +104,23 @@ final class SyncStateInspection(
       futureSupervisor,
       loggerFactory,
     )
+
+  /** Look up all unpruned state changes of a set of contracts on all domains.
+    * If a contract is not found in an available ACS it will be omitted from the response.
+    */
+  def lookupContractDomains(
+      contractIds: Set[LfContractId]
+  )(implicit
+      traceContext: TraceContext
+  ): Future[
+    Map[DomainId, SortedMap[LfContractId, Seq[(CantonTimestamp, ActivenessChangeDetail)]]]
+  ] =
+    syncDomainPersistentStateManager.getAll.toList
+      .map { case (id, state) =>
+        state.activeContractStore.activenessOf(contractIds.toSeq).map(s => id -> s)
+      }
+      .sequence
+      .map(_.toMap)
 
   /** Returns the potentially large ACS of a given domain
     * containing a map of contract IDs to tuples containing the latest activation timestamp and the contract reassignment counter
@@ -144,6 +162,58 @@ final class SyncStateInspection(
       },
       domain,
     )
+
+  def findContractPayloads(
+      domain: DomainId,
+      contractIds: Seq[LfContractId],
+      limit: Int,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[LfContractId, SerializableContract]] = {
+    val domainAlias = syncDomainPersistentStateManager
+      .aliasForDomainId(domain)
+      .getOrElse(throw new IllegalArgumentException(s"no such domain [$domain]"))
+
+    NonEmpty.from(contractIds) match {
+      case None =>
+        FutureUnlessShutdown.pure(Map.empty[LfContractId, SerializableContract])
+      case Some(neCids) =>
+        val domainAcsInspection =
+          getOrFail(
+            syncDomainPersistentStateManager
+              .get(domain),
+            domainAlias,
+          ).acsInspection
+
+        domainAcsInspection.findContractPayloads(
+          neCids,
+          limit,
+        )
+    }
+  }
+
+  def lookupReassignmentIds(
+      targetDomain: DomainId,
+      sourceDomainId: DomainId,
+      contractIds: Seq[LfContractId],
+      minUnassignmentTs: Option[CantonTimestamp] = None,
+      minCompletionTs: Option[CantonTimestamp] = None,
+  )(implicit traceContext: TraceContext): Map[LfContractId, Seq[ReassignmentId]] =
+    timeouts.inspection
+      .awaitUS(functionFullName) {
+        syncDomainPersistentStateManager
+          .get(targetDomain)
+          .traverse(
+            _.reassignmentStore.findContractReassignmentId(
+              contractIds,
+              Some(Source(sourceDomainId)),
+              minUnassignmentTs,
+              minCompletionTs,
+            )
+          )
+      }
+      .asGrpcResponse
+      .getOrElse(throw new IllegalArgumentException(s"no such domain [$targetDomain]"))
 
   @VisibleForTesting
   def acsPruningStatus(
@@ -658,14 +728,14 @@ final class SyncStateInspection(
     participantNodePersistentState.value.ledgerApiStore
       .lastDomainOffsetBeforeOrAtPublicationTime(pruneUpTo)
       .map(
-        _.map(_.offset.toLong)
+        _.map(_.offset.unwrap)
       )
 
   def lookupPublicationTime(
       ledgerOffset: Long
   )(implicit traceContext: TraceContext): EitherT[Future, String, CantonTimestamp] = for {
     offset <- EitherT.fromEither[Future](
-      UpstreamOffsetConvert.toLedgerSyncOffset(ledgerOffset)
+      Offset.fromLong(ledgerOffset)
     )
     domainOffset <- EitherT(
       participantNodePersistentState.value.ledgerApiStore
@@ -836,16 +906,19 @@ final class SyncStateInspection(
   def lastDomainOffset(
       domainId: DomainId
   )(implicit traceContext: TraceContext): Option[DomainOffset] =
-    timeouts.inspection.await(s"$functionFullName")(
-      participantNodePersistentState.value.ledgerApiStore.lastDomainOffsetBeforeOrAt(
-        domainId,
-        Offset.fromAbsoluteOffsetO(
-          participantNodePersistentState.value.ledgerApiStore.ledgerEndCache().map(_.lastOffset)
-        ),
+    participantNodePersistentState.value.ledgerApiStore
+      .ledgerEndCache()
+      .map(_.lastOffset)
+      .flatMap(ledgerEnd =>
+        timeouts.inspection.await(s"$functionFullName")(
+          participantNodePersistentState.value.ledgerApiStore.lastDomainOffsetBeforeOrAt(
+            domainId,
+            ledgerEnd,
+          )
+        )
       )
-    )
 
-  def prunedUptoOffset(implicit traceContext: TraceContext): Option[GlobalOffset] =
+  def prunedUptoOffset(implicit traceContext: TraceContext): Option[Offset] =
     timeouts.inspection.await(functionFullName)(
       participantNodePersistentState.value.pruningStore.pruningStatus().map(_.completedO)
     )

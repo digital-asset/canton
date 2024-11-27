@@ -35,7 +35,7 @@ import com.digitalasset.canton.lifecycle.{
   CloseContext,
   FlagCloseable,
   FutureUnlessShutdown,
-  Lifecycle,
+  LifeCycle,
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.{DynamicDomainParameters, StaticDomainParameters}
@@ -56,6 +56,7 @@ import com.digitalasset.canton.version.{HasVersionedToByteString, ProtocolVersio
 import com.google.protobuf.ByteString
 import org.slf4j.event.Level
 
+import scala.annotation.unused
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -225,7 +226,7 @@ object SyncCryptoClient {
       client: SyncCryptoClient[SyncCryptoApi],
       desiredTimestamp: CantonTimestamp,
       previousTimestampO: Option[CantonTimestamp],
-      warnIfApproximate: Boolean = true,
+      warnIfApproximate: Boolean,
   )(
       getSnapshot: (CantonTimestamp, TraceContext) => F[SyncCryptoApi],
       awaitSnapshotSupervised: (String, CantonTimestamp, TraceContext) => F[SyncCryptoApi],
@@ -328,7 +329,7 @@ class DomainSyncCryptoClient(
     val domainId: DomainId,
     val ips: DomainTopologyClient,
     val crypto: Crypto,
-    sessionSigningKeysConfig: SessionSigningKeysConfig,
+    @unused sessionSigningKeysConfig: SessionSigningKeysConfig,
     cacheConfigs: CachingConfigs,
     val staticDomainParameters: StaticDomainParameters,
     override val timeouts: ProcessingTimeout,
@@ -458,7 +459,7 @@ class DomainSyncCryptoClient(
 
   override def approximateTimestamp: CantonTimestamp = ips.approximateTimestamp
 
-  override def onClosed(): Unit = Lifecycle.close(ips)(logger)
+  override def onClosed(): Unit = LifeCycle.close(ips)(logger)
 
   override def awaitMaxTimestampUS(sequencedTime: CantonTimestamp)(implicit
       traceContext: TraceContext

@@ -5,13 +5,12 @@ package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{ProcessingTimeout, SessionEncryptionKeyCacheConfig}
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.{
   AtomicHealthComponent,
   CloseableHealthComponent,
   ComponentHealthState,
 }
-import com.digitalasset.canton.lifecycle.Lifecycle
+import com.digitalasset.canton.lifecycle.LifeCycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
@@ -24,10 +23,8 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{
   RequestTrackerLookup,
 }
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.PendingReassignmentSubmission
-import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.InFlightSubmissionTrackerDomainState
-import com.digitalasset.canton.participant.protocol.submission.{WatermarkLookup, WatermarkTracker}
+import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionDomainTracker
 import com.digitalasset.canton.participant.store.memory.ReassignmentCache
-import com.digitalasset.canton.participant.sync.TimelyRejectNotifier
 import com.digitalasset.canton.protocol.RootHash
 import com.digitalasset.canton.store.SessionKeyStore
 import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
@@ -43,11 +40,12 @@ import scala.concurrent.ExecutionContext
   */
 class SyncDomainEphemeralState(
     participantId: ParticipantId,
-    participantNodeEphemeralState: ParticipantNodeEphemeralState,
+    val recordOrderPublisher: RecordOrderPublisher,
+    val timeTracker: DomainTimeTracker,
+    val inFlightSubmissionDomainTracker: InFlightSubmissionDomainTracker,
     persistentState: SyncDomainPersistentState,
     val ledgerApiIndexer: LedgerApiIndexer,
     val startingPoints: ProcessingStartingPoints,
-    createTimeTracker: () => DomainTimeTracker,
     metrics: SyncDomainMetrics,
     exitOnFatalFailures: Boolean,
     sessionKeyCacheConfig: SessionEncryptionKeyCacheConfig,
@@ -80,7 +78,6 @@ class SyncDomainEphemeralState(
       metrics,
       loggerFactory,
       startingPoints.processing.nextRequestCounter,
-      futureSupervisor,
     )
   val requestCounterAllocator = new RequestCounterAllocatorImpl(
     startingPoints.cleanReplay.nextRequestCounter,
@@ -122,30 +119,6 @@ class SyncDomainEphemeralState(
     )
   }
 
-  val timelyRejectNotifier: TimelyRejectNotifier = TimelyRejectNotifier(
-    participantNodeEphemeralState,
-    persistentState.indexedDomain.domainId,
-    startingPoints.processing.prenextTimestamp,
-    loggerFactory,
-  )
-
-  val recordOrderPublisher: RecordOrderPublisher =
-    new RecordOrderPublisher(
-      persistentState.indexedDomain.domainId,
-      startingPoints.processing.nextSequencerCounter,
-      startingPoints.processing.prenextTimestamp,
-      ledgerApiIndexer,
-      participantNodeEphemeralState.inFlightSubmissionTracker,
-      metrics.recordOrderPublisher,
-      exitOnFatalFailures = exitOnFatalFailures,
-      timeouts,
-      loggerFactory,
-      futureSupervisor,
-      persistentState.activeContractStore,
-      clock,
-      timelyRejectNotifier.notifyAsync,
-    )
-
   val phase37Synchronizer =
     new Phase37Synchronizer(
       loggerFactory,
@@ -153,18 +126,8 @@ class SyncDomainEphemeralState(
       timeouts,
     )
 
-  val observedTimestampTracker = new WatermarkTracker[CantonTimestamp](
-    startingPoints.processing.prenextTimestamp,
-    loggerFactory,
-    futureSupervisor,
-  )
-
-  // the time tracker, note, must be shutdown in sync domain as it is using the sequencer client to
-  // request time proofs.
-  val timeTracker: DomainTimeTracker = createTimeTracker()
-
   val submissionTracker: SubmissionTracker =
-    SubmissionTracker(persistentState.staticDomainParameters.protocolVersion)(
+    SubmissionTracker(
       participantId,
       persistentState.submissionTrackerStore,
       futureSupervisor,
@@ -175,11 +138,8 @@ class SyncDomainEphemeralState(
   def markAsRecovered()(implicit tc: TraceContext): Unit =
     resolveUnhealthy()
 
-  lazy val inFlightSubmissionTrackerDomainState: InFlightSubmissionTrackerDomainState =
-    InFlightSubmissionTrackerDomainState.fromSyncDomainState(this)
-
   override def onClosed(): Unit =
-    Lifecycle.close(
+    LifeCycle.close(
       requestTracker,
       recordOrderPublisher,
       submissionTracker,
@@ -203,5 +163,4 @@ trait SyncDomainEphemeralStateLookup {
   def reassignmentLookup: ReassignmentLookup = reassignmentCache
 
   def tracker: RequestTrackerLookup = requestTracker
-  def observedTimestampLookup: WatermarkLookup[CantonTimestamp] = observedTimestampTracker
 }

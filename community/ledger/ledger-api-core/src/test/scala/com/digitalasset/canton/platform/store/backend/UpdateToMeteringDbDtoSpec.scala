@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.store.backend
 
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, MetricValues}
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
-import com.digitalasset.canton.data.{AbsoluteOffset, CantonTimestamp, Offset}
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.metrics.{IndexerHistograms, IndexerMetrics}
 import com.digitalasset.canton.topology.DomainId
@@ -41,7 +41,7 @@ class UpdateToMeteringDbDtoSpec extends AnyWordSpec with MetricValues {
 
     val timestamp: Long = 12345
 
-    val offset = AbsoluteOffset.tryFromLong(2L)
+    val offset = Offset.tryFromLong(2L)
     val statistics = TransactionNodeStatistics(
       EmptyActions.copy(creates = 2),
       EmptyActions.copy(consumingExercisesByCid = 1),
@@ -145,13 +145,11 @@ class UpdateToMeteringDbDtoSpec extends AnyWordSpec with MetricValues {
         )(
           List(
             (
-              AbsoluteOffset.tryFromLong(1L),
+              Offset.tryFromLong(1L),
               someTransactionAccepted,
             ),
             (
-              Offset
-                .fromHexString(Ref.HexString.assertFromString(metering.ledger_offset))
-                .toAbsoluteOffset,
+              Offset.fromHexString(Ref.HexString.assertFromString(metering.ledger_offset)),
               someTransactionAccepted,
             ),
           )

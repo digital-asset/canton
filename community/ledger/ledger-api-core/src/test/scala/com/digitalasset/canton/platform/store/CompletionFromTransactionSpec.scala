@@ -71,7 +71,7 @@ class CompletionFromTransactionSpec
           val completionStream = CompletionFromTransaction.acceptedCompletion(
             Set("party1", "party2"),
             Time.Timestamp.Epoch,
-            Offset.beforeBegin,
+            Offset.firstOffset,
             "commandId",
             "transactionId",
             "applicationId",
@@ -85,7 +85,7 @@ class CompletionFromTransactionSpec
 
           val completion = completionStream.completionResponse.completion.value
           completion.domainTime.value.recordTime shouldBe Some(Timestamp(Instant.EPOCH))
-          completion.offset shouldBe 0L
+          completion.offset shouldBe 1L
 
           completion.commandId shouldBe "commandId"
           completion.updateId shouldBe "transactionId"
@@ -108,7 +108,7 @@ class CompletionFromTransactionSpec
           CompletionFromTransaction.acceptedCompletion(
             Set.empty,
             Time.Timestamp.Epoch,
-            Offset.beforeBegin,
+            Offset.firstOffset,
             "commandId",
             "transactionId",
             "applicationId",
@@ -128,7 +128,7 @@ class CompletionFromTransactionSpec
       val completionStream = CompletionFromTransaction.rejectedCompletion(
         Set("party"),
         Time.Timestamp.Epoch,
-        Offset.fromLong(2L),
+        Offset.tryFromLong(2L),
         "commandId",
         status,
         "applicationId",

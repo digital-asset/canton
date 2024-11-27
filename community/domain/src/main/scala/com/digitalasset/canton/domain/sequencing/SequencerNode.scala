@@ -36,6 +36,7 @@ import com.digitalasset.canton.domain.sequencing.service.{
   GrpcSequencerInitializationService,
   GrpcSequencerStatusService,
 }
+import com.digitalasset.canton.domain.sequencing.topology.SequencerSnapshotBasedTopologyHeadInitializer
 import com.digitalasset.canton.domain.server.DynamicGrpcServer
 import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.*
@@ -43,7 +44,7 @@ import com.digitalasset.canton.health.admin.data.{WaitingForExternalInput, Waiti
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   HasCloseContext,
-  Lifecycle,
+  LifeCycle,
   PromiseUnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -354,7 +355,7 @@ class SequencerNodeBootstrap(
             .collect { case SequencerDomainState(domain, _, _, _) => domain }
             .toSet
           for {
-            // TODO(#12390) validate initalisation request, as from here on, it must succeed
+            // TODO(#12390) validate initialisation request, as from here on, it must succeed
             //    - authorization validation etc is done during manager.add
             //    - so we need:
             //        - there must be a dynamic domain parameter
@@ -487,12 +488,12 @@ class SequencerNodeBootstrap(
               TopologyTransactionProcessor.createProcessorAndClientForDomain(
                 domainTopologyStore,
                 domainId,
-                staticDomainParameters.protocolVersion,
                 new DomainCryptoPureApi(staticDomainParameters, crypto.pureCrypto),
                 parameters,
                 clock,
                 futureSupervisor,
                 domainLoggerFactory,
+                new SequencerSnapshotBasedTopologyHeadInitializer(sequencerSnapshot),
               )
             )
             .mapK(FutureUnlessShutdown.outcomeK)
@@ -601,7 +602,6 @@ class SequencerNodeBootstrap(
             staticDomainParameters,
             config.publicApi.overrideMaxRequestSize,
             topologyClient,
-            futureSupervisor,
             loggerFactory,
           )
           indexedDomain <- EitherT.right[String](
@@ -651,7 +651,6 @@ class SequencerNodeBootstrap(
               loggerFactory,
               timeouts,
               None,
-              sequencerId,
             ),
             arguments.metrics.sequencerClient,
             None,
@@ -696,7 +695,6 @@ class SequencerNodeBootstrap(
               config.publicApi.maxTokenExpirationInterval,
             ),
             Seq(sequencerId) ++ membersToRegister,
-            futureSupervisor,
             memberAuthServiceFactory,
             new StoreBasedTopologyStateForInitializationService(
               domainTopologyStore,
@@ -865,7 +863,7 @@ class SequencerNode(
   }
 
   override def close(): Unit =
-    Lifecycle.close(
+    LifeCycle.close(
       sequencer,
       sequencerNodeServer.publicServer,
     )(logger)

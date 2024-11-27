@@ -29,7 +29,7 @@ class NoCommandDeduplicator extends CommandDeduplicator {
       case offset: DeduplicationPeriod.DeduplicationOffset =>
         EitherT(FutureUnlessShutdown.pure(Either.right(offset)))
       case _: DeduplicationPeriod.DeduplicationDuration =>
-        val offset = Offset.firstOffset
+        val offset = Some(Offset.firstOffset)
         EitherT(
           FutureUnlessShutdown.pure(Either.right(DeduplicationPeriod.DeduplicationOffset(offset)))
         )

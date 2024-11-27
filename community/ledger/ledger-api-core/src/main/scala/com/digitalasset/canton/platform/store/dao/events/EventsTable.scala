@@ -116,7 +116,7 @@ object EventsTable {
                     )
                   )
               },
-            offset = first.offset.toLong,
+            offset = first.offset.unwrap,
             traceContext = first.traceContext.map(DamlTraceContext.parseFrom),
             recordTime = Some(TimestampConversion.fromLf(first.recordTime)),
           )

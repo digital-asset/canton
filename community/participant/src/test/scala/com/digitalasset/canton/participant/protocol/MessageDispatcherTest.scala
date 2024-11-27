@@ -30,7 +30,7 @@ import com.digitalasset.canton.participant.metrics.{ParticipantTestMetrics, Sync
 import com.digitalasset.canton.participant.protocol.MessageDispatcher.{AcsCommitment as _, *}
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
 import com.digitalasset.canton.participant.protocol.submission.{
-  InFlightSubmissionTracker,
+  InFlightSubmissionDomainTracker,
   SequencedSubmission,
 }
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
@@ -87,8 +87,6 @@ trait MessageDispatcherTest {
   private val otherParticipant = ParticipantId.tryFromProtoPrimitive("PAR::other::participant")
   private val mediatorGroup = MediatorGroupRecipient(MediatorGroupIndex.zero)
   private val mediatorGroup2 = MediatorGroupRecipient(MediatorGroupIndex.one)
-  private val partyId = PartyId.tryFromProtoPrimitive("party::default")
-  private val otherPartyId = PartyId.tryFromProtoPrimitive("party::other")
 
   private val sessionKeyMapTest = NonEmpty(
     Seq,
@@ -112,7 +110,7 @@ trait MessageDispatcherTest {
       recordOrderPublisher: RecordOrderPublisher,
       badRootHashMessagesRequestProcessor: BadRootHashMessagesRequestProcessor,
       repairProcessor: RepairProcessor,
-      inFlightSubmissionTracker: InFlightSubmissionTracker,
+      inFlightSubmissionDomainTracker: InFlightSubmissionDomainTracker,
   )
 
   object Fixture {
@@ -130,7 +128,7 @@ trait MessageDispatcherTest {
             RecordOrderPublisher,
             BadRootHashMessagesRequestProcessor,
             RepairProcessor,
-            InFlightSubmissionTracker,
+            InFlightSubmissionDomainTracker,
             NamedLoggerFactory,
             SyncDomainMetrics,
         ) => MessageDispatcher,
@@ -218,15 +216,14 @@ trait MessageDispatcherTest {
 
       val repairProcessor = mock[RepairProcessor]
 
-      val inFlightSubmissionTracker = mock[InFlightSubmissionTracker]
+      val inFlightSubmissionDomainTracker = mock[InFlightSubmissionDomainTracker]
       when(
-        inFlightSubmissionTracker.observeSequencing(
-          any[DomainId],
-          any[Map[MessageId, SequencedSubmission]],
+        inFlightSubmissionDomainTracker.observeSequencing(
+          any[Map[MessageId, SequencedSubmission]]
         )(anyTraceContext)
       )
         .thenReturn(FutureUnlessShutdown.unit)
-      when(inFlightSubmissionTracker.observeDeliverError(any[DeliverError])(anyTraceContext))
+      when(inFlightSubmissionDomainTracker.observeDeliverError(any[DeliverError])(anyTraceContext))
         .thenReturn(FutureUnlessShutdown.unit)
 
       val protocolProcessors = new RequestProcessors {
@@ -254,7 +251,7 @@ trait MessageDispatcherTest {
         recordOrderPublisher,
         badRootHashMessagesRequestProcessor,
         repairProcessor,
-        inFlightSubmissionTracker,
+        inFlightSubmissionDomainTracker,
         loggerFactory,
         syncDomainMetrics,
       )
@@ -271,7 +268,7 @@ trait MessageDispatcherTest {
         recordOrderPublisher,
         badRootHashMessagesRequestProcessor,
         repairProcessor,
-        inFlightSubmissionTracker,
+        inFlightSubmissionDomainTracker,
       )
     }
   }
@@ -374,7 +371,7 @@ trait MessageDispatcherTest {
           RecordOrderPublisher,
           BadRootHashMessagesRequestProcessor,
           RepairProcessor,
-          InFlightSubmissionTracker,
+          InFlightSubmissionDomainTracker,
           NamedLoggerFactory,
           SyncDomainMetrics,
       ) => MessageDispatcher
@@ -477,14 +474,16 @@ trait MessageDispatcherTest {
         sut: Fixture,
         expected: Map[MessageId, SequencedSubmission],
     ): Assertion = {
-      verify(sut.inFlightSubmissionTracker).observeSequencing(isEq(domainId), isEq(expected))(
+      verify(sut.inFlightSubmissionDomainTracker).observeSequencing(isEq(expected))(
         anyTraceContext
       )
       succeed
     }
 
     def checkObserveDeliverError(sut: Fixture, expected: DeliverError): Assertion = {
-      verify(sut.inFlightSubmissionTracker).observeDeliverError(isEq(expected))(anyTraceContext)
+      verify(sut.inFlightSubmissionDomainTracker).observeDeliverError(isEq(expected))(
+        anyTraceContext
+      )
       succeed
     }
 

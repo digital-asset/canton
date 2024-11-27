@@ -139,7 +139,7 @@ class TransactionTreeFactoryImpl(
           salt = submitterMetadataSalt,
           maxSequencingTime,
           externalAuthorization = submitterInfo.externallySignedSubmission.map(s =>
-            ExternalAuthorization.create(s.signatures, protocolVersion)
+            ExternalAuthorization.create(s.signatures, s.version, protocolVersion)
           ),
           protocolVersion = protocolVersion,
         )
@@ -510,7 +510,6 @@ class TransactionTreeFactoryImpl(
       LedgerCreateTime(state.ledgerTime),
       contractMetadata,
       serializedCantonContractInst,
-      cantonContractIdVersion,
     )
 
     val contractId = cantonContractIdVersion.fromDiscriminator(discriminator, unicum)

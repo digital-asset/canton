@@ -26,7 +26,12 @@ private[backend] trait StorageBackendTestsInitializeIngestion
 
   private def dtoMetering(app: String, offset: Offset) =
     dtoTransactionMetering(
-      TransactionMetering(Ref.ApplicationId.assertFromString(app), 1, someTime, offset)
+      TransactionMetering(
+        applicationId = Ref.ApplicationId.assertFromString(app),
+        actionCount = 1,
+        meteringTimestamp = someTime,
+        ledgerOffset = offset,
+      )
     )
 
   private val signatory = Ref.Party.assertFromString("signatory")

@@ -11,7 +11,11 @@ import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.{
   RawArchivedContract,
   RawCreatedContract,
 }
-import com.digitalasset.canton.platform.store.backend.Conversions.{contractId, timestampFromMicros}
+import com.digitalasset.canton.platform.store.backend.Conversions.{
+  OffsetToStatement,
+  contractId,
+  timestampFromMicros,
+}
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.{
@@ -38,7 +42,6 @@ class ContractStorageBackendTemplate(
       }.singleOpt
 
     import com.digitalasset.canton.platform.store.backend.Conversions.HashToStatement
-    import com.digitalasset.canton.platform.store.backend.Conversions.OffsetToStatement
     SQL"""
          WITH last_contract_key_create AS (
                 SELECT lapi_events_create.*
@@ -76,7 +79,6 @@ class ContractStorageBackendTemplate(
   ): Map[ContractId, RawArchivedContract] =
     if (contractIds.isEmpty) Map.empty
     else {
-      import com.digitalasset.canton.platform.store.backend.Conversions.OffsetToStatement
       SQL"""
        SELECT contract_id, flat_event_witnesses
        FROM lapi_events_consuming_exercise
@@ -128,7 +130,6 @@ class ContractStorageBackendTemplate(
   ): Map[ContractId, RawCreatedContract] =
     if (contractIds.isEmpty) Map.empty
     else {
-      import com.digitalasset.canton.platform.store.backend.Conversions.OffsetToStatement
       SQL"""
          SELECT
            contract_id,
@@ -158,8 +159,10 @@ class ContractStorageBackendTemplate(
     if (contractIds.isEmpty) Map.empty
     else {
       import com.digitalasset.canton.platform.store.backend.Conversions.OffsetToStatement
-      val ledgerEndOffset = Offset.fromAbsoluteOffsetO(ledgerEndCache().map(_.lastOffset))
-      SQL"""
+      val ledgerEndOffsetO = ledgerEndCache().map(_.lastOffset)
+      ledgerEndOffsetO match {
+        case Some(ledgerEndOffset) =>
+          SQL"""
          WITH min_event_sequential_ids_of_assign AS (
              SELECT MIN(event_sequential_id) min_event_sequential_id
              FROM lapi_events_assign
@@ -185,7 +188,9 @@ class ContractStorageBackendTemplate(
          FROM lapi_events_assign, min_event_sequential_ids_of_assign
          WHERE
            event_sequential_id = min_event_sequential_ids_of_assign.min_event_sequential_id"""
-        .as(rawCreatedContractRowParser.*)(connection)
-        .toMap
+            .as(rawCreatedContractRowParser.*)(connection)
+            .toMap
+        case None => Map.empty
+      }
     }
 }

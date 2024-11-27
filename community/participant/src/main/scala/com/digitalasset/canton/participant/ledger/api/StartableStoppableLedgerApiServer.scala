@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.ledger.api
 
 import cats.Eval
+import com.daml.executors.InstrumentedExecutors
 import com.daml.executors.executors.{NamedExecutor, QueueAwareExecutor}
 import com.daml.ledger.api.v2.experimental_features.ExperimentalCommandInspectionService
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
@@ -21,7 +22,7 @@ import com.digitalasset.canton.concurrent.{
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.connection.GrpcApiInfoService
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
-import com.digitalasset.canton.data.AbsoluteOffset
+import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.http.HttpApiServer
 import com.digitalasset.canton.ledger.api.auth.CachedJwtVerifierLoader
@@ -55,7 +56,10 @@ import com.digitalasset.canton.platform.apiserver.ratelimiting.{
 }
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiUserManagementService
 import com.digitalasset.canton.platform.apiserver.{ApiServiceOwner, LedgerFeatures}
-import com.digitalasset.canton.platform.config.IdentityProviderManagementConfig
+import com.digitalasset.canton.platform.config.{
+  IdentityProviderManagementConfig,
+  IndexServiceConfig,
+}
 import com.digitalasset.canton.platform.index.IndexServiceOwner
 import com.digitalasset.canton.platform.store.DbSupport
 import com.digitalasset.canton.platform.store.dao.events.{ContractLoader, LfValueTranslation}
@@ -220,13 +224,20 @@ class StartableStoppableLedgerApiServer(
           loggerFactory = loggerFactory,
         )
       }
+      readApiServiceExecutionContext <- ResourceOwner
+        .forExecutorService(() =>
+          InstrumentedExecutors.newWorkStealingExecutor(
+            config.metrics.lapi.threadpool.apiReadServices.toString,
+            indexServiceConfig.apiReadServicesThreadPoolSize.getOrElse(
+              IndexServiceConfig.DefaultApiServicesThreadPoolSize(noTracingLogger)
+            ),
+          )
+        )
       indexService <- new IndexServiceOwner(
         dbSupport = dbSupport,
         config = indexServiceConfig,
         participantId = config.participantId,
         metrics = config.metrics,
-        servicesExecutionContext = executionContext,
-        engine = config.engine,
         inMemoryState = inMemoryState,
         tracer = config.tracerProvider.tracer,
         loggerFactory = loggerFactory,
@@ -241,11 +252,12 @@ class StartableStoppableLedgerApiServer(
             timedSyncService.getLfArchive(packageId)(loggingContext.traceContext),
           loggerFactory = loggerFactory,
         ),
+        readApiServiceExecutionContext = readApiServiceExecutionContext,
       )
       _ = timedSyncService.registerInternalStateService(new InternalStateService {
         override def activeContracts(
             partyIds: Set[LfPartyId],
-            validAt: Option[AbsoluteOffset],
+            validAt: Option[Offset],
         )(implicit traceContext: TraceContext): Source[GetActiveContractsResponse, NotUsed] =
           indexService.getActiveContracts(
             filter = TransactionFilter(
@@ -317,7 +329,8 @@ class StartableStoppableLedgerApiServer(
         otherServices = Seq(apiInfoService),
         otherInterceptors = getInterceptors(dbSupport.dbDispatcher.executor),
         engine = config.engine,
-        servicesExecutionContext = executionContext,
+        readApiServicesExecutionContext = readApiServiceExecutionContext,
+        writeApiServicesExecutionContext = executionContext,
         checkOverloaded = config.syncService.checkOverloaded,
         ledgerFeatures = getLedgerFeatures,
         maxDeduplicationDuration = config.maxDeduplicationDuration,
@@ -401,7 +414,7 @@ class StartableStoppableLedgerApiServer(
   }
 
   private def getInterceptors(
-      indexerExecutor: QueueAwareExecutor & NamedExecutor
+      indexDbExecutor: QueueAwareExecutor & NamedExecutor
   ): List[ServerInterceptor] = List(
     new ApiRequestLogger(
       config.loggerFactory,
@@ -427,7 +440,7 @@ class StartableStoppableLedgerApiServer(
           ThreadpoolCheck(
             name = "Index DB Threadpool",
             limit = rateLimit.maxApiServicesIndexDbQueueSize,
-            queue = indexerExecutor,
+            queue = indexDbExecutor,
             loggerFactory = loggerFactory,
           ),
         ),

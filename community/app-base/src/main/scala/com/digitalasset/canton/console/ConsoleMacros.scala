@@ -62,7 +62,6 @@ import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.{
 }
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.BinaryFileUtil
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{DomainAlias, SequencerAlias}
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.protobuf.ByteString
@@ -73,6 +72,7 @@ import io.circe.syntax.*
 
 import java.io.File as JFile
 import java.time.Instant
+import scala.annotation.unused
 import scala.collection.mutable
 import scala.concurrent.duration.*
 
@@ -88,7 +88,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
     @Help.Description(
       "Return the list field names of the given object. Helpful function when inspecting the return result."
     )
-    def object_args[T: TypeTag](obj: T): List[String] = type_args[T]
+    def object_args[T: TypeTag](@unused obj: T): List[String] = type_args[T]
 
     @Help.Summary("Reflective inspection of type arguments, handy to inspect case class types")
     @Help.Description(
@@ -339,7 +339,6 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
     def recompute_contract_ids(
         participant: LocalParticipantReference,
         acs: Seq[SerializableContract],
-        protocolVersion: ProtocolVersion,
     ): (Seq[SerializableContract], Map[LfContractId, LfContractId]) = {
       val contractIdMappings = mutable.Map.empty[LfContractId, LfContractId]
       // We assume ACS events are in order
@@ -411,7 +410,6 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           LedgerCreateTime(createdAt),
           metadata,
           rawContract,
-          cantonContractIdVersion,
         )
         .valueOr(err => throw new RuntimeException(err))
       cantonContractIdVersion.fromDiscriminator(discriminator, unicum)
@@ -1031,12 +1029,13 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         binaryOutputFile: Option[String] = None,
         readableOutputFile: Option[String] = None,
     ): Unit = {
+
       // TODO(#9557) 0. If integrityChecks is true, check that, at the given mismatch timestamp, the target
       //  participant's own commitment and received counterCommitment indeed mismatch
       //  We read these commitment from the target participant's store using R5 endpoints
 
       // TODO(#9557) 1. Downloading the shared contract metadata from counter-participant:
-      //  counterParticipant.commitments.open_commitment(...)
+      // val counterParticipantCmtMetadata = counterParticipant.commitments.open_commitment(...)
 
       // TODO(#9557) 2. If integrityChecks is true, check that the contract metadata sent matches the counter commitment
       //  by uploading the contract metadata to the target participant.
@@ -1045,17 +1044,32 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
       //  hierarchical commitments. In this case, we can perform the check as the last step, after we retrieve the
       //  contract payloads from the counter-participant.
 
-      // TODO(#9557) 3. Identify mismatching contracts by checking the counterParticipant's contracts metadata
+      // TODO(#9557) 3. Download the shared contract metadata from target participant
+      // val targetParticipantCmtMetadata = targetParticipant.commitments.open_commitment()
+
+      // TODO(#9557) 4. Identify mismatching contracts by checking the counterParticipant's contracts metadata
       //  against the ACS contracts of the target participant:
-      //  targetParticipant.commitments.active_contracts_mismatches(...)
+      // CommitmentContractMetadata.compare(targetParticipantCmtMetadata, counterParticipantCmtMetadata)
+
       // TODO(#20583) Investigate fetching the ACS snapshot via LAPI without the contract payload. LAPI has longer lived data
       //  and allows for party filtering.
 
-      // TODO(#9557) 4. Request contract payloads from the counterParticipant for shared contracts that cause mismatches
+      // TODO(#9557) 5. Identify mismatch reasons from the target participant for shared contracts that cause mismatches
+      // targetParticipant.commitments.inspect_commitment_contract()
+
+      // TODO(#9557) 6. Request mismatch reasons contract payloads from the counterParticipant for shared contracts that cause mismatches
+      // counterParticipant.commitments.inspect_commitment_contract()
+
+      // TODO(#9557) 7. Compile the data in 4 and 5 into mismatch reasons and write them to the binary output file:
+      // counterParticipant.commitments.inspect_commitment_contract()
+
+      // mismatch reason lives only in console macros
+
+      // TODO(#9557) 8. Request contract payloads from the counterParticipant for shared contracts that cause mismatches
       //   and write them to the binary output file:
       //   counterParticipant.commitments.download_contract_reconciliation_payloads(...)
 
-      // TODO(#9557) 5. Write user-readable data in the readable output file regarding mismatching contracts ids
+      // TODO(#9557) 9. Write user-readable data in the readable output file regarding mismatching contracts ids
     }
   }
 }

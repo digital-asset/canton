@@ -764,7 +764,7 @@ class TopologyAdministrationGroup(
         mustFullyAuthorize: Boolean = true,
         serial: Option[PositiveInt] = None,
         signedBy: Seq[Fingerprint] = Seq.empty,
-        force: Boolean = false,
+        forceChanges: ForceFlags = ForceFlags.none,
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
@@ -783,7 +783,7 @@ class TopologyAdministrationGroup(
               serial = serial,
               change = TopologyChangeOp.Remove,
               mustFullyAuthorize = mustFullyAuthorize,
-              forceChanges = ForceFlags.none,
+              forceChanges = forceChanges,
             )
           )
 
@@ -1082,9 +1082,7 @@ class TopologyAdministrationGroup(
         purpose: KeyPurpose,
         keyOwner: Member,
         signedBy: Seq[Fingerprint],
-        synchronize: Option[config.NonNegativeDuration] = Some(
-          consoleEnvironment.commandTimeouts.bounded
-        ),
+        synchronize: Option[config.NonNegativeDuration],
         add: Boolean,
         mustFullyAuthorize: Boolean = true,
         force: ForceFlags = ForceFlags.none,

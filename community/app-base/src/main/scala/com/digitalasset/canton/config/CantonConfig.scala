@@ -8,7 +8,6 @@ package com.digitalasset.canton.config
 // SOME OF THE IMPLICIT IMPORTS NECESSARY TO COMPILE
 ////////////////////////////////////////////////////////
 
-import cats.Order
 import cats.data.Validated
 import cats.syntax.either.*
 import cats.syntax.functor.*
@@ -19,10 +18,6 @@ import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.auth.AccessLevel
 import com.digitalasset.canton.config.CantonRequireTypes.*
-import com.digitalasset.canton.config.CantonRequireTypes.LengthLimitedString.{
-  InvalidLengthString,
-  defaultMaxLength,
-}
 import com.digitalasset.canton.config.ConfigErrors.{
   CannotParseFilesError,
   CannotReadFilesError,
@@ -557,15 +552,6 @@ object CantonConfig {
   object ConfigReaders {
     import CantonConfigUtil.*
 
-    lazy implicit val lengthLimitedStringReader: ConfigReader[LengthLimitedString] =
-      ConfigReader.fromString[LengthLimitedString] { str =>
-        Either.cond(
-          str.nonEmpty && str.length <= defaultMaxLength.unwrap,
-          new LengthLimitedStringVar(str, defaultMaxLength)(),
-          InvalidLengthString(str),
-        )
-      }
-
     implicit val nonNegativeDurationReader: ConfigReader[NonNegativeDuration] =
       ConfigReader.fromString[NonNegativeDuration] { str =>
         def err(message: String) =
@@ -733,7 +719,7 @@ object CantonConfig {
       deriveReader[SigningSchemeConfig]
     lazy implicit val encryptionSchemeConfigReader: ConfigReader[EncryptionSchemeConfig] =
       deriveReader[EncryptionSchemeConfig]
-    implicit def cryptoSchemeConfig[S: ConfigReader: Order]: ConfigReader[CryptoSchemeConfig[S]] =
+    implicit def cryptoSchemeConfig[S: ConfigReader]: ConfigReader[CryptoSchemeConfig[S]] =
       deriveReader[CryptoSchemeConfig[S]]
     lazy implicit val communityCryptoReader: ConfigReader[CommunityCryptoConfig] =
       deriveReader[CommunityCryptoConfig]
@@ -1582,7 +1568,7 @@ object CantonConfig {
       .leftWiden[CantonConfigError]
   }
 
-  private def configOrExit[ConfClass: ClassTag](
+  private def configOrExit[ConfClass](
       result: Either[CantonConfigError, ConfClass]
   ): ConfClass =
     result.valueOr { _ =>

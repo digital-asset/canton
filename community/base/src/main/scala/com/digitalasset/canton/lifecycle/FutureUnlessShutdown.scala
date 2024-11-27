@@ -206,11 +206,6 @@ object FutureUnlessShutdownImpl {
       FutureUnlessShutdown(unwrap.transformWith(Instance.unsubst[K](f)))
     }
 
-    def andThen[B](pf: PartialFunction[Try[UnlessShutdown[A]], B])(implicit
-        executor: ExecutionContext
-    ): FutureUnlessShutdown[A] =
-      FutureUnlessShutdown(unwrap.andThen(pf))
-
     /** Analog to [[scala.concurrent.Future]].onComplete */
     def onComplete[B](f: Try[UnlessShutdown[A]] => Unit)(implicit ec: ExecutionContext): Unit =
       unwrap.onComplete(f)
@@ -219,7 +214,7 @@ object FutureUnlessShutdownImpl {
     def failed(implicit ec: ExecutionContext): FutureUnlessShutdown[Throwable] =
       FutureUnlessShutdown.outcomeF(self.unwrap.failed)
 
-    /** Evaluates `f` and returns its result if this future completes with [[UnlessShutdown.AbortedDueToShutdown]]. */
+    /** Evaluates `f` and returns its result as a Future if this future completes with [[UnlessShutdown.AbortedDueToShutdown]]. */
     def onShutdown[B >: A](f: => B)(implicit ec: ExecutionContext): Future[B] =
       unwrap.map(_.onShutdown(f))
 

@@ -6,10 +6,9 @@ package com.digitalasset.canton.domain.sequencing.service
 import cats.data.EitherT
 import cats.syntax.option.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
-import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{DomainSyncCryptoClient, Signature}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.api.v30
@@ -77,7 +76,6 @@ class GrpcSequencerServiceTest
   import GrpcSequencerServiceTest.*
 
   private lazy val participant = DefaultTestIdentities.participant1
-  private lazy val crypto = new SymbolicPureCrypto
 
   class Environment(member: Member) extends Matchers {
     val sequencer: Sequencer = mock[Sequencer]
@@ -118,7 +116,6 @@ class GrpcSequencerServiceTest
         BaseTest.defaultStaticDomainParameters,
         None,
         topologyClient,
-        FutureSupervisor.Noop,
         loggerFactory,
       )
     private val params = new SequencerParameters {

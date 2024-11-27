@@ -18,7 +18,6 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.{
-  AbsoluteOffset,
   CantonTimestamp,
   Offset,
   ProcessedDisclosedContract,
@@ -107,7 +106,6 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.FutureConverters.*
-import scala.util.chaining.scalaUtilChainingOps
 import scala.util.{Failure, Right, Success}
 
 /** The Canton-based synchronization service.
@@ -142,7 +140,6 @@ class CantonSyncService(
     resourceManagementService: ResourceManagementService,
     parameters: ParticipantNodeParameters,
     syncDomainFactory: SyncDomain.Factory[SyncDomain],
-    indexedStringStore: IndexedStringStore,
     storage: Storage,
     metrics: ParticipantMetrics,
     sequencerInfoLoader: SequencerInfoLoader,
@@ -296,10 +293,6 @@ class CantonSyncService(
   override def getProtocolVersionForDomain(domainId: Traced[DomainId]): Option[ProtocolVersion] =
     protocolVersionGetter(domainId)
 
-  participantNodeEphemeralState.inFlightSubmissionTracker.registerDomainStateLookup(domainId =>
-    connectedDomainsMap.get(domainId).map(_.ephemeral.inFlightSubmissionTrackerDomainState)
-  )
-
   if (isActive()) {
     TraceContext.withNewTraceContext { implicit traceContext =>
       initializeState()
@@ -413,7 +406,7 @@ class CantonSyncService(
         disclosedContracts,
       )
     }.map(result =>
-      result.map { _asyncResult =>
+      result.map { _ =>
         // It's OK to throw away the asynchronous result because its errors were already logged in `submitTransactionF`.
         // We merely retain it until here so that the span ends only after the asynchronous computation
         SubmissionResult.Acknowledged
@@ -444,7 +437,7 @@ class CantonSyncService(
   )
 
   override def prune(
-      pruneUpToInclusive: AbsoluteOffset,
+      pruneUpToInclusive: Offset,
       submissionId: LedgerSubmissionId,
       _pruneAllDivulgedContracts: Boolean, // Canton always prunes divulged contracts ignoring this flag
   ): CompletionStage[PruningResult] =
@@ -461,17 +454,10 @@ class CantonSyncService(
     }).asJava
 
   def pruneInternally(
-      pruneUpToInclusive: AbsoluteOffset
+      pruneUpToInclusive: Offset
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, CantonError, Unit] =
     (for {
-      pruneUpToMultiDomainGlobalOffset <- EitherT
-        .fromEither[FutureUnlessShutdown](UpstreamOffsetConvert.toGlobalOffset(pruneUpToInclusive))
-        .leftMap { message =>
-          LedgerPruningOffsetNonCantonFormat(
-            s"Specified offset does not convert to a canton multi domain event log global offset: $message"
-          )
-        }
-      _pruned <- pruningProcessor.pruneLedgerEvents(pruneUpToMultiDomainGlobalOffset)
+      _pruned <- pruningProcessor.pruneLedgerEvents(pruneUpToInclusive)
     } yield ()).transform(pruningErrorToCantonError)
 
   private def pruningErrorToCantonError(pruningResult: Either[LedgerPruningError, Unit])(implicit
@@ -482,16 +468,13 @@ class CantonSyncService(
         s"Could not locate pruning point: ${err.message}. Considering success for idempotency"
       )
       Either.unit
-    case Left(err: LedgerPruningOffsetNonCantonFormat) =>
-      logger.info(err.message)
-      Left(PruningServiceError.NonCantonOffset.Error(err.message))
     case Left(err: LedgerPruningOffsetUnsafeToPrune) =>
       logger.info(s"Unsafe to prune: ${err.message}")
       Left(
         PruningServiceError.UnsafeToPrune.Error(
           err.cause,
           err.message,
-          err.lastSafeOffset.fold("")(UpstreamOffsetConvert.fromGlobalOffset(_).toLong.toString),
+          err.lastSafeOffset.fold("")(_.toDecimalString),
         )
       )
     case Left(err: LedgerPruningOffsetUnsafeDomain) =>
@@ -644,7 +627,7 @@ class CantonSyncService(
   override def validateDar(dar: ByteString, darName: String)(implicit
       traceContext: TraceContext
   ): Future[SubmissionResult] =
-    withSpan("CantonSyncService.validateDar") { implicit traceContext => _span =>
+    withSpan("CantonSyncService.validateDar") { implicit traceContext => _ =>
       if (!isActive()) {
         logger.debug(s"Rejecting DAR validation request on passive replica.")
         Future.successful(SyncServiceError.Synchronous.PassiveNode)
@@ -991,7 +974,7 @@ class CantonSyncService(
   private def startDomain(alias: DomainAlias, syncDomain: SyncDomain)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SyncServiceError, Unit] =
-    EitherT(syncDomain.startFUS())
+    EitherT(syncDomain.start())
       .leftMap(error => SyncServiceError.SyncServiceStartupError.InitError(alias, error))
       .onShutdown(
         Left(
@@ -1152,7 +1135,7 @@ class CantonSyncService(
   /** Perform handshake with the given domain. */
   private def performDomainHandshake(
       domainAlias: DomainAlias,
-      skipStatusCheck: Boolean = false,
+      skipStatusCheck: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
@@ -1190,7 +1173,7 @@ class CantonSyncService(
   private def performDomainConnection(
       domainAlias: DomainAlias,
       startSyncDomain: Boolean,
-      skipStatusCheck: Boolean = false,
+      skipStatusCheck: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] = {
@@ -1243,29 +1226,27 @@ class CantonSyncService(
         domainCrypto = syncCrypto.tryForDomain(domainId, domainHandle.staticParameters)
 
         ephemeral <- EitherT.right[SyncServiceError](
-          FutureUnlessShutdown.outcomeF(
-            syncDomainStateFactory
-              .createFromPersistent(
-                persistent,
-                ledgerApiIndexer.asEval,
-                participantNodeEphemeralState,
-                () => {
-                  val tracker = DomainTimeTracker(
-                    domainConnectionConfig.config.timeTracker,
-                    clock,
-                    domainHandle.sequencerClient,
-                    domainHandle.staticParameters.protocolVersion,
-                    timeouts,
-                    domainLoggerFactory,
-                  )
-                  domainHandle.topologyClient.setDomainTimeTracker(tracker)
-                  tracker
-                },
-                domainMetrics,
-                parameters.cachingConfigs.sessionEncryptionKeyCache,
-                participantId,
-              )
-          )
+          syncDomainStateFactory
+            .createFromPersistent(
+              persistent,
+              ledgerApiIndexer.asEval,
+              participantNodeEphemeralState,
+              () => {
+                val tracker = DomainTimeTracker(
+                  domainConnectionConfig.config.timeTracker,
+                  clock,
+                  domainHandle.sequencerClient,
+                  domainHandle.staticParameters.protocolVersion,
+                  timeouts,
+                  domainLoggerFactory,
+                )
+                domainHandle.topologyClient.setDomainTimeTracker(tracker)
+                tracker
+              },
+              domainMetrics,
+              parameters.cachingConfigs.sessionEncryptionKeyCache,
+              participantId,
+            )
         )
 
         missingKeysAlerter = new MissingKeysAlerter(
@@ -1299,7 +1280,6 @@ class CantonSyncService(
             ),
           missingKeysAlerter,
           reassignmentCoordination,
-          participantNodeEphemeralState.inFlightSubmissionTracker,
           commandProgressTracker,
           clock,
           domainMetrics,
@@ -1557,7 +1537,6 @@ class CantonSyncService(
     ) ++ syncCrypto.ips.allDomains.toSeq ++ connectedDomainsMap.values.toSeq ++ Seq(
       domainRouter,
       domainRegistry,
-      participantNodeEphemeralState.inFlightSubmissionTracker,
       domainConnectionConfigStore,
       syncDomainPersistentStateManager,
       // As currently we stop the persistent state in here as a next step,
@@ -1571,7 +1550,7 @@ class CantonSyncService(
       acsCommitmentProcessorHealth,
     )
 
-    Lifecycle.close(instances*)(logger)
+    LifeCycle.close(instances*)(logger)
   }
 
   override def toString: String = s"CantonSyncService($participantId)"
@@ -1592,11 +1571,9 @@ class CantonSyncService(
       logger.debug(s"Received submit-reassignment $commandId from ledger-api server")
 
       /* @param domain For unassignment this should be the source domain, for assignment this is the target domain
-       * @param remoteDomain For unassignment this should be the target domain, for assignment this is the source domain
        */
       def doReassignment[E <: ReassignmentProcessorError, T](
-          domain: DomainId,
-          remoteDomain: DomainId,
+          domain: DomainId
       )(
           reassign: SyncDomain => EitherT[Future, E, FutureUnlessShutdown[T]]
       )(implicit traceContext: TraceContext): Future[SubmissionResult] = {
@@ -1637,8 +1614,7 @@ class CantonSyncService(
           for {
             targetProtocolVersion <- getProtocolVersion(unassign.targetDomain.unwrap).map(Target(_))
             submissionResult <- doReassignment(
-              domain = unassign.sourceDomain.unwrap,
-              remoteDomain = unassign.targetDomain.unwrap,
+              domain = unassign.sourceDomain.unwrap
             )(
               _.submitUnassignment(
                 submitterMetadata = ReassignmentSubmitterMetadata(
@@ -1658,8 +1634,7 @@ class CantonSyncService(
 
         case assign: ReassignmentCommand.Assign =>
           doReassignment(
-            domain = assign.targetDomain.unwrap,
-            remoteDomain = assign.sourceDomain.unwrap,
+            domain = assign.targetDomain.unwrap
           )(
             _.submitAssignment(
               submitterMetadata = ReassignmentSubmitterMetadata(
@@ -1715,31 +1690,22 @@ class CantonSyncService(
   }
 
   override def incompleteReassignmentOffsets(
-      validAt: AbsoluteOffset,
+      validAt: Offset,
       stakeholders: Set[LfPartyId],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Vector[AbsoluteOffset]] =
-    UpstreamOffsetConvert
-      .toGlobalOffset(Offset.fromAbsoluteOffset(validAt))
-      .fold(
-        error => FutureUnlessShutdown.failed(new IllegalArgumentException(error)),
-        globalOffset =>
-          syncDomainPersistentStateManager.getAll.values.toList
-            .parTraverse {
-              _.reassignmentStore.findIncomplete(
-                sourceDomain = None,
-                validAt = globalOffset,
-                stakeholders = NonEmpty.from(stakeholders),
-                limit = NonNegativeInt.maxValue,
-              )
-            }
-            .map(
-              _.flatten
-                .map(
-                  _.reassignmentEventGlobalOffset.globalOffset
-                    .pipe(UpstreamOffsetConvert.fromGlobalOffsetToAbsoluteOffset)
-                )
-                .toVector
-            ),
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Vector[Offset]] =
+    syncDomainPersistentStateManager.getAll.values.toList
+      .parTraverse {
+        _.reassignmentStore.findIncomplete(
+          sourceDomain = None,
+          validAt = validAt,
+          stakeholders = NonEmpty.from(stakeholders),
+          limit = NonNegativeInt.maxValue,
+        )
+      }
+      .map(
+        _.flatten
+          .map(_.reassignmentEventGlobalOffset.globalOffset)
+          .toVector
       )
 }
 
@@ -1883,7 +1849,6 @@ object CantonSyncService {
         resourceManagementService,
         cantonParameterConfig,
         SyncDomain.DefaultFactory,
-        indexedStringStore,
         storage,
         metrics,
         sequencerInfoLoader,

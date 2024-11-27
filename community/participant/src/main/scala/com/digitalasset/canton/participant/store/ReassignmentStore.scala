@@ -12,7 +12,6 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.{Reassignment, Update}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.participant.GlobalOffset
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentData.*
 import com.digitalasset.canton.participant.protocol.reassignment.{
   IncompleteReassignmentData,
@@ -21,8 +20,8 @@ import com.digitalasset.canton.participant.protocol.reassignment.{
 import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateLookup
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.platform.indexer.parallel.ReassignmentOffsetPersistence
-import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.protocol.messages.DeliveredUnassignmentResult
+import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.topology.DomainId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
@@ -73,10 +72,10 @@ trait ReassignmentStore extends ReassignmentLookup {
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit]
 
-  /** Adds the given [[com.digitalasset.canton.participant.GlobalOffset]] for the reassignment events to the reassignment data in
+  /** Adds the given [[com.digitalasset.canton.data.Offset]] for the reassignment events to the reassignment data in
     * the store, provided that the reassignment data has previously been stored.
     *
-    * The same [[com.digitalasset.canton.participant.GlobalOffset]] can be added any number of times.
+    * The same [[com.digitalasset.canton.data.Offset]] can be added any number of times.
     */
   def addReassignmentsOffsets(
       events: Seq[(ReassignmentId, ReassignmentGlobalOffset)]
@@ -134,12 +133,12 @@ object ReassignmentStore {
       executionContext: ExecutionContext
   ): ReassignmentOffsetPersistence = new ReassignmentOffsetPersistence {
     override def persist(
-        updates: Seq[(Update, Offset)],
+        updates: Seq[(Offset, Update)],
         tracedLogger: TracedLogger,
     )(implicit traceContext: TraceContext): Future[Unit] =
       updates
         .collect {
-          case (reassignmentAccepted: Update.ReassignmentAccepted, offset)
+          case (offset, reassignmentAccepted: Update.ReassignmentAccepted)
               if reassignmentAccepted.reassignmentInfo.isReassigningParticipant =>
             (reassignmentAccepted, offset)
         }
@@ -157,8 +156,7 @@ object ReassignmentStore {
               .fromEither[FutureUnlessShutdown](
                 reassignmentStoreFor(syncDomainPersistentStates)(targetDomain)
               )
-            offsets = eventsForDomain.map { case (reassignmentEvent, offset) =>
-              val globalOffset = GlobalOffset.tryFromLong(offset.toLong)
+            offsets = eventsForDomain.map { case (reassignmentEvent, globalOffset) =>
               val reassignmentGlobal = reassignmentEvent.reassignment match {
                 case _: Reassignment.Assign => AssignmentGlobalOffset(globalOffset)
                 case _: Reassignment.Unassign => UnassignmentGlobalOffset(globalOffset)
@@ -411,7 +409,7 @@ trait ReassignmentLookup {
     */
   def findIncomplete(
       sourceDomain: Option[Source[DomainId]],
-      validAt: GlobalOffset,
+      validAt: Offset,
       stakeholders: Option[NonEmpty[Set[LfPartyId]]],
       limit: NonNegativeInt,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Seq[IncompleteReassignmentData]]
@@ -424,5 +422,17 @@ trait ReassignmentLookup {
     */
   def findEarliestIncomplete()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[(GlobalOffset, ReassignmentId, Target[DomainId])]]
+  ): FutureUnlessShutdown[Option[(Offset, ReassignmentId, Target[DomainId])]]
+
+  /** Queries the reassignment ids for the given contract ids. Optional filtering by unassignment and
+    * completion (assignment) timestamps, and by source domain.
+    */
+  def findContractReassignmentId(
+      contractIds: Seq[LfContractId],
+      sourceDomain: Option[Source[DomainId]],
+      unassignmentTs: Option[CantonTimestamp],
+      completionTs: Option[CantonTimestamp],
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[LfContractId, Seq[ReassignmentId]]]
 }
