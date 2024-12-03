@@ -61,7 +61,13 @@ import com.digitalasset.canton.util.ReassignmentTag.Source
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainAlias, LfPartyId, ReassignmentCounter, RequestCounter}
+import com.digitalasset.canton.{
+  DomainAlias,
+  LfPartyId,
+  ReassignmentCounter,
+  RequestCounter,
+  SequencerCounter,
+}
 import com.google.common.annotations.VisibleForTesting
 
 import java.io.OutputStream
@@ -337,12 +343,8 @@ final class SyncStateInspection(
       }
   }
 
-  def contractCount(domain: DomainAlias)(implicit traceContext: TraceContext): Future[Int] = {
-    val state = syncDomainPersistentStateManager
-      .getByAlias(domain)
-      .getOrElse(throw new IllegalArgumentException(s"Unable to find contract store for $domain."))
-    state.contractStore.contractCount()
-  }
+  def contractCount(implicit traceContext: TraceContext): Future[Int] =
+    participantNodePersistentState.value.contractStore.contractCount()
 
   def contractCountInAcs(domain: DomainAlias, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
@@ -394,7 +396,7 @@ final class SyncStateInspection(
         } else FutureUnlessShutdown.unit
 
       contracts <- FutureUnlessShutdown.outcomeF(
-        state.contractStore
+        participantNodePersistentState.value.contractStore
           .lookupManyExistingUncached(snapshot.keys.toSeq)
           .valueOr { missingContractId =>
             ErrorUtil.invalidState(
@@ -697,11 +699,11 @@ final class SyncStateInspection(
       traceContext: TraceContext
   ): Either[String, Future[Option[RequestIndex]]] =
     lookupCleanDomainIndex(domain)
-      .map(_.map(_.requestIndex))
+      .map(_.map(_.flatMap(_.requestIndex)))
 
   def lookupCleanDomainIndex(domain: DomainAlias)(implicit
       traceContext: TraceContext
-  ): Either[String, Future[DomainIndex]] =
+  ): Either[String, Future[Option[DomainIndex]]] =
     getPersistentStateE(domain)
       .map(state =>
         participantNodePersistentState.value.ledgerApiStore
@@ -946,7 +948,7 @@ final class SyncStateInspection(
       _ <- FutureUnlessShutdown.unit
       domainTopoClient = syncCrypto.ips.tryForDomain(domainId)
       ipsSnapshot <- domainTopoClient.awaitSnapshotUS(domainTopoClient.approximateTimestamp)
-      allMembers <- FutureUnlessShutdown.outcomeF(ipsSnapshot.allMembers())
+      allMembers <- ipsSnapshot.allMembers()
       allParticipants = allMembers
         .filter(_.code == ParticipantId.Code)
         .map(member => ParticipantId.apply(member.uid))
@@ -956,6 +958,34 @@ final class SyncStateInspection(
 
     FutureUnlessShutdown.sequence(result).map(_.toMap)
   }
+
+  def cleanSequencedEventStoreAboveCleanDomainIndex(domainAlias: DomainAlias)(implicit
+      traceContext: TraceContext
+  ): Unit =
+    getOrFail(
+      getPersistentState(domainAlias).map { domainState =>
+        timeouts.inspection.await(functionFullName)(
+          participantNodePersistentState.value.ledgerApiStore
+            .cleanDomainIndex(domainState.indexedDomain.domainId)
+            .flatMap { domainIndexO =>
+              val nextSequencerCounter = domainIndexO
+                .flatMap(_.sequencerIndex)
+                .map(
+                  _.counter.increment
+                    .getOrElse(
+                      throw new IllegalStateException("sequencer counter cannot be increased")
+                    )
+                )
+                .getOrElse(SequencerCounter.Genesis)
+              logger.info(
+                s"Deleting events from SequencedEventStore for domain $domainAlias fromInclusive $nextSequencerCounter"
+              )
+              domainState.sequencedEventStore.delete(nextSequencerCounter)
+            }
+        )
+      },
+      domainAlias,
+    )
 }
 
 object SyncStateInspection {

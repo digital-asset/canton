@@ -69,7 +69,7 @@ class ParallelIndexerSubscriptionSpec
   implicit val materializer: Materializer = Materializer(actorSystem)
 
   private val someParty = DbDto.PartyEntry(
-    ledger_offset = "",
+    ledger_offset = 1,
     recorded_at = 0,
     submission_id = null,
     party = Some("party"),
@@ -95,7 +95,7 @@ class ParallelIndexerSubscriptionSpec
   private val metrics = LedgerApiServerMetrics.ForTesting
 
   private val someEventCreated = DbDto.EventCreate(
-    event_offset = "",
+    event_offset = 1,
     update_id = "",
     ledger_effective_time = 15,
     command_id = None,
@@ -126,7 +126,7 @@ class ParallelIndexerSubscriptionSpec
 
   private val someEventExercise = DbDto.EventExercise(
     consuming = true,
-    event_offset = "",
+    event_offset = 1,
     update_id = "",
     ledger_effective_time = 15,
     command_id = None,
@@ -155,7 +155,7 @@ class ParallelIndexerSubscriptionSpec
   )
 
   private val someEventAssign = DbDto.EventAssign(
-    event_offset = "",
+    event_offset = 1,
     update_id = "",
     command_id = None,
     workflow_id = None,
@@ -185,7 +185,7 @@ class ParallelIndexerSubscriptionSpec
   )
 
   private val someEventUnassign = DbDto.EventUnassign(
-    event_offset = "",
+    event_offset = 1,
     update_id = "",
     command_id = None,
     workflow_id = None,
@@ -205,7 +205,7 @@ class ParallelIndexerSubscriptionSpec
   )
 
   private val someCompletion = DbDto.CommandCompletion(
-    completion_offset = "",
+    completion_offset = 1,
     record_time = 0,
     publication_time = 0,
     application_id = "",
@@ -219,7 +219,6 @@ class ParallelIndexerSubscriptionSpec
     deduplication_offset = None,
     deduplication_duration_seconds = None,
     deduplication_duration_nanos = None,
-    deduplication_start = None,
     domain_id = "x::sourcedomain",
     message_uuid = None,
     request_sequencer_counter = None,
@@ -327,7 +326,7 @@ class ParallelIndexerSubscriptionSpec
         application_id = applicationId,
         action_count = 0,
         metering_timestamp = timestamp,
-        ledger_offset = offset.toHexString,
+        ledger_offset = offset.unwrap,
       )
     )
 
@@ -414,20 +413,20 @@ class ParallelIndexerSubscriptionSpec
           DbDto.IdFilterNonConsumingInformee(0L, ""),
           someEventCreated,
           someEventCreated,
-          DbDto.TransactionMeta("", "", 0L, 0L, "x::sourcedomain", 0L, 0L),
+          DbDto.TransactionMeta("", 1, 0L, 0L, "x::sourcedomain", 0L, 0L),
           someParty,
           someEventExercise,
-          DbDto.TransactionMeta("", "", 0L, 0L, "x::sourcedomain", 0L, 0L),
+          DbDto.TransactionMeta("", 1, 0L, 0L, "x::sourcedomain", 0L, 0L),
           someParty,
           someEventAssign,
           DbDto.IdFilterAssignStakeholder(0L, "", ""),
           DbDto.IdFilterAssignStakeholder(0L, "", ""),
-          DbDto.TransactionMeta("", "", 0L, 0L, "x::sourcedomain", 0L, 0L),
+          DbDto.TransactionMeta("", 1, 0L, 0L, "x::sourcedomain", 0L, 0L),
           someParty,
           someEventUnassign,
           DbDto.IdFilterUnassignStakeholder(0L, "", ""),
           DbDto.IdFilterUnassignStakeholder(0L, "", ""),
-          DbDto.TransactionMeta("", "", 0L, 0L, "x::sourcedomain", 0L, 0L),
+          DbDto.TransactionMeta("", 1, 0L, 0L, "x::sourcedomain", 0L, 0L),
           someParty,
           someCompletion,
         ),
@@ -726,6 +725,8 @@ class ParallelIndexerSubscriptionSpec
     sequencerCounter = None,
     timestamp = CantonTimestamp.ofEpochMicro(156),
   )
+  private val someRecordTime1 = CantonTimestamp.ofEpochMicro(100)
+  private val someRecordTime2 = CantonTimestamp.ofEpochMicro(300)
 
   it should "populate correct ledger-end from batches for a sequencer counter moved" in {
     ParallelIndexerSubscription.ledgerEndDomainIndexFrom(
@@ -747,14 +748,17 @@ class ParallelIndexerSubscriptionSpec
     ParallelIndexerSubscription.ledgerEndDomainIndexFrom(
       Vector(
         someDomainId -> DomainIndex.of(someSequencerIndex1),
+        someDomainId -> DomainIndex.of(someRecordTime1),
         someDomainId -> DomainIndex.of(someSequencerIndex2),
         someDomainId2 -> DomainIndex.of(someRequestIndex1),
         someDomainId2 -> DomainIndex.of(someRequestIndex2),
+        someDomainId2 -> DomainIndex.of(someRecordTime1),
       )
     ) shouldBe Map(
       someDomainId -> DomainIndex(
         None,
         Some(someSequencerIndex2),
+        someSequencerIndex2.timestamp,
       ),
       someDomainId2 -> DomainIndex(
         Some(someRequestIndex2),
@@ -764,6 +768,7 @@ class ParallelIndexerSubscriptionSpec
             timestamp = CantonTimestamp.ofEpochMicro(153),
           )
         ),
+        someRequestIndex2.timestamp,
       ),
     )
   }
@@ -773,6 +778,7 @@ class ParallelIndexerSubscriptionSpec
       Vector(
         someDomainId -> DomainIndex.of(someSequencerIndex1),
         someDomainId -> DomainIndex.of(someRequestIndex1),
+        someDomainId -> DomainIndex.of(someRecordTime2),
         someDomainId2 -> DomainIndex.of(someSequencerIndex1),
         someDomainId2 -> DomainIndex.of(someRequestIndex2),
       )
@@ -785,10 +791,12 @@ class ParallelIndexerSubscriptionSpec
             timestamp = CantonTimestamp.ofEpochMicro(153),
           )
         ),
+        someRecordTime2,
       ),
       someDomainId2 -> DomainIndex(
         Some(someRequestIndex2),
         Some(someSequencerIndex1),
+        someRequestIndex2.timestamp,
       ),
     )
   }
@@ -811,6 +819,7 @@ class ParallelIndexerSubscriptionSpec
               timestamp = CantonTimestamp.ofEpochMicro(5),
             )
           ),
+          CantonTimestamp.ofEpochMicro(5),
         ),
         someDomainId2 -> DomainIndex(
           Some(someRequestIndex2),
@@ -820,6 +829,7 @@ class ParallelIndexerSubscriptionSpec
               timestamp = CantonTimestamp.ofEpochMicro(4),
             )
           ),
+          CantonTimestamp.ofEpochMicro(4),
         ),
       )
     )
@@ -909,10 +919,12 @@ class ParallelIndexerSubscriptionSpec
           someDomainId -> DomainIndex(
             None,
             Some(someSequencerIndex2),
+            someSequencerIndex2.timestamp,
           ),
           someDomainId2 -> DomainIndex(
             None,
             Some(someSequencerIndex2),
+            someSequencerIndex2.timestamp,
           ),
         )
       )
@@ -937,10 +949,12 @@ class ParallelIndexerSubscriptionSpec
           someDomainId -> DomainIndex(
             None,
             Some(someSequencerIndex2),
+            someSequencerIndex2.timestamp,
           ),
           someDomainId2 -> DomainIndex(
             Some(someRequestIndex2),
             Some(someSequencerIndex2),
+            someSequencerIndex2.timestamp,
           ),
         )
       )

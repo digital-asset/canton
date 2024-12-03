@@ -10,8 +10,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.domain.ParticipantId
 import com.digitalasset.canton.ledger.participant.state.{DomainIndex, RequestIndex, SequencerIndex}
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription
-import com.digitalasset.canton.platform.store.backend.Conversions.{offset, offsetO}
+import com.digitalasset.canton.platform.store.backend.Conversions.offset
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.{Conversions, ParameterStorageBackend}
 import com.digitalasset.canton.platform.store.interning.StringInterning
@@ -51,9 +50,9 @@ private[backend] class ParameterStorageBackendImpl(
     batchUpsert(
       """INSERT INTO
         |  lapi_ledger_end_domain_index
-        |  (domain_id, sequencer_counter, sequencer_timestamp, request_counter, request_timestamp, request_sequencer_counter)
+        |  (domain_id, sequencer_counter, sequencer_timestamp, request_counter, request_timestamp, request_sequencer_counter, record_time)
         |VALUES
-        |  ({internalizedDomainId}, {sequencerCounter}, {sequencerTimestampMicros}, {requestCounter}, {requestTimestampMicros}, {requestSequencerCounter})
+        |  ({internalizedDomainId}, {sequencerCounter}, {sequencerTimestampMicros}, {requestCounter}, {requestTimestampMicros}, {requestSequencerCounter}, {recordTimeMicros})
         |""".stripMargin,
       """UPDATE
         |  lapi_ledger_end_domain_index
@@ -62,7 +61,8 @@ private[backend] class ParameterStorageBackendImpl(
         |  sequencer_timestamp = case when {sequencerCounter} is null then sequencer_timestamp else {sequencerTimestampMicros} end,
         |  request_counter = case when {requestCounter} is null then request_counter else {requestCounter} end,
         |  request_timestamp = case when {requestCounter} is null then request_timestamp else {requestTimestampMicros} end,
-        |  request_sequencer_counter = case when {requestCounter} is null then request_sequencer_counter else {requestSequencerCounter} end
+        |  request_sequencer_counter = case when {requestCounter} is null then request_sequencer_counter else {requestSequencerCounter} end,
+        |  record_time = {recordTimeMicros}
         |WHERE
         |  domain_id = {internalizedDomainId}
         |""".stripMargin,
@@ -76,6 +76,7 @@ private[backend] class ParameterStorageBackendImpl(
           "requestSequencerCounter" -> domainIndex.requestIndex
             .flatMap(_.sequencerCounter)
             .map(_.unwrap),
+          "recordTimeMicros" -> domainIndex.recordTime.toMicros,
         )
       },
     )(connection)
@@ -108,34 +109,39 @@ private[backend] class ParameterStorageBackendImpl(
     Conversions.participantId(ParticipantIdColumnName).map(ParticipantId(_))
 
   private val LedgerEndOffsetParser: RowParser[Option[Offset]] =
-    // Note: the ledger_end is a non-optional column,
-    // however some databases treat the empty string as NULL
-    offsetO(LedgerEndColumnName).?.map(_.flatten)
+    offset(LedgerEndColumnName).?
 
-  private val LedgerEndSequentialIdParser: RowParser[Long] =
-    long(LedgerEndSequentialIdColumnName)
+  private val LedgerEndSequentialIdParser: RowParser[Option[Long]] =
+    long(LedgerEndSequentialIdColumnName).?
 
-  private val LedgerEndStringInterningIdParser: RowParser[Int] =
-    int(LedgerEndStringInterningIdColumnName)
+  private val LedgerEndStringInterningIdParser: RowParser[Option[Int]] =
+    int(LedgerEndStringInterningIdColumnName).?
 
   private val LedgerIdentityParser: RowParser[ParameterStorageBackend.IdentityParams] =
     ParticipantIdParser map { case participantId =>
       ParameterStorageBackend.IdentityParams(participantId)
     }
 
-  private val LedgerEndPublicationTimeParser: RowParser[CantonTimestamp] =
-    long(LedgerEndPublicationTimeColumnName).map(CantonTimestamp.ofEpochMicro)
+  private val LedgerEndPublicationTimeParser: RowParser[Option[CantonTimestamp]] =
+    long(LedgerEndPublicationTimeColumnName).map(CantonTimestamp.ofEpochMicro).?
 
   private val LedgerEndParser: RowParser[Option[ParameterStorageBackend.LedgerEnd]] =
     LedgerEndOffsetParser ~ LedgerEndSequentialIdParser ~ LedgerEndStringInterningIdParser ~ LedgerEndPublicationTimeParser map {
-      case lastOffset ~ lastEventSequentialId ~ lastStringInterningId ~ lastPublicationTime =>
-        lastOffset.map(offset =>
+      case Some(lastOffset) ~ Some(lastEventSequentialId) ~
+          Some(lastStringInterningId) ~ Some(lastPublicationTime) =>
+        // the four values are updated the same time, so it is expected that if one is not null, then all of them will not be null
+        Some(
           ParameterStorageBackend.LedgerEnd(
-            offset,
+            lastOffset,
             lastEventSequentialId,
             lastStringInterningId,
             lastPublicationTime,
           )
+        )
+      case None ~ None ~ None ~ None => None
+      case _ =>
+        throw new IllegalStateException(
+          "The offset, eventSequentialId, stringInterningId and publicationTime of the ledger end should have been defined at the same time"
         )
     }
 
@@ -153,12 +159,10 @@ private[backend] class ParameterStorageBackendImpl(
         logger.info(
           s"Initializing new database for participantId '${params.participantId}'"
         )
-        import Conversions.OffsetOToStatement
-        val lastOffset = None
-        // TODO(#22143) temporary measures, will be none in next iteration
-        val lastEventSeqId = ParallelIndexerSubscription.ZeroLedgerEnd.lastEventSeqId
-        val lastStringInterningId = ParallelIndexerSubscription.ZeroLedgerEnd.lastStringInterningId
-        val lastPublicationTime = ParallelIndexerSubscription.ZeroLedgerEnd.lastPublicationTime
+        val lastOffset: Option[Offset] = None
+        val lastEventSeqId: Option[Long] = None
+        val lastStringInterningId: Option[Int] = None
+        val lastPublicationTime: Option[Long] = None
 
         discard(
           SQL"""insert into #$TableName(
@@ -169,10 +173,10 @@ private[backend] class ParameterStorageBackendImpl(
               #$LedgerEndPublicationTimeColumnName
             ) values(
               ${participantId.unwrap: String},
-              ${lastOffset: Option[Offset]},
+              ${lastOffset.map(_.unwrap)},
               $lastEventSeqId,
               $lastStringInterningId,
-              ${lastPublicationTime.toMicros}
+              $lastPublicationTime
             )"""
             .execute()(connection)
         )
@@ -205,7 +209,6 @@ private[backend] class ParameterStorageBackendImpl(
         """
         .execute()(connection)
     )
-
   def updatePrunedAllDivulgedContractsUpToInclusive(
       prunedUpToInclusive: Offset
   )(connection: Connection): Unit =
@@ -216,7 +219,6 @@ private[backend] class ParameterStorageBackendImpl(
         """
         .execute()(connection)
     )
-
   private val SqlSelectMostRecentPruning =
     SQL"select participant_pruned_up_to_inclusive from lapi_parameters"
 
@@ -240,10 +242,10 @@ private[backend] class ParameterStorageBackendImpl(
 
   private val PruneUptoInclusiveAndLedgerEndParser
       : RowParser[ParameterStorageBackend.PruneUptoInclusiveAndLedgerEnd] =
-    offsetO("participant_pruned_up_to_inclusive").? ~ LedgerEndOffsetParser map {
+    offset("participant_pruned_up_to_inclusive").? ~ LedgerEndOffsetParser map {
       case pruneUptoInclusive ~ ledgerEndOffset =>
         ParameterStorageBackend.PruneUptoInclusiveAndLedgerEnd(
-          pruneUptoInclusive = pruneUptoInclusive.flatten,
+          pruneUptoInclusive = pruneUptoInclusive,
           ledgerEnd = ledgerEndOffset,
         )
     }
@@ -262,7 +264,7 @@ private[backend] class ParameterStorageBackendImpl(
 
   override def cleanDomainIndex(domainId: DomainId)(
       connection: Connection
-  ): DomainIndex =
+  ): Option[DomainIndex] =
     // not using stringInterning here to allow broader usage with tricky state inspection integration tests
     SQL"""
       SELECT internal_id
@@ -277,7 +279,8 @@ private[backend] class ParameterStorageBackendImpl(
               sequencer_timestamp,
               request_counter,
               request_timestamp,
-              request_sequencer_counter
+              request_sequencer_counter,
+              record_time
             FROM
               lapi_ledger_end_domain_index
             WHERE
@@ -290,6 +293,7 @@ private[backend] class ParameterStorageBackendImpl(
               requestSequencerCounterO <- long("request_sequencer_counter").?
               sequencerCounterO <- long("sequencer_counter").?
               sequencerTimestampO <- long("sequencer_timestamp").?
+              recordTime <- long("record_time")
             } yield {
               val requestIndex = (requestCounterO, requestTimestampO) match {
                 case (Some(requestCounter), Some(requestTimestamp)) =>
@@ -330,8 +334,10 @@ private[backend] class ParameterStorageBackendImpl(
                     s"Invalid persisted data in lapi_ledger_end_domain_index table: either both sequencer_counter and sequencer_timestamp should be defined or none of them, but an invalid combination found for domain:${domainId.toProtoPrimitive} sequencer_counter: $sequencerCounterO, sequencer_timestamp: $sequencerTimestampO"
                   )
               }
-              requestIndex
-                .++(sequencerIndex)
+              val recordTimeDomainIndex = DomainIndex.of(
+                CantonTimestamp.ofEpochMicro(recordTime)
+              )
+              (recordTimeDomainIndex :: requestIndex ::: sequencerIndex)
                 .reduceOption(_ max _)
                 .getOrElse(
                   throw new IllegalStateException(
@@ -341,7 +347,6 @@ private[backend] class ParameterStorageBackendImpl(
             }
           )(connection)
       )
-      .getOrElse(DomainIndex.empty)
 
   override def updatePostProcessingEnd(postProcessingEnd: Option[Offset])(
       connection: Connection
@@ -351,15 +356,16 @@ private[backend] class ParameterStorageBackendImpl(
       "UPDATE lapi_post_processing_end SET post_processing_end = {postProcessingEnd}",
       List(
         Seq[NamedParameter](
-          "postProcessingEnd" -> postProcessingEnd.toHexString.toString
+          "postProcessingEnd" -> postProcessingEnd.map(_.unwrap)
         )
       ),
     )(connection)
 
   override def postProcessingEnd(connection: Connection): Option[Offset] =
     SQL"select post_processing_end from lapi_post_processing_end"
-      // TODO(#22143) do not store zero as an offset in lapi_post_processing_end
-      .asSingleOpt(offsetO("post_processing_end"))(connection)
+      .asSingleOpt(
+        offset("post_processing_end").?
+      )(connection)
       .flatten
 
   private def batchSql(

@@ -18,6 +18,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.fra
   Module,
   ModuleName,
 }
+import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.simulation.topology.SimulationTopologyHelpers.sequencerBecomeOnlineTime
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.time.SimClock
@@ -26,7 +27,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import org.slf4j.{Logger, LoggerFactory}
 import pprint.{PPrinter, Tree}
 
-import java.time.Duration
 import scala.collection.mutable
 import scala.util.Try
 
@@ -54,18 +54,25 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
     .foreach { case (onboardingTime, (endpoint, _)) =>
       agenda.addOne(
         OnboardSequencer(endpoint),
-        at = onboardingTime.value,
+        at = sequencerBecomeOnlineTime(onboardingTime, simSettings),
         ScheduledCommand.DefaultPriority,
       )
     }
   agenda.addOne(MakeSystemHealthy, simSettings.durationOfFirstPhaseWithFaults)
+  // Schedule liveness checks starting from "phase 2" up to the end of the simulation
+  LazyList
+    .iterate(simSettings.durationOfFirstPhaseWithFaults + simSettings.livenessCheckInterval)(
+      _ + simSettings.livenessCheckInterval
+    )
+    .takeWhile(_ < simSettings.totalSimulationTime)
+    .foreach(at => agenda.addOne(ResumeLivenessChecks, at))
   agenda.addOne(Quit("End of time"), simSettings.totalSimulationTime)
 
   private val network = new NetworkSimulator(simSettings.networkSettings, topology, agenda, clock)
   private val local =
     new LocalSimulator(
       simSettings.localSettings,
-      // TODO(#19242): Currently, only initial peers are subjects to crashes.
+      // TODO(#22807): Currently, only initial peers are subjects to crashes.
       peers = topology.activeSequencersToMachines.view.keySet.toSet,
       agenda,
     )
@@ -301,7 +308,9 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
           case MakeSystemHealthy =>
             local.makeHealthy()
             network.makeHealthy()
-            verifier.simulationIsGoingHealthy(clock.now)
+            verifier.resumeCheckingLiveness(clock.now)
+          case ResumeLivenessChecks =>
+            verifier.resumeCheckingLiveness(clock.now)
           case Quit(reason) =>
             logger.debug(s"Stopping simulation because: $reason")
             continueToRun = false
@@ -320,8 +329,9 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
     currentHistory.toSeq
   }
 
-  private def fixupDurationPrettyPrinting: PartialFunction[Any, Tree] = { case d: Duration =>
-    Tree.Literal(s"Duration.ofNanos(${d.toNanos}L)")
+  private def fixupDurationPrettyPrinting: PartialFunction[Any, Tree] = {
+    case duration: java.time.Duration =>
+      Tree.Literal(s"Duration.ofNanos(${duration.toNanos}L)")
   }
 }
 

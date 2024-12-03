@@ -111,7 +111,7 @@ trait ParameterStorageBackend {
     */
   def ledgerEnd(connection: Connection): Option[ParameterStorageBackend.LedgerEnd]
 
-  def cleanDomainIndex(domainId: DomainId)(connection: Connection): DomainIndex
+  def cleanDomainIndex(domainId: DomainId)(connection: Connection): Option[DomainIndex]
 
   /** Part of pruning process, this needs to be in the same transaction as the other pruning related database operations
     */
@@ -239,7 +239,7 @@ trait ContractStorageBackend {
   def createdContracts(contractIds: Seq[ContractId], before: Offset)(
       connection: Connection
   ): Map[ContractId, ContractStorageBackend.RawCreatedContract]
-  def assignedContracts(contractIds: Seq[ContractId])(
+  def assignedContracts(contractIds: Seq[ContractId], before: Offset)(
       connection: Connection
   ): Map[ContractId, ContractStorageBackend.RawCreatedContract]
 }
@@ -323,11 +323,11 @@ trait EventStorageBackend {
   )(connection: Connection): Vector[Entry[RawUnassignEvent]]
 
   def lookupAssignSequentialIdByOffset(
-      offsets: Iterable[String]
+      offsets: Iterable[Long]
   )(connection: Connection): Vector[Long]
 
   def lookupUnassignSequentialIdByOffset(
-      offsets: Iterable[String]
+      offsets: Iterable[Long]
   )(connection: Connection): Vector[Long]
 
   def lookupAssignSequentialIdByContractId(
@@ -380,7 +380,7 @@ trait EventStorageBackend {
 
 object EventStorageBackend {
   final case class Entry[+E](
-      offset: String,
+      offset: Long,
       updateId: String,
       eventSequentialId: Long,
       ledgerEffectiveTime: Timestamp,

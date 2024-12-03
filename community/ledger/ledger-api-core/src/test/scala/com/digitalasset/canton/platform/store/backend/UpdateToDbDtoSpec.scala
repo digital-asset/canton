@@ -72,7 +72,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
 
       dtos should contain theSameElementsInOrderAs List(
         DbDto.PartyEntry(
-          ledger_offset = someOffset.toHexString,
+          ledger_offset = someOffset.unwrap,
           recorded_at = someRecordTime.toMicros,
           submission_id = Some(someSubmissionId),
           party = Some(someParty),
@@ -94,7 +94,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
 
       dtos should contain theSameElementsInOrderAs List(
         DbDto.PartyEntry(
-          ledger_offset = someOffset.toHexString,
+          ledger_offset = someOffset.unwrap,
           recorded_at = someRecordTime.toMicros,
           submission_id = None,
           party = Some(someParty),
@@ -117,7 +117,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
 
       dtos should contain theSameElementsInOrderAs List(
         DbDto.PartyEntry(
-          ledger_offset = someOffset.toHexString,
+          ledger_offset = someOffset.unwrap,
           recorded_at = someRecordTime.toMicros,
           submission_id = Some(someSubmissionId),
           party = None,
@@ -143,7 +143,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
 
       dtos should contain theSameElementsInOrderAs List(
         DbDto.CommandCompletion(
-          completion_offset = someOffset.toHexString,
+          completion_offset = someOffset.unwrap,
           record_time = 1234567L,
           publication_time = 0,
           application_id = someApplicationId,
@@ -157,7 +157,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           deduplication_offset = None,
           deduplication_duration_seconds = None,
           deduplication_duration_nanos = None,
-          deduplication_start = None,
           domain_id = someDomainId1.toProtoPrimitive,
           message_uuid = None,
           request_sequencer_counter = Some(15),
@@ -182,7 +181,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
 
       dtos should contain theSameElementsInOrderAs List(
         DbDto.CommandCompletion(
-          completion_offset = someOffset.toHexString,
+          completion_offset = someOffset.unwrap,
           record_time = someRecordTime.toMicros,
           publication_time = 0,
           application_id = someApplicationId,
@@ -196,7 +195,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           deduplication_offset = None,
           deduplication_duration_seconds = None,
           deduplication_duration_nanos = None,
-          deduplication_start = None,
           domain_id = someDomainId1.toProtoPrimitive,
           message_uuid = Some(messageUuid.toString),
           request_sequencer_counter = None,
@@ -241,7 +239,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val dtos = updateToDtos(update)
 
       dtos.head shouldEqual DbDto.EventCreate(
-        event_offset = someOffset.toHexString,
+        event_offset = someOffset.unwrap,
         update_id = updateId,
         ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
         command_id = Some(completionInfo.commandId),
@@ -278,7 +276,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         record_time = someRecordTime.toMicros,
       )
       dtos(5) shouldEqual DbDto.CommandCompletion(
-        completion_offset = someOffset.toHexString,
+        completion_offset = someOffset.unwrap,
         record_time = someRecordTime.toMicros,
         publication_time = 0,
         application_id = completionInfo.applicationId,
@@ -292,7 +290,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         deduplication_offset = None,
         deduplication_duration_nanos = None,
         deduplication_duration_seconds = None,
-        deduplication_start = None,
         domain_id = someDomainId1.toProtoPrimitive,
         message_uuid = None,
         request_sequencer_counter = Some(10),
@@ -301,7 +298,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       )
       dtos(6) shouldEqual DbDto.TransactionMeta(
         update_id = updateId,
-        event_offset = someOffset.toHexString,
+        event_offset = someOffset.unwrap,
         publication_time = 0,
         record_time = someRecordTime.toMicros,
         domain_id = someDomainId1.toProtoPrimitive,
@@ -359,7 +356,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       dtos should contain theSameElementsInOrderAs List(
         DbDto.EventExercise(
           consuming = true,
-          event_offset = someOffset.toHexString,
+          event_offset = someOffset.unwrap,
           update_id = updateId,
           ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
           command_id = Some(completionInfo.commandId),
@@ -397,7 +394,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           party_id = "observer",
         ),
         DbDto.CommandCompletion(
-          completion_offset = someOffset.toHexString,
+          completion_offset = someOffset.unwrap,
           record_time = 120,
           publication_time = 0,
           application_id = completionInfo.applicationId,
@@ -411,7 +408,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           deduplication_offset = None,
           deduplication_duration_nanos = None,
           deduplication_duration_seconds = None,
-          deduplication_start = None,
           domain_id = someDomainId1.toProtoPrimitive,
           message_uuid = None,
           request_sequencer_counter = Some(110),
@@ -420,7 +416,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         ),
         DbDto.TransactionMeta(
           update_id = updateId,
-          event_offset = someOffset.toHexString,
+          event_offset = someOffset.unwrap,
           publication_time = 0,
           record_time = 120,
           domain_id = someDomainId1.toProtoPrimitive,
@@ -472,7 +468,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       dtos should contain theSameElementsInOrderAs List(
         DbDto.EventExercise(
           consuming = false,
-          event_offset = someOffset.toHexString,
+          event_offset = someOffset.unwrap,
           update_id = updateId,
           ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
           command_id = Some(completionInfo.commandId),
@@ -504,7 +500,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           party_id = "signatory",
         ),
         DbDto.CommandCompletion(
-          completion_offset = someOffset.toHexString,
+          completion_offset = someOffset.unwrap,
           record_time = someRecordTime.toMicros,
           publication_time = 0,
           application_id = completionInfo.applicationId,
@@ -518,7 +514,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           deduplication_offset = None,
           deduplication_duration_nanos = None,
           deduplication_duration_seconds = None,
-          deduplication_start = None,
           domain_id = someDomainId1.toProtoPrimitive,
           message_uuid = None,
           request_sequencer_counter = Some(10),
@@ -527,7 +522,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         ),
         DbDto.TransactionMeta(
           update_id = updateId,
-          event_offset = someOffset.toHexString,
+          event_offset = someOffset.unwrap,
           publication_time = 0,
           record_time = someRecordTime.toMicros,
           domain_id = someDomainId1.toProtoPrimitive,
@@ -605,7 +600,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       dtos should contain theSameElementsInOrderAs List(
         DbDto.EventExercise(
           consuming = false,
-          event_offset = someOffset.toHexString,
+          event_offset = someOffset.unwrap,
           update_id = updateId,
           ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
           command_id = Some(completionInfo.commandId),
@@ -641,7 +636,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         ),
         DbDto.EventExercise(
           consuming = false,
-          event_offset = someOffset.toHexString,
+          event_offset = someOffset.unwrap,
           update_id = updateId,
           ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
           command_id = Some(completionInfo.commandId),
@@ -674,7 +669,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         ),
         DbDto.EventExercise(
           consuming = false,
-          event_offset = someOffset.toHexString,
+          event_offset = someOffset.unwrap,
           update_id = updateId,
           ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
           command_id = Some(completionInfo.commandId),
@@ -706,7 +701,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           party_id = "signatory",
         ),
         DbDto.CommandCompletion(
-          completion_offset = someOffset.toHexString,
+          completion_offset = someOffset.unwrap,
           record_time = someRecordTime.toMicros,
           publication_time = 0,
           application_id = completionInfo.applicationId,
@@ -720,7 +715,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           deduplication_offset = None,
           deduplication_duration_nanos = None,
           deduplication_duration_seconds = None,
-          deduplication_start = None,
           domain_id = someDomainId1.toProtoPrimitive,
           message_uuid = None,
           request_sequencer_counter = Some(10),
@@ -729,7 +723,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         ),
         DbDto.TransactionMeta(
           update_id = updateId,
-          event_offset = someOffset.toHexString,
+          event_offset = someOffset.unwrap,
           publication_time = 0,
           record_time = someRecordTime.toMicros,
           domain_id = someDomainId1.toProtoPrimitive,
@@ -789,7 +783,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       // Note: fetch and lookup nodes are not indexed
       dtos should contain theSameElementsInOrderAs List(
         DbDto.CommandCompletion(
-          completion_offset = someOffset.toHexString,
+          completion_offset = someOffset.unwrap,
           record_time = someRecordTime.toMicros,
           publication_time = 0,
           application_id = completionInfo.applicationId,
@@ -803,7 +797,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           deduplication_offset = None,
           deduplication_duration_nanos = None,
           deduplication_duration_seconds = None,
-          deduplication_start = None,
           domain_id = someDomainId1.toProtoPrimitive,
           message_uuid = None,
           request_sequencer_counter = Some(10),
@@ -812,7 +805,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         ),
         DbDto.TransactionMeta(
           update_id = updateId,
-          event_offset = someOffset.toHexString,
+          event_offset = someOffset.unwrap,
           publication_time = 0,
           record_time = someRecordTime.toMicros,
           domain_id = someDomainId1.toProtoPrimitive,
@@ -866,7 +859,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       dtos should contain theSameElementsInOrderAs List(
         DbDto.EventExercise(
           consuming = true,
-          event_offset = someOffset.toHexString,
+          event_offset = someOffset.unwrap,
           update_id = updateId,
           ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
           command_id = Some(completionInfo.commandId),
@@ -908,7 +901,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           party_id = "divulgee",
         ),
         DbDto.CommandCompletion(
-          completion_offset = someOffset.toHexString,
+          completion_offset = someOffset.unwrap,
           record_time = someRecordTime.toMicros,
           publication_time = 0,
           application_id = completionInfo.applicationId,
@@ -922,7 +915,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           deduplication_offset = None,
           deduplication_duration_nanos = None,
           deduplication_duration_seconds = None,
-          deduplication_start = None,
           domain_id = someDomainId1.toProtoPrimitive,
           message_uuid = None,
           request_sequencer_counter = Some(10),
@@ -931,7 +923,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         ),
         DbDto.TransactionMeta(
           update_id = updateId,
-          event_offset = someOffset.toHexString,
+          event_offset = someOffset.unwrap,
           publication_time = 0,
           record_time = someRecordTime.toMicros,
           domain_id = someDomainId1.toProtoPrimitive,
@@ -984,7 +976,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val dtos = updateToDtos(update)
 
       dtos.head shouldEqual DbDto.EventCreate(
-        event_offset = someOffset.toHexString,
+        event_offset = someOffset.unwrap,
         update_id = updateId,
         ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
         command_id = Some(completionInfo.commandId),
@@ -1018,7 +1010,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       )
       dtos(3) shouldEqual DbDto.EventExercise(
         consuming = true,
-        event_offset = someOffset.toHexString,
+        event_offset = someOffset.unwrap,
         update_id = updateId,
         ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
         command_id = Some(completionInfo.commandId),
@@ -1060,7 +1052,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         party_id = "divulgee",
       )
       dtos(7) shouldEqual DbDto.CommandCompletion(
-        completion_offset = someOffset.toHexString,
+        completion_offset = someOffset.unwrap,
         record_time = someRecordTime.toMicros,
         publication_time = 0,
         application_id = completionInfo.applicationId,
@@ -1074,7 +1066,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         deduplication_offset = None,
         deduplication_duration_nanos = None,
         deduplication_duration_seconds = None,
-        deduplication_start = None,
         domain_id = someDomainId1.toProtoPrimitive,
         message_uuid = None,
         request_sequencer_counter = Some(10),
@@ -1083,7 +1074,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       )
       dtos(8) shouldEqual DbDto.TransactionMeta(
         update_id = updateId,
-        event_offset = someOffset.toHexString,
+        event_offset = someOffset.unwrap,
         publication_time = 0,
         record_time = someRecordTime.toMicros,
         domain_id = someDomainId1.toProtoPrimitive,
@@ -1140,7 +1131,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
 
       dtos should contain theSameElementsInOrderAs List(
         DbDto.CommandCompletion(
-          completion_offset = someOffset.toHexString,
+          completion_offset = someOffset.unwrap,
           record_time = someRecordTime.toMicros,
           publication_time = 0,
           application_id = completionInfo.applicationId,
@@ -1154,7 +1145,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           deduplication_offset = None,
           deduplication_duration_nanos = None,
           deduplication_duration_seconds = None,
-          deduplication_start = None,
           domain_id = someDomainId1.toProtoPrimitive,
           message_uuid = None,
           request_sequencer_counter = Some(10),
@@ -1163,7 +1153,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         ),
         DbDto.TransactionMeta(
           update_id = updateId,
-          event_offset = someOffset.toHexString,
+          event_offset = someOffset.unwrap,
           publication_time = 0,
           record_time = someRecordTime.toMicros,
           domain_id = someDomainId1.toProtoPrimitive,
@@ -1203,7 +1193,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val dtos = updateToDtos(update)
 
       dtos.head shouldEqual DbDto.EventCreate(
-        event_offset = someOffset.toHexString,
+        event_offset = someOffset.unwrap,
         update_id = updateId,
         ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
         command_id = None,
@@ -1248,7 +1238,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       (None, None, None, None),
       (
         Some(DeduplicationOffset(None)),
-        Some((None: Option[Offset]).toHexString),
+        Some(0L),
         None,
         None,
       ),
@@ -1282,7 +1272,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
 
           dtos should contain theSameElementsInOrderAs List(
             DbDto.CommandCompletion(
-              completion_offset = someOffset.toHexString,
+              completion_offset = someOffset.unwrap,
               record_time = someRecordTime.toMicros,
               publication_time = 0,
               application_id = someApplicationId,
@@ -1296,7 +1286,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
               deduplication_offset = expectedDeduplicationOffset,
               deduplication_duration_seconds = expectedDeduplicationDurationSeconds,
               deduplication_duration_nanos = expectedDeduplicationDurationNanos,
-              deduplication_start = None,
               domain_id = someDomainId1.toProtoPrimitive,
               message_uuid = None,
               request_sequencer_counter = Some(10),
@@ -1344,7 +1333,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           val dtos = updateToDtos(update)
 
           dtos.head shouldEqual DbDto.EventCreate(
-            event_offset = someOffset.toHexString,
+            event_offset = someOffset.unwrap,
             update_id = updateId,
             ledger_effective_time = transactionMeta.ledgerEffectiveTime.micros,
             command_id = Some(completionInfo.commandId),
@@ -1377,7 +1366,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             DbDto.IdFilterCreateStakeholder(0L, createNode.templateId.toString, "observer"),
           )
           dtos(3) shouldEqual DbDto.CommandCompletion(
-            completion_offset = someOffset.toHexString,
+            completion_offset = someOffset.unwrap,
             record_time = someRecordTime.toMicros,
             publication_time = 0,
             application_id = completionInfo.applicationId,
@@ -1391,7 +1380,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             deduplication_offset = expectedDeduplicationOffset,
             deduplication_duration_seconds = expectedDeduplicationDurationSeconds,
             deduplication_duration_nanos = expectedDeduplicationDurationNanos,
-            deduplication_start = None,
             domain_id = someDomainId1.toProtoPrimitive,
             message_uuid = None,
             request_sequencer_counter = Some(10),
@@ -1400,7 +1388,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           )
           dtos(4) shouldEqual DbDto.TransactionMeta(
             update_id = updateId,
-            event_offset = someOffset.toHexString,
+            event_offset = someOffset.unwrap,
             publication_time = 0,
             record_time = someRecordTime.toMicros,
             domain_id = someDomainId1.toProtoPrimitive,
@@ -1450,7 +1438,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val dtos = updateToDtos(update)
 
       dtos.head shouldEqual DbDto.EventAssign(
-        event_offset = someOffset.toHexString,
+        event_offset = someOffset.unwrap,
         update_id = update.updateId,
         command_id = Some(completionInfo.commandId),
         workflow_id = Some(someWorkflowId),
@@ -1479,7 +1467,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         record_time = someRecordTime.toMicros,
       )
       dtos(4) shouldEqual DbDto.CommandCompletion(
-        completion_offset = someOffset.toHexString,
+        completion_offset = someOffset.unwrap,
         record_time = someRecordTime.toMicros,
         publication_time = 0,
         application_id = completionInfo.applicationId,
@@ -1493,7 +1481,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         deduplication_offset = None,
         deduplication_duration_nanos = None,
         deduplication_duration_seconds = None,
-        deduplication_start = None,
         domain_id = "x::domain2",
         message_uuid = None,
         request_sequencer_counter = Some(10),
@@ -1502,7 +1489,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       )
       dtos(5) shouldEqual DbDto.TransactionMeta(
         update_id = updateId,
-        event_offset = someOffset.toHexString,
+        event_offset = someOffset.unwrap,
         publication_time = 0,
         record_time = someRecordTime.toMicros,
         domain_id = "x::domain2",
@@ -1559,7 +1546,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val dtos = updateToDtos(update)
 
       dtos.head shouldEqual DbDto.EventUnassign(
-        event_offset = someOffset.toHexString,
+        event_offset = someOffset.unwrap,
         update_id = update.updateId,
         command_id = Some(completionInfo.commandId),
         workflow_id = Some(someWorkflowId),
@@ -1578,7 +1565,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         record_time = 120L,
       )
       dtos(4) shouldEqual DbDto.CommandCompletion(
-        completion_offset = someOffset.toHexString,
+        completion_offset = someOffset.unwrap,
         record_time = 120L,
         publication_time = 0,
         application_id = completionInfo.applicationId,
@@ -1592,7 +1579,6 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         deduplication_offset = None,
         deduplication_duration_nanos = None,
         deduplication_duration_seconds = None,
-        deduplication_start = None,
         domain_id = "x::domain1",
         message_uuid = None,
         request_sequencer_counter = Some(110),
@@ -1601,7 +1587,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       )
       dtos(5) shouldEqual DbDto.TransactionMeta(
         update_id = updateId,
-        event_offset = someOffset.toHexString,
+        event_offset = someOffset.unwrap,
         publication_time = 0,
         record_time = 120L,
         domain_id = "x::domain1",
@@ -1642,7 +1628,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
 
       dtos.head shouldEqual DbDto.EventPartyToParticipant(
         event_sequential_id = 0,
-        event_offset = someOffset.toHexString,
+        event_offset = someOffset.unwrap,
         update_id = update.updateId,
         party_id = someParty,
         participant_id = someParticipantId,
@@ -1653,7 +1639,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       )
       dtos(1) shouldEqual DbDto.EventPartyToParticipant(
         event_sequential_id = 0,
-        event_offset = someOffset.toHexString,
+        event_offset = someOffset.unwrap,
         update_id = update.updateId,
         party_id = someParty,
         participant_id = otherParticipantId,
@@ -1664,7 +1650,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       )
       dtos(2) shouldEqual DbDto.TransactionMeta(
         update_id = updateId,
-        event_offset = someOffset.toHexString,
+        event_offset = someOffset.unwrap,
         publication_time = 0,
         record_time = someRecordTime.toMicros,
         domain_id = "x::domain1",

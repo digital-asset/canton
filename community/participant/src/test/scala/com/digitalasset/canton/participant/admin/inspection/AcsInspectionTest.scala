@@ -185,7 +185,7 @@ object AcsInspectionTest extends MockitoSugar with ArgumentMatchersSugar with Ba
       LedgerCreateTime(CantonTimestamp.Epoch),
       None,
     )
-    StoredContract(serializableContract, RequestCounter.MaxValue, isDivulged = true)
+    StoredContract(serializableContract, RequestCounter.MaxValue)
   }
 
   private def mockSyncDomainPersistentState(
@@ -220,7 +220,6 @@ object AcsInspectionTest extends MockitoSugar with ArgumentMatchersSugar with Ba
     val state = mock[SyncDomainPersistentState]
     val acsInspection = new AcsInspection(FakeDomainId, acs, cs, Eval.now(mockLedgerApiStore))
 
-    when(state.contractStore).thenAnswer(cs)
     when(state.activeContractStore).thenAnswer(acs)
     when(state.requestJournalStore).thenAnswer(rjs)
     when(state.indexedDomain).thenAnswer(IndexedDomain.tryCreate(FakeDomainId, 1))
@@ -232,7 +231,7 @@ object AcsInspectionTest extends MockitoSugar with ArgumentMatchersSugar with Ba
   private val mockLedgerApiStore: LedgerApiStore = {
     val mockStore = mock[LedgerApiStore]
     when(mockStore.cleanDomainIndex(same(FakeDomainId))(any[TraceContext]))
-      .thenAnswer(Future.successful(MaxDomainIndex))
+      .thenAnswer(Future.successful(Some(MaxDomainIndex)))
     mockStore
   }
 
