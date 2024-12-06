@@ -300,13 +300,15 @@ class LedgerServerPartyNotifier(
     metadata.participantId match {
       case Some(hostingParticipant) =>
         logger.debug(show"Pushing ${metadata.partyId} on $hostingParticipant to ledger server")
-        eventPublisher.publishEventDelayableByRepairOperation(
-          Update.PartyAddedToParticipant(
-            metadata.partyId.toLf,
-            metadata.displayName.map(_.unwrap).getOrElse(""),
-            hostingParticipant.toLf,
-            ParticipantEventPublisher.now.toLf,
-            LedgerSubmissionId.fromString(metadata.submissionId.unwrap).toOption,
+        eventPublisher.publishEventsDelayableByRepairOperation(
+          Seq(
+            Update.PartyAddedToParticipant(
+              metadata.partyId.toLf,
+              metadata.displayName.map(_.unwrap).getOrElse(""),
+              hostingParticipant.toLf,
+              ParticipantEventPublisher.now.toLf,
+              LedgerSubmissionId.fromString(metadata.submissionId.unwrap).toOption,
+            )
           )
         )
       case None =>

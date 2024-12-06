@@ -190,7 +190,7 @@ class CantonSyncServiceTest extends FixtureAnyWordSpec with BaseTest with HasExe
       ).thenReturn(EitherT.rightT(()))
 
       when(
-        f.participantEventPublisher.publishEventDelayableByRepairOperation(any[Update])(
+        f.participantEventPublisher.publishEventsDelayableByRepairOperation(any[Seq[Update]])(
           anyTraceContext
         )
       )

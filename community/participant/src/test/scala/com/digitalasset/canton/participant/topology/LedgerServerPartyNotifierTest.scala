@@ -93,9 +93,9 @@ final class LedgerServerPartyNotifierTest extends AsyncWordSpec with BaseTest {
         )
       )
 
-    when(eventPublisher.publishEventDelayableByRepairOperation(any[Update])(anyTraceContext))
-      .thenAnswer { (update: Update) =>
-        observedEvents += update
+    when(eventPublisher.publishEventsDelayableByRepairOperation(any[Seq[Update]])(anyTraceContext))
+      .thenAnswer { (updates: Seq[Update]) =>
+        observedEvents ++= updates
         FutureUnlessShutdown.unit
       }
 
