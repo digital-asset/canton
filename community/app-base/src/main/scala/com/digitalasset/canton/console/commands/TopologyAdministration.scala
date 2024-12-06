@@ -41,7 +41,10 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.TopologyStore.Authorized
 import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, TopologyStore}
-import com.digitalasset.canton.topology.admin.v30.GenesisStateResponse
+import com.digitalasset.canton.topology.admin.v30.{
+  ExportTopologySnapshotResponse,
+  GenesisStateResponse,
+}
 import com.digitalasset.canton.topology.store.TopologyStoreId.AuthorizedStore
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransaction,
@@ -365,6 +368,7 @@ class TopologyAdministrationGroup(
         filterAuthorizedKey: Option[Fingerprint] = None,
         protocolVersion: Option[String] = None,
         filterNamespace: String = "",
+        timeout: NonNegativeDuration = timeouts.unbounded,
     ): ByteString = {
       if (filterMappings.nonEmpty && excludeMappings.nonEmpty) {
         consoleEnvironment.run(
@@ -378,19 +382,30 @@ class TopologyAdministrationGroup(
 
       consoleEnvironment
         .run {
-          adminCommand(
-            TopologyAdminCommands.Read.ExportTopologySnapshot(
-              BaseQuery(
-                filterStore,
-                proposals,
-                timeQuery,
-                operation,
-                filterSigningKey = filterAuthorizedKey.map(_.toProtoPrimitive).getOrElse(""),
-                protocolVersion.map(ProtocolVersion.tryCreate),
-              ),
-              excludeMappings = excludeMappingsCodes,
-              filterNamespace = filterNamespace,
+          val responseObserver =
+            new ByteStringStreamObserver[ExportTopologySnapshotResponse](_.chunk)
+
+          def call: ConsoleCommandResult[Context.CancellableContext] =
+            adminCommand(
+              TopologyAdminCommands.Read.ExportTopologySnapshot(
+                responseObserver,
+                BaseQuery(
+                  filterStore,
+                  proposals,
+                  timeQuery,
+                  operation,
+                  filterSigningKey = filterAuthorizedKey.map(_.toProtoPrimitive).getOrElse(""),
+                  protocolVersion.map(ProtocolVersion.tryCreate),
+                ),
+                excludeMappings = excludeMappingsCodes,
+                filterNamespace = filterNamespace,
+              )
             )
+          processResult(
+            call,
+            responseObserver.resultBytes,
+            timeout,
+            s"Exporting the topology state from store $filterStore",
           )
         }
     }
@@ -433,7 +448,7 @@ class TopologyAdministrationGroup(
                - "<domain-id>": the topology transaction will be looked up in the specified domain store.
         includeProposals: when true, the result could be the latest proposal, otherwise will only return the latest fully authorized transaction"""
     )
-    def findLatestByMappingHash[M <: TopologyMapping: ClassTag](
+    def find_latest_by_mapping_hash[M <: TopologyMapping: ClassTag](
         mappingHash: MappingHash,
         filterStore: String,
         includeProposals: Boolean = false,
@@ -447,6 +462,29 @@ class TopologyAdministrationGroup(
           list(filterStore = filterStore, proposals = true)
             .collectOfMapping[M]
             .filter(_.mapping.uniqueKey == mappingHash)
+            .result
+        else Seq.empty
+      (latestAuthorized ++ latestProposal).maxByOption(_.serial)
+    }
+
+    @Help.Summary("Find the latest transaction for a given mapping hash")
+    @Help.Description(
+      """
+        store: - "Authorized": the topology transaction will be looked up in the node's authorized store.
+               - "<domain-id>": the topology transaction will be looked up in the specified domain store.
+        includeProposals: when true, the result could be the latest proposal, otherwise will only return the latest fully authorized transaction"""
+    )
+    def find_latest_by_mapping[M <: TopologyMapping: ClassTag](
+        filterStore: String,
+        includeProposals: Boolean = false,
+    ): Option[StoredTopologyTransaction[TopologyChangeOp, M]] = {
+      val latestAuthorized = list(filterStore = filterStore)
+        .collectOfMapping[M]
+        .result
+      val latestProposal =
+        if (includeProposals)
+          list(filterStore = filterStore, proposals = true)
+            .collectOfMapping[M]
             .result
         else Seq.empty
       (latestAuthorized ++ latestProposal).maxByOption(_.serial)
@@ -500,7 +538,7 @@ class TopologyAdministrationGroup(
 
       def latest[M <: TopologyMapping: ClassTag](hash: MappingHash) =
         instance.topology.transactions
-          .findLatestByMappingHash[M](
+          .find_latest_by_mapping_hash[M](
             hash,
             filterStore = AuthorizedStore.filterName,
             includeProposals = true,

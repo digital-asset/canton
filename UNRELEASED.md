@@ -3,6 +3,22 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2024-12-03 (Exclusive)
+
+- Removed parameters `sequencer.writer.event-write-batch-max-duration` and `sequencer.writer.payload-write-batch-max-duration` as these are not used anymore.
+- Introduced parameter `sequencer.writer.event-write-max-concurrency` (default: 2) to configure the maximum number of events batches that can be written at a time.
+- [Breaking Change]: `TopologyManagerReadService.ExportTopologySnapshot` and `TopologyManagerWriteService.ImportTopologySnapshot` are now streaming services for exporting and importing a topology snapshot respectively.
+
+## Until 2024-12-2 (Exclusive)
+
+### Integer event ids in ledger api
+- Added offset (int64) and node-id (int32) fields in all the event types in the ledger api.
+  The following messages have the additional fields:
+  - CreatedEvent
+  - ArchivedEvent
+  - ExercisedEvent
+- Accordingly the java bindings and json schema were augmented to include the new fields.
+
 ## Until 2024-11-16 (Exclusive)
 
 - [Breaking Change] renamed configuration parameter `session-key-cache-config` to `session-encryption-key-cache`.
@@ -491,7 +507,6 @@ Likely to happen in any replicated participant setup with frequent vetting attem
 ##### Recommendation
 
 Users are advised to upgrade to the next minor release (3.2) during their maintenance window.
-
 
 
 #### (24-015, Minor): Pointwise flat transaction Ledger API queries can unexpectedly return TRANSACTION_NOT_FOUND

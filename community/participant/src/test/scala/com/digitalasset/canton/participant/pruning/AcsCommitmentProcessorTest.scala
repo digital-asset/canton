@@ -355,7 +355,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       futureSupervisor,
       new InMemoryActiveContractStore(indexedStringStore, loggerFactory),
       acsCommitmentConfigStore,
-      new InMemoryContractStore(loggerFactory),
+      new InMemoryContractStore(timeouts, loggerFactory),
       // no additional consistency checks; if enabled, one needs to populate the above ACS and contract stores
       // correctly, otherwise the test will fail
       enableAdditionalConsistencyChecks = false,
@@ -396,7 +396,7 @@ sealed trait AcsCommitmentProcessorBaseTest
     val proc = for {
       processor <- acsCommitmentProcessor
       _ = changes.foreach { case (ts, rc, acsChange) =>
-        processor.publish(RecordTime(ts, rc.v), acsChange, Future.unit)
+        processor.publish(RecordTime(ts, rc.v), acsChange)
       }
     } yield processor
     (proc, store, sequencerClient)
@@ -1434,11 +1434,13 @@ class AcsCommitmentProcessorTest
         res <- PruningProcessor
           .latestSafeToPruneTick(
             requestJournalStore,
-            DomainIndex.of(
-              RequestIndex(
-                counter = RequestCounter(0L),
-                sequencerCounter = Some(SequencerCounter(0L)),
-                timestamp = CantonTimestamp.Epoch,
+            Some(
+              DomainIndex.of(
+                RequestIndex(
+                  counter = RequestCounter(0L),
+                  sequencerCounter = Some(SequencerCounter(0L)),
+                  timestamp = CantonTimestamp.Epoch,
+                )
               )
             ),
             constantSortedReconciliationIntervalsProvider(defaultReconciliationInterval),
@@ -1472,7 +1474,7 @@ class AcsCommitmentProcessorTest
         res <- PruningProcessor
           .latestSafeToPruneTick(
             requestJournalStore,
-            DomainIndex.empty,
+            None,
             constantSortedReconciliationIntervalsProvider(defaultReconciliationInterval),
             acsCommitmentStore,
             inFlightSubmissionStore,
@@ -1537,20 +1539,23 @@ class AcsCommitmentProcessorTest
         res1 <- PruningProcessor
           .latestSafeToPruneTick(
             requestJournalStore,
-            DomainIndex(
-              Some(
-                RequestIndex(
-                  counter = RequestCounter(2L),
-                  sequencerCounter = None,
-                  timestamp = ts2,
-                )
-              ),
-              Some(
-                SequencerIndex(
-                  counter = SequencerCounter(3L),
-                  timestamp = ts3,
-                )
-              ),
+            Some(
+              DomainIndex(
+                Some(
+                  RequestIndex(
+                    counter = RequestCounter(2L),
+                    sequencerCounter = None,
+                    timestamp = ts2,
+                  )
+                ),
+                Some(
+                  SequencerIndex(
+                    counter = SequencerCounter(3L),
+                    timestamp = ts3,
+                  )
+                ),
+                recordTime = ts3,
+              )
             ),
             sortedReconciliationIntervalsProvider,
             acsCommitmentStore,
@@ -1568,20 +1573,23 @@ class AcsCommitmentProcessorTest
         res2 <- PruningProcessor
           .latestSafeToPruneTick(
             requestJournalStore,
-            DomainIndex(
-              Some(
-                RequestIndex(
-                  counter = RequestCounter(3L),
-                  sequencerCounter = None,
-                  timestamp = ts3,
-                )
-              ),
-              Some(
-                SequencerIndex(
-                  counter = SequencerCounter(4L),
-                  timestamp = ts4,
-                )
-              ),
+            Some(
+              DomainIndex(
+                Some(
+                  RequestIndex(
+                    counter = RequestCounter(3L),
+                    sequencerCounter = None,
+                    timestamp = ts3,
+                  )
+                ),
+                Some(
+                  SequencerIndex(
+                    counter = SequencerCounter(4L),
+                    timestamp = ts4,
+                  )
+                ),
+                recordTime = ts4,
+              )
             ),
             sortedReconciliationIntervalsProvider,
             acsCommitmentStore,
@@ -1637,20 +1645,23 @@ class AcsCommitmentProcessorTest
         res <- PruningProcessor
           .latestSafeToPruneTick(
             requestJournalStore,
-            DomainIndex(
-              Some(
-                RequestIndex(
-                  counter = RequestCounter(2L),
-                  sequencerCounter = None,
-                  timestamp = tsCleanRequest,
-                )
-              ),
-              Some(
-                SequencerIndex(
-                  counter = SequencerCounter(4L),
-                  timestamp = ts3,
-                )
-              ),
+            Some(
+              DomainIndex(
+                Some(
+                  RequestIndex(
+                    counter = RequestCounter(2L),
+                    sequencerCounter = None,
+                    timestamp = tsCleanRequest,
+                  )
+                ),
+                Some(
+                  SequencerIndex(
+                    counter = SequencerCounter(4L),
+                    timestamp = ts3,
+                  )
+                ),
+                recordTime = ts3,
+              )
             ),
             sortedReconciliationIntervalsProvider,
             acsCommitmentStore,
@@ -1736,20 +1747,23 @@ class AcsCommitmentProcessorTest
           PruningProcessor
             .latestSafeToPruneTick(
               requestJournalStore,
-              DomainIndex(
-                Some(
-                  RequestIndex(
-                    counter = RequestCounter(3L),
-                    sequencerCounter = None,
-                    timestamp = tsCleanRequest2,
-                  )
-                ),
-                Some(
-                  SequencerIndex(
-                    counter = SequencerCounter(1L),
-                    timestamp = tsCleanRequest2,
-                  )
-                ),
+              Some(
+                DomainIndex(
+                  Some(
+                    RequestIndex(
+                      counter = RequestCounter(3L),
+                      sequencerCounter = None,
+                      timestamp = tsCleanRequest2,
+                    )
+                  ),
+                  Some(
+                    SequencerIndex(
+                      counter = SequencerCounter(1L),
+                      timestamp = tsCleanRequest2,
+                    )
+                  ),
+                  recordTime = tsCleanRequest2,
+                )
               ),
               sortedReconciliationIntervalsProvider,
               acsCommitmentStore,
@@ -2247,7 +2261,7 @@ class AcsCommitmentProcessorTest
               _ = changes
                 .filter(a => a._1 < testSequences.head)
                 .foreach { case (ts, tb, change) =>
-                  processor.publish(RecordTime(ts, tb.v), change, Future.unit)
+                  processor.publish(RecordTime(ts, tb.v), change)
                 }
               _ <- processor.flush()
               _ <- testSequence(
@@ -2332,7 +2346,7 @@ class AcsCommitmentProcessorTest
           _ = changes
             .filter(a => a._1 < testSequences.head)
             .foreach { case (ts, tb, change) =>
-              processor.publish(RecordTime(ts, tb.v), change, Future.unit)
+              processor.publish(RecordTime(ts, tb.v), change)
             }
           _ <- processor.flush()
 
@@ -2411,7 +2425,7 @@ class AcsCommitmentProcessorTest
           _ = changes
             .filter(a => a._1 < testSequences.head)
             .foreach { case (ts, tb, change) =>
-              processor.publish(RecordTime(ts, tb.v), change, Future.unit)
+              processor.publish(RecordTime(ts, tb.v), change)
             }
           _ <- processor.flush()
           _ <- testSequence(
@@ -2620,7 +2634,7 @@ class AcsCommitmentProcessorTest
           _ <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
             {
               changes.foreach { case (ts, tb, change) =>
-                processor.publish(RecordTime(ts, tb.v), change, Future.unit)
+                processor.publish(RecordTime(ts, tb.v), change)
               }
               for {
                 _ <- processor.flush()
@@ -2743,7 +2757,7 @@ class AcsCommitmentProcessorTest
           _ = changes
             .filter(a => a._1 <= testSequences.head.head)
             .foreach { case (ts, tb, change) =>
-              processor.publish(RecordTime(ts, tb.v), change, Future.unit)
+              processor.publish(RecordTime(ts, tb.v), change)
             }
           _ <- processor.flush()
           _ <- testSequence(
@@ -2844,7 +2858,7 @@ class AcsCommitmentProcessorTest
           _ = changes
             .filter(a => a._1 <= testSequences.head)
             .foreach { case (ts, tb, change) =>
-              processor.publish(RecordTime(ts, tb.v), change, Future.unit)
+              processor.publish(RecordTime(ts, tb.v), change)
             }
           _ <- processor.flush()
 
@@ -2936,7 +2950,7 @@ class AcsCommitmentProcessorTest
           _ = changes
             .filter(a => a._1 <= testSequences.head)
             .foreach { case (ts, tb, change) =>
-              processor.publish(RecordTime(ts, tb.v), change, Future.unit)
+              processor.publish(RecordTime(ts, tb.v), change)
 
             }
           _ <- processor.flush()
@@ -3010,7 +3024,7 @@ class AcsCommitmentProcessorTest
             changes
               .filter(a => a._1 < testSequences.head)
               .foreach { case (ts, tb, change) =>
-                processor.publish(RecordTime(ts, tb.v), change, Future.unit)
+                processor.publish(RecordTime(ts, tb.v), change)
 
               }
           )
@@ -3192,7 +3206,7 @@ class AcsCommitmentProcessorTest
           _ <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
             {
               changes.foreach { case (ts, tb, change) =>
-                processor.publish(RecordTime(ts, tb.v), change, Future.unit)
+                processor.publish(RecordTime(ts, tb.v), change)
               }
               for {
                 _ <- processor.flush()
@@ -3356,7 +3370,7 @@ class AcsCommitmentProcessorTest
           _ = loggerFactory.assertLogs(
             {
               changes.foreach { case (ts, tb, change) =>
-                processor.publish(RecordTime(ts, tb.v), change, Future.unit)
+                processor.publish(RecordTime(ts, tb.v), change)
               }
               processor.flush()
             },
@@ -3535,7 +3549,7 @@ class AcsCommitmentProcessorTest
               }
 
             _ = changes.foreach { case (ts, tb, change) =>
-              processor.publish(RecordTime(ts, tb.v), change, Future.unit)
+              processor.publish(RecordTime(ts, tb.v), change)
             }
             _ <- processor.flush()
 
@@ -3629,7 +3643,7 @@ class AcsCommitmentProcessorTest
     ): FutureUnlessShutdown[Unit] = {
       lazy val fut = {
         changes.foreach { case (ts, tb, change) =>
-          processor.publish(RecordTime(ts, tb.v), change, Future.unit)
+          processor.publish(RecordTime(ts, tb.v), change)
         }
         processor.flush()
       }
