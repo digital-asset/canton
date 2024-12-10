@@ -45,11 +45,11 @@ object SequencerErrors extends SequencerErrorGroup {
       |This error occurs when the sequencer receives an invalid submission request, e.g. it has an
       |aggregation rule with an unreachable threshold.
       |Malformed requests will not emit any deliver event.
-      |""".stripMargin)
+      """)
   @Resolution("""
       |Check if the sender is running an attack.
       |If you can rule out an attack, please reach out to Canton support.
-      |""".stripMargin)
+      """)
   case object SubmissionRequestMalformed
       extends AlarmErrorCode(id = "SEQUENCER_SUBMISSION_REQUEST_MALFORMED") {
     final case class Error(
@@ -114,18 +114,6 @@ object SequencerErrors extends SequencerErrorGroup {
         s"Invalid topology timestamp $topologyTimestamp. The topology timestamp must be before or at $sequencingTimestamp."
       )
   }
-
-  @Explanation(
-    """Topology timestamp is missing on the submission request."""
-  )
-  @Resolution(
-    """This indicates a bug in Canton (a faulty node behaviour). Please contact customer support."""
-  )
-  case object TopologyTimestampMissing
-      extends SequencerDeliverErrorCode(
-        id = "SEQUENCER_TOPOLOGY_TIMESTAMP_MISSING",
-        ErrorCategory.InvalidGivenCurrentSystemStateOther,
-      )
 
   @Explanation(
     """Maximum sequencing time on the submission request is exceeding the maximum allowed interval into the future. Could be result of a concurrent dynamic domain parameter change for sequencerAggregateSubmissionTimeout."""

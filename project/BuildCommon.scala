@@ -1396,6 +1396,7 @@ object BuildCommon {
             pekko_http,
             sttp_apiscpec_openapi_circe_yaml,
             sttp_apiscpec_asyncapi_circe_yaml,
+            scalapb_json4s,
             daml_libs_scala_scalatest_utils % Test,
             pekko_stream_testkit % Test,
             circe_yaml % Test,
