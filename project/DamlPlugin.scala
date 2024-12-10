@@ -372,10 +372,11 @@ object DamlPlugin extends AutoPlugin {
     } yield {
       (depType, s"$depType$depVersion")
     }
-    val daml3ScriptDars = ("daml-script", "daml3-script-1.dev")
+    val daml3ScriptDars =
+      Seq(("daml-script", "daml3-script-1.dev"), ("daml-script", "daml3-script-stable-1.dev"))
 
     val damlLibsEnv = (for {
-      (depType, artifactName) <- damlScriptDars :+ daml3ScriptDars
+      (depType, artifactName) <- damlScriptDars ++ daml3ScriptDars
     } yield {
       ensureArtifactAvailable(
         url = url + s"$depType/",
