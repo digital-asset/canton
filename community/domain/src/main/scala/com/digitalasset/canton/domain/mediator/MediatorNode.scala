@@ -562,7 +562,7 @@ class MediatorNodeBootstrap(
               arguments.clock,
               arguments.futureSupervisor,
               domainLoggerFactory,
-            )
+            )()
           )
       (topologyProcessor, topologyClient) = topologyProcessorAndClient
       _ = ips.add(topologyClient)
@@ -625,7 +625,6 @@ class MediatorNodeBootstrap(
           info.sequencerConnections,
           info.expectedSequencers,
         )
-        .mapK(FutureUnlessShutdown.outcomeK)
 
       sequencerClientRef =
         GrpcSequencerConnectionService.setup[MediatorDomainConfiguration](mediatorId)(

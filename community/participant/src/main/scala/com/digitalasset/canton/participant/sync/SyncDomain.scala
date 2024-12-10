@@ -393,7 +393,7 @@ class SyncDomain(
           .right(store.findUpcomingEffectiveChanges(timestamp).map { changes =>
             changes.headOption.foreach { head =>
               logger.debug(
-                s"Initialising the acs commitment processor with ${changes.length} effective times starting from: ${head.validFrom}"
+                s"Initializing the acs commitment processor with ${changes.length} effective times starting from: ${head.validFrom}"
               )
               acsCommitmentProcessor.initializeTicksOnStartup(changes.map(_.validFrom).toList)
             }
@@ -443,7 +443,7 @@ class SyncDomain(
       // however, this is bad for reassignment processing as we need to be able to access the topology state
       // across domains and this requires that the clients are separately initialised on the participants
       val resubscriptionTs = ephemeral.startingPoints.processing.lastSequencerTimestamp
-      logger.debug(s"Initialising topology client at clean head=$resubscriptionTs")
+      logger.debug(s"Initializing topology client at clean head=$resubscriptionTs")
       // startup with the resubscription-ts
       topologyClient.updateHead(
         SequencedTime(resubscriptionTs),
@@ -490,7 +490,6 @@ class SyncDomain(
             ephemeral.startingPoints.cleanReplay.nextRequestCounter
           )
         )
-        .mapK(FutureUnlessShutdown.outcomeK)
       _ = logger.info(
         show"Found ${repairs.size} repair requests at request counters ${repairs.map(_.rc)}"
       )
@@ -536,7 +535,7 @@ class SyncDomain(
         metrics.sequencerClient.handler.delay,
       )
 
-      def firstUnpersistedEventScF: Future[SequencerCounter] =
+      def firstUnpersistedEventScF: FutureUnlessShutdown[SequencerCounter] =
         persistent.sequencedEventStore
           .find(SequencedEventStore.LatestUpto(CantonTimestamp.MaxValue))(
             initializationTraceContext
@@ -575,7 +574,7 @@ class SyncDomain(
         _ <- initialize(initializationTraceContext)
         firstUnpersistedEventSc <- EitherT
           .liftF(firstUnpersistedEventScF)
-          .mapK(FutureUnlessShutdown.outcomeK)
+
         monitor = new SyncDomain.EventProcessingMonitor(
           ephemeral.startingPoints,
           firstUnpersistedEventSc,
@@ -633,14 +632,11 @@ class SyncDomain(
               monitor(messageHandler),
               ephemeral.timeTracker,
               tc =>
-                FutureUnlessShutdown.outcomeF(
-                  participantNodePersistentState.value.ledgerApiStore
-                    .cleanDomainIndex(domainId)(tc)
-                    .map(_.flatMap(_.sequencerIndex).map(_.timestamp))
-                ),
+                participantNodePersistentState.value.ledgerApiStore
+                  .cleanDomainIndex(domainId)(tc, ec)
+                  .map(_.flatMap(_.sequencerIndex).map(_.timestamp)),
             )(initializationTraceContext)
           )
-          .mapK(FutureUnlessShutdown.outcomeK)
 
         // wait for initial topology transactions to be sequenced and received before we start computing pending
         // topology transactions to push for IDM approval
@@ -1005,7 +1001,8 @@ object SyncDomain {
       )
       val journalGarbageCollector = new JournalGarbageCollector(
         persistentState.requestJournalStore,
-        tc => ephemeralState.ledgerApiIndexer.ledgerApiStore.value.cleanDomainIndex(domainId)(tc),
+        tc =>
+          ephemeralState.ledgerApiIndexer.ledgerApiStore.value.cleanDomainIndex(domainId)(tc, ec),
         sortedReconciliationIntervalsProvider,
         persistentState.acsCommitmentStore,
         persistentState.activeContractStore,

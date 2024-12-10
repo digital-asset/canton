@@ -4,23 +4,28 @@
 package com.digitalasset.canton.participant.store.db
 
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.participant.store.RequestJournalStoreTest
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.IndexedDomain
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.topology.{DomainId, UniqueIdentifier}
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{BaseTest, FailOnShutdown}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.concurrent.Future
 
-trait DbRequestJournalStoreTest extends AsyncWordSpec with BaseTest with RequestJournalStoreTest {
+trait DbRequestJournalStoreTest
+    extends AsyncWordSpec
+    with BaseTest
+    with RequestJournalStoreTest
+    with FailOnShutdown {
   this: DbTest =>
 
   val domainId = DomainId(UniqueIdentifier.tryFromProtoPrimitive("da::default"))
 
-  override def cleanDb(storage: DbStorage): Future[Unit] = {
+  override def cleanDb(storage: DbStorage)(implicit traceContext: TraceContext): Future[Unit] = {
     import storage.api.*
     storage.update(
       DBIO.seq(sqlu"truncate table par_journal_requests"),

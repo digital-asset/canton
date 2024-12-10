@@ -52,9 +52,11 @@ import scala.collection.MapView
 import scala.collection.concurrent.TrieMap
 import scala.util.{Failure, Success, Try}
 
+/** An in-memory, non-thread safe [[EpochStore]] implementation for non-concurrent tests. */
 abstract class GenericInMemoryEpochStore[E <: Env[E]]
     extends EpochStore[E]
     with OrderedBlocksReader[E] {
+
   private val epochs: TrieMap[EpochNumber, EpochStatus] = TrieMap.empty
   private val blocks: TrieMap[BlockNumber, CompletedBlock] = TrieMap.empty
 
@@ -71,8 +73,7 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
   protected def createFuture[T](action: String)(value: () => Try[T]): E#FutureUnlessShutdownT[T]
 
   private def addSingleMessageToMap[M <: PbftNetworkMessage](
-      storeType: String,
-      map: TrieMap[BlockNumber, TrieMap[ViewNumber, SignedMessage[M]]],
+      map: TrieMap[BlockNumber, TrieMap[ViewNumber, SignedMessage[M]]]
   )(
       message: SignedMessage[M]
   ): Try[Unit] = {
@@ -86,25 +87,18 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
       store = map(message.message.blockMetadata.blockNumber),
       key = message.message.viewNumber,
       value = message,
-      storeType = s"$storeType(${message.message.blockMetadata.blockNumber})",
     )
   }
+
   private def putIfAbsent[K, V](
       store: TrieMap[K, V],
       key: K,
       value: V,
-      storeType: String,
-  ): Try[Unit] = store.putIfAbsent(key, value) match {
-    case None =>
-      Success(())
-    case Some(v) =>
-      if (v == value) Success(())
-      else
-        Failure(
-          new RuntimeException(
-            s"Updating existing entry in $storeType is illegal: key:$key, oldValue: $v, newValue: $value"
-          )
-        )
+  ): Try[Unit] = {
+    store.putIfAbsent(key, value).discard
+    // Re-insertion with a different commit set may happen when a block has already been completed,
+    //  but then catch-up is started and the block is re-sent by state transfer.
+    Success(())
   }
 
   override def startEpoch(
@@ -115,7 +109,6 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
         store = epochs,
         key = epoch.number,
         value = EpochStatus(epoch, isInProgress = true),
-        storeType = "epochs",
       )
     }
 
@@ -162,7 +155,7 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
       prePrepare: SignedMessage[PrePrepare]
   )(implicit traceContext: TraceContext): E#FutureUnlessShutdownT[Unit] =
     createFuture(addPrePrepareActionName(prePrepare)) { () =>
-      addSingleMessageToMap("pre-prepares", prePreparesMap)(prePrepare)
+      addSingleMessageToMap(prePreparesMap)(prePrepare)
     }
 
   override def addPrepares(
@@ -180,7 +173,6 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
           store = preparesMap(head.message.blockMetadata.blockNumber),
           key = head.message.viewNumber,
           value = prepares,
-          storeType = s"prepares(${head.message.blockMetadata.blockNumber})",
         )
       }
     }
@@ -192,11 +184,11 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
     createFuture(addViewChangeMessageActionName(viewChangeMessage)) { () =>
       viewChangeMessage.message match {
         case _: ViewChange =>
-          addSingleMessageToMap("view-changes", viewChangesMap)(
+          addSingleMessageToMap(viewChangesMap)(
             viewChangeMessage.asInstanceOf[SignedMessage[ViewChange]]
           )
         case _: NewView =>
-          addSingleMessageToMap("new-views", newViewsMap)(
+          addSingleMessageToMap(newViewsMap)(
             viewChangeMessage.asInstanceOf[SignedMessage[NewView]]
           )
       }
@@ -219,7 +211,6 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
         store = blocks,
         key = blockNumber,
         value = CompletedBlock(prePrepare, commitMessages),
-        storeType = "orderedBlocks",
       )
     }
   }

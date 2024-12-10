@@ -751,7 +751,7 @@ class CommitmentsAdministrationGroup(
       | - timestamp: The timestamp of the commitment. Needs to correspond to a commitment tick.
       | - counterParticipant: The counter participant to whom we previously sent the commitment
       | - timeout: Time limit for the grpc call to complete
-      """.stripMargin
+      """
   )
   def open_commitment(
       commitment: AcsCommitment.CommitmentType,
@@ -816,7 +816,7 @@ class CommitmentsAdministrationGroup(
       | - expectedDomain: The domain that the contracts are expected to be active on
       | - downloadPayload: If true, the payload of the contracts is also downloaded
       | - timeout: Time limit for the grpc call to complete
-      """.stripMargin
+      """
   )
   def inspect_commitment_contracts(
       contracts: Seq[LfContractId],
@@ -1511,8 +1511,9 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           adminCommand(ParticipantAdminCommands.Package.VetDar(darHash, synchronize))
         })
 
-      @Help.Summary("""Revoke vetting for all packages contained in the DAR archive
-          |identified by the provided DAR hash.""")
+      @Help.Summary(
+        "Revoke vetting for all packages contained in the DAR archive identified by the provided DAR hash."
+      )
       @Help.Description("""This command succeeds if the vetting command used to vet the DAR's packages
           |was symmetric and resulted in a single vetting topology transaction for all the packages in the DAR.
           |This command is potentially dangerous and misuse

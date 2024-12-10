@@ -13,7 +13,6 @@ import sbt.internal.LogManager
 import sbt.internal.util.ManagedLogger
 
 import scala.collection.{Seq, mutable}
-import scala.util.matching.Regex
 
 object DocsOpenBuild {
 
@@ -21,105 +20,13 @@ object DocsOpenBuild {
 
     def repositoryRoot(docsOpenDir: File): File = docsOpenDir / ".."
 
-    def docsVersionDirectory(docsOpenDir: File, cantonVersion: String, log: ManagedLogger): File = {
-      val cantonRoot = repositoryRoot(docsOpenDir)
-      val version = extractVersion(cantonVersion)
+    def cantonDocsSourceDirectory(docsOpenDir: File): File =
+      docsOpenDir / "src" / "sphinx"
 
-      val docsDirectory = cantonRoot / "docs.daml.com" / "docs"
-      val pathFinder = docsDirectory * version.majorMinorWildcard() filter (_.isDirectory)
-
-      val directoryCandidates = pathFinder.get()
-      if (directoryCandidates.lengthCompare(1) == 0) {
-        val selectedDirectory = directoryCandidates.head
-        log.info(
-          s"[versionDirectorySelection] Using '$selectedDirectory' for '${version
-              .majorMinor()}' of '$cantonVersion'"
-        )
-        selectedDirectory
-      } else {
-        throw new NoSuchElementException(
-          s"Expect single path matching major and minor version '${version.majorMinor()}' but there are " +
-            s"${directoryCandidates.size}:\n${directoryCandidates.mkString(",\n")}"
-        )
-      }
-    }
-
-    private final case class Version(major: Int, minor: Int, patch: Int) {
-      def majorMinor(): String = s"$major.$minor"
-      def majorMinorWildcard(): String = s"$major.$minor.*"
-    }
-
-    private def extractVersion(version: String): Version = {
-      val versionPattern: Regex = """.*(\d+)\.(\d+)\.(\d+).*""".r
-      version match {
-        case versionPattern(major, minor, patch) => Version(major.toInt, minor.toInt, patch.toInt)
-        case _ => throw new IllegalArgumentException(s"No version number found in '$version'")
-      }
-    }
-
-    def cantonDocsSourceDirectory(
-        docsOpenDir: File,
-        cantonVersion: String,
-        log: ManagedLogger,
-    ): File =
-      docsVersionDirectory(docsOpenDir, cantonVersion, log) / "docs" / "canton"
-
-    def snippetDirectiveScriptDirectory(
-        docsOpenDir: File,
-        cantonVersion: String,
-        log: ManagedLogger,
-    ): File =
-      docsVersionDirectory(docsOpenDir, cantonVersion, log) / "bin" / "canton"
+    def snippetDirectiveScriptDirectory(docsOpenDir: File): File =
+      docsOpenDir / "src" / "main" / "resources"
 
   }
-
-  def updateManifest(): Def.Initialize[Task[String]] =
-    Def
-      .task {
-        val log: ManagedLogger = streams.value.log
-
-        log.info(
-          "[updateDocs] Refreshing canton sources manifest ..."
-        )
-        val source = cantonDocsSourceDirectory(baseDirectory.value, version.value, log)
-        val scriptPath = (Compile / resourceDirectory).value / "canton_source.py"
-        val manifest = sourceDirectory.value / "assembly" / "canton_sources_manifest"
-        runCommand(s"python $scriptPath $source $manifest", log)
-      }
-
-  def updateDocs(
-      sourceDirectory: SettingKey[File],
-      targetDirectory: SettingKey[File],
-  ): Def.Initialize[Task[String]] =
-    Def
-      .task {
-        val log: ManagedLogger = streams.value.log
-
-        log.info(
-          "[updateDocs] Cleaning output directories ..."
-        )
-        val target = sourceDirectory.value / "preprocessed-sphinx"
-        val assemblyTarget = sourceDirectory.value / "preprocessed-sphinx-assembly"
-        IO.delete(target)
-        IO.delete(assemblyTarget)
-
-        log.info(
-          "[updateDocs] Refreshing snippet data ..."
-        )
-        val snippetJsonSource = targetDirectory.value / "pre"
-        val snippetJsonTarget =
-          cantonDocsSourceDirectory(
-            baseDirectory.value,
-            version.value,
-            log,
-          ) / "includes" / "snippet_data"
-
-        IO.delete(snippetJsonTarget)
-        IO.createDirectory(snippetJsonTarget)
-        IO.copyDirectory(snippetJsonSource, snippetJsonTarget)
-
-        updateManifest.value
-      }
 
   def generateSphinxSnippets(`enterprise-app`: Project): Def.Initialize[Task[Unit]] =
     Def.taskDyn {
@@ -148,8 +55,7 @@ object DocsOpenBuild {
 
       val testPath = sourceDirectory.value / "main" / "resources"
       runCommand(s"python -m unittest discover -v -s $testPath", log)
-      val docsTestPath =
-        snippetDirectiveScriptDirectory(baseDirectory.value, version.value, log)
+      val docsTestPath = snippetDirectiveScriptDirectory(baseDirectory.value)
       runCommand(s"python -m unittest discover -v -s $docsTestPath", log)
 
       log.info(
@@ -165,15 +71,14 @@ object DocsOpenBuild {
       IO.delete(target)
       IO.delete(assemblyTarget)
 
-      val cantonDocsSourcePath =
-        cantonDocsSourceDirectory(baseDirectory.value, version.value, log)
+      val cantonDocsSourcePath = cantonDocsSourceDirectory(baseDirectory.value)
       IO.copyDirectory(cantonDocsSourcePath, target)
       IO.copyDirectory(source, target)
       IO.copyDirectory(snippetJsonSource, snippetJsonTarget)
       IO.createDirectory(assemblyTarget)
     }
 
-  def generateRstResolveSnippet(sourceDirectory: SettingKey[File]) =
+  def generateRstResolveSnippet(sourceDirectory: SettingKey[File]): Def.Initialize[Task[String]] =
     Def.task {
       val log: ManagedLogger = streams.value.log
 
@@ -184,11 +89,8 @@ object DocsOpenBuild {
         "[generateRst][preprocessing:step 1] Replacing custom `.. snippet::` directives with RST code blocks ..."
       )
 
-      val snippetScriptPath = snippetDirectiveScriptDirectory(
-        baseDirectory.value,
-        version.value,
-        log,
-      ) / "snippet_directive.py"
+      val snippetScriptPath =
+        snippetDirectiveScriptDirectory(baseDirectory.value) / "snippet_directive.py"
       runCommand(s"python $snippetScriptPath $snippetJsonTarget $target", log)
     }
 
@@ -202,7 +104,7 @@ object DocsOpenBuild {
         val log: ManagedLogger = streams.value.log
 
         val cantonRoot = repositoryRoot(baseDirectory.value)
-        val source = cantonDocsSourceDirectory(baseDirectory.value, version.value, log)
+        val source = cantonDocsSourceDirectory(baseDirectory.value)
         val target = sourceDirectory.value / "preprocessed-sphinx"
         val assemblyTarget = sourceDirectory.value / "preprocessed-sphinx-assembly"
         val manifest = sourceDirectory.value / "assembly" / "canton_sources_manifest"
