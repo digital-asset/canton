@@ -280,3 +280,7 @@ object Endpoints {
     Future.successful(Left(error))
 
 }
+
+trait DocumentationEndpoints {
+  def documentation: Seq[AnyEndpoint]
+}

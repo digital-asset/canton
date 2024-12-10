@@ -75,6 +75,7 @@ object BuildCommon {
         // scalacOptions in Test += "-Ystatistics",
         // TODO (i20606) We should find versions of libraries that do not need this workaround
         libraryDependencySchemes += "io.circe" %% "circe-parser" % VersionScheme.Always,
+        libraryDependencySchemes += "io.circe" %% "circe-yaml" % VersionScheme.Always,
       )
     )
 
@@ -1379,6 +1380,7 @@ object BuildCommon {
             // needed for foo.bar.{this as that} imports
             .filterNot(_ == "-Xsource:3"),
           libraryDependencies ++= Seq(
+            circe_parser,
             upickle,
             ujson_circe,
             tapir_json_circe,
@@ -1392,6 +1394,7 @@ object BuildCommon {
             pekko_http,
             sttp_apiscpec_openapi_circe_yaml,
             sttp_apiscpec_asyncapi_circe_yaml,
+            scalapb_json4s,
             daml_libs_scala_scalatest_utils % Test,
             pekko_stream_testkit % Test,
             circe_yaml % Test,

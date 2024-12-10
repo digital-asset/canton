@@ -3,6 +3,10 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+- New config option for JSON API `participant.httpLedgerApiExperimental.server.pathPrefix`
+- JSON API for interactive submission had been added
+- JSON API v2 openapi artifacts are now published
+
 ## Until 2024-11-09 (Exclusive)
 
 ## Until 2024-10-31 (Exclusive)

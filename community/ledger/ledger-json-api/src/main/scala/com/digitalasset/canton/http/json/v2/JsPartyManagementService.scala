@@ -17,7 +17,7 @@ import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.Inval
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
 import sttp.tapir.json.circe.jsonBody
-import sttp.tapir.{Endpoint, path, query}
+import sttp.tapir.{AnyEndpoint, Endpoint, path, query}
 
 
 class JsPartyManagementService(
@@ -117,7 +117,7 @@ class JsPartyManagementService(
         }
 }
 
-object JsPartyManagementService {
+object JsPartyManagementService extends DocumentationEndpoints {
   import Endpoints.*
   import JsPartyManagementCodecs.*
 
@@ -159,6 +159,13 @@ object JsPartyManagementService {
     .in(jsonBody[party_management_service.UpdatePartyDetailsRequest])
     .out(jsonBody[party_management_service.UpdatePartyDetailsResponse])
     .description("Allocate a new party to the participant node")
+  override def documentation: Seq[AnyEndpoint] = Seq(
+    listKnownPartiesEndpoint,
+    allocatePartyEndpoint,
+    getParticipantIdEndpoint,
+    getPartyEndpoint,
+    updatePartyEndpoint,
+  )
 }
 
 object JsPartyManagementCodecs {

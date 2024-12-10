@@ -26,7 +26,7 @@ object Dependencies {
   //  When updating pekko, make sure to update the clone as well, including the tests in community/lib/pekko/src/main/scala/pekko
   lazy val pekko_http_version = "1.1.0"
   lazy val ammonite_version = "3.0.0"
-  lazy val apispec_version = "0.7.2"
+  lazy val apispec_version = "0.11.3"
   lazy val awaitility_version = "4.2.0"
   lazy val aws_version = "2.29.5"
   lazy val better_files_version = "3.9.2"
@@ -83,7 +83,7 @@ object Dependencies {
   lazy val slick_version = "3.5.2"
   lazy val sttp_version = "3.8.16"
   lazy val tapir_client_version = "1.9.11"
-  lazy val tapir_version = "1.8.5"
+  lazy val tapir_version = "1.11.7"
   lazy val testcontainers_version = "1.19.7"
   lazy val tink_version = "1.12.0"
   lazy val toxiproxy_java_version = "2.1.7"
@@ -278,25 +278,42 @@ object Dependencies {
 
   lazy val protoc_gen_doc = "io.github.pseudomuto" % "protoc-gen-doc" % protoc_gen_doc_version
 
-  lazy val tapir_json_circe = "com.softwaremill.sttp.tapir" %% "tapir-json-circe" % tapir_version
+  // We prevent library conflicts that new tapir creates / some tests fail
+  val tapirExclusions = Seq(
+    ExclusionRule(
+      organization = "io.circe",
+      name = "circe-parser_2.13",
+    ),
+    ExclusionRule(
+      organization = "io.circe",
+      name = "circe-generic_2.13",
+    ),
+    ExclusionRule(
+      organization = "io.circe",
+      name = "circe-core_2.13",
+    ),
+  )
+
+  lazy val tapir_json_circe =
+    "com.softwaremill.sttp.tapir" %% "tapir-json-circe" % tapir_version excludeAll (tapirExclusions: _*)
 
   lazy val tapir_pekko_http_server =
-    "com.softwaremill.sttp.tapir" %% "tapir-pekko-http-server" % tapir_version
+    "com.softwaremill.sttp.tapir" %% "tapir-pekko-http-server" % tapir_version excludeAll (tapirExclusions: _*)
 
   lazy val tapir_sttp_client =
-    "com.softwaremill.sttp.tapir" %% "tapir-sttp-client" % tapir_client_version
+    "com.softwaremill.sttp.tapir" %% "tapir-sttp-client" % tapir_client_version excludeAll (tapirExclusions: _*)
 
   lazy val tapir_openapi_docs =
-    "com.softwaremill.sttp.tapir" %% "tapir-openapi-docs" % tapir_version
+    "com.softwaremill.sttp.tapir" %% "tapir-openapi-docs" % tapir_version excludeAll (tapirExclusions: _*)
 
   lazy val tapir_asyncapi_docs =
-    "com.softwaremill.sttp.tapir" %% "tapir-asyncapi-docs" % tapir_version
+    "com.softwaremill.sttp.tapir" %% "tapir-asyncapi-docs" % tapir_version excludeAll (tapirExclusions: _*)
 
   lazy val sttp_apiscpec_openapi_circe_yaml =
-    "com.softwaremill.sttp.apispec" %% "openapi-circe-yaml" % apispec_version
+    "com.softwaremill.sttp.apispec" %% "openapi-circe-yaml" % apispec_version excludeAll (tapirExclusions: _*)
 
   lazy val sttp_apiscpec_asyncapi_circe_yaml =
-    "com.softwaremill.sttp.apispec" %% "asyncapi-circe-yaml" % apispec_version
+    "com.softwaremill.sttp.apispec" %% "asyncapi-circe-yaml" % apispec_version excludeAll (tapirExclusions: _*)
 
   lazy val sttp_pekko_backend =
     "com.softwaremill.sttp.client3" %% "pekko-http-backend" % pekko_http_backend_version
