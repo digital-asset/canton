@@ -57,3 +57,6 @@ libraryDependencies ++= Seq(
 addSbtPlugin("pl.project13.scala" % "sbt-jmh" % "0.4.3")
 
 addSbtPlugin("org.jetbrains.scala" % "sbt-ide-settings" % "1.1.2")
+
+//For easy tar.gz archiving
+libraryDependencies += "org.apache.commons" % "commons-compress" % "1.27.1"
