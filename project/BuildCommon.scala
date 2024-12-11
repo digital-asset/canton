@@ -691,7 +691,7 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
-          BuildInfoKey("stableProtocolVersions" -> List("5")),
+          BuildInfoKey("stableProtocolVersions" -> List("5", "7")),
           BuildInfoKey("betaProtocolVersions" -> Nil),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",

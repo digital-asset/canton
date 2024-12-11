@@ -1,13 +1,14 @@
 package metabuild
 
-/** Versions defined here are required in both the metabuild project (our plugins) and our main build.
+/** Versions defined herere required in both the metabuild project (our plugins) and our main build.
   * https://www.scala-sbt.org/1.x/docs/Organizing-Build.html
   */
 object DamlVersions {
 
   /** The version of the daml compiler (and in most cases of the daml libraries as well).
     */
-  val version: String = "2.10.0-snapshot.20241122.13091.0.v2515f003"
+  // after changing version, run `sbt updateDamlProjectVersions` to update the `daml.yaml` project files.
+  val version: String = "2.10.0-snapshot.20241206.13126.0.vf0f16532"
 
   /** Custom Daml artifacts override version.
     */
