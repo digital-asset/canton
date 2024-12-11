@@ -3,16 +3,17 @@
 
 package com.digitalasset.canton.metrics
 
-import com.daml.metrics.api.MetricDoc.Tag
 import com.daml.metrics.api.MetricQualification
 
 object MetricDoc {
 
   final case class Item(
-      tag: Tag,
       name: String,
+      summary: String,
+      description: String,
       metricType: String,
       qualification: MetricQualification,
+      labelsWithDescription: Map[String, String],
   )
 
 }

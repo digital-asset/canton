@@ -9,7 +9,7 @@ Please also consult the [full documentation of this release](https://docs.daml.c
 - Introduced parameter `sequencer.writer.event-write-max-concurrency` (default: 2) to configure the maximum number of events batches that can be written at a time.
 - [Breaking Change]: `TopologyManagerReadService.ExportTopologySnapshot` and `TopologyManagerWriteService.ImportTopologySnapshot` are now streaming services for exporting and importing a topology snapshot respectively.
 
-## Until 2024-12-2 (Exclusive)
+## Until 2024-12-02 (Exclusive)
 
 ### Integer event ids in ledger api
 - Added offset (int64) and node-id (int32) fields in all the event types in the ledger api.
@@ -18,6 +18,30 @@ Please also consult the [full documentation of this release](https://docs.daml.c
   - ArchivedEvent
   - ExercisedEvent
 - Accordingly the java bindings and json schema were augmented to include the new fields.
+
+## Until 2024-11-28 (Exclusive)
+- Deduplication Offset extension to accept participant begin
+
+  Before, only absolute offsets were allowed to define the deduplication periods by offset. After the change
+  participant-begin offsets are also supported for defining deduplication periods. The participant-begin deduplication
+  period (defined as zero value in API) is only valid to be used if the participant was not pruned yet. Otherwise, as in
+  the other cases where the deduplication offset is earlier than the last pruned offset, an error informing that
+  deduplication period starts too early will be returned.
+
+## Until 2024-11-27 (Exclusive)
+- Index DB schema changed in a non-backwards compatible fashion.
+
+  The offset-related fields (e.g. ledger_offset, ledger_end) that were previously stored as `VARCHAR(4000)` for H2 and
+    `text` for Postgres are now stored as `BIGINT` (for both db types).
+  - If the offset column can take the value of the participant begin then the column should be null-able and null should
+    be stored as the offset value (i.e. no zero values are used to represent the participant begin).
+  - Only exception to
+    it is the deduplication_offset of the lapi_command_completions which will take the zero value when the participant
+    begin must be stored as deduplication offset, since null is used to signify the absence of this field.
+- Changed DeduplicationPeriod's offset field type to `int64` in participant_transaction.proto in a non-backwards
+  compatible fashion.
+
+  The type of the offset field changed from `bytes` to `int64` to be compatible with the newly introduced intefer offset type.
 
 ## Until 2024-11-16 (Exclusive)
 

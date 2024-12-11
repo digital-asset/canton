@@ -36,11 +36,15 @@ import com.digitalasset.canton.domain.sequencing.service.{
   GrpcSequencerInitializationService,
   GrpcSequencerStatusService,
 }
-import com.digitalasset.canton.domain.sequencing.topology.SequencerSnapshotBasedTopologyHeadInitializer
+import com.digitalasset.canton.domain.sequencing.topology.{
+  SequencedEventStoreBasedTopologyHeadInitializer,
+  SequencerSnapshotBasedTopologyHeadInitializer,
+}
 import com.digitalasset.canton.domain.server.DynamicGrpcServer
 import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.*
 import com.digitalasset.canton.health.admin.data.{WaitingForExternalInput, WaitingForInitialization}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   HasCloseContext,
@@ -383,7 +387,6 @@ class SequencerNodeBootstrap(
                 // TODO(#14070) make initialize idempotent to support crash recovery during init
                 sequencerFactory
                   .initialize(initialState, sequencerId)
-                  .mapK(FutureUnlessShutdown.outcomeK)
               }
               .getOrElse {
                 logger.debug("Skipping sequencer snapshot")
@@ -489,6 +492,25 @@ class SequencerNodeBootstrap(
         )
         addCloseable(indexedStringStore)
         for {
+          indexedDomain <- EitherT.right[String](
+            IndexedDomain.indexed(indexedStringStore)(domainId)
+          )
+          sequencedEventStore = SequencedEventStore(
+            storage,
+            indexedDomain,
+            staticDomainParameters.protocolVersion,
+            timeouts,
+            loggerFactory,
+          )
+          topologyHeadInitializer = sequencerSnapshot match {
+            case Some(snapshot) =>
+              new SequencerSnapshotBasedTopologyHeadInitializer(snapshot, domainTopologyStore)
+            case None =>
+              new SequencedEventStoreBasedTopologyHeadInitializer(
+                sequencedEventStore,
+                domainTopologyStore,
+              )
+          }
           processorAndClient <- EitherT
             .right(
               TopologyTransactionProcessor.createProcessorAndClientForDomain(
@@ -499,8 +521,7 @@ class SequencerNodeBootstrap(
                 clock,
                 futureSupervisor,
                 domainLoggerFactory,
-                new SequencerSnapshotBasedTopologyHeadInitializer(sequencerSnapshot),
-              )
+              )(topologyHeadInitializer)
             )
           (topologyProcessor, topologyClient) = processorAndClient
           _ = addCloseable(topologyProcessor)
@@ -598,27 +619,15 @@ class SequencerNodeBootstrap(
                 sequencerSnapshot,
               )
             )
-            .mapK(FutureUnlessShutdown.outcomeK)
           domainParamsLookup = DomainParametersLookup.forSequencerDomainParameters(
             staticDomainParameters,
             config.publicApi.overrideMaxRequestSize,
             topologyClient,
             loggerFactory,
           )
-          indexedDomain <- EitherT.right[String](
-            IndexedDomain.indexed(indexedStringStore)(domainId)
-          )
-          sequencedEventStore = SequencedEventStore(
-            storage,
-            indexedDomain,
-            staticDomainParameters.protocolVersion,
-            timeouts,
-            loggerFactory,
-          )
           firstSequencerCounterServeableForSequencer <-
             EitherT
               .right[String](sequencer.firstSequencerCounterServeableForSequencer)
-              .mapK(FutureUnlessShutdown.outcomeK)
 
           _ = addCloseable(sequencedEventStore)
           sequencerClient = new SequencerClientImplPekko[

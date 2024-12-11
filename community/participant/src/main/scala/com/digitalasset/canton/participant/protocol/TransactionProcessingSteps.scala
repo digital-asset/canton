@@ -643,7 +643,7 @@ class TransactionProcessingSteps(
 
       def checkRandomnessMap(): Unit =
         allRandomnessMap.asScala.find { case (_, listRandomness) =>
-          listRandomness.distinct.sizeIs >= 2
+          listRandomness.distinct.sizeIs > 1
         } match {
           case Some((viewHash, _)) =>
             ErrorUtil.internalError(
@@ -1348,14 +1348,15 @@ class TransactionProcessingSteps(
     CommitAndStoreContractsAndPublishEvent,
   ] =
     for {
-      usedAndCreated <- EitherT.right(
-        ExtractUsedAndCreated(
-          participantId,
-          validSubViewsNE,
-          topologySnapshot,
-          loggerFactory,
+      usedAndCreated <- EitherT
+        .right(
+          ExtractUsedAndCreated(
+            participantId,
+            validSubViewsNE,
+            topologySnapshot,
+            loggerFactory,
+          )
         )
-      )
 
       createdContracts = usedAndCreated.contracts.created
 
