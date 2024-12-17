@@ -13,6 +13,7 @@ trait StartSettings {
   val address: String
   val httpPort: Option[Int]
   val portFile: Option[Path]
+  val pathPrefix: Option[String]
   val httpsConfiguration:Option[TlsConfiguration]
   val wsConfig: Option[WebsocketConfig]
   val staticContentConfig: Option[StaticContentConfig]
