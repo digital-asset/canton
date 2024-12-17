@@ -114,10 +114,6 @@ e.g: `int_to_string(42) = "42"`
 
 e.g: `encode(some(5)) = 0x01 || encode(5)`
 
-- `alphanumeric_sort`: Sort a list of strings in alphanumeric order: `alphanumeric_sort: List[String] => List[String]`
-
-e.g: `alphanumeric_sort(List("koala", "zorro", "21pilot", "canton")) = List("21pilot", "canton", "koala", "zorro")`
-
 See encoding of optional values below for details.
 
 ## Primitive Types
@@ -524,8 +520,8 @@ fn encode_node(create):
     encode(create.package_name) ||
     encode(create.template_id) ||
     encode(create.argument) ||
-    encode(alphanumeric_sort(create.signatories)) ||
-    encode(alphanumeric_sort(create.stakeholders))
+    encode(create.signatories) ||
+    encode(create.stakeholders)
 ```
 
 ### Exercise
@@ -539,15 +535,15 @@ fn encode_node(exercise):
     encode(exercise.contract_id) ||
     encode(exercise.package_name) ||
     encode(exercise.template_id) ||
-    encode(alphanumeric_sort(exercise.signatories)) ||
-    encode(alphanumeric_sort(exercise.stakeholders)) ||
-    encode(alphanumeric_sort(exercise.acting_parties)) ||
+    encode(exercise.signatories) ||
+    encode(exercise.stakeholders) ||
+    encode(exercise.acting_parties) ||
     encode(exercise.interface_id) ||
     encode(exercise.choice_id) ||
     encode(exercise.chosen_value) ||
     encode(exercise.consuming) ||
     encode(exercise.exercise_result) ||
-    encode(alphanumeric_sort(exercise.choice_observers)) ||
+    encode(exercise.choice_observers) ||
     encode(exercise.children)
 ```
 
@@ -569,9 +565,9 @@ fn encode_node(fetch):
     encode(fetch.contract_id) ||
     encode(fetch.package_name) ||
     encode(fetch.template_id) ||
-    encode(alphanumeric_sort(fetch.signatories)) ||
-    encode(alphanumeric_sort(fetch.stakeholders)) ||
-    encode(alphanumeric_sort(fetch.acting_parties))
+    encode(fetch.signatories) ||
+    encode(fetch.stakeholders) ||
+    encode(fetch.acting_parties)
 ```
 
 ### Rollback
@@ -657,3 +653,89 @@ fn hash(prepared_transaction):
 
 This resulting hash must be signed with the key pair used to onboard the external party,
 and both the signature along with the `PreparedTransaction` must be sent to the API to submit the transaction to the ledger.
+
+## Trust Model
+
+This section outlines the trust relationships between users of the interactive submission service and the components of the system to ensure secure interactions.
+It covers the components of the network involved in an interactive submission, its validation, and eventual commitment to the ledger or rejection.
+It is intended to provide a system-level overview of the security properties and is addressed to application developers and operators integrating against the API.
+
+## Definitions
+
+Trust: Confidence in a system component to act securely and reliably.
+User: Any individual or entity interacting with the interactive submission API.
+External Party: Daml party on behalf of which transactions are being submitted using the interactive submission service.
+
+## Components
+
+The interactive submission feature revolves around three roles assumed by participant nodes. In practice, these roles can be assumed by one or more physical nodes.
+
+- Preparing Participant Node (PPN): generates a Daml transaction from a Ledger API command
+- Executing Participant Node (EPN): submits the transaction to the network when provided with a signature of the transaction hash
+- Confirming Participant Node (CPN): confirms transactions on behalf of the external party and verifies the party's signature
+
+### Preparing Participant Node (PPN)
+
+#### Trust Relationship
+Untrusted
+
+#### User responsibilities 
+- Users visualize the prepared transaction. They check that it matches their intent. They also validate the data therein to ensure that the transaction can be securely submitted. In particular:
+  - The transaction corresponds to the ledger effects the User intends to generate
+  - The `submission_time` is not ahead of the current sequencer time on the synchronizer.
+    A reliable way to do this is to compare the `submission_time` with the minimum of:
+    - Wallclock time of the submitting application
+    - Last record time emitted by at least `f+1` participants + the configured `mediatorDeduplicationTimeout` on the sync domain (`f` being the maximum number of faulty nodes)
+  - If `min_ledger_time` is defined in the `PrepareSubmissionRequest`, validate that the `ledger_time` in the `PrepareSubmissionResponse` is either empty or ahead of the `min_ledger_time` requested.
+- Users compute the hash of the transaction according to the specification described in this document.
+  - The hash provided in the `PrepareSubmissionResponse` must be ignored if the PPN is not trusted.
+
+#### Example Threats
+- The PPN tampers with the transaction or even generates an entirely different transaction
+
+**Mitigation**: The user inspects the transaction and verifies it corresponds to their intent.
+
+### Executing Participant Node (EPN)
+
+#### Trust Relationship 
+- Untrusted on transaction tampering
+- Trusted on command completions
+
+#### User responsibilities
+- Users sign the transaction hash they computed from the serialized transaction
+- Keys used  to sign the transaction are only used for this purpose
+- Keys used for signature are stored securely and kept private
+- Users do not rely on `workflow_id` in command completions
+
+#### Trust Assumptions
+
+#### Example Threats
+- The EPN emits incorrect completion events, leading users to retry a submission thinking it had failed when it had actually succeeded.
+
+**Mitigation:**
+No practical general mitigation in Canton 3.2.
+Self-conflicting transactions are not subject to this threat, i.e.,
+the transaction contains an archive on at least one contract where the submitting party is a signatory of.
+In that case the CPN(s) then reject resubmissions of the transaction.
+Users can attempt to correlate completion events with the transaction stream from the (trusted) CPN.
+Note the transaction stream only emits committed transactions, making this difficult to leverage in practice.
+
+### Confirming Participant Node (CPN)
+
+#### Trust Relationship
+Fewer than `PartyToParticipant.threshold` participants are assumed to be malicious
+
+#### Trust Assumptions
+- Users trust that at least one out of `PartyToParticipant.threshold` CPNs correctly approve or reject requests on behalf of the party they host as expected according to the Canton protocol
+
+#### User Responsibilities
+- Users carefully choose their CPNs.
+
+#### Example Threats
+- The CPN attempts to submit transactions on behalf of the party without explicit authorization from the party
+- The CPN incorrectly accepts transactions even if the signature is invalid
+
+**Mitigation:**: The external party chooses multiple CPNs to host it jointly in a fault-tolerant mode by setting the threshold on its `PartyToParticipant` topology transaction.
+The threats are mitigated if less CPNs than the threshold are faulty. Canton achieves the fault tolerance by requiring approvals from threshold many CPNs for transactions that are to be commmitted to the ledger.
+
+If the external party consumes information from CPNs such as the transaction stream, it must cross-check the information from threshold many different CPNs to achieve fault tolerance.
