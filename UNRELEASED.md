@@ -3,6 +3,17 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2024-11-18 (Exclusive)
+Refactored domain connectivity service to have endpoints with limited responsibilities:
+
+- Add: ReconnectDomain to be able to reconnect to a registered domain
+- Add: DisconnectAllDomains to disconnect from all connected domains
+- Change: RegisterDomain does not allow to fully connect to a domain anymore (only registration and potentially handshake): if you want to connect to a domain, use the other endpoint
+- Change: ConnectDomain takes a domain config so that it can be used to connect to a domain for the first time
+- Rename: ListConfiguredDomains to ListRegisteredDomains for consistency (and in general: configure(d) -> register(ed))
+
+## Until 2024-11-11 (Exclusive)
+
 - New config option for JSON API `participant.httpLedgerApiExperimental.server.pathPrefix`
 - JSON API for interactive submission had been added
 - JSON API v2 openapi artifacts are now published
