@@ -11,22 +11,14 @@ import com.daml.logging.LoggingContextOf
 import com.daml.metrics.pekkohttp.HttpMetricsInterceptor
 import com.daml.ports.{Port, PortFiles}
 import com.digitalasset.canton.concurrent.DirectExecutionContext
-import com.digitalasset.canton.http.json.{
-  ApiValueToJsValueConverter,
-  DomainJsonDecoder,
-  DomainJsonEncoder,
-  JsValueToApiValueConverter,
-}
+import com.digitalasset.canton.http.json.{ApiValueToJsValueConverter, DomainJsonDecoder, DomainJsonEncoder, JsValueToApiValueConverter}
 import com.digitalasset.canton.http.metrics.HttpApiMetrics
 import com.digitalasset.canton.http.util.ApiValueToLfValueConverter
 import com.digitalasset.canton.http.util.FutureUtil.*
 import com.digitalasset.canton.http.util.Logging.InstanceUUID
 import com.digitalasset.canton.ledger.api.refinements.ApiTypes.ApplicationId
 import com.digitalasset.canton.ledger.client.LedgerClient as DamlLedgerClient
-import com.digitalasset.canton.ledger.client.configuration.{
-  CommandClientConfiguration,
-  LedgerClientConfiguration,
-}
+import com.digitalasset.canton.ledger.client.configuration.{CommandClientConfiguration, LedgerClientConfiguration}
 import com.digitalasset.canton.ledger.client.services.pkg.PackageClient
 import com.digitalasset.canton.ledger.service.LedgerReader
 import com.digitalasset.canton.ledger.service.LedgerReader.PackageStore
@@ -36,7 +28,8 @@ import io.grpc.Channel
 import io.grpc.health.v1.health.{HealthCheckRequest, HealthGrpc}
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.http.scaladsl.Http.ServerBinding
-import org.apache.pekko.http.scaladsl.server.Route
+import org.apache.pekko.http.scaladsl.model.Uri
+import org.apache.pekko.http.scaladsl.server.{Directives, PathMatcher, Route}
 import org.apache.pekko.http.scaladsl.settings.ServerSettings
 import org.apache.pekko.http.scaladsl.{ConnectionContext, Http, HttpsConnectionContext}
 import org.apache.pekko.stream.Materializer
@@ -210,19 +203,26 @@ class HttpService(
         ),
         EndpointsCompanion.notFound(logger),
       )
+      prefixedEndpoints = startSettings.pathPrefix
+        .map(_.split("/").toList.dropWhile(_.isEmpty))
+        .collect { case head :: tl =>
+          val joinedPrefix = tl.foldLeft(PathMatcher(Uri.Path(head), ()))(_ slash _)
+          Directives.pathPrefix(joinedPrefix)(allEndpoints)
+        }
+        .getOrElse(allEndpoints)
 
       binding <- liftET[HttpService.Error] {
         val serverBuilder = Http()
           .newServerAt(address, httpPort.getOrElse(0))
           .withSettings(settings)
 
-        httpsConfiguration
-          .fold(serverBuilder) { config =>
-            logger.info(s"Enabling HTTPS with $config")
-            serverBuilder.enableHttps(HttpService.httpsConnectionContext(config))
+            httpsConfiguration
+              .fold(serverBuilder) { config =>
+                logger.info(s"Enabling HTTPS with $config")
+                serverBuilder.enableHttps(HttpService.httpsConnectionContext(config))
+              }
+              .bind(prefixedEndpoints)
           }
-          .bind(allEndpoints)
-      }
 
       _ <- either(portFile.cata(f => HttpService.createPortFile(f, binding), \/-(()))): ET[Unit]
 

@@ -19,6 +19,7 @@ final case class JsonApiConfig(
                                 address: String = com.digitalasset.canton.cliopts.Http.defaultAddress,
                                 httpPort: Option[Int] = None,
                                 portFile: Option[Path] = None,
+                                pathPrefix: Option[String] = None,
                                 httpsConfiguration: Option[TlsConfiguration] = None,
                                 staticContentConfig: Option[StaticContentConfig] = None,
                                 allowNonHttps: Boolean = false,

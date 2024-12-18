@@ -11,6 +11,7 @@ final case class HttpServerConfig(
     address: String = com.digitalasset.canton.cliopts.Http.defaultAddress,
     port: Option[Int] = None,
     portFile: Option[Path] = None,
+    pathPrefix: Option[String] = None,
 )
 
 object SharedConfigReaders {

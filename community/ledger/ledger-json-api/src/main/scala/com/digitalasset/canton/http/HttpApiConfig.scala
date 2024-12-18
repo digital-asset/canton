@@ -21,6 +21,7 @@ final case class HttpApiConfig(
       httpPort = server.port,
       httpsConfiguration = tls,
       portFile = server.portFile,
+      pathPrefix = server.pathPrefix,
       staticContentConfig = staticContent,
       allowNonHttps = allowInsecureTokens,
       wsConfig = websocketConfig,
