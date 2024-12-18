@@ -64,18 +64,18 @@ final class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
     val submitterInfo = DefaultParticipantStateValues.submitterInfo(actAs)
     treeFactory
       .createTransactionTree(
-        transaction,
-        submitterInfo,
-        factory.confirmationPolicy,
-        Some(WorkflowId.assertFromString("testWorkflowId")),
-        factory.mediatorRef,
-        factory.transactionSeed,
-        factory.transactionUuid,
-        snapshot,
-        contractInstanceOfId,
-        keyResolver,
-        factory.ledgerTime.plusSeconds(100),
-        contractPackages = Map.empty,
+        transaction = transaction,
+        submitterInfo = submitterInfo,
+        confirmationPolicy = factory.confirmationPolicy,
+        workflowId = Some(WorkflowId.assertFromString("testWorkflowId")),
+        mediator = factory.mediatorRef,
+        transactionSeed = factory.transactionSeed,
+        transactionUuid = factory.transactionUuid,
+        topologySnapshot = snapshot,
+        contractOfId = contractInstanceOfId,
+        keyResolver = keyResolver,
+        maxSequencingTime = factory.ledgerTime.plusSeconds(100),
+        suffixedContractPackages = Map.empty,
       )
       .failOnShutdownTo(fail("creating tx tree"))
   }
@@ -145,6 +145,8 @@ final class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
 
       "checking package vettings" must {
         lazy val treeFactory = createTransactionTreeFactory(testedProtocolVersion)
+
+        // TODO(#21671): Unit test tri-state vetting
         "fail if the main package is not vetted" in {
           val example = factory.standardHappyCases(2)
           createTransactionTree(
@@ -152,11 +154,12 @@ final class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
             example.wellFormedUnsuffixedTransaction,
             successfulLookup(example),
             example.keyResolver,
-            snapshot = defaultTestingTopology.withPackages(Seq.empty).build().topologySnapshot(),
-          ).value.flatMap(_ should matchPattern { case Left(UnknownPackageError(_)) => })
+            snapshot =
+              defaultTestingTopology.withVettedPackages(Seq.empty).build().topologySnapshot(),
+          ).value.flatMap(_ should matchPattern { case Left(PackageStateErrors(_)) => })
         }
-        "fail if some dependency is not vetted" in {
 
+        "fail if some dependency is not vetted" in {
           val example = factory.standardHappyCases(2)
           for {
             err <- createTransactionTree(
@@ -168,7 +171,7 @@ final class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
                 packageDependencies = TestPackageDependencyResolver
               ),
             ).value
-          } yield inside(err) { case Left(UnknownPackageError(unknownTo)) =>
+          } yield inside(err) { case Left(PackageStateErrors(unknownTo)) =>
             forEvery(unknownTo) {
               _.packageId shouldBe TestPackageDependencyResolver.exampleDependency
             }
@@ -188,7 +191,7 @@ final class TransactionTreeFactoryImplTest extends AsyncWordSpec with BaseTest {
                 packageDependencies = TestPackageDependencyResolver
               ),
             ).value
-          } yield inside(err) { case Left(UnknownPackageError(unknownTo)) =>
+          } yield inside(err) { case Left(PackageStateErrors(unknownTo)) =>
             unknownTo should not be empty
           }
         }
