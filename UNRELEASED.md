@@ -3,6 +3,40 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2025-01-07 (Exclusive)
+
+- We introduced contract key prefetching / bulk loading to improve workloads that fetch many contract keys.
+
+## Until 2024-12-20 (Exclusive)
+- The GetTransactionByEventId and the GetTransactionTreeByEventId endpoints of the lapi update service have been
+  replaced by the GetTransactionByOffset and the GetTransactionTreeByOffset respectively.
+    - As a consequence, the GetTransactionByEventIdRequest has been replaced by the GetTransactionByOffsetRequest message.
+    - The GetTransactionByOffsetRequest contains the offset of the transaction or the transaction tree to be fetched and
+      the requesting parties.
+    - The json endpoints have been adapted accordingly
+
+## Until 2024-12-17 (Exclusive)
+
+### Refactored domain connectivity service
+Refactored domain connectivity service to have endpoints with limited responsibilities:
+
+- Add: ReconnectDomain to be able to reconnect to a registered domain
+- Add: DisconnectAllDomains to disconnect from all connected domains
+- Change: RegisterDomain does not allow to fully connect to a domain anymore (only registration and potentially handshake): if you want to connect to a domain, use the other endpoint
+- Change: ConnectDomain takes a domain config so that it can be used to connect to a domain for the first time
+- Rename: ListConfiguredDomains to ListRegisteredDomains for consistency (and in general: configure(d) -> register(ed))
+
+### Memory check during node startup
+A memory check has been introduced when starting the node. This check compares the memory allocated to the container with the -Xmx JVM option.
+The goal is to ensure that the container has sufficient memory to run the application.
+To configure the memory check behavior, add one of the following to your configuration:
+
+```
+canton.parameters.startup-memory-check-config.reporting-level = warn  // Default behavior: Logs a warning.
+canton.parameters.startup-memory-check-config.reporting-level = crash // Terminates the node if the check fails.
+canton.parameters.startup-memory-check-config.reporting-level = ignore // Skips the memory check entirely.
+```
+
 ## Until 2024-12-03 (Exclusive)
 
 - Removed parameters `sequencer.writer.event-write-batch-max-duration` and `sequencer.writer.payload-write-batch-max-duration` as these are not used anymore.
@@ -47,6 +81,10 @@ Please also consult the [full documentation of this release](https://docs.daml.c
 
 - [Breaking Change] renamed configuration parameter `session-key-cache-config` to `session-encryption-key-cache`.
 - `sequencer_authentication_service` RPCs return failures as gRPC errors instead of a dedicated failure message with status OK.
+
+## Until 2024-11-13 (Exclusive)
+- display_name is no longer a part of Party data, so is removed from party allocation and update requests in the ledger api and daml script
+- `PartyNameManagement` service was removed from the ledger api
 
 ## Until 2024-11-09 (Exclusive)
 

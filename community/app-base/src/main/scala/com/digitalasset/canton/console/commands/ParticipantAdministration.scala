@@ -102,7 +102,7 @@ import com.digitalasset.canton.sequencing.{
 }
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
+import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.ShowUtil.*
@@ -181,7 +181,7 @@ private[console] object ParticipantCommands {
         domainAlias: DomainAlias,
         connection: String,
         manualConnect: Boolean = false,
-        domainId: Option[DomainId] = None,
+        synchronizerId: Option[SynchronizerId] = None,
         certificatesPath: String = "",
         priority: Int = 0,
         initialRetryDelay: Option[NonNegativeFiniteDuration] = None,
@@ -200,7 +200,7 @@ private[console] object ParticipantCommands {
         domainAlias,
         connection,
         manualConnect,
-        domainId,
+        synchronizerId,
         certificates,
         priority,
         initialRetryDelay,
@@ -213,31 +213,57 @@ private[console] object ParticipantCommands {
     def register(
         runner: AdminCommandRunner,
         config: DomainConnectionConfig,
-        handshakeOnly: Boolean,
+        performHandshake: Boolean,
         validation: SequencerConnectionValidation,
-    ) =
+    ): ConsoleCommandResult[Unit] =
       runner.adminCommand(
         ParticipantAdminCommands.DomainConnectivity
-          .RegisterDomain(config, handshakeOnly = handshakeOnly, validation)
+          .RegisterDomain(config, performHandshake = performHandshake, validation)
       )
 
-    def reconnect(runner: AdminCommandRunner, domainAlias: DomainAlias, retry: Boolean) =
+    def connect(
+        runner: AdminCommandRunner,
+        config: DomainConnectionConfig,
+        validation: SequencerConnectionValidation,
+    ): ConsoleCommandResult[Unit] =
       runner.adminCommand(
-        ParticipantAdminCommands.DomainConnectivity.ConnectDomain(domainAlias, retry)
+        ParticipantAdminCommands.DomainConnectivity.ConnectDomain(config, validation)
       )
 
-    def list_connected(runner: AdminCommandRunner) =
+    def reconnect(
+        runner: AdminCommandRunner,
+        domainAlias: DomainAlias,
+        retry: Boolean,
+    ): ConsoleCommandResult[Boolean] =
+      runner.adminCommand(
+        ParticipantAdminCommands.DomainConnectivity.ReconnectDomain(domainAlias, retry)
+      )
+
+    def list_connected(
+        runner: AdminCommandRunner
+    ): ConsoleCommandResult[Seq[ListConnectedDomainsResult]] =
       runner.adminCommand(
         ParticipantAdminCommands.DomainConnectivity.ListConnectedDomains()
       )
 
-    def reconnect_all(runner: AdminCommandRunner, ignoreFailures: Boolean) =
+    def reconnect_all(
+        runner: AdminCommandRunner,
+        ignoreFailures: Boolean,
+    ): ConsoleCommandResult[Unit] =
       runner.adminCommand(
         ParticipantAdminCommands.DomainConnectivity.ReconnectDomains(ignoreFailures)
       )
 
-    def disconnect(runner: AdminCommandRunner, domainAlias: DomainAlias) =
+    def disconnect(
+        runner: AdminCommandRunner,
+        domainAlias: DomainAlias,
+    ): ConsoleCommandResult[Unit] =
       runner.adminCommand(ParticipantAdminCommands.DomainConnectivity.DisconnectDomain(domainAlias))
+
+    def disconnect_all(
+        runner: AdminCommandRunner
+    ): ConsoleCommandResult[Unit] =
+      runner.adminCommand(ParticipantAdminCommands.DomainConnectivity.DisconnectAllDomains())
 
   }
 }
@@ -270,12 +296,12 @@ class ParticipantTestingGroup(
       validators: Set[ParticipantId] = Set(),
       timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.testingBong,
       levels: Int = 0,
-      domainId: Option[DomainId] = None,
+      synchronizerId: Option[SynchronizerId] = None,
       workflowId: String = "",
       id: String = "",
   ): Duration =
     consoleEnvironment.runE(
-      maybe_bong(targets, validators, timeout, levels, domainId, workflowId, id)
+      maybe_bong(targets, validators, timeout, levels, synchronizerId, workflowId, id)
         .toRight(
           s"Unable to bong $targets with $levels levels within ${LoggerUtil.roundDurationForHumans(timeout.duration)}"
         )
@@ -287,7 +313,7 @@ class ParticipantTestingGroup(
       validators: Set[ParticipantId] = Set(),
       timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.testingBong,
       levels: Int = 0,
-      domainId: Option[DomainId] = None,
+      synchronizerId: Option[SynchronizerId] = None,
       workflowId: String = "",
       id: String = "",
   ): Option[Duration] =
@@ -299,7 +325,7 @@ class ParticipantTestingGroup(
             validators.map(_.adminParty.toLf),
             timeout,
             levels,
-            domainId,
+            synchronizerId,
             workflowId,
             id,
           )
@@ -318,14 +344,14 @@ class ParticipantTestingGroup(
 
   @Help.Summary("Fetch the current time from the given domain", FeatureFlag.Testing)
   def fetch_domain_time(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.ledgerCommand,
   ): CantonTimestamp =
     check(FeatureFlag.Testing) {
       consoleEnvironment.run {
         adminCommand(
           DomainTimeCommands.FetchTime(
-            domainId.some,
+            synchronizerId.some,
             NonNegativeFiniteDuration.Zero,
             timeout,
           )
@@ -339,7 +365,7 @@ class ParticipantTestingGroup(
   ): Unit =
     check(FeatureFlag.Testing) {
       participantRef.domains.list_connected().foreach { item =>
-        fetch_domain_time(item.domainId, timeout).discard[CantonTimestamp]
+        fetch_domain_time(item.synchronizerId, timeout).discard[CantonTimestamp]
       }
     }
 
@@ -356,7 +382,7 @@ class ParticipantTestingGroup(
 
   @Help.Summary("Await for the given time to be reached on the given domain", FeatureFlag.Testing)
   def await_domain_time(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       time: CantonTimestamp,
       timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.ledgerCommand,
   ): Unit =
@@ -364,7 +390,7 @@ class ParticipantTestingGroup(
       consoleEnvironment.run {
         adminCommand(
           DomainTimeCommands.AwaitTime(
-            domainId.some,
+            synchronizerId.some,
             time,
             timeout,
           )
@@ -755,7 +781,7 @@ class CommitmentsAdministrationGroup(
   )
   def open_commitment(
       commitment: AcsCommitment.CommitmentType,
-      domain: DomainId,
+      synchronizerId: SynchronizerId,
       timestamp: CantonTimestamp,
       counterParticipant: ParticipantId,
       timeout: NonNegativeDuration = timeouts.unbounded,
@@ -770,7 +796,7 @@ class CommitmentsAdministrationGroup(
             ParticipantAdminCommands.Inspection.OpenCommitment(
               responseObserver,
               commitment,
-              domain,
+              synchronizerId,
               counterParticipant,
               timestamp,
             )
@@ -793,7 +819,7 @@ class CommitmentsAdministrationGroup(
           case Right(output) => output
         }
       logger.debug(
-        s"Retrieved metadata for ${counterContractsMetadata.size} contracts shared with $counterParticipant at time $timestamp on domain $domain"
+        s"Retrieved metadata for ${counterContractsMetadata.size} contracts shared with $counterParticipant at time $timestamp on domain $synchronizerId"
       )
       counterContractsMetadata
     }
@@ -821,7 +847,7 @@ class CommitmentsAdministrationGroup(
   def inspect_commitment_contracts(
       contracts: Seq[LfContractId],
       timestamp: CantonTimestamp,
-      expectedDomain: DomainId,
+      expectedSynchronizerId: SynchronizerId,
       downloadPayload: Boolean = false,
       timeout: NonNegativeDuration = timeouts.unbounded,
   ): Seq[CommitmentInspectContract] = {
@@ -835,7 +861,7 @@ class CommitmentsAdministrationGroup(
           ParticipantAdminCommands.Inspection.CommitmentContracts(
             responseObserver,
             contracts,
-            expectedDomain,
+            expectedSynchronizerId,
             timestamp,
             downloadPayload,
           )
@@ -893,7 +919,7 @@ class CommitmentsAdministrationGroup(
       counterParticipants: Seq[ParticipantId],
       commitmentState: Seq[ReceivedCmtState],
       verboseMode: Boolean,
-  ): Map[DomainId, Seq[ReceivedAcsCmt]] =
+  ): Map[SynchronizerId, Seq[ReceivedAcsCmt]] =
     consoleEnvironment.run(
       runner.adminCommand(
         LookupReceivedAcsCommitments(
@@ -936,7 +962,7 @@ class CommitmentsAdministrationGroup(
       counterParticipants: Seq[ParticipantId],
       commitmentState: Seq[SentCmtState],
       verboseMode: Boolean,
-  ): Map[DomainId, Seq[SentAcsCmt]] =
+  ): Map[SynchronizerId, Seq[SentAcsCmt]] =
     consoleEnvironment.run(
       runner.adminCommand(
         LookupSentAcsCommitments(
@@ -959,13 +985,13 @@ class CommitmentsAdministrationGroup(
   )
   def set_no_wait_commitments_from(
       counterParticipants: Seq[ParticipantId],
-      domainIds: Seq[DomainId],
+      synchronizerIds: Seq[SynchronizerId],
   ): Unit =
     consoleEnvironment.run(
       runner.adminCommand(
         SetNoWaitCommitmentsFrom(
           counterParticipants,
-          domainIds,
+          synchronizerIds,
         )
       )
     )
@@ -982,13 +1008,13 @@ class CommitmentsAdministrationGroup(
   )
   def set_wait_commitments_from(
       counterParticipants: Seq[ParticipantId],
-      domainIds: Seq[DomainId],
+      synchronizerIds: Seq[SynchronizerId],
   ): Unit =
     consoleEnvironment.run(
       runner.adminCommand(
         SetWaitCommitmentsFrom(
           counterParticipants,
-          domainIds,
+          synchronizerIds,
         )
       )
     )
@@ -1007,7 +1033,7 @@ class CommitmentsAdministrationGroup(
       |includes them if they are known to the participant or specified in the arguments."""
   )
   def get_wait_commitments_config_from(
-      domains: Seq[DomainId],
+      domains: Seq[SynchronizerId],
       counterParticipants: Seq[ParticipantId],
   ): (Seq[NoWaitCommitments], Seq[WaitCommitments]) =
     consoleEnvironment.run(
@@ -1055,7 +1081,7 @@ class CommitmentsAdministrationGroup(
   )
   def add_config_distinguished_slow_counter_participants(
       counterParticipantsDistinguished: Seq[ParticipantId],
-      domains: Seq[DomainId],
+      domains: Seq[SynchronizerId],
   ): Unit = consoleEnvironment.run {
     val result = runner.adminCommand(
       GetConfigForSlowCounterParticipants(
@@ -1067,26 +1093,27 @@ class CommitmentsAdministrationGroup(
       case Right(configs) =>
         val missing = domains
           .flatMap(x => counterParticipantsDistinguished.map(y => (x, y)))
-          .filter { case (domainId, participantId) =>
+          .filter { case (synchronizerId, participantId) =>
             configs.exists(slowCp =>
-              slowCp.domainIds.contains(domainId) && !slowCp.distinguishedParticipants.contains(
-                participantId
-              )
+              slowCp.synchronizerIds.contains(synchronizerId) && !slowCp.distinguishedParticipants
+                .contains(
+                  participantId
+                )
             )
           }
-          .groupBy { case (domainId, _) => domainId }
-          .map { case (domainId, participantSeq) =>
-            domainId -> participantSeq.map { case (_, participantId) => participantId }
+          .groupBy { case (synchronizerId, _) => synchronizerId }
+          .map { case (synchronizerId, participantSeq) =>
+            synchronizerId -> participantSeq.map { case (_, participantId) => participantId }
           }
         if (missing.nonEmpty) {
-          val newConfigs = missing.flatMap { case (domainId, participantSeq) =>
-            val existing = configs.find(slowCp => slowCp.domainIds.contains(domainId))
+          val newConfigs = missing.flatMap { case (synchronizerId, participantSeq) =>
+            val existing = configs.find(slowCp => slowCp.synchronizerIds.contains(synchronizerId))
             existing match {
               case None => None
               case Some(config) =>
                 Some(
                   new SlowCounterParticipantDomainConfig(
-                    Seq(domainId),
+                    Seq(synchronizerId),
                     config.distinguishedParticipants ++ participantSeq,
                     config.thresholdDistinguished,
                     config.thresholdDefault,
@@ -1115,7 +1142,7 @@ class CommitmentsAdministrationGroup(
       |""")
   def remove_config_for_slow_counter_participants(
       counterParticipantsDistinguished: Seq[ParticipantId],
-      domains: Seq[DomainId],
+      domains: Seq[SynchronizerId],
   ): Unit = consoleEnvironment.run {
     val result = runner.adminCommand(
       GetConfigForSlowCounterParticipants(
@@ -1127,26 +1154,27 @@ class CommitmentsAdministrationGroup(
       case Right(configs) =>
         val toBeRemoved = domains
           .zip(counterParticipantsDistinguished)
-          .filter { case (domainId, participantId) =>
+          .filter { case (synchronizerId, participantId) =>
             configs.exists(slowCp =>
-              slowCp.domainIds.contains(domainId) && slowCp.distinguishedParticipants.contains(
-                participantId
-              )
+              slowCp.synchronizerIds.contains(synchronizerId) && slowCp.distinguishedParticipants
+                .contains(
+                  participantId
+                )
             )
           }
-          .groupBy { case (domainId, _) => domainId }
+          .groupBy { case (synchronizerId, _) => synchronizerId }
           .view
           .mapValues(_.map { case (_, participantId) => participantId })
           .toMap
 
-        val newConfigs = toBeRemoved.flatMap { case (domainId, participantSeq) =>
-          val existing = configs.find(slowCp => slowCp.domainIds.contains(domainId))
+        val newConfigs = toBeRemoved.flatMap { case (synchronizerId, participantSeq) =>
+          val existing = configs.find(slowCp => slowCp.synchronizerIds.contains(synchronizerId))
           existing match {
             case None => None
             case Some(config) =>
               Some(
                 new SlowCounterParticipantDomainConfig(
-                  Seq(domainId),
+                  Seq(synchronizerId),
                   config.distinguishedParticipants.diff(participantSeq),
                   config.thresholdDistinguished,
                   config.thresholdDefault,
@@ -1173,7 +1201,7 @@ class CommitmentsAdministrationGroup(
   )
   def add_participant_to_individual_metrics(
       individualMetrics: Seq[ParticipantId],
-      domains: Seq[DomainId],
+      domains: Seq[SynchronizerId],
   ): Unit = consoleEnvironment.run {
     val result = runner.adminCommand(
       GetConfigForSlowCounterParticipants(
@@ -1185,26 +1213,27 @@ class CommitmentsAdministrationGroup(
       case Right(configs) =>
         val missing = domains
           .zip(individualMetrics)
-          .filter { case (domainId, participantId) =>
+          .filter { case (synchronizerId, participantId) =>
             configs.exists(slowCp =>
-              slowCp.domainIds.contains(domainId) && !slowCp.participantsMetrics.contains(
-                participantId
-              )
+              slowCp.synchronizerIds.contains(synchronizerId) && !slowCp.participantsMetrics
+                .contains(
+                  participantId
+                )
             )
           }
-          .groupBy { case (domainId, _) => domainId }
+          .groupBy { case (synchronizerId, _) => synchronizerId }
           .view
           .mapValues(_.map { case (_, participantId) => participantId })
           .toMap
 
-        val newConfigs = missing.flatMap { case (domainId, participantSeq) =>
-          val existing = configs.find(slowCp => slowCp.domainIds.contains(domainId))
+        val newConfigs = missing.flatMap { case (synchronizerId, participantSeq) =>
+          val existing = configs.find(slowCp => slowCp.synchronizerIds.contains(synchronizerId))
           existing match {
             case None => None
             case Some(config) =>
               Some(
                 new SlowCounterParticipantDomainConfig(
-                  Seq(domainId),
+                  Seq(synchronizerId),
                   config.distinguishedParticipants,
                   config.thresholdDistinguished,
                   config.thresholdDefault,
@@ -1232,7 +1261,7 @@ class CommitmentsAdministrationGroup(
   )
   def remove_participant_from_individual_metrics(
       individualMetrics: Seq[ParticipantId],
-      domains: Seq[DomainId],
+      domains: Seq[SynchronizerId],
   ): Unit = consoleEnvironment.run {
     val result = runner.adminCommand(
       GetConfigForSlowCounterParticipants(
@@ -1244,26 +1273,27 @@ class CommitmentsAdministrationGroup(
       case Right(configs) =>
         val toBeRemoved = domains
           .zip(individualMetrics)
-          .filter { case (domainId, participantId) =>
+          .filter { case (synchronizerId, participantId) =>
             configs.exists(slowCp =>
-              slowCp.domainIds.contains(domainId) && slowCp.participantsMetrics.contains(
-                participantId
-              )
+              slowCp.synchronizerIds.contains(synchronizerId) && slowCp.participantsMetrics
+                .contains(
+                  participantId
+                )
             )
           }
-          .groupBy { case (domainId, _) => domainId }
+          .groupBy { case (synchronizerId, _) => synchronizerId }
           .view
           .mapValues(_.map { case (_, participantId) => participantId })
           .toMap
 
-        val newConfigs = toBeRemoved.flatMap { case (domainId, participantSeq) =>
-          val existing = configs.find(slowCp => slowCp.domainIds.contains(domainId))
+        val newConfigs = toBeRemoved.flatMap { case (synchronizerId, participantSeq) =>
+          val existing = configs.find(slowCp => slowCp.synchronizerIds.contains(synchronizerId))
           existing match {
             case None => None
             case Some(config) =>
               Some(
                 new SlowCounterParticipantDomainConfig(
-                  Seq(domainId),
+                  Seq(synchronizerId),
                   config.distinguishedParticipants,
                   config.thresholdDistinguished,
                   config.thresholdDefault,
@@ -1295,7 +1325,7 @@ class CommitmentsAdministrationGroup(
       | - The participants in `individualMetrics`, which have individual metrics per participant showing how many
       reconciliation intervals that participant is behind""")
   def get_config_for_slow_counter_participants(
-      domains: Seq[DomainId]
+      domains: Seq[SynchronizerId]
   ): Seq[SlowCounterParticipantDomainConfig] =
     consoleEnvironment.run(
       runner.adminCommand(
@@ -1306,7 +1336,7 @@ class CommitmentsAdministrationGroup(
     )
 
   def get_config_for_slow_counter_participant(
-      domains: Seq[DomainId],
+      domains: Seq[SynchronizerId],
       counterParticipants: Seq[ParticipantId],
   ): Seq[SlowCounterParticipantDomainConfig] =
     get_config_for_slow_counter_participants(domains).filter(config =>
@@ -1331,7 +1361,7 @@ class CommitmentsAdministrationGroup(
   )
   def get_intervals_behind_for_counter_participants(
       counterParticipants: Seq[ParticipantId],
-      domains: Seq[DomainId],
+      domains: Seq[SynchronizerId],
       threshold: Option[NonNegativeInt],
   ): Seq[CounterParticipantInfo] =
     consoleEnvironment.run(
@@ -1387,7 +1417,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
   ): Unit
 
   protected def participantIsActiveOnDomain(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       participantId: ParticipantId,
   ): Boolean
 
@@ -1617,9 +1647,9 @@ trait ParticipantAdministration extends FeatureFlagFilter {
   object domains extends Helpful {
 
     @Help.Summary("Returns the id of the given domain alias")
-    def id_of(domainAlias: DomainAlias): DomainId =
+    def id_of(domainAlias: DomainAlias): SynchronizerId =
       consoleEnvironment.run {
-        adminCommand(ParticipantAdminCommands.DomainConnectivity.GetDomainId(domainAlias))
+        adminCommand(ParticipantAdminCommands.DomainConnectivity.GetSynchronizerId(domainAlias))
       }
 
     @Help.Summary(
@@ -1634,14 +1664,20 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       list_connected().exists { r =>
         r.domainAlias == domainAlias &&
         r.healthy &&
-        participantIsActiveOnDomain(r.domainId, id)
+        participantIsActiveOnDomain(r.synchronizerId, id)
       }
 
     @Help.Summary(
       "Test whether a participant is connected to a domain"
     )
-    def is_connected(domainId: DomainId): Boolean =
-      list_connected().exists(_.domainId == domainId)
+    def is_connected(synchronizerId: SynchronizerId): Boolean =
+      list_connected().exists(_.synchronizerId == synchronizerId)
+
+    @Help.Summary(
+      "Test whether a participant is connected to a domain"
+    )
+    def is_connected(domain: DomainAlias): Boolean =
+      list_connected().exists(_.domainAlias == domain)
 
     @Help.Summary(
       "Macro to connect a participant to a locally configured domain given by reference"
@@ -1683,7 +1719,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         The arguments are:
           domain - A local domain or sequencer reference
           alias - The name you will be using to refer to this domain. Can not be changed anymore.
-          handshake only - If yes, only the handshake will be performed (no domain connection)
+          performHandshake - If true (default), will perform a handshake with the domain. If no, will only store the configuration without any query to the domain.
           manualConnect - Whether this connection should be handled manually and also excluded from automatic re-connect.
           maxRetryDelayMillis - Maximal amount of time (in milliseconds) between two connection attempts.
           priority - The priority of the domain. The higher the more likely a domain will be used.
@@ -1693,7 +1729,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     def register(
         domain: SequencerReference,
         alias: DomainAlias,
-        handshakeOnly: Boolean = false,
+        performHandshake: Boolean = true,
         manualConnect: Boolean = false,
         maxRetryDelayMillis: Option[Long] = None,
         priority: Int = 0,
@@ -1709,7 +1745,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         maxRetryDelayMillis.map(NonNegativeFiniteDuration.tryOfMillis),
         priority,
       )
-      register_with_config(config, handshakeOnly = handshakeOnly, validation, synchronize)
+      register_by_config(config, performHandshake = performHandshake, validation, synchronize)
     }
 
     @Help.Summary(
@@ -1718,13 +1754,13 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     @Help.Description("""
         The arguments are:
           config - Config for the domain connection
-          handshake only - If yes, only the handshake will be performed (no domain connection)
+          performHandshake - If true (default), will perform handshake with the domain. If no, will only store configuration without any query to the domain.
           validation - Whether to validate the connectivity and ids of the given sequencers (default All)
           synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
         """)
-    def register_with_config(
+    def register_by_config(
         config: DomainConnectionConfig,
-        handshakeOnly: Boolean,
+        performHandshake: Boolean,
         validation: SequencerConnectionValidation = SequencerConnectionValidation.All,
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
@@ -1738,7 +1774,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           ParticipantCommands.domains.register(
             runner,
             config,
-            handshakeOnly = handshakeOnly,
+            performHandshake = performHandshake,
             validation,
           )
         }
@@ -1793,22 +1829,18 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         ),
     ): Unit = {
       val current = this.config(config.domain)
+
       if (current.isEmpty) {
         // architecture-handbook-entry-begin: OnboardParticipantConnect
-        // register the domain configuration
+        // connect to the new domain
         consoleEnvironment.run {
-          ParticipantCommands.domains.register(runner, config, handshakeOnly = false, validation)
-        }
-        if (!config.manualConnect) {
-          reconnect(config.domain.unwrap, retry = false).discard
-          // now update the domain settings to auto-connect
-          modify(config.domain.unwrap, _.copy(manualConnect = false), validation)
+          ParticipantCommands.domains.connect(runner, config, validation)
         }
         // architecture-handbook-entry-end: OnboardParticipantConnect
-      } else if (!config.manualConnect) {
+      } else {
         reconnect(config.domain, retry = false).discard
-        modify(config.domain.unwrap, _.copy(manualConnect = false), validation)
       }
+
       synchronize.foreach { timeout =>
         ConsoleMacros.utils.synchronize_topology(Some(timeout))(consoleEnvironment)
       }
@@ -1847,7 +1879,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           domainAlias - The name you will be using to refer to this domain. Can not be changed anymore.
           connection - The connection string to connect to this domain. I.e. https://url:port
           manualConnect - Whether this connection should be handled manually and also excluded from automatic re-connect.
-          domainId - Optionally the domainId you expect to see on this domain.
+          synchronizerId - Optionally the synchronizerId you expect to see on this domain.
           certificatesPath - Path to TLS certificate files to use as a trust anchor.
           priority - The priority of the domain. The higher the more likely a domain will be used.
           timeTrackerConfig - The configuration for the domain time tracker.
@@ -1858,7 +1890,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         domainAlias: DomainAlias,
         connection: String,
         manualConnect: Boolean = false,
-        domainId: Option[DomainId] = None,
+        synchronizerId: Option[SynchronizerId] = None,
         certificatesPath: String = "",
         priority: Int = 0,
         timeTrackerConfig: DomainTimeTrackerConfig = DomainTimeTrackerConfig(),
@@ -1871,7 +1903,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         domainAlias,
         connection,
         manualConnect,
-        domainId,
+        synchronizerId,
         certificatesPath,
         priority,
         timeTrackerConfig = timeTrackerConfig,
@@ -1940,7 +1972,9 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         ),
     ): Boolean = {
       val ret = consoleEnvironment.run {
-        adminCommand(ParticipantAdminCommands.DomainConnectivity.ConnectDomain(domainAlias, retry))
+        adminCommand(
+          ParticipantAdminCommands.DomainConnectivity.ReconnectDomain(domainAlias, retry)
+        )
       }
       if (ret) {
         synchronize.foreach { timeout =>
@@ -2024,8 +2058,11 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     }
 
     @Help.Summary("List the configured domains of this participant")
+    @Help.Description(
+      "For each returned domain, the boolean indicates whether the participant is currently connected to the domain."
+    )
     def list_registered(): Seq[(DomainConnectionConfig, Boolean)] = consoleEnvironment.run {
-      adminCommand(ParticipantAdminCommands.DomainConnectivity.ListConfiguredDomains)
+      adminCommand(ParticipantAdminCommands.DomainConnectivity.ListRegisteredDomains)
     }
 
     @Help.Summary("Returns true if a domain is registered using the given alias")
@@ -2044,12 +2081,11 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     ): Unit =
       consoleEnvironment.runE {
         for {
-          configured <- adminCommand(
-            ParticipantAdminCommands.DomainConnectivity.ListConfiguredDomains
+          registeredDomains <- adminCommand(
+            ParticipantAdminCommands.DomainConnectivity.ListRegisteredDomains
           ).toEither
-          cfg <- configured
-            .map(_._1)
-            .find(_.domain == domain)
+          cfg <- registeredDomains
+            .collectFirst { case (config, _) if config.domain == domain => config }
             .toRight(s"No such domain $domain configured")
           newConfig = modifier(cfg)
           _ <- Either.cond(
@@ -2139,7 +2175,7 @@ trait ParticipantHealthAdministrationCommon extends FeatureFlagFilter {
   private def ping_internal(
       participantId: ParticipantId,
       timeout: NonNegativeDuration,
-      domainId: Option[DomainId],
+      synchronizerId: Option[SynchronizerId],
       id: String,
   ): Either[String, Duration] =
     consoleEnvironment.run {
@@ -2150,7 +2186,7 @@ trait ParticipantHealthAdministrationCommon extends FeatureFlagFilter {
             Set(),
             timeout,
             0,
-            domainId,
+            synchronizerId,
             "",
             id,
           )
@@ -2164,11 +2200,11 @@ trait ParticipantHealthAdministrationCommon extends FeatureFlagFilter {
   def ping(
       participantId: ParticipantId,
       timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.ping,
-      domainId: Option[DomainId] = None,
+      synchronizerId: Option[SynchronizerId] = None,
       id: String = "",
   ): Duration = {
     val adminApiRes: Either[String, Duration] =
-      ping_internal(participantId, timeout, domainId, id)
+      ping_internal(participantId, timeout, synchronizerId, id)
     consoleEnvironment.runE(
       adminApiRes.leftMap { reason =>
         s"Unable to ping $participantId within ${LoggerUtil
@@ -2185,10 +2221,10 @@ trait ParticipantHealthAdministrationCommon extends FeatureFlagFilter {
   def maybe_ping(
       participantId: ParticipantId,
       timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.ping,
-      domainId: Option[DomainId] = None,
+      synchronizerId: Option[SynchronizerId] = None,
       id: String = "",
   ): Option[Duration] = check(FeatureFlag.Testing) {
-    ping_internal(participantId, timeout, domainId, id).toOption
+    ping_internal(participantId, timeout, synchronizerId, id).toOption
   }
 }
 
@@ -2217,13 +2253,15 @@ class ParticipantHealthAdministration(
       |operations, for example."""
   )
   def count_in_flight(domainAlias: DomainAlias): InFlightCount = {
-    val domainId = consoleEnvironment.run {
-      runner.adminCommand(ParticipantAdminCommands.DomainConnectivity.GetDomainId(domainAlias))
+    val synchronizerId = consoleEnvironment.run {
+      runner.adminCommand(
+        ParticipantAdminCommands.DomainConnectivity.GetSynchronizerId(domainAlias)
+      )
     }
 
     consoleEnvironment.run {
       runner.adminCommand(
-        ParticipantAdminCommands.Inspection.CountInFlight(domainId)
+        ParticipantAdminCommands.Inspection.CountInFlight(synchronizerId)
       )
     }
   }

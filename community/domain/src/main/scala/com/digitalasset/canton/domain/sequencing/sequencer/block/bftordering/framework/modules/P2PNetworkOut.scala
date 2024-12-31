@@ -4,7 +4,7 @@
 package com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.framework.modules
 
 import com.digitalasset.canton.domain.sequencing.sequencer.bftordering.v1
-import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.admin.EnterpriseSequencerBftAdminData.PeerNetworkStatus
+import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.admin.SequencerBftAdminData.PeerNetworkStatus
 import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.framework.modules.dependencies.P2PNetworkOutModuleDependencies
 import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.framework.{Env, Module}
@@ -56,6 +56,14 @@ object P2PNetworkOut {
     ) extends BftOrderingNetworkMessage {
       override def toProto: v1.BftOrderingMessageBody = v1.BftOrderingMessageBody.of(
         v1.BftOrderingMessageBody.Message.ConsensusMessage(signedMessage.toProto)
+      )
+    }
+
+    final case class RetransmissionRequest(
+        signedMessage: SignedMessage[ConsensusStatus.EpochStatus]
+    ) extends BftOrderingNetworkMessage {
+      override def toProto: v1.BftOrderingMessageBody = v1.BftOrderingMessageBody.of(
+        v1.BftOrderingMessageBody.Message.RetransmissionMessage(signedMessage.toProto)
       )
     }
 

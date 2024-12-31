@@ -506,6 +506,7 @@ object BuildCommon {
       `daml-errors`,
       `daml-adjustable-clock`,
       `daml-tls`,
+      `kms-driver-api`,
       `ledger-common`,
       `ledger-common-dars-lf-v2-1`,
       `ledger-common-dars-lf-v2-dev`,
@@ -679,6 +680,7 @@ object BuildCommon {
         `community-admin-api`,
         // No strictly internal dependencies on purpose so that this can be a foundational module and avoid circular dependencies
         `slick-fork`,
+        `kms-driver-api`,
       )
       .settings(
         sharedCantonSettings,
@@ -973,6 +975,20 @@ object BuildCommon {
         // applied to `test` scope are used here. This can be reviewed in the future.
         scalacOptions --= JvmRulesPlugin.scalacOptionsToDisableForTests,
         Compile / compile / wartremoverErrors := JvmRulesPlugin.wartremoverErrorsForTestScope,
+      )
+
+    lazy val `kms-driver-api` = project
+      .in(file("community/kms-driver-api"))
+      .dependsOn(
+        `wartremover-extension` % "compile->compile;test->test"
+      )
+      .settings(
+        sharedCantonSettings,
+        libraryDependencies ++= Seq(
+          pureconfig_core,
+          slf4j_api,
+          opentelemetry_api,
+        ),
       )
 
     // Project for specifying the sequencer driver API

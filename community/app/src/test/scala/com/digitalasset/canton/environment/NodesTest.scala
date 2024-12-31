@@ -19,6 +19,7 @@ import com.digitalasset.canton.concurrent.{
   FutureSupervisor,
 }
 import com.digitalasset.canton.config.*
+import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
 import com.digitalasset.canton.crypto.admin.grpc.GrpcVaultService.CommunityGrpcVaultServiceFactory
 import com.digitalasset.canton.crypto.store.CryptoPrivateStore.CommunityCryptoPrivateStoreFactory
 import com.digitalasset.canton.crypto.{CommunityCryptoFactory, Crypto}
@@ -88,6 +89,7 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
       override def caching: CachingConfigs = CachingConfigs()
       override def alphaVersionSupport: Boolean = false
       override def watchdog: Option[WatchdogConfig] = None
+      override def sessionSigningKeys: SessionSigningKeysConfig = SessionSigningKeysConfig.disabled
     }
   }
 
@@ -112,6 +114,9 @@ class NodesTest extends FixtureAnyWordSpec with BaseTest with HasExecutionContex
       initialProtocolVersion: ProtocolVersion = testedProtocolVersion,
       exitOnFatalFailures: Boolean = true,
       watchdog: Option[WatchdogConfig] = None,
+      startupMemoryCheckConfig: StartupMemoryCheckConfig = StartupMemoryCheckConfig(
+        ReportingLevel.Warn
+      ),
   ) extends CantonNodeParameters
 
   private val metricsFactory: LabeledMetricsFactory = new InMemoryMetricsFactory

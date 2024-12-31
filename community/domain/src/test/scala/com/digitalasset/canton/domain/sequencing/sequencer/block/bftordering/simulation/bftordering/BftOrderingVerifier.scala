@@ -21,14 +21,12 @@ import org.scalatest.matchers.should.Matchers
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
-import scala.concurrent.duration.FiniteDuration
 import scala.jdk.DurationConverters.ScalaDurationOps
 
 class BftOrderingVerifier(
     queue: mutable.Queue[(SequencerId, BlockFormat.Block)],
     stores: Map[SequencerId, SimulationOutputBlockMetadataStore],
     onboardingTimes: Map[SequencerId, TopologyActivationTime],
-    livenessRecoveryTimeout: FiniteDuration,
     simSettings: SimulationSettings,
 ) extends SimulationVerifier
     with Matchers {
@@ -62,6 +60,20 @@ class BftOrderingVerifier(
     checkStores()
   }
 
+  override def aFutureHappened(peer: SequencerId): Unit = ()
+
+  def newStage(
+      simulationSettings: SimulationSettings,
+      newOnboardingTimes: Map[SequencerId, TopologyActivationTime],
+      newStores: Map[SequencerId, SimulationOutputBlockMetadataStore],
+  ): BftOrderingVerifier =
+    new BftOrderingVerifier(
+      queue,
+      stores ++ newStores,
+      newOnboardingTimes,
+      simulationSettings,
+    )
+
   private def checkLiveness(at: CantonTimestamp): Unit =
     livenessState match {
       case LivenessState.NotChecking => ()
@@ -79,7 +91,7 @@ class BftOrderingVerifier(
               s"current peano queue heads = ${peanoQueues.view.mapValues(_.head.unwrap).toMap}; " +
               "liveness timeout occurred"
           ) {
-            at should be <= startedAt.add(livenessRecoveryTimeout.toJava)
+            at should be <= startedAt.add(simSettings.livenessCheckInterval.toJava)
           }
         }
     }
@@ -136,9 +148,6 @@ class BftOrderingVerifier(
     }
     queue.clear()
   }
-
-  override def aFutureHappened(peer: SequencerId): Unit =
-    ()
 }
 
 object BftOrderingVerifier {

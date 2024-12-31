@@ -10,6 +10,7 @@ import com.digitalasset.canton.crypto.DomainSyncCryptoClient
 import com.digitalasset.canton.domain.block.SequencerDriver
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.sequencer.block.DriverBlockSequencerFactory
+import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.core.driver.BftSequencerFactory
 import com.digitalasset.canton.domain.sequencing.sequencer.store.SequencerStore
 import com.digitalasset.canton.domain.sequencing.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.environment.CantonNodeParameters
@@ -17,7 +18,7 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, H
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.{DomainId, SequencerId}
+import com.digitalasset.canton.topology.{SequencerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import io.opentelemetry.api.trace.Tracer
@@ -37,7 +38,7 @@ trait SequencerFactory extends FlagCloseable with HasCloseContext {
   ): EitherT[FutureUnlessShutdown, String, Unit]
 
   def create(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       sequencerId: SequencerId,
       clock: Clock,
       driverClock: Clock, // this clock is only used in tests, otherwise can the same clock as above can be passed
@@ -110,7 +111,7 @@ class CommunityDatabaseSequencerFactory(
     ) {
 
   override def create(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       sequencerId: SequencerId,
       clock: Clock,
       driverClock: Clock,
@@ -131,7 +132,7 @@ class CommunityDatabaseSequencerFactory(
       storage,
       sequencerStore,
       clock,
-      domainId,
+      synchronizerId,
       sequencerId,
       sequencerProtocolVersion,
       domainSyncCryptoApi,
@@ -191,6 +192,20 @@ object CommunitySequencerFactory extends MkSequencerFactory {
         sequencerId,
         nodeParameters,
         loggerFactory,
+      )
+
+    case CommunitySequencerConfig.BftSequencer(blockSequencerConfig, config) =>
+      new BftSequencerFactory(
+        config,
+        blockSequencerConfig,
+        health,
+        storage,
+        protocolVersion,
+        sequencerId,
+        nodeParameters,
+        metrics,
+        loggerFactory,
+        blockSequencerConfig.testingInterceptor,
       )
 
     case CommunitySequencerConfig.External(

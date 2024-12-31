@@ -11,7 +11,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.bftordering.v1.{
   BftOrderingMessageBody,
   BftOrderingServiceReceiveRequest,
 }
-import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.admin.EnterpriseSequencerBftAdminData.{
+import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.admin.SequencerBftAdminData.{
   PeerEndpointHealth,
   PeerEndpointHealthStatus,
   PeerEndpointStatus,
@@ -609,5 +609,6 @@ object BftP2PNetworkOutTest {
         case Success(value) => value
         case Failure(exception) => fail(exception)
       }
+    override def close(): Unit = ()
   }
 }

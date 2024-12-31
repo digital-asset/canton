@@ -47,7 +47,7 @@ import com.digitalasset.canton.sequencing.SequencerConnectionValidation
 import com.digitalasset.canton.sequencing.protocol.TrafficState
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.time.PositiveSeconds
-import com.digitalasset.canton.topology.{DomainId, ParticipantId, PartyId}
+import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{BinaryFileUtil, GrpcStreamingUtils}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -353,7 +353,7 @@ object ParticipantAdminCommands {
         id: Option[String],
         party: PartyId,
         sourceParticipant: ParticipantId,
-        domain: DomainId,
+        synchronizerId: SynchronizerId,
     ) extends GrpcAdminCommand[StartPartyReplicationRequest, StartPartyReplicationResponse, Unit] {
       override type Svc = PartyManagementServiceStub
 
@@ -366,7 +366,7 @@ object ParticipantAdminCommands {
             id = id,
             partyUid = party.uid.toProtoPrimitive,
             sourceParticipantUid = sourceParticipant.uid.toProtoPrimitive,
-            domainUid = domain.uid.toProtoPrimitive,
+            domainUid = synchronizerId.toProtoPrimitive,
           )
         )
 
@@ -388,10 +388,10 @@ object ParticipantAdminCommands {
     final case class ExportAcs(
         parties: Set[PartyId],
         partiesOffboarding: Boolean,
-        filterDomainId: Option[DomainId],
+        filterSynchronizerId: Option[SynchronizerId],
         timestamp: Option[Instant],
         observer: StreamObserver[ExportAcsResponse],
-        contractDomainRenames: Map[DomainId, (DomainId, ProtocolVersion)],
+        contractDomainRenames: Map[SynchronizerId, (SynchronizerId, ProtocolVersion)],
         force: Boolean,
     ) extends GrpcAdminCommand[
           ExportAcsRequest,
@@ -408,15 +408,16 @@ object ParticipantAdminCommands {
         Right(
           ExportAcsRequest(
             parties.map(_.toLf).toSeq,
-            filterDomainId.map(_.toProtoPrimitive).getOrElse(""),
+            filterSynchronizerId.map(_.toProtoPrimitive).getOrElse(""),
             timestamp.map(Timestamp.apply),
-            contractDomainRenames.map { case (source, (targetDomainId, targetProtocolVersion)) =>
-              val targetDomain = ExportAcsRequest.TargetDomain(
-                domainId = targetDomainId.toProtoPrimitive,
-                protocolVersion = targetProtocolVersion.toProtoPrimitive,
-              )
+            contractDomainRenames.map {
+              case (source, (targetSynchronizerId, targetProtocolVersion)) =>
+                val targetDomain = ExportAcsRequest.TargetDomain(
+                  synchronizerId = targetSynchronizerId.toProtoPrimitive,
+                  protocolVersion = targetProtocolVersion.toProtoPrimitive,
+                )
 
-              (source.toProtoPrimitive, targetDomain)
+                (source.toProtoPrimitive, targetDomain)
             },
             force = force,
             partiesOffboarding = partiesOffboarding,
@@ -580,7 +581,7 @@ object ParticipantAdminCommands {
     }
 
     final case class IgnoreEvents(
-        domainId: DomainId,
+        synchronizerId: SynchronizerId,
         fromInclusive: SequencerCounter,
         toInclusive: SequencerCounter,
         force: Boolean,
@@ -603,7 +604,7 @@ object ParticipantAdminCommands {
       override protected def createRequest(): Either[String, IgnoreEventsRequest] =
         Right(
           IgnoreEventsRequest(
-            domainId = domainId.toProtoPrimitive,
+            synchronizerId = synchronizerId.toProtoPrimitive,
             fromInclusive = fromInclusive.toProtoPrimitive,
             toInclusive = toInclusive.toProtoPrimitive,
             force = force,
@@ -615,7 +616,7 @@ object ParticipantAdminCommands {
     }
 
     final case class UnignoreEvents(
-        domainId: DomainId,
+        synchronizerId: SynchronizerId,
         fromInclusive: SequencerCounter,
         toInclusive: SequencerCounter,
         force: Boolean,
@@ -638,7 +639,7 @@ object ParticipantAdminCommands {
       override protected def createRequest(): Either[String, UnignoreEventsRequest] =
         Right(
           UnignoreEventsRequest(
-            domainId = domainId.toProtoPrimitive,
+            synchronizerId = synchronizerId.toProtoPrimitive,
             fromInclusive = fromInclusive.toProtoPrimitive,
             toInclusive = toInclusive.toProtoPrimitive,
             force = force,
@@ -650,8 +651,11 @@ object ParticipantAdminCommands {
       ): Either[String, Unit] = Either.unit
     }
 
-    final case class RollbackUnassignment(unassignId: String, source: DomainId, target: DomainId)
-        extends GrpcAdminCommand[RollbackUnassignmentRequest, RollbackUnassignmentResponse, Unit] {
+    final case class RollbackUnassignment(
+        unassignId: String,
+        source: SynchronizerId,
+        target: SynchronizerId,
+    ) extends GrpcAdminCommand[RollbackUnassignmentRequest, RollbackUnassignmentResponse, Unit] {
       override type Svc = ParticipantRepairServiceStub
 
       override def createService(channel: ManagedChannel): ParticipantRepairServiceStub =
@@ -685,7 +689,7 @@ object ParticipantAdminCommands {
         validators: Set[String],
         timeout: config.NonNegativeDuration,
         levels: Int,
-        domainId: Option[DomainId],
+        synchronizerId: Option[SynchronizerId],
         workflowId: String,
         id: String,
     ) extends GrpcAdminCommand[PingRequest, PingResponse, Either[String, Duration]] {
@@ -701,7 +705,7 @@ object ParticipantAdminCommands {
             validators.toSeq,
             Some(timeout.toProtoPrimitive),
             levels,
-            domainId.map(_.toProtoPrimitive).getOrElse(""),
+            synchronizerId.map(_.toProtoPrimitive).getOrElse(""),
             workflowId,
             id,
           )
@@ -758,20 +762,20 @@ object ParticipantAdminCommands {
 
     }
 
-    final case class ConnectDomain(domainAlias: DomainAlias, retry: Boolean)
-        extends Base[ConnectDomainRequest, ConnectDomainResponse, Boolean] {
+    final case class ReconnectDomain(domainAlias: DomainAlias, retry: Boolean)
+        extends Base[ReconnectDomainRequest, ReconnectDomainResponse, Boolean] {
 
-      override protected def createRequest(): Either[String, ConnectDomainRequest] =
-        Right(ConnectDomainRequest(domainAlias.toProtoPrimitive, retry))
+      override protected def createRequest(): Either[String, ReconnectDomainRequest] =
+        Right(ReconnectDomainRequest(domainAlias.toProtoPrimitive, retry))
 
       override protected def submitRequest(
           service: DomainConnectivityServiceStub,
-          request: ConnectDomainRequest,
-      ): Future[ConnectDomainResponse] =
-        service.connectDomain(request)
+          request: ReconnectDomainRequest,
+      ): Future[ReconnectDomainResponse] =
+        service.reconnectDomain(request)
 
       override protected def handleResponse(
-          response: ConnectDomainResponse
+          response: ReconnectDomainResponse
       ): Either[String, Boolean] =
         Right(response.connectedSuccessfully)
 
@@ -780,22 +784,24 @@ object ParticipantAdminCommands {
 
     }
 
-    final case class GetDomainId(domainAlias: DomainAlias)
-        extends Base[GetDomainIdRequest, GetDomainIdResponse, DomainId] {
+    final case class GetSynchronizerId(domainAlias: DomainAlias)
+        extends Base[GetSynchronizerIdRequest, GetSynchronizerIdResponse, SynchronizerId] {
 
-      override protected def createRequest(): Either[String, GetDomainIdRequest] =
-        Right(GetDomainIdRequest(domainAlias.toProtoPrimitive))
+      override protected def createRequest(): Either[String, GetSynchronizerIdRequest] =
+        Right(GetSynchronizerIdRequest(domainAlias.toProtoPrimitive))
 
       override protected def submitRequest(
           service: DomainConnectivityServiceStub,
-          request: GetDomainIdRequest,
-      ): Future[GetDomainIdResponse] =
-        service.getDomainId(request)
+          request: GetSynchronizerIdRequest,
+      ): Future[GetSynchronizerIdResponse] =
+        service.getSynchronizerId(request)
 
       override protected def handleResponse(
-          response: GetDomainIdResponse
-      ): Either[String, DomainId] =
-        DomainId.fromProtoPrimitive(response.domainId, "domain_id").leftMap(_.toString)
+          response: GetSynchronizerIdResponse
+      ): Either[String, SynchronizerId] =
+        SynchronizerId
+          .fromProtoPrimitive(response.synchronizerId, "synchronizer_id")
+          .leftMap(_.toString)
     }
 
     final case class DisconnectDomain(domainAlias: DomainAlias)
@@ -812,6 +818,23 @@ object ParticipantAdminCommands {
 
       override protected def handleResponse(
           response: DisconnectDomainResponse
+      ): Either[String, Unit] = Either.unit
+    }
+
+    final case class DisconnectAllDomains()
+        extends Base[DisconnectAllDomainsRequest, DisconnectAllDomainsResponse, Unit] {
+
+      override protected def createRequest(): Either[String, DisconnectAllDomainsRequest] =
+        Right(DisconnectAllDomainsRequest())
+
+      override protected def submitRequest(
+          service: DomainConnectivityServiceStub,
+          request: DisconnectAllDomainsRequest,
+      ): Future[DisconnectAllDomainsResponse] =
+        service.disconnectAllDomains(request)
+
+      override protected def handleResponse(
+          response: DisconnectAllDomainsResponse
       ): Either[String, Unit] = Either.unit
     }
 
@@ -839,27 +862,27 @@ object ParticipantAdminCommands {
 
     }
 
-    final case object ListConfiguredDomains
-        extends Base[ListConfiguredDomainsRequest, ListConfiguredDomainsResponse, Seq[
+    final case object ListRegisteredDomains
+        extends Base[ListRegisteredDomainsRequest, ListRegisteredDomainsResponse, Seq[
           (CDomainConnectionConfig, Boolean)
         ]] {
 
-      override protected def createRequest(): Either[String, ListConfiguredDomainsRequest] = Right(
-        ListConfiguredDomainsRequest()
+      override protected def createRequest(): Either[String, ListRegisteredDomainsRequest] = Right(
+        ListRegisteredDomainsRequest()
       )
 
       override protected def submitRequest(
           service: DomainConnectivityServiceStub,
-          request: ListConfiguredDomainsRequest,
-      ): Future[ListConfiguredDomainsResponse] =
-        service.listConfiguredDomains(request)
+          request: ListRegisteredDomainsRequest,
+      ): Future[ListRegisteredDomainsResponse] =
+        service.listRegisteredDomains(request)
 
       override protected def handleResponse(
-          response: ListConfiguredDomainsResponse
+          response: ListRegisteredDomainsResponse
       ): Either[String, Seq[(CDomainConnectionConfig, Boolean)]] = {
 
         def mapRes(
-            result: ListConfiguredDomainsResponse.Result
+            result: ListRegisteredDomainsResponse.Result
         ): Either[String, (CDomainConnectionConfig, Boolean)] =
           for {
             configP <- result.config.toRight("Server has sent empty config")
@@ -870,20 +893,53 @@ object ParticipantAdminCommands {
       }
     }
 
-    final case class RegisterDomain(
+    final case class ConnectDomain(
         config: CDomainConnectionConfig,
-        handshakeOnly: Boolean,
         sequencerConnectionValidation: SequencerConnectionValidation,
-    ) extends Base[RegisterDomainRequest, RegisterDomainResponse, Unit] {
+    ) extends Base[ConnectDomainRequest, ConnectDomainResponse, Unit] {
 
-      override protected def createRequest(): Either[String, RegisterDomainRequest] =
+      override protected def createRequest(): Either[String, ConnectDomainRequest] =
         Right(
-          RegisterDomainRequest(
-            add = Some(config.toProtoV30),
-            handshakeOnly = handshakeOnly,
+          ConnectDomainRequest(
+            config = Some(config.toProtoV30),
             sequencerConnectionValidation = sequencerConnectionValidation.toProtoV30,
           )
         )
+
+      override protected def submitRequest(
+          service: DomainConnectivityServiceStub,
+          request: ConnectDomainRequest,
+      ): Future[ConnectDomainResponse] =
+        service.connectDomain(request)
+
+      override protected def handleResponse(
+          response: ConnectDomainResponse
+      ): Either[String, Unit] = Either.unit
+
+      // can take long if we need to wait to become active
+      override def timeoutType: TimeoutType = DefaultUnboundedTimeout
+
+    }
+
+    final case class RegisterDomain(
+        config: CDomainConnectionConfig,
+        performHandshake: Boolean,
+        sequencerConnectionValidation: SequencerConnectionValidation,
+    ) extends Base[RegisterDomainRequest, RegisterDomainResponse, Unit] {
+
+      override protected def createRequest(): Either[String, RegisterDomainRequest] = {
+        val domainConnection =
+          if (performHandshake) RegisterDomainRequest.DomainConnection.DOMAIN_CONNECTION_HANDSHAKE
+          else RegisterDomainRequest.DomainConnection.DOMAIN_CONNECTION_NONE
+
+        Right(
+          RegisterDomainRequest(
+            config = Some(config.toProtoV30),
+            domainConnection = domainConnection,
+            sequencerConnectionValidation = sequencerConnectionValidation.toProtoV30,
+          )
+        )
+      }
 
       override protected def submitRequest(
           service: DomainConnectivityServiceStub,
@@ -908,7 +964,7 @@ object ParticipantAdminCommands {
       override protected def createRequest(): Either[String, ModifyDomainRequest] =
         Right(
           ModifyDomainRequest(
-            modify = Some(config.toProtoV30),
+            newConfig = Some(config.toProtoV30),
             sequencerConnectionValidation = sequencerConnectionValidation.toProtoV30,
           )
         )
@@ -1012,7 +1068,7 @@ object ParticipantAdminCommands {
     final case class OpenCommitment(
         observer: StreamObserver[v30.OpenCommitment.Response],
         commitment: AcsCommitment.CommitmentType,
-        domainId: DomainId,
+        synchronizerId: SynchronizerId,
         computedForCounterParticipant: ParticipantId,
         toInclusive: CantonTimestamp,
     ) extends Base[
@@ -1024,7 +1080,7 @@ object ParticipantAdminCommands {
         v30.OpenCommitment
           .Request(
             AcsCommitment.commitmentTypeToProto(commitment),
-            domainId.toProtoPrimitive,
+            synchronizerId.toProtoPrimitive,
             computedForCounterParticipant.toProtoPrimitive,
             Some(toInclusive.toProtoTimestamp),
           )
@@ -1052,7 +1108,7 @@ object ParticipantAdminCommands {
     final case class CommitmentContracts(
         observer: StreamObserver[v30.InspectCommitmentContracts.Response],
         contracts: Seq[LfContractId],
-        expectedDomain: DomainId,
+        expectedDomainId: SynchronizerId,
         timestamp: CantonTimestamp,
         downloadPayload: Boolean,
     ) extends Base[
@@ -1063,7 +1119,7 @@ object ParticipantAdminCommands {
       override protected def createRequest() = Right(
         v30.InspectCommitmentContracts.Request(
           contracts.map(_.toBytes.toByteString),
-          expectedDomain.toProtoPrimitive,
+          expectedDomainId.toProtoPrimitive,
           Some(timestamp.toProtoTimestamp),
           downloadPayload,
         )
@@ -1095,7 +1151,7 @@ object ParticipantAdminCommands {
     ) extends Base[
           v30.LookupReceivedAcsCommitments.Request,
           v30.LookupReceivedAcsCommitments.Response,
-          Map[DomainId, Seq[ReceivedAcsCmt]],
+          Map[SynchronizerId, Seq[ReceivedAcsCmt]],
         ] {
 
       override protected def createRequest() = Right(
@@ -1103,7 +1159,7 @@ object ParticipantAdminCommands {
           .Request(
             domainTimeRanges.map { case domainTimeRange =>
               v30.DomainTimeRange(
-                domainTimeRange.domain.toProtoPrimitive,
+                domainTimeRange.synchronizerId.toProtoPrimitive,
                 domainTimeRange.timeRange.map { timeRange =>
                   v30.TimeRange(
                     Some(timeRange.startExclusive.toProtoTimestamp),
@@ -1128,26 +1184,26 @@ object ParticipantAdminCommands {
           response: v30.LookupReceivedAcsCommitments.Response
       ): Either[
         String,
-        Map[DomainId, Seq[ReceivedAcsCmt]],
+        Map[SynchronizerId, Seq[ReceivedAcsCmt]],
       ] =
-        if (response.received.sizeIs != response.received.map(_.domainId).toSet.size)
+        if (response.received.sizeIs != response.received.map(_.synchronizerId).toSet.size)
           Left(s"Some domains are not unique in the response: ${response.received}")
         else
           response.received
             .traverse(receivedCmtPerDomain =>
               for {
-                domainId <- DomainId.fromString(receivedCmtPerDomain.domainId)
+                synchronizerId <- SynchronizerId.fromString(receivedCmtPerDomain.synchronizerId)
                 receivedCmts <- receivedCmtPerDomain.received
                   .map(fromProtoToReceivedAcsCmt)
                   .sequence
-              } yield domainId -> receivedCmts
+              } yield synchronizerId -> receivedCmts
             )
             .map(_.toMap)
     }
 
     final case class TimeRange(startExclusive: CantonTimestamp, endInclusive: CantonTimestamp)
 
-    final case class DomainTimeRange(domain: DomainId, timeRange: Option[TimeRange])
+    final case class DomainTimeRange(synchronizerId: SynchronizerId, timeRange: Option[TimeRange])
 
     final case class ReceivedAcsCmt(
         receivedCmtPeriod: CommitmentPeriod,
@@ -1217,7 +1273,7 @@ object ParticipantAdminCommands {
     ) extends Base[
           v30.LookupSentAcsCommitments.Request,
           v30.LookupSentAcsCommitments.Response,
-          Map[DomainId, Seq[SentAcsCmt]],
+          Map[SynchronizerId, Seq[SentAcsCmt]],
         ] {
 
       override protected def createRequest() = Right(
@@ -1225,7 +1281,7 @@ object ParticipantAdminCommands {
           .Request(
             domainTimeRanges.map { case domainTimeRange =>
               v30.DomainTimeRange(
-                domainTimeRange.domain.toProtoPrimitive,
+                domainTimeRange.synchronizerId.toProtoPrimitive,
                 domainTimeRange.timeRange.map { timeRange =>
                   v30.TimeRange(
                     Some(timeRange.startExclusive.toProtoTimestamp),
@@ -1250,9 +1306,9 @@ object ParticipantAdminCommands {
           response: v30.LookupSentAcsCommitments.Response
       ): Either[
         String,
-        Map[DomainId, Seq[SentAcsCmt]],
+        Map[SynchronizerId, Seq[SentAcsCmt]],
       ] =
-        if (response.sent.sizeIs != response.sent.map(_.domainId).toSet.size)
+        if (response.sent.sizeIs != response.sent.map(_.synchronizerId).toSet.size)
           Left(
             s"Some domains are not unique in the response: ${response.sent}"
           )
@@ -1260,9 +1316,9 @@ object ParticipantAdminCommands {
           response.sent
             .traverse(sentCmtPerDomain =>
               for {
-                domainId <- DomainId.fromString(sentCmtPerDomain.domainId)
+                synchronizerId <- SynchronizerId.fromString(sentCmtPerDomain.synchronizerId)
                 sentCmts <- sentCmtPerDomain.sent.map(fromProtoToSentAcsCmt).sequence
-              } yield domainId -> sentCmts
+              } yield synchronizerId -> sentCmts
             )
             .map(_.toMap)
     }
@@ -1327,7 +1383,7 @@ object ParticipantAdminCommands {
     }
 
     final case class SlowCounterParticipantDomainConfig(
-        domainIds: Seq[DomainId],
+        synchronizerIds: Seq[SynchronizerId],
         distinguishedParticipants: Seq[ParticipantId],
         thresholdDistinguished: NonNegativeInt,
         thresholdDefault: NonNegativeInt,
@@ -1335,7 +1391,7 @@ object ParticipantAdminCommands {
     ) {
       def toProtoV30: v30.SlowCounterParticipantDomainConfig =
         v30.SlowCounterParticipantDomainConfig(
-          domainIds.map(_.toProtoPrimitive),
+          synchronizerIds.map(_.toProtoPrimitive),
           distinguishedParticipants.map(_.toProtoPrimitive),
           thresholdDistinguished.value.toLong,
           thresholdDefault.value.toLong,
@@ -1354,9 +1410,9 @@ object ParticipantAdminCommands {
         val participantsMetrics =
           config.participantUidsMetrics.map(ParticipantId.tryFromProtoPrimitive)
         for {
-          domainIds <- config.domainIds.map(DomainId.fromString).sequence
+          synchronizerIds <- config.synchronizerIds.map(SynchronizerId.fromString).sequence
         } yield SlowCounterParticipantDomainConfig(
-          domainIds,
+          synchronizerIds,
           distinguishedParticipants,
           thresholdDistinguished,
           thresholdDefault,
@@ -1366,7 +1422,7 @@ object ParticipantAdminCommands {
     }
 
     final case class GetConfigForSlowCounterParticipants(
-        domainIds: Seq[DomainId]
+        synchronizerIds: Seq[SynchronizerId]
     ) extends Base[
           v30.GetConfigForSlowCounterParticipants.Request,
           v30.GetConfigForSlowCounterParticipants.Response,
@@ -1376,7 +1432,7 @@ object ParticipantAdminCommands {
       override protected def createRequest() = Right(
         v30.GetConfigForSlowCounterParticipants
           .Request(
-            domainIds.map(_.toProtoPrimitive)
+            synchronizerIds.map(_.toProtoPrimitive)
           )
       )
 
@@ -1394,14 +1450,14 @@ object ParticipantAdminCommands {
 
     final case class CounterParticipantInfo(
         participantId: ParticipantId,
-        domainId: DomainId,
+        synchronizerId: SynchronizerId,
         intervalsBehind: NonNegativeLong,
         asOfSequencingTimestamp: Instant,
     )
 
     final case class GetIntervalsBehindForCounterParticipants(
         counterParticipants: Seq[ParticipantId],
-        domainIds: Seq[DomainId],
+        synchronizerIds: Seq[SynchronizerId],
         threshold: NonNegativeInt,
     ) extends Base[
           v30.GetIntervalsBehindForCounterParticipants.Request,
@@ -1413,7 +1469,7 @@ object ParticipantAdminCommands {
         v30.GetIntervalsBehindForCounterParticipants
           .Request(
             counterParticipants.map(_.toProtoPrimitive),
-            domainIds.map(_.toProtoPrimitive),
+            synchronizerIds.map(_.toProtoPrimitive),
             Some(threshold.value.toLong),
           )
       )
@@ -1429,7 +1485,7 @@ object ParticipantAdminCommands {
       ): Either[String, Seq[CounterParticipantInfo]] =
         response.intervalsBehind.map { info =>
           for {
-            domainId <- DomainId.fromString(info.domainId)
+            synchronizerId <- SynchronizerId.fromString(info.synchronizerId)
             participantId <- ParticipantId
               .fromProtoPrimitive(info.counterParticipantUid, "")
               .leftMap(_.toString)
@@ -1443,14 +1499,14 @@ object ParticipantAdminCommands {
             intervalsBehind <- NonNegativeLong.create(info.intervalsBehind).leftMap(_.toString)
           } yield CounterParticipantInfo(
             participantId,
-            domainId,
+            synchronizerId,
             intervalsBehind,
             asOf.toInstant,
           )
         }.sequence
     }
 
-    final case class CountInFlight(domainId: DomainId)
+    final case class CountInFlight(synchronizerId: SynchronizerId)
         extends Base[
           v30.CountInFlight.Request,
           v30.CountInFlight.Response,
@@ -1458,7 +1514,7 @@ object ParticipantAdminCommands {
         ] {
 
       override protected def createRequest(): Either[String, v30.CountInFlight.Request] =
-        Right(v30.CountInFlight.Request(domainId.toProtoPrimitive))
+        Right(v30.CountInFlight.Request(synchronizerId.toProtoPrimitive))
 
       override protected def submitRequest(
           service: InspectionServiceStub,
@@ -1578,7 +1634,7 @@ object ParticipantAdminCommands {
 
     final case class SetNoWaitCommitmentsFrom(
         counterParticipants: Seq[ParticipantId],
-        domainIds: Seq[DomainId],
+        synchronizerIds: Seq[SynchronizerId],
     ) extends Base[
           pruning.v30.SetNoWaitCommitmentsFrom.Request,
           pruning.v30.SetNoWaitCommitmentsFrom.Response,
@@ -1588,7 +1644,7 @@ object ParticipantAdminCommands {
         Right(
           pruning.v30.SetNoWaitCommitmentsFrom.Request(
             counterParticipants.map(_.toProtoPrimitive),
-            domainIds.map(_.toProtoPrimitive),
+            synchronizerIds.map(_.toProtoPrimitive),
           )
         )
 
@@ -1605,14 +1661,14 @@ object ParticipantAdminCommands {
 
     final case class NoWaitCommitments(
         counterParticipant: ParticipantId,
-        domains: Seq[DomainId],
+        domains: Seq[SynchronizerId],
     )
 
     object NoWaitCommitments {
       def fromSetup(setup: Seq[WaitCommitmentsSetup]): Either[String, Seq[NoWaitCommitments]] = {
         val s = setup.map(setup =>
           for {
-            domains <- setup.domainIds.traverse(_.domainIds.traverse(DomainId.fromString))
+            domains <- setup.domains.traverse(_.synchronizerIds.traverse(SynchronizerId.fromString))
             participantId <- ParticipantId
               .fromProtoPrimitive(setup.counterParticipantUid, "")
               .leftMap(_.toString)
@@ -1639,7 +1695,7 @@ object ParticipantAdminCommands {
 
     final case class SetWaitCommitmentsFrom(
         counterParticipants: Seq[ParticipantId],
-        domainIds: Seq[DomainId],
+        synchronizerIds: Seq[SynchronizerId],
     ) extends Base[
           pruning.v30.ResetNoWaitCommitmentsFrom.Request,
           pruning.v30.ResetNoWaitCommitmentsFrom.Response,
@@ -1650,7 +1706,7 @@ object ParticipantAdminCommands {
         Right(
           pruning.v30.ResetNoWaitCommitmentsFrom.Request(
             counterParticipants.map(_.toProtoPrimitive),
-            domainIds.map(_.toProtoPrimitive),
+            synchronizerIds.map(_.toProtoPrimitive),
           )
         )
 
@@ -1667,14 +1723,14 @@ object ParticipantAdminCommands {
 
     final case class WaitCommitments(
         counterParticipant: ParticipantId,
-        domains: Seq[DomainId],
+        domains: Seq[SynchronizerId],
     )
 
     object WaitCommitments {
       def fromSetup(setup: Seq[WaitCommitmentsSetup]): Either[String, Seq[WaitCommitments]] = {
         val s = setup.map(setup =>
           for {
-            domains <- setup.domainIds.traverse(_.domainIds.traverse(DomainId.fromString))
+            domains <- setup.domains.traverse(_.synchronizerIds.traverse(SynchronizerId.fromString))
           } yield WaitCommitments(
             ParticipantId.tryFromProtoPrimitive(setup.counterParticipantUid),
             domains.getOrElse(Seq.empty),
@@ -1697,7 +1753,7 @@ object ParticipantAdminCommands {
     }
 
     final case class GetNoWaitCommitmentsFrom(
-        domains: Seq[DomainId],
+        domains: Seq[SynchronizerId],
         counterParticipants: Seq[ParticipantId],
     ) extends Base[
           pruning.v30.GetNoWaitCommitmentsFrom.Request,
@@ -1796,7 +1852,7 @@ object ParticipantAdminCommands {
   }
 
   object TrafficControl {
-    final case class GetTrafficControlState(domainId: DomainId)
+    final case class GetTrafficControlState(synchronizerId: SynchronizerId)
         extends GrpcAdminCommand[
           TrafficControlStateRequest,
           TrafficControlStateResponse,
@@ -1816,7 +1872,7 @@ object ParticipantAdminCommands {
         service.trafficControlState(request)
 
       override protected def createRequest(): Either[String, TrafficControlStateRequest] = Right(
-        TrafficControlStateRequest(domainId.toProtoPrimitive)
+        TrafficControlStateRequest(synchronizerId.toProtoPrimitive)
       )
 
       override protected def handleResponse(

@@ -80,7 +80,7 @@ import com.digitalasset.canton.topology.processing.{
   SequencedTime,
   TopologyTransactionProcessor,
 }
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
+import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
@@ -96,7 +96,7 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
 
 /** A connected domain from the synchronization service.
   *
-  * @param domainId          The identifier of the connected domain.
+  * @param synchronizerId          The identifier of the connected domain.
   * @param domainHandle      A domain handle providing sequencer clients.
   * @param participantId     The participant node id hosting this sync service.
   * @param persistent        The persistent state of the sync domain.
@@ -105,7 +105,7 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
   * @param domainCrypto      Synchronisation crypto utility combining IPS and Crypto operations for a single domain.
   */
 class SyncDomain(
-    val domainId: DomainId,
+    val synchronizerId: SynchronizerId,
     val domainHandle: DomainHandle,
     participantId: ParticipantId,
     engine: Engine,
@@ -116,7 +116,7 @@ class SyncDomain(
     val packageService: Eval[PackageService],
     domainCrypto: DomainSyncCryptoClient,
     identityPusher: ParticipantTopologyDispatcher,
-    topologyProcessorFactory: TopologyTransactionProcessor.Factory,
+    topologyProcessor: TopologyTransactionProcessor,
     missingKeysAlerter: MissingKeysAlerter,
     reassignmentCoordination: ReassignmentCoordination,
     commandProgressTracker: CommandProgressTracker,
@@ -157,7 +157,7 @@ class SyncDomain(
   private[canton] val requestGenerator =
     TransactionConfirmationRequestFactory(
       participantId,
-      domainId,
+      synchronizerId,
       staticDomainParameters.protocolVersion,
     )(
       domainCrypto.crypto.pureCrypto,
@@ -180,7 +180,7 @@ class SyncDomain(
   private val transactionProcessor: TransactionProcessor = new TransactionProcessor(
     participantId,
     requestGenerator,
-    domainId,
+    synchronizerId,
     damle,
     staticDomainParameters,
     parameters,
@@ -199,7 +199,7 @@ class SyncDomain(
   )
 
   private val unassignmentProcessor: UnassignmentProcessor = new UnassignmentProcessor(
-    Source(domainId),
+    Source(synchronizerId),
     participantId,
     damle,
     Source(staticDomainParameters),
@@ -218,7 +218,7 @@ class SyncDomain(
   )
 
   private val assignmentProcessor: AssignmentProcessor = new AssignmentProcessor(
-    Target(domainId),
+    Target(synchronizerId),
     participantId,
     damle,
     Target(staticDomainParameters),
@@ -236,13 +236,10 @@ class SyncDomain(
     this,
   )
 
-  private val topologyProcessor =
-    topologyProcessorFactory.create(acsCommitmentProcessor.scheduleTopologyTick)
-
   private val trafficProcessor =
     new TrafficControlProcessor(
       domainCrypto,
-      domainId,
+      synchronizerId,
       Option.empty[CantonTimestamp],
       loggerFactory,
     )
@@ -262,7 +259,7 @@ class SyncDomain(
       ephemeral,
       domainCrypto,
       sequencerClient,
-      domainId,
+      synchronizerId,
       participantId,
       staticDomainParameters.protocolVersion,
       timeouts,
@@ -277,7 +274,7 @@ class SyncDomain(
 
   private val registerIdentityTransactionHandle = identityPusher.createHandler(
     domainHandle.domainAlias,
-    domainId,
+    synchronizerId,
     staticDomainParameters.protocolVersion,
     domainHandle.topologyClient,
     sequencerClient,
@@ -287,7 +284,7 @@ class SyncDomain(
   private val messageDispatcher: MessageDispatcher =
     messageDispatcherFactory.create(
       staticDomainParameters.protocolVersion,
-      domainId,
+      synchronizerId,
       participantId,
       ephemeral.requestTracker,
       transactionProcessor,
@@ -329,7 +326,7 @@ class SyncDomain(
   ): EitherT[FutureUnlessShutdown, SyncDomainInitializationError, Unit] = {
     def liftF[A](f: Future[A]): EitherT[Future, SyncDomainInitializationError, A] = EitherT.right(f)
 
-    def withMetadataSeq(cids: Seq[LfContractId]): Future[Seq[StoredContract]] =
+    def withMetadataSeq(cids: Seq[LfContractId]): Future[Seq[SerializableContract]] =
       participantNodePersistentState.value.contractStore
         .lookupManyExistingUncached(cids)
         .valueOr { missingContractId =>
@@ -361,7 +358,7 @@ class SyncDomain(
           activations = storedActivatedContracts
             .map(c =>
               c.contractId -> ContractStakeholdersAndReassignmentCounter(
-                c.contract.metadata.stakeholders,
+                c.metadata.stakeholders,
                 change.activations(c.contractId).reassignmentCounter,
               )
             )
@@ -370,7 +367,7 @@ class SyncDomain(
             .map(c =>
               c.contractId ->
                 ContractStakeholdersAndReassignmentCounter(
-                  c.contract.metadata.stakeholders,
+                  c.metadata.stakeholders,
                   change.deactivations(c.contractId).reassignmentCounter,
                 )
             )
@@ -586,7 +583,7 @@ class SyncDomain(
             Lambda[`+X <: Envelope[_]` => Traced[Seq[PossiblyIgnoredSequencedEvent[X]]]],
             ClosedEnvelope,
           ] {
-            override def name: String = s"sync-domain-$domainId"
+            override def name: String = s"sync-domain-$synchronizerId"
 
             override def subscriptionStartsAt(
                 start: SubscriptionStart,
@@ -633,7 +630,7 @@ class SyncDomain(
               ephemeral.timeTracker,
               tc =>
                 participantNodePersistentState.value.ledgerApiStore
-                  .cleanDomainIndex(domainId)(tc, ec)
+                  .cleanDomainIndex(synchronizerId)(tc, ec)
                   .map(_.flatMap(_.sequencerIndex).map(_.timestamp)),
             )(initializationTraceContext)
           )
@@ -646,7 +643,7 @@ class SyncDomain(
             .domainConnected()(initializationTraceContext)
             .leftMap[SyncDomainInitializationError](ParticipantTopologyHandshakeError.apply)
       } yield {
-        logger.debug(s"Started sync domain for $domainId")(initializationTraceContext)
+        logger.debug(s"Started sync domain for $synchronizerId")(initializationTraceContext)
         ephemeral.markAsRecovered()
         logger.debug("Sync domain is ready.")(initializationTraceContext)
         FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
@@ -663,8 +660,8 @@ class SyncDomain(
     val fetchLimit = 1000
 
     def completeReassignments(
-        previous: Option[(CantonTimestamp, Source[DomainId])]
-    ): FutureUnlessShutdown[Either[Option[(CantonTimestamp, Source[DomainId])], Unit]] = {
+        previous: Option[(CantonTimestamp, Source[SynchronizerId])]
+    ): FutureUnlessShutdown[Either[Option[(CantonTimestamp, Source[SynchronizerId])], Unit]] = {
       logger.debug(s"Fetch $fetchLimit pending reassignments")
       val resF = for {
         pendingReassignments <- performUnlessClosingUSF(functionFullName)(
@@ -682,7 +679,7 @@ class SyncDomain(
               performUnlessClosingEitherUSF[ReassignmentProcessorError, Unit](functionFullName)(
                 AutomaticAssignment.perform(
                   data.reassignmentId,
-                  Target(domainId),
+                  Target(synchronizerId),
                   Target(staticDomainParameters),
                   reassignmentCoordination,
                   data.contract.metadata.stakeholders,
@@ -734,7 +731,7 @@ class SyncDomain(
       )
 
       _bool <- Monad[FutureUnlessShutdown].tailRecM(
-        None: Option[(CantonTimestamp, Source[DomainId])]
+        None: Option[(CantonTimestamp, Source[SynchronizerId])]
       )(ts => completeReassignments(ts))
     } yield {
       logger.debug(s"Assignment completion has finished")
@@ -803,7 +800,7 @@ class SyncDomain(
   override def submitUnassignment(
       submitterMetadata: ReassignmentSubmitterMetadata,
       contractId: LfContractId,
-      targetDomain: Target[DomainId],
+      targetDomain: Target[SynchronizerId],
       targetProtocolVersion: Target[ProtocolVersion],
   )(implicit
       traceContext: TraceContext
@@ -813,11 +810,13 @@ class SyncDomain(
     performSubmissionUnlessClosing[
       ReassignmentProcessorError,
       UnassignmentProcessingSteps.SubmissionResult,
-    ](functionFullName, DomainNotReady(domainId, "The domain is shutting down.")) {
-      logger.debug(s"Submitting unassignment of `$contractId` from `$domainId` to `$targetDomain`")
+    ](functionFullName, DomainNotReady(synchronizerId, "The domain is shutting down.")) {
+      logger.debug(
+        s"Submitting unassignment of `$contractId` from `$synchronizerId` to `$targetDomain`"
+      )
 
       if (!ready)
-        DomainNotReady(domainId, "Cannot submit unassignment before recovery").discard
+        DomainNotReady(synchronizerId, "Cannot submit unassignment before recovery").discard
       unassignmentProcessor
         .submit(
           UnassignmentProcessingSteps
@@ -828,7 +827,7 @@ class SyncDomain(
               targetProtocolVersion,
             )
         )
-        .onShutdown(Left(DomainNotReady(domainId, "The domain is shutting down")))
+        .onShutdown(Left(DomainNotReady(synchronizerId, "The domain is shutting down")))
     }
 
   override def submitAssignment(
@@ -844,19 +843,19 @@ class SyncDomain(
       AssignmentProcessingSteps.SubmissionResult,
     ](
       functionFullName,
-      DomainNotReady(domainId, "The domain is shutting down."),
+      DomainNotReady(synchronizerId, "The domain is shutting down."),
     ) {
-      logger.debug(s"Submitting assignment of `$reassignmentId` to `$domainId`")
+      logger.debug(s"Submitting assignment of `$reassignmentId` to `$synchronizerId`")
 
       if (!ready)
-        DomainNotReady(domainId, "Cannot submit unassignment before recovery").discard
+        DomainNotReady(synchronizerId, "Cannot submit unassignment before recovery").discard
 
       assignmentProcessor
         .submit(
           AssignmentProcessingSteps
             .SubmissionParam(submitterMetadata, reassignmentId)
         )
-        .onShutdown(Left(DomainNotReady(domainId, "The domain is shutting down")))
+        .onShutdown(Left(DomainNotReady(synchronizerId, "The domain is shutting down")))
     }
 
   def numberOfDirtyRequests(): Int = ephemeral.requestJournal.numberOfDirtyRequests
@@ -891,7 +890,7 @@ class SyncDomain(
       )
     )
 
-  override def toString: String = s"SyncDomain(domain=$domainId, participant=$participantId)"
+  override def toString: String = s"SyncDomain(domain=$synchronizerId, participant=$participantId)"
 }
 
 object SyncDomain {
@@ -943,7 +942,7 @@ object SyncDomain {
   trait Factory[+T <: SyncDomain] {
 
     def create(
-        domainId: DomainId,
+        synchronizerId: SynchronizerId,
         domainHandle: DomainHandle,
         participantId: ParticipantId,
         engine: Engine,
@@ -968,7 +967,7 @@ object SyncDomain {
 
   object DefaultFactory extends Factory[SyncDomain] {
     override def create(
-        domainId: DomainId,
+        synchronizerId: SynchronizerId,
         domainHandle: DomainHandle,
         participantId: ParticipantId,
         engine: Engine,
@@ -1002,20 +1001,21 @@ object SyncDomain {
       val journalGarbageCollector = new JournalGarbageCollector(
         persistentState.requestJournalStore,
         tc =>
-          ephemeralState.ledgerApiIndexer.ledgerApiStore.value.cleanDomainIndex(domainId)(tc, ec),
+          ephemeralState.ledgerApiIndexer.ledgerApiStore.value
+            .cleanDomainIndex(synchronizerId)(tc, ec),
         sortedReconciliationIntervalsProvider,
         persistentState.acsCommitmentStore,
         persistentState.activeContractStore,
         persistentState.submissionTrackerStore,
         participantNodePersistentState.map(_.inFlightSubmissionStore),
-        domainId,
+        synchronizerId,
         parameters.journalGarbageCollectionDelay,
         parameters.processingTimeouts,
         loggerFactory,
       )
       for {
         acsCommitmentProcessor <- AcsCommitmentProcessor(
-          domainId,
+          synchronizerId,
           participantId,
           domainHandle.sequencerClient,
           domainCrypto,
@@ -1035,8 +1035,11 @@ object SyncDomain {
           clock,
           exitOnFatalFailures = parameters.exitOnFatalFailures,
         )
+        topologyProcessor <- topologyProcessorFactory.create(
+          acsCommitmentProcessor.scheduleTopologyTick
+        )
       } yield new SyncDomain(
-        domainId,
+        synchronizerId,
         domainHandle,
         participantId,
         engine,
@@ -1047,7 +1050,7 @@ object SyncDomain {
         packageService,
         domainCrypto,
         identityPusher,
-        topologyProcessorFactory,
+        topologyProcessor,
         missingKeysAlerter,
         reassignmentCoordination,
         commandProgressTracker,

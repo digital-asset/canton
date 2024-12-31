@@ -23,6 +23,7 @@ import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.fra
 import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.framework.modules.{
   Availability,
   Consensus,
+  ConsensusStatus,
   P2PNetworkIn,
 }
 import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.framework.{
@@ -111,21 +112,42 @@ class BftP2PNetworkIn[E <: Env[E]](
           )
         metrics.p2p.receive.labels.source.values.Availability(from)
       case Message.ConsensusMessage(consensusMessage) =>
-        SignedMessage
-          .fromProto(v1.ConsensusMessage)(IssConsensusModule.parseNetworkMessage(from, _))(
-            consensusMessage
-          )
+        IssConsensusModule
+          .parseNetworkMessage(consensusMessage)
           .fold(
             errorMessage =>
               logger.warn(
                 s"Dropping consensus message from $from as it couldn't be parsed: $errorMessage"
               ),
-            signedMessage =>
-              consensus.asyncSend(
-                Consensus.ConsensusMessage.PbftUnverifiedNetworkMessage(signedMessage)
-              ),
+            message => {
+              val originalSender = message.underlyingNetworkMessage.message.from
+              if (originalSender != from) {
+                val epoch = message.underlyingNetworkMessage.message.blockMetadata.epochNumber
+                logger.debug(
+                  s"Received retransmitted message at epoch $epoch from $from originally created by $originalSender"
+                )
+              }
+              consensus.asyncSend(message)
+            },
           )
         metrics.p2p.receive.labels.source.values.Consensus(from)
+      case Message.RetransmissionMessage(message) =>
+        SignedMessage
+          .fromProto(v1.EpochStatus)(ConsensusStatus.EpochStatus.fromProto(from, _))(
+            message
+          )
+          .fold(
+            errorMessage =>
+              logger.warn(
+                s"Dropping retransmission message from $from as it couldn't be parsed: $errorMessage"
+              ),
+            signedMessage =>
+              consensus.asyncSend(
+                Consensus.RetransmissionsMessage.RetransmissionRequest(signedMessage.message)
+              ),
+          )
+        metrics.p2p.receive.labels.source.values.Retransmissions(from)
+
       case Message.StateTransferMessage(message) =>
         SignedMessage
           .fromProto(v1.StateTransferMessage)(

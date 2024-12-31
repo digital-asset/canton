@@ -10,7 +10,6 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.topology.*
@@ -21,6 +20,7 @@ import com.digitalasset.canton.topology.store.StoredTopologyTransactions.{
   GenericStoredTopologyTransactions,
   PositiveStoredTopologyTransactions,
 }
+import com.digitalasset.canton.topology.store.TopologyStore.EffectiveStateChange
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransaction.GenericValidatedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
@@ -445,7 +445,8 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
     )
 
   override def findEssentialStateAtSequencedTime(
-      asOfInclusive: SequencedTime
+      asOfInclusive: SequencedTime,
+      includeRejected: Boolean,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[GenericStoredTopologyTransactions] =
@@ -456,34 +457,11 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
         topologyTransactionStore.toSeq
       }),
       entry => entry.sequenced <= asOfInclusive,
-      includeRejected = true,
+      includeRejected = includeRejected,
     ).map(
       // 2. transform the result such that the validUntil fields are set as they were at maxEffective time of the snapshot
       _.asSnapshotAtMaxEffectiveTime
     )
-
-  /** store an initial set of topology transactions as given into the store */
-  override def bootstrap(
-      snapshot: GenericStoredTopologyTransactions
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.pure {
-    blocking {
-      synchronized {
-        topologyTransactionStore
-          .appendAll(
-            snapshot.result.map { tx =>
-              TopologyStoreEntry(
-                tx.transaction,
-                tx.sequenced,
-                tx.validFrom,
-                rejected = tx.rejectionReason,
-                until = tx.validUntil,
-              )
-            }
-          )
-          .discard
-      }
-    }
-  }
 
   override def findUpcomingEffectiveChanges(asOfInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
@@ -610,7 +588,7 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
 
   override def findParticipantOnboardingTransactions(
       participantId: ParticipantId,
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] = {
@@ -625,7 +603,7 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
     FutureUnlessShutdown.pure(
       TopologyStore.filterInitialParticipantDispatchingTransactions(
         participantId,
-        domainId,
+        synchronizerId,
         res.map(_.toStoredTransaction).toSeq,
       )
     )
@@ -646,6 +624,43 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
         )
       case _ => ()
     }
+    FutureUnlessShutdown.unit
+  }
+
+  override def findEffectiveStateChanges(
+      fromEffectiveInclusive: CantonTimestamp,
+      onlyAtEffective: Boolean,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[EffectiveStateChange]] = {
+    val inRange: EffectiveTime => Boolean =
+      if (onlyAtEffective) _.value == fromEffectiveInclusive
+      else _.value >= fromEffectiveInclusive
+    val res = blocking(synchronized {
+      topologyTransactionStore.view
+        .filter(x =>
+          !x.transaction.isProposal &&
+            (inRange(x.from) || x.until.exists(inRange)) &&
+            !x.until.contains(x.from) &&
+            x.rejected.isEmpty
+        )
+        .toSeq
+    })
+    FutureUnlessShutdown.pure(
+      StoredTopologyTransactions(
+        res.map(e =>
+          StoredTopologyTransaction(e.sequenced, e.from, e.until, e.transaction, e.rejected)
+        )
+      ).toEffectiveStateChanges(fromEffectiveInclusive, onlyAtEffective)
+    )
+  }
+
+  override def deleteAllData()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    blocking(synchronized {
+      topologyTransactionStore.clear()
+      topologyTransactionsStoreUniqueIndex.clear()
+      watermark.set(None)
+    })
     FutureUnlessShutdown.unit
   }
 }

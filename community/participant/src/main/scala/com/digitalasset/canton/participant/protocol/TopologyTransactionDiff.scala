@@ -6,35 +6,37 @@ package com.digitalasset.canton.participant.protocol
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel.*
-import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
-import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
+  AuthorizationLevel,
+  TopologyEvent,
+}
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactions.PositiveSignedTopologyTransactions
+import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LedgerParticipantId, LedgerTransactionId, LfPartyId}
 
-// TODO(i21350): Handle changes to the domainId and authorization levels, also consider threshold
+// TODO(i21350): Handle changes to the synchronizerId and authorization levels, also consider threshold
 private[protocol] object TopologyTransactionDiff {
 
   /** Compute a set of topology events from the old state and the current state
-    * @param domainId Domain on which the topology transactions were sequenced
-    * @param old Previous topology state
-    * @param current Current state, after applying the batch of transactions
-    * @param transactions The batch of transactions that lead to the current state
-    * @return The set of events and the update_id
+    * @param synchronizerId Domain on which the topology transactions were sequenced
+    * @param oldRelevantState Previous topology state
+    * @param currentRelevantState Current state, after applying the batch of transactions
+    * @param participantId The local participant that may require initiation of online party replication
+    * @return The set of events, the update_id, and whether a party needs to be replicated to this participant
     */
   private[protocol] def apply(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
+      oldRelevantState: PositiveSignedTopologyTransactions,
+      currentRelevantState: PositiveSignedTopologyTransactions,
+      participantId: ParticipantId,
       protocolVersion: ProtocolVersion,
-      old: PositiveSignedTopologyTransactions,
-      current: PositiveSignedTopologyTransactions,
-      transactions: Seq[GenericSignedTopologyTransaction],
-  ): Option[(NonEmpty[Set[TopologyEvent]], LedgerTransactionId)] = {
+  ): Option[TopologyTransactionDiff] = {
 
-    val before = partyToParticipant(old)
-    val after = partyToParticipant(current)
+    val before = partyToParticipant(oldRelevantState)
+    val after = partyToParticipant(currentRelevantState)
 
     val added: Set[TopologyEvent] = after.diff(before).map { case (partyId, participantId) =>
       PartyToParticipantAuthorization(partyId, participantId, Submission)
@@ -45,18 +47,49 @@ private[protocol] object TopologyTransactionDiff {
 
     val allEvents: Set[TopologyEvent] = added ++ removed
 
-    NonEmpty.from(allEvents).map((_, updateId(domainId, protocolVersion, transactions)))
+    NonEmpty
+      .from(allEvents)
+      .map { events =>
+        // Adding a party that existed before on another participant means the local participant needs to
+        // initiate party replication.
+        val locallyAddedParties = added.collect {
+          case PartyToParticipantAuthorization(partyId, lfParticipantId, authLevel)
+              if lfParticipantId == participantId.toLf && authLevel != AuthorizationLevel.Revoked =>
+            partyId
+        }
+        val partiesExistingOnOtherParticipants = locallyAddedParties intersect before.collect {
+          case (partyId, _) => partyId
+        }
+        TopologyTransactionDiff(
+          events,
+          updateId(synchronizerId, protocolVersion, oldRelevantState, currentRelevantState),
+          requiresLocalParticipantPartyReplication = partiesExistingOnOtherParticipants.nonEmpty,
+        )
+      }
   }
 
   private[protocol] def updateId(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       protocolVersion: ProtocolVersion,
-      txs: Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]],
+      oldRelevantState: Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]],
+      currentRelevantState: Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]],
   ): LedgerTransactionId = {
 
     val builder = Hash.build(HashPurpose.TopologyUpdateId, HashAlgorithm.Sha256)
-    builder.add(domainId.toProtoPrimitive)
-    txs.foreach(tx => builder.add(tx.hashOfSignatures(protocolVersion).getCryptographicEvidence))
+    def addToBuilder(
+        stateTransactions: Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]]
+    ): Unit =
+      stateTransactions
+        .map(_.hashOfSignatures(protocolVersion).toHexString)
+        .sorted // for not relying on retrieval order
+        .foreach(builder.add)
+
+    builder.add(synchronizerId.toProtoPrimitive)
+    builder.add("old-relevant-state")
+    addToBuilder(oldRelevantState)
+    // the same state-tx can be either current or old, but these hashes should be different
+    builder.add("new-relevant-state")
+    addToBuilder(currentRelevantState)
 
     val hash = builder.finish()
 
@@ -73,3 +106,9 @@ private[protocol] object TopologyTransactionDiff {
       .flatMap(m => m.participants.map(p => (m.partyId.toLf, p.participantId.toLf)))
       .toSet
 }
+
+private[protocol] final case class TopologyTransactionDiff(
+    topologyEvents: NonEmpty[Set[TopologyEvent]],
+    transactionId: LedgerTransactionId,
+    requiresLocalParticipantPartyReplication: Boolean,
+)
