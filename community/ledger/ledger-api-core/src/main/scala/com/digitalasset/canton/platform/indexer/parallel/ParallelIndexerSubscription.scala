@@ -9,8 +9,14 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.Update.CommitRepair
-import com.digitalasset.canton.ledger.participant.state.{DomainIndex, DomainIndexUpdate, Update}
+import com.digitalasset.canton.ledger.participant.state.{
+  DomainIndex,
+  DomainIndexUpdate,
+  ParticipantUpdate,
+  Update,
+}
 import com.digitalasset.canton.logging.{
   LoggingContextWithTrace,
   NamedLoggerFactory,
@@ -27,7 +33,7 @@ import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.Le
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.platform.store.dao.events.{CompressionStrategy, LfValueTranslation}
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.PekkoUtil.{Commit, FutureQueue, PekkoSourceQueueToFutureQueue}
 import com.digitalasset.daml.lf.data.Ref
@@ -87,7 +93,7 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
   ): (Handle, Future[Done] => FutureQueue[(Long, Update)]) = {
     import MetricsContext.Implicits.empty
     val aggregatedLedgerEndForRepair
-        : AtomicReference[Option[(LedgerEnd, Map[DomainId, DomainIndex])]] =
+        : AtomicReference[Option[(LedgerEnd, Map[SynchronizerId, DomainIndex])]] =
       // the LedgerEnd necessarily will be updated as successful repair has at least a CommitRepair Update, which carries the LedgerEnd forward
       new AtomicReference(None)
     val storeLedgerEndF = storeLedgerEnd(
@@ -238,9 +244,11 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
         updates.lastOption.foreach { case (offset, _) =>
           commit(offset.unwrap)
         }
-        updates.foreach { case (_, update) =>
-          discard(update.persisted.trySuccess(()))
-        }
+        updates
+          .collect { case (_, participantUpdate: ParticipantUpdate) =>
+            participantUpdate
+          }
+          .foreach(_.persisted.trySuccess(()).discard)
       }
       .viaMat(KillSwitches.single)(Keep.both)
       .toMat(Sink.ignore)(Keep.both)
@@ -495,12 +503,12 @@ object ParallelIndexerSubscription {
   }
 
   def ledgerEndDomainIndexFrom(
-      domainIndexes: Vector[(DomainId, DomainIndex)]
-  ): Map[DomainId, DomainIndex] =
+      domainIndexes: Vector[(SynchronizerId, DomainIndex)]
+  ): Map[SynchronizerId, DomainIndex] =
     domainIndexes.groupMapReduce(_._1)(_._2)(_ max _)
 
   def ingestTail[DB_BATCH](
-      storeLedgerEnd: (LedgerEnd, Map[DomainId, DomainIndex]) => Future[Unit],
+      storeLedgerEnd: (LedgerEnd, Map[SynchronizerId, DomainIndex]) => Future[Unit],
       logger: TracedLogger,
   )(implicit
       traceContext: TraceContext
@@ -528,20 +536,20 @@ object ParallelIndexerSubscription {
   }
 
   private def storeLedgerEnd(
-      storeTailFunction: (LedgerEnd, Map[DomainId, DomainIndex]) => Connection => Unit,
+      storeTailFunction: (LedgerEnd, Map[SynchronizerId, DomainIndex]) => Connection => Unit,
       dbDispatcher: DbDispatcher,
       metrics: LedgerApiServerMetrics,
       logger: TracedLogger,
   )(implicit
       traceContext: TraceContext
-  ): (LedgerEnd, Map[DomainId, DomainIndex]) => Future[Unit] =
+  ): (LedgerEnd, Map[SynchronizerId, DomainIndex]) => Future[Unit] =
     (ledgerEnd, ledgerEndDomainIndexes) =>
       LoggingContextWithTrace.withNewLoggingContext("updateOffset" -> ledgerEnd.lastOffset) {
         implicit loggingContext =>
           def domainIndexesLog: String = ledgerEndDomainIndexes.toVector
             .sortBy(_._1.toProtoPrimitive)
-            .map { case (domainId, domainIndex) =>
-              s"${domainId.toProtoPrimitive.take(20).mkString} -> $domainIndex"
+            .map { case (synchronizerId, domainIndex) =>
+              s"${synchronizerId.toProtoPrimitive.take(20).mkString} -> $domainIndex"
             }
             .mkString("domain-indexes: [", ", ", "]")
 
@@ -557,13 +565,13 @@ object ParallelIndexerSubscription {
       }
 
   def aggregateLedgerEndForRepair[DB_BATCH](
-      aggregatedLedgerEnd: AtomicReference[Option[(LedgerEnd, Map[DomainId, DomainIndex])]]
+      aggregatedLedgerEnd: AtomicReference[Option[(LedgerEnd, Map[SynchronizerId, DomainIndex])]]
   ): Vector[Batch[DB_BATCH]] => Unit =
     batchOfBatches =>
       batchOfBatches.lastOption.foreach(lastBatch =>
         discard(aggregatedLedgerEnd.updateAndGet { aggregated =>
           val oldDomainIndexes =
-            aggregated.fold(Vector.empty[(DomainId, DomainIndex)])(_._2.toVector)
+            aggregated.fold(Vector.empty[(SynchronizerId, DomainIndex)])(_._2.toVector)
           // this will also have at the end the offset bump for the CommitRepair Update as well, we accept this for sake of simplicity
           val newLedgerEnd = lastBatch.ledgerEnd
           val domainIndexesForBatchOfBatches = batchOfBatches
@@ -642,10 +650,10 @@ object ParallelIndexerSubscription {
     }
 
   def commitRepair[DB_BATCH](
-      storeLedgerEnd: (LedgerEnd, Map[DomainId, DomainIndex]) => Future[Unit],
+      storeLedgerEnd: (LedgerEnd, Map[SynchronizerId, DomainIndex]) => Future[Unit],
       storePostProcessingEnd: Offset => Future[Unit],
       updateInMemoryState: LedgerEnd => Unit,
-      aggregatedLedgerEnd: AtomicReference[Option[(LedgerEnd, Map[DomainId, DomainIndex])]],
+      aggregatedLedgerEnd: AtomicReference[Option[(LedgerEnd, Map[SynchronizerId, DomainIndex])]],
       logger: TracedLogger,
   )(implicit
       traceContext: TraceContext
@@ -655,7 +663,7 @@ object ParallelIndexerSubscription {
     implicit val ec: DirectExecutionContext = DirectExecutionContext(logger)
     offsetsAndUpdates =>
       offsetsAndUpdates.lastOption match {
-        case Some((_, CommitRepair())) =>
+        case Some((_, commitRepair: CommitRepair)) =>
           aggregatedLedgerEnd.get() match {
             case Some((ledgerEnd, domainIndexes)) =>
               for {
@@ -663,6 +671,7 @@ object ParallelIndexerSubscription {
                 _ <- storeLedgerEnd(ledgerEnd, domainIndexes)
                 _ <- storePostProcessingEnd(ledgerEnd.lastOffset)
                 _ = updateInMemoryState(ledgerEnd)
+                _ = commitRepair.persisted.trySuccess(())
               } yield {
                 logger.info("Repair committed, Ledger End stored and updated successfully.")
                 offsetsAndUpdates

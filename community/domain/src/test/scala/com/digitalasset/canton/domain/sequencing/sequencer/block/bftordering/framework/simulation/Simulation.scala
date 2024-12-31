@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.framework.simulation
 
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.framework.Module.ModuleControl
 import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.framework.modules.P2PNetworkOut
 import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.framework.simulation.SimulationModuleSystem.{
@@ -18,7 +19,10 @@ import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.fra
   Module,
   ModuleName,
 }
-import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.simulation.topology.SimulationTopologyHelpers.sequencerBecomeOnlineTime
+import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.simulation.topology.SimulationTopologyHelpers.{
+  onboardingTime,
+  sequencerBecomeOnlineTime,
+}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.networking.Endpoint
 import com.digitalasset.canton.time.SimClock
@@ -35,7 +39,12 @@ import scala.util.Try
   *              from the [[com.digitalasset.canton.time.SimClock]] point of view. It may result in executing commands in an incorrect order.
   */
 class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, ClientMessageT](
-    topology: Topology[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, ClientMessageT],
+    private var topology: Topology[
+      OnboardingDataT,
+      SystemNetworkMessageT,
+      SystemInputMessageT,
+      ClientMessageT,
+    ],
     onboardingDataProvider: OnboardingDataProvider[OnboardingDataT],
     machineInitializer: MachineInitializer[
       OnboardingDataT,
@@ -48,13 +57,18 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
     loggerFactory: NamedLoggerFactory,
 ) {
 
+  val simulationStageStart: CantonTimestamp = clock.now
+
   val agenda: Agenda = new Agenda(clock)
-  simSettings.peerOnboardingTimes
+  simSettings.peerOnboardingDelays
     .zip(topology.laterOnboardedEndpointsWithInitializers)
-    .foreach { case (onboardingTime, (endpoint, _)) =>
+    .foreach { case (onboardingDelay, (endpoint, _)) =>
       agenda.addOne(
         OnboardSequencer(endpoint),
-        at = sequencerBecomeOnlineTime(onboardingTime, simSettings),
+        at = sequencerBecomeOnlineTime(
+          onboardingTime(simulationStageStart, onboardingDelay),
+          simSettings,
+        ),
         ScheduledCommand.DefaultPriority,
       )
     }
@@ -230,7 +244,9 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
         ),
       )
     }
-    val _ = topology.activeSequencersToMachines.put(sequencerId, machine)
+    topology = topology.copy(activeSequencersToMachines =
+      topology.activeSequencersToMachines.updated(sequencerId, machine)
+    )
     // handle init messages
     runNodeCollector(sequencerId, FromInit, machine.nodeCollector)
   }
@@ -328,6 +344,29 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
     currentHistory.toSeq
   }
 
+  def newStage(
+      simulationSettings: SimulationSettings,
+      newlyOnboardedEndpointsToInitializers: Map[
+        Endpoint,
+        SimulationInitializer[
+          OnboardingDataT,
+          SystemNetworkMessageT,
+          SystemInputMessageT,
+          ClientMessageT,
+        ],
+      ],
+  ): Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, ClientMessageT] =
+    new Simulation(
+      topology.copy(
+        laterOnboardedEndpointsWithInitializers = newlyOnboardedEndpointsToInitializers
+      ),
+      onboardingDataProvider,
+      machineInitializer,
+      simulationSettings,
+      clock,
+      loggerFactory,
+    )
+
   private def fixupDurationPrettyPrinting: PartialFunction[Any, Tree] = {
     case duration: java.time.Duration =>
       Tree.Literal(s"Duration.ofNanos(${duration.toNanos}L)")
@@ -369,7 +408,7 @@ final case class Topology[
     SystemInputMessageT,
     ClientMessageT,
 ](
-    activeSequencersToMachines: mutable.Map[SequencerId, Machine[?, ?]],
+    activeSequencersToMachines: Map[SequencerId, Machine[?, ?]],
     laterOnboardedEndpointsWithInitializers: Map[
       Endpoint,
       SimulationInitializer[

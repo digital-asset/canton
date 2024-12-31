@@ -216,6 +216,23 @@ class IssSegmentModule[E <: Env[E]](
       case pbftEvent: ConsensusSegment.ConsensusMessage.PbftEvent =>
         processPbftEvent(pbftEvent)
 
+      case ConsensusSegment.RetransmissionsMessage.StatusRequest(segmentIndex) =>
+        parent.asyncSend(
+          Consensus.RetransmissionsMessage.SegmentStatus(segmentIndex, segmentState.status)
+        )
+      case ConsensusSegment.RetransmissionsMessage.RetransmissionRequest(from, fromStatus) =>
+        segmentState
+          .messagesToRetransmit(from, fromStatus)
+          .messages
+          .foreach { msg =>
+            p2pNetworkOut.asyncSend(
+              P2PNetworkOut.send(
+                P2PNetworkOut.BftOrderingNetworkMessage.ConsensusMessage(msg),
+                to = from,
+              )
+            )
+          }
+
       case ConsensusSegment.ConsensusMessage.BlockOrdered(metadata) =>
         leaderSegmentState.foreach(_.confirmCompleteBlockStored(metadata.blockNumber))
 
@@ -323,7 +340,6 @@ class IssSegmentModule[E <: Env[E]](
       context: E#ActorContextT[ConsensusSegment.Message],
       traceContext: TraceContext,
   ): Unit = {
-    val blockComplete = segmentState.isBlockComplete(pbftEvent.blockMetadata.blockNumber)
     val processResults = segmentState.processEvent(pbftEvent)
 
     def handleStore(store: StoreResult, sendMsg: () => Unit): Unit = store match {
@@ -397,7 +413,7 @@ class IssSegmentModule[E <: Env[E]](
         }
 
         store match {
-          case Some(storeResult) if storeMessages && !blockComplete =>
+          case Some(storeResult) if storeMessages =>
             handleStore(storeResult, () => sendMessage())
           case _ => sendMessage()
         }

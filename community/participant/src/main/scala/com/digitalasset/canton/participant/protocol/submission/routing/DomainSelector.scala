@@ -15,19 +15,17 @@ import com.digitalasset.canton.participant.protocol.submission.UsableDomains
 import com.digitalasset.canton.participant.sync.TransactionRoutingError
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.RoutingInternalError
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.TopologyErrors.NoDomainForSubmission
-import com.digitalasset.canton.protocol.LfLanguageVersion
-import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ReassignmentTag.Target
-import com.digitalasset.daml.lf.engine.Blinding
 
 import scala.concurrent.ExecutionContext
 
 private[routing] class DomainSelectorFactory(
     admissibleDomains: AdmissibleDomains,
-    priorityOfDomain: DomainId => Int,
+    priorityOfSynchronizer: SynchronizerId => Int,
     domainRankComputation: DomainRankComputation,
     domainStateProvider: DomainStateProvider,
     loggerFactory: NamedLoggerFactory,
@@ -47,7 +45,7 @@ private[routing] class DomainSelectorFactory(
     } yield new DomainSelector(
       transactionData,
       admissibleDomains,
-      priorityOfDomain,
+      priorityOfSynchronizer,
       domainRankComputation,
       domainStateProvider,
       loggerFactory,
@@ -60,7 +58,7 @@ private[routing] class DomainSelectorFactory(
   *                          - submitters have to be hosted on the local participant
   *                          - informees have to be hosted on some participant
   *                            It is assumed that the participant is connected to all domains in `connectedDomains`
-  * @param priorityOfDomain      Priority of each domain (lowest number indicates highest priority)
+  * @param priorityOfSynchronizer      Priority of each domain (lowest number indicates highest priority)
   * @param domainRankComputation Utility class to compute `DomainRank`
   * @param domainStateProvider   Provides state information about a domain.
   *                              Note: returns an either rather than an option since failure comes from disconnected
@@ -68,8 +66,8 @@ private[routing] class DomainSelectorFactory(
   */
 private[routing] class DomainSelector(
     val transactionData: TransactionData,
-    admissibleDomains: NonEmpty[Set[DomainId]],
-    priorityOfDomain: DomainId => Int,
+    admissibleDomains: NonEmpty[Set[SynchronizerId]],
+    priorityOfSynchronizer: SynchronizerId => Int,
     domainRankComputation: DomainRankComputation,
     domainStateProvider: DomainStateProvider,
     protected val loggerFactory: NamedLoggerFactory,
@@ -89,7 +87,7 @@ private[routing] class DomainSelector(
     transactionData.prescribedDomainO match {
       case Some(prescribedDomain) =>
         for {
-          _ <- validatePrescribedDomain(prescribedDomain, transactionData.version)
+          _ <- validatePrescribedDomain(prescribedDomain)
           domainRank <- domainRankComputation
             .compute(
               contracts,
@@ -102,7 +100,7 @@ private[routing] class DomainSelector(
       case None =>
         for {
           admissibleDomains <- filterDomains(admissibleDomains)
-          domainRank <- pickDomainIdAndComputeReassignments(contracts, admissibleDomains)
+          domainRank <- pickSynchronizerIdAndComputeReassignments(contracts, admissibleDomains)
         } yield domainRank
     }
   }
@@ -117,49 +115,47 @@ private[routing] class DomainSelector(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionRoutingError, DomainRank] =
     for {
-      inputContractsDomainIdO <- chooseDomainOfInputContracts
+      inputContractsSynchronizerIdO <- chooseDomainOfInputContracts
 
-      domainId <- transactionData.prescribedDomainO match {
-        case Some(prescribedDomainId) =>
+      synchronizerId <- transactionData.prescribedDomainO match {
+        case Some(prescribedSynchronizerId) =>
           // If a domain is prescribed, we use the prescribed one
           singleDomainValidatePrescribedDomain(
-            prescribedDomainId,
-            transactionData.version,
-            inputContractsDomainIdO,
+            prescribedSynchronizerId,
+            inputContractsSynchronizerIdO,
           )
-            .map(_ => prescribedDomainId)
+            .map(_ => prescribedSynchronizerId)
 
         case None =>
-          inputContractsDomainIdO match {
-            case Some(inputContractsDomainId) =>
+          inputContractsSynchronizerIdO match {
+            case Some(inputContractsSynchronizerId) =>
               // If all the contracts are on a single domain, we use this one
               singleDomainValidatePrescribedDomain(
-                inputContractsDomainId,
-                transactionData.version,
-                inputContractsDomainIdO,
+                inputContractsSynchronizerId,
+                inputContractsSynchronizerIdO,
               )
-                .map(_ => inputContractsDomainId)
+                .map(_ => inputContractsSynchronizerId)
             // TODO(#10088) If validation fails, try to re-submit as multi-domain
 
             case None =>
               // Pick the best valid domain in domainsOfSubmittersAndInformees
               filterDomains(admissibleDomains)
-                .map(_.minBy1(id => DomainRank(Map.empty, priorityOfDomain(id), id)))
+                .map(_.minBy1(id => DomainRank(Map.empty, priorityOfSynchronizer(id), id)))
           }
       }
-    } yield DomainRank(Map.empty, priorityOfDomain(domainId), domainId)
+    } yield DomainRank(Map.empty, priorityOfSynchronizer(synchronizerId), synchronizerId)
 
   private def filterDomains(
-      admissibleDomains: NonEmpty[Set[DomainId]]
+      admissibleDomains: NonEmpty[Set[SynchronizerId]]
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TransactionRoutingError, NonEmpty[Set[DomainId]]] = {
+  ): EitherT[FutureUnlessShutdown, TransactionRoutingError, NonEmpty[Set[SynchronizerId]]] = {
 
     val (unableToFetchStateDomains, domainStates) = admissibleDomains.forgetNE.toList.map {
-      domainId =>
-        domainStateProvider.getTopologySnapshotAndPVFor(domainId).map {
+      synchronizerId =>
+        domainStateProvider.getTopologySnapshotAndPVFor(synchronizerId).map {
           case (snapshot, protocolVersion) =>
-            (domainId, protocolVersion, snapshot)
+            (synchronizerId, protocolVersion, snapshot)
         }
     }.separate
 
@@ -167,16 +163,15 @@ private[routing] class DomainSelector(
       domains <- EitherT.right(
         UsableDomains.check(
           domains = domainStates,
-          requiredPackagesPerParty = Blinding.partyPackages(transactionData.transaction),
-          transactionVersion = transactionData.transaction.version,
+          transaction = transactionData.transaction,
           ledgerTime = transactionData.ledgerTime,
         )
       )
 
       (unusableDomains, usableDomains) = domains
       allUnusableDomains =
-        unusableDomains.map(d => d.domainId -> d.toString).toMap ++
-          unableToFetchStateDomains.map(d => d.domainId -> d.toString).toMap
+        unusableDomains.map(d => d.synchronizerId -> d.toString).toMap ++
+          unableToFetchStateDomains.map(d => d.synchronizerId -> d.toString).toMap
 
       _ = logger.debug(s"Not considering the following domains for routing: $allUnusableDomains")
 
@@ -192,23 +187,22 @@ private[routing] class DomainSelector(
   }
 
   private def singleDomainValidatePrescribedDomain(
-      domainId: DomainId,
-      transactionVersion: LfLanguageVersion,
-      inputContractsDomainIdO: Option[DomainId],
+      synchronizerId: SynchronizerId,
+      inputContractsSynchronizerIdO: Option[SynchronizerId],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionRoutingError, Unit] = {
     /*
-      If there are input contracts, then they should be on domain `domainId`
+      If there are input contracts, then they should be on domain `synchronizerId`
      */
-    def validateContainsInputContractsDomainId
+    def validateContainsInputContractsSynchronizerId
         : EitherT[FutureUnlessShutdown, TransactionRoutingError, Unit] =
-      inputContractsDomainIdO match {
-        case Some(inputContractsDomainId) =>
+      inputContractsSynchronizerIdO match {
+        case Some(inputContractsSynchronizerId) =>
           EitherTUtil.condUnitET(
-            inputContractsDomainId == domainId,
-            TransactionRoutingError.ConfigurationErrors.InvalidPrescribedDomainId
-              .InputContractsNotOnDomain(domainId, inputContractsDomainId),
+            inputContractsSynchronizerId == synchronizerId,
+            TransactionRoutingError.ConfigurationErrors.InvalidPrescribedSynchronizerId
+              .InputContractsNotOnDomain(synchronizerId, inputContractsSynchronizerId),
           )
 
         case None => EitherT.pure(())
@@ -216,34 +210,34 @@ private[routing] class DomainSelector(
 
     for {
       // Single-domain specific validations
-      _ <- validateContainsInputContractsDomainId
+      _ <- validateContainsInputContractsSynchronizerId
 
       // Generic validations
-      _ <- validatePrescribedDomain(domainId, transactionVersion)
+      _ <- validatePrescribedDomain(synchronizerId)
     } yield ()
   }
 
   /** Validation that are shared between single- and multi- domain submission:
     *
-    * - Participant is connected to `domainId`
+    * - Participant is connected to `synchronizerId`
     *
-    * - List `domainsOfSubmittersAndInformees` contains `domainId`
+    * - List `domainsOfSubmittersAndInformees` contains `synchronizerId`
     */
-  private def validatePrescribedDomain(domainId: DomainId, transactionVersion: LfLanguageVersion)(
-      implicit traceContext: TraceContext
+  private def validatePrescribedDomain(synchronizerId: SynchronizerId)(implicit
+      traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionRoutingError, Unit] =
     for {
       domainState <- EitherT.fromEither[FutureUnlessShutdown](
-        domainStateProvider.getTopologySnapshotAndPVFor(domainId)
+        domainStateProvider.getTopologySnapshotAndPVFor(synchronizerId)
       )
       (snapshot, protocolVersion) = domainState
 
       // Informees and submitters should reside on the selected domain
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-        admissibleDomains.contains(domainId),
-        TransactionRoutingError.ConfigurationErrors.InvalidPrescribedDomainId
+        admissibleDomains.contains(synchronizerId),
+        TransactionRoutingError.ConfigurationErrors.InvalidPrescribedSynchronizerId
           .NotAllInformeeAreOnDomain(
-            domainId,
+            synchronizerId,
             admissibleDomains,
           ),
       )
@@ -251,24 +245,23 @@ private[routing] class DomainSelector(
       // Further validations
       _ <- UsableDomains
         .check(
-          domainId = domainId,
+          synchronizerId = synchronizerId,
           protocolVersion = protocolVersion,
           snapshot = snapshot,
-          requiredPackagesPerParty = transactionData.requiredPackagesPerParty,
-          transactionVersion = transactionVersion,
+          transaction = transactionData.transaction,
           ledgerTime = transactionData.ledgerTime,
           interactiveSubmissionVersionO = transactionData.externallySignedSubmissionO.map(_.version),
         )
         .leftMap[TransactionRoutingError] { err =>
-          TransactionRoutingError.ConfigurationErrors.InvalidPrescribedDomainId
-            .Generic(domainId, err.toString)
+          TransactionRoutingError.ConfigurationErrors.InvalidPrescribedSynchronizerId
+            .Generic(synchronizerId, err.toString)
         }
 
     } yield ()
 
-  private def pickDomainIdAndComputeReassignments(
+  private def pickSynchronizerIdAndComputeReassignments(
       contracts: Seq[ContractData],
-      domains: NonEmpty[Set[DomainId]],
+      domains: NonEmpty[Set[SynchronizerId]],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionRoutingError, DomainRank] = {
@@ -299,7 +292,7 @@ private[routing] class DomainSelector(
   }
 
   private def chooseDomainOfInputContracts
-      : EitherT[FutureUnlessShutdown, TransactionRoutingError, Option[DomainId]] = {
+      : EitherT[FutureUnlessShutdown, TransactionRoutingError, Option[SynchronizerId]] = {
     val inputContractsDomainData = transactionData.inputContractsDomainData
 
     inputContractsDomainData.domains.size match {
@@ -307,7 +300,7 @@ private[routing] class DomainSelector(
       // Input contracts reside on different domains
       // Fail..
       case _ =>
-        EitherT.leftT[FutureUnlessShutdown, Option[DomainId]](
+        EitherT.leftT[FutureUnlessShutdown, Option[SynchronizerId]](
           RoutingInternalError
             .InputContractsOnDifferentDomains(inputContractsDomainData.domains)
         )

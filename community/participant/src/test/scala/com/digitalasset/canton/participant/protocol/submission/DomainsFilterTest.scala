@@ -14,7 +14,6 @@ import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{DamlLfVersionToProtocolVersions, ProtocolVersion}
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext, LfPartyId}
-import com.digitalasset.daml.lf.engine.Blinding
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits.*
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -42,7 +41,7 @@ class DomainsFilterTest
         filter.split(correctTopology, correctPackages).futureValueUS
 
       unusableDomains shouldBe empty
-      usableDomains shouldBe List(DefaultTestIdentities.domainId)
+      usableDomains shouldBe List(DefaultTestIdentities.synchronizerId)
     }
 
     "reject domains when informees don't have an active participant" in {
@@ -53,7 +52,7 @@ class DomainsFilterTest
 
       unusableDomains shouldBe List(
         UsableDomains.MissingActiveParticipant(
-          DefaultTestIdentities.domainId,
+          DefaultTestIdentities.synchronizerId,
           Set(partyNotConnected),
         )
       )
@@ -79,7 +78,7 @@ class DomainsFilterTest
 
         unusableDomains shouldBe List(
           UsableDomains.UnknownPackage(
-            DefaultTestIdentities.domainId,
+            DefaultTestIdentities.synchronizerId,
             List(
               unknownPackageFor(submitterParticipantId, packageNotValid),
               unknownPackageFor(observerParticipantId, packageNotValid),
@@ -102,7 +101,7 @@ class DomainsFilterTest
 
       unusableDomains shouldBe List(
         UsableDomains.UnknownPackage(
-          DefaultTestIdentities.domainId,
+          DefaultTestIdentities.synchronizerId,
           List(
             unknownPackageFor(submitterParticipantId, missingPackage),
             unknownPackageFor(observerParticipantId, missingPackage),
@@ -133,7 +132,7 @@ class DomainsFilterTest
         .value
       unusableDomains shouldBe List(
         UsableDomains.UnsupportedMinimumProtocolVersion(
-          domainId = DefaultTestIdentities.domainId,
+          synchronizerId = DefaultTestIdentities.synchronizerId,
           currentPV = currentDomainPV,
           requiredPV = requiredPV,
           lfVersion = LfLanguageVersion.v2_dev,
@@ -156,7 +155,7 @@ class DomainsFilterTest
         filter.split(correctTopology, correctPackages).futureValueUS
 
       unusableDomains shouldBe empty
-      usableDomains shouldBe List(DefaultTestIdentities.domainId)
+      usableDomains shouldBe List(DefaultTestIdentities.synchronizerId)
     }
 
     "reject domains when packages are missing" in {
@@ -184,7 +183,7 @@ class DomainsFilterTest
         usableDomains shouldBe empty
         unusableDomains shouldBe List(
           UsableDomains.UnknownPackage(
-            DefaultTestIdentities.domainId,
+            DefaultTestIdentities.synchronizerId,
             unknownPackageFor(submitterParticipantId) ++ unknownPackageFor(observerParticipantId),
           )
         )
@@ -206,10 +205,10 @@ private[submission] object DomainsFilterTest {
     )(implicit
         ec: ExecutionContext,
         tc: TraceContext,
-    ): FutureUnlessShutdown[(List[UsableDomains.DomainNotUsedReason], List[DomainId])] = {
+    ): FutureUnlessShutdown[(List[UsableDomains.DomainNotUsedReason], List[SynchronizerId])] = {
       val domains = List(
         (
-          DefaultTestIdentities.domainId,
+          DefaultTestIdentities.synchronizerId,
           domainProtocolVersion,
           SimpleTopology.defaultTestingIdentityFactory(topology, packages),
         )
@@ -217,8 +216,7 @@ private[submission] object DomainsFilterTest {
 
       UsableDomains.check(
         domains = domains,
-        requiredPackagesPerParty = Blinding.partyPackages(tx),
-        transactionVersion = tx.version,
+        transaction = tx,
         ledgerTime = ledgerTime,
       )
     }

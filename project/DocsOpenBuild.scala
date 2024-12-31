@@ -64,18 +64,15 @@ object DocsOpenBuild {
 
       val source = sourceDirectory.value / "sphinx"
       val target = sourceDirectory.value / "preprocessed-sphinx"
-      val assemblyTarget = sourceDirectory.value / "preprocessed-sphinx-assembly"
       val snippetJsonSource = targetDirectory.value / "pre"
       val snippetJsonTarget = target / "includes" / "snippet_data"
 
       IO.delete(target)
-      IO.delete(assemblyTarget)
 
       val cantonDocsSourcePath = cantonDocsSourceDirectory(baseDirectory.value)
       IO.copyDirectory(cantonDocsSourcePath, target)
       IO.copyDirectory(source, target)
       IO.copyDirectory(snippetJsonSource, snippetJsonTarget)
-      IO.createDirectory(assemblyTarget)
     }
 
   def generateRstResolveSnippet(sourceDirectory: SettingKey[File]): Def.Initialize[Task[String]] =
@@ -106,8 +103,6 @@ object DocsOpenBuild {
         val cantonRoot = repositoryRoot(baseDirectory.value)
         val source = cantonDocsSourceDirectory(baseDirectory.value)
         val target = sourceDirectory.value / "preprocessed-sphinx"
-        val assemblyTarget = sourceDirectory.value / "preprocessed-sphinx-assembly"
-        val manifest = sourceDirectory.value / "assembly" / "canton_sources_manifest"
 
         log.info(
           "[generateRst][preprocessing:step 2] Using the reference JSON to preprocess the RST files ..."
@@ -115,7 +110,7 @@ object DocsOpenBuild {
 
         val scriptPath = resourceDirectory.value / "rst-preprocessor.py"
         runCommand(
-          s"python $scriptPath $cantonRoot ${generateReferenceJson.value} $source $manifest $target $assemblyTarget",
+          s"python $scriptPath $cantonRoot ${generateReferenceJson.value} $source $target",
           log,
         )
       }
@@ -189,7 +184,10 @@ object DocsOpenBuild {
     val stdErr = mutable.MutableList[String]()
     val exitCode = Process(Seq(appPath) ++ args, cwd) ! ProcessLogger(
       line => stdOut += line,
-      line => stdErr += line,
+      line => {
+        log.info(s"Error detected: $line")
+        stdErr += line
+      },
     )
     if (exitCode != 0) {
       log.error(s"Canton invocation with arguments $args failed: exit code $exitCode")

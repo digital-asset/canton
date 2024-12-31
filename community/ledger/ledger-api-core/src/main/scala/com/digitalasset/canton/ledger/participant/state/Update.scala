@@ -10,7 +10,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.CommandRejected.R
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.LfHash
-import com.digitalasset.canton.topology.DomainId
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.{RequestCounter, SequencerCounter, data}
@@ -56,18 +56,17 @@ sealed trait Update extends Product with Serializable with PrettyPrinting with H
 
   /** The record time at which the state change was committed. */
   def recordTime: CantonTimestamp
+}
 
-  // TODO(i20043) this will be removed later as various needs solved differently
+// TODO(i21341) this will be removed later as Topology Event project progresses
+sealed trait ParticipantUpdate extends Update {
+  def withRecordTime(recordTime: CantonTimestamp): Update
+
   def persisted: Promise[Unit]
 }
 
-// TODO(i20043) this will be removed later as Topology Event project progresses
-sealed trait ParticipantUpdate extends Update {
-  def withRecordTime(recordTime: CantonTimestamp): Update
-}
-
 sealed trait DomainUpdate extends Update {
-  def domainId: DomainId
+  def synchronizerId: SynchronizerId
 }
 
 /** Update which defines a DomainIndex, and therefore contribute to DomainIndex moving ahead.
@@ -83,8 +82,8 @@ sealed trait DomainIndexUpdate extends DomainUpdate {
   final def sequencerIndexO: Option[SequencerIndex] =
     sequencerCounterO.map(SequencerIndex(_, recordTime))
 
-  final def domainIndex: (DomainId, DomainIndex) =
-    domainId -> DomainIndex(requestIndexO, sequencerIndexO, recordTime)
+  final def domainIndex: (SynchronizerId, DomainIndex) =
+    synchronizerId -> DomainIndex(requestIndexO, sequencerIndexO, recordTime)
 }
 
 sealed trait SequencedUpdate extends DomainIndexUpdate {
@@ -227,21 +226,21 @@ object Update {
   final case class TopologyTransactionEffective(
       updateId: Ref.TransactionId,
       events: Set[TopologyTransactionEffective.TopologyEvent],
-      domainId: DomainId,
-      sequencerCounter: SequencerCounter,
-      recordTime: CantonTimestamp,
-      persisted: Promise[Unit] = Promise(),
+      synchronizerId: SynchronizerId,
+      effectiveTime: CantonTimestamp,
   )(implicit override val traceContext: TraceContext)
-      extends SequencedUpdate {
+      extends FloatingUpdate {
+
+    // Topology transactions emitted to the update stream at effective time
+    override def recordTime: CantonTimestamp = effectiveTime
+
     override def pretty: Pretty[TopologyTransactionEffective] =
       prettyOfClass(
-        param("recordTime", _.recordTime),
-        param("domainId", _.domainId),
+        param("effectiveTime", _.effectiveTime),
+        param("synchronizerId", _.synchronizerId),
         param("updateId", _.updateId),
         indicateOmittedFields,
       )
-
-    override def requestCounterO: Option[RequestCounter] = None
   }
 
   object TopologyTransactionEffective {
@@ -269,7 +268,7 @@ object Update {
       LoggingValue.Nested.fromEntries(
         Logging.updateId(topologyTransactionEffective.updateId),
         Logging.recordTime(topologyTransactionEffective.recordTime.toLf),
-        Logging.domainId(topologyTransactionEffective.domainId),
+        Logging.synchronizerId(topologyTransactionEffective.synchronizerId),
       )
     }
   }
@@ -343,7 +342,7 @@ object Update {
           Logging.ledgerTime(txAccepted.transactionMeta.ledgerEffectiveTime),
           Logging.workflowIdOpt(txAccepted.transactionMeta.workflowId),
           Logging.submissionTime(txAccepted.transactionMeta.submissionTime),
-          Logging.domainId(txAccepted.domainId),
+          Logging.synchronizerId(txAccepted.synchronizerId),
         )
     }
   }
@@ -355,11 +354,10 @@ object Update {
       updateId: data.UpdateId,
       hostedWitnesses: List[Ref.Party],
       contractMetadata: Map[Value.ContractId, Bytes],
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       requestCounter: RequestCounter,
       sequencerCounter: SequencerCounter,
       recordTime: CantonTimestamp,
-      persisted: Promise[Unit] = Promise(),
       commitSetO: Option[LapiCommitSet] = None,
   )(implicit override val traceContext: TraceContext)
       extends TransactionAccepted
@@ -375,10 +373,9 @@ object Update {
       updateId: data.UpdateId,
       hostedWitnesses: List[Ref.Party],
       contractMetadata: Map[Value.ContractId, Bytes],
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       requestCounter: RequestCounter,
       recordTime: CantonTimestamp,
-      persisted: Promise[Unit] = Promise(),
   )(implicit override val traceContext: TraceContext)
       extends TransactionAccepted
       with RepairUpdate {
@@ -422,7 +419,7 @@ object Update {
         indicateOmittedFields,
       )
 
-    final override def domainId: DomainId = reassignment match {
+    final override def synchronizerId: SynchronizerId = reassignment match {
       case _: Reassignment.Assign => reassignmentInfo.targetDomain.unwrap
       case _: Reassignment.Unassign => reassignmentInfo.sourceDomain.unwrap
     }
@@ -437,7 +434,6 @@ object Update {
       requestCounter: RequestCounter,
       sequencerCounter: SequencerCounter,
       recordTime: CantonTimestamp,
-      persisted: Promise[Unit] = Promise(),
       commitSetO: Option[LapiCommitSet] = None,
   )(implicit override val traceContext: TraceContext)
       extends ReassignmentAccepted
@@ -454,7 +450,6 @@ object Update {
       reassignment: Reassignment,
       requestCounter: RequestCounter,
       recordTime: CantonTimestamp,
-      persisted: Promise[Unit] = Promise(),
   )(implicit override val traceContext: TraceContext)
       extends ReassignmentAccepted
       with RepairUpdate {
@@ -498,18 +493,17 @@ object Update {
         param("completion", _.completionInfo),
         paramIfTrue("definiteAnswer", _.definiteAnswer),
         param("reason", _.reasonTemplate.message.singleQuoted),
-        param("domainId", _.domainId.uid),
+        param("synchronizerId", _.synchronizerId.uid),
       )
   }
 
   final case class SequencedCommandRejected(
       completionInfo: CompletionInfo,
       reasonTemplate: RejectionReasonTemplate,
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       requestCounter: RequestCounter,
       sequencerCounter: SequencerCounter,
       recordTime: CantonTimestamp,
-      persisted: Promise[Unit] = Promise(),
   )(implicit override val traceContext: TraceContext)
       extends CommandRejected
       with SequencedUpdate
@@ -518,10 +512,9 @@ object Update {
   final case class UnSequencedCommandRejected(
       completionInfo: CompletionInfo,
       reasonTemplate: RejectionReasonTemplate,
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       recordTime: CantonTimestamp,
       messageUuid: UUID,
-      persisted: Promise[Unit] = Promise(),
   )(implicit override val traceContext: TraceContext)
       extends CommandRejected
       with FloatingUpdate
@@ -537,7 +530,7 @@ object Update {
           Logging.commandId(commandRejected.completionInfo.commandId),
           Logging.deduplicationPeriod(commandRejected.completionInfo.optDeduplicationPeriod),
           Logging.rejectionReason(commandRejected.reasonTemplate),
-          Logging.domainId(commandRejected.domainId),
+          Logging.synchronizerId(commandRejected.synchronizerId),
         )
     }
 
@@ -582,16 +575,15 @@ object Update {
   }
 
   final case class SequencerIndexMoved(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       sequencerCounter: SequencerCounter,
       recordTime: CantonTimestamp,
       requestCounterO: Option[RequestCounter],
-      persisted: Promise[Unit] = Promise(),
   )(implicit override val traceContext: TraceContext)
       extends SequencedUpdate {
     override protected def pretty: Pretty[SequencerIndexMoved] =
       prettyOfClass(
-        param("domainId", _.domainId.uid),
+        param("synchronizerId", _.synchronizerId.uid),
         param("sequencerCounter", _.sequencerCounter),
         param("sequencerTimestamp", _.recordTime),
         paramIfDefined("requestCounter", _.requestCounterO),
@@ -602,21 +594,20 @@ object Update {
     implicit val `SequencerIndexMoved to LoggingValue`: ToLoggingValue[SequencerIndexMoved] =
       seqIndexMoved =>
         LoggingValue.Nested.fromEntries(
-          Logging.domainId(seqIndexMoved.domainId),
+          Logging.synchronizerId(seqIndexMoved.synchronizerId),
           "sequencerCounter" -> seqIndexMoved.sequencerCounter.unwrap,
           "sequencerTimestamp" -> seqIndexMoved.recordTime.toInstant,
         )
   }
 
   final case class EmptyAcsPublicationRequired(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       recordTime: CantonTimestamp,
-      persisted: Promise[Unit] = Promise(),
   )(implicit override val traceContext: TraceContext)
       extends DomainUpdate {
     override protected def pretty: Pretty[EmptyAcsPublicationRequired] =
       prettyOfClass(
-        param("domainId", _.domainId.uid),
+        param("synchronizerId", _.synchronizerId.uid),
         param("sequencerTimestamp", _.recordTime),
       )
   }
@@ -626,13 +617,13 @@ object Update {
         : ToLoggingValue[EmptyAcsPublicationRequired] =
       emptyAcsPublicationRequired =>
         LoggingValue.Nested.fromEntries(
-          Logging.domainId(emptyAcsPublicationRequired.domainId),
+          Logging.synchronizerId(emptyAcsPublicationRequired.synchronizerId),
           "sequencerTimestamp" -> emptyAcsPublicationRequired.recordTime.toInstant,
         )
   }
 
   final case class CommitRepair()(implicit override val traceContext: TraceContext) extends Update {
-    override val persisted: Promise[Unit] = Promise()
+    val persisted: Promise[Unit] = Promise()
 
     override protected def pretty: Pretty[CommitRepair] = prettyOfClass()
 
@@ -715,8 +706,8 @@ object Update {
     def completionInfo(info: Option[CompletionInfo]): LoggingEntry =
       "completion" -> info
 
-    def domainId(domainId: DomainId): LoggingEntry =
-      "domainId" -> domainId.toString
+    def synchronizerId(synchronizerId: SynchronizerId): LoggingEntry =
+      "synchronizerId" -> synchronizerId.toString
   }
 
 }

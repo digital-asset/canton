@@ -5,7 +5,7 @@ package com.digitalasset.canton.crypto.provider.jce
 
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.CommunityCryptoProvider.Jce
+import com.digitalasset.canton.config.CryptoProvider.Jce
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.CryptoPureApiError.KeyParseAndValidateError
 import com.digitalasset.canton.crypto.deterministic.encryption.DeterministicRandom
@@ -259,6 +259,41 @@ class JcePureCrypto(
         )
     } yield verifier
 
+  private def edDsaSigner(signingKey: SigningPrivateKey): Either[SigningError, PublicKeySign] =
+    for {
+      privateKey <- Either
+        .catchOnly[IllegalArgumentException] {
+          val privateKeyInfo = PrivateKeyInfo.getInstance(signingKey.key.toByteArray)
+          ASN1OctetString.getInstance(privateKeyInfo.getPrivateKey.getOctets)
+        }
+        .leftMap(err => SigningError.InvalidSigningKey(show"Failed to parse PKCS #8 format: $err"))
+      signer <- Either
+        .catchOnly[GeneralSecurityException](new Ed25519Sign(privateKey.getOctets))
+        .leftMap(err =>
+          SigningError.InvalidSigningKey(show"Failed to get signer for Ed25519: $err")
+        )
+    } yield signer
+
+  private def edDsaVerifier(
+      publicKey: SigningPublicKey
+  ): Either[SignatureCheckError, PublicKeyVerify] =
+    for {
+      javaPublicKey <- parseAndGetPublicKey(
+        publicKey,
+        SignatureCheckError.InvalidKeyError.apply,
+      )
+      ed25519PublicKey <- javaPublicKey match {
+        case k: BCEdDSAPublicKey =>
+          Right(k.getPointEncoding)
+        case _ => Left(SignatureCheckError.InvalidKeyError("Not an Ed25519 public key"))
+      }
+      verifier <- Either
+        .catchOnly[GeneralSecurityException](new Ed25519Verify(ed25519PublicKey))
+        .leftMap(err =>
+          SignatureCheckError.InvalidKeyError(show"Failed to get verifier for Ed25519: $err")
+        )
+    } yield verifier
+
   override def generateSymmetricKey(
       scheme: SymmetricKeyScheme
   ): Either[EncryptionKeyGenerationError, SymmetricKey] =
@@ -291,6 +326,7 @@ class JcePureCrypto(
   override protected[crypto] def signBytes(
       bytes: ByteString,
       signingKey: SigningPrivateKey,
+      usage: NonEmpty[Set[SigningKeyUsage]],
       signingAlgorithmSpec: SigningAlgorithmSpec = defaultSigningAlgorithmSpec,
   ): Either[SigningError, Signature] = {
 
@@ -308,45 +344,34 @@ class JcePureCrypto(
             ),
         )
 
-    CryptoKeyValidation
-      .selectSigningAlgorithmSpec(
-        signingKey.keySpec,
-        signingAlgorithmSpec,
-        supportedSigningAlgorithmSpecs,
-        algorithmSpec =>
-          SigningError.UnsupportedAlgorithmSpec(algorithmSpec, supportedSigningAlgorithmSpecs),
+    for {
+      _ <- CryptoKeyValidation
+        .ensureUsage(
+          usage,
+          signingKey.usage,
+          signingKey.id,
+          err => SigningError.InvalidSigningKey(err),
+        )
+      _ <- CryptoKeyValidation.ensureFormat(
+        signingKey.format,
+        Set(CryptoKeyFormat.DerPkcs8Pki),
+        err => SigningError.InvalidSigningKey(err),
       )
-      .flatMap { _ =>
-        signingKey.keySpec match {
-          case SigningKeySpec.EcCurve25519 =>
-            for {
-              _ <- CryptoKeyValidation.ensureFormat(
-                signingKey.format,
-                Set(CryptoKeyFormat.DerPkcs8Pki),
-                err => SigningError.InvalidSigningKey(err),
-              )
-              privateKey <- Either
-                .catchOnly[IllegalArgumentException] {
-                  val privateKeyInfo = PrivateKeyInfo.getInstance(signingKey.key.toByteArray)
-                  ASN1OctetString.getInstance(privateKeyInfo.getPrivateKey.getOctets)
-                }
-                .leftMap(err =>
-                  SigningError.InvalidSigningKey(show"Failed to parse PKCS #8 format: $err")
-                )
-              signer <- Either
-                .catchOnly[GeneralSecurityException](new Ed25519Sign(privateKey.getOctets))
-                .leftMap(err =>
-                  SigningError.InvalidSigningKey(show"Failed to get signer for Ed25519: $err")
-                )
-              signature <- signWithSigner(signer)
-            } yield signature
-
-          case SigningKeySpec.EcP256 =>
-            ecDsaSigner(signingKey, HashType.SHA256).flatMap(signWithSigner)
-          case SigningKeySpec.EcP384 =>
-            ecDsaSigner(signingKey, HashType.SHA384).flatMap(signWithSigner)
-        }
+      algoSpec <- CryptoKeyValidation
+        .selectSigningAlgorithmSpec(
+          signingKey.keySpec,
+          signingAlgorithmSpec,
+          supportedSigningAlgorithmSpecs,
+          algorithmSpec =>
+            SigningError.UnsupportedAlgorithmSpec(algorithmSpec, supportedSigningAlgorithmSpecs),
+        )
+      signer <- algoSpec match {
+        case SigningAlgorithmSpec.Ed25519 => edDsaSigner(signingKey)
+        case SigningAlgorithmSpec.EcDsaSha256 => ecDsaSigner(signingKey, HashType.SHA256)
+        case SigningAlgorithmSpec.EcDsaSha384 => ecDsaSigner(signingKey, HashType.SHA384)
       }
+      signature <- signWithSigner(signer)
+    } yield signature
   }
 
   override protected[crypto] def verifySignature(
@@ -392,6 +417,11 @@ class JcePureCrypto(
             )
       }
 
+      _ <- CryptoKeyValidation.ensureFormat(
+        publicKey.format,
+        Set(CryptoKeyFormat.DerX509Spki),
+        err => SignatureCheckError.InvalidKeyError(err),
+      )
       _ <- CryptoKeyValidation.ensureCryptoSpec(
         publicKey.keySpec,
         signingAlgorithmSpec,
@@ -407,30 +437,12 @@ class JcePureCrypto(
             signingAlgorithmSpec.supportedSigningKeySpecs,
           ),
       )
-
-      _ <- publicKey.keySpec match {
-        case SigningKeySpec.EcCurve25519 =>
-          for {
-            javaPublicKey <- parseAndGetPublicKey(
-              publicKey,
-              SignatureCheckError.InvalidKeyError.apply,
-            )
-            ed25519PublicKey <- javaPublicKey match {
-              case k: BCEdDSAPublicKey =>
-                Right(k.getPointEncoding)
-              case _ => Left(SignatureCheckError.InvalidKeyError("Not an Ed25519 public key"))
-            }
-            verifier <- Either
-              .catchOnly[GeneralSecurityException](new Ed25519Verify(ed25519PublicKey))
-              .leftMap(err =>
-                SignatureCheckError.InvalidKeyError(show"Failed to get verifier for Ed25519: $err")
-              )
-            _ <- verify(verifier)
-          } yield ()
-
-        case SigningKeySpec.EcP256 => ecDsaVerifier(publicKey, HashType.SHA256).flatMap(verify)
-        case SigningKeySpec.EcP384 => ecDsaVerifier(publicKey, HashType.SHA384).flatMap(verify)
+      verifier <- signingAlgorithmSpec match {
+        case SigningAlgorithmSpec.Ed25519 => edDsaVerifier(publicKey)
+        case SigningAlgorithmSpec.EcDsaSha256 => ecDsaVerifier(publicKey, HashType.SHA256)
+        case SigningAlgorithmSpec.EcDsaSha384 => ecDsaVerifier(publicKey, HashType.SHA384)
       }
+      _ <- verify(verifier)
     } yield ()
   }
 

@@ -6,7 +6,7 @@ addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.13.0")
 addSbtPlugin("com.lightbend.sbt" % "sbt-java-formatter" % "0.7.0")
 
 // Code coverage
-addSbtPlugin("org.scoverage" % "sbt-scoverage" % "2.0.9")
+addSbtPlugin("org.scoverage" % "sbt-scoverage" % "2.2.2")
 
 // documentation site creation
 addSbtPlugin("com.github.sbt" % "sbt-site-sphinx" % "1.7.0")

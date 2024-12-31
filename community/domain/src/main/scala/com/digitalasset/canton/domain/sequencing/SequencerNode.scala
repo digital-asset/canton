@@ -12,6 +12,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.connection.GrpcApiInfoService
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.crypto.{Crypto, DomainCryptoPureApi, DomainSyncCryptoClient}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.domain.metrics.SequencerMetrics
 import com.digitalasset.canton.domain.sequencing.admin.data.{
@@ -78,7 +79,11 @@ import com.digitalasset.canton.store.{
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClient
-import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
+import com.digitalasset.canton.topology.processing.{
+  InitialTopologySnapshotValidator,
+  TopologyTransactionProcessor,
+}
+import com.digitalasset.canton.topology.store.StoredTopologyTransactions.GenericStoredTopologyTransactions
 import com.digitalasset.canton.topology.store.TopologyStoreId.DomainStore
 import com.digitalasset.canton.topology.store.{
   StoreBasedTopologyStateForInitializationService,
@@ -89,7 +94,6 @@ import com.digitalasset.canton.topology.transaction.{
   DomainTrustCertificate,
   MediatorDomainState,
   SequencerDomainState,
-  SignedTopologyTransaction,
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, SingleUseCell}
@@ -174,8 +178,8 @@ class SequencerNodeBootstrap(
       storeId: TopologyStoreId
   ): Option[DomainTopologyClient] =
     storeId match {
-      case DomainStore(domainId, _) =>
-        topologyClient.get.filter(_.domainId == domainId)
+      case DomainStore(synchronizerId, _) =>
+        topologyClient.get.filter(_.synchronizerId == synchronizerId)
       case _ => None
     }
 
@@ -199,7 +203,7 @@ class SequencerNodeBootstrap(
     override def getAdminToken: Option[String] = Some(adminToken.secret)
 
     // add initialization service
-    adminServerRegistry.addServiceU(
+    val (initializationServiceDef, _) = adminServerRegistry.addService(
       SequencerInitializationServiceGrpc.bindService(
         new GrpcSequencerInitializationService(this, loggerFactory)(executionContext),
         executionContext,
@@ -283,7 +287,7 @@ class SequencerNodeBootstrap(
                   crypto,
                   existing.domainParameters,
                   store = createDomainTopologyStore(
-                    existing.domainId,
+                    existing.synchronizerId,
                     existing.domainParameters.protocolVersion,
                   ),
                   outboxQueue = new DomainOutboxQueue(loggerFactory),
@@ -292,7 +296,7 @@ class SequencerNodeBootstrap(
                   futureSupervisor,
                   loggerFactory,
                 ),
-                sequencerSnapshot = None,
+                topologyAndSequencerSnapshot = None,
               )
             )
           case None =>
@@ -303,12 +307,34 @@ class SequencerNodeBootstrap(
         .value
         .map(_.flatten)
 
+    private def finalizeInitialization(
+        synchronizerId: SynchronizerId,
+        staticDomainParameters: StaticDomainParameters,
+    ): EitherT[FutureUnlessShutdown, String, Unit] = {
+      logger.info(s"Finalizing initialization for domain $synchronizerId")
+      domainConfigurationStore
+        .saveConfiguration(
+          SequencerDomainConfiguration(
+            synchronizerId,
+            staticDomainParameters,
+          )
+        )
+        .leftMap(e => s"Unable to save parameters: ${e.toString}")
+        .mapK(FutureUnlessShutdown.outcomeK)
+    }
+
     private def createDomainTopologyStore(
-        domainId: DomainId,
+        synchronizerId: SynchronizerId,
         protocolVersion: ProtocolVersion,
     ): TopologyStore[DomainStore] = {
       val store =
-        TopologyStore(DomainStore(domainId), storage, protocolVersion, timeouts, loggerFactory)
+        TopologyStore(
+          DomainStore(synchronizerId),
+          storage,
+          protocolVersion,
+          timeouts,
+          loggerFactory,
+        )
       addCloseable(store)
       store
     }
@@ -322,6 +348,7 @@ class SequencerNodeBootstrap(
           "Unexpected state during initialization: domain topology manager shouldn't have been set before",
         )
       } yield {
+        adminServerRegistry.removeServiceU(initializationServiceDef)
         new StartupNode(
           storage,
           crypto,
@@ -333,7 +360,12 @@ class SequencerNodeBootstrap(
           manager,
           result.domainTopologyManager,
           nonInitializedSequencerNodeServer.getAndSet(None),
-          result.sequencerSnapshot,
+          result.topologyAndSequencerSnapshot,
+          () =>
+            finalizeInitialization(
+              result.domainTopologyManager.synchronizerId,
+              result.staticDomainParameters,
+            ),
           healthReporter,
           healthService,
         )
@@ -361,7 +393,7 @@ class SequencerNodeBootstrap(
               else "with existing snapshot"}"
           )
           val sequencerFactory = mkFactory(request.domainParameters.protocolVersion)
-          val domainIds = request.topologySnapshot.result
+          val synchronizerIds = request.topologySnapshot.result
             .map(_.mapping)
             .collect { case SequencerDomainState(domain, _, _, _) => domain }
             .toSet
@@ -372,27 +404,15 @@ class SequencerNodeBootstrap(
             //        - there must be a dynamic domain parameter
             //        - there must have one mediator and one sequencer group
             //        - each member must have the necessary keys
-            domainId <- EitherT.fromEither[FutureUnlessShutdown](
-              domainIds.headOption.toRight("No domain id within topology state defined!")
+            synchronizerId <- EitherT.fromEither[FutureUnlessShutdown](
+              synchronizerIds.headOption.toRight(
+                "No synchronizer id within topology state defined!"
+              )
             )
-            _ <- request.sequencerSnapshot
-              .map { snapshot =>
-                logger.debug("Uploading sequencer snapshot to sequencer driver")
-                val initialState = SequencerInitialState(
-                  domainId,
-                  snapshot,
-                  request.topologySnapshot.result.view
-                    .map(tx => (tx.sequenced.value, tx.validFrom.value)),
-                )
-                // TODO(#14070) make initialize idempotent to support crash recovery during init
-                sequencerFactory
-                  .initialize(initialState, sequencerId)
-              }
-              .getOrElse {
-                logger.debug("Skipping sequencer snapshot")
-                EitherT.rightT[FutureUnlessShutdown, String](())
-              }
-            store = createDomainTopologyStore(domainId, request.domainParameters.protocolVersion)
+            store = createDomainTopologyStore(
+              synchronizerId,
+              request.domainParameters.protocolVersion,
+            )
             outboxQueue = new DomainOutboxQueue(loggerFactory)
             topologyManager = new DomainTopologyManager(
               sequencerId.uid,
@@ -406,30 +426,11 @@ class SequencerNodeBootstrap(
               futureSupervisor,
               loggerFactory,
             )
-            _ = logger.debug(
-              s"Storing ${request.topologySnapshot.result.length} txs in the domain store"
-            )
-            _ <- EitherT
-              .right(store.bootstrap(request.topologySnapshot))
-            _ = if (logger.underlying.isDebugEnabled()) {
-              logger.debug(
-                s"Bootstrapped sequencer topology domain store with transactions ${request.topologySnapshot.result}"
-              )
-            }
-            _ <- domainConfigurationStore
-              .saveConfiguration(
-                SequencerDomainConfiguration(
-                  domainId,
-                  request.domainParameters,
-                )
-              )
-              .leftMap(e => s"Unable to save parameters: ${e.toString}")
-              .mapK(FutureUnlessShutdown.outcomeK)
           } yield StageResult(
             request.domainParameters,
             sequencerFactory,
             topologyManager,
-            request.sequencerSnapshot,
+            Some(request.topologySnapshot -> request.sequencerSnapshot),
           )
         }.map { _ =>
           InitializeSequencerResponse(replicated = config.sequencer.supportsReplicas)
@@ -448,7 +449,10 @@ class SequencerNodeBootstrap(
       authorizedTopologyManager: AuthorizedTopologyManager,
       domainTopologyManager: DomainTopologyManager,
       preinitializedServer: Option[DynamicGrpcServer],
-      sequencerSnapshot: Option[SequencerSnapshot],
+      topologyAndSequencerSnapshot: Option[
+        (GenericStoredTopologyTransactions, Option[SequencerSnapshot])
+      ],
+      finalizeInitialization: () => EitherT[FutureUnlessShutdown, String, Unit],
       healthReporter: GrpcHealthReporter,
       healthService: DependenciesHealthService,
   ) extends BootstrapStage[SequencerNode, RunningNode[SequencerNode]](
@@ -457,9 +461,10 @@ class SequencerNodeBootstrap(
       )
       with HasCloseContext {
     override def getAdminToken: Option[String] = Some(adminToken.secret)
-    // save one argument and grab the domainId from the store ...
-    private val domainId = domainTopologyManager.store.storeId.domainId
-    private val domainLoggerFactory = loggerFactory.append("domainId", domainId.toString)
+    // save one argument and grab the synchronizerId from the store ...
+    private val synchronizerId = domainTopologyManager.synchronizerId
+    private val domainLoggerFactory =
+      loggerFactory.append("synchronizerId", synchronizerId.toString)
 
     preinitializedServer.foreach(x => addCloseable(x.publicServer))
 
@@ -468,7 +473,7 @@ class SequencerNodeBootstrap(
     ): EitherT[FutureUnlessShutdown, String, Option[RunningNode[SequencerNode]]] = {
 
       val domainOutboxFactory = new DomainOutboxFactorySingleCreate(
-        domainId,
+        synchronizerId,
         sequencerId,
         authorizedTopologyManager,
         domainTopologyManager,
@@ -493,7 +498,7 @@ class SequencerNodeBootstrap(
         addCloseable(indexedStringStore)
         for {
           indexedDomain <- EitherT.right[String](
-            IndexedDomain.indexed(indexedStringStore)(domainId)
+            IndexedDomain.indexed(indexedStringStore)(synchronizerId)
           )
           sequencedEventStore = SequencedEventStore(
             storage,
@@ -502,7 +507,85 @@ class SequencerNodeBootstrap(
             timeouts,
             loggerFactory,
           )
-          topologyHeadInitializer = sequencerSnapshot match {
+
+          membersToRegister <- {
+            topologyAndSequencerSnapshot match {
+              case None =>
+                EitherT.rightT[FutureUnlessShutdown, String](Set.empty[Member])
+              case Some((initialTopologyTransactions, sequencerSnapshot)) =>
+                val topologySnapshotValidator = new InitialTopologySnapshotValidator(
+                  synchronizerId,
+                  new DomainCryptoPureApi(staticDomainParameters, crypto.pureCrypto),
+                  domainTopologyStore,
+                  parameters.processingTimeouts,
+                  loggerFactory,
+                )
+                for {
+                  _ <- topologySnapshotValidator.validateAndApplyInitialTopologySnapshot(
+                    initialTopologyTransactions
+                  )
+                  _ <- sequencerSnapshot
+                    .map { snapshot =>
+                      logger.debug("Uploading sequencer snapshot to sequencer driver")
+                      val initialState = SequencerInitialState(
+                        synchronizerId,
+                        snapshot,
+                        initialTopologyTransactions.result.view
+                          .map(tx => (tx.sequenced.value, tx.validFrom.value)),
+                      )
+                      // TODO(#14070) make initialize idempotent to support crash recovery during init
+                      sequencerFactory
+                        .initialize(initialState, sequencerId)
+                    }
+                    .getOrElse {
+                      logger.debug("No sequencer snapshot provided for initialization")
+                      EitherT.rightT[FutureUnlessShutdown, String](())
+                    }
+                  _ <- finalizeInitialization()
+
+                  // This sequencer node was started for the first time and initialized with a topology state.
+                  // Therefore, we fetch all members who have a registered role on the domain and pass them
+                  // to the underlying sequencer driver to register them as known members.
+                  transactions <- EitherT.right[String](
+                    domainTopologyStore
+                      .findPositiveTransactions(
+                        CantonTimestamp.MaxValue,
+                        asOfInclusive = false,
+                        isProposal = false,
+                        types = Seq(
+                          DomainTrustCertificate.code,
+                          SequencerDomainState.code,
+                          MediatorDomainState.code,
+                        ),
+                        filterUid = None,
+                        filterNamespace = None,
+                      )
+                  )
+                } yield {
+                  val participants = transactions
+                    .collectOfMapping[DomainTrustCertificate]
+                    .collectLatestByUniqueKey
+                    .toTopologyState
+                    .map(_.participantId)
+                    .toSet
+                  val sequencers = transactions
+                    .collectOfMapping[SequencerDomainState]
+                    .collectLatestByUniqueKey
+                    .toTopologyState
+                    .flatMap(sds => sds.active.forgetNE ++ sds.observers)
+                    .toSet
+                  val mediators = transactions
+                    .collectOfMapping[MediatorDomainState]
+                    .collectLatestByUniqueKey
+                    .toTopologyState
+                    .flatMap(mds => mds.active.forgetNE ++ mds.observers)
+                    .toSet
+                  participants ++ sequencers ++ mediators
+                }
+            }
+          }
+
+          topologyHeadInitializer = topologyAndSequencerSnapshot.flatMap(_._2) match {
             case Some(snapshot) =>
               new SequencerSnapshotBasedTopologyHeadInitializer(snapshot, domainTopologyStore)
             case None =>
@@ -515,7 +598,7 @@ class SequencerNodeBootstrap(
             .right(
               TopologyTransactionProcessor.createProcessorAndClientForDomain(
                 domainTopologyStore,
-                domainId,
+                synchronizerId,
                 new DomainCryptoPureApi(staticDomainParameters, crypto.pureCrypto),
                 parameters,
                 clock,
@@ -531,55 +614,9 @@ class SequencerNodeBootstrap(
             SequencerNodeBootstrap.this.topologyClient.putIfAbsent(topologyClient).isEmpty,
             "Unexpected state during initialization: topology client shouldn't have been set before",
           )
-          membersToRegister <- {
-            val tsInit = SignedTopologyTransaction.InitialTopologySequencingTime.immediateSuccessor
-            // When the sequencer is started on a fresh domain there's no sequencer snapshot,
-            // so we need to register all members present in the topology snapshot
-            if (topologyClient.approximateTimestamp == tsInit) {
-              // This sequencer node was started for the first time and initialized with a topology state.
-              // Therefore, we fetch all members who have a registered role on the domain and pass them
-              // to the underlying sequencer driver to register them as known members.
-              EitherT.right[String](
-                domainTopologyStore
-                  .findPositiveTransactions(
-                    tsInit,
-                    asOfInclusive = false,
-                    isProposal = false,
-                    types = Seq(
-                      DomainTrustCertificate.code,
-                      SequencerDomainState.code,
-                      MediatorDomainState.code,
-                    ),
-                    filterUid = None,
-                    filterNamespace = None,
-                  )
-                  .map { transactions =>
-                    val participants = transactions
-                      .collectOfMapping[DomainTrustCertificate]
-                      .collectLatestByUniqueKey
-                      .toTopologyState
-                      .map(_.participantId)
-                      .toSet
-                    val sequencers = transactions
-                      .collectOfMapping[SequencerDomainState]
-                      .collectLatestByUniqueKey
-                      .toTopologyState
-                      .flatMap(sds => sds.active.forgetNE ++ sds.observers)
-                      .toSet
-                    val mediators = transactions
-                      .collectOfMapping[MediatorDomainState]
-                      .collectLatestByUniqueKey
-                      .toTopologyState
-                      .flatMap(mds => mds.active.forgetNE ++ mds.observers)
-                      .toSet
-                    participants ++ sequencers ++ mediators
-                  }
-              )
-            } else EitherT.rightT[FutureUnlessShutdown, String](Set.empty[Member])
-          }
 
           memberAuthServiceFactory = MemberAuthenticationServiceFactory(
-            domainId,
+            synchronizerId,
             clock,
             config.publicApi.nonceExpirationInterval.asJava,
             config.publicApi.maxTokenExpirationInterval.asJava,
@@ -592,7 +629,7 @@ class SequencerNodeBootstrap(
 
           syncCrypto = new DomainSyncCryptoClient(
             sequencerId,
-            domainId,
+            synchronizerId,
             topologyClient,
             crypto,
             arguments.parameterConfig.sessionSigningKeys,
@@ -608,7 +645,7 @@ class SequencerNodeBootstrap(
           sequencer <- EitherT
             .right[String](
               sequencerFactory.create(
-                domainId,
+                synchronizerId,
                 sequencerId,
                 clock,
                 clock,
@@ -616,7 +653,9 @@ class SequencerNodeBootstrap(
                 futureSupervisor,
                 config.trafficConfig,
                 runtimeReadyPromise.futureUS,
-                sequencerSnapshot,
+                topologyAndSequencerSnapshot.flatMap { case (_, sequencerSnapshot) =>
+                  sequencerSnapshot
+                },
               )
             )
           domainParamsLookup = DomainParametersLookup.forSequencerDomainParameters(
@@ -633,7 +672,7 @@ class SequencerNodeBootstrap(
           sequencerClient = new SequencerClientImplPekko[
             DirectSequencerClientTransport.SubscriptionError
           ](
-            domainId,
+            synchronizerId,
             sequencerId,
             SequencerTransports.default(
               sequencerId,
@@ -650,7 +689,7 @@ class SequencerNodeBootstrap(
             domainParamsLookup,
             parameters.processingTimeouts,
             // Since the sequencer runtime trusts itself, there is no point in validating the events.
-            SequencedEventValidatorFactory.noValidation(domainId, warn = false),
+            SequencedEventValidatorFactory.noValidation(synchronizerId, warn = false),
             clock,
             RequestSigner(syncCrypto, staticDomainParameters.protocolVersion, loggerFactory),
             sequencedEventStore,
@@ -751,7 +790,9 @@ class SequencerNodeBootstrap(
       staticDomainParameters: StaticDomainParameters,
       sequencerFactory: SequencerFactory,
       domainTopologyManager: DomainTopologyManager,
-      sequencerSnapshot: Option[SequencerSnapshot],
+      topologyAndSequencerSnapshot: Option[
+        (GenericStoredTopologyTransactions, Option[SequencerSnapshot])
+      ],
   )
 
   // Deferred health component for the sequencer health, created during initialization
@@ -858,8 +899,8 @@ class SequencerNode(
     val ports = Map("public" -> config.publicApi.port, "admin" -> config.adminApi.port)
 
     SequencerNodeStatus(
-      sequencer.domainId.unwrap,
-      sequencer.domainId,
+      sequencer.synchronizerId.unwrap,
+      sequencer.synchronizerId,
       uptime(),
       ports,
       activeMembers,

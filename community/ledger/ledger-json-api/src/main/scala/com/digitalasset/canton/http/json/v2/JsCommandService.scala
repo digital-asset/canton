@@ -236,7 +236,7 @@ final case class JsCommands(
     read_as: Seq[String],
     submission_id: String,
     disclosed_contracts: Seq[com.daml.ledger.api.v2.commands.DisclosedContract],
-    domain_id: String,
+    synchronizer_id: String,
     package_id_selection_preference: Seq[String],
 )
 
@@ -277,7 +277,6 @@ object JsCommandService extends DocumentationEndpoints {
       .out(jsonBody[command_submission_service.SubmitReassignmentResponse])
       .description("Submit reassignment command asynchronously")
 
-  // TODO (i21030) add test for this
   val completionStreamEndpoint =
     commands.get
       .in(sttp.tapir.stringToPath("completions"))

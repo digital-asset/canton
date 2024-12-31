@@ -11,17 +11,18 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.PackageUnknownTo
-import com.digitalasset.canton.protocol.LfLanguageVersion
+import com.digitalasset.canton.protocol.{LfActionNode, LfLanguageVersion, LfVersionedTransaction}
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{DomainId, ParticipantId}
+import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.util.{EitherTUtil, LfTransactionUtil}
 import com.digitalasset.canton.version.{
   DamlLfVersionToProtocolVersions,
   HashingSchemeVersion,
   ProtocolVersion,
 }
 import com.digitalasset.canton.{LfPackageId, LfPartyId}
+import com.digitalasset.daml.lf.engine.Blinding
 import com.digitalasset.daml.lf.transaction.TransactionVersion
 
 import scala.concurrent.ExecutionContext
@@ -33,37 +34,34 @@ object UsableDomains {
     * - Domain that can be used
     */
   def check(
-      domains: List[(DomainId, ProtocolVersion, TopologySnapshot)],
-      requiredPackagesPerParty: Map[LfPartyId, Set[LfPackageId]],
-      transactionVersion: LfLanguageVersion,
+      domains: List[(SynchronizerId, ProtocolVersion, TopologySnapshot)],
+      transaction: LfVersionedTransaction,
       ledgerTime: CantonTimestamp,
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-  ): FutureUnlessShutdown[(List[DomainNotUsedReason], List[DomainId])] = domains
-    .parTraverse { case (domainId, protocolVersion, snapshot) =>
+  ): FutureUnlessShutdown[(List[DomainNotUsedReason], List[SynchronizerId])] = domains
+    .parTraverse { case (synchronizerId, protocolVersion, snapshot) =>
       UsableDomains
         .check(
-          domainId,
+          synchronizerId,
           protocolVersion,
           snapshot,
-          requiredPackagesPerParty,
-          transactionVersion,
+          transaction,
           ledgerTime,
           // TODO(i20688): use ISV to select domain
           Option.empty[HashingSchemeVersion],
         )
-        .map(_ => domainId)
+        .map(_ => synchronizerId)
         .value
     }
     .map(_.separate)
 
   def check(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       protocolVersion: ProtocolVersion,
       snapshot: TopologySnapshot,
-      requiredPackagesPerParty: Map[LfPartyId, Set[LfPackageId]],
-      transactionVersion: LfLanguageVersion,
+      transaction: LfVersionedTransaction,
       ledgerTime: CantonTimestamp,
       interactiveSubmissionVersionO: Option[HashingSchemeVersion],
   )(implicit
@@ -71,26 +69,37 @@ object UsableDomains {
       tc: TraceContext,
   ): EitherT[FutureUnlessShutdown, DomainNotUsedReason, Unit] = {
 
+    val requiredPackagesPerParty = Blinding.partyPackages(transaction)
+    val transactionVersion = transaction.version
+
     val packageVetted: EitherT[FutureUnlessShutdown, UnknownPackage, Unit] =
       checkPackagesVetted(
-        domainId,
+        synchronizerId,
         snapshot,
         requiredPackagesPerParty,
         ledgerTime,
       )
     val partiesConnected: EitherT[FutureUnlessShutdown, MissingActiveParticipant, Unit] =
-      checkConnectedParties(domainId, snapshot, requiredPackagesPerParty.keySet)
+      checkConnectedParties(synchronizerId, snapshot, requiredPackagesPerParty.keySet)
+    val partiesWithConfirmingParticipant
+        : EitherT[FutureUnlessShutdown, MissingActiveParticipant, Unit] =
+      checkConfirmingParties(synchronizerId, transaction, snapshot)
     val compatibleProtocolVersion
         : EitherT[FutureUnlessShutdown, UnsupportedMinimumProtocolVersion, Unit] =
-      checkProtocolVersion(domainId, protocolVersion, transactionVersion)
+      checkProtocolVersion(synchronizerId, protocolVersion, transactionVersion)
     val compatibleInteractiveSubmissionVersion
         : EitherT[FutureUnlessShutdown, DomainNotUsedReason, Unit] =
-      checkInteractiveSubmissionVersion(domainId, interactiveSubmissionVersionO, protocolVersion)
+      checkInteractiveSubmissionVersion(
+        synchronizerId,
+        interactiveSubmissionVersionO,
+        protocolVersion,
+      )
         .leftWiden[DomainNotUsedReason]
 
     for {
       _ <- packageVetted.leftWiden[DomainNotUsedReason]
       _ <- partiesConnected.leftWiden[DomainNotUsedReason]
+      _ <- partiesWithConfirmingParticipant.leftWiden[DomainNotUsedReason]
       _ <- compatibleProtocolVersion.leftWiden[DomainNotUsedReason]
       _ <- compatibleInteractiveSubmissionVersion
     } yield ()
@@ -98,7 +107,7 @@ object UsableDomains {
   }
 
   private def checkInteractiveSubmissionVersion(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       versionO: Option[HashingSchemeVersion],
       protocolVersion: ProtocolVersion,
   )(implicit
@@ -114,7 +123,7 @@ object UsableDomains {
         minProtocolVersion.exists(protocolVersion >= _),
         (),
         UnsupportedMinimumProtocolVersionForInteractiveSubmission(
-          domainId = domainId,
+          synchronizerId = synchronizerId,
           currentPV = protocolVersion,
           requiredPV = minProtocolVersion,
           isVersion = version,
@@ -123,10 +132,33 @@ object UsableDomains {
     }
     .getOrElse(EitherT.pure(()))
 
-  /** Check that every party in `parties` is hosted by an active participant on domain `domainId`
+  /** Check that every confirming party in the transaction is hosted by an active confirming participant
+    * on domain `synchronizerId`.
+    */
+  private def checkConfirmingParties(
+      synchronizerId: SynchronizerId,
+      transaction: LfVersionedTransaction,
+      snapshot: TopologySnapshot,
+  )(implicit
+      ec: ExecutionContext,
+      tc: TraceContext,
+  ): EitherT[FutureUnlessShutdown, MissingActiveParticipant, Unit] = {
+
+    val actionNodes = transaction.nodes.values.collect { case an: LfActionNode => an }
+
+    val requiredConfirmers = actionNodes.flatMap { node =>
+      LfTransactionUtil.signatoriesOrMaintainers(node) | LfTransactionUtil.actingParties(node)
+    }.toSet
+
+    snapshot
+      .allHaveActiveParticipants(requiredConfirmers, _.canConfirm)
+      .leftMap(MissingActiveParticipant(synchronizerId, _))
+  }
+
+  /** Check that every party in `parties` is hosted by an active participant on domain `synchronizerId`
     */
   private def checkConnectedParties(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       snapshot: TopologySnapshot,
       parties: Set[LfPartyId],
   )(implicit
@@ -135,7 +167,7 @@ object UsableDomains {
   ): EitherT[FutureUnlessShutdown, MissingActiveParticipant, Unit] =
     snapshot
       .allHaveActiveParticipants(parties)
-      .leftMap(MissingActiveParticipant(domainId, _))
+      .leftMap(MissingActiveParticipant(synchronizerId, _))
 
   private def unknownPackages(snapshot: TopologySnapshot, ledgerTime: CantonTimestamp)(
       participantIdAndRequiredPackages: (ParticipantId, Set[LfPackageId])
@@ -175,7 +207,7 @@ object UsableDomains {
     *
     * - For every participant `P` hosting `party`
     *
-    * - All packages `pkgs` are vetted by `P` on domain `domainId`
+    * - All packages `pkgs` are vetted by `P` on domain `synchronizerId`
     *
     * Note: in order to avoid false errors, it is important that the set of packages needed
     * for the parties hosted locally covers the set of packages needed for all the parties.
@@ -191,7 +223,7 @@ object UsableDomains {
     * needed for these parties will be sufficient to re-interpret the whole projection.
     */
   def checkPackagesVetted(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       snapshot: TopologySnapshot,
       requiredPackagesByParty: Map[LfPartyId, Set[LfPackageId]],
       ledgerTime: CantonTimestamp,
@@ -201,11 +233,11 @@ object UsableDomains {
   ): EitherT[FutureUnlessShutdown, UnknownPackage, Unit] =
     resolveParticipants(snapshot, requiredPackagesByParty)
       .flatMap(
-        checkPackagesVetted(domainId, snapshot, ledgerTime, _)
+        checkPackagesVetted(synchronizerId, snapshot, ledgerTime, _)
       )
 
   private def checkPackagesVetted(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       snapshot: TopologySnapshot,
       ledgerTime: CantonTimestamp,
       requiredPackages: Map[ParticipantId, Set[LfPackageId]],
@@ -217,10 +249,10 @@ object UsableDomains {
       requiredPackages.toList
         .parFlatTraverse(unknownPackages(snapshot, ledgerTime))
         .map(NonEmpty.from(_).toLeft(()))
-    ).leftMap(unknownTo => UnknownPackage(domainId, unknownTo))
+    ).leftMap(unknownTo => UnknownPackage(synchronizerId, unknownTo))
 
   private def checkProtocolVersion(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       protocolVersion: ProtocolVersion,
       transactionVersion: TransactionVersion,
   )(implicit
@@ -234,7 +266,7 @@ object UsableDomains {
     EitherTUtil.condUnitET(
       protocolVersion >= minimumPVForTransaction,
       UnsupportedMinimumProtocolVersion(
-        domainId,
+        synchronizerId,
         protocolVersion,
         minimumPVForTransaction,
         transactionVersion,
@@ -243,44 +275,44 @@ object UsableDomains {
   }
 
   sealed trait DomainNotUsedReason {
-    def domainId: DomainId
+    def synchronizerId: SynchronizerId
   }
 
-  final case class MissingActiveParticipant(domainId: DomainId, parties: Set[LfPartyId])
+  final case class MissingActiveParticipant(synchronizerId: SynchronizerId, parties: Set[LfPartyId])
       extends DomainNotUsedReason {
     override def toString: String =
-      s"Parties $parties don't have an active participant on domain $domainId"
+      s"Parties $parties don't have an active participant on domain $synchronizerId"
   }
 
-  final case class UnknownPackage(domainId: DomainId, unknownTo: List[PackageUnknownTo])
+  final case class UnknownPackage(synchronizerId: SynchronizerId, unknownTo: List[PackageUnknownTo])
       extends DomainNotUsedReason {
     override def toString: String =
-      (s"Some packages are not known to all informees on domain $domainId" +: unknownTo.map(
+      (s"Some packages are not known to all informees on domain $synchronizerId" +: unknownTo.map(
         _.toString
       )).mkString(System.lineSeparator())
   }
 
   final case class UnsupportedMinimumProtocolVersion(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       currentPV: ProtocolVersion,
       requiredPV: ProtocolVersion,
       lfVersion: LfLanguageVersion,
   ) extends DomainNotUsedReason {
 
     override def toString: String =
-      s"The transaction uses a specific LF version $lfVersion that is supported starting protocol version: $requiredPV. Currently the Domain $domainId is using $currentPV."
+      s"The transaction uses a specific LF version $lfVersion that is supported starting protocol version: $requiredPV. Currently the Domain $synchronizerId is using $currentPV."
 
   }
 
   final case class UnsupportedMinimumProtocolVersionForInteractiveSubmission(
-      domainId: DomainId,
+      synchronizerId: SynchronizerId,
       currentPV: ProtocolVersion,
       requiredPV: Option[ProtocolVersion],
       isVersion: HashingSchemeVersion,
   ) extends DomainNotUsedReason {
 
     override def toString: String =
-      s"The transaction was hashed using a version $isVersion that is supported starting protocol version: $requiredPV. Currently the Domain $domainId is using $currentPV."
+      s"The transaction was hashed using a version $isVersion that is supported starting protocol version: $requiredPV. Currently the Domain $synchronizerId is using $currentPV."
 
   }
 }
