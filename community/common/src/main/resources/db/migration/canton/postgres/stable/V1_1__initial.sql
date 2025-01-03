@@ -232,7 +232,7 @@ create table sequencer_client_pending_sends (
 );
 
 create table par_domain_connection_configs(
-  domain_alias varchar(300) collate "C" not null primary key,
+  synchronizer_alias varchar(300) collate "C" not null primary key,
   config bytea, -- the protobuf-serialized versioned domain connection config
   status char(1) default 'A' not null
 );

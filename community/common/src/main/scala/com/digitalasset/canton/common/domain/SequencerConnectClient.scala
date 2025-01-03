@@ -4,7 +4,7 @@
 package com.digitalasset.canton.common.domain
 
 import cats.data.EitherT
-import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.common.domain.SequencerConnectClient.{
   DomainClientBootstrapInfo,
   Error,
@@ -26,7 +26,7 @@ import scala.concurrent.ExecutionContextExecutor
 
 trait SequencerConnectClient extends NamedLogging with AutoCloseable {
 
-  def getDomainClientBootstrapInfo(domainAlias: DomainAlias)(implicit
+  def getDomainClientBootstrapInfo(synchronizerAlias: SynchronizerAlias)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, DomainClientBootstrapInfo]
 
@@ -43,15 +43,19 @@ trait SequencerConnectClient extends NamedLogging with AutoCloseable {
   ): EitherT[FutureUnlessShutdown, Error, SynchronizerId]
 
   def handshake(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       request: HandshakeRequest,
       dontWarnOnDeprecatedPV: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, HandshakeResponse]
 
-  def isActive(participantId: ParticipantId, domainAlias: DomainAlias, waitForActive: Boolean)(
-      implicit traceContext: TraceContext
+  def isActive(
+      participantId: ParticipantId,
+      synchronizerAlias: SynchronizerAlias,
+      waitForActive: Boolean,
+  )(implicit
+      traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, Boolean]
 
   protected def handleVerifyActiveResponse(
@@ -66,7 +70,7 @@ trait SequencerConnectClient extends NamedLogging with AutoCloseable {
   }
 
   def registerOnboardingTopologyTransactions(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       member: Member,
       topologyTransactions: Seq[GenericSignedTopologyTransaction],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, Error, Unit]
@@ -74,7 +78,7 @@ trait SequencerConnectClient extends NamedLogging with AutoCloseable {
 
 object SequencerConnectClient {
 
-  type Builder = (DomainAlias, SequencerConnection) => SequencerConnectClient
+  type Builder = (SynchronizerAlias, SequencerConnection) => SequencerConnectClient
 
   sealed trait Error {
     def message: String
@@ -89,7 +93,7 @@ object SequencerConnectClient {
   }
 
   def apply(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       sequencerConnection: SequencerConnection,
       timeouts: ProcessingTimeout,
       traceContextPropagation: TracingConfig.Propagation,
@@ -105,7 +109,7 @@ object SequencerConnectClient {
           traceContextPropagation,
           SequencerClient
             .loggerFactoryWithSequencerAlias(
-              loggerFactory.append("domainAlias", domainAlias.toString),
+              loggerFactory.append("synchronizerAlias", synchronizerAlias.toString),
               connection.sequencerAlias,
             )
             .append("sequencerConnection", connection.endpoints.map(_.toString).mkString(",")),

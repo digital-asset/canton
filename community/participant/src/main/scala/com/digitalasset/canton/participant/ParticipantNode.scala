@@ -39,7 +39,7 @@ import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.grpc.*
 import com.digitalasset.canton.participant.admin.workflows.java.canton
 import com.digitalasset.canton.participant.config.*
-import com.digitalasset.canton.participant.domain.DomainAliasManager
+import com.digitalasset.canton.participant.domain.SynchronizerAliasManager
 import com.digitalasset.canton.participant.domain.grpc.GrpcDomainRegistry
 import com.digitalasset.canton.participant.health.admin.ParticipantStatus
 import com.digitalasset.canton.participant.ledger.api.CantonLedgerApiServerWrapper.IndexerLockIds
@@ -343,7 +343,7 @@ class ParticipantNodeBootstrap(
         futureSupervisor,
         loggerFactory,
       )
-      // closed in DomainAliasManager
+      // closed in SynchronizerAliasManager
       val registeredDomainsStore = RegisteredDomainsStore(storage, timeouts, loggerFactory)
       val indexedStringStore = IndexedStringStore.create(
         storage,
@@ -364,9 +364,9 @@ class ParticipantNodeBootstrap(
           )
           .mapK(FutureUnlessShutdown.outcomeK)
 
-        domainAliasManager <- EitherT
+        synchronizerAliasManager <- EitherT
           .right[String](
-            DomainAliasManager
+            SynchronizerAliasManager
               .create(domainConnectionConfigStore, registeredDomainsStore, loggerFactory)
           )
           .mapK(FutureUnlessShutdown.outcomeK)
@@ -393,7 +393,7 @@ class ParticipantNodeBootstrap(
 
         syncDomainPersistentStateManager = new SyncDomainPersistentStateManager(
           participantId,
-          domainAliasManager,
+          synchronizerAliasManager,
           storage,
           indexedStringStore,
           persistentState.map(_.acsCounterParticipantConfigStore).value,
@@ -572,7 +572,7 @@ class ParticipantNodeBootstrap(
           config.crypto,
           clock,
           parameterConfig,
-          domainAliasManager,
+          synchronizerAliasManager,
           arguments.testingConfig,
           recordSequencerInteractions,
           replaySequencerConfig,
@@ -615,10 +615,10 @@ class ParticipantNodeBootstrap(
           arguments.metrics.pruning,
           exitOnFatalFailures = arguments.parameterConfig.exitOnFatalFailures,
           synchronizerId =>
-            domainAliasManager
+            synchronizerAliasManager
               .aliasForSynchronizerId(synchronizerId)
-              .flatMap(domainAlias =>
-                domainConnectionConfigStore.get(domainAlias).toOption.map(_.status)
+              .flatMap(synchronizerAlias =>
+                domainConnectionConfigStore.get(synchronizerAlias).toOption.map(_.status)
               ),
           parameterConfig.processingTimeouts,
           futureSupervisor,
@@ -660,7 +660,7 @@ class ParticipantNodeBootstrap(
           participantId,
           domainRegistry,
           domainConnectionConfigStore,
-          domainAliasManager,
+          synchronizerAliasManager,
           persistentState,
           ephemeralState,
           syncDomainPersistentStateManager,
@@ -740,7 +740,7 @@ class ParticipantNodeBootstrap(
               .bindService(
                 new GrpcDomainConnectivityService(
                   sync,
-                  domainAliasManager,
+                  synchronizerAliasManager,
                   parameterConfig.processingTimeouts,
                   sequencerInfoLoader,
                   loggerFactory,
@@ -755,7 +755,7 @@ class ParticipantNodeBootstrap(
                 sync.stateInspection,
                 ips,
                 indexedStringStore,
-                domainAliasManager,
+                synchronizerAliasManager,
                 loggerFactory,
               ),
               executionContext,
@@ -811,7 +811,7 @@ class ParticipantNodeBootstrap(
 
         addCloseable(sync)
         addCloseable(domainConnectionConfigStore)
-        addCloseable(domainAliasManager)
+        addCloseable(synchronizerAliasManager)
         addCloseable(syncDomainPersistentStateManager)
         addCloseable(domainRegistry)
         addCloseable(partyMetadataStore)

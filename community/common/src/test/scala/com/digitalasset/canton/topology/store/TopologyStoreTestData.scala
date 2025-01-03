@@ -280,7 +280,7 @@ class TopologyStoreTestData(
   val sds_seq1_domain1 = makeSignedTx(
     SequencerDomainState
       .create(
-        domain = domain1_p1p2_synchronizerId,
+        synchronizerId = domain1_p1p2_synchronizerId,
         threshold = PositiveInt.one,
         active = Seq(seq1Id),
         observers = Seq.empty,

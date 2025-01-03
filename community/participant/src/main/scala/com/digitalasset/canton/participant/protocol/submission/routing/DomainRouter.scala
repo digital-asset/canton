@@ -15,7 +15,7 @@ import com.digitalasset.canton.ledger.participant.state.{SubmitterInfo, Transact
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
-import com.digitalasset.canton.participant.domain.DomainAliasManager
+import com.digitalasset.canton.participant.domain.SynchronizerAliasManager
 import com.digitalasset.canton.participant.protocol.SerializableContractAuthenticator
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
   TransactionSubmissionError,
@@ -278,7 +278,7 @@ object DomainRouter {
   def apply(
       connectedDomains: ConnectedDomainsLookup,
       domainConnectionConfigStore: DomainConnectionConfigStore,
-      domainAliasManager: DomainAliasManager,
+      synchronizerAliasManager: SynchronizerAliasManager,
       cryptoPureApi: CryptoPureApi,
       participantId: ParticipantId,
       parameters: ParticipantNodeParameters,
@@ -295,14 +295,16 @@ object DomainRouter {
     val domainStateProvider = new DomainStateProviderImpl(connectedDomains)
     val domainRankComputation = new DomainRankComputation(
       participantId = participantId,
-      priorityOfSynchronizer = priorityOfDomain(domainConnectionConfigStore, domainAliasManager),
+      priorityOfSynchronizer =
+        priorityOfDomain(domainConnectionConfigStore, synchronizerAliasManager),
       snapshotProvider = domainStateProvider,
       loggerFactory = loggerFactory,
     )
 
     val domainSelectorFactory = new DomainSelectorFactory(
       admissibleDomains = new AdmissibleDomains(participantId, connectedDomains, loggerFactory),
-      priorityOfSynchronizer = priorityOfDomain(domainConnectionConfigStore, domainAliasManager),
+      priorityOfSynchronizer =
+        priorityOfDomain(domainConnectionConfigStore, synchronizerAliasManager),
       domainRankComputation = domainRankComputation,
       domainStateProvider = domainStateProvider,
       loggerFactory = loggerFactory,
@@ -324,11 +326,11 @@ object DomainRouter {
 
   private def priorityOfDomain(
       domainConnectionConfigStore: DomainConnectionConfigStore,
-      domainAliasManager: DomainAliasManager,
+      synchronizerAliasManager: SynchronizerAliasManager,
   )(synchronizerId: SynchronizerId): Int = {
     val maybePriority = for {
-      domainAlias <- domainAliasManager.aliasForSynchronizerId(synchronizerId)
-      config <- domainConnectionConfigStore.get(domainAlias).toOption.map(_.config)
+      synchronizerAlias <- synchronizerAliasManager.aliasForSynchronizerId(synchronizerId)
+      config <- domainConnectionConfigStore.get(synchronizerAlias).toOption.map(_.config)
     } yield config.priority
 
     // If the participant is disconnected from the domain while this code is evaluated,

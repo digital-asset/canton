@@ -35,10 +35,10 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.{
   BaseTest,
-  DomainAlias,
   FailOnShutdown,
   ProtocolVersionChecksAsyncWordSpec,
   SequencerCounter,
+  SynchronizerAlias,
 }
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -60,7 +60,7 @@ class StoreBasedDomainOutboxTest
     SymbolicCrypto.create(testedReleaseProtocolVersion, timeouts, loggerFactory)
   private lazy val publicKey = crypto.generateSymbolicSigningKey()
   private lazy val namespace = Namespace(publicKey.id)
-  private lazy val domain = DomainAlias.tryCreate("target")
+  private lazy val domain = SynchronizerAlias.tryCreate("target")
   private lazy val transactions =
     Seq[TopologyMapping](
       NamespaceDelegation.tryCreate(namespace, publicKey, isRootDelegation = true),

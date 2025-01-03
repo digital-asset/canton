@@ -21,11 +21,11 @@ object ListPartiesResult {
   final case class ParticipantDomains(participant: ParticipantId, domains: Seq[DomainPermission])
 
   private def fromProtoV30(
-      value: v30.ListPartiesResponse.Result.ParticipantDomains.DomainPermissions
+      valueP: v30.ListPartiesResponse.Result.ParticipantDomains.DomainPermissions
   ): ParsingResult[DomainPermission] =
     for {
-      synchronizerId <- SynchronizerId.fromProtoPrimitive(value.domain, "domain")
-      permission <- ParticipantPermission.fromProtoV30(value.permission)
+      synchronizerId <- SynchronizerId.fromProtoPrimitive(valueP.synchronizerId, "domain")
+      permission <- ParticipantPermission.fromProtoV30(valueP.permission)
     } yield DomainPermission(synchronizerId, permission)
 
   private def fromProtoV30(
@@ -74,9 +74,9 @@ object ListKeyOwnersResult {
       value: v30.ListKeyOwnersResponse.Result
   ): ParsingResult[ListKeyOwnersResult] =
     for {
-      domain <- SynchronizerId.fromProtoPrimitive(value.domain, "domain")
+      synchronizerId <- SynchronizerId.fromProtoPrimitive(value.synchronizerId, "domain")
       owner <- Member.fromProtoPrimitive(value.keyOwner, "keyOwner")
       signingKeys <- value.signingKeys.traverse(SigningPublicKey.fromProtoV30)
       encryptionKeys <- value.encryptionKeys.traverse(EncryptionPublicKey.fromProtoV30)
-    } yield ListKeyOwnersResult(domain, owner, signingKeys, encryptionKeys)
+    } yield ListKeyOwnersResult(synchronizerId, owner, signingKeys, encryptionKeys)
 }

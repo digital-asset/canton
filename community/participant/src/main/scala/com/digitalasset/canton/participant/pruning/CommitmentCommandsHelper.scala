@@ -213,10 +213,12 @@ object CommitmentInspectContract extends HasProtocolVersionedCompanion[Commitmen
               reassignment.toReassignmentType match {
                 case ReassignmentType.Unassignment =>
                   for {
-                    targetDomain <- synchronizerIdFromIdx(reassignment.remoteSynchronizerIdx)
+                    targetSynchronizerId <- synchronizerIdFromIdx(
+                      reassignment.remoteSynchronizerIdx
+                    )
                   } yield {
                     val reassignmentIds = syncStateInspection.lookupReassignmentIds(
-                      targetDomain,
+                      targetSynchronizerId,
                       synchronizerId,
                       Seq(cid),
                       Some(ts),
@@ -227,7 +229,7 @@ object CommitmentInspectContract extends HasProtocolVersionedCompanion[Commitmen
                       )
                     }
                     ContractUnassigned.create(
-                      targetDomain,
+                      targetSynchronizerId,
                       // the reassignment counter the contract had on the source domain *before* the reassignment op
                       reassignment.reassignmentCounter - 1,
                       reassignmentIds(cid).headOption,
@@ -235,11 +237,13 @@ object CommitmentInspectContract extends HasProtocolVersionedCompanion[Commitmen
                   }
                 case ReassignmentType.Assignment =>
                   for {
-                    srcDomain <- synchronizerIdFromIdx(reassignment.remoteSynchronizerIdx)
+                    sourceSynchronizerId <- synchronizerIdFromIdx(
+                      reassignment.remoteSynchronizerIdx
+                    )
                   } yield {
                     val reassignmentIds = syncStateInspection.lookupReassignmentIds(
                       synchronizerId,
-                      srcDomain,
+                      sourceSynchronizerId,
                       Seq(cid),
                       None,
                       Some(ts),
@@ -621,9 +625,9 @@ object ContractAssigned
             "unassignTimestamp",
             reassignmentId.unassignTimestamp,
           )
-          srcDomain <- SynchronizerId
+          sourceSynchronizerId <- SynchronizerId
             .fromProtoPrimitive(reassignmentId.sourceSynchronizerId, "sourceSynchronizerId")
-        } yield Some(ReassignmentId(Source(srcDomain), ts))
+        } yield Some(ReassignmentId(Source(sourceSynchronizerId), ts))
       case None => Right(None: Option[ReassignmentId])
     }
 
@@ -650,7 +654,7 @@ object ContractAssigned
 }
 
 final case class ContractUnassigned(
-    targetDomain: SynchronizerId,
+    targetSynchronizerId: SynchronizerId,
     // the reassignment counter the contract had on the source domain *before* the reassignment op
     // it represents the transfer data reassignment counter - 1
     reassignmentCounterSrc: ReassignmentCounter,
@@ -663,16 +667,16 @@ final case class ContractUnassigned(
 ) extends ContractInactive
     with HasProtocolVersionedWrapper[ContractUnassigned] {
   override protected def pretty: Pretty[ContractUnassigned] = prettyOfClass(
-    param("target domain", _.targetDomain),
+    param("target synchronizer id", _.targetSynchronizerId),
     param("reassignment counter on source", _.reassignmentCounterSrc),
-    paramIfDefined("reasignment id", _.reassignmentId),
+    paramIfDefined("reassignment id", _.reassignmentId),
   )
 
   @transient override protected lazy val companionObj: ContractUnassigned.type =
     ContractUnassigned
 
   def toProtoV30: v30.ContractState.Unassigned = v30.ContractState.Unassigned(
-    targetDomain.toProtoPrimitive,
+    targetSynchronizerId.toProtoPrimitive,
     reassignmentCounterSrc.v,
     reassignmentId match {
       case Some(rid) =>
@@ -702,9 +706,9 @@ object ContractUnassigned
       unassigned: v30.ContractState.Unassigned
   ): ParsingResult[ContractUnassigned] =
     for {
-      targetDomain <- SynchronizerId.fromProtoPrimitive(
+      targetSynchronizerId <- SynchronizerId.fromProtoPrimitive(
         unassigned.targetSynchronizerId,
-        "targetSynchronizerId",
+        "target_synchronizer_id",
       )
       reassignmentCounterSrc = ReassignmentCounter(unassigned.reassignmentCounterSrc)
       reassignmentIdE = unassigned.reassignmentId match {
@@ -712,19 +716,19 @@ object ContractUnassigned
           for {
             ts <- ProtoConverter.parseRequired(
               CantonTimestamp.fromProtoTimestamp,
-              "unassign ts",
+              "unassign_ts",
               reassignmentId.unassignTimestamp,
             )
-            srcDomain <- SynchronizerId
+            sourceSynchronizerId <- SynchronizerId
               .fromProtoPrimitive(reassignmentId.sourceSynchronizerId, "sourceSynchronizerId")
-          } yield Some(ReassignmentId(Source(srcDomain), ts))
+          } yield Some(ReassignmentId(Source(sourceSynchronizerId), ts))
         case None => Right(None: Option[ReassignmentId])
       }
 
       reassignmentId <- reassignmentIdE
       reprProtocolVersion <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield ContractUnassigned(
-      targetDomain,
+      targetSynchronizerId,
       reassignmentCounterSrc,
       reassignmentId,
     )(

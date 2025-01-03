@@ -110,7 +110,7 @@ message PartyToKeyMapping {
   // the party
   string party = 1;
   // optionally restricted to domain
-  string domain = 2;
+  string synchronizer_id = 2;
   // the authorization threshold
   uint32 threshold = 3;
   // the designated signing keys
@@ -126,7 +126,7 @@ message DomainTrustCertificate {
   string participant_uid = 1;
 
   // the uid of the domain that the participant trusts
-  string domain = 2;
+  string synchronizer_id = 2;
 
   reserved 3; // was bool reassignment_only_to_given_target_domains = 3;
 
@@ -137,7 +137,7 @@ message DomainTrustCertificate {
 // authorization: whoever controls the synchronizer id
 // UNIQUE(domain,participant)
 message ParticipantDomainPermission {
-  string domain = 1;
+  string synchronizer_id = 1;
   string participant_uid = 2;
 
   // the permission level of the participant on this domain (usually submission)
@@ -157,7 +157,7 @@ message ParticipantDomainPermission {
 // authorization: whoever controls the synchronizer id
 // UNIQUE(domain,party)
 message PartyHostingLimits {
-  string domain = 1;
+  string synchronizer_id = 1;
   string party = 2;
   reserved 3; // was quota = 3;
 }
@@ -232,7 +232,7 @@ message PartyToParticipant {
 // UNIQUE(domain)
 message DomainParametersState {
   // domain affected by the new domain parameters
-  string domain = 1;
+  string synchronizer_id = 1;
 
   DynamicDomainParameters domain_parameters = 2;
 }
@@ -242,7 +242,7 @@ message DomainParametersState {
 // UNIQUE(domain)
 message DynamicSequencingParametersState {
   // domain affected by the new domain parameters
-  string domain = 1;
+  string synchronizer_id = 1;
 
   DynamicSequencingParameters sequencing_parameters = 2;
 }
@@ -375,6 +375,6 @@ message SignedTopologyTransactions {
 message TopologyTransactionsBroadcast {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 
-  string domain = 1;
+  string synchronizer_id = 1;
   SignedTopologyTransactions signed_transactions = 2;
 }

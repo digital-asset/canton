@@ -133,7 +133,7 @@ class GrpcTopologyAggregationService(
                 participantUid = participantId.uid.toProtoPrimitive,
                 domains = domains.map { case (synchronizerId, permission) =>
                   v30.ListPartiesResponse.Result.ParticipantDomains.DomainPermissions(
-                    domain = synchronizerId.toProtoPrimitive,
+                    synchronizerId = synchronizerId.toProtoPrimitive,
                     permission = permission.toProtoV30,
                   )
                 }.toSeq,
@@ -156,7 +156,7 @@ class GrpcTopologyAggregationService(
           .emptyStringAsNone(request.filterKeyOwnerType)
           .traverse(code => MemberCode.fromProtoPrimitive(code, "filterKeyOwnerType"))
       ): EitherT[FutureUnlessShutdown, CantonError, Option[MemberCode]]
-      matched <- snapshots(request.filterDomain, request.asOf)
+      matched <- snapshots(request.filterSynchronizerId, request.asOf)
       res <- EitherT.right(matched.parTraverse { case (storeId, client) =>
         client.inspectKeys(request.filterKeyOwnerUid, keyOwnerTypeO, request.limit).map { res =>
           (storeId, res)
@@ -170,10 +170,10 @@ class GrpcTopologyAggregationService(
       })
       v30.ListKeyOwnersResponse(
         results = mapped.toSeq.flatMap { case (owner, domainData) =>
-          domainData.map { case (domain, keys) =>
+          domainData.map { case (synchronizerId, keys) =>
             v30.ListKeyOwnersResponse.Result(
               keyOwner = owner.toProtoPrimitive,
-              domain = domain.toProtoPrimitive,
+              synchronizerId = synchronizerId.toProtoPrimitive,
               signingKeys = keys.signingKeys.map(_.toProtoV30),
               encryptionKeys = keys.encryptionKeys.map(_.toProtoV30),
             )

@@ -32,7 +32,7 @@ import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.ResourceUtil
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainAlias, SequencerCounter}
+import com.digitalasset.canton.{SequencerCounter, SynchronizerAlias}
 import com.google.protobuf.ByteString
 import io.grpc.Context
 
@@ -64,14 +64,14 @@ class ParticipantRepairAdministration(
       |contract ids passed in. Be sure to not connect the participant to the domain until the call returns."""
   )
   def purge(
-      domain: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       contractIds: Seq[LfContractId],
       ignoreAlreadyPurged: Boolean = true,
   ): Unit =
     consoleEnvironment.run {
       runner.adminCommand(
         ParticipantAdminCommands.ParticipantRepairManagement.PurgeContracts(
-          domain = domain,
+          synchronizerAlias = synchronizerAlias,
           contracts = contractIds,
           ignoreAlreadyPurged = ignoreAlreadyPurged,
         )
@@ -92,13 +92,13 @@ class ParticipantRepairAdministration(
         |Forcing a migration is intended for disaster recovery when a source domain cannot be recovered anymore.
         |
         |The arguments are:
-        |source: the domain alias of the source domain
+        |source: the synchronizer alias of the source domain
         |target: the configuration for the target domain
         |force: if true, migration is forced ignoring in-flight transactions. Defaults to false.
         """
   )
   def migrate_domain(
-      source: DomainAlias,
+      source: SynchronizerAlias,
       target: DomainConnectionConfig,
       force: Boolean = false,
   ): Unit =
@@ -276,11 +276,13 @@ class ParticipantRepairAdministration(
        |Purging a deactivated domain is typically performed automatically as part of a hard domain migration via
        |``repair.migrate_domain``."""
   )
-  def purge_deactivated_domain(domain: DomainAlias): Unit =
+  def purge_deactivated_domain(synchronizerAlias: SynchronizerAlias): Unit =
     check(FeatureFlag.Repair) {
       consoleEnvironment.run {
         runner.adminCommand(
-          ParticipantAdminCommands.ParticipantRepairManagement.PurgeDeactivatedDomain(domain)
+          ParticipantAdminCommands.ParticipantRepairManagement.PurgeDeactivatedDomain(
+            synchronizerAlias
+          )
         )
       }
     }
@@ -389,8 +391,8 @@ abstract class LocalParticipantRepairAdministration(
   )
   def change_assignation(
       contractIds: Seq[LfContractId],
-      sourceDomain: DomainAlias,
-      targetDomain: DomainAlias,
+      sourceSynchronizerAlias: SynchronizerAlias,
+      targetSynchronizerAlias: SynchronizerAlias,
       skipInactive: Boolean = true,
       batchSize: Int = 100,
   ): Unit =
@@ -401,8 +403,8 @@ abstract class LocalParticipantRepairAdministration(
           access(
             _.sync.repairService.changeAssignationAwait(
               contractIds,
-              sourceDomain,
-              targetDomain,
+              sourceSynchronizerAlias,
+              targetSynchronizerAlias,
               skipInactive,
               PositiveInt.tryCreate(batchSize),
             )(tc)

@@ -62,11 +62,11 @@ import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, MonadUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
-  DomainAlias,
   LfPartyId,
   ReassignmentCounter,
   RequestCounter,
   SequencerCounter,
+  SynchronizerAlias,
 }
 import com.google.common.annotations.VisibleForTesting
 
@@ -135,7 +135,7 @@ final class SyncStateInspection(
     * containing a map of contract IDs to tuples containing the latest activation timestamp and the contract reassignment counter
     */
   def findAcs(
-      domainAlias: DomainAlias
+      synchronizerAlias: SynchronizerAlias
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncStateInspectionError, Map[
@@ -145,8 +145,8 @@ final class SyncStateInspection(
     for {
       state <- EitherT.fromEither[FutureUnlessShutdown](
         syncDomainPersistentStateManager
-          .getByAlias(domainAlias)
-          .toRight(SyncStateInspection.NoSuchDomain(domainAlias))
+          .getByAlias(synchronizerAlias)
+          .toRight(SyncStateInspection.NoSuchDomain(synchronizerAlias))
       )
 
       snapshotO <- EitherT.right(state.acsInspection.getCurrentSnapshot().map(_.map(_.snapshot)))
@@ -156,7 +156,7 @@ final class SyncStateInspection(
 
   /** searches the pcs and returns the contract and activeness flag */
   def findContracts(
-      domain: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       filterId: Option[String],
       filterPackage: Option[String],
       filterTemplate: Option[String],
@@ -165,11 +165,11 @@ final class SyncStateInspection(
     getOrFail(
       timeouts.inspection.await("findContracts") {
         syncDomainPersistentStateManager
-          .getByAlias(domain)
+          .getByAlias(synchronizerAlias)
           .traverse(_.acsInspection.findContracts(filterId, filterPackage, filterTemplate, limit))
           .failOnShutdownToAbortException("findContracts")
       },
-      domain,
+      synchronizerAlias,
     )
 
   def findContractPayloads(
@@ -179,7 +179,7 @@ final class SyncStateInspection(
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[LfContractId, SerializableContract]] = {
-    val domainAlias = syncDomainPersistentStateManager
+    val synchronizerAlias = syncDomainPersistentStateManager
       .aliasForSynchronizerId(synchronizerId)
       .getOrElse(throw new IllegalArgumentException(s"no such domain [$synchronizerId]"))
 
@@ -191,7 +191,7 @@ final class SyncStateInspection(
           getOrFail(
             syncDomainPersistentStateManager
               .get(synchronizerId),
-            domainAlias,
+            synchronizerAlias,
           ).acsInspection
 
         domainAcsInspection.findContractPayloads(
@@ -226,13 +226,13 @@ final class SyncStateInspection(
 
   @VisibleForTesting
   def acsPruningStatus(
-      domain: DomainAlias
+      synchronizerAlias: SynchronizerAlias
   )(implicit traceContext: TraceContext): Option[PruningStatus] =
     timeouts.inspection
       .awaitUS("acsPruningStatus")(
         getOrFail(
-          getPersistentState(domain),
-          domain,
+          getPersistentState(synchronizerAlias),
+          synchronizerAlias,
         ).acsInspection.activeContractStore.pruningStatus
       )
       .asGrpcResponse
@@ -349,22 +349,22 @@ final class SyncStateInspection(
   def contractCount(implicit traceContext: TraceContext): FutureUnlessShutdown[Int] =
     participantNodePersistentState.value.contractStore.contractCount()
 
-  def contractCountInAcs(domain: DomainAlias, timestamp: CantonTimestamp)(implicit
+  def contractCountInAcs(synchronizerAlias: SynchronizerAlias, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Future[Option[Int]] =
-    getPersistentState(domain) match {
+    getPersistentState(synchronizerAlias) match {
       case None => Future.successful(None)
       case Some(state) => state.activeContractStore.contractCount(timestamp).map(Some(_))
     }
 
   def requestJournalSize(
-      domain: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       start: CantonTimestamp = CantonTimestamp.Epoch,
       end: Option[CantonTimestamp] = None,
   )(implicit traceContext: TraceContext): Option[UnlessShutdown[Int]] =
-    getPersistentState(domain).map { state =>
+    getPersistentState(synchronizerAlias).map { state =>
       timeouts.inspection.awaitUS(
-        s"$functionFullName from $start to $end from the journal of domain $domain"
+        s"$functionFullName from $start to $end from the journal of synchronizer $synchronizerAlias"
       )(
         state.requestJournalStore.size(start, end)
       )
@@ -421,35 +421,39 @@ final class SyncStateInspection(
 
   private def tryGetProtocolVersion(
       state: SyncDomainPersistentState,
-      domain: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
   )(implicit traceContext: TraceContext): ProtocolVersion =
     timeouts.inspection
       .await(functionFullName)(state.parameterStore.lastParameters)
-      .getOrElse(throw new IllegalStateException(s"No static domain parameters found for $domain"))
+      .getOrElse(
+        throw new IllegalStateException(s"No static domain parameters found for $synchronizerAlias")
+      )
       .protocolVersion
 
   def getProtocolVersion(
-      domain: DomainAlias
+      synchronizerAlias: SynchronizerAlias
   )(implicit traceContext: TraceContext): Future[ProtocolVersion] =
     for {
       param <- syncDomainPersistentStateManager
-        .getByAlias(domain)
+        .getByAlias(synchronizerAlias)
         .traverse(_.parameterStore.lastParameters)
     } yield {
-      getOrFail(param, domain)
+      getOrFail(param, synchronizerAlias)
         .map(_.protocolVersion)
         .getOrElse(
-          throw new IllegalStateException(s"No static domain parameters found for $domain")
+          throw new IllegalStateException(
+            s"No static domain parameters found for $synchronizerAlias"
+          )
         )
     }
 
   def findMessages(
-      domain: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       from: Option[Instant],
       to: Option[Instant],
       limit: Option[Int],
   )(implicit traceContext: TraceContext): Seq[ParsingResult[PossiblyIgnoredProtocolEvent]] = {
-    val state = getOrFail(getPersistentState(domain), domain)
+    val state = getOrFail(getPersistentState(synchronizerAlias), synchronizerAlias)
     val messagesF =
       if (from.isEmpty && to.isEmpty)
         state.sequencedEventStore.sequencedEvents(limit)
@@ -468,28 +472,30 @@ final class SyncStateInspection(
       }
     val closed =
       timeouts.inspection
-        .awaitUS(s"finding messages from $from to $to on $domain")(messagesF)
+        .awaitUS(s"finding messages from $from to $to on $synchronizerAlias")(messagesF)
         .asGrpcResponse
     val opener =
       new EnvelopeOpener[PossiblyIgnoredSequencedEvent](
-        tryGetProtocolVersion(state, domain),
+        tryGetProtocolVersion(state, synchronizerAlias),
         state.pureCryptoApi,
       )
     closed.map(opener.open)
   }
 
   @VisibleForTesting
-  def findMessage(domain: DomainAlias, criterion: SequencedEventStore.SearchCriterion)(implicit
+  def findMessage(
+      synchronizerAlias: SynchronizerAlias,
+      criterion: SequencedEventStore.SearchCriterion,
+  )(implicit
       traceContext: TraceContext
   ): Option[ParsingResult[PossiblyIgnoredProtocolEvent]] = {
-    val state = getOrFail(getPersistentState(domain), domain)
+    val state = getOrFail(getPersistentState(synchronizerAlias), synchronizerAlias)
     val messageF = state.sequencedEventStore.find(criterion).value
     val closed =
       timeouts.inspection
-        .awaitUS(s"$functionFullName on $domain matching $criterion")(messageF)
-    // .toOption
+        .awaitUS(s"$functionFullName on $synchronizerAlias matching $criterion")(messageF)
     val opener = new EnvelopeOpener[PossiblyIgnoredSequencedEvent](
-      tryGetProtocolVersion(state, domain),
+      tryGetProtocolVersion(state, synchronizerAlias),
       state.pureCryptoApi,
     )
     closed match {
@@ -499,7 +505,7 @@ final class SyncStateInspection(
   }
 
   def findComputedCommitments(
-      domain: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       start: CantonTimestamp,
       end: CantonTimestamp,
       counterParticipant: Option[ParticipantId] = None,
@@ -507,30 +513,33 @@ final class SyncStateInspection(
       traceContext: TraceContext
   ): Iterable[(CommitmentPeriod, ParticipantId, AcsCommitment.CommitmentType)] =
     timeouts.inspection
-      .awaitUS(s"$functionFullName from $start to $end on $domain")(
-        getOrFail(getPersistentState(domain), domain).acsCommitmentStore
+      .awaitUS(s"$functionFullName from $start to $end on $synchronizerAlias")(
+        getOrFail(getPersistentState(synchronizerAlias), synchronizerAlias).acsCommitmentStore
           .searchComputedBetween(start, end, counterParticipant.toList)
       )
       .asGrpcResponse
 
   def findLastComputedAndSent(
-      domain: DomainAlias
+      synchronizerAlias: SynchronizerAlias
   )(implicit traceContext: TraceContext): Option[CantonTimestampSecond] =
     timeouts.inspection
-      .awaitUS(s"$functionFullName on $domain")(
-        getOrFail(getPersistentState(domain), domain).acsCommitmentStore.lastComputedAndSent
+      .awaitUS(s"$functionFullName on $synchronizerAlias")(
+        getOrFail(
+          getPersistentState(synchronizerAlias),
+          synchronizerAlias,
+        ).acsCommitmentStore.lastComputedAndSent
       )
       .asGrpcResponse
 
   def findReceivedCommitments(
-      domain: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       start: CantonTimestamp,
       end: CantonTimestamp,
       counterParticipant: Option[ParticipantId] = None,
   )(implicit traceContext: TraceContext): Iterable[SignedProtocolMessage[AcsCommitment]] =
     timeouts.inspection
-      .awaitUS(s"$functionFullName from $start to $end on $domain")(
-        getOrFail(getPersistentState(domain), domain).acsCommitmentStore
+      .awaitUS(s"$functionFullName from $start to $end on $synchronizerAlias")(
+        getOrFail(getPersistentState(synchronizerAlias), synchronizerAlias).acsCommitmentStore
           .searchReceivedBetween(start, end, counterParticipant.toList)
       )
       .asGrpcResponse
@@ -545,11 +554,11 @@ final class SyncStateInspection(
       .awaitUS(functionFullName) {
         val searchResult = domainPeriods.map { dp =>
           for {
-            domain <- syncDomainPersistentStateManager
+            synchronizerAlias <- syncDomainPersistentStateManager
               .aliasForSynchronizerId(dp.indexedDomain.synchronizerId)
-              .toRight(s"No domain alias found for ${dp.indexedDomain.synchronizerId}")
+              .toRight(s"No synchronizer alias found for ${dp.indexedDomain.synchronizerId}")
 
-            persistentState <- getPersistentStateE(domain)
+            persistentState <- getPersistentStateE(synchronizerAlias)
 
             result = for {
               computed <- persistentState.acsCommitmentStore
@@ -606,10 +615,10 @@ final class SyncStateInspection(
       .awaitUS(functionFullName) {
         val searchResult = domainPeriods.map { dp =>
           for {
-            domain <- syncDomainPersistentStateManager
+            synchronizerAlias <- syncDomainPersistentStateManager
               .aliasForSynchronizerId(dp.indexedDomain.synchronizerId)
-              .toRight(s"No domain alias found for ${dp.indexedDomain.synchronizerId}")
-            persistentState <- getPersistentStateE(domain)
+              .toRight(s"No synchronizer alias found for ${dp.indexedDomain.synchronizerId}")
+            persistentState <- getPersistentStateE(synchronizerAlias)
 
             result = for {
               computed <-
@@ -663,74 +672,78 @@ final class SyncStateInspection(
       .asGrpcResponse
 
   def outstandingCommitments(
-      domain: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       start: CantonTimestamp,
       end: CantonTimestamp,
       counterParticipant: Option[ParticipantId],
   )(implicit
       traceContext: TraceContext
   ): Iterable[(CommitmentPeriod, ParticipantId, CommitmentPeriodState)] = {
-    val persistentState = getPersistentState(domain)
-    timeouts.inspection.awaitUS(s"$functionFullName from $start to $end on $domain")(
-      getOrFail(persistentState, domain).acsCommitmentStore
+    val persistentState = getPersistentState(synchronizerAlias)
+    timeouts.inspection.awaitUS(s"$functionFullName from $start to $end on $synchronizerAlias")(
+      getOrFail(persistentState, synchronizerAlias).acsCommitmentStore
         .outstanding(start, end, counterParticipant.toList)
     )
   }.asGrpcResponse
 
   def bufferedCommitments(
-      domain: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       endAtOrBefore: CantonTimestamp,
   )(implicit traceContext: TraceContext): Iterable[AcsCommitment] = {
-    val persistentState = getPersistentState(domain)
+    val persistentState = getPersistentState(synchronizerAlias)
     timeouts.inspection
-      .awaitUS(s"$functionFullName to and including $endAtOrBefore on $domain")(
-        getOrFail(persistentState, domain).acsCommitmentStore.queue.peekThrough(endAtOrBefore)
+      .awaitUS(s"$functionFullName to and including $endAtOrBefore on $synchronizerAlias")(
+        getOrFail(persistentState, synchronizerAlias).acsCommitmentStore.queue
+          .peekThrough(endAtOrBefore)
       )
       .asGrpcResponse
   }
 
-  def noOutstandingCommitmentsTs(domain: DomainAlias, beforeOrAt: CantonTimestamp)(implicit
-      traceContext: TraceContext
+  def noOutstandingCommitmentsTs(synchronizerAlias: SynchronizerAlias, beforeOrAt: CantonTimestamp)(
+      implicit traceContext: TraceContext
   ): Option[CantonTimestamp] = {
-    val persistentState = getPersistentState(domain)
+    val persistentState = getPersistentState(synchronizerAlias)
 
-    timeouts.inspection.awaitUS(s"$functionFullName on $domain for ts $beforeOrAt")(
+    timeouts.inspection.awaitUS(s"$functionFullName on $synchronizerAlias for ts $beforeOrAt")(
       for {
-        result <- getOrFail(persistentState, domain).acsCommitmentStore.noOutstandingCommitments(
-          beforeOrAt
-        )
+        result <- getOrFail(persistentState, synchronizerAlias).acsCommitmentStore
+          .noOutstandingCommitments(beforeOrAt)
       } yield result
     )
   }.asGrpcResponse
 
-  def lookupCleanRequestIndex(domain: DomainAlias)(implicit
+  def lookupCleanRequestIndex(synchronizerAlias: SynchronizerAlias)(implicit
       traceContext: TraceContext
   ): Either[String, FutureUnlessShutdown[Option[RequestIndex]]] =
-    lookupCleanDomainIndex(domain)
+    lookupCleanDomainIndex(synchronizerAlias)
       .map(_.map(_.flatMap(_.requestIndex)))
 
-  def lookupCleanDomainIndex(domain: DomainAlias)(implicit
+  def lookupCleanDomainIndex(synchronizerAlias: SynchronizerAlias)(implicit
       traceContext: TraceContext
   ): Either[String, FutureUnlessShutdown[Option[DomainIndex]]] =
-    getPersistentStateE(domain)
+    getPersistentStateE(synchronizerAlias)
       .map(state =>
         participantNodePersistentState.value.ledgerApiStore
           .cleanDomainIndex(state.indexedDomain.synchronizerId)
       )
 
-  def requestStateInJournal(rc: RequestCounter, domain: DomainAlias)(implicit
+  def requestStateInJournal(rc: RequestCounter, synchronizerAlias: SynchronizerAlias)(implicit
       traceContext: TraceContext
   ): Either[String, Future[Option[RequestJournal.RequestData]]] =
-    getPersistentStateE(domain)
+    getPersistentStateE(synchronizerAlias)
       .map(state => state.requestJournalStore.query(rc).value)
 
-  private[this] def getPersistentState(domain: DomainAlias): Option[SyncDomainPersistentState] =
-    syncDomainPersistentStateManager.getByAlias(domain)
+  private[this] def getPersistentState(
+      synchronizerAlias: SynchronizerAlias
+  ): Option[SyncDomainPersistentState] =
+    syncDomainPersistentStateManager.getByAlias(synchronizerAlias)
 
   private[this] def getPersistentStateE(
-      domain: DomainAlias
+      synchronizerAlias: SynchronizerAlias
   ): Either[String, SyncDomainPersistentState] =
-    syncDomainPersistentStateManager.getByAlias(domain).toRight(s"no such domain [$domain]")
+    syncDomainPersistentStateManager
+      .getByAlias(synchronizerAlias)
+      .toRight(s"no such domain [$synchronizerAlias]")
 
   def getOffsetByTime(
       pruneUpTo: CantonTimestamp
@@ -873,14 +886,14 @@ final class SyncStateInspection(
       .createOrUpdateCounterParticipantConfigs(configs, thresholds)
 
   def countInFlight(
-      domain: DomainAlias
+      synchronizerAlias: SynchronizerAlias
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, InFlightCount] =
     for {
       state <- EitherT.fromEither[FutureUnlessShutdown](
-        getPersistentState(domain)
-          .toRight(s"Unknown domain $domain")
+        getPersistentState(synchronizerAlias)
+          .toRight(s"Unknown synchronizer $synchronizerAlias")
       )
       synchronizerId = state.indexedDomain.synchronizerId
       unsequencedSubmissions <- EitherT.right(
@@ -900,8 +913,10 @@ final class SyncStateInspection(
       )
       .onShutdown(throw new RuntimeException("verifyLapiStoreIntegrity"))
 
-  def acceptedTransactionCount(domainAlias: DomainAlias)(implicit traceContext: TraceContext): Int =
-    getPersistentState(domainAlias)
+  def acceptedTransactionCount(
+      synchronizerAlias: SynchronizerAlias
+  )(implicit traceContext: TraceContext): Int =
+    getPersistentState(synchronizerAlias)
       .map(domainPersistentState =>
         timeouts.inspection
           .awaitUS(functionFullName)(
@@ -983,11 +998,11 @@ final class SyncStateInspection(
     FutureUnlessShutdown.sequence(result).map(_.toMap)
   }
 
-  def cleanSequencedEventStoreAboveCleanDomainIndex(domainAlias: DomainAlias)(implicit
+  def cleanSequencedEventStoreAboveCleanDomainIndex(synchronizerAlias: SynchronizerAlias)(implicit
       traceContext: TraceContext
   ): Unit =
     getOrFail(
-      getPersistentState(domainAlias).map { domainState =>
+      getPersistentState(synchronizerAlias).map { domainState =>
         timeouts.inspection.await(functionFullName)(
           participantNodePersistentState.value.ledgerApiStore
             .cleanDomainIndex(domainState.indexedDomain.synchronizerId)
@@ -1002,24 +1017,24 @@ final class SyncStateInspection(
                 )
                 .getOrElse(SequencerCounter.Genesis)
               logger.info(
-                s"Deleting events from SequencedEventStore for domain $domainAlias fromInclusive $nextSequencerCounter"
+                s"Deleting events from SequencedEventStore for synchronizer $synchronizerAlias fromInclusive $nextSequencerCounter"
               )
               domainState.sequencedEventStore.delete(nextSequencerCounter)
             }
             .failOnShutdownToAbortException("cleanSequencedEventStoreAboveCleanDomainIndex")
         )
       },
-      domainAlias,
+      synchronizerAlias,
     )
 }
 
 object SyncStateInspection {
 
   sealed trait SyncStateInspectionError extends Product with Serializable
-  private final case class NoSuchDomain(alias: DomainAlias) extends SyncStateInspectionError
+  private final case class NoSuchDomain(alias: SynchronizerAlias) extends SyncStateInspectionError
 
-  private def getOrFail[T](opt: Option[T], domain: DomainAlias): T =
-    opt.getOrElse(throw new IllegalArgumentException(s"no such domain [$domain]"))
+  private def getOrFail[T](opt: Option[T], synchronizerAlias: SynchronizerAlias): T =
+    opt.getOrElse(throw new IllegalArgumentException(s"no such synchronizer [$synchronizerAlias]"))
 
   final case class InFlightCount(
       pendingSubmissions: NonNegativeInt,

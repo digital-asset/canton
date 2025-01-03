@@ -193,12 +193,12 @@ class TopologyAdministrationGroup(
     */
   private def areFilterStoreFilterDomainCompatible(
       filterStore: String,
-      filterDomain: String,
+      filterSynchronizerId: String,
   ): Either[String, Unit] = {
     val storeO: Option[TopologyStore] =
       OptionUtil.emptyStringAsNone(filterStore).map(TopologyStore.tryFromString)
     val domainO: Option[SynchronizerId] =
-      OptionUtil.emptyStringAsNone(filterDomain).map(SynchronizerId.tryFromString)
+      OptionUtil.emptyStringAsNone(filterSynchronizerId).map(SynchronizerId.tryFromString)
 
     (storeO, domainO) match {
       case (Some(TopologyStore.Domain(domainStore)), Some(domain)) =>

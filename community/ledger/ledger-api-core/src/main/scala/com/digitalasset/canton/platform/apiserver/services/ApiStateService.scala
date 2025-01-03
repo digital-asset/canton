@@ -128,7 +128,7 @@ final class ApiStateService(
                   }
                   permissions.map(permission =>
                     GetConnectedDomainsResponse.ConnectedDomain(
-                      domainAlias = connectedDomain.domainAlias.toProtoPrimitive,
+                      synchronizerAlias = connectedDomain.synchronizerAlias.toProtoPrimitive,
                       synchronizerId = connectedDomain.synchronizerId.toProtoPrimitive,
                       permission = permission,
                     )

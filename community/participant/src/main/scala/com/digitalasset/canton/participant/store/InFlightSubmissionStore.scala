@@ -188,7 +188,7 @@ trait InFlightSubmissionStore extends AutoCloseable {
     */
   def updateUnsequenced(
       changeId: ChangeIdHash,
-      submissionDomain: SynchronizerId,
+      submissionSynchronizerId: SynchronizerId,
       messageId: MessageId,
       newSequencingInfo: UnsequencedSubmission,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]

@@ -5,7 +5,7 @@ package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.topology.{SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, DomainAlias}
+import com.digitalasset.canton.{BaseTest, SynchronizerAlias}
 import org.scalatest.wordspec.AsyncWordSpec
 
 trait RegisteredDomainsStoreTest {
@@ -13,7 +13,7 @@ trait RegisteredDomainsStoreTest {
 
   protected implicit def traceContext: TraceContext
 
-  private def alias(a: String) = DomainAlias.tryCreate(a)
+  private def alias(a: String) = SynchronizerAlias.tryCreate(a)
   private def id(a: String) = SynchronizerId(UniqueIdentifier.tryFromProtoPrimitive(s"$a::default"))
 
   def registeredDomainsStore(mk: () => RegisteredDomainsStore): Unit = {
@@ -43,7 +43,7 @@ trait RegisteredDomainsStoreTest {
         _ <- valueOrFail(sut.addMapping(alias("alias"), id("foo")))("foo")
         result <- sut.addMapping(alias("alias"), id("bar")).value
       } yield result shouldBe Left(
-        DomainAliasAndIdStore.DomainAliasAlreadyAdded(alias("alias"), id("foo"))
+        SynchronizerAliasAndIdStore.SynchronizerAliasAlreadyAdded(alias("alias"), id("foo"))
       )
     }
 
@@ -53,7 +53,7 @@ trait RegisteredDomainsStoreTest {
         _ <- valueOrFail(sut.addMapping(alias("foo"), id("id")))("foo -> id")
         result <- sut.addMapping(alias("bar"), id("id")).value
       } yield result shouldBe Left(
-        DomainAliasAndIdStore.SynchronizerIdAlreadyAdded(id("id"), alias("foo"))
+        SynchronizerAliasAndIdStore.SynchronizerIdAlreadyAdded(id("id"), alias("foo"))
       )
     }
 

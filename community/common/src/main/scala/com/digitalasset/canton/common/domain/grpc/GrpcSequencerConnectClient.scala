@@ -34,7 +34,7 @@ import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.retry
 import com.digitalasset.canton.util.retry.{AllExceptionRetryPolicy, Success}
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
-import com.digitalasset.canton.{DomainAlias, ProtoDeserializationError}
+import com.digitalasset.canton.{ProtoDeserializationError, SynchronizerAlias}
 import io.grpc.ClientInterceptors
 
 import scala.concurrent.ExecutionContextExecutor
@@ -54,13 +54,13 @@ class GrpcSequencerConnectClient(
   private val builder =
     sequencerConnection.mkChannelBuilder(clientChannelBuilder, traceContextPropagation)
 
-  override def getDomainClientBootstrapInfo(domainAlias: DomainAlias)(implicit
+  override def getDomainClientBootstrapInfo(synchronizerAlias: SynchronizerAlias)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, DomainClientBootstrapInfo] =
     for {
       _ <- CantonGrpcUtil
         .checkCantonApiInfo(
-          domainAlias.unwrap,
+          synchronizerAlias.unwrap,
           CantonGrpcUtil.ApiName.SequencerPublicApi,
           builder,
           logger,
@@ -71,7 +71,7 @@ class GrpcSequencerConnectClient(
         .leftMap(err => Error.Transport(err))
       response <- CantonGrpcUtil
         .sendSingleGrpcRequest(
-          serverName = domainAlias.unwrap,
+          serverName = synchronizerAlias.unwrap,
           requestDescription = "get synchronizer id and sequencer id",
           channelBuilder = builder,
           stubFactory = v30.SequencerConnectServiceGrpc.stub,
@@ -153,7 +153,7 @@ class GrpcSequencerConnectClient(
     } yield synchronizerId
 
   override def handshake(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       request: HandshakeRequest,
       dontWarnOnDeprecatedPV: Boolean,
   )(implicit
@@ -162,7 +162,7 @@ class GrpcSequencerConnectClient(
     for {
       responseP <- CantonGrpcUtil
         .sendSingleGrpcRequest(
-          serverName = domainAlias.unwrap,
+          serverName = synchronizerAlias.unwrap,
           requestDescription = "handshake",
           channelBuilder = builder,
           stubFactory = v30.SequencerConnectServiceGrpc.stub,
@@ -182,13 +182,17 @@ class GrpcSequencerConnectClient(
       )
       _ = if (handshakeResponse.serverProtocolVersion.isDeprecated && !dontWarnOnDeprecatedPV)
         DeprecatedProtocolVersion.WarnSequencerClient(
-          domainAlias,
+          synchronizerAlias,
           handshakeResponse.serverProtocolVersion,
         )
     } yield handshakeResponse
 
-  def isActive(participantId: ParticipantId, domainAlias: DomainAlias, waitForActive: Boolean)(
-      implicit traceContext: TraceContext
+  def isActive(
+      participantId: ParticipantId,
+      synchronizerAlias: SynchronizerAlias,
+      waitForActive: Boolean,
+  )(implicit
+      traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, Boolean] = {
     val interceptor = new SequencerConnectClientInterceptor(participantId, loggerFactory)
 
@@ -202,7 +206,7 @@ class GrpcSequencerConnectClient(
     def verifyActive(): EitherT[FutureUnlessShutdown, Error, Boolean] =
       CantonGrpcUtil
         .sendSingleGrpcRequest(
-          serverName = domainAlias.unwrap,
+          serverName = synchronizerAlias.unwrap,
           requestDescription = "verify active",
           channelBuilder = builder,
           stubFactory = channel =>
@@ -233,14 +237,14 @@ class GrpcSequencerConnectClient(
   }
 
   override def registerOnboardingTopologyTransactions(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       member: Member,
       topologyTransactions: Seq[GenericSignedTopologyTransaction],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, Error, Unit] = {
     val interceptor = new SequencerConnectClientInterceptor(member, loggerFactory)
     CantonGrpcUtil
       .sendSingleGrpcRequest(
-        serverName = domainAlias.unwrap,
+        serverName = synchronizerAlias.unwrap,
         requestDescription = "register-onboarding-topology-transactions",
         channelBuilder = builder,
         stubFactory = channel =>

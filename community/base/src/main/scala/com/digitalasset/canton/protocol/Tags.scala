@@ -188,13 +188,13 @@ final case class ReassignmentId(
 ) extends PrettyPrinting {
   def toProtoV30: v30.ReassignmentId =
     v30.ReassignmentId(
-      sourceDomain = sourceDomain.unwrap.toProtoPrimitive,
+      sourceSynchronizerId = sourceDomain.unwrap.toProtoPrimitive,
       timestamp = unassignmentTs.toProtoPrimitive,
     )
 
   def toAdminProto: com.digitalasset.canton.admin.participant.v30.ReassignmentId =
     com.digitalasset.canton.admin.participant.v30.ReassignmentId(
-      sourceDomain = sourceDomain.unwrap.toProtoPrimitive,
+      sourceSynchronizerId = sourceDomain.unwrap.toProtoPrimitive,
       timestamp = Some(unassignmentTs.toProtoTimestamp),
     )
 
@@ -209,11 +209,11 @@ object ReassignmentId {
     reassignmentIdP match {
       case v30.ReassignmentId(originDomainP, requestTimestampP) =>
         for {
-          sourceDomain <- SynchronizerId.fromProtoPrimitive(
+          sourceSynchronizerId <- SynchronizerId.fromProtoPrimitive(
             originDomainP,
-            "ReassignmentId.origin_domain",
+            "ReassignmentId.source_synchronizer_id",
           )
           requestTimestamp <- CantonTimestamp.fromProtoPrimitive(requestTimestampP)
-        } yield ReassignmentId(Source(sourceDomain), requestTimestamp)
+        } yield ReassignmentId(Source(sourceSynchronizerId), requestTimestamp)
     }
 }

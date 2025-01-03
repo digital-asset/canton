@@ -26,9 +26,9 @@ import com.digitalasset.canton.version.{ProtocolVersionCompatibility, ReleaseVer
 import com.digitalasset.canton.{
   BaseTest,
   BaseTestWordSpec,
-  DomainAlias,
   HasExecutionContext,
   SequencerAlias,
+  SynchronizerAlias,
 }
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
@@ -51,7 +51,7 @@ class SequencerInfoLoaderTest extends BaseTestWordSpec with HasExecutionContext 
   private lazy val endpoint1 = Endpoint("localhost", Port.tryCreate(1001))
   private lazy val endpoint2 = Endpoint("localhost", Port.tryCreate(1002))
   private lazy val staticDomainParameters = BaseTest.defaultStaticDomainParametersWith()
-  private lazy val domainAlias = DomainAlias.tryCreate("domain1")
+  private lazy val synchronizerAlias = SynchronizerAlias.tryCreate("domain1")
 
   private def mapArgs(
       args: List[
@@ -280,10 +280,10 @@ class SequencerInfoLoaderTest extends BaseTestWordSpec with HasExecutionContext 
     val toleranceForRaciness = 3
 
     "return complete results when requested" in {
-      val scs = sequencerConnections(10)
+      val scs = sequencerConnections(PositiveInt.tryCreate(10))
       val res = sequencerInfoLoader
         .loadSequencerEndpointsParallel(
-          domainAlias,
+          synchronizerAlias,
           scs,
           parallelism = NonNegativeInt.tryCreate(3),
           maybeThreshold = None,
@@ -297,14 +297,14 @@ class SequencerInfoLoaderTest extends BaseTestWordSpec with HasExecutionContext 
 
     "return partial results when threshold specified" in {
       val threshold = PositiveInt.tryCreate(3)
-      val scs = sequencerConnections(10)
+      val scs = sequencerConnections(PositiveInt.tryCreate(10))
       val invalidSequencerConnections = Map(
         2 -> nonValidResultF(scs(1)),
         3 -> nonValidResultF(scs(2)),
       )
       val res = sequencerInfoLoader
         .loadSequencerEndpointsParallel(
-          domainAlias,
+          synchronizerAlias,
           scs,
           parallelism = NonNegativeInt.tryCreate(3),
           maybeThreshold = Some(threshold),
@@ -329,10 +329,10 @@ class SequencerInfoLoaderTest extends BaseTestWordSpec with HasExecutionContext 
         Seq(1, 3, 4)
           .map(_ -> Promise[UnlessShutdown[LoadSequencerEndpointInformationResult]]())
           .toMap
-      val scs = sequencerConnections(10)
+      val scs = sequencerConnections(PositiveInt.tryCreate(10))
       val res = sequencerInfoLoader
         .loadSequencerEndpointsParallel(
-          domainAlias,
+          synchronizerAlias,
           scs,
           parallelism = NonNegativeInt.tryCreate(4),
           maybeThreshold = Some(threshold),
@@ -350,7 +350,7 @@ class SequencerInfoLoaderTest extends BaseTestWordSpec with HasExecutionContext 
     }
 
     "return early in case of a failed Future" in {
-      val scs = sequencerConnections(10)
+      val scs = sequencerConnections(PositiveInt.tryCreate(10))
       val invalidSequencerConnections = Map(
         5 -> FutureUnlessShutdown.failed(new RuntimeException("booh"))
       )
@@ -358,7 +358,7 @@ class SequencerInfoLoaderTest extends BaseTestWordSpec with HasExecutionContext 
         .assertThrowsAndLogsAsync[RuntimeException](
           sequencerInfoLoader
             .loadSequencerEndpointsParallel(
-              domainAlias,
+              synchronizerAlias,
               scs,
               parallelism = NonNegativeInt.tryCreate(3),
               maybeThreshold = None,
@@ -366,17 +366,17 @@ class SequencerInfoLoaderTest extends BaseTestWordSpec with HasExecutionContext 
             .failOnShutdown,
           assertion = _.getMessage should include("booh"),
           _.errorMessage should include(
-            "Exception loading sequencer Sequencer 'sequencer5' info in domain Domain 'domain1'"
+            "Exception loading sequencer Sequencer 'sequencer5' info in synchronizer Domain 'domain1'"
           ),
         )
         .futureValue
     }
   }
 
-  private def sequencerConnections(n: Int): NonEmpty[Seq[SequencerConnection]] =
+  private def sequencerConnections(n: PositiveInt): NonEmpty[Seq[SequencerConnection]] =
     NonEmpty
       .from(
-        (1 to n)
+        (1 to n.value)
           .map(i =>
             GrpcSequencerConnection(
               NonEmpty.mk(Seq, endpoint1),
@@ -386,7 +386,7 @@ class SequencerInfoLoaderTest extends BaseTestWordSpec with HasExecutionContext 
             )
           )
       )
-      .getOrElse(throw new IllegalArgumentException("n must be positive"))
+      .value
 
   private def loadSequencerInfoFactory(
       m: Map[Int, FutureUnlessShutdown[LoadSequencerEndpointInformationResult]]

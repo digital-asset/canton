@@ -7,15 +7,15 @@ import cats.Monad
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.participant.store.DomainAliasAndIdStore.{
-  DomainAliasAlreadyAdded,
+import com.digitalasset.canton.participant.store.RegisteredDomainsStore
+import com.digitalasset.canton.participant.store.SynchronizerAliasAndIdStore.{
   Error,
+  SynchronizerAliasAlreadyAdded,
   SynchronizerIdAlreadyAdded,
 }
-import com.digitalasset.canton.participant.store.RegisteredDomainsStore
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -29,11 +29,11 @@ class DbRegisteredDomainsStore(
 )(implicit ec: ExecutionContext)
     extends RegisteredDomainsStore
     with DbStore {
-  import DomainAlias.*
+  import SynchronizerAlias.*
   import SynchronizerId.*
   import storage.api.*
 
-  override def addMapping(alias: DomainAlias, synchronizerId: SynchronizerId)(implicit
+  override def addMapping(alias: SynchronizerAlias, synchronizerId: SynchronizerId)(implicit
       traceContext: TraceContext
   ): EitherT[Future, Error, Unit] =
     EitherT {
@@ -74,7 +74,7 @@ class DbRegisteredDomainsStore(
                   Either.cond(
                     oldSynchronizerId == synchronizerId,
                     (),
-                    DomainAliasAlreadyAdded(alias, oldSynchronizerId),
+                    SynchronizerAliasAlreadyAdded(alias, oldSynchronizerId),
                   )
                 )
             }
@@ -82,7 +82,7 @@ class DbRegisteredDomainsStore(
           doubleSynchronizerId <- EitherT.right[Either[Error, Unit]](
             storage.query(
               sql"select alias from par_domains where synchronizer_id = $synchronizerId"
-                .as[DomainAlias],
+                .as[SynchronizerAlias],
               functionFullName,
             )
           )
@@ -106,11 +106,11 @@ class DbRegisteredDomainsStore(
 
   override def aliasToSynchronizerIdMap(implicit
       traceContext: TraceContext
-  ): Future[Map[DomainAlias, SynchronizerId]] =
+  ): Future[Map[SynchronizerAlias, SynchronizerId]] =
     storage
       .query(
         sql"""select alias, synchronizer_id from par_domains"""
-          .as[(DomainAlias, SynchronizerId)]
+          .as[(SynchronizerAlias, SynchronizerId)]
           .map(_.toMap),
         functionFullName,
       )

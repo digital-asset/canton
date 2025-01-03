@@ -327,7 +327,7 @@ object GeneratorsProtocol {
     for {
       timestamp <- Arbitrary.arbitrary[CantonTimestamp]
       counter <- nonNegativeLongArb.arbitrary.map(_.unwrap)
-      targetDomain <- Arbitrary.arbitrary[Target[SynchronizerId]]
-    } yield TimeProofTestUtil.mkTimeProof(timestamp, counter, targetDomain, protocolVersion)
+      targetSynchronizerId <- Arbitrary.arbitrary[Target[SynchronizerId]]
+    } yield TimeProofTestUtil.mkTimeProof(timestamp, counter, targetSynchronizerId, protocolVersion)
   )
 }

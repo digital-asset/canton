@@ -584,7 +584,7 @@ object Generators {
   def connectedDomainGen
       : Gen[v2.StateServiceOuterClass.GetConnectedDomainsResponse.ConnectedDomain] =
     for {
-      domainAlias <- Arbitrary.arbString.arbitrary
+      synchronizerAlias <- Arbitrary.arbString.arbitrary
       synchronizerId <- Arbitrary.arbString.arbitrary
       permission <- Gen.oneOf(
         v2.StateServiceOuterClass.ParticipantPermission.PARTICIPANT_PERMISSION_SUBMISSION,
@@ -593,7 +593,7 @@ object Generators {
       )
     } yield v2.StateServiceOuterClass.GetConnectedDomainsResponse.ConnectedDomain
       .newBuilder()
-      .setDomainAlias(domainAlias)
+      .setSynchronizerAlias(synchronizerAlias)
       .setSynchronizerId(synchronizerId)
       .setPermission(permission)
       .build()

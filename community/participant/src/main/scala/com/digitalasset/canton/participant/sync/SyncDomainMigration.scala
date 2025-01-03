@@ -11,7 +11,7 @@ import cats.syntax.traverse.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation}
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.common.domain.grpc.SequencerInfoLoader
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -22,10 +22,10 @@ import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection.SyncStateInspectionError
 import com.digitalasset.canton.participant.admin.repair.RepairService
 import com.digitalasset.canton.participant.domain.{
-  DomainAliasManager,
   DomainConnectionConfig,
   DomainRegistryError,
   DomainRegistryHelpers,
+  SynchronizerAliasManager,
 }
 import com.digitalasset.canton.participant.store.DomainConnectionConfigStore
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
@@ -44,11 +44,11 @@ import scala.concurrent.{ExecutionContext, Future}
 sealed trait SyncDomainMigrationError extends Product with Serializable with CantonError
 
 class SyncDomainMigration(
-    aliasManager: DomainAliasManager,
+    aliasManager: SynchronizerAliasManager,
     domainConnectionConfigStore: DomainConnectionConfigStore,
     inspection: SyncStateInspection,
     repair: RepairService,
-    prepareDomainConnection: Traced[DomainAlias] => EitherT[
+    prepareDomainConnection: Traced[SynchronizerAlias] => EitherT[
       FutureUnlessShutdown,
       SyncDomainMigrationError,
       Unit,
@@ -63,7 +63,7 @@ class SyncDomainMigration(
   import com.digitalasset.canton.participant.sync.SyncDomainMigrationError.*
 
   private def getSynchronizerId(
-      sourceAlias: DomainAlias
+      sourceAlias: SynchronizerAlias
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SyncDomainMigrationError, SynchronizerId] =
@@ -76,19 +76,19 @@ class SyncDomainMigration(
     )
 
   private def checkMigrationRequest(
-      source: Source[DomainAlias],
+      source: Source[SynchronizerAlias],
       target: Target[DomainConnectionConfig],
       targetSynchronizerId: Target[SynchronizerId],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, SyncDomainMigrationError, Unit] = {
-    logger.debug(s"Checking migration request from $source to ${target.unwrap.domain}")
+    logger.debug(s"Checking migration request from $source to ${target.unwrap.synchronizerAlias}")
     for {
       // check that target alias differs from source
       _ <- EitherT.cond[Future](
-        source.unwrap != target.unwrap.domain,
+        source.unwrap != target.unwrap.synchronizerAlias,
         (),
-        InvalidArgument.SameDomainAlias(source.unwrap),
+        InvalidArgument.SameSynchronizerAlias(source.unwrap),
       )
       // check that source domain exists and has not been deactivated
       sourceStatus <- EitherT
@@ -107,7 +107,7 @@ class SyncDomainMigration(
           (),
           SyncDomainMigrationError.InvalidArgument
             .ExpectedsynchronizerIdsDiffer(
-              target.map(_.domain),
+              target.map(_.synchronizerAlias),
               expectedSynchronizerId,
               targetSynchronizerId,
             ),
@@ -127,10 +127,12 @@ class SyncDomainMigration(
   private def registerNewDomain(target: Target[DomainConnectionConfig])(implicit
       traceContext: TraceContext
   ): EitherT[Future, SyncDomainMigrationError, Unit] = {
-    logger.debug(s"Registering new domain ${target.unwrap.domain}")
+    logger.debug(s"Registering new domain ${target.unwrap.synchronizerAlias}")
     domainConnectionConfigStore
       .put(target.unwrap, DomainConnectionConfigStore.MigratingTo)
-      .leftMap[SyncDomainMigrationError](_ => InternalError.DuplicateConfig(target.unwrap.domain))
+      .leftMap[SyncDomainMigrationError](_ =>
+        InternalError.DuplicateConfig(target.unwrap.synchronizerAlias)
+      )
   }
 
   /** Checks whether the migration is possible:
@@ -139,7 +141,7 @@ class SyncDomainMigration(
     * - No dirty request (except if `force = true`)
     */
   def isDomainMigrationPossible(
-      source: Source[DomainAlias],
+      source: Source[SynchronizerAlias],
       target: Target[DomainConnectionConfig],
       force: Boolean,
   )(implicit
@@ -154,7 +156,7 @@ class SyncDomainMigration(
         performUnlessClosingEitherUSF(functionFullName)(
           sequencerInfoLoader
             .loadAndAggregateSequencerEndpoints(
-              domainConnectionConfig.domain,
+              domainConnectionConfig.synchronizerAlias,
               domainConnectionConfig.synchronizerId,
               domainConnectionConfig.sequencerConnections,
               SequencerConnectionValidation.Active,
@@ -163,17 +165,17 @@ class SyncDomainMigration(
               val error = DomainRegistryError.ConnectionErrors.FailedToConnectToSequencer
                 .Error(DomainRegistryError.fromSequencerInfoLoaderError(err).cause)
               SyncServiceError
-                .SyncServiceFailedDomainConnection(domainConnectionConfig.domain, error)
+                .SyncServiceFailedDomainConnection(domainConnectionConfig.synchronizerAlias, error)
             }
         )
       )
       _ <- performUnlessClosingEitherU(functionFullName)(
         aliasManager
-          .processHandshake(target.unwrap.domain, targetDomainInfo.unwrap.synchronizerId)
-          .leftMap(DomainRegistryHelpers.fromDomainAliasManagerError)
+          .processHandshake(target.unwrap.synchronizerAlias, targetDomainInfo.unwrap.synchronizerId)
+          .leftMap(DomainRegistryHelpers.fromSynchronizerAliasManagerError)
           .leftMap[SyncServiceError](err =>
             SyncServiceError.SyncServiceFailedDomainConnection(
-              target.unwrap.domain,
+              target.unwrap.synchronizerAlias,
               err,
             )
           )
@@ -207,43 +209,46 @@ class SyncDomainMigration(
     * Assumes that [[isDomainMigrationPossible]] was called before to check preconditions.
     */
   def migrateDomain(
-      source: Source[DomainAlias],
+      source: Source[SynchronizerAlias],
       target: Target[DomainConnectionConfig],
       targetSynchronizerId: Target[SynchronizerId],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncDomainMigrationError, Unit] = {
     def prepare(): EitherT[Future, SyncDomainMigrationError, Unit] = {
-      logger.debug(s"Preparing domain migration from $source to ${target.unwrap.domain}")
+      logger.debug(s"Preparing domain migration from $source to ${target.unwrap.synchronizerAlias}")
       for {
         // check that the request makes sense
         _ <- checkMigrationRequest(source, target, targetSynchronizerId)
         // check if the target alias already exists.
         targetStatusO = target.traverse(config =>
-          domainConnectionConfigStore.get(config.domain).toOption.map(_.status)
+          domainConnectionConfigStore.get(config.synchronizerAlias).toOption.map(_.status)
         )
         // check if we are already active on the target domain
         _ <- targetStatusO.fold {
           // domain not yet configured, add the configuration
           registerNewDomain(target)
         } { targetStatus =>
-          logger.debug(s"Checking status of target domain ${target.unwrap.domain}")
+          logger.debug(s"Checking status of target domain ${target.unwrap.synchronizerAlias}")
           EitherT.fromEither[Future](
             for {
               // check target status
               _ <- Either.cond(
                 targetStatus.unwrap.canMigrateTo,
                 (),
-                InvalidArgument.InvalidDomainConfigStatus(target.map(_.domain), targetStatus),
+                InvalidArgument.InvalidDomainConfigStatus(
+                  target.map(_.synchronizerAlias),
+                  targetStatus,
+                ),
               )
               // check stored alias if it exists
-              _ <- aliasManager.synchronizerIdForAlias(target.unwrap.domain).traverse_ {
+              _ <- aliasManager.synchronizerIdForAlias(target.unwrap.synchronizerAlias).traverse_ {
                 storedSynchronizerId =>
                   Either.cond(
                     targetSynchronizerId.unwrap == storedSynchronizerId,
                     (),
                     InvalidArgument.ExpectedsynchronizerIdsDiffer(
-                      target.map(_.domain),
+                      target.map(_.synchronizerAlias),
                       storedSynchronizerId,
                       targetSynchronizerId,
                     ),
@@ -252,7 +257,10 @@ class SyncDomainMigration(
             } yield ()
           )
         }
-        _ <- updateDomainStatus(target.unwrap.domain, DomainConnectionConfigStore.MigratingTo)
+        _ <- updateDomainStatus(
+          target.unwrap.synchronizerAlias,
+          DomainConnectionConfigStore.MigratingTo,
+        )
         _ <- updateDomainStatus(source.unwrap, DomainConnectionConfigStore.Vacating)
       } yield ()
     }
@@ -262,10 +270,10 @@ class SyncDomainMigration(
       sourceSynchronizerId <- performUnlessClosingEitherU(functionFullName)(
         source.traverse(getSynchronizerId(_))
       )
-      _ <- prepareDomainConnection(Traced(target.unwrap.domain))
+      _ <- prepareDomainConnection(Traced(target.unwrap.synchronizerAlias))
       _ <- moveContracts(source, sourceSynchronizerId, targetSynchronizerId)
       _ <- performUnlessClosingEitherU(functionFullName)(
-        updateDomainStatus(target.unwrap.domain, DomainConnectionConfigStore.Active)
+        updateDomainStatus(target.unwrap.synchronizerAlias, DomainConnectionConfigStore.Active)
       )
       _ <- performUnlessClosingEitherU(functionFullName)(
         updateDomainStatus(source.unwrap, DomainConnectionConfigStore.Inactive)
@@ -274,7 +282,7 @@ class SyncDomainMigration(
   }
 
   private def updateDomainStatus(
-      alias: DomainAlias,
+      alias: SynchronizerAlias,
       state: DomainConnectionConfigStore.Status,
   )(implicit traceContext: TraceContext): EitherT[Future, SyncDomainMigrationError, Unit] = {
     logger.info(s"Changing status of domain configuration $alias to $state")
@@ -284,7 +292,7 @@ class SyncDomainMigration(
   }
 
   private def moveContracts(
-      sourceAlias: Source[DomainAlias],
+      sourceAlias: Source[SynchronizerAlias],
       source: Source[SynchronizerId],
       target: Target[SynchronizerId],
   )(implicit
@@ -337,16 +345,16 @@ object SyncDomainMigrationError extends MigrationErrors() {
         "INVALID_DOMAIN_MIGRATION_REQUEST",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    final case class SameDomainAlias(domain: DomainAlias)(implicit
+    final case class SameSynchronizerAlias(synchronizerAlias: SynchronizerAlias)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause = "Source domain must differ from target domain.")
         with SyncDomainMigrationError
-    final case class UnknownSourceDomain(domain: Source[DomainAlias])(implicit
+    final case class UnknownSourceDomain(domain: Source[SynchronizerAlias])(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause = s"Source domain $domain is unknown.")
         with SyncDomainMigrationError
 
-    final case class SourceSynchronizerIdUnknown(source: DomainAlias)(implicit
+    final case class SourceSynchronizerIdUnknown(source: SynchronizerAlias)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = s"Source domain $source has no synchronizer id stored: it's completely empty"
@@ -354,7 +362,7 @@ object SyncDomainMigrationError extends MigrationErrors() {
         with SyncDomainMigrationError
 
     final case class InvalidDomainConfigStatus[T[X] <: ReassignmentTag[X]: SameReassignmentType](
-        domain: T[DomainAlias],
+        domain: T[SynchronizerAlias],
         status: T[DomainConnectionConfigStore.Status],
     )(implicit
         val loggingContext: ErrorLoggingContext
@@ -365,7 +373,7 @@ object SyncDomainMigrationError extends MigrationErrors() {
         with SyncDomainMigrationError
 
     final case class ExpectedsynchronizerIdsDiffer(
-        alias: Target[DomainAlias],
+        alias: Target[SynchronizerAlias],
         expected: SynchronizerId,
         remote: Target[SynchronizerId],
     )(implicit
@@ -384,13 +392,16 @@ object SyncDomainMigrationError extends MigrationErrors() {
         with SyncDomainMigrationError
   }
 
-  final case class MigrationParentError(domain: DomainAlias, parent: SyncServiceError)(implicit
+  final case class MigrationParentError(
+      synchronizerAlias: SynchronizerAlias,
+      parent: SyncServiceError,
+  )(implicit
       val loggingContext: ErrorLoggingContext
   ) extends SyncDomainMigrationError
       with ParentCantonError[SyncServiceError] {
 
     override def logOnCreation: Boolean = false
-    override def mixinContext: Map[String, String] = Map("domain" -> domain.unwrap)
+    override def mixinContext: Map[String, String] = Map("domain" -> synchronizerAlias.unwrap)
 
   }
 
@@ -399,21 +410,21 @@ object SyncDomainMigrationError extends MigrationErrors() {
         "BROKEN_DOMAIN_MIGRATION",
         ErrorCategory.SystemInternalAssumptionViolated,
       ) {
-    final case class DuplicateConfig(alias: DomainAlias)(implicit
+    final case class DuplicateConfig(alias: SynchronizerAlias)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = show"The domain alias $alias was already present, but shouldn't be"
+          cause = show"The synchronizer alias $alias was already present, but shouldn't be"
         )
         with SyncDomainMigrationError
 
-    final case class FailedReadingAcs(source: DomainAlias, err: SyncStateInspectionError)(implicit
-        val loggingContext: ErrorLoggingContext
+    final case class FailedReadingAcs(source: SynchronizerAlias, err: SyncStateInspectionError)(
+        implicit val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = show"Failed reading the ACS"
         )
         with SyncDomainMigrationError
 
-    final case class FailedMigratingContracts(source: DomainAlias, err: String)(implicit
+    final case class FailedMigratingContracts(source: SynchronizerAlias, err: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = show"Migrating the ACS to the new domain failed unexpectedly!"

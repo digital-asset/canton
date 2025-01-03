@@ -51,7 +51,7 @@ import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{BinaryFileUtil, GrpcStreamingUtils}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainAlias, SequencerCounter, config}
+import com.digitalasset.canton.{SequencerCounter, SynchronizerAlias, config}
 import com.google.protobuf.ByteString
 import com.google.protobuf.empty.Empty
 import com.google.protobuf.timestamp.Timestamp
@@ -494,7 +494,7 @@ object ParticipantAdminCommands {
     }
 
     final case class PurgeContracts(
-        domain: DomainAlias,
+        synchronizerAlias: SynchronizerAlias,
         contracts: Seq[LfContractId],
         ignoreAlreadyPurged: Boolean,
     ) extends GrpcAdminCommand[PurgeContractsRequest, PurgeContractsResponse, Unit] {
@@ -507,7 +507,7 @@ object ParticipantAdminCommands {
       override protected def createRequest(): Either[String, PurgeContractsRequest] =
         Right(
           PurgeContractsRequest(
-            domain = domain.toProtoPrimitive,
+            synchronizerAlias = synchronizerAlias.toProtoPrimitive,
             contractIds = contracts.map(_.coid),
             ignoreAlreadyPurged = ignoreAlreadyPurged,
           )
@@ -525,7 +525,7 @@ object ParticipantAdminCommands {
     }
 
     final case class MigrateDomain(
-        sourceDomainAlias: DomainAlias,
+        sourceSynchronizerAlias: SynchronizerAlias,
         targetDomainConfig: CDomainConnectionConfig,
         force: Boolean,
     ) extends GrpcAdminCommand[MigrateDomainRequest, MigrateDomainResponse, Unit] {
@@ -542,7 +542,7 @@ object ParticipantAdminCommands {
       override protected def createRequest(): Either[String, MigrateDomainRequest] =
         Right(
           MigrateDomainRequest(
-            sourceDomainAlias.toProtoPrimitive,
+            sourceSynchronizerAlias.toProtoPrimitive,
             Some(targetDomainConfig.toProtoV30),
             force = force,
           )
@@ -555,7 +555,7 @@ object ParticipantAdminCommands {
       override def timeoutType: TimeoutType = DefaultUnboundedTimeout
     }
 
-    final case class PurgeDeactivatedDomain(domainAlias: DomainAlias)
+    final case class PurgeDeactivatedDomain(synchronizerAlias: SynchronizerAlias)
         extends GrpcAdminCommand[
           PurgeDeactivatedDomainRequest,
           PurgeDeactivatedDomainResponse,
@@ -573,7 +573,7 @@ object ParticipantAdminCommands {
         service.purgeDeactivatedDomain(request)
 
       override protected def createRequest(): Either[String, PurgeDeactivatedDomainRequest] =
-        Right(PurgeDeactivatedDomainRequest(domainAlias.toProtoPrimitive))
+        Right(PurgeDeactivatedDomainRequest(synchronizerAlias.toProtoPrimitive))
 
       override protected def handleResponse(
           response: PurgeDeactivatedDomainResponse
@@ -762,11 +762,11 @@ object ParticipantAdminCommands {
 
     }
 
-    final case class ReconnectDomain(domainAlias: DomainAlias, retry: Boolean)
+    final case class ReconnectDomain(synchronizerAlias: SynchronizerAlias, retry: Boolean)
         extends Base[ReconnectDomainRequest, ReconnectDomainResponse, Boolean] {
 
       override protected def createRequest(): Either[String, ReconnectDomainRequest] =
-        Right(ReconnectDomainRequest(domainAlias.toProtoPrimitive, retry))
+        Right(ReconnectDomainRequest(synchronizerAlias.toProtoPrimitive, retry))
 
       override protected def submitRequest(
           service: DomainConnectivityServiceStub,
@@ -784,11 +784,11 @@ object ParticipantAdminCommands {
 
     }
 
-    final case class GetSynchronizerId(domainAlias: DomainAlias)
+    final case class GetSynchronizerId(synchronizerAlias: SynchronizerAlias)
         extends Base[GetSynchronizerIdRequest, GetSynchronizerIdResponse, SynchronizerId] {
 
       override protected def createRequest(): Either[String, GetSynchronizerIdRequest] =
-        Right(GetSynchronizerIdRequest(domainAlias.toProtoPrimitive))
+        Right(GetSynchronizerIdRequest(synchronizerAlias.toProtoPrimitive))
 
       override protected def submitRequest(
           service: DomainConnectivityServiceStub,
@@ -804,11 +804,11 @@ object ParticipantAdminCommands {
           .leftMap(_.toString)
     }
 
-    final case class DisconnectDomain(domainAlias: DomainAlias)
+    final case class DisconnectDomain(synchronizerAlias: SynchronizerAlias)
         extends Base[DisconnectDomainRequest, DisconnectDomainResponse, Unit] {
 
       override protected def createRequest(): Either[String, DisconnectDomainRequest] =
-        Right(DisconnectDomainRequest(domainAlias.toProtoPrimitive))
+        Right(DisconnectDomainRequest(synchronizerAlias.toProtoPrimitive))
 
       override protected def submitRequest(
           service: DomainConnectivityServiceStub,
@@ -979,11 +979,11 @@ object ParticipantAdminCommands {
         Either.unit
     }
 
-    final case class Logout(domainAlias: DomainAlias)
+    final case class Logout(synchronizerAlias: SynchronizerAlias)
         extends Base[LogoutRequest, LogoutResponse, Unit] {
 
       override protected def createRequest(): Either[String, LogoutRequest] =
-        Right(LogoutRequest(domainAlias.toProtoPrimitive))
+        Right(LogoutRequest(synchronizerAlias.toProtoPrimitive))
 
       override protected def submitRequest(
           service: DomainConnectivityServiceStub,

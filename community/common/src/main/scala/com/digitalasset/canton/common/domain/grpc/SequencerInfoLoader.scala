@@ -61,9 +61,9 @@ class SequencerInfoLoader(
 ) extends NamedLogging {
 
   private def sequencerConnectClientBuilder: SequencerConnectClient.Builder = {
-    (domainAlias: DomainAlias, config: SequencerConnection) =>
+    (synchronizerAlias: SynchronizerAlias, config: SequencerConnection) =>
       SequencerConnectClient(
-        domainAlias,
+        synchronizerAlias,
         config,
         timeouts,
         traceContextPropagation,
@@ -72,7 +72,7 @@ class SequencerInfoLoader(
   }
 
   private def getBootstrapInfoDomainParameters(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       sequencerAlias: SequencerAlias,
       client: SequencerConnectClient,
   )(implicit
@@ -83,17 +83,17 @@ class SequencerInfoLoader(
     (DomainClientBootstrapInfo, StaticDomainParameters),
   ] = {
 
-    logger.debug(s"Querying bootstrap information for domain $domainAlias")
+    logger.debug(s"Querying bootstrap information for synchronizer $synchronizerAlias")
     for {
       bootstrapInfo <- client
-        .getDomainClientBootstrapInfo(domainAlias)
-        .leftMap(SequencerInfoLoader.fromSequencerConnectClientError(domainAlias))
+        .getDomainClientBootstrapInfo(synchronizerAlias)
+        .leftMap(SequencerInfoLoader.fromSequencerConnectClientError(synchronizerAlias))
 
-      _ <- performHandshake(client, domainAlias, sequencerAlias)
+      _ <- performHandshake(client, synchronizerAlias, sequencerAlias)
 
       domainParameters <- client
-        .getDomainParameters(domainAlias.unwrap)
-        .leftMap(SequencerInfoLoader.fromSequencerConnectClientError(domainAlias))
+        .getDomainParameters(synchronizerAlias.unwrap)
+        .leftMap(SequencerInfoLoader.fromSequencerConnectClientError(synchronizerAlias))
 
       _ = logger.info(
         s"Retrieved domain information: bootstrap information is $bootstrapInfo and domain parameters are $domainParameters"
@@ -103,7 +103,7 @@ class SequencerInfoLoader(
   }
 
   private def getBootstrapInfoDomainParametersWithRetry(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       sequencerAlias: SequencerAlias,
       client: SequencerConnectClient,
   )(implicit
@@ -123,17 +123,17 @@ class SequencerInfoLoader(
           maxRetries = retries,
           delay = timeouts.sequencerInfo.asFiniteApproximation.div(retries.toLong),
           operationName =
-            s"${domainAlias.toProtoPrimitive}/${sequencerAlias.toProtoPrimitive}: $functionFullName",
+            s"${synchronizerAlias.toProtoPrimitive}/${sequencerAlias.toProtoPrimitive}: $functionFullName",
         )
         .unlessShutdown(
-          getBootstrapInfoDomainParameters(domainAlias, sequencerAlias, client).value,
+          getBootstrapInfoDomainParameters(synchronizerAlias, sequencerAlias, client).value,
           NoExceptionRetryPolicy,
         )
     )
   }
 
   private def getBootstrapInfoDomainParameters(
-      domainAlias: DomainAlias
+      synchronizerAlias: SynchronizerAlias
   )(connection: SequencerConnection)(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
@@ -144,14 +144,14 @@ class SequencerInfoLoader(
   ] =
     connection match {
       case grpc: GrpcSequencerConnection =>
-        val client = sequencerConnectClientBuilder(domainAlias, grpc)
+        val client = sequencerConnectClientBuilder(synchronizerAlias, grpc)
         // retry the bootstrapping info parameters. we want to maximise the number of
         // sequencers (and work around a bootstrapping issue with active-active sequencers)
         // where k8 health end-points don't distinguish between admin / public api
         // and might route our requests to an active instance that is still waiting for
         // the node-id to be written to the database
         getBootstrapInfoDomainParametersWithRetry(
-          domainAlias,
+          synchronizerAlias,
           grpc.sequencerAlias,
           client,
         ).thereafter(_ => client.close())
@@ -159,7 +159,7 @@ class SequencerInfoLoader(
 
   private def performHandshake(
       sequencerConnectClient: SequencerConnectClient,
-      alias: DomainAlias,
+      alias: SynchronizerAlias,
       sequencerAlias: SequencerAlias,
   )(implicit
       traceContext: TraceContext
@@ -188,7 +188,7 @@ class SequencerInfoLoader(
     }
 
   def loadAndAggregateSequencerEndpoints(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       expectedSynchronizerId: Option[SynchronizerId],
       sequencerConnections: SequencerConnections,
       sequencerConnectionValidation: SequencerConnectionValidation,
@@ -197,7 +197,7 @@ class SequencerInfoLoader(
       closeContext: CloseContext,
   ): EitherT[FutureUnlessShutdown, SequencerInfoLoaderError, SequencerAggregatedInfo] = EitherT(
     loadSequencerEndpoints(
-      domainAlias,
+      synchronizerAlias,
       sequencerConnections,
       sequencerConnectionValidation == SequencerConnectionValidation.All,
     ).map(
@@ -212,7 +212,7 @@ class SequencerInfoLoader(
   )
 
   def validateSequencerConnection(
-      alias: DomainAlias,
+      alias: SynchronizerAlias,
       expectedSynchronizerId: Option[SynchronizerId],
       sequencerConnections: SequencerConnections,
       sequencerConnectionValidation: SequencerConnectionValidation,
@@ -240,7 +240,7 @@ class SequencerInfoLoader(
     }
 
   private def loadSequencerEndpoints(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       sequencerConnections: SequencerConnections,
       loadAllEndpoints: Boolean,
   )(implicit
@@ -259,7 +259,7 @@ class SequencerInfoLoader(
       sequencerConnections.connections
 
     loadSequencerEndpointsParallel(
-      domainAlias,
+      synchronizerAlias,
       connections,
       sequencerInfoLoadParallelism,
       Option.when(!loadAllEndpoints)(
@@ -267,7 +267,7 @@ class SequencerInfoLoader(
         sequencerConnections.sequencerTrustThreshold * PositiveInt.two + PositiveInt.one
       ),
     ) { connection =>
-      getBootstrapInfoDomainParameters(domainAlias)(connection).value
+      getBootstrapInfoDomainParameters(synchronizerAlias)(connection).value
         .map {
           case Right((domainClientBootstrapInfo, staticDomainParameters)) =>
             LoadSequencerEndpointInformationResult.Valid(
@@ -288,7 +288,7 @@ class SequencerInfoLoader(
     */
   @VisibleForTesting
   private[grpc] def loadSequencerEndpointsParallel(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       connections: NonEmpty[Seq[SequencerConnection]],
       parallelism: NonNegativeInt,
       maybeThreshold: Option[PositiveInt],
@@ -302,7 +302,7 @@ class SequencerInfoLoader(
       logger.debug(
         s"Loading sequencer info entries with ${connections.size} connections (${grpcConnections
             .map(conn => s"${conn.sequencerAlias.unwrap}=${conn.endpoints.mkString(",")}")
-            .mkString(";")}), parallelism ${parallelism.unwrap}, threshold $maybeThreshold, domain ${domainAlias.unwrap}"
+            .mkString(";")}), parallelism ${parallelism.unwrap}, threshold $maybeThreshold, domain ${synchronizerAlias.unwrap}"
       )
     }
     val promise = Promise[UnlessShutdown[Seq[LoadSequencerEndpointInformationResult]]]()
@@ -322,7 +322,7 @@ class SequencerInfoLoader(
     @nowarn("msg=match may not be exhaustive")
     def loadSequencerInfoAsync(connection: SequencerConnection): Unit = {
       logger.debug(
-        s"About to load sequencer ${connection.sequencerAlias} info in domain $domainAlias"
+        s"About to load sequencer ${connection.sequencerAlias} info in synchronizer $synchronizerAlias"
       )
       // Note that we tested using HasFlushFuture.addToFlush, but the complexity and risk of delaying shutdown
       // wasn't worth the questionable benefit of tracking "dangling threads" without ownership of the netty channel.
@@ -339,7 +339,7 @@ class SequencerInfoLoader(
                 // Perform accounting to decide how to proceed.
                 case (_, resultsSoFar, maybeNext) =>
                   logger.debug(
-                    s"Loaded sequencer ${connection.sequencerAlias} info in domain $domainAlias"
+                    s"Loaded sequencer ${connection.sequencerAlias} info in synchronizer $synchronizerAlias"
                   )
                   if (!promise.isCompleted) {
                     if (
@@ -355,7 +355,7 @@ class SequencerInfoLoader(
                       )
                     ) {
                       logger.debug(
-                        s"Loaded sufficiently many sequencer info entries (${resultsSoFar.size}) in domain $domainAlias"
+                        s"Loaded sufficiently many sequencer info entries (${resultsSoFar.size}) in synchronizer $synchronizerAlias"
                       )
                       promise.trySuccess(Outcome(resultsSoFar.reverse)).discard
                     } else {
@@ -373,21 +373,21 @@ class SequencerInfoLoader(
             if (!promise.isCompleted) {
               LoggerUtil.logThrowableAtLevel(
                 Level.ERROR,
-                s"Exception loading sequencer ${connection.sequencerAlias} info in domain $domainAlias",
+                s"Exception loading sequencer ${connection.sequencerAlias} info in synchronizer $synchronizerAlias",
                 t,
               )
               promise.tryFailure(t).discard
             } else {
               // Minimize log noise distraction on behalf of "dangling" futures.
               logger.info(
-                s"Ignoring exception loading sequencer ${connection.sequencerAlias} info in domain $domainAlias after promise completion ${t.getMessage}"
+                s"Ignoring exception loading sequencer ${connection.sequencerAlias} info in synchronizer $synchronizerAlias after promise completion ${t.getMessage}"
               )
             }
             t
           },
         ),
         failureMessage =
-          s"error on load sequencer ${connection.sequencerAlias} info in domain $domainAlias",
+          s"error on load sequencer ${connection.sequencerAlias} info in synchronizer $synchronizerAlias",
         level = if (promise.isCompleted) Level.INFO else Level.ERROR,
       )
     }
@@ -435,11 +435,11 @@ object SequencerInfoLoader {
     final case class MisconfiguredStaticDomainParameters(cause: String)
         extends SequencerInfoLoaderError
     final case class FailedToConnectToSequencers(cause: String) extends SequencerInfoLoaderError
-    final case class DomainIsNotAvailableError(alias: DomainAlias, cause: String)
+    final case class DomainIsNotAvailableError(alias: SynchronizerAlias, cause: String)
         extends SequencerInfoLoaderError
   }
 
-  private def fromSequencerConnectClientError(alias: DomainAlias)(
+  private def fromSequencerConnectClientError(alias: SynchronizerAlias)(
       error: SequencerConnectClient.Error
   ): SequencerInfoLoaderError = error match {
     case SequencerConnectClient.Error.DeserializationFailure(e) =>

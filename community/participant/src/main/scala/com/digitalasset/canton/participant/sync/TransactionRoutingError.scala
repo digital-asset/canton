@@ -79,10 +79,10 @@ object TransactionRoutingError extends RoutingErrorGroup {
 
       final case class InputContractsNotOnDomain(
           synchronizerId: SynchronizerId,
-          inputContractDomain: SynchronizerId,
+          inputContractSynchronizerId: SynchronizerId,
       ) extends TransactionErrorImpl(
             cause =
-              s"The needed input contracts are not on $synchronizerId, but on $inputContractDomain"
+              s"The needed input contracts are not on $synchronizerId, but on $inputContractSynchronizerId"
           )
           with TransactionRoutingErrorWithDomain
 

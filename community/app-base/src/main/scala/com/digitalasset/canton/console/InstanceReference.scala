@@ -20,25 +20,6 @@ import com.digitalasset.canton.console.commands.*
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.domain.mediator.{
-  MediatorNode,
-  MediatorNodeBootstrap,
-  MediatorNodeConfigCommon,
-  RemoteMediatorConfig,
-}
-import com.digitalasset.canton.domain.sequencing.config.{
-  RemoteSequencerConfig,
-  SequencerNodeConfigCommon,
-}
-import com.digitalasset.canton.domain.sequencing.sequencer.block.bftordering.admin.SequencerBftAdminData.{
-  OrderingTopology,
-  PeerNetworkStatus,
-}
-import com.digitalasset.canton.domain.sequencing.sequencer.{
-  SequencerClients,
-  SequencerPruningStatus,
-}
-import com.digitalasset.canton.domain.sequencing.{SequencerNode, SequencerNodeBootstrap}
 import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
@@ -53,6 +34,25 @@ import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBoot
 import com.digitalasset.canton.sequencer.admin.v30.SequencerPruningAdministrationServiceGrpc
 import com.digitalasset.canton.sequencer.admin.v30.SequencerPruningAdministrationServiceGrpc.SequencerPruningAdministrationServiceStub
 import com.digitalasset.canton.sequencing.{GrpcSequencerConnection, SequencerConnections}
+import com.digitalasset.canton.synchronizer.mediator.{
+  MediatorNode,
+  MediatorNodeBootstrap,
+  MediatorNodeConfigCommon,
+  RemoteMediatorConfig,
+}
+import com.digitalasset.canton.synchronizer.sequencing.config.{
+  RemoteSequencerConfig,
+  SequencerNodeConfigCommon,
+}
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.admin.SequencerBftAdminData.{
+  OrderingTopology,
+  PeerNetworkStatus,
+}
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.{
+  SequencerClients,
+  SequencerPruningStatus,
+}
+import com.digitalasset.canton.synchronizer.sequencing.{SequencerNode, SequencerNodeBootstrap}
 import com.digitalasset.canton.time.{DelegatingSimClock, SimClock}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.store.TimeQuery
