@@ -14,7 +14,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainAlias, LfPartyId}
+import com.digitalasset.canton.{LfPartyId, SynchronizerAlias}
 
 /** An interface to change a ledger via a participant.
   * '''Please note that this interface is unstable and may significantly change.'''
@@ -82,7 +82,7 @@ object SyncService {
 
   object ConnectedDomainResponse {
     final case class ConnectedDomain(
-        domainAlias: DomainAlias,
+        synchronizerAlias: SynchronizerAlias,
         synchronizerId: SynchronizerId,
         permission: ParticipantPermission,
     )

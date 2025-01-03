@@ -62,7 +62,7 @@ import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.{
 }
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
 import com.digitalasset.canton.util.BinaryFileUtil
-import com.digitalasset.canton.{DomainAlias, SequencerAlias}
+import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.protobuf.ByteString
 import com.typesafe.scalalogging.LazyLogging
@@ -1127,11 +1127,11 @@ object DebuggingHelpers extends LazyLogging {
 
   private def get_active_contracts_helper(
       ref: ParticipantReference,
-      lookup: DomainAlias => Seq[(Boolean, SerializableContract)],
+      lookup: SynchronizerAlias => Seq[(Boolean, SerializableContract)],
   ): (Map[String, String], Map[String, TemplateId]) = {
     val syncAcs = ref.domains
       .list_connected()
-      .map(_.domainAlias)
+      .map(_.synchronizerAlias)
       .flatMap(lookup)
       .collect {
         case (active, sc) if active =>

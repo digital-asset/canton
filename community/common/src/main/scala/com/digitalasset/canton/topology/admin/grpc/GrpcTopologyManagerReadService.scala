@@ -617,7 +617,7 @@ class GrpcTopologyManagerReadService(
       res <- collectFromStoresByFilterString(
         request.baseQuery,
         DomainParametersState.code,
-        request.filterDomain,
+        request.filterSynchronizerId,
       )
     } yield {
       val results = res
@@ -642,7 +642,7 @@ class GrpcTopologyManagerReadService(
       res <- collectFromStoresByFilterString(
         request.baseQuery,
         MediatorDomainState.code,
-        request.filterDomain,
+        request.filterSynchronizerId,
       )
     } yield {
       val results = res
@@ -667,7 +667,7 @@ class GrpcTopologyManagerReadService(
       res <- collectFromStoresByFilterString(
         request.baseQuery,
         SequencerDomainState.code,
-        request.filterDomain,
+        request.filterSynchronizerId,
       )
     } yield {
       val results = res
@@ -874,7 +874,7 @@ class GrpcTopologyManagerReadService(
       res <- collectFromStoresByFilterString(
         request.baseQuery,
         PurgeTopologyTransaction.code,
-        request.filterDomain,
+        request.filterSynchronizerId,
       )
     } yield {
       val results = res

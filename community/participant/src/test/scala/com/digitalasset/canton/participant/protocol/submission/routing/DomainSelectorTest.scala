@@ -302,7 +302,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
         ) shouldBe InvalidPrescribedSynchronizerId
           .InputContractsNotOnDomain(
             synchronizerId = acme,
-            inputContractDomain = da,
+            inputContractSynchronizerId = da,
           )
 
         // Multi domain
@@ -328,7 +328,7 @@ class DomainSelectorTest extends AnyWordSpec with BaseTest with HasExecutionCont
         ) shouldBe InvalidPrescribedSynchronizerId
           .InputContractsNotOnDomain(
             synchronizerId = acme,
-            inputContractDomain = da,
+            inputContractSynchronizerId = da,
           )
 
         // Multi domain: reassignment proposal (da -> acme)

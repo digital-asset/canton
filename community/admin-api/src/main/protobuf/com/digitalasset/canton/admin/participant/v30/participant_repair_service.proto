@@ -43,7 +43,7 @@ service ParticipantRepairService {
 message PurgeContractsRequest {
   // Alias of the domain on which the contracts are currently assigned
   // Required
-  string domain = 1;
+  string synchronizer_alias = 1;
 
   // Contracts to be purged
   // Required
@@ -139,7 +139,7 @@ message ImportAcsResponse {
 
 message PurgeDeactivatedDomainRequest {
   // Alias of the deactivated domain to purge data from
-  string domain_alias = 1;
+  string synchronizer_alias = 1;
 }
 
 message PurgeDeactivatedDomainResponse {}

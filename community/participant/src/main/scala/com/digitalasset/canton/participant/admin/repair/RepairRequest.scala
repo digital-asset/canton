@@ -12,16 +12,16 @@ import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.{StaticDomainParameters, TransactionId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.{DomainAlias, RequestCounter}
+import com.digitalasset.canton.{RequestCounter, SynchronizerAlias}
 
 private[repair] final case class RepairRequest(
-    domain: RepairRequest.DomainData,
+    synchronizer: RepairRequest.DomainData,
     transactionId: TransactionId,
     requestCounters: NonEmpty[Seq[RequestCounter]],
     context: RepairContext,
 ) {
 
-  val timestamp: CantonTimestamp = domain.startingPoints.processing.currentRecordTime
+  val timestamp: CantonTimestamp = synchronizer.startingPoints.processing.currentRecordTime
 
   def firstTimeOfChange: TimeOfChange = TimeOfChange(requestCounters.head1, timestamp)
 
@@ -48,7 +48,7 @@ private[repair] object RepairRequest {
 
   final case class DomainData(
       id: SynchronizerId,
-      alias: DomainAlias,
+      alias: SynchronizerAlias,
       topologySnapshot: TopologySnapshot,
       persistentState: SyncDomainPersistentState,
       parameters: StaticDomainParameters,

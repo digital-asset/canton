@@ -428,7 +428,7 @@ class ParticipantTab(
           .toSet
           .mkString("\n")
         val connected =
-          participant.domains.list_connected().map(_.domainAlias.unwrap).mkString("\n")
+          participant.domains.list_connected().map(_.synchronizerAlias.unwrap).mkString("\n")
         MetaInfo(currentDars, hosted, connected)
       }
     }) {

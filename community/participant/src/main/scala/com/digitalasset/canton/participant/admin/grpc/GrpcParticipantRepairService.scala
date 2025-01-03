@@ -30,7 +30,7 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, MonadUtil, ResourceUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{DomainAlias, LfPartyId, SequencerCounter, protocol}
+import com.digitalasset.canton.{LfPartyId, SequencerCounter, SynchronizerAlias, protocol}
 import com.google.protobuf.ByteString
 import io.grpc.stub.StreamObserver
 
@@ -63,8 +63,8 @@ final class GrpcParticipantRepairService(
       cids <- request.contractIds
         .traverse(LfContractId.fromString)
         .leftMap(RepairServiceError.InvalidArgument.Error(_))
-      domain <- DomainAlias
-        .fromProtoPrimitive(request.domain)
+      synchronizerAlias <- SynchronizerAlias
+        .fromProtoPrimitive(request.synchronizerAlias)
         .leftMap(_.toString)
         .leftMap(RepairServiceError.InvalidArgument.Error(_))
 
@@ -73,8 +73,8 @@ final class GrpcParticipantRepairService(
         .toRight(RepairServiceError.InvalidArgument.Error("Missing contract ids to purge"))
 
       _ <- sync.repairService
-        .purgeContracts(domain, cidsNE, request.ignoreAlreadyPurged)
-        .leftMap(RepairServiceError.ContractPurgeError.Error(domain, _))
+        .purgeContracts(synchronizerAlias, cidsNE, request.ignoreAlreadyPurged)
+        .leftMap(RepairServiceError.ContractPurgeError.Error(synchronizerAlias, _))
     } yield ()
 
     res.fold(
@@ -261,7 +261,7 @@ final class GrpcParticipantRepairService(
       alias <- EitherT.fromEither[Future](
         sync.aliasManager
           .aliasForSynchronizerId(synchronizerId)
-          .toRight(s"Not able to find domain alias for ${synchronizerId.toString}")
+          .toRight(s"Not able to find synchronizer alias for ${synchronizerId.toString}")
       )
 
       _ <- EitherT.fromEither[Future](
@@ -287,8 +287,8 @@ final class GrpcParticipantRepairService(
     // ensure here we don't process migration requests concurrently
     if (!domainMigrationInProgress.getAndSet(true)) {
       val migratedSourceDomain = for {
-        sourceDomainAlias <- EitherT.fromEither[Future](
-          DomainAlias.create(request.sourceAlias).map(Source(_))
+        sourceSynchronizerAlias <- EitherT.fromEither[Future](
+          SynchronizerAlias.create(request.sourceAlias).map(Source(_))
         )
         conf <- EitherT
           .fromEither[Future](
@@ -301,7 +301,7 @@ final class GrpcParticipantRepairService(
           )
         _ <- EitherT(
           sync
-            .migrateDomain(sourceDomainAlias, conf, force = request.force)
+            .migrateDomain(sourceSynchronizerAlias, conf, force = request.force)
             .leftMap(_.asGrpcError.getStatus.getDescription)
             .value
             .onShutdown {
@@ -335,13 +335,13 @@ final class GrpcParticipantRepairService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
     val res = for {
-      domainAlias <- EitherT.fromEither[FutureUnlessShutdown](
-        DomainAlias
-          .fromProtoPrimitive(request.domainAlias)
+      synchronizerAlias <- EitherT.fromEither[FutureUnlessShutdown](
+        SynchronizerAlias
+          .fromProtoPrimitive(request.synchronizerAlias)
           .leftMap(_.toString)
           .leftMap(RepairServiceError.InvalidArgument.Error(_))
       )
-      _ <- sync.purgeDeactivatedDomain(domainAlias).leftWiden[CantonError]
+      _ <- sync.purgeDeactivatedDomain(synchronizerAlias).leftWiden[CantonError]
     } yield ()
 
     EitherTUtil

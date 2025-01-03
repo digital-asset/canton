@@ -6,6 +6,10 @@ Please also consult the [full documentation of this release](https://docs.daml.c
 ## Until 2025-01-07 (Exclusive)
 
 - We introduced contract key prefetching / bulk loading to improve workloads that fetch many contract keys.
+- Domain renaming
+    - domain id -> synchronizer id
+    - domain alias -> synchronizer alias
+    - domain projects (e.g., community-domain) -> synchronizer projects
 
 ## Until 2024-12-20 (Exclusive)
 - The GetTransactionByEventId and the GetTransactionTreeByEventId endpoints of the lapi update service have been

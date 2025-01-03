@@ -18,16 +18,17 @@ import slick.jdbc.{GetResult, SetParameter}
   * This does not need to be globally unique. Only unique for the participant using it.
   * @param str String with given alias
   */
-final case class DomainAlias(protected val str: String255)
+final case class SynchronizerAlias(protected val str: String255)
     extends LengthLimitedStringWrapper
     with PrettyPrinting {
-  override protected def pretty: Pretty[DomainAlias] =
+  override protected def pretty: Pretty[SynchronizerAlias] =
     prettyOfString(inst => show"Domain ${inst.unwrap.singleQuoted}")
 }
-object DomainAlias extends LengthLimitedStringWrapperCompanion[String255, DomainAlias] {
+object SynchronizerAlias extends LengthLimitedStringWrapperCompanion[String255, SynchronizerAlias] {
   override protected def companion: String255.type = String255
-  override def instanceName: String = "DomainAlias"
-  override protected def factoryMethodWrapper(str: String255): DomainAlias = DomainAlias(str)
+  override def instanceName: String = "SynchronizerAlias"
+  override protected def factoryMethodWrapper(str: String255): SynchronizerAlias =
+    SynchronizerAlias(str)
 }
 
 /** Class representing a SequencerAlias.

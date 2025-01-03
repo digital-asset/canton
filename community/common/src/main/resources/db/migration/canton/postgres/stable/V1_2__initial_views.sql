@@ -267,7 +267,7 @@ create or replace view debug.sequencer_client_pending_sends as
 
 create or replace view debug.par_domain_connection_configs as
   select
-    domain_alias,
+    synchronizer_alias,
     config,
     status
   from par_domain_connection_configs;

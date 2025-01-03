@@ -19,7 +19,7 @@ import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.{GrpcFUSExtended, wrapErrUS}
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection.InFlightCount
-import com.digitalasset.canton.participant.domain.DomainAliasManager
+import com.digitalasset.canton.participant.domain.SynchronizerAliasManager
 import com.digitalasset.canton.participant.pruning.{
   CommitmentContractMetadata,
   CommitmentInspectContract,
@@ -48,7 +48,7 @@ class GrpcInspectionService(
     syncStateInspection: SyncStateInspection,
     ips: IdentityProvidingServiceClient,
     indexedStringStore: IndexedStringStore,
-    domainAliasManager: DomainAliasManager,
+    synchronizerAliasManager: SynchronizerAliasManager,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContext
@@ -322,13 +322,13 @@ class GrpcInspectionService(
   private def fetchDefaultDomainTimeRanges()(implicit
       traceContext: TraceContext
   ): Either[String, Seq[Future[DomainSearchCommitmentPeriod]]] = {
-    val searchPeriods = domainAliasManager.ids.map(synchronizerId =>
+    val searchPeriods = synchronizerAliasManager.ids.map(synchronizerId =>
       for {
-        domainAlias <- domainAliasManager
+        synchronizerAlias <- synchronizerAliasManager
           .aliasForSynchronizerId(synchronizerId)
-          .toRight(s"No domain alias found for $synchronizerId")
+          .toRight(s"No synchronizer alias found for $synchronizerId")
         lastComputed <- syncStateInspection
-          .findLastComputedAndSent(domainAlias)
+          .findLastComputedAndSent(synchronizerAlias)
           .toRight(s"No computations done for $synchronizerId")
       } yield {
         for {
@@ -360,11 +360,11 @@ class GrpcInspectionService(
     for {
       synchronizerId <- SynchronizerId.fromString(timeRange.synchronizerId)
 
-      domainAlias <- domainAliasManager
+      synchronizerAlias <- synchronizerAliasManager
         .aliasForSynchronizerId(synchronizerId)
-        .toRight(s"No domain alias found for $synchronizerId")
+        .toRight(s"No synchronizer alias found for $synchronizerId")
       lastComputed <- syncStateInspection
-        .findLastComputedAndSent(domainAlias)
+        .findLastComputedAndSent(synchronizerAlias)
         .toRight(s"No computations done for $synchronizerId")
 
       times <- timeRange.interval
@@ -418,9 +418,9 @@ class GrpcInspectionService(
           SynchronizerId.fromProtoPrimitive(request.synchronizerId, "synchronizerId")
         )
 
-        domainAlias <- EitherT
+        synchronizerAlias <- EitherT
           .fromOption[FutureUnlessShutdown](
-            domainAliasManager.aliasForSynchronizerId(synchronizerId),
+            synchronizerAliasManager.aliasForSynchronizerId(synchronizerId),
             InspectionServiceError.IllegalArgumentError
               .Error(s"Unknown synchronizer id $synchronizerId"),
           )
@@ -428,7 +428,9 @@ class GrpcInspectionService(
 
         pv <- EitherTUtil
           .fromFuture(
-            FutureUnlessShutdown.outcomeF(syncStateInspection.getProtocolVersion(domainAlias)),
+            FutureUnlessShutdown.outcomeF(
+              syncStateInspection.getProtocolVersion(synchronizerAlias)
+            ),
             err => InspectionServiceError.InternalServerError.Error(err.toString),
           )
           .leftWiden[CantonError]
@@ -450,7 +452,7 @@ class GrpcInspectionService(
         )
 
         computedCmts = syncStateInspection.findComputedCommitments(
-          domainAlias,
+          synchronizerAlias,
           cantonTickTs,
           cantonTickTs,
           Some(counterParticipant),
@@ -577,11 +579,11 @@ class GrpcInspectionService(
           SynchronizerId.fromProtoPrimitive(request.expectedSynchronizerId, "synchronizerId")
         )
 
-        expectedDomainAlias <- EitherT
+        expectedSynchronizerAlias <- EitherT
           .fromOption[FutureUnlessShutdown](
-            domainAliasManager.aliasForSynchronizerId(expectedSynchronizerId),
+            synchronizerAliasManager.aliasForSynchronizerId(expectedSynchronizerId),
             InspectionServiceError.IllegalArgumentError
-              .Error(s"Domain alias not found for $expectedSynchronizerId"),
+              .Error(s"Synchronizer alias not found for $expectedSynchronizerId"),
           )
           .leftWiden[CantonError]
 
@@ -596,7 +598,7 @@ class GrpcInspectionService(
         pv <- EitherTUtil
           .fromFuture(
             FutureUnlessShutdown.outcomeF(
-              syncStateInspection.getProtocolVersion(expectedDomainAlias)
+              syncStateInspection.getProtocolVersion(expectedSynchronizerAlias)
             ),
             err => InspectionServiceError.InternalServerError.Error(err.toString),
           )
@@ -641,16 +643,14 @@ class GrpcInspectionService(
       synchronizerId <- EitherT.fromEither[FutureUnlessShutdown](
         SynchronizerId.fromString(request.synchronizerId)
       )
-      domainAlias <- EitherT.fromEither[FutureUnlessShutdown](
-        domainAliasManager
+      synchronizerAlias <- EitherT.fromEither[FutureUnlessShutdown](
+        synchronizerAliasManager
           .aliasForSynchronizerId(synchronizerId)
-          .toRight(s"Not able to find domain alias for ${synchronizerId.toString}")
+          .toRight(s"Not able to find synchronizer alias for ${synchronizerId.toString}")
       )
 
-      count <- syncStateInspection.countInFlight(domainAlias)
-    } yield {
-      count
-    }
+      count <- syncStateInspection.countInFlight(synchronizerAlias)
+    } yield count
 
     inFlightCount
       .fold(

@@ -74,7 +74,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       topologyDispatcher: ParticipantTopologyDispatcher,
       packageDependencyResolver: PackageDependencyResolverUS,
       partyNotifier: LedgerServerPartyNotifier,
-      metrics: DomainAlias => SyncDomainMetrics,
+      metrics: SynchronizerAlias => SyncDomainMetrics,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, DomainHandle] = {
@@ -91,7 +91,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       // fetch or create persistent state for the domain
       persistentState <- syncDomainPersistentStateManager
         .lookupOrCreatePersistentState(
-          config.domain,
+          config.synchronizerAlias,
           indexedSynchronizerId,
           sequencerAggregatedInfo.staticDomainParameters,
         )
@@ -188,7 +188,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
                   config.copy(recordingConfig = updateMemberRecordingPath(config.recordingConfig))
                 )
             ),
-            metrics(config.domain).sequencerClient,
+            metrics(config.synchronizerAlias).sequencerClient,
             participantNodeParameters.loggingConfig,
             participantNodeParameters.exitOnFatalFailures,
             domainLoggerFactory,
@@ -214,7 +214,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       }
 
       // TODO(i12906): We should check for the activeness only from the honest sequencers.
-      active <- isActive(config.domain, sequencerAggregatedInfo)
+      active <- isActive(config.synchronizerAlias, sequencerAggregatedInfo)
 
       // if the participant is being restarted and has completed topology initialization previously
       // then we can skip it
@@ -224,11 +224,11 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
           logger.debug(
             s"Participant is not yet active on domain $synchronizerId. Initializing topology"
           )
-          val client = sequencerConnectClient(config.domain, sequencerAggregatedInfo)
+          val client = sequencerConnectClient(config.synchronizerAlias, sequencerAggregatedInfo)
           for {
             success <- topologyDispatcher.onboardToDomain(
               synchronizerId,
-              config.domain,
+              config.synchronizerAlias,
               client,
               sequencerAggregatedInfo.staticDomainParameters.protocolVersion,
             )
@@ -236,14 +236,14 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
               success,
               (),
               DomainRegistryError.ConnectionErrors.ParticipantIsNotActive.Error(
-                s"Domain ${config.domain} has rejected our on-boarding attempt"
+                s"Domain ${config.synchronizerAlias} has rejected our on-boarding attempt"
               ),
             )
             // make sure the participant is immediately active after pushing our topology,
             // or whether we have to stop here to wait for a asynchronous approval at the domain
             _ <- {
               logger.debug("Now waiting to become active")
-              waitForActive(config.domain, sequencerAggregatedInfo)
+              waitForActive(config.synchronizerAlias, sequencerAggregatedInfo)
             }
           } yield ()
         }
@@ -292,7 +292,7 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
       )
     } yield DomainHandle(
       synchronizerId,
-      config.domain,
+      config.synchronizerAlias,
       sequencerAggregatedInfo.staticDomainParameters,
       sequencerClient,
       sequencerChannelClientO,
@@ -369,32 +369,35 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
     }
 
   private def sequencerConnectClient(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       sequencerAggregatedInfo: SequencerAggregatedInfo,
   ): SequencerConnectClient = {
     // TODO(i12076): Currently it takes the first available connection
     //  here which is already checked for healthiness, but it should maybe check all of them - if they're healthy
     val sequencerConnection = sequencerAggregatedInfo.sequencerConnections.default
-    sequencerConnectClientBuilder(domainAlias, sequencerConnection)
+    sequencerConnectClientBuilder(synchronizerAlias, sequencerConnection)
   }
 
-  private def isActive(domainAlias: DomainAlias, sequencerAggregatedInfo: SequencerAggregatedInfo)(
-      implicit traceContext: TraceContext
+  private def isActive(
+      synchronizerAlias: SynchronizerAlias,
+      sequencerAggregatedInfo: SequencerAggregatedInfo,
+  )(implicit
+      traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] = {
-    val client = sequencerConnectClient(domainAlias, sequencerAggregatedInfo)
-    isActive(domainAlias, client, false).thereafter { _ =>
+    val client = sequencerConnectClient(synchronizerAlias, sequencerAggregatedInfo)
+    isActive(synchronizerAlias, client, false).thereafter { _ =>
       client.close()
     }
   }
 
   private def waitForActive(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       sequencerAggregatedInfo: SequencerAggregatedInfo,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Unit] = {
-    val client = sequencerConnectClient(domainAlias, sequencerAggregatedInfo)
-    isActive(domainAlias, client, true)
+    val client = sequencerConnectClient(synchronizerAlias, sequencerAggregatedInfo)
+    isActive(synchronizerAlias, client, true)
       .subflatMap(isActive =>
         Either.cond(
           isActive,
@@ -409,20 +412,20 @@ trait DomainRegistryHelpers extends FlagCloseable with NamedLogging { this: HasF
   }
 
   private def isActive(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       client: SequencerConnectClient,
       waitForActive: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, DomainRegistryError, Boolean] =
     client
-      .isActive(participantId, domainAlias, waitForActive = waitForActive)
-      .leftMap(DomainRegistryHelpers.toDomainRegistryError(domainAlias))
+      .isActive(participantId, synchronizerAlias, waitForActive = waitForActive)
+      .leftMap(DomainRegistryHelpers.toDomainRegistryError(synchronizerAlias))
 
   private def sequencerConnectClientBuilder: SequencerConnectClient.Builder = {
-    (domainAlias: DomainAlias, config: SequencerConnection) =>
+    (synchronizerAlias: SynchronizerAlias, config: SequencerConnection) =>
       SequencerConnectClient(
-        domainAlias,
+        synchronizerAlias,
         config,
         participantNodeParameters.processingTimeouts,
         participantNodeParameters.tracing.propagation,
@@ -435,7 +438,7 @@ object DomainRegistryHelpers {
 
   private[domain] final case class DomainHandle(
       synchronizerId: SynchronizerId,
-      alias: DomainAlias,
+      alias: SynchronizerAlias,
       staticParameters: StaticDomainParameters,
       sequencer: RichSequencerClient,
       channelSequencerClientO: Option[SequencerChannelClient],
@@ -445,7 +448,7 @@ object DomainRegistryHelpers {
       timeouts: ProcessingTimeout,
   )
 
-  def toDomainRegistryError(alias: DomainAlias)(
+  def toDomainRegistryError(alias: SynchronizerAlias)(
       error: SequencerConnectClient.Error
   )(implicit loggingContext: ErrorLoggingContext): DomainRegistryError =
     error match {
@@ -459,18 +462,18 @@ object DomainRegistryHelpers {
         DomainRegistryError.ConnectionErrors.DomainIsNotAvailable.Error(alias, message)
     }
 
-  def fromDomainAliasManagerError(
-      error: DomainAliasManager.Error
+  def fromSynchronizerAliasManagerError(
+      error: SynchronizerAliasManager.Error
   )(implicit loggingContext: ErrorLoggingContext): DomainRegistryError =
     error match {
-      case DomainAliasManager.GenericError(reason) =>
+      case SynchronizerAliasManager.GenericError(reason) =>
         DomainRegistryError.HandshakeErrors.HandshakeFailed.Error(reason)
-      case DomainAliasManager.DomainAliasDuplication(
+      case SynchronizerAliasManager.SynchronizerAliasDuplication(
             synchronizerId,
             alias,
             previousSynchronizerId,
           ) =>
-        DomainRegistryError.HandshakeErrors.DomainAliasDuplication.Error(
+        DomainRegistryError.HandshakeErrors.SynchronizerAliasDuplication.Error(
           synchronizerId,
           alias,
           previousSynchronizerId,

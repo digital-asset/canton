@@ -4,7 +4,7 @@
 package com.digitalasset.canton.participant.admin.repair
 
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
-import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.RepairServiceErrorGroup
 import com.digitalasset.canton.error.{BaseCantonError, CantonError}
@@ -148,7 +148,7 @@ object RepairServiceError extends RepairServiceErrorGroup {
         id = "CONTRACT_PURGE_ERROR",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    final case class Error(domain: DomainAlias, reason: String)(implicit
+    final case class Error(synchronizerAlias: SynchronizerAlias, reason: String)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(cause = reason)
         with RepairServiceError

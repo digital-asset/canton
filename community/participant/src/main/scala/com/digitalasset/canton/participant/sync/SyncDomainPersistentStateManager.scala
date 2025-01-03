@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.sync
 import cats.Eval
 import cats.data.EitherT
 import cats.syntax.parallel.*
-import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.Crypto
 import com.digitalasset.canton.data.CantonTimestamp
@@ -19,7 +19,7 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.PackageDependencyResolver
-import com.digitalasset.canton.participant.domain.{DomainAliasResolution, DomainRegistryError}
+import com.digitalasset.canton.participant.domain.{DomainRegistryError, SynchronizerAliasResolution}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.topology.TopologyComponentFactory
@@ -47,7 +47,7 @@ trait SyncDomainPersistentStateLookup {
   */
 class SyncDomainPersistentStateManager(
     participantId: ParticipantId,
-    aliasResolution: DomainAliasResolution,
+    aliasResolution: SynchronizerAliasResolution,
     storage: Storage,
     val indexedStringStore: IndexedStringStore,
     acsCounterParticipantConfigStore: AcsCounterParticipantConfigStore,
@@ -64,7 +64,7 @@ class SyncDomainPersistentStateManager(
     with AutoCloseable
     with NamedLogging {
 
-  /** Creates [[com.digitalasset.canton.participant.store.SyncDomainPersistentState]]s for all known domain aliases
+  /** Creates [[com.digitalasset.canton.participant.store.SyncDomainPersistentState]]s for all known synchronizer aliases
     * provided that the domain parameters and a sequencer offset are known.
     * Does not check for unique contract key domain constraints.
     * Must not be called concurrently with itself or other methods of this class.
@@ -120,7 +120,7 @@ class SyncDomainPersistentStateManager(
     * Must not be called concurrently with itself or other methods of this class.
     */
   def lookupOrCreatePersistentState(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       synchronizerId: IndexedDomain,
       domainParameters: StaticDomainParameters,
   )(implicit
@@ -130,7 +130,7 @@ class SyncDomainPersistentStateManager(
     val persistentState = createPersistentState(synchronizerId, domainParameters)
     for {
       _ <- checkAndUpdateDomainParameters(
-        domainAlias,
+        synchronizerAlias,
         persistentState.parameterStore,
         domainParameters,
       )
@@ -149,7 +149,7 @@ class SyncDomainPersistentStateManager(
       .getOrElse(mkPersistentState(indexedDomain, staticDomainParameters))
 
   private def checkAndUpdateDomainParameters(
-      alias: DomainAlias,
+      alias: SynchronizerAlias,
       parameterStore: DomainParameterStore,
       newParameters: StaticDomainParameters,
   )(implicit traceContext: TraceContext): EitherT[Future, DomainRegistryError, Unit] =
@@ -194,15 +194,15 @@ class SyncDomainPersistentStateManager(
 
   override def getAll: Map[SynchronizerId, SyncDomainPersistentState] = domainStates.toMap
 
-  def getByAlias(domainAlias: DomainAlias): Option[SyncDomainPersistentState] =
+  def getByAlias(synchronizerAlias: SynchronizerAlias): Option[SyncDomainPersistentState] =
     for {
-      synchronizerId <- synchronizerIdForAlias(domainAlias)
+      synchronizerId <- synchronizerIdForAlias(synchronizerAlias)
       res <- get(synchronizerId)
     } yield res
 
-  def synchronizerIdForAlias(domainAlias: DomainAlias): Option[SynchronizerId] =
-    aliasResolution.synchronizerIdForAlias(domainAlias)
-  def aliasForSynchronizerId(synchronizerId: SynchronizerId): Option[DomainAlias] =
+  def synchronizerIdForAlias(synchronizerAlias: SynchronizerAlias): Option[SynchronizerId] =
+    aliasResolution.synchronizerIdForAlias(synchronizerAlias)
+  def aliasForSynchronizerId(synchronizerId: SynchronizerId): Option[SynchronizerAlias] =
     aliasResolution.aliasForSynchronizerId(synchronizerId)
 
   private def mkPersistentState(

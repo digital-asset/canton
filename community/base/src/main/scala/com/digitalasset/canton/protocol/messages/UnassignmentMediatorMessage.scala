@@ -44,7 +44,7 @@ final case class UnassignmentMediatorMessage(
       : RepresentativeProtocolVersion[UnassignmentMediatorMessage.type] =
     UnassignmentMediatorMessage.protocolVersionRepresentativeFor(protocolVersion.unwrap)
 
-  override def synchronizerId: SynchronizerId = commonData.sourceDomain.unwrap
+  override def synchronizerId: SynchronizerId = commonData.sourceSynchronizerId.unwrap
 
   override def mediator: MediatorGroupRecipient = commonData.sourceMediatorGroup
 

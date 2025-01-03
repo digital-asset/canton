@@ -508,7 +508,7 @@ final class GeneratorsData(
   implicit val assignmentCommonDataArb: Arbitrary[AssignmentCommonData] = Arbitrary(
     for {
       salt <- Arbitrary.arbitrary[Salt]
-      targetDomain <- Arbitrary.arbitrary[Target[SynchronizerId]]
+      targetSynchronizerId <- Arbitrary.arbitrary[Target[SynchronizerId]]
 
       targetMediator <- Arbitrary.arbitrary[MediatorGroupRecipient]
 
@@ -524,7 +524,7 @@ final class GeneratorsData(
     } yield AssignmentCommonData
       .create(hashOps)(
         salt,
-        targetDomain,
+        targetSynchronizerId,
         targetMediator,
         stakeholders,
         uuid,
@@ -537,7 +537,7 @@ final class GeneratorsData(
   implicit val unassignmentCommonData: Arbitrary[UnassignmentCommonData] = Arbitrary(
     for {
       salt <- Arbitrary.arbitrary[Salt]
-      sourceDomain <- Arbitrary.arbitrary[Source[SynchronizerId]]
+      sourceSynchronizerId <- Arbitrary.arbitrary[Source[SynchronizerId]]
 
       sourceMediator <- Arbitrary.arbitrary[MediatorGroupRecipient]
 
@@ -553,7 +553,7 @@ final class GeneratorsData(
     } yield UnassignmentCommonData
       .create(hashOps)(
         salt,
-        sourceDomain,
+        sourceSynchronizerId,
         sourceMediator,
         stakeholders,
         reassigningParticipants,
@@ -568,14 +568,14 @@ final class GeneratorsData(
       sourceProtocolVersion: Source[ProtocolVersion],
   ): Gen[DeliveredUnassignmentResult] =
     for {
-      sourceDomain <- Arbitrary.arbitrary[Source[SynchronizerId]]
+      sourceSynchronizerId <- Arbitrary.arbitrary[Source[SynchronizerId]]
       requestId <- Arbitrary.arbitrary[RequestId]
       rootHash <- Arbitrary.arbitrary[RootHash]
       protocolVersion = sourceProtocolVersion.unwrap
       verdict = Verdict.Approve(protocolVersion)
 
       result = ConfirmationResultMessage.create(
-        sourceDomain.unwrap,
+        sourceSynchronizerId.unwrap,
         ViewType.UnassignmentViewType,
         requestId,
         rootHash,
@@ -598,7 +598,7 @@ final class GeneratorsData(
       recipients <- recipientsArb.arbitrary
 
       batch = Batch.of(protocolVersion, signedResult -> recipients)
-      deliver <- deliverGen(sourceDomain.unwrap, batch, protocolVersion)
+      deliver <- deliverGen(sourceSynchronizerId.unwrap, batch, protocolVersion)
 
       unassignmentTs <- Arbitrary.arbitrary[CantonTimestamp]
     } yield DeliveredUnassignmentResult
@@ -643,7 +643,7 @@ final class GeneratorsData(
 
       contract <- serializableContractArb(canHaveEmptyKey = true).arbitrary
 
-      targetDomain <- Arbitrary.arbitrary[Target[SynchronizerId]]
+      targetSynchronizerId <- Arbitrary.arbitrary[Target[SynchronizerId]]
       timeProof <- timeProofArb(protocolVersion).arbitrary
       reassignmentCounter <- reassignmentCounterGen
 
@@ -653,7 +653,7 @@ final class GeneratorsData(
       .create(hashOps)(
         salt,
         contract,
-        targetDomain,
+        targetSynchronizerId,
         timeProof,
         sourceProtocolVersion,
         targetProtocolVersion,

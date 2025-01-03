@@ -133,7 +133,7 @@ class InMemoryInFlightSubmissionStore(override protected val loggerFactory: Name
 
   override def updateUnsequenced(
       changeIdHash: ChangeIdHash,
-      submissionDomain: SynchronizerId,
+      submissionSynchronizerId: SynchronizerId,
       messageId: MessageId,
       newSequencingInfo: UnsequencedSubmission,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
@@ -142,12 +142,12 @@ class InMemoryInFlightSubmissionStore(override protected val loggerFactory: Name
         submission.sequencingInfo.asUnsequenced match {
           case Some(unsequenced) =>
             if (
-              submission.submissionSynchronizerId != submissionDomain || submission.messageId != messageId
+              submission.submissionSynchronizerId != submissionSynchronizerId || submission.messageId != messageId
             )
               submission
             else if (unsequenced.timeout < newSequencingInfo.timeout) {
               logger.warn(
-                show"Sequencing timeout for submission (change ID hash $changeIdHash, message Id $messageId on $submissionDomain) is at ${unsequenced.timeout} before ${newSequencingInfo.timeout}. Current data: $unsequenced"
+                show"Sequencing timeout for submission (change ID hash $changeIdHash, message Id $messageId on $submissionSynchronizerId) is at ${unsequenced.timeout} before ${newSequencingInfo.timeout}. Current data: $unsequenced"
               )
               submission
             } else {
@@ -155,7 +155,7 @@ class InMemoryInFlightSubmissionStore(override protected val loggerFactory: Name
             }
           case None =>
             logger.warn(
-              show"Submission (change ID hash $changeIdHash, message Id $messageId) on $submissionDomain has already been sequenced. ${submission.sequencingInfo}"
+              show"Submission (change ID hash $changeIdHash, message Id $messageId) on $submissionSynchronizerId has already been sequenced. ${submission.sequencingInfo}"
             )
             submission
         }

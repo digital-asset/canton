@@ -42,13 +42,13 @@ service DomainConnectivityService {
   // list registered domains
   rpc ListRegisteredDomains(ListRegisteredDomainsRequest) returns (ListRegisteredDomainsResponse);
 
-  // Get the synchronizer id of the given domain alias
+  // Get the synchronizer id of the given synchronizer alias
   rpc GetSynchronizerId(GetSynchronizerIdRequest) returns (GetSynchronizerIdResponse);
 }
 
 message DomainConnectionConfig {
   // participant local identifier of the target domain
-  string domain_alias = 1;
+  string synchronizer_alias = 1;
   // connection information to sequencers
   com.digitalasset.canton.admin.domain.v30.SequencerConnections sequencer_connections = 2;
   // if false, then domain needs to be manually connected to (default false)
@@ -121,7 +121,7 @@ message ListRegisteredDomainsResponse {
 }
 
 message ReconnectDomainRequest {
-  string domain_alias = 1;
+  string synchronizer_alias = 1;
   /* if retry is set to true, we will keep on retrying if the domain is unavailable */
   bool retry = 2;
 }
@@ -146,7 +146,7 @@ message ConnectDomainResponse {
 }
 
 message DisconnectDomainRequest {
-  string domain_alias = 1;
+  string synchronizer_alias = 1;
 }
 
 message DisconnectDomainResponse {}
@@ -159,7 +159,7 @@ message ListConnectedDomainsRequest {}
 
 message ListConnectedDomainsResponse {
   message Result {
-    string domain_alias = 1;
+    string synchronizer_alias = 1;
     string synchronizer_id = 2;
     bool healthy = 3;
   }
@@ -167,7 +167,7 @@ message ListConnectedDomainsResponse {
 }
 
 message GetSynchronizerIdRequest {
-  string domain_alias = 1;
+  string synchronizer_alias = 1;
 }
 
 message GetSynchronizerIdResponse {
@@ -175,7 +175,7 @@ message GetSynchronizerIdResponse {
 }
 
 message LogoutRequest {
-  string domain_alias = 1;
+  string synchronizer_alias = 1;
 }
 
 message LogoutResponse {

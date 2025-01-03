@@ -48,9 +48,9 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{
   BaseTest,
   CloseableTest,
-  DomainAlias,
   FailOnShutdown,
   HasExecutionContext,
+  SynchronizerAlias,
 }
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
@@ -100,13 +100,13 @@ sealed trait SyncStateInspectionTest
   lazy val synchronizerId: SynchronizerId = SynchronizerId(
     UniqueIdentifier.tryFromProtoPrimitive("domain::domain")
   )
-  lazy val synchronizerIdAlias: DomainAlias = DomainAlias.tryCreate("domain")
+  lazy val synchronizerIdAlias: SynchronizerAlias = SynchronizerAlias.tryCreate("domain")
   lazy val indexedDomain: IndexedDomain = IndexedDomain.tryCreate(synchronizerId, 1)
   // values for domain2
   lazy val synchronizerId2: SynchronizerId = SynchronizerId(
     UniqueIdentifier.tryFromProtoPrimitive("domain::domain2")
   )
-  lazy val synchronizerId2Alias: DomainAlias = DomainAlias.tryCreate("domain2")
+  lazy val synchronizerId2Alias: SynchronizerAlias = SynchronizerAlias.tryCreate("domain2")
   lazy val indexedDomain2: IndexedDomain = IndexedDomain.tryCreate(synchronizerId2, 2)
 
   def buildSyncState(): (SyncStateInspection, SyncDomainPersistentStateManager) = {
@@ -130,7 +130,7 @@ sealed trait SyncStateInspectionTest
   protected def addDomainToSyncState(
       stateManager: SyncDomainPersistentStateManager,
       synchronizerId: SynchronizerId,
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
   ): AcsCommitmentStore = {
     val persistentStateDomain = mock[SyncDomainPersistentState]
     val acsCounterParticipantConfigStore = mock[AcsCounterParticipantConfigStore]
@@ -144,9 +144,9 @@ sealed trait SyncStateInspectionTest
       loggerFactory,
     )
     when(persistentStateDomain.acsCommitmentStore).thenReturn(acsCommitmentStore)
-    when(stateManager.aliasForSynchronizerId(synchronizerId)).thenReturn(Some(domainAlias))
+    when(stateManager.aliasForSynchronizerId(synchronizerId)).thenReturn(Some(synchronizerAlias))
     when(stateManager.get(synchronizerId)).thenReturn(Some(persistentStateDomain))
-    when(stateManager.getByAlias(domainAlias)).thenReturn(Some(persistentStateDomain))
+    when(stateManager.getByAlias(synchronizerAlias)).thenReturn(Some(persistentStateDomain))
 
     acsCommitmentStore
   }

@@ -6,7 +6,7 @@ package com.digitalasset.canton.topology
 import cats.data.EitherT
 import cats.syntax.option.*
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.DomainAlias
+import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.common.domain.{
   RegisterTopologyTransactionHandle,
   SequencerBasedRegisterTopologyTransactionHandle,
@@ -48,7 +48,7 @@ import scala.concurrent.{ExecutionContext, Promise}
 import scala.util.chaining.*
 
 class StoreBasedDomainOutbox(
-    domain: DomainAlias,
+    synchronizerAlias: SynchronizerAlias,
     val synchronizerId: SynchronizerId,
     val memberId: Member,
     val protocolVersion: ProtocolVersion,
@@ -255,7 +255,7 @@ class StoreBasedDomainOutbox(
             convertTransactions(applicable)
           }
           // dispatch to domain
-          responses <- dispatch(domain, transactions = convertedTxs)
+          responses <- dispatch(synchronizerAlias, transactions = convertedTxs)
           observed <- EitherT.right(
             // we either receive accepted or failed for all transactions in a submission batch.
             // failed submissions are turned into a Left in dispatch. Therefore it's safe to await without additional checks.
@@ -453,7 +453,7 @@ class DomainOutboxFactory(
       authorizedObserverRef.getOrElse(throw new IllegalStateException("Must have observer"))
 
     val storeBasedDomainOutbox = new StoreBasedDomainOutbox(
-      DomainAlias(synchronizerId.uid.toLengthLimitedString),
+      SynchronizerAlias(synchronizerId.uid.toLengthLimitedString),
       synchronizerId,
       memberId = memberId,
       protocolVersion = protocolVersion,
@@ -484,7 +484,7 @@ class DomainOutboxFactory(
 
     val queueBasedDomainOutbox =
       new QueueBasedDomainOutbox(
-        DomainAlias(synchronizerId.uid.toLengthLimitedString),
+        SynchronizerAlias(synchronizerId.uid.toLengthLimitedString),
         synchronizerId,
         memberId = memberId,
         protocolVersion = protocolVersion,

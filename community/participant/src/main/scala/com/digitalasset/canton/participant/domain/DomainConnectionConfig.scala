@@ -27,14 +27,14 @@ import com.digitalasset.canton.version.{
   ProtoVersion,
   ProtocolVersion,
 }
-import com.digitalasset.canton.{DomainAlias, SequencerAlias}
+import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
 import com.google.protobuf.ByteString
 
 import java.net.URI
 
 /** The domain connection configuration object
   *
-  * @param domain alias to be used internally to refer to this domain connection
+  * @param synchronizer alias to be used internally to refer to this domain connection
   * @param sequencerConnections Configuration for the sequencers. In case of BFT domain - there could be sequencers with multiple connections.
   *                             Each sequencer can also support high availability, so multiple endpoints could be provided for each individual sequencer.
   * @param manualConnect if set to true (default false), the domain is not connected automatically on startup.
@@ -52,7 +52,7 @@ import java.net.URI
   * @param initializeFromTrustedDomain if false will automatically generate a DomainTrustCertificate when connecting to a new domain.
   */
 final case class DomainConnectionConfig(
-    domain: DomainAlias,
+    synchronizerAlias: SynchronizerAlias,
     sequencerConnections: SequencerConnections,
     manualConnect: Boolean = false,
     synchronizerId: Option[SynchronizerId] = None,
@@ -102,7 +102,7 @@ final case class DomainConnectionConfig(
 
   override protected def pretty: Pretty[DomainConnectionConfig] =
     prettyOfClass(
-      param("domain", _.domain),
+      param("domain", _.synchronizerAlias),
       param("sequencerConnections", _.sequencerConnections),
       param("manualConnect", _.manualConnect),
       paramIfDefined("synchronizerId", _.synchronizerId),
@@ -115,7 +115,7 @@ final case class DomainConnectionConfig(
 
   def toProtoV30: v30.DomainConnectionConfig =
     v30.DomainConnectionConfig(
-      domainAlias = domain.unwrap,
+      synchronizerAlias = synchronizerAlias.unwrap,
       sequencerConnections = sequencerConnections.toProtoV30.some,
       manualConnect = manualConnect,
       synchronizerId = synchronizerId.fold("")(_.toProtoPrimitive),
@@ -141,7 +141,7 @@ object DomainConnectionConfig
 
   def grpc(
       sequencerAlias: SequencerAlias,
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       connection: String,
       manualConnect: Boolean = false,
       synchronizerId: Option[SynchronizerId] = None,
@@ -153,7 +153,7 @@ object DomainConnectionConfig
       initializeFromTrustedDomain: Boolean = false,
   ): DomainConnectionConfig =
     DomainConnectionConfig(
-      domainAlias,
+      synchronizerAlias,
       SequencerConnections.single(
         GrpcSequencerConnection.tryCreate(connection, certificates, sequencerAlias)
       ),
@@ -170,7 +170,7 @@ object DomainConnectionConfig
       domainConnectionConfigP: v30.DomainConnectionConfig
   ): ParsingResult[DomainConnectionConfig] = {
     val v30.DomainConnectionConfig(
-      domainAlias,
+      synchronizerAlias,
       sequencerConnectionsPO,
       manualConnect,
       synchronizerId,
@@ -182,9 +182,9 @@ object DomainConnectionConfig
     ) =
       domainConnectionConfigP
     for {
-      alias <- DomainAlias
-        .create(domainAlias)
-        .leftMap(err => InvariantViolation(s"DomainConnectionConfig.domain_alias", err))
+      alias <- SynchronizerAlias
+        .create(synchronizerAlias)
+        .leftMap(err => InvariantViolation(s"DomainConnectionConfig.synchronizer_alias", err))
       sequencerConnections <- ProtoConverter
         .required("sequencerConnections", sequencerConnectionsPO)
         .flatMap(SequencerConnections.fromProtoV30)

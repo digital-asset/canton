@@ -32,10 +32,10 @@ object ErrorResource {
   lazy val ExceptionText: ErrorResource = ErrorResource("EXCEPTION_TEXT")
   lazy val DevErrorType: ErrorResource = ErrorResource("DEV_ERROR_TYPE")
   lazy val SynchronizerId: ErrorResource = ErrorResource("SYNCHRONIZER_ID")
-  lazy val DomainAlias: ErrorResource = ErrorResource("DOMAIN_ALIAS")
+  lazy val SynchronizerAlias: ErrorResource = ErrorResource("SYNCHRONIZER_ALIAS")
   lazy val Offset: ErrorResource = ErrorResource("OFFSET")
 
-  lazy val all = Seq(
+  lazy val all: Seq[ErrorResource] = Seq(
     CommandId,
     ContractArg,
     ContractId,
@@ -56,7 +56,7 @@ object ErrorResource {
     TransactionId,
     User,
     SynchronizerId,
-    DomainAlias,
+    SynchronizerAlias,
     Offset,
   )
 

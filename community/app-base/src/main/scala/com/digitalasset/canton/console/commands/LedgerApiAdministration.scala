@@ -2542,7 +2542,7 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
     val domainPartiesAndParticipants =
       consoleEnvironment.participants.all.iterator
         .filter(x => x.health.is_running() && x.health.initialized() && x.name == name)
-        .flatMap(_.parties.list(filterDomain = txDomain.filterString))
+        .flatMap(_.parties.list(filterSynchronizerId = txDomain.filterString))
         .toSet
 
     val domainParties = domainPartiesAndParticipants.map(_.party)

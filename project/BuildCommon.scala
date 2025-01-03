@@ -489,7 +489,7 @@ object BuildCommon {
       `community-app-base`,
       `community-base`,
       `community-common`,
-      `community-domain`,
+      `community-synchronizer`,
       `community-participant`,
       `community-testing`,
       `community-integration-testing`,
@@ -649,7 +649,7 @@ object BuildCommon {
     lazy val `community-app-base` = project
       .in(file("community/app-base"))
       .dependsOn(
-        `community-domain`,
+        `community-synchronizer`,
         `community-participant`,
       )
       .settings(
@@ -793,8 +793,8 @@ object BuildCommon {
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
-    lazy val `community-domain` = project
-      .in(file("community/domain"))
+    lazy val `community-synchronizer` = project
+      .in(file("community/synchronizer"))
       .dependsOn(
         `community-common` % "compile->compile;test->test",
         `community-reference-driver`,

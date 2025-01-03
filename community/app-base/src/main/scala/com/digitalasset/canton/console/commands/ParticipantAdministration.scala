@@ -106,7 +106,7 @@ import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.{DomainAlias, SequencerAlias, config}
+import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias, config}
 import io.grpc.Context
 import spray.json.DeserializationException
 
@@ -117,7 +117,7 @@ import scala.concurrent.duration.Duration
 sealed trait DomainChoice
 object DomainChoice {
   object All extends DomainChoice
-  final case class Only(aliases: Seq[DomainAlias]) extends DomainChoice
+  final case class Only(aliases: Seq[SynchronizerAlias]) extends DomainChoice
 }
 
 private[console] object ParticipantCommands {
@@ -152,7 +152,7 @@ private[console] object ParticipantCommands {
 
     def reference_to_config(
         domain: NonEmpty[Map[SequencerAlias, SequencerReference]],
-        domainAlias: DomainAlias,
+        synchronizerAlias: SynchronizerAlias,
         manualConnect: Boolean = false,
         maxRetryDelay: Option[NonNegativeFiniteDuration] = None,
         priority: Int = 0,
@@ -161,7 +161,7 @@ private[console] object ParticipantCommands {
           SubmissionRequestAmplification.NoAmplification,
     ): DomainConnectionConfig =
       DomainConnectionConfig(
-        domainAlias,
+        synchronizerAlias,
         SequencerConnections.tryMany(
           domain.toSeq.map { case (alias, domain) =>
             domain.sequencerConnection.withAlias(alias)
@@ -178,7 +178,7 @@ private[console] object ParticipantCommands {
       )
 
     def to_config(
-        domainAlias: DomainAlias,
+        synchronizerAlias: SynchronizerAlias,
         connection: String,
         manualConnect: Boolean = false,
         synchronizerId: Option[SynchronizerId] = None,
@@ -197,7 +197,7 @@ private[console] object ParticipantCommands {
       }
       DomainConnectionConfig.grpc(
         SequencerAlias.Default,
-        domainAlias,
+        synchronizerAlias,
         connection,
         manualConnect,
         synchronizerId,
@@ -232,11 +232,11 @@ private[console] object ParticipantCommands {
 
     def reconnect(
         runner: AdminCommandRunner,
-        domainAlias: DomainAlias,
+        synchronizerAlias: SynchronizerAlias,
         retry: Boolean,
     ): ConsoleCommandResult[Boolean] =
       runner.adminCommand(
-        ParticipantAdminCommands.DomainConnectivity.ReconnectDomain(domainAlias, retry)
+        ParticipantAdminCommands.DomainConnectivity.ReconnectDomain(synchronizerAlias, retry)
       )
 
     def list_connected(
@@ -256,9 +256,11 @@ private[console] object ParticipantCommands {
 
     def disconnect(
         runner: AdminCommandRunner,
-        domainAlias: DomainAlias,
+        synchronizerAlias: SynchronizerAlias,
     ): ConsoleCommandResult[Unit] =
-      runner.adminCommand(ParticipantAdminCommands.DomainConnectivity.DisconnectDomain(domainAlias))
+      runner.adminCommand(
+        ParticipantAdminCommands.DomainConnectivity.DisconnectDomain(synchronizerAlias)
+      )
 
     def disconnect_all(
         runner: AdminCommandRunner
@@ -334,11 +336,11 @@ class ParticipantTestingGroup(
 
   @Help.Summary("Fetch the current time from the given domain", FeatureFlag.Testing)
   def fetch_domain_time(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       timeout: NonNegativeDuration,
   ): CantonTimestamp =
     check(FeatureFlag.Testing) {
-      val id = participantRef.domains.id_of(domainAlias)
+      val id = participantRef.domains.id_of(synchronizerAlias)
       fetch_domain_time(id, timeout)
     }
 
@@ -371,12 +373,12 @@ class ParticipantTestingGroup(
 
   @Help.Summary("Await for the given time to be reached on the given domain", FeatureFlag.Testing)
   def await_domain_time(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       time: CantonTimestamp,
       timeout: NonNegativeDuration,
   ): Unit =
     check(FeatureFlag.Testing) {
-      val id = participantRef.domains.id_of(domainAlias)
+      val id = participantRef.domains.id_of(synchronizerAlias)
       await_domain_time(id, time, timeout)
     }
 
@@ -418,7 +420,7 @@ class LocalParticipantTestingGroup(
   The ``activeSet`` argument allows to restrict the search to the active contract set.
   """)
   def pcs_search(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       // filter by id (which is txId::discriminator, so can be used to look for both)
       filterId: String = "",
       filterPackage: String = "",
@@ -431,7 +433,7 @@ class LocalParticipantTestingGroup(
 
     val pcs = state_inspection
       .findContracts(
-        domainAlias,
+        synchronizerAlias,
         toOpt(filterId),
         toOpt(filterPackage),
         toOpt(filterTemplate),
@@ -443,7 +445,7 @@ class LocalParticipantTestingGroup(
 
   @Help.Summary("Lookup of active contracts", FeatureFlag.Testing)
   def acs_search(
-      domainAlias: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       // filter by id (which is txId::discriminator, so can be used to look for both)
       filterId: String = "",
       filterPackage: String = "",
@@ -455,7 +457,14 @@ class LocalParticipantTestingGroup(
       filterStakeholder.forall(s => c.metadata.stakeholders.contains(s.toLf))
 
     check(FeatureFlag.Testing) {
-      pcs_search(domainAlias, filterId, filterPackage, filterTemplate, activeSet = true, limit)
+      pcs_search(
+        synchronizerAlias,
+        filterId,
+        filterPackage,
+        filterTemplate,
+        activeSet = true,
+        limit,
+      )
         .map(_._2)
         .filter(predicate)
     }
@@ -468,13 +477,13 @@ class LocalParticipantTestingGroup(
       |
       |Fails if the participant has never connected to the domain.""")
   def sequencer_messages(
-      domain: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       from: Option[Instant] = None,
       to: Option[Instant] = None,
       limit: PositiveInt = defaultLimit,
   ): Seq[PossiblyIgnoredProtocolEvent] =
     state_inspection
-      .findMessages(domain, from, to, Some(limit.value))
+      .findMessages(synchronizerAlias, from, to, Some(limit.value))
       .map(_.valueOr(e => throw new IllegalStateException(e.toString)))
 
   @Help.Summary(
@@ -497,10 +506,10 @@ class LocalParticipantTestingGroup(
       |Additionally, the result needn't fall on a "commitment tick" as specified by the reconciliation interval."""
   )
   def find_clean_commitments_timestamp(
-      domain: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       beforeOrAt: CantonTimestamp = CantonTimestamp.now(),
   ): Option[CantonTimestamp] =
-    state_inspection.noOutstandingCommitmentsTs(domain, beforeOrAt)
+    state_inspection.noOutstandingCommitmentsTs(synchronizerAlias, beforeOrAt)
 
   @Help.Summary(
     "Obtain access to the state inspection interface. Use at your own risk.",
@@ -687,7 +696,7 @@ class LocalCommitmentsAdministrationGroup(
        - counterParticipant: optionally filter by counter participant
       """)
   def received(
-      domain: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       start: Instant,
       end: Instant,
       counterParticipant: Option[ParticipantId] = None,
@@ -695,7 +704,7 @@ class LocalCommitmentsAdministrationGroup(
     access(node =>
       node.sync.stateInspection
         .findReceivedCommitments(
-          domain,
+          synchronizerAlias,
           timestampFromInstant(start),
           timestampFromInstant(end),
           counterParticipant,
@@ -704,14 +713,14 @@ class LocalCommitmentsAdministrationGroup(
 
   @Help.Summary("Lookup ACS commitments locally computed as part of the reconciliation protocol")
   def computed(
-      domain: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       start: Instant,
       end: Instant,
       counterParticipant: Option[ParticipantId] = None,
   ): Iterable[(CommitmentPeriod, ParticipantId, AcsCommitment.CommitmentType)] =
     access { node =>
       node.sync.stateInspection.findComputedCommitments(
-        domain,
+        synchronizerAlias,
         timestampFromInstant(start),
         timestampFromInstant(end),
         counterParticipant,
@@ -719,14 +728,14 @@ class LocalCommitmentsAdministrationGroup(
     }
 
   def outstanding(
-      domain: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       start: Instant,
       end: Instant,
       counterParticipant: Option[ParticipantId] = None,
   ): Iterable[(CommitmentPeriod, ParticipantId, CommitmentPeriodState)] =
     access { node =>
       node.sync.stateInspection.outstandingCommitments(
-        domain,
+        synchronizerAlias,
         timestampFromInstant(start),
         timestampFromInstant(end),
         counterParticipant,
@@ -734,21 +743,21 @@ class LocalCommitmentsAdministrationGroup(
     }
 
   def buffered(
-      domain: DomainAlias,
+      synchronizerAlias: SynchronizerAlias,
       endAtOrBefore: Instant,
   ): Iterable[AcsCommitment] =
     access { node =>
       node.sync.stateInspection.bufferedCommitments(
-        domain,
+        synchronizerAlias,
         timestampFromInstant(endAtOrBefore),
       )
     }
 
   def lastComputedAndSent(
-      domain: DomainAlias
+      synchronizerAlias: SynchronizerAlias
   ): Option[CantonTimestampSecond] =
     access { node =>
-      node.sync.stateInspection.findLastComputedAndSent(domain)
+      node.sync.stateInspection.findLastComputedAndSent(synchronizerAlias)
     }
 }
 
@@ -1646,10 +1655,12 @@ trait ParticipantAdministration extends FeatureFlagFilter {
   @Help.Group("Domains")
   object domains extends Helpful {
 
-    @Help.Summary("Returns the id of the given domain alias")
-    def id_of(domainAlias: DomainAlias): SynchronizerId =
+    @Help.Summary("Returns the id of the given synchronizer alias")
+    def id_of(synchronizerAlias: SynchronizerAlias): SynchronizerId =
       consoleEnvironment.run {
-        adminCommand(ParticipantAdminCommands.DomainConnectivity.GetSynchronizerId(domainAlias))
+        adminCommand(
+          ParticipantAdminCommands.DomainConnectivity.GetSynchronizerId(synchronizerAlias)
+        )
       }
 
     @Help.Summary(
@@ -1660,9 +1671,9 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |Yields false, if the domain is configured in the Canton configuration and
         |the participant is not active from the perspective of the domain."""
     )
-    def active(domainAlias: DomainAlias): Boolean =
+    def active(synchronizerAlias: SynchronizerAlias): Boolean =
       list_connected().exists { r =>
-        r.domainAlias == domainAlias &&
+        r.synchronizerAlias == synchronizerAlias &&
         r.healthy &&
         participantIsActiveOnDomain(r.synchronizerId, id)
       }
@@ -1676,8 +1687,8 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     @Help.Summary(
       "Test whether a participant is connected to a domain"
     )
-    def is_connected(domain: DomainAlias): Boolean =
-      list_connected().exists(_.domainAlias == domain)
+    def is_connected(synchronizerAlias: SynchronizerAlias): Boolean =
+      list_connected().exists(_.synchronizerAlias == synchronizerAlias)
 
     @Help.Summary(
       "Macro to connect a participant to a locally configured domain given by reference"
@@ -1693,7 +1704,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         """)
     def connect_local(
         domain: SequencerReference,
-        alias: DomainAlias,
+        alias: SynchronizerAlias,
         manualConnect: Boolean = false,
         maxRetryDelayMillis: Option[Long] = None,
         priority: Int = 0,
@@ -1728,7 +1739,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         """)
     def register(
         domain: SequencerReference,
-        alias: DomainAlias,
+        alias: SynchronizerAlias,
         performHandshake: Boolean = true,
         manualConnect: Boolean = false,
         maxRetryDelayMillis: Option[Long] = None,
@@ -1766,7 +1777,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           consoleEnvironment.commandTimeouts.bounded
         ),
     ): Unit = {
-      val current = this.config(config.domain)
+      val current = this.config(config.synchronizerAlias)
       // if the config is not found, then we register the domain
       if (current.isEmpty) {
         // register the domain configuration
@@ -1786,7 +1797,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
 
     def connect_local_bft(
         domain: NonEmpty[Map[SequencerAlias, SequencerReference]],
-        alias: DomainAlias,
+        alias: SynchronizerAlias,
         manualConnect: Boolean = false,
         maxRetryDelayMillis: Option[Long] = None,
         priority: Int = 0,
@@ -1828,7 +1839,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           consoleEnvironment.commandTimeouts.unbounded
         ),
     ): Unit = {
-      val current = this.config(config.domain)
+      val current = this.config(config.synchronizerAlias)
 
       if (current.isEmpty) {
         // architecture-handbook-entry-begin: OnboardParticipantConnect
@@ -1838,7 +1849,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         }
         // architecture-handbook-entry-end: OnboardParticipantConnect
       } else {
-        reconnect(config.domain, retry = false).discard
+        reconnect(config.synchronizerAlias, retry = false).discard
       }
 
       synchronize.foreach { timeout =>
@@ -1857,11 +1868,11 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |""")
     def connect(
         instance: SequencerReference,
-        domainAlias: DomainAlias,
+        synchronizerAlias: SynchronizerAlias,
     ): Unit =
       connect_by_config(
         DomainConnectionConfig(
-          domainAlias,
+          synchronizerAlias,
           SequencerConnections.single(instance.sequencerConnection),
         )
       )
@@ -1876,7 +1887,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |with manualStart = true. If anything fails, the domain will remain registered with `manualConnect = true` and
         |you will have to perform these steps manually.
         The arguments are:
-          domainAlias - The name you will be using to refer to this domain. Can not be changed anymore.
+          synchronizerAlias - The name you will be using to refer to this domain. Can not be changed anymore.
           connection - The connection string to connect to this domain. I.e. https://url:port
           manualConnect - Whether this connection should be handled manually and also excluded from automatic re-connect.
           synchronizerId - Optionally the synchronizerId you expect to see on this domain.
@@ -1887,7 +1898,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           validation - Whether to validate the connectivity and ids of the given sequencers (default All)
         """)
     def connect(
-        domainAlias: DomainAlias,
+        synchronizerAlias: SynchronizerAlias,
         connection: String,
         manualConnect: Boolean = false,
         synchronizerId: Option[SynchronizerId] = None,
@@ -1900,7 +1911,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         validation: SequencerConnectionValidation = SequencerConnectionValidation.All,
     ): DomainConnectionConfig = {
       val config = ParticipantCommands.domains.to_config(
-        domainAlias,
+        synchronizerAlias,
         connection,
         manualConnect,
         synchronizerId,
@@ -1928,13 +1939,13 @@ trait ParticipantAdministration extends FeatureFlagFilter {
            myparticipant.domains.connect(config)
 
         The arguments are:
-          domainAlias - The name you will be using to refer to this domain. Can not be changed anymore.
+          synchronizerAlias - The name you will be using to refer to this domain. Can not be changed anymore.
           connections - The sequencer connection definitions (can be an URL) to connect to this domain. I.e. https://url:port
           synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
           validation - Whether to validate the connectivity and ids of the given sequencers (default All)
         """)
     def connect_multi(
-        domainAlias: DomainAlias,
+        synchronizerAlias: SynchronizerAlias,
         connections: Seq[SequencerConnection],
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
@@ -1946,7 +1957,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       val sequencerConnections =
         SequencerConnections.single(sequencerConnection)
       val config = DomainConnectionConfig(
-        domainAlias,
+        synchronizerAlias,
         sequencerConnections,
       )
       connect_by_config(config, validation, synchronize)
@@ -1960,12 +1971,12 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |but the server will keep on retrying to connect to the domain.
         |
         The arguments are:
-          domainAlias - The name you will be using to refer to this domain. Can not be changed anymore.
+          synchronizerAlias - The name you will be using to refer to this domain. Can not be changed anymore.
           retry - Whether the reconnect should keep on retrying until it succeeded or abort noisly if the connection attempt fails.
           synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
         """)
     def reconnect(
-        domainAlias: DomainAlias,
+        synchronizerAlias: SynchronizerAlias,
         retry: Boolean = true,
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
@@ -1973,7 +1984,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     ): Boolean = {
       val ret = consoleEnvironment.run {
         adminCommand(
-          ParticipantAdminCommands.DomainConnectivity.ReconnectDomain(domainAlias, retry)
+          ParticipantAdminCommands.DomainConnectivity.ReconnectDomain(synchronizerAlias, retry)
         )
       }
       if (ret) {
@@ -2002,17 +2013,17 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         |Same behaviour as generic reconnect.
 
         The arguments are:
-          domainAlias - The domain alias to connect to
+          synchronizerAlias - The synchronizer alias to connect to
           retry - Whether the reconnect should keep on retrying until it succeeded or abort noisly if the connection attempt fails.
           synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
         """)
     def reconnect_local(
-        domainAlias: DomainAlias,
+        synchronizerAlias: SynchronizerAlias,
         retry: Boolean = true,
         synchronize: Option[NonNegativeDuration] = Some(
           consoleEnvironment.commandTimeouts.bounded
         ),
-    ): Boolean = reconnect(domainAlias, retry, synchronize)
+    ): Boolean = reconnect(synchronizerAlias, retry, synchronize)
 
     @Help.Summary("Reconnect this participant to all domains which are not marked as manual start")
     @Help.Description("""
@@ -2037,19 +2048,19 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     }
 
     @Help.Summary("Disconnect this participant from the given domain")
-    def disconnect(domainAlias: DomainAlias): Unit = consoleEnvironment.run {
-      adminCommand(ParticipantAdminCommands.DomainConnectivity.DisconnectDomain(domainAlias))
+    def disconnect(synchronizerAlias: SynchronizerAlias): Unit = consoleEnvironment.run {
+      adminCommand(ParticipantAdminCommands.DomainConnectivity.DisconnectDomain(synchronizerAlias))
     }
 
     @Help.Summary("Disconnect this participant from all connected domains")
     def disconnect_all(): Unit =
       list_connected().foreach { connected =>
-        disconnect(connected.domainAlias)
+        disconnect(connected.synchronizerAlias)
       }
 
     @Help.Summary("Disconnect this participant from the given local domain")
-    def disconnect_local(domain: DomainAlias): Unit = consoleEnvironment.run {
-      adminCommand(ParticipantAdminCommands.DomainConnectivity.DisconnectDomain(domain))
+    def disconnect_local(synchronizerAlias: SynchronizerAlias): Unit = consoleEnvironment.run {
+      adminCommand(ParticipantAdminCommands.DomainConnectivity.DisconnectDomain(synchronizerAlias))
     }
 
     @Help.Summary("List the connected domains of this participant")
@@ -2066,16 +2077,16 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     }
 
     @Help.Summary("Returns true if a domain is registered using the given alias")
-    def is_registered(domain: DomainAlias): Boolean =
-      config(domain).nonEmpty
+    def is_registered(synchronizerAlias: SynchronizerAlias): Boolean =
+      config(synchronizerAlias).nonEmpty
 
     @Help.Summary("Returns the current configuration of a given domain")
-    def config(domain: DomainAlias): Option[DomainConnectionConfig] =
-      list_registered().map(_._1).find(_.domain == domain)
+    def config(synchronizerAlias: SynchronizerAlias): Option[DomainConnectionConfig] =
+      list_registered().map(_._1).find(_.synchronizerAlias == synchronizerAlias)
 
     @Help.Summary("Modify existing domain connection")
     def modify(
-        domain: DomainAlias,
+        synchronizerAlias: SynchronizerAlias,
         modifier: DomainConnectionConfig => DomainConnectionConfig,
         validation: SequencerConnectionValidation = SequencerConnectionValidation.All,
     ): Unit =
@@ -2085,13 +2096,15 @@ trait ParticipantAdministration extends FeatureFlagFilter {
             ParticipantAdminCommands.DomainConnectivity.ListRegisteredDomains
           ).toEither
           cfg <- registeredDomains
-            .collectFirst { case (config, _) if config.domain == domain => config }
-            .toRight(s"No such domain $domain configured")
+            .collectFirst {
+              case (config, _) if config.synchronizerAlias == synchronizerAlias => config
+            }
+            .toRight(s"No such synchronizer $synchronizerAlias configured")
           newConfig = modifier(cfg)
           _ <- Either.cond(
-            newConfig.domain == cfg.domain,
+            newConfig.synchronizerAlias == cfg.synchronizerAlias,
             (),
-            "We don't support modifying the domain alias of a DomainConnectionConfig.",
+            "We don't support modifying the synchronizer alias of a DomainConnectionConfig.",
           )
           _ <- adminCommand(
             ParticipantAdminCommands.DomainConnectivity.ModifyDomainConnection(
@@ -2106,15 +2119,15 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       "Revoke this participant's authentication tokens and close all the sequencer connections in the given domain"
     )
     @Help.Description("""
-      domainAlias: the domain alias from which to logout
+      synchronizerAlias: the synchronizer alias from which to logout
       On all the sequencers from the specified domain, all existing authentication tokens for this participant
       will be revoked.
       Note that the participant is not disconnected from the domain; only the connections to the sequencers are closed.
       The participant will automatically reopen connections, perform a challenge-response and obtain new tokens.
       """)
-    def logout(domainAlias: DomainAlias): Unit = consoleEnvironment.run {
+    def logout(synchronizerAlias: SynchronizerAlias): Unit = consoleEnvironment.run {
       adminCommand(
-        ParticipantAdminCommands.DomainConnectivity.Logout(domainAlias)
+        ParticipantAdminCommands.DomainConnectivity.Logout(synchronizerAlias)
       )
     }
   }
@@ -2252,10 +2265,10 @@ class ParticipantHealthAdministration(
       |or transactions present for the selected domain. Such re-assurance is then helpful to proceed with repair
       |operations, for example."""
   )
-  def count_in_flight(domainAlias: DomainAlias): InFlightCount = {
+  def count_in_flight(synchronizerAlias: SynchronizerAlias): InFlightCount = {
     val synchronizerId = consoleEnvironment.run {
       runner.adminCommand(
-        ParticipantAdminCommands.DomainConnectivity.GetSynchronizerId(domainAlias)
+        ParticipantAdminCommands.DomainConnectivity.GetSynchronizerId(synchronizerAlias)
       )
     }
 

@@ -63,7 +63,7 @@ class PartiesAdministrationGroup(
       |
       filterParty: Filter by parties starting with the given string.
       filterParticipant: Filter for parties that are hosted by a participant with an id starting with the given string
-      filterDomain: Filter by domains whose id starts with the given string.
+      filterSynchronizerId: Filter by domains whose id starts with the given string.
       asOf: Optional timestamp to inspect the topology state at a given point in time.
       limit: Limit on the number of parties fetched (defaults to canton.parameters.console.default-limit).
 
@@ -73,14 +73,14 @@ class PartiesAdministrationGroup(
   def list(
       filterParty: String = "",
       filterParticipant: String = "",
-      filterDomain: String = "",
+      filterSynchronizerId: String = "",
       asOf: Option[Instant] = None,
       limit: PositiveInt = defaultLimit,
   ): Seq[ListPartiesResult] =
     consoleEnvironment.run {
       adminCommand(
         TopologyAdminCommands.Aggregation.ListParties(
-          filterDomain = filterDomain,
+          filterSynchronizerId = filterSynchronizerId,
           filterParty = filterParty,
           filterParticipant = filterParticipant,
           asOf = asOf,
@@ -105,21 +105,21 @@ class ParticipantPartiesAdministrationGroup(
       |to running the `list` method using the participant id of the invoking participant.
       |
       filterParty: Filter by parties starting with the given string.
-      filterDomain: Filter by domains whose id starts with the given string.
+      filterSynchronizerId: Filter by domains whose id starts with the given string.
       asOf: Optional timestamp to inspect the topology state at a given point in time.
       limit: How many items to return (defaults to canton.parameters.console.default-limit)
 
       Example: participant1.parties.hosted(filterParty="alice")""")
   def hosted(
       filterParty: String = "",
-      filterDomain: String = "",
+      filterSynchronizerId: String = "",
       asOf: Option[Instant] = None,
       limit: PositiveInt = defaultLimit,
   ): Seq[ListPartiesResult] =
     list(
       filterParty,
       filterParticipant = participantId.filterString,
-      filterDomain = filterDomain,
+      filterSynchronizerId = filterSynchronizerId,
       asOf = asOf,
       limit = limit,
     )
@@ -185,7 +185,7 @@ class ParticipantPartiesAdministrationGroup(
             Right(Seq())
           case DomainChoice.Only(aliases) =>
             connected.flatMap { res =>
-              val connectedM = res.map(x => (x.domainAlias, x.synchronizerId)).toMap
+              val connectedM = res.map(x => (x.synchronizerAlias, x.synchronizerId)).toMap
               aliases.traverse(alias => connectedM.get(alias).toRight(s"Unknown: $alias for $name"))
             }
         }
