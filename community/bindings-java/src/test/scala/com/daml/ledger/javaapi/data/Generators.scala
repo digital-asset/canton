@@ -1,9 +1,10 @@
-// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates.
-// Proprietary code. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 package com.daml.ledger.javaapi.data
 
 import com.daml.ledger.api.*
+import com.daml.ledger.api.v2.CommandsOuterClass
 import com.google.protobuf.{ByteString, Empty}
 import org.scalacheck.Arbitrary.arbitrary
 import org.scalacheck.{Arbitrary, Gen}
@@ -265,8 +266,6 @@ object Generators {
       vs.fold(b.setViewValue, b.setViewStatus).build()
     }
 
-  // TODO(#22794) remove generator
-  val eventIdGen: Gen[String] = Arbitrary.arbString.arbitrary.suchThat(_.nonEmpty)
   val packageNameGen: Gen[String] = Arbitrary.arbString.arbitrary.suchThat(_.nonEmpty)
 
   val createdEventGen: Gen[v2.EventOuterClass.CreatedEvent] =
@@ -277,7 +276,6 @@ object Generators {
       createArgument <- recordGen
       createEventBlob <- byteStringGen
       interfaceViews <- Gen.listOf(interfaceViewGen)
-      eventId <- eventIdGen
       offset <- Arbitrary.arbLong.arbitrary
       nodeId <- Arbitrary.arbInt.arbitrary
       witnessParties <- Gen.listOf(Arbitrary.arbString.arbitrary)
@@ -291,7 +289,6 @@ object Generators {
       .setCreateArguments(createArgument)
       .setCreatedEventBlob(createEventBlob)
       .addAllInterfaceViews(interfaceViews.asJava)
-      .setEventId(eventId)
       .setOffset(offset)
       .setNodeId(nodeId)
       .addAllWitnessParties(witnessParties.asJava)
@@ -303,7 +300,6 @@ object Generators {
     for {
       contractId <- contractIdValueGen.map(_.getContractId)
       templateId <- identifierGen
-      eventId <- eventIdGen
       offset <- Arbitrary.arbLong.arbitrary
       nodeId <- Arbitrary.arbInt.arbitrary
       witnessParties <- Gen.listOf(Arbitrary.arbString.arbitrary)
@@ -312,7 +308,6 @@ object Generators {
       .newBuilder()
       .setContractId(contractId)
       .setTemplateId(templateId)
-      .setEventId(eventId)
       .setOffset(offset)
       .setNodeId(nodeId)
       .addAllWitnessParties(witnessParties.asJava)
@@ -323,7 +318,6 @@ object Generators {
       contractId <- contractIdValueGen.map(_.getContractId)
       templateId <- identifierGen
       actingParties <- Gen.listOf(Arbitrary.arbString.arbitrary)
-      eventId <- eventIdGen
       offset <- Arbitrary.arbLong.arbitrary
       nodeId <- Arbitrary.arbInt.arbitrary
       choice <- Arbitrary.arbString.arbitrary
@@ -339,7 +333,6 @@ object Generators {
       .setChoice(choice)
       .setChoiceArgument(choiceArgument)
       .setConsuming(isConsuming)
-      .setEventId(eventId)
       .setOffset(offset)
       .setNodeId(nodeId)
       .addAllWitnessParties(witnessParties.asJava)
@@ -772,9 +765,9 @@ object Generators {
     import v2.TransactionOuterClass.{TransactionTree, TreeEvent}
     def idTreeEventPairGen =
       treeEventGen.map { e =>
-        val id = e.getKindCase match {
-          case TreeEvent.KindCase.CREATED => e.getCreated.getEventId
-          case TreeEvent.KindCase.EXERCISED => e.getExercised.getEventId
+        val id: Integer = e.getKindCase match {
+          case TreeEvent.KindCase.CREATED => e.getCreated.getNodeId
+          case TreeEvent.KindCase.EXERCISED => e.getExercised.getNodeId
           case TreeEvent.KindCase.KIND_NOT_SET => sys.error("unrecognized TreeEvent")
         }
         id -> e
@@ -785,7 +778,7 @@ object Generators {
       workflowId <- Arbitrary.arbString.arbitrary
       effectiveAt <- instantGen
       eventsById <- Gen.mapOfN(10, idTreeEventPairGen)
-      rootEventIds = eventsById.headOption.map(_._1).toList
+      rootNodeIds = eventsById.headOption.map(_._1).toList
       offset <- Arbitrary.arbLong.arbitrary
       synchronizerId <- Arbitrary.arbString.arbitrary
       traceContext <- Gen.const(Utils.newProtoTraceContext("parent", "state"))
@@ -797,7 +790,7 @@ object Generators {
       .setWorkflowId(workflowId)
       .setEffectiveAt(Utils.instantToProto(effectiveAt))
       .putAllEventsById(eventsById.asJava)
-      .addAllRootEventIds(rootEventIds.asJava)
+      .addAllRootNodeIds(rootNodeIds.asJava)
       .setOffset(offset)
       .setSynchronizerId(synchronizerId)
       .setTraceContext(traceContext)
@@ -1168,4 +1161,14 @@ object Generators {
       .setTransaction(transaction)
       .build()
   }
+
+  val prefetchContractKeyGen: Gen[CommandsOuterClass.PrefetchContractKey] =
+    for {
+      templateId <- identifierGen
+      contractKey <- valueGen
+    } yield CommandsOuterClass.PrefetchContractKey
+      .newBuilder()
+      .setTemplateId(templateId)
+      .setContractKey(contractKey)
+      .build()
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.synchronizer.sequencing.config
@@ -6,7 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencing.config
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
-import com.digitalasset.canton.synchronizer.config.CommunityPublicServerConfig
+import com.digitalasset.canton.synchronizer.config.PublicServerConfig
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.{
   CommunitySequencerConfig,
@@ -18,13 +18,13 @@ import monocle.macros.syntax.lens.*
   */
 final case class CommunitySequencerNodeConfig(
     override val init: SequencerNodeInitConfig = SequencerNodeInitConfig(),
-    override val publicApi: CommunityPublicServerConfig = CommunityPublicServerConfig(),
-    override val adminApi: CommunityAdminServerConfig = CommunityAdminServerConfig(),
-    override val storage: CommunityStorageConfig = CommunityStorageConfig.Memory(),
+    override val publicApi: PublicServerConfig = PublicServerConfig(),
+    override val adminApi: AdminServerConfig = AdminServerConfig(),
+    override val storage: StorageConfig = StorageConfig.Memory(),
     override val crypto: CommunityCryptoConfig = CommunityCryptoConfig(),
     override val sequencer: CommunitySequencerConfig = CommunitySequencerConfig.default,
     override val auditLogging: Boolean = false,
-    override val timeTracker: DomainTimeTrackerConfig = DomainTimeTrackerConfig(),
+    override val timeTracker: SynchronizerTimeTrackerConfig = SynchronizerTimeTrackerConfig(),
     override val sequencerClient: SequencerClientConfig = SequencerClientConfig(),
     override val parameters: SequencerNodeParameterConfig = SequencerNodeParameterConfig(),
     override val health: SequencerHealthConfig = SequencerHealthConfig(),

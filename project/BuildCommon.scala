@@ -396,6 +396,8 @@ object BuildCommon {
     scalacOptions += "-Wconf:src=src_managed/.*:silent", // Ignore warnings in generated code
   )
 
+  lazy val sharedCommunitySettings = sharedSettings ++ JvmRulesPlugin.damlRepoHeaderSettings
+
   lazy val cantonWarts = Seq(
     // DirectGrpcServiceInvocation prevents direct invocation of gRPC services through a stub, but this is often useful in tests
     Compile / compile / wartremoverErrors += Wart.custom(
@@ -432,6 +434,9 @@ object BuildCommon {
     // Enable logging of begin and end of test cases, test suites, and test runs.
     Test / testOptions += Tests.Argument("-C", "com.digitalasset.canton.LogReporter")
   )
+
+  lazy val sharedCantonCommunitySettings =
+    sharedCantonSettings ++ JvmRulesPlugin.damlRepoHeaderSettings
 
   // On circle-ci, between machine executors and dockers, some plugins have different paths
   // ex: -Xplugin:/root/.cache vs -Xplugin:/home/********/.cache/
@@ -550,13 +555,12 @@ object BuildCommon {
         DamlProjects.`google-common-protos-scala`
       )
       .settings(
-        sharedSettings,
+        sharedCommunitySettings,
         libraryDependencies ++= Seq(
           grpc_api,
           scalapb_runtime_grpc,
           scalatest % Test,
         ),
-        JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
     lazy val `util-logging` = project
@@ -566,7 +570,7 @@ object BuildCommon {
         `daml-grpc-utils`,
       )
       .settings(
-        sharedSettings ++ cantonWarts,
+        sharedCommunitySettings ++ cantonWarts,
         libraryDependencies ++= Seq(
           daml_lf_data,
           daml_libs_scala_contextualized_logging,
@@ -587,7 +591,6 @@ object BuildCommon {
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
         coverageEnabled := false,
-        JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
     lazy val `community-app` = project
@@ -653,8 +656,7 @@ object BuildCommon {
         `community-participant`,
       )
       .settings(
-        sharedCantonSettings,
-        JvmRulesPlugin.damlRepoHeaderSettings,
+        sharedCantonCommunitySettings,
         libraryDependencies ++= Seq(
           ammonite,
           circe_parser,
@@ -683,8 +685,7 @@ object BuildCommon {
         `kms-driver-api`,
       )
       .settings(
-        sharedCantonSettings,
-        JvmRulesPlugin.damlRepoHeaderSettings,
+        sharedCantonCommunitySettings,
         libraryDependencies ++= Seq(
           daml_executors,
           daml_lf_transaction,
@@ -756,7 +757,7 @@ object BuildCommon {
         DamlProjects.`bindings-java`,
       )
       .settings(
-        sharedCantonSettings,
+        sharedCantonCommunitySettings,
         libraryDependencies ++= Seq(
           awaitility % Test,
           cats_scalacheck % Test,
@@ -790,7 +791,6 @@ object BuildCommon {
           )
         ),
         addFilesToHeaderCheck("*.daml", "daml", Compile),
-        JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
     lazy val `community-synchronizer` = project
@@ -800,7 +800,7 @@ object BuildCommon {
         `community-reference-driver`,
       )
       .settings(
-        sharedCantonSettings,
+        sharedCantonCommunitySettings,
         libraryDependencies ++= Seq(
           pekko_actor_typed,
           scala_logging,
@@ -832,7 +832,6 @@ object BuildCommon {
       """
         ),
         addProtobufFilesToHeaderCheck(Compile),
-        JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
     lazy val `community-participant` = project
@@ -844,7 +843,7 @@ object BuildCommon {
       )
       .enablePlugins(DamlPlugin)
       .settings(
-        sharedCantonSettings,
+        sharedCantonCommunitySettings,
         libraryDependencies ++= Seq(
           cats,
           chimney,
@@ -902,14 +901,13 @@ object BuildCommon {
         damlFixedDars := Seq(),
         addProtobufFilesToHeaderCheck(Compile),
         addFilesToHeaderCheck("*.daml", "daml", Compile),
-        JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
     lazy val `community-admin-api` = project
       .in(file("community/admin-api"))
       .dependsOn(`util-external`, `daml-errors` % "compile->compile;test->test")
       .settings(
-        sharedCantonSettings,
+        sharedCantonCommunitySettings,
         libraryDependencies ++= Seq(
           scalapb_runtime // not sufficient to include only through the `common` dependency - race conditions ensue
         ),
@@ -932,8 +930,7 @@ object BuildCommon {
         `magnolify-addon` % "compile->test",
       )
       .settings(
-        sharedSettings,
-        JvmRulesPlugin.damlRepoHeaderSettings,
+        sharedCommunitySettings,
         libraryDependencies ++= Seq(
           cats,
           cats_law,
@@ -961,8 +958,7 @@ object BuildCommon {
         `community-testing`,
       )
       .settings(
-        sharedCantonSettings,
-        JvmRulesPlugin.damlRepoHeaderSettings,
+        sharedCantonCommunitySettings,
 
         // The dependency override is needed because `community-testing` depends transitively on
         // `scalatest` and `community-app-base` depends transitively on `ammonite`, which in turn
@@ -983,7 +979,7 @@ object BuildCommon {
         `wartremover-extension` % "compile->compile;test->test"
       )
       .settings(
-        sharedCantonSettings,
+        sharedCantonCommunitySettings,
         libraryDependencies ++= Seq(
           pureconfig_core,
           slf4j_api,
@@ -999,7 +995,7 @@ object BuildCommon {
         `util-logging`,
       )
       .settings(
-        sharedCantonSettings,
+        sharedCantonCommunitySettings,
         libraryDependencies ++= Seq(
           logback_classic,
           logback_core,
@@ -1017,7 +1013,6 @@ object BuildCommon {
           pureconfig_core,
         ),
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
-        JvmRulesPlugin.damlRepoHeaderSettings,
         UberLibrary.assemblySettings("sequencer-driver-lib"),
       )
 
@@ -1028,7 +1023,7 @@ object BuildCommon {
         `sequencer-driver-api`,
       )
       .settings(
-        sharedCantonSettings,
+        sharedCantonCommunitySettings,
         libraryDependencies ++= Seq(
           scalatest
         ),
@@ -1038,7 +1033,7 @@ object BuildCommon {
     lazy val `sequencer-driver-lib`: Project =
       project
         .settings(
-          sharedCantonSettings,
+          sharedCantonCommunitySettings,
           libraryDependencies ++= Seq(
             circe_core,
             circe_generic,
@@ -1056,7 +1051,7 @@ object BuildCommon {
         `sequencer-driver-api` % "compile->compile;test->test",
       )
       .settings(
-        sharedCantonSettings,
+        sharedCantonCommunitySettings,
         dependencyOverrides ++= Seq(log4j_core, log4j_api),
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
@@ -1141,7 +1136,7 @@ object BuildCommon {
         `community-admin-api` % "test->test",
       )
       .settings(
-        sharedCantonSettings,
+        sharedCantonCommunitySettings,
         libraryDependencies ++= Seq(
           scalafx,
           scalatest % Test,
@@ -1173,7 +1168,6 @@ object BuildCommon {
         addProtobufFilesToHeaderCheck(Compile),
         addFilesToHeaderCheck("*.sh", "../pack", Compile),
         addFilesToHeaderCheck("*.daml", "daml", Compile),
-        JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
     lazy val `daml-errors` = project
@@ -1183,7 +1177,7 @@ object BuildCommon {
         `wartremover-extension` % "compile->compile;test->test",
       )
       .settings(
-        sharedSettings ++ cantonWarts,
+        sharedCommunitySettings ++ cantonWarts,
         libraryDependencies ++= Seq(
           slf4j_api,
           grpc_api,
@@ -1193,7 +1187,6 @@ object BuildCommon {
           scalatestScalacheck % Test,
         ),
         coverageEnabled := false,
-        JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
     lazy val `daml-tls` = project
@@ -1203,7 +1196,7 @@ object BuildCommon {
         `wartremover-extension` % "compile->compile;test->test",
       )
       .settings(
-        sharedSettings ++ cantonWarts,
+        sharedCommunitySettings ++ cantonWarts,
         libraryDependencies ++= Seq(
           commons_io,
           grpc_netty,
@@ -1217,15 +1210,13 @@ object BuildCommon {
           slf4j_api,
         ),
         coverageEnabled := false,
-        JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
     lazy val `daml-adjustable-clock` = project
       .in(file("daml-common-staging/adjustable-clock"))
       .settings(
-        sharedSettings,
+        sharedCommunitySettings,
         coverageEnabled := false,
-        JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
     lazy val `ledger-common` = project
@@ -1237,7 +1228,7 @@ object BuildCommon {
         `util-external`,
       )
       .settings(
-        sharedSettings, // Upgrade to sharedCantonSettings when com.digitalasset.canton.concurrent.Threading moved out of community-base
+        sharedCommunitySettings, // Upgrade to sharedCantonSettings when com.digitalasset.canton.concurrent.Threading moved out of community-base
         Compile / PB.targets := Seq(
           PB.gens.java -> (Compile / sourceManaged).value / "protobuf",
           scalapb.gen(flatPackage = false) -> (Compile / sourceManaged).value / "protobuf",
@@ -1262,7 +1253,6 @@ object BuildCommon {
         ),
         Test / parallelExecution := true,
         coverageEnabled := false,
-        JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
     def createLedgerCommonDarsProject(lfVersion: String) =
@@ -1358,7 +1348,7 @@ object BuildCommon {
         DamlProjects.`daml-jwt`,
       )
       .settings(
-        sharedCantonSettings,
+        sharedCantonCommunitySettings,
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = false) -> (Compile / sourceManaged).value / "protobuf"
         ),
@@ -1382,7 +1372,6 @@ object BuildCommon {
         Test / fork := false,
         Test / testGrouping := separateRevocationTest((Test / definedTests).value),
         coverageEnabled := false,
-        JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
     lazy val `ledger-json-api` =
@@ -1396,7 +1385,7 @@ object BuildCommon {
         )
         .enablePlugins(DamlPlugin)
         .settings(
-          sharedSettings,
+          sharedCommunitySettings,
           libraryDependencies ++= Seq(
             circe_parser,
             upickle,
@@ -1418,7 +1407,6 @@ object BuildCommon {
             circe_yaml % Test,
           ),
           coverageEnabled := false,
-          JvmRulesPlugin.damlRepoHeaderSettings,
           Test / damlCodeGeneration := Seq(
             (
               (Test / sourceDirectory).value / "daml" / "v2_1",
@@ -1451,9 +1439,8 @@ object BuildCommon {
         DamlProjects.`daml-jwt`,
       )
       .settings(
-        sharedCantonSettings,
+        sharedCantonCommunitySettings,
         coverageEnabled := false,
-        JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
     lazy val `ledger-api-string-interning-benchmark` = project
@@ -1461,8 +1448,7 @@ object BuildCommon {
       .enablePlugins(JmhPlugin)
       .dependsOn(`ledger-api-core`)
       .settings(
-        sharedCantonSettings,
-        JvmRulesPlugin.damlRepoHeaderSettings,
+        sharedCantonCommunitySettings,
         Test / parallelExecution := true,
         Test / fork := false,
       )
@@ -1471,7 +1457,7 @@ object BuildCommon {
       project
         .in(file("community/ledger/transcode/"))
         .settings(
-          sharedSettings,
+          sharedCommunitySettings,
           scalacOptions --= DamlProjects.removeCompileFlagsForDaml
             // needed for foo.bar.{this as that} imports
             .filterNot(_ == "-Xsource:3"),
@@ -1479,7 +1465,6 @@ object BuildCommon {
             daml_lf_language,
             "com.lihaoyi" %% "ujson" % "4.0.2",
           ),
-          JvmRulesPlugin.damlRepoHeaderSettings,
         )
         .dependsOn(DamlProjects.`ledger-api`)
   }
@@ -1501,7 +1486,7 @@ object BuildCommon {
       .in(file("daml-common-staging/daml-jwt"))
       .disablePlugins(WartRemover)
       .settings(
-        sharedSettings,
+        sharedCommunitySettings,
         scalacOptions += "-Wconf:src=src_managed/.*:silent",
         libraryDependencies ++= Seq(
           auth0_java,
@@ -1514,7 +1499,6 @@ object BuildCommon {
           slf4j_api,
         ),
         coverageEnabled := false,
-        JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
     // this project builds scala protobuf versions that include
@@ -1603,7 +1587,7 @@ object BuildCommon {
         WartRemover,
       )
       .settings(
-        sharedSettings,
+        sharedCommunitySettings,
         scalacOptions --= removeCompileFlagsForDaml,
         Compile / PB.targets := Seq(
           // build java codegen too
@@ -1638,7 +1622,7 @@ object BuildCommon {
         `ledger-api`
       )
       .settings(
-        sharedSettings,
+        sharedCommunitySettings,
         compileOrder := CompileOrder.JavaThenScala,
         crossPaths := false, // Without this, the Java tests are not executed
         libraryDependencies ++= Seq(

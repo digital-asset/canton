@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss.retransmissions
@@ -48,16 +48,23 @@ class RetransmissionsManager[E <: Env[E]](
       traceContext: TraceContext,
   ): Unit = message match {
     // message from the network from a node requesting retransmissions of messages
-    case Consensus.RetransmissionsMessage.RetransmissionRequest(epochStatus) =>
-      if (epochStatus.epochNumber != epochNumber) {
-        // TODO(#18788): support serving retransmission of commit certs to nodes in a previous epoch
-        logger.info(
-          s"We got a retransmission request for epoch ${epochStatus.epochNumber}," +
-            s"but we can only serve retransmissions for epoch $epochNumber"
-        )
-      } else {
-        logger.info(s"Got a retransmission request from ${epochStatus.from} at epoch $epochNumber")
-        epochState.processRetransmissionsRequest(epochStatus)
+    case Consensus.RetransmissionsMessage.NetworkMessage(msg) =>
+      msg match {
+        case Consensus.RetransmissionsMessage.RetransmissionRequest(epochStatus) =>
+          if (epochStatus.epochNumber != epochNumber) {
+            // TODO(#18788): support serving retransmission of commit certs to nodes in a previous epoch
+            logger.info(
+              s"We got a retransmission request for epoch ${epochStatus.epochNumber}," +
+                s"but we can only serve retransmissions for epoch $epochNumber"
+            )
+          } else {
+            logger.info(
+              s"Got a retransmission request from ${epochStatus.from} at epoch $epochNumber"
+            )
+            epochState.processRetransmissionsRequest(epochStatus)
+          }
+        case Consensus.RetransmissionsMessage.RetransmissionResponse(from, commitCertificates) =>
+          epochState.processRetransmissionResponse(from, commitCertificates)
       }
 
     // periodic event where we broadcast our status in order to request retransmissions
@@ -89,9 +96,9 @@ class RetransmissionsManager[E <: Env[E]](
   private def broadcastStatus(epochStatus: ConsensusStatus.EpochStatus): Unit =
     p2pNetworkOut.asyncSend(
       P2PNetworkOut.Multicast(
-        P2PNetworkOut.BftOrderingNetworkMessage.RetransmissionRequest(
+        P2PNetworkOut.BftOrderingNetworkMessage.RetransmissionMessage(
           SignedMessage(
-            epochStatus,
+            Consensus.RetransmissionsMessage.RetransmissionRequest.create(epochStatus),
             Signature.noSignature,
           ) // TODO(#20458) actually sign the message
         ),

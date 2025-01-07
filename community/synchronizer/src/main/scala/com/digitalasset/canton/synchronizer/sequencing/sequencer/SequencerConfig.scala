@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.synchronizer.sequencing.sequencer
@@ -6,9 +6,9 @@ package com.digitalasset.canton.synchronizer.sequencing.sequencer
 import cats.syntax.option.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
-  CommunityStorageConfig,
   NonNegativeFiniteDuration,
   PositiveDurationSeconds,
+  StorageConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.driver.BftBlockOrderer
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.reference.{
@@ -133,7 +133,7 @@ object CommunitySequencerConfig {
       ConfigCursor(
         driverFactory
           .configWriter(confidential = false)
-          .to(ReferenceSequencerDriver.Config(storage = CommunityStorageConfig.Memory())),
+          .to(ReferenceSequencerDriver.Config(storage = StorageConfig.Memory())),
         List(),
       ),
     )

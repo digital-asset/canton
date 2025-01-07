@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss
@@ -7,10 +7,10 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.domain.sequencing.sequencer.bftordering.v1
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v1
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis.GenesisEpoch
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss.leaders.{
@@ -45,10 +45,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftorderi
   OrderingTopology,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.modules.Consensus.ConsensusMessage.PbftVerifiedNetworkMessage
-import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.modules.Consensus.{
-  NewEpochTopology,
-  RetransmissionsMessage,
-}
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.modules.Consensus.NewEpochTopology
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.PbftNetworkMessage.headerFromProto
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.{
   PbftNetworkMessage,
@@ -362,7 +359,11 @@ final class IssConsensusModule[E <: Env[E]](
           case consensusMessage: Consensus.ConsensusMessage =>
             handleConsensusMessage(consensusMessage)
 
-          case RetransmissionsMessage.RetransmissionRequest(EpochStatus(from, epochNumber, _))
+          case Consensus.RetransmissionsMessage.NetworkMessage(
+                Consensus.RetransmissionsMessage.RetransmissionRequest(
+                  EpochStatus(from, epochNumber, _)
+                )
+              )
               if startCatchupIfNeeded(
                 catchupDetector.updateLatestKnownPeerEpoch(from, epochNumber),
                 epochNumber,
@@ -731,6 +732,22 @@ object IssConsensusModule {
           Left(ProtoDeserializationError.OtherError("Empty Received"))
       }): ParsingResult[ConsensusSegment.ConsensusMessage.PbftNetworkMessage]
     } yield result
+
+  def parseRetransmissionMessage(from: SequencerId, message: v1.RetransmissionMessage)(
+      originalByteString: ByteString
+  ): ParsingResult[Consensus.RetransmissionsMessage.RetransmissionsNetworkMessage] =
+    message.message match {
+      case v1.RetransmissionMessage.Message.RetransmissionRequest(value) =>
+        Consensus.RetransmissionsMessage.RetransmissionRequest.fromProto(from, value)(
+          originalByteString
+        )
+      case v1.RetransmissionMessage.Message.RetransmissionResponse(value) =>
+        Consensus.RetransmissionsMessage.RetransmissionResponse.fromProto(from, value)(
+          originalByteString
+        )
+      case v1.RetransmissionMessage.Message.Empty =>
+        Left(ProtoDeserializationError.OtherError("Empty Received"))
+    }
 
   def parseStateTransferMessage(
       from: SequencerId,

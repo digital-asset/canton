@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.networking
@@ -6,21 +6,20 @@ package com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftorder
 import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.domain.sequencing.sequencer.bftordering.v1
-import com.digitalasset.canton.domain.sequencing.sequencer.bftordering.v1.BftOrderingMessageBody.Message
-import com.digitalasset.canton.domain.sequencing.sequencer.bftordering.v1.{
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v1
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v1.BftOrderingMessageBody.Message
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v1.{
   BftOrderingMessageBody,
   BftOrderingServiceReceiveRequest,
 }
-import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.availability.AvailabilityModule
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss.IssConsensusModule
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.modules.{
   Availability,
   Consensus,
-  ConsensusStatus,
   P2PNetworkIn,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.{
@@ -131,7 +130,9 @@ class BftP2PNetworkIn[E <: Env[E]](
         metrics.p2p.receive.labels.source.values.Consensus(from)
       case Message.RetransmissionMessage(message) =>
         SignedMessage
-          .fromProto(v1.EpochStatus)(ConsensusStatus.EpochStatus.fromProto(from, _))(
+          .fromProto(v1.RetransmissionMessage)(
+            IssConsensusModule.parseRetransmissionMessage(from, _)
+          )(
             message
           )
           .fold(
@@ -141,7 +142,7 @@ class BftP2PNetworkIn[E <: Env[E]](
               ),
             signedMessage =>
               consensus.asyncSend(
-                Consensus.RetransmissionsMessage.RetransmissionRequest(signedMessage.message)
+                Consensus.RetransmissionsMessage.NetworkMessage(signedMessage.message)
               ),
           )
         metrics.p2p.receive.labels.source.values.Retransmissions(from)

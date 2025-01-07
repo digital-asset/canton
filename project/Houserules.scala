@@ -1,6 +1,7 @@
-import sbt.Keys._
-import sbt._
-import wartremover.WartRemover.autoImport._
+import sbt.Keys.*
+import sbt.*
+import wartremover.Wart
+import wartremover.WartRemover.autoImport.*
 import wartremover.contrib.ContribWart
 
 /** Settings for all JVM projects in this build. Contains compiler flags,
@@ -28,8 +29,8 @@ object JvmRulesPlugin extends AutoPlugin {
     // Configure sbt-header to manage license notices in files
     headerLicense := Some(
       HeaderLicense
-        .Custom( // When updating the year here, also update .circleci/enterpriseAppHeaderCheck.sh and damlRepoHeaderSettings below
-          """|Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates.
+        .Custom( // When updating the year here, also update damlRepoHeaderSettings below
+          """|Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates.
              |Proprietary code. All rights reserved.
              |""".stripMargin
         )
@@ -51,7 +52,7 @@ object JvmRulesPlugin extends AutoPlugin {
     headerLicense := Some(
       HeaderLicense
         .Custom( // When updating the year here, also update .circleci/enterpriseAppHeaderCheck.sh and cantonRepoHeaderSettings above
-          """|Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+          """|Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
              |SPDX-License-Identifier: Apache-2.0
              |""".stripMargin
         )
@@ -69,6 +70,9 @@ object JvmRulesPlugin extends AutoPlugin {
   )
 
   lazy val wartsDisabledWithSystemProperty = System.getProperty("canton-disable-warts") == "true"
+
+  def unlessWartsAreDisabledWithSystemProperty[A](a: Seq[A]): Seq[A] =
+    if (wartsDisabledWithSystemProperty) Seq.empty else a
 
   def unlessWartsAreDisabledWithSystemProperty[A](a: A, as: A*): Seq[A] =
     if (wartsDisabledWithSystemProperty) Seq.empty else a +: as
@@ -107,37 +111,47 @@ object JvmRulesPlugin extends AutoPlugin {
     "-Wnonunit-statement",
   ) // disable value discard and non-unit statement checks on tests
 
-  lazy val wartremoverErrorsForCompileScope =
-    unlessWartsAreDisabledWithSystemProperty(
-      Wart.AnyVal,
-      Wart.AsInstanceOf,
-      Wart.DropTakeToSlice,
-      Wart.EitherProjectionPartial,
-      Wart.Enumeration,
-      Wart.FinalCaseClass,
-      Wart.GetGetOrElse,
-      Wart.GetOrElseNull,
-      Wart.IsInstanceOf,
-      Wart.IterableOps,
-      Wart.JavaConversions,
-      Wart.Null,
-      Wart.Option2Iterable,
-      Wart.OptionPartial,
-      Wart.Product,
-      Wart.Return,
-      Wart.ReverseFind,
-      Wart.ReverseIterator,
-      Wart.ReverseTakeReverse,
-      Wart.Serializable,
-      Wart.SizeIs,
-      Wart.SortedMaxMin,
-      Wart.SortedMaxMinOption,
-      Wart.SortFilter,
-      Wart.TryPartial,
-      Wart.Var,
-      Wart.While,
-      ContribWart.UnintendedLaziness,
-    )
+  lazy val wartremoverErrorsForCompileScope: Seq[Wart] = {
+    val allWarts =
+      Warts.allBut(
+        Wart.Any,
+        Wart.ArrayEquals,
+        Wart.AutoUnboxing,
+        Wart.CaseClassPrivateApply,
+        Wart.Equals,
+        Wart.DefaultArguments,
+        Wart.ExplicitImplicitTypes,
+        Wart.FinalVal,
+        Wart.ForeachEntry,
+        Wart.ImplicitConversion,
+        Wart.ImplicitParameter,
+        Wart.JavaSerializable,
+        Wart.LeakingSealed,
+        Wart.ListAppend,
+        Wart.ListUnapply,
+        Wart.MutableDataStructures,
+        Wart.NoNeedImport,
+        Wart.NonUnitStatements,
+        Wart.Nothing,
+        Wart.Overloading,
+        Wart.PlatformDefault,
+        Wart.PublicInference,
+        Wart.Recursion,
+        Wart.RedundantConversions,
+        Wart.ScalaApp,
+        Wart.SeqApply,
+        Wart.SeqUpdated,
+        Wart.StringPlusAny,
+        Wart.ThreadSleep,
+        Wart.Throw,
+        Wart.ToString,
+        Wart.TripleQuestionMark,
+      ) ++ Seq(
+        ContribWart.UnintendedLaziness
+      )
+
+    unlessWartsAreDisabledWithSystemProperty(allWarts)
+  }
 
   val wartremoverErrorsForTestScope =
     unlessWartsAreDisabledWithSystemProperty(

@@ -1,10 +1,10 @@
-// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant
 
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
-import com.digitalasset.canton.participant.store.DomainConnectionConfigStore
+import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.ShowUtil.*
 
@@ -46,7 +46,7 @@ object Pruning {
 
   final case class LedgerPruningNotPossibleDuringHardMigration(
       synchronizerId: SynchronizerId,
-      status: DomainConnectionConfigStore.Status,
+      status: SynchronizerConnectionConfigStore.Status,
   ) extends LedgerPruningError {
     override def message =
       s"The domain $synchronizerId can not be pruned as there is a pending domain migration: $status"
@@ -58,7 +58,7 @@ object Pruning {
 
   final case class PurgingOnlyAllowedOnInactiveDomain(
       synchronizerId: SynchronizerId,
-      status: DomainConnectionConfigStore.Status,
+      status: SynchronizerConnectionConfigStore.Status,
   ) extends LedgerPruningError {
     override def message: String =
       s"Domain $synchronizerId status needs to be inactive, but is ${status.getClass.getSimpleName}"
