@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss
@@ -9,7 +9,9 @@ import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss.SegmentState.RetransmissionResult
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.Block
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss.validation.ConsensusCertificateValidator
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.data.NumberIdentifiers.{
   BlockNumber,
   EpochNumber,
@@ -24,7 +26,6 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftorderi
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.data.topology.Membership
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.*
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.modules.ConsensusStatus
-import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.modules.ConsensusStatus.RetransmissionResult
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -52,6 +53,9 @@ class SegmentState(
 
   private val originalLeaderIndex = eligibleLeaders.indexOf(segment.originalLeader)
   private val viewChangeBlockMetadata = BlockMetadata(epochNumber, segment.slotNumbers.head1)
+  private val commitCertValidator = new ConsensusCertificateValidator(
+    membership.orderingTopology.strongQuorum
+  )
 
   // Only one view is active at a time, starting at view=0, inViewChange=false
   // - Upon view change start, due to timeout or >= f+1 peer votes, increment currentView and inViewChange=true
@@ -64,6 +68,11 @@ class SegmentState(
 
   private val futureViewMessagesQueue = mutable.Queue[SignedMessage[PbftNormalCaseMessage]]()
   private val viewChangeState = new mutable.HashMap[ViewNumber, PbftViewChangeState]
+
+  // if we receive a retransmitted commit certificate during a view change,
+  // we queue it so that we process it when we finish the view change
+  // TODO(#18788): introduce support for taking commit certificates during a view change
+  private val commitCertQueue = mutable.Queue[CommitCertificate]()
 
   private val pbftBlocks = new mutable.HashMap[ViewNumber, NonEmpty[Seq[PbftBlockState]]]()
   pbftBlocks
@@ -115,7 +124,10 @@ class SegmentState(
         processMessagesStored(messagesStored)
       case timeout: PbftTimeout =>
         processTimeout(timeout)
+      case msg: RetransmittedCommitCertificate =>
+        processCommitCertificate(msg)
     }
+
     // if the block has been completed in a previous view and it gets completed again as a result of a view change
     // in a higher view, we don't want to signal again that the block got completed
     processResults.filter {
@@ -359,6 +371,36 @@ class SegmentState(
     result
   }
 
+  private def processCommitCertificate(msg: RetransmittedCommitCertificate)(implicit
+      traceContext: TraceContext
+  ): Seq[ProcessResult] = {
+    val RetransmittedCommitCertificate(from, cc) = msg
+    val blockNumber = cc.blockMetadata.blockNumber
+    var result = Seq.empty[ProcessResult]
+
+    if (isBlockComplete(blockNumber))
+      logger.debug(
+        s"Discarded retransmitted commit cert for block $blockNumber from $from because block is already complete"
+      )
+    else
+      commitCertValidator.validateRetransmittedConsensusCertificate(cc) match {
+        case Right(_) =>
+          if (inViewChange) commitCertQueue.enqueue(cc)
+          else
+            pbftBlocks(currentViewNumber) = pbftBlocks(currentViewNumber).zipWithIndex.map {
+              case (_, idx) if idx == segment.relativeBlockIndex(blockNumber) =>
+                new AlreadyOrdered(currentLeader, cc, loggerFactory)
+              case (elem, _) => elem
+            }
+          result = Seq(CompletedBlock(cc.prePrepare, cc.commits, currentViewNumber))
+        case Left(error) =>
+          logger.debug(
+            s"Discarded retransmitted commit cert for block $blockNumber from $from because of validation error: $error"
+          )
+      }
+    result
+  }
+
   private def processTimeout(
       timeout: PbftTimeout
   )(implicit traceContext: TraceContext): Seq[ProcessResult] = {
@@ -580,12 +622,17 @@ class SegmentState(
           )
       }
 
+    val queuedCCMap = commitCertQueue
+      .dequeueAll(_ => true)
+      .map(cc => cc.prePrepare.message.blockMetadata.blockNumber -> cc)
+      .toMap
+
     // Create the new set of blocks for the currentView
     pbftBlocks
       .put(
         currentViewNumber,
         segment.slotNumbers.map { blockNumber =>
-          blockToCommitCert.get(blockNumber) match {
+          blockToCommitCert.get(blockNumber).orElse(queuedCCMap.get(blockNumber)) match {
             case Some(cc: CommitCertificate) =>
               new AlreadyOrdered(currentLeader, cc, loggerFactory)
             case _ =>
@@ -664,6 +711,14 @@ class SegmentState(
 }
 
 object SegmentState {
+
+  final case class RetransmissionResult(
+      messages: Seq[SignedMessage[PbftNetworkMessage]],
+      commitCerts: Seq[CommitCertificate] = Seq.empty,
+  )
+  object RetransmissionResult {
+    val empty = RetransmissionResult(Seq.empty, Seq.empty)
+  }
 
   def computeLeaderOfView(
       viewNumber: ViewNumber,

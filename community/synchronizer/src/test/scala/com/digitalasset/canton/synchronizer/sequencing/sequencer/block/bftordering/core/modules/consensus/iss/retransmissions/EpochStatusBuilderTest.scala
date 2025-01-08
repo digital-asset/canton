@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss.retransmissions
@@ -45,7 +45,7 @@ class EpochStatusBuilderTest extends AnyWordSpec with BftSequencerBaseTest {
         Consensus.RetransmissionsMessage.SegmentStatus(segmentIndex = 0, inProgressSegment)
       )
       epochStatusBuilder.epochStatus shouldBe Some(
-        ConsensusStatus.EpochStatus.create(
+        ConsensusStatus.EpochStatus(
           self,
           epoch0,
           Seq(inProgressSegment, completeSegment, inViewChangeSegment),

@@ -3,7 +3,14 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
-## Until 2025-01-07 (Exclusive)
+## Until 2024-01-04 (Exclusive)
+- The event_id field has been removed from the Event messages of the lapi since now the event id consists of the offset
+  and the node id which are already present in the events.
+- The events_by_id field in the TransactionTree message has been converted from a map<string, TreeEvent> to a
+  map<int32, TreeEvent> with values the node ids of the events.
+- Accordingly, the root_event_ids has been renamed to root_node_ids to hold the node ids of the root events.
+
+## Until 2025-01-03 (Exclusive)
 
 - We introduced contract key prefetching / bulk loading to improve workloads that fetch many contract keys.
 - Domain renaming

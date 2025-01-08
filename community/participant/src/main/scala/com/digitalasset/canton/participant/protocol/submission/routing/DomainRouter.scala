@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.protocol.submission.routing
@@ -15,14 +15,13 @@ import com.digitalasset.canton.ledger.participant.state.{SubmitterInfo, Transact
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
-import com.digitalasset.canton.participant.domain.SynchronizerAliasManager
 import com.digitalasset.canton.participant.protocol.SerializableContractAuthenticator
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
   TransactionSubmissionError,
   TransactionSubmissionResult,
 }
 import com.digitalasset.canton.participant.protocol.submission.routing.DomainRouter.inputContractsStakeholders
-import com.digitalasset.canton.participant.store.DomainConnectionConfigStore
+import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.sync.TransactionRoutingError.ConfigurationErrors.{
   MultiDomainSupportNotEnabled,
   SubmissionDomainNotReady,
@@ -37,6 +36,7 @@ import com.digitalasset.canton.participant.sync.TransactionRoutingError.{
   UnableToQueryTopologySnapshot,
 }
 import com.digitalasset.canton.participant.sync.{ConnectedDomainsLookup, TransactionRoutingError}
+import com.digitalasset.canton.participant.synchronizer.SynchronizerAliasManager
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
@@ -277,7 +277,7 @@ class DomainRouter(
 object DomainRouter {
   def apply(
       connectedDomains: ConnectedDomainsLookup,
-      domainConnectionConfigStore: DomainConnectionConfigStore,
+      domainConnectionConfigStore: SynchronizerConnectionConfigStore,
       synchronizerAliasManager: SynchronizerAliasManager,
       cryptoPureApi: CryptoPureApi,
       participantId: ParticipantId,
@@ -325,7 +325,7 @@ object DomainRouter {
   }
 
   private def priorityOfDomain(
-      domainConnectionConfigStore: DomainConnectionConfigStore,
+      domainConnectionConfigStore: SynchronizerConnectionConfigStore,
       synchronizerAliasManager: SynchronizerAliasManager,
   )(synchronizerId: SynchronizerId): Int = {
     val maybePriority = for {

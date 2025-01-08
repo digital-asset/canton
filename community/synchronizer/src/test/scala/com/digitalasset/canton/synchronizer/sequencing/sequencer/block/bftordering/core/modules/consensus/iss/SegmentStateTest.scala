@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss
@@ -42,6 +42,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftorderi
   PrePrepareStored,
   Prepare,
   PreparesStored,
+  RetransmittedCommitCertificate,
   ViewChange,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.modules.ConsensusStatus
@@ -1301,6 +1302,27 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
               _: Commit,
             ) =>
       }
+    }
+
+    "immediately complete a block when receiving a retransmitted commit certificate" in {
+      val originalLeader = myId
+      val segment = createSegmentState(originalLeader)
+      val view1 = ViewNumber.First
+      val block1 = slotNumbers.head1
+
+      val pp1 = createPrePrepare(block1, view1, from = otherPeer1)
+      val commits = Seq(
+        createCommit(block1, view1, from = otherPeer1, pp1.message.hash),
+        createCommit(block1, view1, from = otherPeer2, pp1.message.hash),
+        createCommit(block1, view1, from = otherPeer3, pp1.message.hash),
+      )
+      val commitCertificate = CommitCertificate(pp1, commits)
+
+      val results = assertNoLogs(
+        segment.processEvent(RetransmittedCommitCertificate(otherPeer1, commitCertificate))
+      )
+
+      results should contain theSameElementsInOrderAs List(CompletedBlock(pp1, commits, view1))
     }
   }
 

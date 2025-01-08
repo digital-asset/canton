@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.unit.modules.consensus.iss
@@ -520,8 +520,10 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
               Signature.noSignature,
             )
           ),
-          RetransmissionsMessage.RetransmissionRequest(
-            EpochStatus.create(allPeers(1), EpochNumber.First, Seq.empty)
+          RetransmissionsMessage.NetworkMessage(
+            RetransmissionsMessage.RetransmissionRequest.create(
+              EpochStatus(allPeers(1), EpochNumber.First, Seq.empty)
+            )
           ),
         ).forEvery { message =>
           val stateTransferManagerMock = mock[StateTransferManager[ProgrammableUnitTestEnv]]

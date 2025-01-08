@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.driver
@@ -8,13 +8,8 @@ import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.{CommunityAdminServerConfig, ProcessingTimeout}
+import com.digitalasset.canton.config.{AdminServerConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.domain.sequencing.sequencer.bftordering.v1.{
-  BftOrderingServiceGrpc,
-  BftOrderingServiceReceiveRequest,
-  BftOrderingServiceReceiveResponse,
-}
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
@@ -35,6 +30,11 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.Sequencer.{
   SignedOrderingRequestOps,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.SequencerSnapshot
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v1.{
+  BftOrderingServiceGrpc,
+  BftOrderingServiceReceiveRequest,
+  BftOrderingServiceReceiveResponse,
+}
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.BlockOrderer
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.admin.BftOrderingSequencerAdminService
@@ -341,7 +341,7 @@ final class BftBlockOrderer(
 
       val activeServer = CantonServerBuilder
         .forConfig(
-          config = CommunityAdminServerConfig(endpoint.host, Some(endpoint.port)),
+          config = AdminServerConfig(endpoint.host, Some(endpoint.port)),
           None,
           executor = p2pServerGrpcExecutor,
           loggerFactory = loggerFactory,
@@ -367,13 +367,13 @@ final class BftBlockOrderer(
   }
 
   override def send(
-      orderingRequest: SignedOrderingRequest
+      signedOrderingRequest: SignedOrderingRequest
   )(implicit traceContext: TraceContext): EitherT[Future, SendAsyncError, Unit] = {
     logger.debug(s"sending submission")
     sendToMempool(
       SendTag,
-      orderingRequest.submissionRequest.sender,
-      orderingRequest.toByteString,
+      signedOrderingRequest.submissionRequest.sender,
+      signedOrderingRequest.toByteString,
     )
   }
 

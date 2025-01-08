@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss
@@ -19,6 +19,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftorderi
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.data.availability.OrderingBlock
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.data.ordering.CommitCertificate
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.data.ordering.iss.{
   BlockMetadata,
   EpochInfo,
@@ -137,6 +138,21 @@ class EpochState[E <: Env[E]](
     }.onShutdown {
       logger.info(
         s"At epoch ${epoch.info.number} received message after shutdown, so discarding retransmission request from ${epochStatus.from}"
+      )
+    }
+
+  def processRetransmissionResponse(
+      from: SequencerId,
+      commitCerts: Seq[CommitCertificate],
+  )(implicit traceContext: TraceContext): Unit =
+    performUnlessClosing("processRetransmissionsRequest") {
+      commitCerts.foreach { cc =>
+        blockToSegmentModule(cc.prePrepare.message.blockMetadata.blockNumber)
+          .asyncSend(ConsensusSegment.ConsensusMessage.RetransmittedCommitCertificate(from, cc))
+      }
+    }.onShutdown {
+      logger.info(
+        s"At epoch ${epoch.info.number} received message after shutdown, so discarding retransmission response from $from"
       )
     }
 

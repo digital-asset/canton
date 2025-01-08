@@ -1,13 +1,13 @@
-// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.modules
 
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.domain.sequencing.sequencer.bftordering.v1
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v1
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.Epoch
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.topology.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.data.NumberIdentifiers.{
@@ -92,11 +92,167 @@ object Consensus {
 
   sealed trait RetransmissionsMessage extends ProtocolMessage
   object RetransmissionsMessage {
-    final case class RetransmissionRequest(epochStatus: ConsensusStatus.EpochStatus)
-        extends RetransmissionsMessage
+    sealed trait RetransmissionsNetworkMessage
+        extends HasRepresentativeProtocolVersion
+        with ProtocolVersionedMemoizedEvidence
+        with MessageFrom
+
     final case object PeriodicStatusBroadcast extends RetransmissionsMessage
     final case class SegmentStatus(segmentIndex: Int, status: ConsensusStatus.SegmentStatus)
         extends RetransmissionsMessage
+    final case class NetworkMessage(message: RetransmissionsNetworkMessage)
+        extends RetransmissionsMessage
+
+    final case class RetransmissionRequest private (epochStatus: ConsensusStatus.EpochStatus)(
+        override val representativeProtocolVersion: RepresentativeProtocolVersion[
+          RetransmissionRequest.type
+        ],
+        override val deserializedFrom: Option[ByteString],
+    ) extends RetransmissionsNetworkMessage
+        with HasProtocolVersionedWrapper[RetransmissionRequest] {
+
+      def toProto: v1.RetransmissionMessage =
+        v1.RetransmissionMessage.of(
+          v1.RetransmissionMessage.Message.RetransmissionRequest(
+            epochStatus.toProto
+          )
+        )
+
+      override protected val companionObj: RetransmissionRequest.type = RetransmissionRequest
+
+      override protected[this] def toByteStringUnmemoized: ByteString =
+        super[HasProtocolVersionedWrapper].toByteString
+
+      override def from: SequencerId = epochStatus.from
+    }
+
+    object RetransmissionRequest
+        extends HasMemoizedProtocolVersionedWithContextCompanion[
+          RetransmissionRequest,
+          SequencerId,
+        ] {
+      override def name: String = "RetransmissionRequest"
+      def create(epochStatus: ConsensusStatus.EpochStatus): RetransmissionRequest =
+        RetransmissionRequest(epochStatus)(
+          protocolVersionRepresentativeFor(ProtocolVersion.minimum),
+          None,
+        )
+
+      private def fromProtoRetransmissionMessage(
+          from: SequencerId,
+          value: v1.RetransmissionMessage,
+      )(
+          originalByteString: ByteString
+      ): ParsingResult[RetransmissionRequest] = for {
+        protoRetransmissionRequest <- value.message.retransmissionRequest.toRight(
+          ProtoDeserializationError.OtherError(s"Not a $name message")
+        )
+        result <- fromProto(from, protoRetransmissionRequest)(originalByteString)
+      } yield result
+
+      def fromProto(
+          from: SequencerId,
+          proto: v1.EpochStatus,
+      )(
+          originalByteString: ByteString
+      ): ParsingResult[RetransmissionRequest] = for {
+        epochStatus <- ConsensusStatus.EpochStatus.fromProto(from, proto)
+      } yield RetransmissionRequest(epochStatus)(
+        protocolVersionRepresentativeFor(ProtocolVersion.minimum),
+        Some(originalByteString),
+      )
+
+      override def supportedProtoVersions: SupportedProtoVersions =
+        SupportedProtoVersions(
+          ProtoVersion(30) ->
+            VersionedProtoConverter(
+              ProtocolVersion.v33
+            )(v1.RetransmissionMessage)(
+              supportedProtoVersionMemoized(_)(
+                fromProtoRetransmissionMessage
+              ),
+              _.toProto,
+            )
+        )
+    }
+
+    final case class RetransmissionResponse private (
+        from: SequencerId,
+        commitCertificates: Seq[CommitCertificate],
+    )(
+        override val representativeProtocolVersion: RepresentativeProtocolVersion[
+          RetransmissionResponse.type
+        ],
+        override val deserializedFrom: Option[ByteString],
+    ) extends RetransmissionsNetworkMessage
+        with HasProtocolVersionedWrapper[RetransmissionResponse] {
+      def toProto: v1.RetransmissionMessage =
+        v1.RetransmissionMessage.of(
+          v1.RetransmissionMessage.Message.RetransmissionResponse(
+            v1.RetransmissionResponse(commitCertificates.map(_.toProto))
+          )
+        )
+
+      override protected val companionObj: RetransmissionResponse.type = RetransmissionResponse
+
+      override protected[this] def toByteStringUnmemoized: ByteString =
+        super[HasProtocolVersionedWrapper].toByteString
+    }
+
+    object RetransmissionResponse
+        extends HasMemoizedProtocolVersionedWithContextCompanion[
+          RetransmissionResponse,
+          SequencerId,
+        ] {
+      override def name: String = "RetransmissionResponse"
+      def create(
+          from: SequencerId,
+          commitCertificates: Seq[CommitCertificate],
+      ): RetransmissionResponse =
+        RetransmissionResponse(from, commitCertificates)(
+          protocolVersionRepresentativeFor(ProtocolVersion.minimum),
+          None,
+        )
+
+      private def fromProtoRetransmissionMessage(
+          from: SequencerId,
+          value: v1.RetransmissionMessage,
+      )(
+          originalByteString: ByteString
+      ): ParsingResult[RetransmissionResponse] = for {
+        protoRetransmissionResponse <- value.message.retransmissionResponse.toRight(
+          ProtoDeserializationError.OtherError(s"Not a $name message")
+        )
+        response <- fromProto(from, protoRetransmissionResponse)(originalByteString)
+      } yield response
+
+      def fromProto(
+          from: SequencerId,
+          protoRetransmissionResponse: v1.RetransmissionResponse,
+      )(
+          originalByteString: ByteString
+      ): ParsingResult[RetransmissionResponse] = for {
+        commitCertificates <- protoRetransmissionResponse.commitCertificates.traverse(
+          CommitCertificate.fromProto
+        )
+      } yield RetransmissionResponse(from, commitCertificates)(
+        protocolVersionRepresentativeFor(ProtocolVersion.minimum),
+        Some(originalByteString),
+      )
+
+      override def supportedProtoVersions: SupportedProtoVersions =
+        SupportedProtoVersions(
+          ProtoVersion(30) ->
+            VersionedProtoConverter(
+              ProtocolVersion.v33
+            )(v1.RetransmissionMessage)(
+              supportedProtoVersionMemoized(_)(
+                fromProtoRetransmissionMessage
+              ),
+              _.toProto,
+            )
+        )
+    }
   }
 
   sealed trait StateTransferMessage extends ProtocolMessage

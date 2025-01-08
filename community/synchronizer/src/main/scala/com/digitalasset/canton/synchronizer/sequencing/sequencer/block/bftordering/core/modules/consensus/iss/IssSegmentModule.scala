@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss
@@ -222,17 +222,28 @@ class IssSegmentModule[E <: Env[E]](
           Consensus.RetransmissionsMessage.SegmentStatus(segmentIndex, segmentState.status)
         )
       case ConsensusSegment.RetransmissionsMessage.RetransmissionRequest(from, fromStatus) =>
-        segmentState
-          .messagesToRetransmit(from, fromStatus)
-          .messages
-          .foreach { msg =>
-            p2pNetworkOut.asyncSend(
-              P2PNetworkOut.send(
-                P2PNetworkOut.BftOrderingNetworkMessage.ConsensusMessage(msg),
-                to = from,
-              )
+        val toRetransmit = segmentState.messagesToRetransmit(from, fromStatus)
+        toRetransmit.messages.foreach { msg =>
+          p2pNetworkOut.asyncSend(
+            P2PNetworkOut.send(
+              P2PNetworkOut.BftOrderingNetworkMessage.ConsensusMessage(msg),
+              to = from,
             )
-          }
+          )
+        }
+        if (toRetransmit.commitCerts.nonEmpty)
+          p2pNetworkOut.asyncSend(
+            P2PNetworkOut.send(
+              P2PNetworkOut.BftOrderingNetworkMessage.RetransmissionMessage(
+                SignedMessage(
+                  Consensus.RetransmissionsMessage.RetransmissionResponse
+                    .create(epoch.membership.myId, toRetransmit.commitCerts),
+                  Signature.noSignature, // TODO(#20458) actually sign the message
+                )
+              ),
+              to = from,
+            )
+          )
 
       case ConsensusSegment.ConsensusMessage.BlockOrdered(metadata) =>
         leaderSegmentState.foreach(_.confirmCompleteBlockStored(metadata.blockNumber))
@@ -328,9 +339,6 @@ class IssSegmentModule[E <: Env[E]](
 
       case ConsensusSegment.Internal.AsyncException(e: Throwable) =>
         logAsyncException(e)
-
-      case _ =>
-        logger.error(s"Segment submodule should not receive $messageType")
     }
   }
 
