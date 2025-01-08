@@ -12,15 +12,17 @@ object UberLibrary {
   private def externalDependenciesOf(project: Project): Def.Initialize[Task[Seq[ModuleID]]] =
     Def.task {
       val thisOrg = (project / organization).value
-      val thisVer = (project / version).value
       val descriptors = (project / projectDescriptors).value
       for {
         moduleDescriptor <- descriptors.valuesIterator.toSeq
         dependency <- moduleDescriptor.getDependencies
+        // Preserve runtime dependencies and avoid putting plugin and test dependencies to POM files that land
+        //  into `UberLibraries` so that they effectively do not become runtime dependencies on the "client" side.
+        if !dependency.getModuleConfigurations.exists(List("plugin", "test").contains)
         revisionId = dependency.getDependencyRevisionId
         org = revisionId.getOrganisation if org != thisOrg
         name = revisionId.getName
-        version = revisionId.getRevision if version != thisVer
+        version = revisionId.getRevision
       } yield ModuleID(org, name, version)
     }
 
