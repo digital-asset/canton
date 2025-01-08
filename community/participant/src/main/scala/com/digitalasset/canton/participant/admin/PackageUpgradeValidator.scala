@@ -55,12 +55,10 @@ class PackageUpgradeValidator(
       case Nil => EitherT.pure[Future, DamlError](packageMap)
       case pkgId :: rest =>
         val pkg = upgradingPackagesMap(pkgId)
-        val supportsUpgrades =
-          pkg.languageVersion >= LanguageVersion.Features.smartContractUpgrade && !pkg.isUtilityPackage
         pkg.metadata match {
           case Some(pkgMetadata) =>
             for {
-              _ <- EitherTUtil.ifThenET(supportsUpgrades)(
+              _ <- EitherTUtil.ifThenET(supportsUpgrades(pkg))(
                 // This check will look for the closest neighbors of pkgId for the package versioning ordering and
                 // will load them from the DB and decode them. If one were to upload many packages that upgrade each
                 // other, we will end up decoding the same package many times. Some of these cases could be sped up
@@ -280,4 +278,43 @@ class PackageUpgradeValidator(
           (oldPkgId2, oldPkg2),
         )
     }
+
+  private def lfVersionSupportsUpgrades(pkg: Ast.Package): Boolean =
+    pkg.languageVersion >= LanguageVersion.Features.smartContractUpgrade
+
+  private def supportsUpgrades(pkg: Ast.Package): Boolean =
+    lfVersionSupportsUpgrades(pkg) && !pkg.isUtilityPackage
+
+  def warnDamlScriptUpload(
+      mainPackage: (Ref.PackageId, Ast.Package),
+      allPackages: List[(Ref.PackageId, Ast.Package)],
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Unit = {
+    def isDamlScript(pkgMeta: Ast.PackageMetadata): Boolean = pkgMeta.name match {
+      case "daml-script" | "daml3-script" | "daml-script-lts" | "daml-script-lts-stable" => true
+      case _ => false
+    }
+    val mainPackageSupportsUpgrades = lfVersionSupportsUpgrades(mainPackage._2)
+
+    allPackages.foreach { case (pkgId, pkg) =>
+      pkg.metadata match {
+        case None =>
+        case Some(pkgMetadata) =>
+          val pkgSupportsUpgrades = lfVersionSupportsUpgrades(pkg)
+          if ((pkgSupportsUpgrades || mainPackageSupportsUpgrades) && isDamlScript(pkgMetadata)) {
+            val mainPackageLabel =
+              s"${if (mainPackageSupportsUpgrades) s"LF${mainPackage._2.languageVersion.pretty} "
+                else ""}package ${mainPackage._1}"
+            val damlScriptPackageLabel =
+              s"${if (pkgSupportsUpgrades) s"LF${pkg.languageVersion.pretty} "
+                else ""}${pkgMetadata.name} ($pkgId)"
+            logger.warn(
+              s"Upload of $mainPackageLabel contains $damlScriptPackageLabel as a dependency. " +
+                "Avoid uploading daml-script to the ledger when using Smart Contract Upgrades"
+            )
+          }
+      }
+    }
+  }
 }

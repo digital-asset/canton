@@ -363,20 +363,25 @@ object DamlPlugin extends AutoPlugin {
       tarballPath = Seq("damlc", "damlc"),
     )
 
-    // so far canton system dars depend on daml-script, but maybe daml-triggers or others some day?
-    val damlLibsDependencyTypes = Seq("daml-script")
-    val damlLibsDependencyVersions = damlLanguageVersions.foldLeft(Seq(""))(_ :+ "-" + _)
-    val damlScriptDars = for {
-      depType <- damlLibsDependencyTypes
-      depVersion <- damlLibsDependencyVersions
-    } yield {
-      (depType, s"$depType$depVersion")
-    }
-    val daml3ScriptDars =
-      Seq(("daml-script", "daml3-script-1.dev"), ("daml-script", "daml3-script-stable-1.dev"))
+    val damlScriptDeps = List(
+      // daml-script is no longer supported after LF 1.15.
+      ("daml-script", Set("1.14", "1.15")),
+      // daml-scrip-lts is supported by all LF versions.
+      ("daml-script-lts", damlLanguageVersions :+ "1.dev"),
+      // daml-scrip-lts-stable is supported by all LF versions.
+      ("daml-script-lts-stable", damlLanguageVersions :+ "1.dev"),
+    )
+    val damlScriptDars =
+      for {
+        (depType, depVersions) <- damlScriptDeps
+        depVersion <- depVersions
+      } yield {
+        // all the daml-script(-lts.*) dars are located in the daml-script directory
+        ("daml-script", s"$depType-$depVersion")
+      }
 
     val damlLibsEnv = (for {
-      (depType, artifactName) <- damlScriptDars ++ daml3ScriptDars
+      (depType, artifactName) <- damlScriptDars
     } yield {
       ensureArtifactAvailable(
         url = url + s"$depType/",
