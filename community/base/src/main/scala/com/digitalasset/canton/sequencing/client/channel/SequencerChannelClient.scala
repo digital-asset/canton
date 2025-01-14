@@ -37,8 +37,8 @@ import scala.util.Try
 final class SequencerChannelClient(
     member: Member,
     clientState: SequencerChannelClientState,
-    domainCryptoApi: SynchronizerSyncCryptoClient,
-    domainParameters: StaticSynchronizerParameters,
+    synchronizerCryptoApi: SynchronizerSyncCryptoClient,
+    synchronizerParameters: StaticSynchronizerParameters,
     protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -91,15 +91,14 @@ final class SequencerChannelClient(
           onShutdownRunner: OnShutdownRunner,
       ): SequencerChannelClientEndpoint =
         new SequencerChannelClientEndpoint(
-          sequencerId,
           channelId,
           member,
           connectTo,
           processor,
-          domainCryptoApi,
+          synchronizerCryptoApi,
           isSessionKeyOwner,
           topologyTs,
-          domainParameters.protocolVersion,
+          synchronizerParameters.protocolVersion,
           context,
           onShutdownRunner,
           timeouts,

@@ -181,36 +181,36 @@ object RequestId {
     CantonTimestamp.fromProtoPrimitive(requestIdP).map(RequestId(_))
 }
 
-/** A reassignment is identified by the source domain and the sequencer timestamp on the unassignment request. */
+/** A reassignment is identified by the source synchronizer and the sequencer timestamp on the unassignment request. */
 final case class ReassignmentId(
-    sourceDomain: Source[SynchronizerId],
+    sourceSynchronizer: Source[SynchronizerId],
     unassignmentTs: CantonTimestamp,
 ) extends PrettyPrinting {
   def toProtoV30: v30.ReassignmentId =
     v30.ReassignmentId(
-      sourceSynchronizerId = sourceDomain.unwrap.toProtoPrimitive,
+      sourceSynchronizerId = sourceSynchronizer.unwrap.toProtoPrimitive,
       timestamp = unassignmentTs.toProtoPrimitive,
     )
 
   def toAdminProto: com.digitalasset.canton.admin.participant.v30.ReassignmentId =
     com.digitalasset.canton.admin.participant.v30.ReassignmentId(
-      sourceSynchronizerId = sourceDomain.unwrap.toProtoPrimitive,
+      sourceSynchronizerId = sourceSynchronizer.unwrap.toProtoPrimitive,
       timestamp = Some(unassignmentTs.toProtoTimestamp),
     )
 
   override protected def pretty: Pretty[ReassignmentId] = prettyOfClass(
     param("ts", _.unassignmentTs),
-    param("source", _.sourceDomain),
+    param("source", _.sourceSynchronizer),
   )
 }
 
 object ReassignmentId {
   def fromProtoV30(reassignmentIdP: v30.ReassignmentId): ParsingResult[ReassignmentId] =
     reassignmentIdP match {
-      case v30.ReassignmentId(originDomainP, requestTimestampP) =>
+      case v30.ReassignmentId(sourceSynchronizerP, requestTimestampP) =>
         for {
           sourceSynchronizerId <- SynchronizerId.fromProtoPrimitive(
-            originDomainP,
+            sourceSynchronizerP,
             "ReassignmentId.source_synchronizer_id",
           )
           requestTimestamp <- CantonTimestamp.fromProtoPrimitive(requestTimestampP)

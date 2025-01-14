@@ -65,13 +65,13 @@ sealed trait ParticipantUpdate extends Update {
   def persisted: Promise[Unit]
 }
 
-sealed trait DomainUpdate extends Update {
+sealed trait SynchronizerUpdate extends Update {
   def synchronizerId: SynchronizerId
 }
 
-/** Update which defines a DomainIndex, and therefore contribute to DomainIndex moving ahead.
+/** Update which defines a SynchronizerIndex, and therefore contribute to SynchronizerIndex moving ahead.
   */
-sealed trait DomainIndexUpdate extends DomainUpdate {
+sealed trait SynchronizerIndexUpdate extends SynchronizerUpdate {
   def requestCounterO: Option[RequestCounter]
 
   def sequencerCounterO: Option[SequencerCounter]
@@ -82,23 +82,23 @@ sealed trait DomainIndexUpdate extends DomainUpdate {
   final def sequencerIndexO: Option[SequencerIndex] =
     sequencerCounterO.map(SequencerIndex(_, recordTime))
 
-  final def domainIndex: (SynchronizerId, DomainIndex) =
-    synchronizerId -> DomainIndex(requestIndexO, sequencerIndexO, recordTime)
+  final def synchronizerIndex: (SynchronizerId, SynchronizerIndex) =
+    synchronizerId -> SynchronizerIndex(requestIndexO, sequencerIndexO, recordTime)
 }
 
-sealed trait SequencedUpdate extends DomainIndexUpdate {
+sealed trait SequencedUpdate extends SynchronizerIndexUpdate {
   def sequencerCounter: SequencerCounter
 
   final override def sequencerCounterO: Option[SequencerCounter] = Some(sequencerCounter)
 }
 
-sealed trait RequestUpdate extends DomainIndexUpdate {
+sealed trait RequestUpdate extends SynchronizerIndexUpdate {
   def requestCounter: RequestCounter
 
   final override def requestCounterO: Option[RequestCounter] = Some(requestCounter)
 }
 
-sealed trait FloatingUpdate extends DomainIndexUpdate {
+sealed trait FloatingUpdate extends SynchronizerIndexUpdate {
 
   final override def requestCounterO: Option[RequestCounter] = None
 
@@ -413,15 +413,15 @@ object Update {
         param("recordTime", _.recordTime),
         param("updateId", _.updateId),
         paramIfDefined("completion", _.optCompletionInfo),
-        param("source", _.reassignmentInfo.sourceDomain),
-        param("target", _.reassignmentInfo.targetDomain),
+        param("source", _.reassignmentInfo.sourceSynchronizer),
+        param("target", _.reassignmentInfo.targetSynchronizer),
         unnamedParam(_.reassignment.kind.unquoted),
         indicateOmittedFields,
       )
 
     final override def synchronizerId: SynchronizerId = reassignment match {
-      case _: Reassignment.Assign => reassignmentInfo.targetDomain.unwrap
-      case _: Reassignment.Unassign => reassignmentInfo.sourceDomain.unwrap
+      case _: Reassignment.Assign => reassignmentInfo.targetSynchronizer.unwrap
+      case _: Reassignment.Unassign => reassignmentInfo.sourceSynchronizer.unwrap
     }
   }
 
@@ -470,7 +470,7 @@ object Update {
 
   /** Signal that a command submitted via [[SyncService]] was rejected.
     */
-  sealed trait CommandRejected extends DomainIndexUpdate {
+  sealed trait CommandRejected extends SynchronizerIndexUpdate {
 
     /** The completion information for the submission
       */
@@ -604,7 +604,7 @@ object Update {
       synchronizerId: SynchronizerId,
       recordTime: CantonTimestamp,
   )(implicit override val traceContext: TraceContext)
-      extends DomainUpdate {
+      extends SynchronizerUpdate {
     override protected def pretty: Pretty[EmptyAcsPublicationRequired] =
       prettyOfClass(
         param("synchronizerId", _.synchronizerId.uid),

@@ -254,7 +254,7 @@ trait StoreBasedTopologySnapshotTest
       }
     }
 
-    "properly deals with participants with lower domain privileges" in {
+    "properly deals with participants with lower synchronizer privileges" in {
       val fixture = new Fixture()
       for {
         _ <- fixture.add(ts, Seq(dpc1, p1_otk, p1_dtc, party1participant1, p1_pdp_observation))
@@ -264,7 +264,7 @@ trait StoreBasedTopologySnapshotTest
           SequencerCounter(0),
           Seq(),
         )
-        snapshot <- fixture.client.snapshotUS(ts.immediateSuccessor)
+        snapshot <- fixture.client.snapshot(ts.immediateSuccessor)
         party1Mappings <- snapshot.activeParticipantsOf(party1.toLf)
       } yield {
         compareMappings(party1Mappings, Map(participant1 -> ParticipantPermission.Observation))
@@ -304,9 +304,9 @@ trait StoreBasedTopologySnapshotTest
           SequencerCounter(0),
           Seq(),
         )
-        snapshotA <- fixture.client.snapshotUS(ts1)
-        snapshotB <- fixture.client.snapshotUS(ts1.immediateSuccessor)
-        snapshotC <- fixture.client.snapshotUS(ts2.immediateSuccessor)
+        snapshotA <- fixture.client.snapshot(ts1)
+        snapshotB <- fixture.client.snapshot(ts1.immediateSuccessor)
+        snapshotC <- fixture.client.snapshot(ts2.immediateSuccessor)
         party1Ma <- snapshotA.activeParticipantsOf(party1.toLf)
         party1Mb <- snapshotB.activeParticipantsOf(party1.toLf)
         party2Ma <- snapshotA.activeParticipantsOf(party2.toLf)

@@ -88,10 +88,7 @@ import org.apache.pekko.stream.{KillSwitch, KillSwitches, Materializer}
 import org.apache.pekko.{Done, NotUsed}
 import org.slf4j.event.Level
 
-import java.nio.file.Path
-import java.time.Duration as JDuration
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.{BlockingQueue, LinkedBlockingQueue}
 import scala.concurrent.*
 import scala.concurrent.duration.*
 import scala.util.{Failure, Success, Try}
@@ -139,7 +136,7 @@ trait SequencerClient extends SequencerClientSend with FlagCloseable {
     *                            If [[scala.None$]], the subscription starts at the [[initialCounterLowerBound]].
     * @param cleanPreheadTsO     The timestamp of the clean prehead sequencer counter, if known.
     * @param eventHandler        A function handling the events.
-    * @param timeTracker         Tracker for operations requiring the current domain time. Only updated with received events and not previously stored events.
+    * @param timeTracker         Tracker for operations requiring the current synchronizer time. Only updated with received events and not previously stored events.
     * @param fetchCleanTimestamp A function for retrieving the latest clean timestamp to use for periodic acknowledgements
     * @return The future completes after the subscription has been established or when an error occurs before that.
     *         In particular, synchronous processing of events from the [[com.digitalasset.canton.store.SequencedEventStore]]
@@ -197,7 +194,9 @@ abstract class SequencerClientImpl(
     val config: SequencerClientConfig,
     testingConfig: TestingConfigInternal,
     val protocolVersion: ProtocolVersion,
-    domainParametersLookup: DynamicSynchronizerParametersLookup[SequencerSynchronizerParameters],
+    synchronizerParametersLookup: DynamicSynchronizerParametersLookup[
+      SequencerSynchronizerParameters
+    ],
     override val timeouts: ProcessingTimeout,
     clock: Clock,
     val requestSigner: RequestSigner,
@@ -271,7 +270,7 @@ abstract class SequencerClientImpl(
       serializedRequestSize <= maxRequestSize.unwrap,
       (),
       SendAsyncClientError.RequestInvalid(
-        s"Batch size ($serializedRequestSize bytes) is exceeding maximum size ($maxRequestSize bytes) for domain $synchronizerId"
+        s"Batch size ($serializedRequestSize bytes) is exceeding maximum size ($maxRequestSize bytes) for synchronizer $synchronizerId"
       ),
     )
   }
@@ -289,7 +288,7 @@ abstract class SequencerClientImpl(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit] = {
     implicit val metricsContextImplicit =
-      metricsContext.withExtraLabels("domain" -> synchronizerId.toString)
+      metricsContext.withExtraLabels("synchronizer" -> synchronizerId.toString)
     withSpan("SequencerClient.sendAsync") { implicit traceContext => span =>
       def mkRequestE(
           cost: Option[SequencingSubmissionCost]
@@ -332,8 +331,8 @@ abstract class SequencerClientImpl(
         case _: ParticipantId => true
         case _ => false
       }
-      val domainParamsF = EitherT.liftF(
-        domainParametersLookup.getApproximateOrDefaultValue(warnOnUsingDefaults)
+      val synchronizerParamsF = EitherT.liftF(
+        synchronizerParametersLookup.getApproximateOrDefaultValue(warnOnUsingDefaults)
       )
 
       if (replayEnabled) {
@@ -344,9 +343,9 @@ abstract class SequencerClientImpl(
           )
           requestE = mkRequestE(costO)
           request <- EitherT.fromEither[FutureUnlessShutdown](requestE)
-          domainParams <- domainParamsF
+          synchronizerParams <- synchronizerParamsF
           _ <- EitherT.fromEither[FutureUnlessShutdown](
-            checkRequestSize(request, domainParams.maxRequestSize)
+            checkRequestSize(request, synchronizerParams.maxRequestSize)
           )
         } yield {
           // Invoke the callback immediately, because it will not be triggered by replayed messages,
@@ -406,9 +405,9 @@ abstract class SequencerClientImpl(
           )
           requestE = mkRequestE(cost)
           request <- EitherT.fromEither[FutureUnlessShutdown](requestE)
-          domainParams <- domainParamsF
+          synchronizerParams <- synchronizerParamsF
           _ <- EitherT.fromEither[FutureUnlessShutdown](
-            checkRequestSize(request, domainParams.maxRequestSize)
+            checkRequestSize(request, synchronizerParams.maxRequestSize)
           )
           _ <- trackSend
           _ = recorderO.foreach(_.recordSubmission(request))
@@ -448,7 +447,7 @@ abstract class SequencerClientImpl(
             logger.debug(
               s"Adding aggregation rule $aggregationRule to submission request with message ID $messageId"
             )
-            request.copy(aggregationRule = aggregationRule.some)
+            request.updateAggregationRule(aggregationRule)
           } else request
 
         for {
@@ -485,7 +484,7 @@ abstract class SequencerClientImpl(
 
         // cancel pending send now as we know the request will never cause a sequenced result
         logger.debug(s"Cancelling the pending send as the sequencer returned error: $err")
-        FutureUnlessShutdown.outcomeF(sendTracker.cancelPendingSend(messageId).map(_ => err))
+        sendTracker.cancelPendingSend(messageId).map(_ => err)
       }
 
   /** Send the `signedRequest` to the `firstSequencer` via `firstTransport`.
@@ -639,23 +638,22 @@ abstract class SequencerClientImpl(
       timeTracker: SynchronizerTimeTracker,
       onCleanHandler: Traced[SequencerCounterCursorPrehead] => Unit = _ => (),
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    FutureUnlessShutdown.outcomeF(sequencerCounterTrackerStore.preheadSequencerCounter).flatMap {
-      cleanPrehead =>
-        val priorTimestamp = cleanPrehead.fold(CantonTimestamp.MinValue)(
-          _.timestamp
-        ) // Sequencer client will feed events right after this ts to the handler.
-        val cleanSequencerCounterTracker = new CleanSequencerCounterTracker(
-          sequencerCounterTrackerStore,
-          onCleanHandler,
-          loggerFactory,
-        )
-        subscribeAfter(
-          priorTimestamp,
-          cleanPrehead.map(_.timestamp),
-          cleanSequencerCounterTracker(eventHandler),
-          timeTracker,
-          PeriodicAcknowledgements.fetchCleanCounterFromStore(sequencerCounterTrackerStore),
-        )
+    sequencerCounterTrackerStore.preheadSequencerCounter.flatMap { cleanPrehead =>
+      val priorTimestamp = cleanPrehead.fold(CantonTimestamp.MinValue)(
+        _.timestamp
+      ) // Sequencer client will feed events right after this ts to the handler.
+      val cleanSequencerCounterTracker = new CleanSequencerCounterTracker(
+        sequencerCounterTrackerStore,
+        onCleanHandler,
+        loggerFactory,
+      )
+      subscribeAfter(
+        priorTimestamp,
+        cleanPrehead.map(_.timestamp),
+        cleanSequencerCounterTracker(eventHandler),
+        timeTracker,
+        PeriodicAcknowledgements.fetchCleanCounterFromStore(sequencerCounterTrackerStore),
+      )
     }
 
   /** Create a subscription for sequenced events for this member,
@@ -672,7 +670,7 @@ abstract class SequencerClientImpl(
     *                       If [[scala.None$]], the subscription starts at the [[com.digitalasset.canton.data.CounterCompanion.Genesis]].
     * @param cleanPreheadTsO The timestamp of the clean prehead sequencer counter, if known.
     * @param eventHandler A function handling the events.
-    * @param timeTracker Tracker for operations requiring the current domain time. Only updated with received events and not previously stored events.
+    * @param timeTracker Tracker for operations requiring the current synchronizer time. Only updated with received events and not previously stored events.
     * @param fetchCleanTimestamp A function for retrieving the latest clean timestamp to use for periodic acknowledgements
     * @return The future completes after the subscription has been established or when an error occurs before that.
     *         In particular, synchronous processing of events from the [[com.digitalasset.canton.store.SequencedEventStore]]
@@ -748,7 +746,7 @@ object SequencerClientImpl {
   )
 }
 
-/** The sequencer client facilitates access to the individual domain sequencer. A client centralizes the
+/** The sequencer client facilitates access to the individual synchronizer sequencer. A client centralizes the
   * message signing operations, as well as the handling and storage of message receipts and delivery proofs,
   * such that this functionality does not have to be duplicated throughout the participant node.
   */
@@ -759,7 +757,9 @@ class RichSequencerClientImpl(
     config: SequencerClientConfig,
     testingConfig: TestingConfigInternal,
     protocolVersion: ProtocolVersion,
-    domainParametersLookup: DynamicSynchronizerParametersLookup[SequencerSynchronizerParameters],
+    synchronizerParametersLookup: DynamicSynchronizerParametersLookup[
+      SequencerSynchronizerParameters
+    ],
     timeouts: ProcessingTimeout,
     eventValidatorFactory: SequencedEventValidatorFactory,
     clock: Clock,
@@ -784,7 +784,7 @@ class RichSequencerClientImpl(
       config,
       testingConfig,
       protocolVersion,
-      domainParametersLookup,
+      synchronizerParametersLookup,
       timeouts,
       clock,
       requestSigner,
@@ -834,7 +834,7 @@ class RichSequencerClientImpl(
       states =>
         SequencerAggregator
           .aggregateHealthResult(states, sequencersTransportState.getSequencerTrustThreshold),
-      ComponentHealthState.failed("Disconnected from domain"),
+      ComponentHealthState.failed("Disconnected from synchronizer"),
     )
 
   val healthComponent: CloseableHealthComponent = deferredSubscriptionHealth
@@ -990,7 +990,7 @@ class RichSequencerClientImpl(
     val eventDelay: DelaySequencedEvent = {
       val first = testingConfig.testSequencerClientFor.find(elem =>
         elem.memberName == member.identifier.unwrap &&
-          elem.domainName == synchronizerId.identifier.unwrap
+          elem.synchronizerName == synchronizerId.identifier.unwrap
       )
 
       first match {
@@ -1177,11 +1177,8 @@ class RichSequencerClientImpl(
           handlerIdleLock.synchronized { val _ = handlerIdle.get().success(()) }
         }
 
-        FutureUnlessShutdown
-          .outcomeF(
-            sendTracker
-              .update(handlerEvents)
-          )
+        sendTracker
+          .update(handlerEvents)
           .flatMap(_ => processEventBatch(eventHandler, handlerEvents).value)
           .transformWith {
             case Success(UnlessShutdown.Outcome(Right(()))) =>
@@ -1435,7 +1432,9 @@ class SequencerClientImplPekko[E: Pretty](
     config: SequencerClientConfig,
     testingConfig: TestingConfigInternal,
     protocolVersion: ProtocolVersion,
-    domainParametersLookup: DynamicSynchronizerParametersLookup[SequencerSynchronizerParameters],
+    synchronizerParametersLookup: DynamicSynchronizerParametersLookup[
+      SequencerSynchronizerParameters
+    ],
     timeouts: ProcessingTimeout,
     eventValidatorFactory: SequencedEventValidatorFactory,
     clock: Clock,
@@ -1460,7 +1459,7 @@ class SequencerClientImplPekko[E: Pretty](
       config,
       testingConfig,
       protocolVersion,
-      domainParametersLookup,
+      synchronizerParametersLookup,
       timeouts,
       clock,
       requestSigner,
@@ -1623,7 +1622,10 @@ class SequencerClientImplPekko[E: Pretty](
           .via(batchFlow)
           .mapAsync(parallelism = 1) { controlOrEvent =>
             controlOrEvent.traverse(tracedEvents =>
-              sendTracker.update(tracedEvents.value).map((_: Unit) => tracedEvents)
+              sendTracker
+                .update(tracedEvents.value)
+                .failOnShutdownToAbortException("SequencerClientImplPekko")
+                .map((_: Unit) => tracedEvents)
             )
           }
           .map(_.map(eventBatch => WithPromise(eventBatch)()))
@@ -1915,28 +1917,6 @@ object SequencerClient {
 
     case object BecamePassive extends CloseReason
   }
-
-  /** Hook for informing tests about replay statistics.
-    *
-    * If a [[SequencerClient]] is used with
-    * [[transports.replay.ReplayingEventsSequencerClientTransport]], the transport
-    * will add a statistics to this queue whenever a replay attempt has completed successfully.
-    *
-    * A test can poll this statistics from the queue to determine whether the replay has completed and to
-    * get statistics on the replay.
-    *
-    * LIMITATION: This is only suitable for manual / sequential test setups, as the statistics are shared through
-    * a global queue.
-    */
-  @VisibleForTesting
-  lazy val replayStatistics: BlockingQueue[ReplayStatistics] = new LinkedBlockingQueue()
-
-  final case class ReplayStatistics(
-      inputPath: Path,
-      numberOfEvents: Int,
-      startTime: CantonTimestamp,
-      duration: JDuration,
-  )
 
   /** Utility to add retries around sends as an attempt to guarantee the send is eventually sequenced.
     */

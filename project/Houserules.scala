@@ -42,6 +42,7 @@ object JvmRulesPlugin extends AutoPlugin {
       HeaderFileType.scala -> HeaderCommentStyle.cppStyleLineComment,
       HeaderFileType.sh -> HeaderCommentStyle.hashLineComment,
       HeaderFileType("rst") -> dotCommentStyle,
+      HeaderFileType("py") -> HeaderCommentStyle.hashLineComment,
     ),
   )
 

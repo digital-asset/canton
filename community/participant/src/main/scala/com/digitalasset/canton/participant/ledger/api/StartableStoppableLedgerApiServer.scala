@@ -235,6 +235,8 @@ class StartableStoppableLedgerApiServer(
       indexService <- new IndexServiceOwner(
         dbSupport = dbSupport,
         config = indexServiceConfig,
+        experimentalEnableTopologyEvents =
+          config.cantonParameterConfig.experimentalEnableTopologyEvents,
         participantId = config.participantId,
         metrics = config.metrics,
         inMemoryState = inMemoryState,
@@ -344,7 +346,7 @@ class StartableStoppableLedgerApiServer(
         telemetry = telemetry,
         loggerFactory = loggerFactory,
         authenticateContract = authenticateContract,
-        dynParamGetter = config.syncService.dynamicDomainParameterGetter,
+        dynParamGetter = config.syncService.dynamicSynchronizerParameterGetter,
         interactiveSubmissionServiceConfig = config.serverConfig.interactiveSubmissionService,
         lfValueTranslation = lfValueTranslationForInteractiveSubmission,
         keepAlive = config.serverConfig.keepAliveServer,

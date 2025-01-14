@@ -44,17 +44,16 @@ import SequencedSubmissionsValidator.SequencedSubmissionsValidationResult
 
 /** Processes a chunk of events in a block, yielding a [[ChunkUpdate]].
   */
-private[update] final class BlockChunkProcessor(
+final class BlockChunkProcessor(
     synchronizerId: SynchronizerId,
     protocolVersion: ProtocolVersion,
-    domainSyncCryptoApi: SynchronizerSyncCryptoClient,
+    synchronizerSyncCryptoApi: SynchronizerSyncCryptoClient,
     sequencerId: SequencerId,
     rateLimitManager: SequencerRateLimitManager,
     orderingTimeFixMode: OrderingTimeFixMode,
     override val loggerFactory: NamedLoggerFactory,
     metrics: SequencerMetrics,
     memberValidator: SequencerMemberValidator,
-    createTopologyTickMessageId: () => MessageId = () => MessageId.randomMessageId(), // For testing
 )(implicit closeContext: CloseContext)
     extends NamedLogging {
 
@@ -62,7 +61,7 @@ private[update] final class BlockChunkProcessor(
     new SequencedSubmissionsValidator(
       synchronizerId,
       protocolVersion,
-      domainSyncCryptoApi,
+      synchronizerSyncCryptoApi,
       sequencerId,
       rateLimitManager,
       loggerFactory,
@@ -199,8 +198,8 @@ private[update] final class BlockChunkProcessor(
     // We bypass validation here to make sure that the topology tick is always received by the sequencer runtime.
     for {
       snapshot <-
-        SyncCryptoClient.getSnapshotForTimestampUS(
-          domainSyncCryptoApi,
+        SyncCryptoClient.getSnapshotForTimestamp(
+          synchronizerSyncCryptoApi,
           tickSequencingTimestamp,
           state.latestSequencerEventTimestamp,
           protocolVersion,
@@ -227,7 +226,7 @@ private[update] final class BlockChunkProcessor(
           outcome = SubmissionOutcome.Deliver(
             SubmissionRequest.tryCreate(
               sender = sequencerId,
-              messageId = createTopologyTickMessageId(),
+              messageId = MessageId.tryCreate(s"topology-tick-$height"),
               batch = Batch.empty(protocolVersion),
               maxSequencingTime = tickSequencingTimestamp,
               topologyTimestamp = None,
@@ -335,7 +334,7 @@ private[update] final class BlockChunkProcessor(
               topologyTimestamp =>
                 SequencedEventValidator
                   .validateTopologyTimestampUS(
-                    domainSyncCryptoApi,
+                    synchronizerSyncCryptoApi,
                     topologyTimestamp,
                     sequencingTimestamp,
                     latestSequencerEventTimestamp,
@@ -350,8 +349,8 @@ private[update] final class BlockChunkProcessor(
                         sequencingTimestamp,
                       )
                     case SequencedEventValidator.TopologyTimestampTooOld(_) |
-                        SequencedEventValidator.NoDynamicDomainParameters(_) =>
-                      SequencerErrors.TopoologyTimestampTooEarly(
+                        SequencedEventValidator.NoDynamicSynchronizerParameters(_) =>
+                      SequencerErrors.TopologyTimestampTooEarly(
                         topologyTimestamp,
                         sequencingTimestamp,
                       )
@@ -369,8 +368,8 @@ private[update] final class BlockChunkProcessor(
                 FutureUnlessShutdown.pure(topologySnapshot)
               case _ =>
                 SyncCryptoClient
-                  .getSnapshotForTimestampUS(
-                    domainSyncCryptoApi,
+                  .getSnapshotForTimestamp(
+                    synchronizerSyncCryptoApi,
                     sequencingTimestamp,
                     latestSequencerEventTimestamp,
                     protocolVersion,
@@ -405,8 +404,8 @@ private[update] final class BlockChunkProcessor(
     (Map[Member, CantonTimestamp], Seq[(Member, CantonTimestamp, BaseAlarm)])
   ] =
     for {
-      snapshot <- SyncCryptoClient.getSnapshotForTimestampUS(
-        domainSyncCryptoApi,
+      snapshot <- SyncCryptoClient.getSnapshotForTimestamp(
+        synchronizerSyncCryptoApi,
         state.lastBlockTs,
         state.latestSequencerEventTimestamp,
         protocolVersion,

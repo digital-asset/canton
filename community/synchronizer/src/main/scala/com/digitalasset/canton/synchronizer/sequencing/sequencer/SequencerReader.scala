@@ -126,7 +126,7 @@ class SequencerReader(
         registeredMember.enabled,
         CreateSubscriptionError.MemberDisabled(member): CreateSubscriptionError,
       )
-      // We use the sequencing time of the topology transaction that registered the member on the domain
+      // We use the sequencing time of the topology transaction that registered the member on the synchronizer
       // as the latestTopologyClientRecipientTimestamp
       memberOnboardingTxSequencingTime <- EitherT.right(
         syncCryptoApi.headSnapshot.ipsSnapshot
@@ -269,7 +269,7 @@ class SequencerReader(
           .fromOption[FutureUnlessShutdown](topologySnapshotO)
           .getOrElseF {
             val warnIfApproximate = event.counter > SequencerCounter.Genesis
-            SyncCryptoClient.getSnapshotForTimestampUS(
+            SyncCryptoClient.getSnapshotForTimestamp(
               syncCryptoApi,
               event.timestamp,
               previousTopologyClientTimestamp,
@@ -448,7 +448,7 @@ class SequencerReader(
                 (
                   topologyTimestamp,
                   SequencedEventValidator.TopologyTimestampTooOld(_) |
-                  SequencedEventValidator.NoDynamicDomainParameters(_),
+                  SequencedEventValidator.NoDynamicSynchronizerParameters(_),
                 )
               )
             ) =>
@@ -459,7 +459,7 @@ class SequencerReader(
           // This way, we can avoid revalidating the skipped events after the checkpoint we resubscribe from.
           val event = if (registeredMember.memberId == unvalidatedEvent.event.sender) {
             val error =
-              SequencerErrors.TopoologyTimestampTooEarly(
+              SequencerErrors.TopologyTimestampTooEarly(
                 topologyTimestamp,
                 unvalidatedEvent.timestamp,
               )

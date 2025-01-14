@@ -136,7 +136,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
       )
     )
 
-  private val domainParamsLookup
+  private val synchronizerParamsLookup
       : DynamicSynchronizerParametersLookup[SequencerSynchronizerParameters] =
     SynchronizerParametersLookup.forSequencerSynchronizerParameters(
       BaseTest.defaultStaticSynchronizerParameters,
@@ -176,7 +176,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
         loggerFactory,
       ),
       sequencerSubscriptionFactory,
-      domainParamsLookup,
+      synchronizerParamsLookup,
       params,
       topologyStateForInitializationService,
       BaseTest.testedProtocolVersion,
@@ -200,7 +200,6 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
           .map(_.map(_.fingerprint).toList)
           .onShutdown(throw new Exception("Aborted due to shutdown."))
       } yield v30.SequencerAuthentication.ChallengeResponse(
-        ReleaseVersion.current.toProtoPrimitive,
         Nonce.generate(cryptoApi.pureCrypto).toProtoPrimitive,
         fingerprints.map(_.unwrap),
       )

@@ -24,8 +24,8 @@ import com.digitalasset.canton.synchronizer.mediator.store.{
   MediatorState,
 }
 import com.digitalasset.canton.synchronizer.metrics.MediatorMetrics
-import com.digitalasset.canton.time.admin.v30.DomainTimeServiceGrpc
-import com.digitalasset.canton.time.{Clock, GrpcDomainTimeService, SynchronizerTimeTracker}
+import com.digitalasset.canton.time.admin.v30.SynchronizerTimeServiceGrpc
+import com.digitalasset.canton.time.{Clock, GrpcSynchronizerTimeService, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.TopologyTransactionProcessor
@@ -39,7 +39,7 @@ import scala.concurrent.ExecutionContext
 /** Mediator component and its supporting services */
 final class MediatorRuntime(
     val mediator: Mediator,
-    domainOutbox: SynchronizerOutboxHandle,
+    synchronizerOutbox: SynchronizerOutboxHandle,
     config: MediatorConfig,
     storage: Storage,
     clock: Clock,
@@ -57,9 +57,9 @@ final class MediatorRuntime(
     loggerFactory = loggerFactory,
   )
 
-  val timeService: ServerServiceDefinition = DomainTimeServiceGrpc.bindService(
-    GrpcDomainTimeService
-      .forDomainEntity(mediator.synchronizerId, mediator.timeTracker, loggerFactory),
+  val timeService: ServerServiceDefinition = SynchronizerTimeServiceGrpc.bindService(
+    GrpcSynchronizerTimeService
+      .forSynchronizerEntity(mediator.synchronizerId, mediator.timeTracker, loggerFactory),
     ec,
   )
   val administrationService: ServerServiceDefinition =
@@ -77,15 +77,15 @@ final class MediatorRuntime(
   ): EitherT[FutureUnlessShutdown, String, Unit] =
     for {
       _ <- EitherT.right(mediator.start())
-      // start the domainOutbox only after the mediator has been started, otherwise
+      // start the synchronizerOutbox only after the mediator has been started, otherwise
       // the future returned by startup will not be complete, because any topology transactions pushed to the
-      // domain aren't actually processed until after the runtime is up and ... running
-      _ <- domainOutbox.startup()
+      // synchronizer aren't actually processed until after the runtime is up and ... running
+      _ <- synchronizerOutbox.startup()
       _ <- EitherT.right(FutureUnlessShutdown.outcomeF(pruningScheduler.start()))
     } yield ()
 
   override protected def onClosed(): Unit =
-    LifeCycle.close(pruningScheduler, domainOutbox, mediator)(logger)
+    LifeCycle.close(pruningScheduler, synchronizerOutbox, mediator)(logger)
 }
 
 object MediatorRuntimeFactory {
@@ -100,7 +100,7 @@ object MediatorRuntimeFactory {
       topologyClient: SynchronizerTopologyClientWithInit,
       topologyTransactionProcessor: TopologyTransactionProcessor,
       topologyManagerStatus: TopologyManagerStatus,
-      domainOutboxFactory: SynchronizerOutboxFactory,
+      synchronizerOutboxFactory: SynchronizerOutboxFactory,
       timeTracker: SynchronizerTimeTracker,
       nodeParameters: CantonNodeParameters,
       protocolVersion: ProtocolVersion,
@@ -139,7 +139,7 @@ object MediatorRuntimeFactory {
         loggerFactory,
       )
 
-    val domainOutbox = domainOutboxFactory.create(
+    val synchronizerOutbox = synchronizerOutboxFactory.create(
       protocolVersion,
       topologyClient,
       sequencerClient,
@@ -154,7 +154,7 @@ object MediatorRuntimeFactory {
       syncCrypto,
       topologyTransactionProcessor,
       topologyManagerStatus,
-      domainOutbox,
+      synchronizerOutbox,
       timeTracker,
       state,
       sequencerCounterTrackerStore,
@@ -169,7 +169,7 @@ object MediatorRuntimeFactory {
     EitherT.pure[FutureUnlessShutdown, String](
       new MediatorRuntime(
         mediator,
-        domainOutbox,
+        synchronizerOutbox,
         config,
         storage,
         clock,

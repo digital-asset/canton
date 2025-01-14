@@ -46,8 +46,8 @@ import com.digitalasset.canton.sequencing.client.{
   SequencerClientImplPekko,
 }
 import com.digitalasset.canton.store.{
-  IndexedDomain,
   IndexedStringStore,
+  IndexedSynchronizer,
   SendTrackerStore,
   SequencedEventStore,
 }
@@ -67,8 +67,8 @@ import com.digitalasset.canton.synchronizer.sequencing.config.{
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.*
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.store.{
-  SequencerDomainConfiguration,
-  SequencerDomainConfigurationStore,
+  SequencerSynchronizerConfiguration,
+  SequencerSynchronizerConfigurationStore,
 }
 import com.digitalasset.canton.synchronizer.sequencing.service.{
   GrpcSequencerInitializationService,
@@ -269,15 +269,13 @@ class SequencerNodeBootstrap(
           .discard
       }
 
-    private val domainConfigurationStore =
-      SequencerDomainConfigurationStore(storage, timeouts, loggerFactory)
+    private val synchronizerConfigurationStore =
+      SequencerSynchronizerConfigurationStore(storage, timeouts, loggerFactory)
 
     override protected def stageCompleted(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Option[StageResult]] =
-      domainConfigurationStore.fetchConfiguration
-        .mapK(FutureUnlessShutdown.outcomeK)
-        .toOption
+      synchronizerConfigurationStore.fetchConfiguration.toOption
         .map {
           case Some(existing) =>
             Some(
@@ -315,15 +313,14 @@ class SequencerNodeBootstrap(
         staticSynchronizerParameters: StaticSynchronizerParameters,
     ): EitherT[FutureUnlessShutdown, String, Unit] = {
       logger.info(s"Finalizing initialization for synchronizer $synchronizerId")
-      domainConfigurationStore
+      synchronizerConfigurationStore
         .saveConfiguration(
-          SequencerDomainConfiguration(
+          SequencerSynchronizerConfiguration(
             synchronizerId,
             staticSynchronizerParameters,
           )
         )
         .leftMap(e => s"Unable to save parameters: ${e.toString}")
-        .mapK(FutureUnlessShutdown.outcomeK)
     }
 
     private def createSynchronizerTopologyStore(
@@ -500,12 +497,12 @@ class SequencerNodeBootstrap(
         )
         addCloseable(indexedStringStore)
         for {
-          indexedDomain <- EitherT.right[String](
-            IndexedDomain.indexed(indexedStringStore)(synchronizerId)
+          indexedSynchronizer <- EitherT.right[String](
+            IndexedSynchronizer.indexed(indexedStringStore)(synchronizerId)
           )
           sequencedEventStore = SequencedEventStore(
             storage,
-            indexedDomain,
+            indexedSynchronizer,
             staticSynchronizerParameters.protocolVersion,
             timeouts,
             loggerFactory,
@@ -518,8 +515,10 @@ class SequencerNodeBootstrap(
               case Some((initialTopologyTransactions, sequencerSnapshot)) =>
                 val topologySnapshotValidator = new InitialTopologySnapshotValidator(
                   synchronizerId,
+                  staticSynchronizerParameters.protocolVersion,
                   new SynchronizerCryptoPureApi(staticSynchronizerParameters, crypto.pureCrypto),
                   synchronizerTopologyStore,
+                  config.topology.insecureIgnoreMissingExtraKeySignaturesInInitialSnapshot,
                   parameters.processingTimeouts,
                   loggerFactory,
                 )
@@ -734,7 +733,7 @@ class SequencerNodeBootstrap(
             config.publicApi,
             timeTracker,
             arguments.metrics,
-            indexedDomain,
+            indexedSynchronizer,
             syncCrypto,
             synchronizerTopologyManager,
             synchronizerTopologyStore,

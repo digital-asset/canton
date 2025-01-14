@@ -31,7 +31,6 @@ import com.digitalasset.canton.store.db.DbSequencedEventStore.SequencedEventDbTy
 import com.digitalasset.canton.store.memory.InMemorySequencedEventStore
 import com.digitalasset.canton.tracing.{HasTraceContext, SerializableTraceContext, TraceContext}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.ExecutionContext
 
@@ -95,7 +94,6 @@ trait SequencedEventStore extends PrunableByTime with NamedLogging with AutoClos
 
   /** Deletes all events with sequencer counter greater than or equal to `from`.
     */
-  @VisibleForTesting
   private[canton] def delete(fromInclusive: SequencerCounter)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
@@ -120,7 +118,7 @@ object SequencedEventStore {
 
   def apply[Env <: Envelope[_]](
       storage: Storage,
-      indexedDomain: IndexedDomain,
+      indexedSynchronizer: IndexedSynchronizer,
       protocolVersion: ProtocolVersion,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -130,7 +128,7 @@ object SequencedEventStore {
       case dbStorage: DbStorage =>
         new DbSequencedEventStore(
           dbStorage,
-          indexedDomain,
+          indexedSynchronizer,
           protocolVersion,
           timeouts,
           loggerFactory,

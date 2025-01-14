@@ -14,7 +14,7 @@ import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong}
 import com.digitalasset.canton.crypto.SyncCryptoApiProvider
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond, Offset}
-import com.digitalasset.canton.ledger.participant.state.{DomainIndex, RequestIndex}
+import com.digitalasset.canton.ledger.participant.state.{RequestIndex, SynchronizerIndex}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcUSExtended
@@ -28,10 +28,10 @@ import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervals
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.ActiveContractStore.ActivenessChangeDetail
 import com.digitalasset.canton.participant.sync.{
-  ConnectedDomainsLookup,
-  SyncDomainPersistentStateManager,
+  ConnectedSynchronizersLookup,
+  SyncPersistentStateManager,
 }
-import com.digitalasset.canton.platform.store.backend.EventStorageBackend.DomainOffset
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SynchronizerOffset
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.messages.CommitmentPeriodState.{
   Matched,
@@ -39,8 +39,8 @@ import com.digitalasset.canton.protocol.messages.CommitmentPeriodState.{
 }
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId, SerializableContract}
 import com.digitalasset.canton.pruning.{
-  ConfigForDomainThresholds,
   ConfigForSlowCounterParticipants,
+  ConfigForSynchronizerThresholds,
   CounterParticipantIntervalsBehind,
   PruningStatus,
 }
@@ -93,11 +93,11 @@ object JournalGarbageCollectorControl {
 
 /** Implements inspection functions for the sync state of a participant node */
 final class SyncStateInspection(
-    syncDomainPersistentStateManager: SyncDomainPersistentStateManager,
+    syncPersistentStateManager: SyncPersistentStateManager,
     participantNodePersistentState: Eval[ParticipantNodePersistentState],
     timeouts: ProcessingTimeout,
     journalCleaningControl: JournalGarbageCollectorControl,
-    connectedDomainsLookup: ConnectedDomainsLookup,
+    connectedSynchronizersLookup: ConnectedSynchronizersLookup,
     syncCrypto: SyncCryptoApiProvider,
     participantId: ParticipantId,
     futureSupervisor: FutureSupervisor,
@@ -109,29 +109,29 @@ final class SyncStateInspection(
 
   private lazy val sortedReconciliationIntervalsProviderFactory =
     new SortedReconciliationIntervalsProviderFactory(
-      syncDomainPersistentStateManager,
+      syncPersistentStateManager,
       futureSupervisor,
       loggerFactory,
     )
 
-  /** Look up all unpruned state changes of a set of contracts on all domains.
+  /** Look up all unpruned state changes of a set of contracts on all synchronizers.
     * If a contract is not found in an available ACS it will be omitted from the response.
     */
-  def lookupContractDomains(
+  def lookupContractSynchronizers(
       contractIds: Set[LfContractId]
   )(implicit
       traceContext: TraceContext
-  ): Future[
+  ): FutureUnlessShutdown[
     Map[SynchronizerId, SortedMap[LfContractId, Seq[(CantonTimestamp, ActivenessChangeDetail)]]]
   ] =
-    syncDomainPersistentStateManager.getAll.toList
+    syncPersistentStateManager.getAll.toList
       .map { case (id, state) =>
         state.activeContractStore.activenessOf(contractIds.toSeq).map(s => id -> s)
       }
       .sequence
       .map(_.toMap)
 
-  /** Returns the potentially large ACS of a given domain
+  /** Returns the potentially large ACS of a given synchronizer
     * containing a map of contract IDs to tuples containing the latest activation timestamp and the contract reassignment counter
     */
   def findAcs(
@@ -144,9 +144,9 @@ final class SyncStateInspection(
   ]] =
     for {
       state <- EitherT.fromEither[FutureUnlessShutdown](
-        syncDomainPersistentStateManager
+        syncPersistentStateManager
           .getByAlias(synchronizerAlias)
-          .toRight(SyncStateInspection.NoSuchDomain(synchronizerAlias))
+          .toRight(SyncStateInspection.NoSuchSynchronizer(synchronizerAlias))
       )
 
       snapshotO <- EitherT.right(state.acsInspection.getCurrentSnapshot().map(_.map(_.snapshot)))
@@ -164,7 +164,7 @@ final class SyncStateInspection(
   )(implicit traceContext: TraceContext): List[(Boolean, SerializableContract)] =
     getOrFail(
       timeouts.inspection.await("findContracts") {
-        syncDomainPersistentStateManager
+        syncPersistentStateManager
           .getByAlias(synchronizerAlias)
           .traverse(_.acsInspection.findContracts(filterId, filterPackage, filterTemplate, limit))
           .failOnShutdownToAbortException("findContracts")
@@ -179,22 +179,22 @@ final class SyncStateInspection(
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[LfContractId, SerializableContract]] = {
-    val synchronizerAlias = syncDomainPersistentStateManager
+    val synchronizerAlias = syncPersistentStateManager
       .aliasForSynchronizerId(synchronizerId)
-      .getOrElse(throw new IllegalArgumentException(s"no such domain [$synchronizerId]"))
+      .getOrElse(throw new IllegalArgumentException(s"no such synchronizer [$synchronizerId]"))
 
     NonEmpty.from(contractIds) match {
       case None =>
         FutureUnlessShutdown.pure(Map.empty[LfContractId, SerializableContract])
       case Some(neCids) =>
-        val domainAcsInspection =
+        val synchronizerAcsInspection =
           getOrFail(
-            syncDomainPersistentStateManager
+            syncPersistentStateManager
               .get(synchronizerId),
             synchronizerAlias,
           ).acsInspection
 
-        domainAcsInspection.findContractPayloads(
+        synchronizerAcsInspection.findContractPayloads(
           neCids,
           limit,
         )
@@ -210,7 +210,7 @@ final class SyncStateInspection(
   )(implicit traceContext: TraceContext): Map[LfContractId, Seq[ReassignmentId]] =
     timeouts.inspection
       .awaitUS(functionFullName) {
-        syncDomainPersistentStateManager
+        syncPersistentStateManager
           .get(targetSynchronizerId)
           .traverse(
             _.reassignmentStore.findContractReassignmentId(
@@ -222,7 +222,9 @@ final class SyncStateInspection(
           )
       }
       .asGrpcResponse
-      .getOrElse(throw new IllegalArgumentException(s"no such domain [$targetSynchronizerId]"))
+      .getOrElse(
+        throw new IllegalArgumentException(s"no such synchronizer [$targetSynchronizerId]")
+      )
 
   @VisibleForTesting
   def acsPruningStatus(
@@ -238,13 +240,13 @@ final class SyncStateInspection(
       .asGrpcResponse
 
   private def disableJournalCleaningForFilter(
-      domains: Map[SynchronizerId, SyncDomainPersistentState],
+      synchronizers: Map[SynchronizerId, SyncPersistentState],
       filterSynchronizerId: SynchronizerId => Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, AcsInspectionError, Unit] = {
     val disabledCleaningF = Future
-      .sequence(domains.collect {
+      .sequence(synchronizers.collect {
         case (synchronizerId, _) if filterSynchronizerId(synchronizerId) =>
           journalCleaningControl.disable(synchronizerId)
       })
@@ -253,7 +255,7 @@ final class SyncStateInspection(
   }
 
   def allProtocolVersions: Map[SynchronizerId, ProtocolVersion] =
-    syncDomainPersistentStateManager.getAll.view
+    syncPersistentStateManager.getAll.view
       .mapValues(_.staticSynchronizerParameters.protocolVersion)
       .toMap
 
@@ -262,22 +264,22 @@ final class SyncStateInspection(
       filterSynchronizerId: SynchronizerId => Boolean,
       parties: Set[LfPartyId],
       timestamp: Option[CantonTimestamp],
-      contractDomainRenames: Map[SynchronizerId, (SynchronizerId, ProtocolVersion)],
+      contractSynchronizerRenames: Map[SynchronizerId, (SynchronizerId, ProtocolVersion)],
       skipCleanTimestampCheck: Boolean,
       partiesOffboarding: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, AcsInspectionError, Unit] = {
-    val allDomains = syncDomainPersistentStateManager.getAll
+    val allSynchronizers = syncPersistentStateManager.getAll
 
     // disable journal cleaning for the duration of the dump
-    disableJournalCleaningForFilter(allDomains, filterSynchronizerId)
+    disableJournalCleaningForFilter(allSynchronizers, filterSynchronizerId)
       .mapK(FutureUnlessShutdown.outcomeK)
       .flatMap { _ =>
-        MonadUtil.sequentialTraverse_(allDomains) {
+        MonadUtil.sequentialTraverse_(allSynchronizers) {
           case (synchronizerId, state) if filterSynchronizerId(synchronizerId) =>
             val (synchronizerIdForExport, protocolVersion) =
-              contractDomainRenames.getOrElse(
+              contractSynchronizerRenames.getOrElse(
                 synchronizerId,
                 (synchronizerId, state.staticSynchronizerParameters.protocolVersion),
               )
@@ -314,11 +316,11 @@ final class SyncStateInspection(
               _ <- result match {
                 case Some((allStakeholders, snapshotTs)) if partiesOffboarding =>
                   for {
-                    syncDomain <- EitherT.fromOption[FutureUnlessShutdown](
-                      connectedDomainsLookup.get(synchronizerId),
+                    connectedSynchronizer <- EitherT.fromOption[FutureUnlessShutdown](
+                      connectedSynchronizersLookup.get(synchronizerId),
                       AcsInspectionError.OffboardingParty(
                         synchronizerId,
-                        s"Unable to get topology client for domain $synchronizerId; check domain connectivity.",
+                        s"Unable to get topology client for synchronizer $synchronizerId; check synchronizer connectivity.",
                       ),
                     )
 
@@ -327,7 +329,7 @@ final class SyncStateInspection(
                       offboardedParties = parties,
                       allStakeholders = allStakeholders,
                       snapshotTs = snapshotTs,
-                      topologyClient = syncDomain.topologyClient,
+                      topologyClient = connectedSynchronizer.topologyClient,
                     )
                   } yield ()
 
@@ -351,9 +353,9 @@ final class SyncStateInspection(
 
   def contractCountInAcs(synchronizerAlias: SynchronizerAlias, timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Future[Option[Int]] =
+  ): FutureUnlessShutdown[Option[Int]] =
     getPersistentState(synchronizerAlias) match {
-      case None => Future.successful(None)
+      case None => FutureUnlessShutdown.pure(None)
       case Some(state) => state.activeContractStore.contractCount(timestamp).map(Some(_))
     }
 
@@ -379,14 +381,14 @@ final class SyncStateInspection(
   ): FutureUnlessShutdown[Set[(LfContractId, ReassignmentCounter)]] =
     for {
       state <- FutureUnlessShutdown.fromTry(
-        syncDomainPersistentStateManager
+        syncPersistentStateManager
           .get(synchronizerId)
           .toTry(
             new IllegalArgumentException(s"Unable to find contract store for $synchronizerId.")
           )
       )
 
-      snapshot <- FutureUnlessShutdown.outcomeF(state.activeContractStore.snapshot(timestamp))
+      snapshot <- state.activeContractStore.snapshot(timestamp)
 
       // check that the active contract store has not been pruned up to timestamp, otherwise the snapshot is inconsistent.
       pruningStatus <- state.activeContractStore.pruningStatus
@@ -394,13 +396,13 @@ final class SyncStateInspection(
         if (pruningStatus.exists(_.timestamp > timestamp)) {
           FutureUnlessShutdown.failed(
             new IllegalStateException(
-              s"Active contract store for domain $synchronizerId has been pruned up to ${pruningStatus
+              s"Active contract store for synchronizer $synchronizerId has been pruned up to ${pruningStatus
                   .map(_.lastSuccess)}, which is after the requested timestamp $timestamp"
             )
           )
         } else FutureUnlessShutdown.unit
 
-      contracts <- FutureUnlessShutdown.outcomeF(
+      contracts <-
         participantNodePersistentState.value.contractStore
           .lookupManyExistingUncached(snapshot.keys.toSeq)
           .valueOr { missingContractId =>
@@ -408,7 +410,6 @@ final class SyncStateInspection(
               s"Contract id $missingContractId is in the active contract store but its contents is not in the contract store"
             )
           }
-      )
 
       contractsWithReassignmentCounter = contracts.map(c => c -> snapshot(c.contractId)._2)
 
@@ -420,23 +421,23 @@ final class SyncStateInspection(
     } yield filteredByParty.toSet
 
   private def tryGetProtocolVersion(
-      state: SyncDomainPersistentState,
+      state: SyncPersistentState,
       synchronizerAlias: SynchronizerAlias,
   )(implicit traceContext: TraceContext): ProtocolVersion =
     timeouts.inspection
-      .await(functionFullName)(state.parameterStore.lastParameters)
-      .getOrElse(
+      .awaitUS(functionFullName)(state.parameterStore.lastParameters) match {
+      case UnlessShutdown.Outcome(Some(ssp)) => ssp.protocolVersion
+      case _ =>
         throw new IllegalStateException(
           s"No static synchronizer parameters found for $synchronizerAlias"
         )
-      )
-      .protocolVersion
+    }
 
   def getProtocolVersion(
       synchronizerAlias: SynchronizerAlias
-  )(implicit traceContext: TraceContext): Future[ProtocolVersion] =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[ProtocolVersion] =
     for {
-      param <- syncDomainPersistentStateManager
+      param <- syncPersistentStateManager
         .getByAlias(synchronizerAlias)
         .traverse(_.parameterStore.lastParameters)
     } yield {
@@ -546,19 +547,19 @@ final class SyncStateInspection(
       )
       .asGrpcResponse
 
-  def crossDomainSentCommitmentMessages(
-      domainPeriods: Seq[DomainSearchCommitmentPeriod],
+  def crossSynchronizerSentCommitmentMessages(
+      synchronizerPeriods: Seq[SynchronizerSearchCommitmentPeriod],
       counterParticipants: Seq[ParticipantId],
       states: Seq[CommitmentPeriodState],
       verbose: Boolean,
   )(implicit traceContext: TraceContext): Either[String, Iterable[SentAcsCommitment]] =
     timeouts.inspection
       .awaitUS(functionFullName) {
-        val searchResult = domainPeriods.map { dp =>
+        val searchResult = synchronizerPeriods.map { dp =>
           for {
-            synchronizerAlias <- syncDomainPersistentStateManager
-              .aliasForSynchronizerId(dp.indexedDomain.synchronizerId)
-              .toRight(s"No synchronizer alias found for ${dp.indexedDomain.synchronizerId}")
+            synchronizerAlias <- syncPersistentStateManager
+              .aliasForSynchronizerId(dp.indexedSynchronizer.synchronizerId)
+              .toRight(s"No synchronizer alias found for ${dp.indexedSynchronizer.synchronizerId}")
 
             persistentState <- getPersistentStateE(synchronizerAlias)
 
@@ -590,7 +591,13 @@ final class SyncStateInspection(
                     }
                 }
             } yield SentAcsCommitment
-              .compare(dp.indexedDomain.synchronizerId, computed, received, outstanding, verbose)
+              .compare(
+                dp.indexedSynchronizer.synchronizerId,
+                computed,
+                received,
+                outstanding,
+                verbose,
+              )
               .filter(cmt => states.isEmpty || states.contains(cmt.state))
           } yield result
         }
@@ -607,19 +614,19 @@ final class SyncStateInspection(
       }
       .asGrpcResponse
 
-  def crossDomainReceivedCommitmentMessages(
-      domainPeriods: Seq[DomainSearchCommitmentPeriod],
+  def crossSynchronizerReceivedCommitmentMessages(
+      synchronizerPeriods: Seq[SynchronizerSearchCommitmentPeriod],
       counterParticipants: Seq[ParticipantId],
       states: Seq[CommitmentPeriodState],
       verbose: Boolean,
   )(implicit traceContext: TraceContext): Either[String, Iterable[ReceivedAcsCommitment]] =
     timeouts.inspection
       .awaitUS(functionFullName) {
-        val searchResult = domainPeriods.map { dp =>
+        val searchResult = synchronizerPeriods.map { dp =>
           for {
-            synchronizerAlias <- syncDomainPersistentStateManager
-              .aliasForSynchronizerId(dp.indexedDomain.synchronizerId)
-              .toRight(s"No synchronizer alias found for ${dp.indexedDomain.synchronizerId}")
+            synchronizerAlias <- syncPersistentStateManager
+              .aliasForSynchronizerId(dp.indexedSynchronizer.synchronizerId)
+              .toRight(s"No synchronizer alias found for ${dp.indexedSynchronizer.synchronizerId}")
             persistentState <- getPersistentStateE(synchronizerAlias)
 
             result = for {
@@ -643,14 +650,14 @@ final class SyncStateInspection(
                 .peekThrough(dp.toInclusive) // peekThrough takes an upper bound parameter
                 .map(iter =>
                   iter.filter(cmt =>
-                    cmt.period.fromExclusive >= dp.fromExclusive && cmt.synchronizerId == dp.indexedDomain.synchronizerId && (counterParticipants.isEmpty ||
+                    cmt.period.fromExclusive >= dp.fromExclusive && cmt.synchronizerId == dp.indexedSynchronizer.synchronizerId && (counterParticipants.isEmpty ||
                       counterParticipants
                         .contains(cmt.sender))
                   )
                 )
             } yield ReceivedAcsCommitment
               .compare(
-                dp.indexedDomain.synchronizerId,
+                dp.indexedSynchronizer.synchronizerId,
                 received,
                 computed,
                 buffered,
@@ -717,41 +724,41 @@ final class SyncStateInspection(
   def lookupCleanRequestIndex(synchronizerAlias: SynchronizerAlias)(implicit
       traceContext: TraceContext
   ): Either[String, FutureUnlessShutdown[Option[RequestIndex]]] =
-    lookupCleanDomainIndex(synchronizerAlias)
+    lookupCleanSynchronizerIndex(synchronizerAlias)
       .map(_.map(_.flatMap(_.requestIndex)))
 
-  def lookupCleanDomainIndex(synchronizerAlias: SynchronizerAlias)(implicit
+  def lookupCleanSynchronizerIndex(synchronizerAlias: SynchronizerAlias)(implicit
       traceContext: TraceContext
-  ): Either[String, FutureUnlessShutdown[Option[DomainIndex]]] =
+  ): Either[String, FutureUnlessShutdown[Option[SynchronizerIndex]]] =
     getPersistentStateE(synchronizerAlias)
       .map(state =>
         participantNodePersistentState.value.ledgerApiStore
-          .cleanDomainIndex(state.indexedDomain.synchronizerId)
+          .cleanSynchronizerIndex(state.indexedSynchronizer.synchronizerId)
       )
 
   def requestStateInJournal(rc: RequestCounter, synchronizerAlias: SynchronizerAlias)(implicit
       traceContext: TraceContext
-  ): Either[String, Future[Option[RequestJournal.RequestData]]] =
+  ): Either[String, FutureUnlessShutdown[Option[RequestJournal.RequestData]]] =
     getPersistentStateE(synchronizerAlias)
       .map(state => state.requestJournalStore.query(rc).value)
 
   private[this] def getPersistentState(
       synchronizerAlias: SynchronizerAlias
-  ): Option[SyncDomainPersistentState] =
-    syncDomainPersistentStateManager.getByAlias(synchronizerAlias)
+  ): Option[SyncPersistentState] =
+    syncPersistentStateManager.getByAlias(synchronizerAlias)
 
   private[this] def getPersistentStateE(
       synchronizerAlias: SynchronizerAlias
-  ): Either[String, SyncDomainPersistentState] =
-    syncDomainPersistentStateManager
+  ): Either[String, SyncPersistentState] =
+    syncPersistentStateManager
       .getByAlias(synchronizerAlias)
-      .toRight(s"no such domain [$synchronizerAlias]")
+      .toRight(s"no such synchronizer [$synchronizerAlias]")
 
   def getOffsetByTime(
       pruneUpTo: CantonTimestamp
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[Long]] =
     participantNodePersistentState.value.ledgerApiStore
-      .lastDomainOffsetBeforeOrAtPublicationTime(pruneUpTo)
+      .lastSynchronizerOffsetBeforeOrAtPublicationTime(pruneUpTo)
       .map(
         _.map(_.offset.unwrap)
       )
@@ -763,36 +770,38 @@ final class SyncStateInspection(
       offset <- EitherT.fromEither[FutureUnlessShutdown](
         Offset.fromLong(ledgerOffset)
       )
-      domainOffset <- EitherT(
+      synchronizerOffset <- EitherT(
         participantNodePersistentState.value.ledgerApiStore
-          .domainOffset(offset)
+          .synchronizerOffset(offset)
           .map(_.toRight(s"offset $ledgerOffset not found"))
       )
-    } yield CantonTimestamp(domainOffset.publicationTime)
+    } yield CantonTimestamp(synchronizerOffset.publicationTime)
 
   def getConfigsForSlowCounterParticipants()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[
-    (Seq[ConfigForSlowCounterParticipants], Seq[ConfigForDomainThresholds])
+    (Seq[ConfigForSlowCounterParticipants], Seq[ConfigForSynchronizerThresholds])
   ] =
     participantNodePersistentState.value.acsCounterParticipantConfigStore
       .fetchAllSlowCounterParticipantConfig()
 
   def getIntervalsBehindForParticipants(
-      domains: Seq[SynchronizerId],
+      synchronizers: Seq[SynchronizerId],
       participants: Seq[ParticipantId],
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Iterable[CounterParticipantIntervalsBehind]] = {
     val result = for {
-      (synchronizerId, syncDomain) <-
-        syncDomainPersistentStateManager.getAll
-          .filter { case (domain, _) => domains.contains(domain) || domains.isEmpty }
+      (synchronizerId, syncPersistentState) <-
+        syncPersistentStateManager.getAll
+          .filter { case (synchronizer, _) =>
+            synchronizers.contains(synchronizer) || synchronizers.isEmpty
+          }
     } yield for {
-      lastSent <- syncDomain.acsCommitmentStore.lastComputedAndSent(traceContext)
+      lastSent <- syncPersistentState.acsCommitmentStore.lastComputedAndSent(traceContext)
 
       lastSentFinal = lastSent.fold(CantonTimestamp.MinValue)(_.forgetRefinement)
-      outstanding <- syncDomain.acsCommitmentStore
+      outstanding <- syncPersistentState.acsCommitmentStore
         .outstanding(
           CantonTimestamp.MinValue,
           lastSentFinal,
@@ -800,12 +809,12 @@ final class SyncStateInspection(
           includeMatchedPeriods = true,
         )
 
-      upToDate <- syncDomain.acsCommitmentStore.searchReceivedBetween(
+      upToDate <- syncPersistentState.acsCommitmentStore.searchReceivedBetween(
         lastSentFinal,
         lastSentFinal,
       )
 
-      filteredAllParticipants <- findAllKnownParticipants(domains, participants)
+      filteredAllParticipants <- findAllKnownParticipants(synchronizers, participants)
       allParticipantIds = filteredAllParticipants.values.flatten.toSet
 
       matchedFilteredByYoungest = outstanding
@@ -825,7 +834,6 @@ final class SyncStateInspection(
               s"failed to retrieve reconciliationIntervalProvider: $string"
             )
           )
-          .mapK(FutureUnlessShutdown.outcomeK)
       )
       oldestOutstandingTimeOption = outstanding
         .filter { case (_, _, state) => state != CommitmentPeriodState.Matched }
@@ -882,7 +890,7 @@ final class SyncStateInspection(
 
   def addOrUpdateConfigsForSlowCounterParticipants(
       configs: Seq[ConfigForSlowCounterParticipants],
-      thresholds: Seq[ConfigForDomainThresholds],
+      thresholds: Seq[ConfigForSynchronizerThresholds],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     participantNodePersistentState.value.acsCounterParticipantConfigStore
       .createOrUpdateCounterParticipantConfigs(configs, thresholds)
@@ -897,7 +905,7 @@ final class SyncStateInspection(
         getPersistentState(synchronizerAlias)
           .toRight(s"Unknown synchronizer $synchronizerAlias")
       )
-      synchronizerId = state.indexedDomain.synchronizerId
+      synchronizerId = state.indexedSynchronizer.synchronizerId
       unsequencedSubmissions <- EitherT.right(
         participantNodePersistentState.value.inFlightSubmissionStore
           .lookupUnsequencedUptoUnordered(synchronizerId, CantonTimestamp.now())
@@ -919,12 +927,12 @@ final class SyncStateInspection(
       synchronizerAlias: SynchronizerAlias
   )(implicit traceContext: TraceContext): Int =
     getPersistentState(synchronizerAlias)
-      .map(domainPersistentState =>
+      .map(synchronizerPersistentState =>
         timeouts.inspection
           .awaitUS(functionFullName)(
             participantNodePersistentState.value.ledgerApiStore
               .onlyForTestingNumberOfAcceptedTransactionsFor(
-                domainPersistentState.indexedDomain.synchronizerId
+                synchronizerPersistentState.indexedSynchronizer.synchronizerId
               )
           )
           .onShutdown(0)
@@ -939,16 +947,16 @@ final class SyncStateInspection(
       )
       .onShutdown(throw new RuntimeException("onlyForTestingMoveLedgerEndBackToScratch"))
 
-  def lastDomainOffset(
+  def lastSynchronizerOffset(
       synchronizerId: SynchronizerId
-  )(implicit traceContext: TraceContext): Option[DomainOffset] =
+  )(implicit traceContext: TraceContext): Option[SynchronizerOffset] =
     participantNodePersistentState.value.ledgerApiStore
       .ledgerEndCache()
       .map(_.lastOffset)
       .flatMap(ledgerEnd =>
         timeouts.inspection
           .awaitUS(s"$functionFullName")(
-            participantNodePersistentState.value.ledgerApiStore.lastDomainOffsetBeforeOrAt(
+            participantNodePersistentState.value.ledgerApiStore.lastSynchronizerOffsetBeforeOrAt(
               synchronizerId,
               ledgerEnd,
             )
@@ -965,30 +973,32 @@ final class SyncStateInspection(
 
   def getSequencerChannelClient(synchronizerId: SynchronizerId): Option[SequencerChannelClient] =
     for {
-      syncDomain <- connectedDomainsLookup.get(synchronizerId)
-      sequencerChannelClient <- syncDomain.synchronizerHandle.sequencerChannelClientO
+      connectedSynchronizer <- connectedSynchronizersLookup.get(synchronizerId)
+      sequencerChannelClient <- connectedSynchronizer.synchronizerHandle.sequencerChannelClientO
     } yield sequencerChannelClient
 
   def getAcsInspection(synchronizerId: SynchronizerId): Option[AcsInspection] =
-    connectedDomainsLookup
+    connectedSynchronizersLookup
       .get(synchronizerId)
-      .map(_.synchronizerHandle.domainPersistentState.acsInspection)
+      .map(_.synchronizerHandle.syncPersistentState.acsInspection)
 
   def findAllKnownParticipants(
-      domainFilter: Seq[SynchronizerId] = Seq.empty,
+      synchronizerFilter: Seq[SynchronizerId] = Seq.empty,
       participantFilter: Seq[ParticipantId] = Seq.empty,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[SynchronizerId, Set[ParticipantId]]] = {
     val result = for {
       (synchronizerId, _) <-
-        syncDomainPersistentStateManager.getAll.filter { case (synchronizerId, _) =>
-          domainFilter.contains(synchronizerId) || domainFilter.isEmpty
+        syncPersistentStateManager.getAll.filter { case (synchronizerId, _) =>
+          synchronizerFilter.contains(synchronizerId) || synchronizerFilter.isEmpty
         }
     } yield for {
       _ <- FutureUnlessShutdown.unit
-      domainTopoClient = syncCrypto.ips.tryForSynchronizer(synchronizerId)
-      ipsSnapshot <- domainTopoClient.awaitSnapshotUS(domainTopoClient.approximateTimestamp)
+      synchronizerTopoClient = syncCrypto.ips.tryForSynchronizer(synchronizerId)
+      ipsSnapshot <- synchronizerTopoClient.awaitSnapshot(
+        synchronizerTopoClient.approximateTimestamp
+      )
       allMembers <- ipsSnapshot.allMembers()
       allParticipants = allMembers
         .filter(_.code == ParticipantId.Code)
@@ -1000,16 +1010,16 @@ final class SyncStateInspection(
     FutureUnlessShutdown.sequence(result).map(_.toMap)
   }
 
-  def cleanSequencedEventStoreAboveCleanDomainIndex(synchronizerAlias: SynchronizerAlias)(implicit
-      traceContext: TraceContext
+  def cleanSequencedEventStoreAboveCleanSynchronizerIndex(synchronizerAlias: SynchronizerAlias)(
+      implicit traceContext: TraceContext
   ): Unit =
     getOrFail(
-      getPersistentState(synchronizerAlias).map { domainState =>
+      getPersistentState(synchronizerAlias).map { synchronizerState =>
         timeouts.inspection.await(functionFullName)(
           participantNodePersistentState.value.ledgerApiStore
-            .cleanDomainIndex(domainState.indexedDomain.synchronizerId)
-            .flatMap { domainIndexO =>
-              val nextSequencerCounter = domainIndexO
+            .cleanSynchronizerIndex(synchronizerState.indexedSynchronizer.synchronizerId)
+            .flatMap { synchronizerIndexO =>
+              val nextSequencerCounter = synchronizerIndexO
                 .flatMap(_.sequencerIndex)
                 .map(
                   _.counter.increment
@@ -1021,9 +1031,9 @@ final class SyncStateInspection(
               logger.info(
                 s"Deleting events from SequencedEventStore for synchronizer $synchronizerAlias fromInclusive $nextSequencerCounter"
               )
-              domainState.sequencedEventStore.delete(nextSequencerCounter)
+              synchronizerState.sequencedEventStore.delete(nextSequencerCounter)
             }
-            .failOnShutdownToAbortException("cleanSequencedEventStoreAboveCleanDomainIndex")
+            .failOnShutdownToAbortException("cleanSequencedEventStoreAboveCleanSynchronizerIndex")
         )
       },
       synchronizerAlias,
@@ -1033,7 +1043,8 @@ final class SyncStateInspection(
 object SyncStateInspection {
 
   sealed trait SyncStateInspectionError extends Product with Serializable
-  private final case class NoSuchDomain(alias: SynchronizerAlias) extends SyncStateInspectionError
+  private final case class NoSuchSynchronizer(alias: SynchronizerAlias)
+      extends SyncStateInspectionError
 
   private def getOrFail[T](opt: Option[T], synchronizerAlias: SynchronizerAlias): T =
     opt.getOrElse(throw new IllegalArgumentException(s"no such synchronizer [$synchronizerAlias]"))

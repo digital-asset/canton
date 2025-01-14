@@ -30,7 +30,13 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils, MonadUtil, ResourceUtil}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{LfPartyId, SequencerCounter, SynchronizerAlias, protocol}
+import com.digitalasset.canton.{
+  LfPartyId,
+  ReassignmentCounter,
+  SequencerCounter,
+  SynchronizerAlias,
+  protocol,
+}
 import com.google.protobuf.ByteString
 import io.grpc.stub.StreamObserver
 
@@ -48,7 +54,7 @@ final class GrpcParticipantRepairService(
     extends ParticipantRepairServiceGrpc.ParticipantRepairService
     with NamedLogging {
 
-  private val domainMigrationInProgress = new AtomicReference[Boolean](false)
+  private val synchronizerMigrationInProgress = new AtomicReference[Boolean](false)
 
   private val processingTimeout: ProcessingTimeout = parameters.processingTimeouts
 
@@ -121,7 +127,7 @@ final class GrpcParticipantRepairService(
               _.filterString.startsWith(request.filterSynchronizerId),
               validRequest.parties,
               validRequest.timestamp,
-              validRequest.contractDomainRenames,
+              validRequest.contractSynchronizerRenames,
               skipCleanTimestampCheck = validRequest.force,
               partiesOffboarding = validRequest.partiesOffboarding,
             )
@@ -281,19 +287,21 @@ final class GrpcParticipantRepairService(
       )
     } yield ()
 
-  override def migrateDomain(request: MigrateDomainRequest): Future[MigrateDomainResponse] = {
+  override def migrateSynchronizer(
+      request: MigrateSynchronizerRequest
+  ): Future[MigrateSynchronizerResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
     // ensure here we don't process migration requests concurrently
-    if (!domainMigrationInProgress.getAndSet(true)) {
-      val migratedSourceDomain = for {
+    if (!synchronizerMigrationInProgress.getAndSet(true)) {
+      val migratedSourceSynchronizer = for {
         sourceSynchronizerAlias <- EitherT.fromEither[Future](
-          SynchronizerAlias.create(request.sourceAlias).map(Source(_))
+          SynchronizerAlias.create(request.sourceSynchronizerAlias).map(Source(_))
         )
         conf <- EitherT
           .fromEither[Future](
-            request.targetDomainConnectionConfig
-              .toRight("The target domain connection configuration is required")
+            request.targetSynchronizerConnectionConfig
+              .toRight("The target synchronizer connection configuration is required")
               .flatMap(
                 SynchronizerConnectionConfig.fromProtoV30(_).leftMap(_.toString)
               )
@@ -301,37 +309,109 @@ final class GrpcParticipantRepairService(
           )
         _ <- EitherT(
           sync
-            .migrateDomain(sourceSynchronizerAlias, conf, force = request.force)
+            .migrateSynchronizer(sourceSynchronizerAlias, conf, force = request.force)
             .leftMap(_.asGrpcError.getStatus.getDescription)
             .value
             .onShutdown {
               Left("Aborted due to shutdown.")
             }
         )
-      } yield MigrateDomainResponse()
+      } yield MigrateSynchronizerResponse()
 
       EitherTUtil
         .toFuture(
-          migratedSourceDomain.leftMap(err =>
+          migratedSourceSynchronizer.leftMap(err =>
             io.grpc.Status.CANCELLED.withDescription(err).asRuntimeException()
           )
         )
         .thereafter { _ =>
-          domainMigrationInProgress.set(false)
+          synchronizerMigrationInProgress.set(false)
         }
     } else
       Future.failed(
         io.grpc.Status.ABORTED
           .withDescription(
-            s"migrate_domain for participant: ${sync.participantId} is already in progress"
+            s"migrate_synchronizer for participant: ${sync.participantId} is already in progress"
           )
           .asRuntimeException()
       )
   }
 
-  override def purgeDeactivatedDomain(
-      request: PurgeDeactivatedDomainRequest
-  ): Future[PurgeDeactivatedDomainResponse] = {
+  override def changeAssignation(
+      request: ChangeAssignationRequest
+  ): Future[ChangeAssignationResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    def synchronizerIdFromAlias(
+        synchronizerAliasP: String
+    ): EitherT[FutureUnlessShutdown, RepairServiceError, SynchronizerId] =
+      for {
+        alias <- EitherT
+          .fromEither[FutureUnlessShutdown](SynchronizerAlias.create(synchronizerAliasP))
+          .leftMap(err =>
+            RepairServiceError.InvalidArgument
+              .Error(s"Unable to parse $synchronizerAliasP as synchronizer alias: $err")
+          )
+
+        id <- EitherT.fromEither[FutureUnlessShutdown](
+          sync.aliasManager
+            .synchronizerIdForAlias(alias)
+            .toRight[RepairServiceError](
+              RepairServiceError.InvalidArgument
+                .Error(s"Unable to find synchronizer id for alias $alias")
+            )
+        )
+      } yield id
+
+    val result = for {
+      sourceSynchronizerId <- synchronizerIdFromAlias(request.sourceSynchronizerAlias).map(
+        Source(_)
+      )
+      targetSynchronizerId <- synchronizerIdFromAlias(request.targetSynchronizerAlias).map(
+        Target(_)
+      )
+
+      contracts <- EitherT.fromEither[FutureUnlessShutdown](request.contracts.traverse {
+        case ChangeAssignationRequest.Contract(cidP, reassignmentCounterPO) =>
+          val reassignmentCounter = reassignmentCounterPO.map(ReassignmentCounter(_))
+
+          LfContractId
+            .fromString(cidP)
+            .leftMap[RepairServiceError](err =>
+              RepairServiceError.InvalidArgument.Error(s"Unable to parse contract id `$cidP`: $err")
+            )
+            .map((_, reassignmentCounter))
+      })
+
+      _ <- NonEmpty.from(contracts) match {
+        case None => EitherTUtil.unitUS[RepairServiceError]
+        case Some(contractsNE) =>
+          sync.repairService
+            .changeAssignation(
+              contracts = contractsNE,
+              sourceSynchronizer = sourceSynchronizerId,
+              targetSynchronizer = targetSynchronizerId,
+              skipInactive = request.skipInactive,
+              batchSize = batching.maxItemsInBatch,
+            )
+            .leftMap[RepairServiceError](RepairServiceError.ContractAssignationChangeError.Error(_))
+      }
+    } yield ()
+
+    EitherTUtil
+      .toFutureUnlessShutdown(
+        result.bimap(
+          _.asGrpcError,
+          _ => ChangeAssignationResponse(),
+        )
+      )
+      .asGrpcResponse
+
+  }
+
+  override def purgeDeactivatedSynchronizer(
+      request: PurgeDeactivatedSynchronizerRequest
+  ): Future[PurgeDeactivatedSynchronizerResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
     val res = for {
@@ -341,14 +421,14 @@ final class GrpcParticipantRepairService(
           .leftMap(_.toString)
           .leftMap(RepairServiceError.InvalidArgument.Error(_))
       )
-      _ <- sync.purgeDeactivatedDomain(synchronizerAlias).leftWiden[CantonError]
+      _ <- sync.purgeDeactivatedSynchronizer(synchronizerAlias).leftWiden[CantonError]
     } yield ()
 
     EitherTUtil
       .toFutureUnlessShutdown(
         res.bimap(
           _.asGrpcError,
-          _ => PurgeDeactivatedDomainResponse(),
+          _ => PurgeDeactivatedSynchronizerResponse(),
         )
       )
       .asGrpcResponse
@@ -416,13 +496,13 @@ final class GrpcParticipantRepairService(
       )
       sourceSynchronizerId <- EitherT.fromEither[FutureUnlessShutdown](
         SynchronizerId
-          .fromProtoPrimitive(request.source, "source")
+          .fromProtoPrimitive(request.sourceSynchronizerId, "source")
           .map(Source(_))
           .leftMap(_.message)
       )
       targetSynchronizerId <- EitherT.fromEither[FutureUnlessShutdown](
         SynchronizerId
-          .fromProtoPrimitive(request.target, "target")
+          .fromProtoPrimitive(request.targetSynchronizerId, "target")
           .map(Target(_))
           .leftMap(_.message)
       )
@@ -444,26 +524,29 @@ object GrpcParticipantRepairService {
 
   private object ValidExportAcsRequest {
 
-    private def validateContractDomainRenames(
-        contractDomainRenames: Map[String, ExportAcsRequest.TargetDomain],
+    private def validateContractSynchronizerRenames(
+        contractSynchronizerRenames: Map[String, ExportAcsRequest.TargetSynchronizer],
         allProtocolVersions: Map[SynchronizerId, ProtocolVersion],
     ): Either[String, List[(SynchronizerId, (SynchronizerId, ProtocolVersion))]] =
-      contractDomainRenames.toList.traverse {
-        case (source, ExportAcsRequest.TargetDomain(targetDomain, targetProtocolVersionRaw)) =>
+      contractSynchronizerRenames.toList.traverse {
+        case (
+              source,
+              ExportAcsRequest.TargetSynchronizer(targetSynchronizer, targetProtocolVersionRaw),
+            ) =>
           for {
             sourceId <- SynchronizerId
               .fromProtoPrimitive(source, "source synchronizer id")
               .leftMap(_.message)
 
             targetSynchronizerId <- SynchronizerId
-              .fromProtoPrimitive(targetDomain, "target synchronizer id")
+              .fromProtoPrimitive(targetSynchronizer, "target synchronizer id")
               .leftMap(_.message)
             targetProtocolVersion <- ProtocolVersion
               .fromProtoPrimitive(targetProtocolVersionRaw)
               .leftMap(_.toString)
 
             /*
-            The `targetProtocolVersion` should be the one running on the corresponding domain.
+            The `targetProtocolVersion` should be the one running on the corresponding synchronizer.
              */
             _ <- allProtocolVersions
               .get(targetSynchronizerId)
@@ -471,7 +554,7 @@ object GrpcParticipantRepairService {
                 Either.cond(
                   foundProtocolVersion == targetProtocolVersion,
                   (),
-                  s"Inconsistent protocol versions for domain $targetSynchronizerId: found version is $foundProtocolVersion, passed is $targetProtocolVersion",
+                  s"Inconsistent protocol versions for synchronizer $targetSynchronizerId: found version is $foundProtocolVersion, passed is $targetProtocolVersion",
                 )
               }
               .getOrElse(Either.unit)
@@ -490,14 +573,14 @@ object GrpcParticipantRepairService {
         timestamp <- request.timestamp
           .traverse(CantonTimestamp.fromProtoTimestamp)
           .leftMap(_.message)
-        contractDomainRenames <- validateContractDomainRenames(
-          request.contractDomainRenames,
+        contractSynchronizerRenames <- validateContractSynchronizerRenames(
+          request.contractSynchronizerRenames,
           allProtocolVersions,
         )
       } yield ValidExportAcsRequest(
         parties.toSet,
         timestamp,
-        contractDomainRenames.toMap,
+        contractSynchronizerRenames.toMap,
         force = request.force,
         partiesOffboarding = request.partiesOffboarding,
       )
@@ -516,7 +599,7 @@ object GrpcParticipantRepairService {
   private final case class ValidExportAcsRequest private (
       parties: Set[LfPartyId],
       timestamp: Option[CantonTimestamp],
-      contractDomainRenames: Map[SynchronizerId, (SynchronizerId, ProtocolVersion)],
+      contractSynchronizerRenames: Map[SynchronizerId, (SynchronizerId, ProtocolVersion)],
       force: Boolean, // if true, does not check whether `timestamp` is clean
       partiesOffboarding: Boolean,
   )

@@ -282,7 +282,7 @@ private[events] object TransactionLogUpdatesConversions {
         apiEvent.Event.Event.Archived(
           apiEvent.ArchivedEvent(
             offset = exercisedEvent.eventOffset.unwrap,
-            nodeId = exercisedEvent.nodeIndex,
+            nodeId = exercisedEvent.nodeId,
             contractId = exercisedEvent.contractId.coid,
             templateId = Some(LfEngineToApi.toApiIdentifier(exercisedEvent.templateId)),
             packageName = exercisedEvent.packageName,
@@ -515,7 +515,7 @@ private[events] object TransactionLogUpdatesConversions {
         TreeEvent.Kind.Exercised(
           apiEvent.ExercisedEvent(
             offset = exercisedEvent.eventOffset.unwrap,
-            nodeId = exercisedEvent.nodeIndex,
+            nodeId = exercisedEvent.nodeId,
             contractId = exercisedEvent.contractId.coid,
             templateId = Some(LfEngineToApi.toApiIdentifier(exercisedEvent.templateId)),
             packageName = exercisedEvent.packageName,
@@ -595,7 +595,7 @@ private[events] object TransactionLogUpdatesConversions {
       .map(apiContractData =>
         apiEvent.CreatedEvent(
           offset = createdEvent.eventOffset.unwrap,
-          nodeId = createdEvent.nodeIndex,
+          nodeId = createdEvent.nodeId,
           contractId = createdEvent.contractId.coid,
           templateId = Some(LfEngineToApi.toApiIdentifier(createdEvent.templateId)),
           packageName = createdEvent.packageName,
@@ -651,8 +651,8 @@ private[events] object TransactionLogUpdatesConversions {
         ).map(createdEvent =>
           ApiReassignment.Event.AssignedEvent(
             ApiAssignedEvent(
-              source = info.sourceDomain.unwrap.toProtoPrimitive,
-              target = info.targetDomain.unwrap.toProtoPrimitive,
+              source = info.sourceSynchronizer.unwrap.toProtoPrimitive,
+              target = info.targetSynchronizer.unwrap.toProtoPrimitive,
               unassignId = info.unassignId.toMicros.toString,
               submitter = info.submitter.getOrElse(""),
               reassignmentCounter = info.reassignmentCounter,
@@ -666,8 +666,8 @@ private[events] object TransactionLogUpdatesConversions {
         Future.successful(
           ApiReassignment.Event.UnassignedEvent(
             ApiUnassignedEvent(
-              source = info.sourceDomain.unwrap.toProtoPrimitive,
-              target = info.targetDomain.unwrap.toProtoPrimitive,
+              source = info.sourceSynchronizer.unwrap.toProtoPrimitive,
+              target = info.targetSynchronizer.unwrap.toProtoPrimitive,
               unassignId = info.unassignId.toMicros.toString,
               submitter = info.submitter.getOrElse(""),
               reassignmentCounter = info.reassignmentCounter,

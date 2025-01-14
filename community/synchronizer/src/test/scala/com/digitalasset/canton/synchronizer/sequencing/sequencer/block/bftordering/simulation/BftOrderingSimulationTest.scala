@@ -58,6 +58,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.flatspec.AnyFlatSpec
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.Random
@@ -139,19 +140,29 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BaseTest {
 
       var alreadyOnboardedPeerEndpoints = initialPeerEndpoints
       var alreadyOnboardedPeerEndpointsToTopologyData = initialPeerEndpointsToTopologyData
+      var alreadyOnboardedSequencerIdsToOnboardingTimes = initialSequencerIdsToOnboardingTimes
+      var alreadyOnboardedSequencerIdsToStores = initialSequencerIdsToStores
       var simulationAndModel: Option[(SimulationT, BftOrderingVerifier)] = None
 
       val clock = new SimClock(SimulationStartTime, loggerFactory)
 
-      generateStages().foreach {
-        case SimulationTestStage(numberOfRandomlyOnboardedPeers, simSettings) =>
+      val allEndpointsToTopologyDataCell =
+        new AtomicReference[Map[Endpoint, SimulationTopologyData]](Map.empty)
+      def getAllEndpointsToTopologyData = allEndpointsToTopologyDataCell.get()
+
+      val stages = generateStages()
+      val stagesCount = stages.size
+      stages.zipWithIndex.foreach {
+        case (SimulationTestStage(numberOfRandomlyOnboardedPeers, simSettings), idx) =>
           val stageStart = clock.now
+
+          logger.info(s"Starting stage ${idx + 1} (of $stagesCount) at $stageStart")
+
           val availabilityRandom = new Random(simSettings.localSettings.randomSeed)
 
           val newlyOnboardedPeerEndpoints =
             (firstNewlyOnboardedPeerIndex until firstNewlyOnboardedPeerIndex + numberOfRandomlyOnboardedPeers)
               .map(i => Endpoint(peerHostname(i), Port.tryCreate(0)))
-
           val newlyOnboardedPeersWithStores =
             newlyOnboardedPeerEndpoints.map(_ -> new SimulationOutputBlockMetadataStore)
           val newlyOnboardedPeerEndpointsWithOnboardingTimes =
@@ -167,6 +178,8 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BaseTest {
           val allEndpointsToTopologyData =
             alreadyOnboardedPeerEndpointsToTopologyData ++ newlyOnboardedPeerEndpointsToTopologyData
 
+          allEndpointsToTopologyDataCell.set(allEndpointsToTopologyData)
+
           def peerInitializer(
               endpoint: Endpoint,
               store: SimulationOutputBlockMetadataStore,
@@ -175,7 +188,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BaseTest {
             newPeerInitializer(
               endpoint,
               alreadyOnboardedPeerEndpoints,
-              allEndpointsToTopologyData,
+              () => getAllEndpointsToTopologyData,
               store,
               sendQueue,
               clock,
@@ -202,6 +215,11 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BaseTest {
               SimulationP2PNetworkManager.fakeSequencerId(endpoint) -> store
             }.toMap
 
+          val allSequencerIdsToOnboardingTimes =
+            alreadyOnboardedSequencerIdsToOnboardingTimes ++ newlyOnboardedSequencerIdsToOnboardingTimes
+          val allSequencerIdsToStores =
+            alreadyOnboardedSequencerIdsToStores ++ newlyOnboardedSequencerIdsToStores
+
           simulationAndModel = simulationAndModel match {
             case None => // First stage
               val initialTopologyInitializers =
@@ -214,15 +232,11 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BaseTest {
                 }
               val allTopologyInitializers =
                 initialTopologyInitializers ++ newlyOnboardedTopologyInitializers
-              val allPeersToOnboardingTimes =
-                initialSequencerIdsToOnboardingTimes ++ newlyOnboardedSequencerIdsToOnboardingTimes
-              val allSequencerIdsToStores =
-                initialSequencerIdsToStores ++ newlyOnboardedSequencerIdsToStores
               val simulation =
                 SimulationModuleSystem(
                   allTopologyInitializers,
                   new PeerActiveAtProvider(
-                    allPeersToOnboardingTimes,
+                    allSequencerIdsToOnboardingTimes,
                     allSequencerIdsToStores,
                   ),
                   simSettings,
@@ -234,7 +248,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BaseTest {
                 new BftOrderingVerifier(
                   sendQueue,
                   allSequencerIdsToStores,
-                  allPeersToOnboardingTimes,
+                  allSequencerIdsToOnboardingTimes,
                   simSettings,
                 )
               Some(simulation -> model)
@@ -243,6 +257,10 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BaseTest {
               Some(
                 previousSimulation.newStage(
                   simSettings,
+                  new PeerActiveAtProvider(
+                    allSequencerIdsToOnboardingTimes,
+                    allSequencerIdsToStores,
+                  ),
                   newlyOnboardedTopologyInitializers,
                 ) ->
                   previousModel.newStage(
@@ -262,6 +280,8 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BaseTest {
           firstNewlyOnboardedPeerIndex += numberOfRandomlyOnboardedPeers
           alreadyOnboardedPeerEndpoints ++= newlyOnboardedPeerEndpoints
           alreadyOnboardedPeerEndpointsToTopologyData = allEndpointsToTopologyData
+          alreadyOnboardedSequencerIdsToOnboardingTimes = allSequencerIdsToOnboardingTimes
+          alreadyOnboardedSequencerIdsToStores = allSequencerIdsToStores
       }
     }
   }
@@ -269,7 +289,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BaseTest {
   def newPeerInitializer(
       endpoint: Endpoint,
       alreadyOnboardedPeerEnpoints: Iterable[Endpoint],
-      allEndpointsToTopologyData: Map[Endpoint, SimulationTopologyData],
+      getAllEndpointsToTopologyData: () => Map[Endpoint, SimulationTopologyData],
       outputBlockMetadataStore: SimulationOutputBlockMetadataStore,
       sendQueue: mutable.Queue[(SequencerId, BlockFormat.Block)],
       clock: Clock,
@@ -298,7 +318,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BaseTest {
     val orderingTopologyProvider =
       new SimulationOrderingTopologyProvider(
         thisPeer,
-        allEndpointsToTopologyData,
+        getAllEndpointsToTopologyData,
         loggerFactory,
       )
 
@@ -362,7 +382,7 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BaseTest {
           requestInspector,
         )
       },
-      IssClient.initializer(simSettings.clientRequestInterval, peerLogger, timeouts),
+      IssClient.initializer(simSettings.clientRequestInterval, thisPeer, peerLogger, timeouts),
       initializeImmediately,
     )
   }
@@ -406,24 +426,41 @@ class BftOrderingSimulationTest1NodeNoFaults extends BftOrderingSimulationTest {
   )
 }
 
-class BftOrderingSimulationTest2NodesWithOnboardingNoFaults extends BftOrderingSimulationTest {
-  override val numberOfRuns: Int = 10
-  override val numberOfInitialPeers: Int = 2
+class BftOrderingSimulationTestWithProgressiveOnboardingAndDelayNoFaults
+    extends BftOrderingSimulationTest {
+
+  override val numberOfRuns: Int = 3
+
+  override val numberOfInitialPeers: Int = 1
 
   private val numberOfRandomlyOnboardedPeers = 1
+
   private val durationOfFirstPhaseWithFaults = 1.minute
   private val durationOfSecondPhaseWithoutFaults = 1.minute
 
   private val randomSourceToCreateSettings: Random =
-    new Random(4) // Manually remove the seed for fully randomized local runs.
+    new Random(5) // Manually remove the seed for fully randomized local runs.
 
-  private def newOnboardingDelay(): FiniteDuration =
-    generatePeerOnboardingDelay(
-      durationOfFirstPhaseWithFaults,
-      randomSourceToCreateSettings,
-    )
+  override def generateStages(): Seq[SimulationTestStage] = {
+    val stagesCount = 4 // 1 -> 2, 2 -> 3, 3 -> 4, 4 -> 5 with catchup
+    for (i <- 1 to stagesCount) yield {
+      val stage = generateStage()
+      if (i < stagesCount) {
+        stage
+      } else {
+        // Let the last stage have some delay after onboarding to test both onboarding and catching up
+        //  from at least 1 onboarded node.
+        stage.copy(
+          simulationSettings = stage.simulationSettings.copy(
+            becomingOnlineAfterOnboardingDelay =
+              SimulationSettings.DefaultBecomingOnlineAfterOnboardingDelay
+          )
+        )
+      }
+    }
+  }
 
-  override def generateStages(): Seq[SimulationTestStage] = Seq(
+  private def generateStage() =
     SimulationTestStage(
       numberOfRandomlyOnboardedPeers = numberOfRandomlyOnboardedPeers,
       simulationSettings = SimulationSettings(
@@ -444,28 +481,12 @@ class BftOrderingSimulationTest2NodesWithOnboardingNoFaults extends BftOrderingS
         becomingOnlineAfterOnboardingDelay = 0.seconds,
       ),
     )
-  )
-}
 
-class BftOrderingSimulationTest4NodesWithOnboardingNoFaults
-    extends BftOrderingSimulationTest2NodesWithOnboardingNoFaults {
-
-  override val numberOfRuns: Int = 5
-  override val numberOfInitialPeers: Int = 4 // f = 1
-}
-
-class BftOrderingSimulationTest4NodesWithOnboardingAndDelayNoFaults
-    extends BftOrderingSimulationTest4NodesWithOnboardingNoFaults {
-
-  override def generateStages(): Seq[SimulationTestStage] =
-    super.generateStages().map { stage =>
-      stage.copy(
-        simulationSettings = stage.simulationSettings.copy(
-          becomingOnlineAfterOnboardingDelay =
-            SimulationSettings.DefaultBecomingOnlineAfterOnboardingDelay
-        )
-      )
-    }
+  private def newOnboardingDelay(): FiniteDuration =
+    generatePeerOnboardingDelay(
+      durationOfFirstPhaseWithFaults,
+      randomSourceToCreateSettings,
+    )
 }
 
 class BftOrderingSimulationTest2NodesBootstrap extends BftOrderingSimulationTest {

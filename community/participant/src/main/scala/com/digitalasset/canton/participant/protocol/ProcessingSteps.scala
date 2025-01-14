@@ -35,8 +35,8 @@ import com.digitalasset.canton.participant.protocol.submission.{
 import com.digitalasset.canton.participant.protocol.validation.PendingTransaction
 import com.digitalasset.canton.participant.store.{
   ReassignmentLookup,
-  SyncDomainEphemeralState,
-  SyncDomainEphemeralStateLookup,
+  SyncEphemeralState,
+  SyncEphemeralStateLookup,
 }
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
@@ -122,7 +122,7 @@ trait ProcessingSteps[
   def embedResultError(err: ResultProcessingError): ResultError
 
   /** Selector to get the [[PendingSubmissions]], if any */
-  def pendingSubmissions(state: SyncDomainEphemeralState): PendingSubmissions
+  def pendingSubmissions(state: SyncEphemeralState): PendingSubmissions
 
   /** The kind of request, used for logging and error reporting */
   def requestKind: String
@@ -142,13 +142,13 @@ trait ProcessingSteps[
     *
     * @param submissionParam The parameter object encapsulating the parameters of the submit method
     * @param mediator        The mediator ID to use for this submission
-    * @param ephemeralState  Read-only access to the [[com.digitalasset.canton.participant.store.SyncDomainEphemeralState]]
+    * @param ephemeralState  Read-only access to the [[com.digitalasset.canton.participant.store.SyncEphemeralState]]
     * @param recentSnapshot  A recent snapshot of the topology state to be used for submission
     */
   def createSubmission(
       submissionParam: SubmissionParam,
       mediator: MediatorGroupRecipient,
-      ephemeralState: SyncDomainEphemeralStateLookup,
+      ephemeralState: SyncEphemeralStateLookup,
       recentSnapshot: SynchronizerSnapshotSyncCryptoApi,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SubmissionError, Submission]
 
@@ -379,7 +379,7 @@ trait ProcessingSteps[
       malformedPayloads: Seq[MalformedPayload],
       mediator: MediatorGroupRecipient,
       snapshot: SynchronizerSnapshotSyncCryptoApi,
-      domainParameters: DynamicSynchronizerParametersWithValidity,
+      synchronizerParameters: DynamicSynchronizerParametersWithValidity,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[ParsedRequestType]
 
   /** Phase 3, step 2 (some good views) */
@@ -547,10 +547,10 @@ object ProcessingSteps {
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, String, Target[CantonTimestamp]] =
     for {
-      domainParameters <- EitherT(topologySnapshot.unwrap.findDynamicSynchronizerParameters())
+      synchronizerParameters <- EitherT(topologySnapshot.unwrap.findDynamicSynchronizerParameters())
 
       assignmentExclusivity <- EitherT
-        .fromEither[FutureUnlessShutdown](domainParameters.assignmentExclusivityLimitFor(ts))
+        .fromEither[FutureUnlessShutdown](synchronizerParameters.assignmentExclusivityLimitFor(ts))
     } yield Target(assignmentExclusivity)
 
   def getDecisionTime(
@@ -561,8 +561,10 @@ object ProcessingSteps {
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, String, CantonTimestamp] =
     for {
-      domainParameters <- EitherT(topologySnapshot.findDynamicSynchronizerParameters())
-      decisionTime <- EitherT.fromEither[FutureUnlessShutdown](domainParameters.decisionTimeFor(ts))
+      synchronizerParameters <- EitherT(topologySnapshot.findDynamicSynchronizerParameters())
+      decisionTime <- EitherT.fromEither[FutureUnlessShutdown](
+        synchronizerParameters.decisionTimeFor(ts)
+      )
     } yield decisionTime
 
   trait RequestType {
@@ -616,10 +618,10 @@ object ProcessingSteps {
     def snapshot: SynchronizerSnapshotSyncCryptoApi
     def mediator: MediatorGroupRecipient
     def isFreshOwnTimelyRequest: Boolean
-    def domainParameters: DynamicSynchronizerParametersWithValidity
+    def synchronizerParameters: DynamicSynchronizerParametersWithValidity
     def rootHash: RootHash
 
-    def decisionTime: CantonTimestamp = domainParameters
+    def decisionTime: CantonTimestamp = synchronizerParameters
       .decisionTimeFor(requestTimestamp)
       .valueOr(err => throw new IllegalStateException(err))
   }

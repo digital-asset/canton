@@ -29,6 +29,7 @@ lazy val `ledger-api-value` = DamlProjects.`ledger-api-value`
 lazy val `ledger-api` = DamlProjects.`ledger-api`
 lazy val `bindings-java` = DamlProjects.`bindings-java`
 lazy val `ledger-common` = CommunityProjects.`ledger-common`
+lazy val `ledger-common-dars` = CommunityProjects.`ledger-common-dars`
 lazy val `ledger-common-dars-lf-v2-dev` = CommunityProjects.`ledger-common-dars-lf-v2-dev`
 lazy val `ledger-common-dars-lf-v2-1` = CommunityProjects.`ledger-common-dars-lf-v2-1`
 lazy val `daml-errors` = CommunityProjects.`daml-errors`

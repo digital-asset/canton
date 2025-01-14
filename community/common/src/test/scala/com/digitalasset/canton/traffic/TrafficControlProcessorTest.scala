@@ -7,6 +7,7 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.protocol.messages.{
   DefaultOpenEnvelope,
@@ -27,7 +28,6 @@ import org.scalatest.wordspec.AnyWordSpec
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
-import scala.concurrent.Future
 
 class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExecutionContext {
 
@@ -41,7 +41,7 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
   private val sc2 = SequencerCounter(2)
   private val sc3 = SequencerCounter(3)
 
-  private val domainCrypto = TestingTopology(synchronizerParameters = List.empty)
+  private val synchronizerCrypto = TestingTopology(synchronizerParameters = List.empty)
     .build(loggerFactory)
     .forOwnerAndSynchronizer(DefaultTestIdentities.sequencerId, synchronizerId)
 
@@ -79,7 +79,7 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
         SignedProtocolMessage
           .trySignAndCreate(
             setTrafficPurchased,
-            domainCrypto.currentSnapshotApproximation,
+            synchronizerCrypto.currentSnapshotApproximation,
             testedProtocolVersion,
           )
           .failOnShutdown
@@ -95,7 +95,7 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
       ],
   ) = {
     val tcp = new TrafficControlProcessor(
-      domainCrypto,
+      synchronizerCrypto,
       synchronizerId,
       Option.empty[CantonTimestamp],
       loggerFactory,
@@ -113,7 +113,7 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
           sequencingTimestamp: CantonTimestamp,
       )(implicit
           traceContext: TraceContext
-      ): Future[Unit] = Future.successful(updates.updateAndGet(_ += update))
+      ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.pure(updates.updateAndGet(_ += update))
     })
 
     (tcp, observedTs, updates)
@@ -195,7 +195,7 @@ class TrafficControlProcessorTest extends AnyWordSpec with BaseTest with HasExec
             (
               _.shouldBeCantonError(
                 InvalidTrafficPurchasedMessage,
-                _ should include("should be addressed to all the sequencers of a domain"),
+                _ should include("should be addressed to all the sequencers of a synchronizer"),
               ),
               "invalid recipients",
             )

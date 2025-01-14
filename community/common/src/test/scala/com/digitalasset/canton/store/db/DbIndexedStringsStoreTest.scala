@@ -4,6 +4,7 @@
 package com.digitalasset.canton.store.db
 
 import com.daml.nameof.NameOf.functionFullName
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.{IndexedStringStore, IndexedStringType}
 import com.digitalasset.canton.topology.SynchronizerId
@@ -23,7 +24,9 @@ trait DbIndexedStringsStoreTest
 
   import com.digitalasset.canton.topology.DefaultTestIdentities.*
 
-  override def cleanDb(storage: DbStorage)(implicit traceContext: TraceContext): Future[Unit] = {
+  override def cleanDb(
+      storage: DbStorage
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     import storage.api.*
     val query =
       sqlu"truncate table common_static_strings restart identity"
@@ -35,7 +38,7 @@ trait DbIndexedStringsStoreTest
 
   def staticStringsStore(mk: () => IndexedStringStore): Unit = {
 
-    val domain2 = SynchronizerId.tryFromString("other::domain")
+    val synchronizer2 = SynchronizerId.tryFromString("other::synchronizer")
 
     def d2idx(store: IndexedStringStore, synchronizerId: SynchronizerId): Future[Int] =
       store
@@ -54,9 +57,9 @@ trait DbIndexedStringsStoreTest
     "return the same index for a previously stored uid" in {
       val store = mk()
       for {
-        idx <- d2idx(store, domain2)
+        idx <- d2idx(store, synchronizer2)
         idx2 <- d2idx(store, synchronizerId)
-        idx3 <- d2idx(store, domain2)
+        idx3 <- d2idx(store, synchronizer2)
       } yield {
         idx shouldBe idx3
         idx2 should not be idx
@@ -66,15 +69,15 @@ trait DbIndexedStringsStoreTest
     "return the correct index for the stored uid" in {
       val store = mk()
       for {
-        in1 <- d2idx(store, domain2)
+        in1 <- d2idx(store, synchronizer2)
         in2 <- d2idx(store, synchronizerId)
-        in3 <- d2idx(store, domain2)
+        in3 <- d2idx(store, synchronizer2)
         lk1 <- idx2d(store, in1)
         lk2 <- idx2d(store, in2)
         ompt1 <- idx2d(store, 0)
         ompt2 <- idx2d(store, Math.max(in1, in2) + 1)
       } yield {
-        lk1.value shouldBe domain2
+        lk1.value shouldBe synchronizer2
         lk2.value shouldBe synchronizerId
         ompt1 shouldBe empty
         ompt2 shouldBe empty

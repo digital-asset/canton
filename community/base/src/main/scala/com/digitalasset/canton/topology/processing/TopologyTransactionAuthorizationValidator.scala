@@ -89,11 +89,16 @@ private object AuthorizationKeys {
   *        update that activates or deactivates states that depend on this delegation.
   * (3) finally, what we compute as the "authorized graph" is then used to compute the derived table
   *     of "namespace delegations"
+  *
+  *     insecureIgnoreMissingExtraKeySignatures is needed to support legacy OTK and PTK that didn't sign the
+  * transaction with the newly added signing keys.
   */
 class TopologyTransactionAuthorizationValidator[+PureCrypto <: CryptoPureApi](
     val pureCrypto: PureCrypto,
     val store: TopologyStore[TopologyStoreId],
     validationIsFinal: Boolean,
+    // TODO(#16458): remove once Canton 3 is stable and all OTK and PTK transactions are properly signed
+    insecureIgnoreMissingExtraKeySignatures: Boolean,
     val loggerFactory: NamedLoggerFactory,
 )(implicit override val executionContext: ExecutionContext)
     extends NamedLogging
@@ -328,7 +333,14 @@ class TopologyTransactionAuthorizationValidator[+PureCrypto <: CryptoPureApi](
         txWithSignaturesToVerify,
         requiredAuth
           .satisfiedByActualAuthorizers(actual)
-          .fold(identity, _ => ReferencedAuthorizations.empty),
+          .fold(
+            // if missing signatures from extra keys should be ignored, un-set the reported missing keys
+            missing =>
+              if (insecureIgnoreMissingExtraKeySignatures)
+                missing.copy(extraKeys = Set.empty)
+              else missing,
+            _ => ReferencedAuthorizations.empty,
+          ),
       )
     }
   }
@@ -382,7 +394,7 @@ class TopologyTransactionAuthorizationValidator[+PureCrypto <: CryptoPureApi](
     // This must not be done when preliminarily validating transactions via the SynchronizerTopologyManager, because
     // the validation outcome might change when validating the transaction again after it has been sequenced.
     val finalTransaction =
-      if (validationIsFinal) toValidate.copy(isProposal = !missingAuthorizers.isEmpty)
+      if (validationIsFinal) toValidate.updateIsProposal(isProposal = !missingAuthorizers.isEmpty)
       else toValidate
 
     // Either the transaction is fully authorized or the request allows partial authorization

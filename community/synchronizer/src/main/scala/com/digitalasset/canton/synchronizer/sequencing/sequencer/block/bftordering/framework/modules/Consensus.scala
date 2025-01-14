@@ -28,6 +28,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftorderi
   MessageFrom,
   SignedMessage,
 }
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.PrePrepare
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.modules.dependencies.ConsensusModuleDependencies
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.{
   Env,
@@ -335,7 +336,7 @@ object Consensus {
 
     final case class BlockTransferResponse private (
         latestCompletedEpoch: EpochNumber,
-        commitCertificates: Seq[CommitCertificate],
+        prePrepares: Seq[SignedMessage[PrePrepare]],
         from: SequencerId,
     )(
         override val representativeProtocolVersion: RepresentativeProtocolVersion[
@@ -349,7 +350,7 @@ object Consensus {
           v1.StateTransferMessage.Message.BlockResponse(
             v1.BlockTransferResponse.of(
               latestCompletedEpoch,
-              commitCertificates.view.map(_.toProto).toSeq,
+              prePrepares.view.map(_.toProto).toSeq,
             )
           )
         )
@@ -367,11 +368,11 @@ object Consensus {
       override def name: String = "BlockTransferResponse"
       def create(
           latestCompletedEpoch: EpochNumber,
-          commitCertificates: Seq[CommitCertificate],
+          prePrepares: Seq[SignedMessage[PrePrepare]],
           from: SequencerId,
       ): BlockTransferResponse = BlockTransferResponse(
         latestCompletedEpoch,
-        commitCertificates,
+        prePrepares,
         from,
       )(
         protocolVersionRepresentativeFor(ProtocolVersion.minimum),
@@ -392,13 +393,13 @@ object Consensus {
           protoResponse: v1.BlockTransferResponse,
       )(originalByteString: ByteString): ParsingResult[BlockTransferResponse] =
         for {
-          commitCertificates <- protoResponse.commitCertificates.traverse(
-            CommitCertificate.fromProto
+          prePrepares <- protoResponse.blockPrePrepares.traverse(
+            SignedMessage.fromProto(v1.ConsensusMessage)(PrePrepare.fromProtoConsensusMessage)
           )
           rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
         } yield BlockTransferResponse(
           EpochNumber(protoResponse.latestCompletedEpoch),
-          commitCertificates,
+          prePrepares,
           from,
         )(rpv, Some(originalByteString))
 
@@ -425,7 +426,7 @@ object Consensus {
     ) extends StateTransferMessage
 
     final case class BlocksStored[E <: Env[E]](
-        commitCertificates: Seq[CommitCertificate],
+        prePrepares: Seq[PrePrepare],
         stateTransferEndEpoch: EpochNumber,
     ) extends StateTransferMessage
   }

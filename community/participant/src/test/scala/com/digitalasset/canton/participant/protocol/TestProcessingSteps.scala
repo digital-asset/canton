@@ -36,8 +36,8 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{
 }
 import com.digitalasset.canton.participant.store.{
   ReassignmentLookup,
-  SyncDomainEphemeralState,
-  SyncDomainEphemeralStateLookup,
+  SyncEphemeralState,
+  SyncEphemeralStateLookup,
 }
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageError.SyncCryptoDecryptError
@@ -99,7 +99,7 @@ class TestProcessingSteps(
   override def embedResultError(err: ProtocolProcessor.ResultProcessingError): TestProcessingError =
     TestProcessorError(err)
 
-  override def pendingSubmissions(state: SyncDomainEphemeralState): PendingSubmissions =
+  override def pendingSubmissions(state: SyncEphemeralState): PendingSubmissions =
     pendingSubmissionMap
 
   override def submissionIdOfPendingRequest(pendingData: TestPendingRequestData): Int = 0
@@ -125,7 +125,7 @@ class TestProcessingSteps(
   override def createSubmission(
       submissionParam: Int,
       mediator: MediatorGroupRecipient,
-      ephemeralState: SyncDomainEphemeralStateLookup,
+      ephemeralState: SyncEphemeralStateLookup,
       recentSnapshot: SynchronizerSnapshotSyncCryptoApi,
   )(implicit
       traceContext: TraceContext
@@ -209,7 +209,7 @@ class TestProcessingSteps(
       malformedPayloads: Seq[ProtocolProcessor.MalformedPayload],
       mediator: MediatorGroupRecipient,
       snapshot: SynchronizerSnapshotSyncCryptoApi,
-      domainParameters: DynamicSynchronizerParametersWithValidity,
+      synchronizerParameters: DynamicSynchronizerParametersWithValidity,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[TestParsedRequest] =
     FutureUnlessShutdown.pure(
       TestParsedRequest(
@@ -220,7 +220,7 @@ class TestProcessingSteps(
         snapshot,
         mediator,
         isFreshOwnTimelyRequest,
-        domainParameters,
+        synchronizerParameters,
       )
     )
 
@@ -357,7 +357,7 @@ object TestProcessingSteps {
       override val snapshot: SynchronizerSnapshotSyncCryptoApi,
       override val mediator: MediatorGroupRecipient,
       override val isFreshOwnTimelyRequest: Boolean,
-      override val domainParameters: DynamicSynchronizerParametersWithValidity,
+      override val synchronizerParameters: DynamicSynchronizerParametersWithValidity,
   ) extends ParsedRequest[TestViewType.ViewSubmitterMetadata] {
     override def submitterMetadataO: None.type = None
     override def rootHash: RootHash = TestHash.dummyRootHash

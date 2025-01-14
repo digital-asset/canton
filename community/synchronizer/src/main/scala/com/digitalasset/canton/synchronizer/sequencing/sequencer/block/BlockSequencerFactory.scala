@@ -36,7 +36,6 @@ import com.digitalasset.canton.synchronizer.sequencing.traffic.{
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{SequencerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace
@@ -111,7 +110,7 @@ abstract class BlockSequencerFactory(
       orderingTimeFixMode: OrderingTimeFixMode,
       initialBlockHeight: Option[Long],
       sequencerSnapshot: Option[SequencerSnapshot],
-      domainLoggerFactory: NamedLoggerFactory,
+      synchronizerLoggerFactory: NamedLoggerFactory,
       runtimeReady: FutureUnlessShutdown[Unit],
   )(implicit
       executionContext: ExecutionContext,
@@ -136,15 +135,12 @@ abstract class BlockSequencerFactory(
         .right(
           store.setInitialState(snapshot, snapshot.initialTopologyEffectiveTimestamp)
         )
-        .mapK(FutureUnlessShutdown.outcomeK)
       _ <- EitherT
         .right(
           snapshot.snapshot.trafficPurchased.parTraverse_(trafficPurchasedStore.store)
         )
-        .mapK(FutureUnlessShutdown.outcomeK)
       _ <- EitherT
         .right(trafficConsumedStore.store(snapshot.snapshot.trafficConsumed))
-        .mapK(FutureUnlessShutdown.outcomeK)
       _ = logger.debug(
         s"from snapshot: ticking traffic purchased entry manager with ${snapshot.latestSequencerEventTimestamp}"
       )
@@ -153,14 +149,13 @@ abstract class BlockSequencerFactory(
           snapshot.latestSequencerEventTimestamp
             .traverse(ts => trafficPurchasedStore.setInitialTimestamp(ts))
         )
-        .mapK(FutureUnlessShutdown.outcomeK)
     } yield ()
   }
 
   @VisibleForTesting
   protected def makeRateLimitManager(
       trafficPurchasedManager: TrafficPurchasedManager,
-      domainSyncCryptoApi: SynchronizerSyncCryptoClient,
+      synchronizerSyncCryptoApi: SynchronizerSyncCryptoClient,
       protocolVersion: ProtocolVersion,
       trafficConfig: SequencerTrafficConfig,
   ): SequencerRateLimitManager =
@@ -170,7 +165,7 @@ abstract class BlockSequencerFactory(
       loggerFactory,
       nodeParameters.processingTimeouts,
       metrics,
-      domainSyncCryptoApi,
+      synchronizerSyncCryptoApi,
       protocolVersion,
       trafficConfig,
       eventCostCalculator = new EventCostCalculator(loggerFactory),
@@ -181,7 +176,7 @@ abstract class BlockSequencerFactory(
       sequencerId: SequencerId,
       clock: Clock,
       driverClock: Clock,
-      domainSyncCryptoApi: SynchronizerSyncCryptoClient,
+      synchronizerSyncCryptoApi: SynchronizerSyncCryptoClient,
       futureSupervisor: FutureSupervisor,
       trafficConfig: SequencerTrafficConfig,
       runtimeReady: FutureUnlessShutdown[Unit],
@@ -227,16 +222,16 @@ abstract class BlockSequencerFactory(
 
     val rateLimitManager = makeRateLimitManager(
       balanceManager,
-      domainSyncCryptoApi,
+      synchronizerSyncCryptoApi,
       protocolVersion,
       trafficConfig,
     )
 
-    val domainLoggerFactory = loggerFactory.append("synchronizerId", synchronizerId.toString)
+    val synchronizerLoggerFactory = loggerFactory.append("synchronizerId", synchronizerId.toString)
 
     for {
       initialBlockHeight <- FutureUnlessShutdown(Future.successful(initialBlockHeight))
-      _ <- FutureUnlessShutdown.outcomeF(balanceManager.initialize)
+      _ <- balanceManager.initialize
       stateManager <- FutureUnlessShutdown.lift(
         BlockSequencerStateManager.create(
           synchronizerId,
@@ -244,14 +239,14 @@ abstract class BlockSequencerFactory(
           trafficConsumedStore,
           nodeParameters.enableAdditionalConsistencyChecks,
           nodeParameters.processingTimeouts,
-          domainLoggerFactory,
+          synchronizerLoggerFactory,
         )
       )
     } yield {
       val sequencer = createBlockSequencer(
         name,
         synchronizerId,
-        domainSyncCryptoApi,
+        synchronizerSyncCryptoApi,
         stateManager,
         store,
         trafficPurchasedStore,
@@ -265,7 +260,7 @@ abstract class BlockSequencerFactory(
         orderingTimeFixMode,
         initialBlockHeight,
         sequencerSnapshot,
-        domainLoggerFactory,
+        synchronizerLoggerFactory,
         runtimeReady,
       )
       testingInterceptor

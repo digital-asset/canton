@@ -22,7 +22,11 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
-import com.digitalasset.canton.ledger.participant.state.{DomainIndex, RequestIndex, SequencerIndex}
+import com.digitalasset.canton.ledger.participant.state.{
+  RequestIndex,
+  SequencerIndex,
+  SynchronizerIndex,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.event.{
@@ -61,7 +65,10 @@ import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.messages.*
-import com.digitalasset.canton.pruning.{ConfigForDomainThresholds, ConfigForSlowCounterParticipants}
+import com.digitalasset.canton.pruning.{
+  ConfigForSlowCounterParticipants,
+  ConfigForSynchronizerThresholds,
+}
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
@@ -69,7 +76,6 @@ import com.digitalasset.canton.time.{PositiveSeconds, SimClock}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.daml.lf.data.Ref
@@ -143,7 +149,10 @@ sealed trait AcsCommitmentProcessorBaseTest
 
   protected def acsSetup(
       contracts: Map[LfContractId, NonEmpty[Seq[Lifespan]]]
-  )(implicit ec: ExecutionContext, traceContext: TraceContext): Future[ActiveContractSnapshot] = {
+  )(implicit
+      ec: ExecutionContext,
+      traceContext: TraceContext,
+  ): FutureUnlessShutdown[ActiveContractSnapshot] = {
     val acs =
       new InMemoryActiveContractStore(indexedStringStore, loggerFactory)
     contracts.toList
@@ -167,7 +176,6 @@ sealed trait AcsCommitmentProcessorBaseTest
                   lifespan.reassignmentCounterAtActivation,
                 )
                 .value
-                .failOnShutdown
           }
           _ <- lifespan match {
             case Lifespan.ArchiveOnDeactivate(_, deactivatedTs, _) =>
@@ -191,7 +199,6 @@ sealed trait AcsCommitmentProcessorBaseTest
                   reassignmentCounterAtUnassignment,
                 )
                 .value
-                .failOnShutdown
           }
         } yield ()
       }
@@ -201,7 +208,7 @@ sealed trait AcsCommitmentProcessorBaseTest
   protected def cryptoSetup(
       owner: ParticipantId,
       topology: Map[ParticipantId, Set[LfPartyId]],
-      dynamicDomainParametersWithValidity: List[
+      dynamicSynchronizerParametersWithValidity: List[
         SynchronizerParameters.WithValidity[DynamicSynchronizerParameters]
       ] = List.empty,
   ): SyncCryptoClient[SynchronizerSnapshotSyncCryptoApi] = {
@@ -209,10 +216,10 @@ sealed trait AcsCommitmentProcessorBaseTest
     val topologyWithPermissions =
       topology.fmap(_.map(p => (p, ParticipantPermission.Submission)).toMap)
 
-    val testingTopology = dynamicDomainParametersWithValidity match {
+    val testingTopology = dynamicSynchronizerParametersWithValidity match {
       // this way we get default values for an empty List
       case Nil => TestingTopology()
-      case _ => TestingTopology(synchronizerParameters = dynamicDomainParametersWithValidity)
+      case _ => TestingTopology(synchronizerParameters = dynamicSynchronizerParametersWithValidity)
     }
 
     testingTopology
@@ -283,7 +290,7 @@ sealed trait AcsCommitmentProcessorBaseTest
         SortedReconciliationIntervalsProvider
       ] = None,
       acsCommitmentsCatchUpModeEnabled: Boolean = false,
-      domainParametersUpdates: List[
+      synchronizerParametersUpdates: List[
         SynchronizerParameters.WithValidity[DynamicSynchronizerParameters]
       ] = List.empty,
   )(implicit ec: ExecutionContext): (
@@ -299,13 +306,13 @@ sealed trait AcsCommitmentProcessorBaseTest
         Some(AcsCommitmentsCatchUpConfig(PositiveInt.tryCreate(2), PositiveInt.tryCreate(1)))
       else None
 
-    val domainCrypto = cryptoSetup(
+    val synchronizerCrypto = cryptoSetup(
       localId,
       topology,
-      domainParametersUpdates.appended(
+      synchronizerParametersUpdates.appended(
         SynchronizerParameters.WithValidity(
           validFrom = CantonTimestamp.MinValue,
-          validUntil = domainParametersUpdates
+          validUntil = synchronizerParametersUpdates
             .sortBy(_.validFrom)
             .headOption
             .fold(Some(CantonTimestamp.MaxValue))(param => Some(param.validFrom)),
@@ -339,20 +346,20 @@ sealed trait AcsCommitmentProcessorBaseTest
       }
 
     // reset default Metrics
-    ParticipantTestMetrics.domain.commitments.largestDistinguishedCounterParticipantLatency
+    ParticipantTestMetrics.synchronizer.commitments.largestDistinguishedCounterParticipantLatency
       .updateValue(0)
-    ParticipantTestMetrics.domain.commitments.largestCounterParticipantLatency.updateValue(0)
+    ParticipantTestMetrics.synchronizer.commitments.largestCounterParticipantLatency.updateValue(0)
     val indexedStringStore = new InMemoryIndexedStringStore(minIndex = 1, maxIndex = 1)
 
     val acsCommitmentProcessor = AcsCommitmentProcessor(
       synchronizerId,
       localId,
       sequencerClient,
-      domainCrypto,
+      synchronizerCrypto,
       sortedReconciliationIntervalsProvider,
       store,
       _ => (),
-      ParticipantTestMetrics.domain.commitments,
+      ParticipantTestMetrics.synchronizer.commitments,
       testedProtocolVersion,
       DefaultProcessingTimeouts.testing
         .copy(storageMaxRetryInterval = NonNegativeDuration.tryFromDuration(1.millisecond)),
@@ -877,7 +884,7 @@ class AcsCommitmentProcessorTest
         .forOwnerAndSynchronizer(remote)
     // we assume that the participant has a single stakeholder group
     val cmt = commitmentsFromStkhdCmts(Seq(stakeholderCommitment(contracts)))
-    val snapshotF = syncCrypto.snapshotUS(CantonTimestamp.Epoch)
+    val snapshotF = syncCrypto.snapshot(CantonTimestamp.Epoch)
     val period =
       CommitmentPeriod
         .create(
@@ -900,7 +907,7 @@ class AcsCommitmentProcessorTest
       at: CantonTimestampSecond,
       contractSetup: Map[LfContractId, (Set[Ref.IdString.Party], NonEmpty[Seq[Lifespan]])],
       crypto: SyncCryptoClient[SynchronizerSnapshotSyncCryptoApi],
-  ): Future[Map[ParticipantId, AcsCommitment.CommitmentType]] = {
+  ): FutureUnlessShutdown[Map[ParticipantId, AcsCommitment.CommitmentType]] = {
     val stakeholderLookup = { (cid: LfContractId) =>
       contractSetup
         .map { case (cid, tuple) => (cid, tuple) }
@@ -934,7 +941,6 @@ class AcsCommitmentProcessorTest
           parallelism,
           new CachedCommitments(),
         )
-        .failOnShutdown
     } yield res
   }
 
@@ -1317,8 +1323,8 @@ class AcsCommitmentProcessorTest
 
         We test the following scenario (timestamps are considered as seconds since epoch):
         - Reconciliation interval = 5s
-        - Remote participant (RP) connects to the domain at t=0
-        - Local participant (LP) connects to the domain at t=6
+        - Remote participant (RP) connects to the synchronizer at t=0
+        - Local participant (LP) connects to the synchronizer at t=6
         - A shared contract lives between t=8 and t=12
         - RP sends a commitment with period [5, 10]
           Note: t=5 is not on a tick for LP
@@ -1439,7 +1445,7 @@ class AcsCommitmentProcessorTest
           .latestSafeToPruneTick(
             requestJournalStore,
             Some(
-              DomainIndex.of(
+              SynchronizerIndex.of(
                 RequestIndex(
                   counter = RequestCounter(0L),
                   sequencerCounter = Some(SequencerCounter(0L)),
@@ -1547,7 +1553,7 @@ class AcsCommitmentProcessorTest
           .latestSafeToPruneTick(
             requestJournalStore,
             Some(
-              DomainIndex(
+              SynchronizerIndex(
                 Some(
                   RequestIndex(
                     counter = RequestCounter(2L),
@@ -1577,13 +1583,13 @@ class AcsCommitmentProcessorTest
         _ <- FutureUnlessShutdown.outcomeF(
           requestJournalStore
             .replace(RequestCounter(3), ts3, RequestState.Clean, Some(ts3))
-            .valueOrFail("advance RC 3 to clean")
+            .valueOrFailShutdown("advance RC 3 to clean")
         )
         res2 <- PruningProcessor
           .latestSafeToPruneTick(
             requestJournalStore,
             Some(
-              DomainIndex(
+              SynchronizerIndex(
                 Some(
                   RequestIndex(
                     counter = RequestCounter(3L),
@@ -1654,7 +1660,7 @@ class AcsCommitmentProcessorTest
           .latestSafeToPruneTick(
             requestJournalStore,
             Some(
-              DomainIndex(
+              SynchronizerIndex(
                 Some(
                   RequestIndex(
                     counter = RequestCounter(2L),
@@ -1756,7 +1762,7 @@ class AcsCommitmentProcessorTest
             .latestSafeToPruneTick(
               requestJournalStore,
               Some(
-                DomainIndex(
+                SynchronizerIndex(
                   Some(
                     RequestIndex(
                       counter = RequestCounter(3L),
@@ -1922,7 +1928,7 @@ class AcsCommitmentProcessorTest
         Map[LfContractId, ReassignmentCounter](cid4 -> reassignmentCounter3)
 
       val reassignmentCountersForArchivedTransient =
-        AcsChange.reassignmentCountersForArchivedTransient(cs)
+        AcsCommitmentProcessor.reassignmentCountersForArchivedTransient(cs)
       val acs1 =
         AcsChange.tryFromCommitSet(
           cs,
@@ -2249,7 +2255,7 @@ class AcsCommitmentProcessorTest
                 contractSetup,
                 topology,
                 acsCommitmentsCatchUpModeEnabled = true,
-                domainParametersUpdates = List(startConfigWithValidity),
+                synchronizerParametersUpdates = List(startConfigWithValidity),
                 overrideDefaultSortedReconciliationIntervalsProvider = Some(
                   constantSortedReconciliationIntervalsProvider(
                     PositiveSeconds.tryOfSeconds(reconciliationInterval)
@@ -2339,7 +2345,7 @@ class AcsCommitmentProcessorTest
             contractSetup,
             topology,
             acsCommitmentsCatchUpModeEnabled = true,
-            domainParametersUpdates = List(startConfigWithValidity),
+            synchronizerParametersUpdates = List(startConfigWithValidity),
           )
 
         (for {
@@ -2418,7 +2424,7 @@ class AcsCommitmentProcessorTest
             contractSetup,
             topology,
             acsCommitmentsCatchUpModeEnabled = true,
-            domainParametersUpdates = List(startConfigWithValidity),
+            synchronizerParametersUpdates = List(startConfigWithValidity),
           )
 
         (for {
@@ -2753,7 +2759,8 @@ class AcsCommitmentProcessorTest
             contractSetup,
             topology,
             acsCommitmentsCatchUpModeEnabled = true,
-            domainParametersUpdates = List(disabledConfigWithValidity, changedConfigWithValidity),
+            synchronizerParametersUpdates =
+              List(disabledConfigWithValidity, changedConfigWithValidity),
           )
 
         (for {
@@ -2855,7 +2862,8 @@ class AcsCommitmentProcessorTest
             contractSetup,
             topology,
             acsCommitmentsCatchUpModeEnabled = true,
-            domainParametersUpdates = List(startConfigWithValidity, disabledConfigWithValidity),
+            synchronizerParametersUpdates =
+              List(startConfigWithValidity, disabledConfigWithValidity),
           )
 
         (for {
@@ -2942,7 +2950,7 @@ class AcsCommitmentProcessorTest
             contractSetup,
             topology,
             acsCommitmentsCatchUpModeEnabled = true,
-            domainParametersUpdates = List(startConfigWithValidity, changeConfigWithValidity),
+            synchronizerParametersUpdates = List(startConfigWithValidity, changeConfigWithValidity),
           )
 
         (for {
@@ -4038,7 +4046,7 @@ class AcsCommitmentProcessorTest
               )
             ),
             Seq(
-              new ConfigForDomainThresholds(
+              new ConfigForSynchronizerThresholds(
                 synchronizerId = synchronizerId,
                 thresholdDistinguished = NonNegativeLong.zero,
                 thresholdDefault = NonNegativeLong.zero,
@@ -4067,9 +4075,9 @@ class AcsCommitmentProcessorTest
       } yield {
         val intervalAsMicros = interval.duration.toMillis * 1000
         // remoteId2 is 3 intervals behind remoteId1
-        ParticipantTestMetrics.domain.commitments.largestCounterParticipantLatency.getValue shouldBe 3 * intervalAsMicros
+        ParticipantTestMetrics.synchronizer.commitments.largestCounterParticipantLatency.getValue shouldBe 3 * intervalAsMicros
         // remoteId3 is 2 intervals behind remoteId1
-        ParticipantTestMetrics.domain.commitments.largestDistinguishedCounterParticipantLatency.getValue shouldBe 2 * intervalAsMicros
+        ParticipantTestMetrics.synchronizer.commitments.largestDistinguishedCounterParticipantLatency.getValue shouldBe 2 * intervalAsMicros
       }).failOnShutdown
     }
 
@@ -4134,7 +4142,7 @@ class AcsCommitmentProcessorTest
               ),
             ),
             Seq(
-              new ConfigForDomainThresholds(
+              new ConfigForSynchronizerThresholds(
                 synchronizerId = synchronizerId,
                 thresholdDistinguished = NonNegativeLong.zero,
                 thresholdDefault = NonNegativeLong.zero,
@@ -4163,11 +4171,11 @@ class AcsCommitmentProcessorTest
       } yield {
         val intervalAsMicros = interval.duration.toMillis * 1000
         // remoteId2 is 3 intervals behind remoteId1
-        ParticipantTestMetrics.domain.commitments
+        ParticipantTestMetrics.synchronizer.commitments
           .counterParticipantLatency(remoteId2)
           .getValue shouldBe 3 * intervalAsMicros
         // remoteId3 is 2 intervals behind remoteId1
-        ParticipantTestMetrics.domain.commitments
+        ParticipantTestMetrics.synchronizer.commitments
           .counterParticipantLatency(remoteId3)
           .getValue shouldBe 2 * intervalAsMicros
       }).failOnShutdown
@@ -4228,7 +4236,7 @@ class AcsCommitmentProcessorTest
               )
             ),
             Seq(
-              new ConfigForDomainThresholds(
+              new ConfigForSynchronizerThresholds(
                 synchronizerId = synchronizerId,
                 thresholdDistinguished = NonNegativeLong.tryCreate(5),
                 thresholdDefault = NonNegativeLong.tryCreate(5),
@@ -4253,9 +4261,9 @@ class AcsCommitmentProcessorTest
 
       } yield {
         // remoteId3 is 2 intervals behind remoteId1, but threshold is 5 so nothing should be reported
-        ParticipantTestMetrics.domain.commitments.largestDistinguishedCounterParticipantLatency.getValue shouldBe 0
+        ParticipantTestMetrics.synchronizer.commitments.largestDistinguishedCounterParticipantLatency.getValue shouldBe 0
         // remoteId2 is 3 intervals behind remoteId1, but threshold is 5 so nothing should be reported
-        ParticipantTestMetrics.domain.commitments.largestCounterParticipantLatency.getValue shouldBe 0
+        ParticipantTestMetrics.synchronizer.commitments.largestCounterParticipantLatency.getValue shouldBe 0
       }).failOnShutdown
     }
   }

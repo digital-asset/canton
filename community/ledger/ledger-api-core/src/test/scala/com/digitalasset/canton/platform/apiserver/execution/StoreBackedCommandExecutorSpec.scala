@@ -443,8 +443,8 @@ class StoreBackedCommandExecutorSpec
   }
 
   "Disclosed contract synchronizer id consideration" should {
-    val synchronizerId1 = SynchronizerId.tryFromString("x::domain1")
-    val synchronizerId2 = SynchronizerId.tryFromString("x::domain2")
+    val synchronizerId1 = SynchronizerId.tryFromString("x::synchronizer1")
+    val synchronizerId2 = SynchronizerId.tryFromString("x::synchronizer2")
     val disclosedContractId1 = TransactionBuilder.newCid
     val disclosedContractId2 = TransactionBuilder.newCid
 
@@ -498,8 +498,8 @@ class StoreBackedCommandExecutorSpec
               ),
               logger,
             )
-        ) { case Left(error: ErrorCause.DisclosedContractssynchronizerIdsMismatch) =>
-          error.mismatchingDisclosedContractsynchronizerIds shouldBe Map(
+        ) { case Left(error: ErrorCause.DisclosedContractsSynchronizerIdsMismatch) =>
+          error.mismatchingDisclosedContractSynchronizerIds shouldBe Map(
             disclosedContractId1 -> synchronizerId1,
             disclosedContractId2 -> synchronizerId2,
           )

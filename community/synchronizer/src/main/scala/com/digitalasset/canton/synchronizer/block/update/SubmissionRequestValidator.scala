@@ -584,7 +584,7 @@ private[update] final class SubmissionRequestValidator(
           submissionRequest.batch
             .focus(_.envelopes)
             .modify(_.lazyZip(updatedInFlightAggregation.aggregatedSignatures).map {
-              (envelope, signatures) => envelope.copy(signatures = signatures)
+              (envelope, signatures) => envelope.updateSignatures(signatures = signatures)
             })
       }
 
@@ -785,7 +785,7 @@ private[update] final class SubmissionRequestValidator(
         .wellformedAggregationRule(submissionRequest.sender, rule)
         .leftMap { message =>
           val alarm = SequencerErrors.SubmissionRequestMalformed
-            .Error(submissionRequest, message)
+            .Error(submissionRequest.messageId, message)
           alarm.report()
 
           SubmissionRequestOutcome.discardSubmissionRequest

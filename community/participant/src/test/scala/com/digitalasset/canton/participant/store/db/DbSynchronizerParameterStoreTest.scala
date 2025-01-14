@@ -5,27 +5,28 @@ package com.digitalasset.canton.participant.store.db
 
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.participant.store.DomainParameterStoreTest
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.participant.store.SynchronizerParameterStoreTest
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.wordspec.AsyncWordSpec
 
-import scala.concurrent.Future
-
 trait DbSynchronizerParameterStoreTest
     extends AsyncWordSpec
     with BaseTest
-    with DomainParameterStoreTest {
+    with SynchronizerParameterStoreTest {
   this: DbTest =>
 
-  override def cleanDb(storage: DbStorage)(implicit traceContext: TraceContext): Future[Int] = {
+  override def cleanDb(
+      storage: DbStorage
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Int] = {
     import storage.api.*
-    storage.update(sqlu"truncate table par_static_domain_parameters", functionFullName)
+    storage.update(sqlu"truncate table par_static_synchronizer_parameters", functionFullName)
   }
 
-  "DbDomainParameterStore" should {
-    behave like domainParameterStore(synchronizerId =>
+  "DbSynchronizerParameterStore" should {
+    behave like synchronizerParameterStore(synchronizerId =>
       new DbSynchronizerParameterStore(synchronizerId, storage, timeouts, loggerFactory)
     )
   }

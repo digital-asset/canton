@@ -135,7 +135,7 @@ private[platform] object InMemoryStateUpdaterFlow {
               // an Offset and Update pair was received
               // update the latest checkpoint
               case (lastOffsetCheckpointO, Some((off, update))) =>
-                val domainTimeO = update match {
+                val synchronizerTimeO = update match {
                   case _: Update.PartyAddedToParticipant => None
                   case _: Update.PartyAllocationRejected => None
                   case tx: Update.TransactionAccepted =>
@@ -143,9 +143,19 @@ private[platform] object InMemoryStateUpdaterFlow {
                   case reassignment: Update.ReassignmentAccepted =>
                     reassignment.reassignment match {
                       case _: Reassignment.Unassign =>
-                        Some((reassignment.reassignmentInfo.sourceDomain.unwrap, update.recordTime))
+                        Some(
+                          (
+                            reassignment.reassignmentInfo.sourceSynchronizer.unwrap,
+                            update.recordTime,
+                          )
+                        )
                       case _: Reassignment.Assign =>
-                        Some((reassignment.reassignmentInfo.targetDomain.unwrap, update.recordTime))
+                        Some(
+                          (
+                            reassignment.reassignmentInfo.targetSynchronizer.unwrap,
+                            update.recordTime,
+                          )
+                        )
                     }
                   case commandRejected: Update.CommandRejected =>
                     Some((commandRejected.synchronizerId, commandRejected.recordTime))
@@ -156,14 +166,15 @@ private[platform] object InMemoryStateUpdaterFlow {
                   case _: Update.CommitRepair => None
                 }
 
-                val lastDomainTimes = lastOffsetCheckpointO.map(_.domainTimes).getOrElse(Map.empty)
-                val newDomainTimes =
-                  domainTimeO match {
+                val lastSynchronizerTimes =
+                  lastOffsetCheckpointO.map(_.synchronizerTimes).getOrElse(Map.empty)
+                val newSynchronizerTimes =
+                  synchronizerTimeO match {
                     case Some((synchronizerId, recordTime)) =>
-                      lastDomainTimes.updated(synchronizerId, recordTime.toLf)
-                    case None => lastDomainTimes
+                      lastSynchronizerTimes.updated(synchronizerId, recordTime.toLf)
+                    case None => lastSynchronizerTimes
                   }
-                val newOffsetCheckpoint = OffsetCheckpoint(off, newDomainTimes)
+                val newOffsetCheckpoint = OffsetCheckpoint(off, newSynchronizerTimes)
                 (Some(newOffsetCheckpoint), None)
               // a tick was received, propagate the OffsetCheckpoint
               case (lastOffsetCheckpointO, None) =>
@@ -412,7 +423,7 @@ private[platform] object InMemoryStateUpdater {
         TransactionLogUpdate.CreatedEvent(
           eventOffset = offset,
           updateId = txAccepted.updateId,
-          nodeIndex = nodeId.index,
+          nodeId = nodeId.index,
           eventSequentialId = 0L,
           contractId = create.coid,
           ledgerEffectiveTime = txAccepted.transactionMeta.ledgerEffectiveTime,
@@ -445,7 +456,7 @@ private[platform] object InMemoryStateUpdater {
         TransactionLogUpdate.ExercisedEvent(
           eventOffset = offset,
           updateId = txAccepted.updateId,
-          nodeIndex = nodeId.index,
+          nodeId = nodeId.index,
           eventSequentialId = 0L,
           contractId = exercise.targetCoid,
           ledgerEffectiveTime = txAccepted.transactionMeta.ledgerEffectiveTime,
@@ -552,9 +563,10 @@ private[platform] object InMemoryStateUpdater {
           optDeduplicationDurationSeconds = deduplicationDurationSeconds,
           optDeduplicationDurationNanos = deduplicationDurationNanos,
           synchronizerId = u.reassignment match {
-            case _: Reassignment.Assign => u.reassignmentInfo.targetDomain.unwrap.toProtoPrimitive
+            case _: Reassignment.Assign =>
+              u.reassignmentInfo.targetSynchronizer.unwrap.toProtoPrimitive
             case _: Reassignment.Unassign =>
-              u.reassignmentInfo.sourceDomain.unwrap.toProtoPrimitive
+              u.reassignmentInfo.sourceSynchronizer.unwrap.toProtoPrimitive
           },
           traceContext = u.traceContext,
         )
@@ -575,7 +587,7 @@ private[platform] object InMemoryStateUpdater {
             TransactionLogUpdate.CreatedEvent(
               eventOffset = offset,
               updateId = u.updateId,
-              nodeIndex = 0, // set 0 for assign-created
+              nodeId = 0, // set 0 for assign-created
               eventSequentialId = 0L,
               contractId = create.coid,
               ledgerEffectiveTime = assign.ledgerEffectiveTime,

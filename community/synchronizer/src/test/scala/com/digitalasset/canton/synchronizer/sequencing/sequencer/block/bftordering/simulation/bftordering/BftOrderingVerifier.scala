@@ -67,13 +67,20 @@ class BftOrderingVerifier(
       simulationSettings: SimulationSettings,
       newOnboardingTimes: Map[SequencerId, TopologyActivationTime],
       newStores: Map[SequencerId, SimulationOutputBlockMetadataStore],
-  ): BftOrderingVerifier =
-    new BftOrderingVerifier(
-      queue,
-      stores ++ newStores,
-      newOnboardingTimes,
-      simulationSettings,
-    )
+  ): BftOrderingVerifier = {
+    val newVerifier =
+      new BftOrderingVerifier(
+        queue,
+        stores ++ newStores,
+        newOnboardingTimes,
+        simulationSettings,
+      )
+    newVerifier.currentLog ++= currentLog
+    newVerifier.previousTimestamp = previousTimestamp
+    newVerifier.peanoQueues ++= peanoQueues
+    newVerifier.sequencersToOnboard ++= sequencersToOnboard
+    newVerifier
+  }
 
   private def checkLiveness(at: CantonTimestamp): Unit =
     livenessState match {
@@ -118,7 +125,7 @@ class BftOrderingVerifier(
             .resolveValue()
             .getOrElse(fail(s"failed to get an onboarding block for peer $sequencer"))
             .map(_.blockNumber)
-          peanoQueues(sequencer) = new PeanoQueue(startingBlock.getOrElse(BlockNumber(0L)))
+          peanoQueues(sequencer) = new PeanoQueue(startingBlock.getOrElse(BlockNumber(0L)))(fail(_))
           sequencersToOnboard.remove(sequencer)
         }
       }
@@ -141,8 +148,12 @@ class BftOrderingVerifier(
 
   private def checkStores(): Unit = {
     queue.foreach { case (sequencer, block) =>
-      val peanoQueue = peanoQueues(sequencer)
-      val newBlocks = peanoQueue.insertAndPoll(BlockNumber(block.blockHeight), block)
+      val peanoQueue = peanoQueues.getOrElse(
+        sequencer,
+        throw new RuntimeException(s"Sequencer $sequencer not onboarded"),
+      )
+      peanoQueue.insert(BlockNumber(block.blockHeight), block)
+      val newBlocks = peanoQueue.pollAvailable()
       newBlocks.foreach { blockToInsert =>
         checkBlockAgainstModel(blockToInsert)
       }
