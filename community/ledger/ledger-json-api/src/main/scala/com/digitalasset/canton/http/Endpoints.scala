@@ -54,6 +54,7 @@ class Endpoints(
     encoder: DomainJsonEncoder,
     decoder: DomainJsonDecoder,
     shouldLogHttpBodies: Boolean,
+    resolveUser: ResolveUser,
     userManagementClient: UserManagementClient,
     val loggerFactory: NamedLoggerFactory,
     maxTimeToCollectRequest: FiniteDuration = FiniteDuration(5, "seconds"),
@@ -65,7 +66,7 @@ class Endpoints(
     allowNonHttps = allowNonHttps,
     decodeJwt = decodeJwt,
     encoder = encoder,
-    userManagementClient,
+    resolveUser,
     maxTimeToCollectRequest = maxTimeToCollectRequest,
     loggerFactory = loggerFactory,
   )

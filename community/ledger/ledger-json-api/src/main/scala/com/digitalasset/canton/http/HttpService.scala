@@ -26,6 +26,10 @@ import com.digitalasset.canton.ledger.client.configuration.{
   CommandClientConfiguration,
   LedgerClientConfiguration,
 }
+import com.digitalasset.canton.ledger.client.services.admin.{
+  IdentityProviderConfigClient,
+  UserManagementClient,
+}
 import com.digitalasset.canton.ledger.client.services.pkg.PackageClient
 import com.digitalasset.canton.ledger.service.LedgerReader
 import com.digitalasset.canton.ledger.service.LedgerReader.PackageStore
@@ -92,6 +96,15 @@ class HttpService(
 
       val ledgerClient: DamlLedgerClient =
         DamlLedgerClient.withoutToken(channel, clientConfig, loggerFactory)
+
+      val resolveUser: EndpointsCompanion.ResolveUser =
+        if (startSettings.userManagementWithoutAuthorization)
+          HttpService.resolveUserWithIdp(
+            ledgerClient.userManagementClient,
+            ledgerClient.identityProviderConfigClient,
+          )
+        else
+          HttpService.resolveUser(ledgerClient.userManagementClient)
 
       import org.apache.pekko.http.scaladsl.server.Directives.*
       val bindingEt: EitherT[Future, HttpService.Error, ServerBinding] =
@@ -188,6 +201,7 @@ class HttpService(
             encoder,
             decoder,
             debugLoggingOfHttpBodies,
+            resolveUser,
             ledgerClient.userManagementClient,
             loggerFactory,
           )
@@ -203,7 +217,7 @@ class HttpService(
           websocketEndpoints = new WebsocketEndpoints(
             HttpService.decodeJwt,
             websocketService,
-            ledgerClient.userManagementClient,
+            resolveUser,
             loggerFactory,
           )
 
@@ -257,7 +271,44 @@ class HttpService(
 
 }
 
-object HttpService {
+object HttpService extends NoTracing {
+
+  def resolveUser(userManagementClient: UserManagementClient): EndpointsCompanion.ResolveUser =
+    jwt => userId => userManagementClient.listUserRights(userId = userId, token = Some(jwt.value))
+
+  def resolveUserWithIdp(
+      userManagementClient: UserManagementClient,
+      idpClient: IdentityProviderConfigClient,
+  )(implicit ec: ExecutionContext): EndpointsCompanion.ResolveUser = jwt =>
+    userId => {
+      for {
+        idps <- idpClient
+          .listIdentityProviderConfigs(token = Some(jwt.value))
+          .map(_.map(_.identityProviderId.value))
+        userWithIdp <- Future
+          .traverse("" +: idps)(idp =>
+            userManagementClient
+              .listUsers(
+                token = Some(jwt.value),
+                identityProviderId = idp,
+                pageToken = "",
+                // Hardcoded limit for users within any idp. This is enough for the limited usage
+                // of this functionality in the transition phase from json-api v1 to v2.
+                pageSize = 1000,
+              )
+              .map(_._1)
+          )
+          .map(_.flatten.filter(_.id == userId))
+        userRight <- Future.traverse(userWithIdp)(user =>
+          userManagementClient.listUserRights(
+            token = Some(jwt.value),
+            userId = userId,
+            identityProviderId = user.identityProviderId.toRequestString,
+          )
+        )
+      } yield userRight.flatten
+
+    }
   // TODO(#13303) Check that this is intended to be used as ValidateJwt in prod code
   //              and inline.
   // Decode JWT without any validation
