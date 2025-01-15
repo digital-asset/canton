@@ -17,7 +17,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.SequencerIndexMov
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessSet
-import com.digitalasset.canton.participant.store.SyncDomainEphemeralState
+import com.digitalasset.canton.participant.store.SyncEphemeralState
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.{
   ConfirmationResponse,
@@ -37,7 +37,7 @@ import scala.concurrent.ExecutionContext
 
 /** Collects helper methods for message processing */
 abstract class AbstractMessageProcessor(
-    ephemeral: SyncDomainEphemeralState,
+    ephemeral: SyncEphemeralState,
     crypto: SynchronizerSyncCryptoClient,
     sequencerClient: SequencerClientSend,
     protocolVersion: ProtocolVersion,
@@ -110,12 +110,12 @@ abstract class AbstractMessageProcessor(
     else {
       logger.trace(s"Request $requestId: ProtocolProcessor scheduling the sending of responses")
       for {
-        domainParameters <- crypto.ips
-          .awaitSnapshotUS(requestId.unwrap)
+        synchronizerParameters <- crypto.ips
+          .awaitSnapshot(requestId.unwrap)
           .flatMap(snapshot => snapshot.findDynamicSynchronizerParametersOrDefault(protocolVersion))
 
         maxSequencingTime = requestId.unwrap.add(
-          domainParameters.confirmationResponseTimeout.unwrap
+          synchronizerParameters.confirmationResponseTimeout.unwrap
         )
         _ <- sequencerClient
           .sendAsync(
@@ -146,10 +146,10 @@ abstract class AbstractMessageProcessor(
       timestamp: CantonTimestamp,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     crypto.ips
-      .awaitSnapshotUS(timestamp)
+      .awaitSnapshot(timestamp)
       .flatMap(snapshot => snapshot.findDynamicSynchronizerParameters())
-      .flatMap { domainParametersE =>
-        val decisionTimeE = domainParametersE.flatMap(_.decisionTimeFor(timestamp))
+      .flatMap { synchronizerParametersE =>
+        val decisionTimeE = synchronizerParametersE.flatMap(_.decisionTimeFor(timestamp))
         val decisionTimeF = decisionTimeE.fold(
           err => FutureUnlessShutdown.failed(new IllegalStateException(err)),
           FutureUnlessShutdown.pure,

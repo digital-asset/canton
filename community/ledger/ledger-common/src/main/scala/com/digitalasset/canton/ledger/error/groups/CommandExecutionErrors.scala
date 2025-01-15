@@ -152,21 +152,21 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
 
   @Explanation(
     """This error occurs if some of the disclosed contracts attached to the command submission that were also used in command interpretation have specified mismatching synchronizer ids.
-      |This can happen if the synchronizer ids of the disclosed contracts are out of sync OR if the originating contracts are assigned to different domains."""
+      |This can happen if the synchronizer ids of the disclosed contracts are out of sync OR if the originating contracts are assigned to different synchronizers."""
   )
   @Resolution(
-    "Retry the submission with an up-to-date set of attached disclosed contracts or re-create a command submission that only uses disclosed contracts residing on the same domain."
+    "Retry the submission with an up-to-date set of attached disclosed contracts or re-create a command submission that only uses disclosed contracts residing on the same synchronizer."
   )
   object DisclosedContractsSynchronizerIdMismatch
       extends ErrorCode(
         id = "DISCLOSED_CONTRACTS_SYNCHRONIZER_ID_MISMATCH",
         ErrorCategory.InvalidIndependentOfSystemState,
       ) {
-    final case class Reject(mismatchingContractIdTosynchronizerIds: Map[ContractId, String])(
+    final case class Reject(mismatchingContractIdToSynchronizerIds: Map[ContractId, String])(
         implicit loggingContext: ContextualizedErrorLogger
     ) extends DamlErrorWithDefiniteAnswer(
           cause =
-            s"Some disclosed contracts that were used during command interpretation have mismatching synchronizer ids: $mismatchingContractIdTosynchronizerIds"
+            s"Some disclosed contracts that were used during command interpretation have mismatching synchronizer ids: $mismatchingContractIdToSynchronizerIds"
         )
   }
 
@@ -174,7 +174,7 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
     """This error occurs when the synchronizer id provided in the command submission mismatches the synchronizer id specified in one of the disclosed contracts used in command interpretation."""
   )
   @Resolution(
-    "Retry the submission with all disclosed contracts residing on the target submission domain."
+    "Retry the submission with all disclosed contracts residing on the target submission synchronizer."
   )
   object PrescribedSynchronizerIdMismatch
       extends ErrorCode(
@@ -189,7 +189,7 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
         loggingContext: ContextualizedErrorLogger
     ) extends DamlErrorWithDefiniteAnswer(
           cause =
-            s"The target domain=$prescribedSynchronizerId specified in the command submission mismatches the synchronizer id=$disclosedContractsSynchronizerId of some attached disclosed contracts that have been used in the submission (used-disclosed-contract-ids=$usedDisclosedContractsSpecifyingASynchronizerId)"
+            s"The target synchronizer=$prescribedSynchronizerId specified in the command submission mismatches the synchronizer id=$disclosedContractsSynchronizerId of some attached disclosed contracts that have been used in the submission (used-disclosed-contract-ids=$usedDisclosedContractsSpecifyingASynchronizerId)"
         )
   }
 

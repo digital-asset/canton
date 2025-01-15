@@ -84,9 +84,9 @@ class AcsInspection(
   ] =
     for {
       requestIndex <- ledgerApiStore.value
-        .cleanDomainIndex(synchronizerId)
+        .cleanSynchronizerIndex(synchronizerId)
         .map(_.flatMap(_.requestIndex))
-      snapshot <- FutureUnlessShutdown.outcomeF(
+      snapshot <-
         requestIndex
           .traverse { cursorHead =>
             val ts = cursorHead.timestamp
@@ -99,7 +99,6 @@ class AcsInspection(
             snapshotF.map(snapshot => Some(AcsSnapshot(snapshot, ts)))
           }
           .map(_.flatten)
-      )
     } yield snapshot
 
   // fetch acs, checking that the requested timestamp is clean
@@ -118,13 +117,14 @@ class AcsInspection(
           TimestampValidation
             .beforeRequestIndex(
               synchronizerId,
-              ledgerApiStore.value.cleanDomainIndex(synchronizerId).map(_.flatMap(_.requestIndex)),
+              ledgerApiStore.value
+                .cleanSynchronizerIndex(synchronizerId)
+                .map(_.flatMap(_.requestIndex)),
               timestamp,
             )
         else EitherT.pure[FutureUnlessShutdown, AcsInspectionError](())
       snapshot <- EitherT
         .right(activeContractStore.snapshot(timestamp))
-        .mapK(FutureUnlessShutdown.outcomeK)
       // check after getting the snapshot in case a pruning was happening concurrently
       _ <- TimestampValidation.afterPruning(
         synchronizerId,
@@ -194,7 +194,7 @@ class AcsInspection(
   ): EitherT[FutureUnlessShutdown, AcsInspectionError, Unit] =
     for {
       topologySnapshot <- EitherT.right[AcsInspectionError](
-        topologyClient.awaitSnapshotUS(snapshotTs)
+        topologyClient.awaitSnapshot(snapshotTs)
       )
       hostedStakeholders <-
         EitherT
@@ -264,7 +264,6 @@ class AcsInspection(
         .leftMap(missingContract =>
           AcsInspectionError.InconsistentSnapshot(synchronizerId, missingContract)
         )
-        .mapK(FutureUnlessShutdown.outcomeK)
 
       contractsWithReassignmentCounter = batch.zip(reassignmentCounters)
 

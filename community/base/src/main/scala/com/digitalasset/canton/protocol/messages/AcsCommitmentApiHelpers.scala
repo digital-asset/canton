@@ -9,18 +9,18 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.AcsCommitment.CommitmentType
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.store.IndexedDomain
+import com.digitalasset.canton.store.IndexedSynchronizer
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import slick.jdbc.{GetResult, SetParameter}
 
-final case class DomainSearchCommitmentPeriod(
-    indexedDomain: IndexedDomain,
+final case class SynchronizerSearchCommitmentPeriod(
+    indexedSynchronizer: IndexedSynchronizer,
     fromExclusive: CantonTimestamp,
     toInclusive: CantonTimestamp,
 ) extends PrettyPrinting {
-  override protected def pretty: Pretty[DomainSearchCommitmentPeriod] =
+  override protected def pretty: Pretty[SynchronizerSearchCommitmentPeriod] =
     prettyOfClass(
-      param("synchronizerId", _.indexedDomain.synchronizerId),
+      param("synchronizerId", _.indexedSynchronizer.synchronizerId),
       param("fromExclusive", _.fromExclusive),
       param("toInclusive", _.toInclusive),
     )
@@ -161,10 +161,10 @@ object SentAcsCommitment {
       )
     }
 
-  def toProtoV30(sents: Iterable[SentAcsCommitment]): Seq[v30.SentAcsCommitmentPerDomain] = {
-    sents.groupBy(_.synchronizerId).map { case (domain, commitment) =>
-      v30.SentAcsCommitmentPerDomain(
-        domain.toProtoPrimitive,
+  def toProtoV30(sents: Iterable[SentAcsCommitment]): Seq[v30.SentAcsCommitmentPerSynchronizer] = {
+    sents.groupBy(_.synchronizerId).map { case (synchronizer, commitment) =>
+      v30.SentAcsCommitmentPerSynchronizer(
+        synchronizer.toProtoPrimitive,
         commitment.map { comm =>
           v30.SentAcsCommitment(
             Some(
@@ -253,10 +253,10 @@ object ReceivedAcsCommitment {
     )
   def toProtoV30(
       received: Iterable[ReceivedAcsCommitment]
-  ): Seq[v30.ReceivedAcsCommitmentPerDomain] = {
-    received.groupBy(_.synchronizerId).map { case (domain, commitment) =>
-      v30.ReceivedAcsCommitmentPerDomain(
-        domain.toProtoPrimitive,
+  ): Seq[v30.ReceivedAcsCommitmentPerSynchronizer] = {
+    received.groupBy(_.synchronizerId).map { case (synchronizer, commitment) =>
+      v30.ReceivedAcsCommitmentPerSynchronizer(
+        synchronizer.toProtoPrimitive,
         commitment.map { cmt =>
           v30.ReceivedAcsCommitment(
             Some(

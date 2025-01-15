@@ -73,6 +73,7 @@ abstract class ConsumesCancellableGrpcStreamObserver[
   private val currentAwaitOnNext = new AtomicReference[Promise[UnlessShutdown[Either[E, Unit]]]](
     Promise.successful(Outcome(Either.unit))
   )
+  protected lazy val cancelledByClient = new AtomicBoolean(false)
 
   protected def callHandler: Traced[R] => EitherT[FutureUnlessShutdown, E, Unit]
   protected def onCompleteCloseReason: SubscriptionCloseReason[E]
@@ -94,8 +95,6 @@ abstract class ConsumesCancellableGrpcStreamObserver[
       override def run(): Unit = cancel()
     })
   }
-
-  protected val cancelledByClient = new AtomicBoolean(false)
 
   private def cancel(): Unit =
     if (!cancelledByClient.getAndSet(true)) context.close()
@@ -157,7 +156,6 @@ abstract class ConsumesCancellableGrpcStreamObserver[
     )
   }
 
-  @VisibleForTesting // so unit tests can call onNext, onError and onComplete
   private[client] val observer = new StreamObserver[R] {
     override def onNext(value: R): Unit = {
       // we take the unusual step of immediately trying to deserialize the trace-context
@@ -294,7 +292,7 @@ object GrpcSequencerSubscription {
       loggerFactory: NamedLoggerFactory,
   )(protocolVersion: ProtocolVersion)(implicit
       executionContext: ExecutionContext
-  ): GrpcSequencerSubscription[E, v30.VersionedSubscriptionResponse] =
+  ): ConsumesCancellableGrpcStreamObserver[E, v30.VersionedSubscriptionResponse] =
     new GrpcSequencerSubscription(
       context,
       onShutdownRunner,

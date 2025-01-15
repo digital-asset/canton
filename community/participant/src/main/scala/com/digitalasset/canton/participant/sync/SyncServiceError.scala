@@ -49,34 +49,36 @@ object SyncServiceInjectionError extends InjectionErrorGroup {
   }
 
   @Explanation(
-    "This errors results if a command is submitted to a participant that is not connected to any domain."
+    "This errors results if a command is submitted to a participant that is not connected to any synchronizer."
   )
   @Resolution(
-    "Connect your participant to the domain where the given parties are hosted."
+    "Connect your participant to the synchronizer where the given parties are hosted."
   )
-  object NotConnectedToAnyDomain
+  object NotConnectedToAnySynchronizer
       extends ErrorCode(
-        id = "NOT_CONNECTED_TO_ANY_DOMAIN",
+        id = "NOT_CONNECTED_TO_ANY_SYNCHRONIZER",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
     final case class Error()
-        extends TransactionErrorImpl(cause = "This participant is not connected to any domain.")
+        extends TransactionErrorImpl(
+          cause = "This participant is not connected to any synchronizer."
+        )
   }
 
   @Explanation(
-    "This errors results if a command is submitted to a participant that is not connected to a domain needed to process the command."
+    "This errors results if a command is submitted to a participant that is not connected to a synchronizer needed to process the command."
   )
   @Resolution(
-    "Connect your participant to the required domain."
+    "Connect your participant to the required synchronizer."
   )
-  object NotConnectedToDomain
+  object NotConnectedToSynchronizer
       extends ErrorCode(
-        id = "NOT_CONNECTED_TO_DOMAIN",
+        id = "NOT_CONNECTED_TO_SYNCHRONIZER",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
-    final case class Error(domain: String)
+    final case class Error(synchronizer: String)
         extends TransactionErrorImpl(
-          cause = s"This participant is not connected to domain $domain."
+          cause = s"This participant is not connected to synchronizer $synchronizer."
         )
   }
 
@@ -99,26 +101,26 @@ object SyncServiceInjectionError extends InjectionErrorGroup {
 object SyncServiceError extends SyncServiceErrorGroup {
 
   @Explanation(
-    "This error results if a domain connectivity command is referring to a synchronizer alias that has not been registered."
+    "This error results if a synchronizer connectivity command is referring to a synchronizer alias that has not been registered."
   )
   @Resolution(
-    "Please confirm the synchronizer alias is correct, or configure the domain before (re)connecting."
+    "Please confirm the synchronizer alias is correct, or configure the synchronizer before (re)connecting."
   )
-  object SyncServiceUnknownDomain
+  object SyncServiceUnknownSynchronizer
       extends ErrorCode(
-        "SYNC_SERVICE_UNKNOWN_DOMAIN",
+        "SYNC_SERVICE_UNKNOWN_SYNCHRONIZER",
         ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
       ) {
     final case class Error(synchronizerAlias: SynchronizerAlias)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = s"The domain with alias ${synchronizerAlias.unwrap} is unknown."
+          cause = s"The synchronizer with alias ${synchronizerAlias.unwrap} is unknown."
         )
         with SyncServiceError
   }
 
   @Explanation(
-    "This error results on an attempt to register a new domain under an alias already in use."
+    "This error results on an attempt to register a new synchronizer under an alias already in use."
   )
   object SyncServiceAlreadyAdded
       extends ErrorCode(
@@ -127,7 +129,9 @@ object SyncServiceError extends SyncServiceErrorGroup {
       ) {
     final case class Error(synchronizerAlias: SynchronizerAlias)(implicit
         val loggingContext: ErrorLoggingContext
-    ) extends CantonError.Impl(cause = "The domain with the given alias has already been added.")
+    ) extends CantonError.Impl(
+          cause = "The synchronizer with the given alias has already been added."
+        )
         with SyncServiceError
   }
 
@@ -170,9 +174,9 @@ object SyncServiceError extends SyncServiceErrorGroup {
 
   abstract class MigrationErrors extends ErrorGroup()
 
-  abstract class DomainRegistryErrorGroup extends ErrorGroup()
+  abstract class SynchronizerRegistryErrorGroup extends ErrorGroup()
 
-  final case class SyncServiceFailedDomainConnection(
+  final case class SyncServiceFailedSynchronizerConnection(
       synchronizerAlias: SynchronizerAlias,
       parent: SynchronizerRegistryError,
   )(implicit
@@ -182,18 +186,18 @@ object SyncServiceError extends SyncServiceErrorGroup {
 
     override def logOnCreation: Boolean = false
 
-    override def mixinContext: Map[String, String] = Map("domain" -> synchronizerAlias.unwrap)
+    override def mixinContext: Map[String, String] = Map("synchronizer" -> synchronizerAlias.unwrap)
 
   }
 
   final case class SyncServiceMigrationError(
       from: Source[SynchronizerAlias],
       to: Target[SynchronizerAlias],
-      parent: SyncDomainMigrationError,
+      parent: SynchronizerMigrationError,
   )(implicit
       val loggingContext: ErrorLoggingContext
   ) extends SyncServiceError
-      with ParentCantonError[SyncDomainMigrationError] {
+      with ParentCantonError[SynchronizerMigrationError] {
 
     override def logOnCreation: Boolean = false
 
@@ -210,7 +214,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
   )
   object SyncServiceSynchronizerDisabledUs
       extends ErrorCode(
-        "SYNC_SERVICE_DOMAIN_DISABLED_US",
+        "SYNC_SERVICE_SYNCHRONIZER_DISABLED_US",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
 
@@ -224,15 +228,15 @@ object SyncServiceError extends SyncServiceErrorGroup {
   }
 
   @Explanation(
-    "This error is logged when a sync domain has a non-active status."
+    "This error is logged when a synchronizer has a non-active status."
   )
   @Resolution(
-    """If you attempt to connect to a domain that has either been migrated off or has a pending migration,
+    """If you attempt to connect to a synchronizer that has either been migrated off or has a pending migration,
       |this error will be emitted. Please complete the migration before attempting to connect to it."""
   )
-  object SyncServiceDomainIsNotActive
+  object SyncServiceSynchronizerIsNotActive
       extends ErrorCode(
-        "SYNC_SERVICE_DOMAIN_STATUS_NOT_ACTIVE",
+        "SYNC_SERVICE_SYNCHRONIZER_STATUS_NOT_ACTIVE",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
 
@@ -247,7 +251,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
         with SyncServiceError
   }
 
-  final case class SyncServicePurgeDomainError(
+  final case class SyncServicePurgeSynchronizerError(
       synchronizerAlias: SynchronizerAlias,
       parent: PruningServiceError,
   )(implicit
@@ -256,12 +260,12 @@ object SyncServiceError extends SyncServiceErrorGroup {
       with ParentCantonError[PruningServiceError]
 
   @Explanation(
-    "This error is logged when a sync domain is disconnected because the participant became passive."
+    "This error is logged when a connected synchronizer is disconnected because the participant became passive."
   )
   @Resolution("Fail over to the active participant replica.")
-  object SyncServiceDomainBecamePassive
+  object SyncServiceBecamePassive
       extends ErrorCode(
-        "SYNC_SERVICE_DOMAIN_BECAME_PASSIVE",
+        "SYNC_SERVICE_BECAME_PASSIVE",
         ErrorCategory.TransientServerFailure,
       ) {
 
@@ -275,36 +279,36 @@ object SyncServiceError extends SyncServiceErrorGroup {
   }
 
   @Explanation(
-    "This error is emitted when an operation is attempted such as repair that requires the domains to be disconnected and clean."
+    "This error is emitted when an operation is attempted such as repair that requires the synchronizers to be disconnected and clean."
   )
-  @Resolution("Disconnect the still connected domains before attempting the command.")
-  object SyncServiceDomainsMustBeOffline
+  @Resolution("Disconnect the still connected synchronizers before attempting the command.")
+  object SyncServiceSynchronizersMustBeOffline
       extends ErrorCode(
-        "SYNC_SERVICE_DOMAINS_MUST_BE_OFFLINE",
+        "SYNC_SERVICE_SYNCHRONIZERS_MUST_BE_OFFLINE",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
 
-    final case class Error(connectedDomains: Seq[SynchronizerAlias])(implicit
+    final case class Error(connectedSynchronizers: Seq[SynchronizerAlias])(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = show"$connectedDomains must be disconnected for the given operation"
+          cause = show"$connectedSynchronizers must be disconnected for the given operation"
         )
         with SyncServiceError
 
   }
 
   @Explanation(
-    "This error is emitted when a domain migration is attempted while transactions are still in-flight on the source domain."
+    "This error is emitted when a synchronizer migration is attempted while transactions are still in-flight on the source synchronizer."
   )
   @Resolution(
-    """Ensure the source domain has no in-flight transactions by reconnecting participants to the source domain, halting
+    """Ensure the source synchronizer has no in-flight transactions by reconnecting participants to the source synchronizer, halting
       |activity on the participants and waiting for in-flight transactions to complete or time out. Afterwards invoke
-      |`migrate_domain` again. As a last resort, you may force the domain migration ignoring in-flight transactions using
+      |`migrate_synchronizer` again. As a last resort, you may force the synchronizer migration ignoring in-flight transactions using
       |the `force` flag on the command. Be advised, forcing a migration may lead to a ledger fork."""
   )
-  object SyncServiceDomainMustNotHaveInFlightTransactions
+  object SyncServiceSynchronizerMustNotHaveInFlightTransactions
       extends ErrorCode(
-        "SYNC_SERVICE_DOMAIN_MUST_NOT_HAVE_IN_FLIGHT_TRANSACTIONS",
+        "SYNC_SERVICE_SYNCHRONIZER_MUST_NOT_HAVE_IN_FLIGHT_TRANSACTIONS",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
 
@@ -318,13 +322,13 @@ object SyncServiceError extends SyncServiceErrorGroup {
   }
 
   @Explanation(
-    "This error is logged when a sync domain is unexpectedly disconnected from the Canton " +
+    "This error is logged when a connected synchronizer is unexpectedly disconnected from the Canton " +
       "sync service (after having previously been connected)"
   )
   @Resolution("Please contact support and provide the failure reason.")
-  object SyncServiceDomainDisconnect
+  object SyncServiceSynchronizerDisconnect
       extends ErrorCode(
-        "SYNC_SERVICE_DOMAIN_DISCONNECTED",
+        "SYNC_SERVICE_SYNCHRONIZER_DISCONNECTED",
         ErrorCategory.SystemInternalAssumptionViolated,
       ) {
 
@@ -341,7 +345,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause =
-            show"Domain $synchronizerAlias fatally disconnected because of an exception ${throwable.getMessage}",
+            show"Synchronizer $synchronizerAlias fatally disconnected because of an exception ${throwable.getMessage}",
           throwableO = Some(throwable),
         )
 
@@ -358,15 +362,19 @@ object SyncServiceError extends SyncServiceErrorGroup {
     final case class Failure(synchronizerAlias: SynchronizerAlias, throwable: Throwable)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = "The domain failed to startup due to an internal error",
+          cause = "The synchronizer failed to startup due to an internal error",
           throwableO = Some(throwable),
         )
         with SyncServiceError
 
-    final case class DomainIsMissingInternally(synchronizerAlias: SynchronizerAlias, where: String)(
-        implicit val loggingContext: ErrorLoggingContext
+    final case class SynchronizerIsMissingInternally(
+        synchronizerAlias: SynchronizerAlias,
+        where: String,
+    )(implicit
+        val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = "Failed to await for participant becoming active due to missing domain objects"
+          cause =
+            "Failed to await for participant becoming active due to missing synchronizer objects"
         )
         with SyncServiceError
     final case class CleanHeadAwaitFailed(
@@ -387,7 +395,7 @@ object SyncServiceError extends SyncServiceErrorGroup {
     final case class Warn(override val cause: String) extends Alarm(cause)
   }
 
-  @Explanation("This error indicates a sync domain failed to start or initialize properly.")
+  @Explanation("This error indicates a synchronizer failed to start or initialize properly.")
   @Resolution(
     "Please check the underlying error(s) and retry if possible. If not, contact support and provide the failure reason."
   )
@@ -404,29 +412,29 @@ object SyncServiceError extends SyncServiceErrorGroup {
 
     final case class InitError(
         synchronizerAlias: SynchronizerAlias,
-        error: SyncDomainInitializationError,
+        error: ConnectedSynchronizerInitializationError,
     )(implicit
         val loggingContext: ErrorLoggingContext
-    ) extends CantonError.Impl(cause = "The domain failed to initialize due to an error")
+    ) extends CantonError.Impl(cause = "The synchronizer failed to initialize due to an error")
         with SyncServiceError
   }
 
   @Explanation(
-    """The participant is not connected to a domain and can therefore not allocate a party
-    because the party notification is configured as ``party-notification.type = via-domain``."""
+    """The participant is not connected to a synchronizer and can therefore not allocate a party
+    because the party notification is configured as ``party-notification.type = via-synchronizer``."""
   )
   @Resolution(
-    "Connect the participant to a domain first or change the participant's party notification config to ``eager``."
+    "Connect the participant to a synchronizer first or change the participant's party notification config to ``eager``."
   )
-  object PartyAllocationNoDomainError
+  object PartyAllocationNoSynchronizerError
       extends ErrorCode(
-        "PARTY_ALLOCATION_WITHOUT_CONNECTED_DOMAIN",
+        "PARTY_ALLOCATION_WITHOUT_CONNECTED_SYNCHRONIZER",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
     final case class Error(submission_id: LedgerSubmissionId)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = show"Cannot allocate a party without being connected to a domain"
+          cause = show"Cannot allocate a party without being connected to a synchronizer"
         )
   }
 

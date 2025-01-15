@@ -45,7 +45,7 @@ class TrafficPurchasedSubmissionHandler(
 
   /** Send a signed traffic purchased entry request.
     * @param member recipient of the new balance
-    * @param synchronizerId synchronizerId of the domain where the top up is being sent to
+    * @param synchronizerId synchronizerId of the synchronizer where the top up is being sent to
     * @param protocolVersion protocol version used
     * @param serial monotonically increasing serial number for the request
     * @param totalTrafficPurchased new total traffic purchased entry
@@ -118,7 +118,7 @@ class TrafficPurchasedSubmissionHandler(
             .map(
               _.getOrElse(
                 ErrorUtil.invalidState(
-                  "No sequencer group was found on the domain. There should at least be one sequencer (this one)."
+                  "No sequencer group was found on the synchronizer. There should at least be one sequencer (this one)."
                 )
               )
             )
@@ -127,7 +127,7 @@ class TrafficPurchasedSubmissionHandler(
         NonEmpty
           .from(sequencerGroup.active.map(_.member)),
         ErrorUtil.invalidState(
-          "No active sequencers found on the domain. There should at least be one sequencer."
+          "No active sequencers found on the synchronizer. There should at least be one sequencer."
         ),
       )
       aggregationRule = AggregationRule(
@@ -159,7 +159,7 @@ class TrafficPurchasedSubmissionHandler(
             RecipientsTree.ofMembers(
               NonEmpty.mk(Set, member), // Root of recipient tree: recipient of the top up
               Seq(
-                RecipientsTree.recipientsLeaf( // Leaf of the tree: sequencers of domain group
+                RecipientsTree.recipientsLeaf( // Leaf of the tree: sequencers of synchronizer group
                   NonEmpty.mk(
                     Set,
                     SequencersOfSynchronizer: Recipient,

@@ -93,7 +93,7 @@ final class ParticipantPruningScheduler(
     (for {
       offsetByRetention <- EitherT.right[ScheduledRunResult](
         participantNodePersistentState.value.ledgerApiStore
-          .lastDomainOffsetBeforeOrAtPublicationTime(timestampByRetention)
+          .lastSynchronizerOffsetBeforeOrAtPublicationTime(timestampByRetention)
           .map(_.map(_.offset))
       )
       _ = logger.debug(
@@ -204,12 +204,16 @@ final class ParticipantPruningScheduler(
   def setParticipantSchedule(schedule: ParticipantPruningSchedule)(implicit
       traceContext: TraceContext
   ): Future[Unit] = updateScheduleAndReactivateIfActive(
-    pruningSchedulerStore.setParticipantSchedule(schedule)
+    pruningSchedulerStore
+      .setParticipantSchedule(schedule)
+      .failOnShutdownToAbortException("ParticipantPruningSchedule")
   )
 
   def getParticipantSchedule()(implicit
       traceContext: TraceContext
-  ): Future[Option[ParticipantPruningSchedule]] = pruningSchedulerStore.getParticipantSchedule()
+  ): Future[Option[ParticipantPruningSchedule]] = pruningSchedulerStore
+    .getParticipantSchedule()
+    .failOnShutdownToAbortException("ParticipantPruningScheduler")
 
   override def initializeSchedule()(implicit
       traceContext: TraceContext
@@ -274,7 +278,7 @@ final class ParticipantPruningScheduler(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] =
     participantNodePersistentState.value.ledgerApiStore
-      .firstDomainOffsetAfterOrAtPublicationTime(CantonTimestamp.MinValue)
+      .firstSynchronizerOffsetAfterOrAtPublicationTime(CantonTimestamp.MinValue)
       .map(domainOffset =>
         MetricsHelper.updateAgeInHoursGauge(
           clock,

@@ -222,7 +222,7 @@ trait ReassignmentProcessingSteps[
       malformedPayloads: Seq[MalformedPayload],
       mediator: MediatorGroupRecipient,
       snapshot: SynchronizerSnapshotSyncCryptoApi,
-      domainParameters: DynamicSynchronizerParametersWithValidity,
+      synchronizerParameters: DynamicSynchronizerParametersWithValidity,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[ParsedReassignmentRequest[FullView]] = {
@@ -254,7 +254,7 @@ trait ReassignmentProcessingSteps[
         malformedPayloads,
         mediator,
         snapshot,
-        domainParameters,
+        synchronizerParameters,
       )
     )
   }
@@ -264,7 +264,7 @@ trait ReassignmentProcessingSteps[
       rootHash: RootHash,
       malformedPayloads: Seq[MalformedPayload],
   )(implicit traceContext: TraceContext): Seq[ConfirmationResponse] =
-    // TODO(i12926) This will crash the SyncDomain
+    // TODO(i12926) This will crash the ConnectedSynchronizer
     ErrorUtil.internalError(
       new UnsupportedOperationException(
         s"Received a unassignment/assignment request with id $requestId with all payloads being malformed. Crashing..."
@@ -467,7 +467,7 @@ object ReassignmentProcessingSteps {
       override val malformedPayloads: Seq[MalformedPayload],
       override val mediator: MediatorGroupRecipient,
       override val snapshot: SynchronizerSnapshotSyncCryptoApi,
-      override val domainParameters: DynamicSynchronizerParametersWithValidity,
+      override val synchronizerParameters: DynamicSynchronizerParametersWithValidity,
   ) extends ParsedRequest[ReassignmentSubmitterMetadata] {
     override def rootHash: RootHash = fullViewTree.rootHash
   }
@@ -518,9 +518,9 @@ object ReassignmentProcessingSteps {
 
   final case class ContractError(message: String) extends ReassignmentProcessorError
 
-  final case class UnknownDomain(synchronizerId: SynchronizerId, context: String)
+  final case class UnknownSynchronizer(synchronizerId: SynchronizerId, context: String)
       extends ReassignmentProcessorError {
-    override def message: String = s"Unknown domain $synchronizerId when $context"
+    override def message: String = s"Unknown synchronizer $synchronizerId when $context"
   }
 
   case object ApplicationShutdown extends ReassignmentProcessorError {
@@ -529,9 +529,9 @@ object ReassignmentProcessingSteps {
     override def message: String = "Application is shutting down"
   }
 
-  final case class DomainNotReady(synchronizerId: SynchronizerId, context: String)
+  final case class SynchronizerNotReady(synchronizerId: SynchronizerId, context: String)
       extends ReassignmentProcessorError {
-    override def message: String = s"Domain $synchronizerId is not ready when $context"
+    override def message: String = s"Synchronizer $synchronizerId is not ready when $context"
   }
 
   final case class ReassignmentParametersError(synchronizerId: SynchronizerId, context: String)
@@ -540,9 +540,10 @@ object ReassignmentProcessingSteps {
       s"Unable to compute reassignment parameters for $synchronizerId: $context"
   }
 
-  final case class NoTimeProofFromDomain(synchronizerId: SynchronizerId, reason: String)
+  final case class NoTimeProofFromSynchronizer(synchronizerId: SynchronizerId, reason: String)
       extends ReassignmentProcessorError {
-    override def message: String = s"Cannot fetch time proof for domain `$synchronizerId`: $reason"
+    override def message: String =
+      s"Cannot fetch time proof for synchronizer `$synchronizerId`: $reason"
   }
 
   final case class ReassignmentDataNotFound(reassignmentId: ReassignmentId)

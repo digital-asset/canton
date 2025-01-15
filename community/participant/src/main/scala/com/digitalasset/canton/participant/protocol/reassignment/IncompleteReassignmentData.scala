@@ -15,7 +15,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import io.scalaland.chimney.dsl.*
 
 /** Stores the data for a reassignment that is incomplete, i.e., for which only the assignment or the unassignment was
-  * emitted on the multi-domain event log.
+  * emitted to the indexer.
   *
   * If [[IncompleteReassignmentData.ReassignmentEventGlobalOffset]] is a [[IncompleteReassignmentData.UnassignmentEventGlobalOffset]],
   * it means that the unassignment event was emitted before or at `queryOffset` and that assigned event was not yet
@@ -34,8 +34,8 @@ final case class IncompleteReassignmentData private (
     queryOffset: Offset,
 ) {
 
-  def sourceDomain: Source[SynchronizerId] = unassignmentRequest.sourceSynchronizer
-  def targetDomain: Target[SynchronizerId] = unassignmentRequest.targetSynchronizer
+  def sourceSynchronizer: Source[SynchronizerId] = unassignmentRequest.sourceSynchronizer
+  def targetSynchronizer: Target[SynchronizerId] = unassignmentRequest.targetSynchronizer
 
   def unassignmentGlobalOffset: Option[Offset] =
     reassignmentEventGlobalOffset.unassignmentGlobalOffset

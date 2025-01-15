@@ -3,7 +3,33 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
-## Until 2024-01-04 (Exclusive)
+## Until 2025-01-15 (Exclusive)
+
+- Renamed request/response protobuf messages of the inspection, pruning, resource management services from `Endpoint.Request` to `EndpointRequest` and respectively for the response types.
+- Renamed the node_index field of events in the index db to node_id.
+- Changes to defaults in ResourceLimits:
+  - The fields `max_inflight_validation_requests` and `max_submission_rate` are now declared as `optional uint32`,
+    which also means that absent values are not encoded anymore as negative values, but as absent values.
+    Negative values will result in a parsing error and a rejected request.
+
+## Until 2025-01-010 (Exclusive)
+
+### Initial Topology Snapshot Validation
+The initial topology snapshot, both for initializing a new domain and for onboarding a new member,
+is now validated by the node importing the snapshot.
+
+In case the snapshot might contain legacy OTK topology transactions with missing signatures for newly added signing keys,
+the nodes may permit such transactions by overriding the following setting:
+
+```
+canton.sequencers.mySequencer.topology.insecure-ignore-missing-extra-key-signatures-in-initial-snapshot = true
+
+canton.participants.myParticipant.topology.insecure-ignore-missing-extra-key-signatures-in-initial-snapshot = true
+
+canton.mediators.myMediator.topology.insecure-ignore-missing-extra-key-signatures-in-initial-snapshot = true
+```
+
+## Until 2025-01-04 (Exclusive)
 - The event_id field has been removed from the Event messages of the lapi since now the event id consists of the offset
   and the node id which are already present in the events.
 - The events_by_id field in the TransactionTree message has been converted from a map<string, TreeEvent> to a

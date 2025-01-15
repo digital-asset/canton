@@ -53,11 +53,11 @@ class CantonOrderingTopologyProviderTest
         )
       when(topologySnapshotMock.findDynamicSequencingParameters()(any[TraceContext]))
         .thenReturn(FutureUnlessShutdown.pure(Right(someDynamicSequencingParameters)))
-      val domainSnapshotSyncCryptoApiMock = mock[SynchronizerSnapshotSyncCryptoApi]
-      when(domainSnapshotSyncCryptoApiMock.ipsSnapshot).thenReturn(topologySnapshotMock)
+      val synchronizerSnapshotSyncCryptoApiMock = mock[SynchronizerSnapshotSyncCryptoApi]
+      when(synchronizerSnapshotSyncCryptoApiMock.ipsSnapshot).thenReturn(topologySnapshotMock)
       val cryptoApiMock = mock[SynchronizerSyncCryptoClient]
-      when(cryptoApiMock.awaitSnapshotUS(any[CantonTimestamp])(any[TraceContext]))
-        .thenReturn(FutureUnlessShutdown.pure(domainSnapshotSyncCryptoApiMock))
+      when(cryptoApiMock.awaitSnapshot(any[CantonTimestamp])(any[TraceContext]))
+        .thenReturn(FutureUnlessShutdown.pure(synchronizerSnapshotSyncCryptoApiMock))
 
       Table(
         (
@@ -79,7 +79,7 @@ class CantonOrderingTopologyProviderTest
         (CantonTimestamp.MinValue, CantonTimestamp.MinValue, true),
       ).forEvery {
         case (activationTimestamp, maxEffectiveTimestamp, expectedPendingTopologyChangesFlag) =>
-          when(cryptoApiMock.awaitMaxTimestampUS(activationTimestamp))
+          when(cryptoApiMock.awaitMaxTimestamp(activationTimestamp))
             .thenReturn(
               FutureUnlessShutdown.pure(
                 Some((SequencedTime(aTimestamp), EffectiveTime(maxEffectiveTimestamp)))

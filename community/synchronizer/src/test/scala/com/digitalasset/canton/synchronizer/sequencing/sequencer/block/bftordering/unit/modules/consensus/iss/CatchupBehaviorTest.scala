@@ -11,13 +11,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftorderi
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.EpochInProgress
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss.leaders.SimpleLeaderSelectionPolicy
-import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer.{
-  CatchupBehavior,
-  CatchupDetector,
-  DefaultCatchupDetector,
-  StateTransferManager,
-  StateTransferMessageResult,
-}
+import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer.*
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.core.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.fakeSequencerId
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.framework.ModuleRef

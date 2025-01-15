@@ -115,7 +115,7 @@ trait SortedReconciliationIntervalsHelpers {
   /** Creates a SortedReconciliationIntervalsProvider that returns
     * always the same reconciliation interval
     *
-    * @param synchronizerBootstrappingTime `validFrom` time of the domain parameters
+    * @param synchronizerBootstrappingTime `validFrom` time of the synchronizer parameters
     */
   protected def constantSortedReconciliationIntervalsProvider(
       reconciliationInterval: PositiveSeconds,
@@ -126,7 +126,7 @@ trait SortedReconciliationIntervalsHelpers {
     val topologySnapshot = mock[TopologySnapshot]
 
     when(topologyClient.approximateTimestamp).thenReturn(CantonTimestamp.MaxValue)
-    when(topologyClient.awaitSnapshotUS(any[CantonTimestamp])(any[TraceContext])).thenReturn(
+    when(topologyClient.awaitSnapshot(any[CantonTimestamp])(any[TraceContext])).thenReturn(
       FutureUnlessShutdown.pure(topologySnapshot)
     )
 

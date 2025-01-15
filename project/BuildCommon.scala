@@ -403,6 +403,9 @@ object BuildCommon {
     Compile / compile / wartremoverErrors += Wart.custom(
       "com.digitalasset.canton.DirectGrpcServiceInvocation"
     ),
+    Compile / compile / wartremoverErrors += Wart.custom(
+      "com.digitalasset.canton.EnforceVisibleForTesting"
+    ),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.DiscardedFuture"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureAndThen"),
     wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
@@ -490,6 +493,7 @@ object BuildCommon {
       `daml-grpc-utils`,
       `util-external`,
       `util-logging`,
+      `community-admin-api`,
       `community-app`,
       `community-app-base`,
       `community-base`,
@@ -513,6 +517,7 @@ object BuildCommon {
       `daml-tls`,
       `kms-driver-api`,
       `ledger-common`,
+      `ledger-common-dars`,
       `ledger-common-dars-lf-v2-1`,
       `ledger-common-dars-lf-v2-dev`,
       `ledger-api-core`,
@@ -680,6 +685,7 @@ object BuildCommon {
         `daml-tls`,
         `util-logging`,
         `community-admin-api`,
+        `magnolify-addon` % "compile->compile",
         // No strictly internal dependencies on purpose so that this can be a foundational module and avoid circular dependencies
         `slick-fork`,
         `kms-driver-api`,
@@ -1119,6 +1125,8 @@ object BuildCommon {
       .settings(
         sharedSettings,
         libraryDependencies ++= Seq(
+          cats,
+          daml_non_empty,
           magnolia,
           magnolifyScalacheck,
           magnolifyShared % Test,
@@ -1219,6 +1227,11 @@ object BuildCommon {
         coverageEnabled := false,
       )
 
+    lazy val `ledger-common-dars` =
+      project
+        .in(file("community/ledger/ledger-common-dars"))
+        .settings(sharedCommunitySettings, addFilesToHeaderCheck("*.daml", "daml", Compile))
+
     lazy val `ledger-common` = project
       .in(file("community/ledger/ledger-common"))
       .dependsOn(
@@ -1265,7 +1278,7 @@ object BuildCommon {
         )
         .enablePlugins(DamlPlugin)
         .settings(
-          sharedSettings,
+          sharedCommunitySettings,
           Compile / damlDarLfVersion := lfVersion,
           ledgerCommonDarsSharedSettings(lfVersion),
         )
@@ -1605,15 +1618,13 @@ object BuildCommon {
         ),
         Compile / unmanagedResources += (ThisBuild / baseDirectory).value / "community/ledger-api/VERSION",
         coverageEnabled := false,
-        // skip header check
-        headerSources / excludeFilter := HiddenFileFilter || "*",
-        headerResources / excludeFilter := HiddenFileFilter || "*",
         libraryDependencies ++= Seq(
           daml_ledger_api_value_scala,
           scalapb_runtime,
           scalapb_runtime_grpc,
           protoc_gen_doc asProtocPlugin (),
         ),
+        addProtobufFilesToHeaderCheck(Compile),
       )
 
     lazy val `bindings-java` = project

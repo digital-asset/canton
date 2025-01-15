@@ -31,18 +31,18 @@ import java.time.Duration
 import scala.concurrent.ExecutionContext
 
 /** The authentication service issues tokens to members after they have successfully completed the following challenge
-  * response protocol and after they have accepted the service agreement of the domain. The tokens are required for
+  * response protocol and after they have accepted the service agreement of the synchronizer. The tokens are required for
   * connecting to the sequencer.
   *
   * In order for a member to subscribe to the sequencer, it must follow a few steps for it to authenticate.
-  * Assuming the domain already has knowledge of the member's public keys, the following steps are to be taken:
-  *   1. member sends request to the domain for authenticating
-  *   2. domain returns a nonce (a challenge random number)
-  *   3. member takes the nonce, concatenates it with the identity of the domain, signs it and sends it back
-  *   4. domain checks the signature against the key of the member. if it matches, create a token and return it
+  * Assuming the synchronizer already has knowledge of the member's public keys, the following steps are to be taken:
+  *   1. member sends request to the synchronizer for authenticating
+  *   2. synchronizer returns a nonce (a challenge random number)
+  *   3. member takes the nonce, concatenates it with the identity of the synchronizer, signs it and sends it back
+  *   4. synchronizer checks the signature against the key of the member. if it matches, create a token and return it
   *   5. member will use the token when subscribing to the sequencer
   *
-  * @param invalidateMemberCallback Called when a member is explicitly deactivated on the domain so all active subscriptions
+  * @param invalidateMemberCallback Called when a member is explicitly deactivated on the synchronizer so all active subscriptions
   *                                 for this member should be terminated.
   */
 class MemberAuthenticationService(
@@ -61,7 +61,7 @@ class MemberAuthenticationService(
     extends NamedLogging
     with FlagCloseable {
 
-  /** Domain generates nonce that he expects the participant to use to concatenate with the domain's id and sign
+  /** synchronizer generates nonce that he expects the participant to use to concatenate with the synchronizer's id and sign
     * to proceed with the authentication (step 2). We expect to find a key with usage 'SequencerAuthentication' to
     * sign these messages.
     */
@@ -105,7 +105,7 @@ class MemberAuthenticationService(
       }
     }
 
-  /** Domain checks that the signature given by the member matches and returns a token if it does (step 4)
+  /** synchronizer checks that the signature given by the member matches and returns a token if it does (step 4)
     */
   def validateSignature(member: Member, signature: Signature, providedNonce: Nonce)(implicit
       traceContext: TraceContext
@@ -121,7 +121,7 @@ class MemberAuthenticationService(
         .mapK(FutureUnlessShutdown.outcomeK)
       StoredNonce(_, nonce, generatedAt, _expireAt) = value
       authentication <- EitherT.fromEither[FutureUnlessShutdown](MemberAuthentication(member))
-      hash = authentication.hashDomainNonce(nonce, synchronizerId, cryptoApi.pureCrypto)
+      hash = authentication.hashSynchronizerNonce(nonce, synchronizerId, cryptoApi.pureCrypto)
       snapshot = cryptoApi.currentSnapshotApproximation
 
       _ <- snapshot
@@ -156,10 +156,10 @@ class MemberAuthenticationService(
       AuthenticationTokenWithExpiry(token, tokenExpiry)
     }
 
-  /** Domain checks if the token given by the participant is the one previously assigned to it for authentication.
+  /** synchronizer checks if the token given by the participant is the one previously assigned to it for authentication.
     * The participant also provides the synchronizer id for which they think they are connecting to. If this id does not match
-    * this domain's id, it means the participant was previously connected to a different domain on the same address and
-    * now should be informed that this address now hosts a different domain.
+    * this synchronizer's id, it means the participant was previously connected to a different synchronizer on the same address and
+    * now should be informed that this address now hosts a different synchronizer.
     */
   def validateToken(
       intendedSynchronizerId: SynchronizerId,
@@ -167,7 +167,7 @@ class MemberAuthenticationService(
       token: AuthenticationToken,
   ): Either[AuthenticationError, StoredAuthenticationToken] =
     for {
-      _ <- correctDomain(member, intendedSynchronizerId)
+      _ <- correctSynchronizer(member, intendedSynchronizerId)
       validTokenO = store.fetchTokens(member).filter(_.expireAt > clock.now).find(_.token == token)
       validToken <- validTokenO.toRight(MissingToken(member)).leftWiden[AuthenticationError]
     } yield validToken
@@ -221,7 +221,7 @@ class MemberAuthenticationService(
         EitherT.leftT(AuthenticationNotSupportedForMember(sequencer))
     }
 
-  private def correctDomain(
+  private def correctSynchronizer(
       member: Member,
       intendedSynchronizerId: SynchronizerId,
   ): Either[AuthenticationError, Unit] =
@@ -312,7 +312,7 @@ class MemberAuthenticationServiceImpl(
     )
     with TopologyTransactionProcessingSubscriber {
 
-  /** domain topology client subscriber used to remove member tokens if they get disabled */
+  /** synchronizer topology client subscriber used to remove member tokens if they get disabled */
   override def observed(
       sequencerTimestamp: SequencedTime,
       effectiveTimestamp: EffectiveTime,
@@ -328,7 +328,7 @@ class MemberAuthenticationServiceImpl(
             ) =>
           val participant = cert.participantId
           logger.info(
-            s"Domain trust certificate of $participant was removed, forcefully disconnecting the participant."
+            s"Synchronizer trust certificate of $participant was removed, forcefully disconnecting the participant."
           )
           invalidateAndExpire(isParticipantActive)(participant)
         case TopologyTransaction(
@@ -348,7 +348,7 @@ class MemberAuthenticationServiceImpl(
             ) =>
           val participant = cert.participantId
           logger.info(
-            s"$participant's access has been revoked by the domain. Removing any token and booting the participant"
+            s"$participant's access has been revoked by the synchronizer. Removing any token and booting the participant"
           )
           invalidateAndExpire(isParticipantActive)(participant)
 

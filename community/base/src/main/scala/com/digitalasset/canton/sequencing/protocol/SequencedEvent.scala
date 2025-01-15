@@ -52,7 +52,7 @@ sealed trait SequencedEvent[+Env <: Envelope[?]]
     */
   val timestamp: CantonTimestamp
 
-  /** The domain which this deliver event belongs to */
+  /** The synchronizer which this deliver event belongs to */
   val synchronizerId: SynchronizerId
 
   def isTombstone: Boolean = false
@@ -383,6 +383,9 @@ case class Deliver[+Env <: Envelope[_]] private[sequencing] (
       representativeProtocolVersion,
       deserializedFromO,
     )
+
+  def updateTrafficReceipt(trafficReceipt: Option[TrafficReceipt]): Deliver[Env] =
+    copy(trafficReceipt = trafficReceipt)
 
   override protected def pretty: Pretty[this.type] =
     prettyOfClass(

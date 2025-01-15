@@ -21,6 +21,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
 import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Flow
 import sttp.capabilities.pekko.PekkoStreams
 import sttp.tapir.generic.auto.*
@@ -36,6 +37,7 @@ class JsStateService(
 )(implicit
     val executionContext: ExecutionContext,
     val esf: ExecutionSequencerFactory,
+    materializer: Materializer,
     wsConfig: WebsocketConfig,
 ) extends Endpoints
     with NamedLogging {
@@ -52,7 +54,11 @@ class JsStateService(
       activeContractsEndpoint,
       getActiveContractsStream,
     ),
-    withServerLogic(JsStateService.getConnectedDomainsEndpoint, getConnectedDomains),
+    asList(
+      activeContractsListEndpoint,
+      getActiveContractsStream,
+    ),
+    withServerLogic(JsStateService.getConnectedSynchronizersEndpoint, getConnectedSynchronizers),
     withServerLogic(
       JsStateService.getLedgerEndEndpoint,
       getLedgerEnd,
@@ -63,15 +69,18 @@ class JsStateService(
     ),
   )
 
-  private def getConnectedDomains(
+  private def getConnectedSynchronizers(
       callerContext: CallerContext
   ): TracedInput[(String, Option[String])] => Future[
-    Either[JsCantonError, state_service.GetConnectedDomainsResponse]
+    Either[JsCantonError, state_service.GetConnectedSynchronizersResponse]
   ] = req =>
     stateServiceClient(callerContext.token())(req.traceContext)
-      .getConnectedDomains(
+      .getConnectedSynchronizers(
         state_service
-          .GetConnectedDomainsRequest(party = req.in._1, participantId = req.in._2.getOrElse(""))
+          .GetConnectedSynchronizersRequest(
+            party = req.in._1,
+            participantId = req.in._2.getOrElse(""),
+          )
       )
       .resultToRight
 
@@ -110,6 +119,7 @@ class JsStateService(
         withCloseDelay = true,
       )
     }
+
 }
 
 object JsStateService extends DocumentationEndpoints {
@@ -130,12 +140,19 @@ object JsStateService extends DocumentationEndpoints {
     )
     .description("Get active contracts stream")
 
-  val getConnectedDomainsEndpoint = state.get
-    .in(sttp.tapir.stringToPath("connected-domains"))
+  val activeContractsListEndpoint = state.post
+    .in(sttp.tapir.stringToPath("active-contracts"))
+    .in(jsonBody[state_service.GetActiveContractsRequest])
+    .out(jsonBody[Seq[JsGetActiveContractsResponse]])
+    .inStreamListParams()
+    .description("Query active contracts list (blocking call)")
+
+  val getConnectedSynchronizersEndpoint = state.get
+    .in(sttp.tapir.stringToPath("connected-synchronizers"))
     .in(query[String]("party"))
     .in(query[Option[String]]("participantId"))
-    .out(jsonBody[state_service.GetConnectedDomainsResponse])
-    .description("Get connected domains")
+    .out(jsonBody[state_service.GetConnectedSynchronizersResponse])
+    .description("Get connected synchronizers")
 
   val getLedgerEndEndpoint = state.get
     .in(sttp.tapir.stringToPath("ledger-end"))
@@ -149,7 +166,8 @@ object JsStateService extends DocumentationEndpoints {
 
   override def documentation: Seq[AnyEndpoint] = Seq(
     activeContractsEndpoint,
-    getConnectedDomainsEndpoint,
+    activeContractsListEndpoint,
+    getConnectedSynchronizersEndpoint,
     getLedgerEndEndpoint,
     getLastPrunedOffsetsEndpoint,
   )
@@ -235,11 +253,14 @@ object JsStateServiceCodecs {
   implicit val jsUnassignedEventRW: Codec[JsUnassignedEvent] = deriveCodec
   implicit val jsAssignedEventRW: Codec[JsAssignedEvent] = deriveCodec
 
-  implicit val getConnectedDomainsRequestRW: Codec[state_service.GetConnectedDomainsRequest] =
+  implicit val getConnectedSynchronizersRequestRW
+      : Codec[state_service.GetConnectedSynchronizersRequest] =
     deriveCodec
-  implicit val getConnectedDomainsResponseRW: Codec[state_service.GetConnectedDomainsResponse] =
+  implicit val getConnectedSynchronizersResponseRW
+      : Codec[state_service.GetConnectedSynchronizersResponse] =
     deriveCodec
-  implicit val connectedDomainRW: Codec[state_service.GetConnectedDomainsResponse.ConnectedDomain] =
+  implicit val connectedSynchronizerRW
+      : Codec[state_service.GetConnectedSynchronizersResponse.ConnectedSynchronizer] =
     deriveCodec
   implicit val participantPermissionRW: Codec[state_service.ParticipantPermission] = deriveCodec
 

@@ -5,18 +5,18 @@ package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.topology.{SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.{BaseTest, SynchronizerAlias}
+import com.digitalasset.canton.{BaseTest, FailOnShutdown, SynchronizerAlias}
 import org.scalatest.wordspec.AsyncWordSpec
 
-trait RegisteredDomainsStoreTest {
-  this: AsyncWordSpec with BaseTest =>
+trait RegisteredDomainsStoreTest extends FailOnShutdown {
+  this: AsyncWordSpec & BaseTest =>
 
   protected implicit def traceContext: TraceContext
 
   private def alias(a: String) = SynchronizerAlias.tryCreate(a)
   private def id(a: String) = SynchronizerId(UniqueIdentifier.tryFromProtoPrimitive(s"$a::default"))
 
-  def registeredDomainsStore(mk: () => RegisteredDomainsStore): Unit = {
+  def registeredDomainsStore(mk: () => RegisteredSynchronizersStore): Unit = {
     "be able to retrieve a map from alias to synchronizer ids" in {
       val sut = mk()
       for {
