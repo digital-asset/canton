@@ -418,6 +418,7 @@ trait CantonConfig {
         general = CantonNodeParameterConverter.general(this, domainConfig),
         protocol = CantonNodeParameterConverter.protocol(this, domainConfig.init.domainParameters),
         maxBurstFactor = domainConfig.parameters.maxBurstFactor,
+        dispatcherBatchSize = domainConfig.parameters.dispatcherBatchSize,
       )
   }
 

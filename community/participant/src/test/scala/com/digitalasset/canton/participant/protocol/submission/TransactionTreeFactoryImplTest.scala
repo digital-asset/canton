@@ -67,6 +67,9 @@ final class TransactionTreeFactoryImplTest
       snapshot: TopologySnapshot = factory.topologySnapshot,
   ): EitherT[Future, TransactionTreeConversionError, GenTransactionTree] = {
     val submitterInfo = DefaultParticipantStateValues.submitterInfo(actAs)
+    val unsuffixedContractPackages = transaction.unwrap.nodes.values.collect {
+      case create: LfNodeCreate => create.coid -> create.templateId.packageId
+    }.toMap
     treeFactory
       .createTransactionTree(
         transaction = transaction,
@@ -80,7 +83,7 @@ final class TransactionTreeFactoryImplTest
         contractOfId = contractInstanceOfId,
         keyResolver = keyResolver,
         maxSequencingTime = factory.ledgerTime.plusSeconds(100),
-        suffixedContractPackages = Map.empty,
+        contractPackages = unsuffixedContractPackages,
       )
       .failOnShutdownTo(fail("creating tx tree"))
   }
