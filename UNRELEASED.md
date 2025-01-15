@@ -3,6 +3,10 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2025-01-08 (Exclusive)
+- Configuration for JSON API has been moved from `participant.http-ledger-api-experimental` to `participant.http-ledger-api`
+
+
 ## Until 2024-11-18 (Exclusive)
 Refactored domain connectivity service to have endpoints with limited responsibilities:
 
