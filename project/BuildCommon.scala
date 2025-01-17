@@ -316,13 +316,13 @@ object BuildCommon {
         "community" / "admin-api",
         "admin-api",
       )
-      val communityDomainProto: Seq[(File, String)] = packProtobufFiles(
-        "community" / "domain",
-        "domain",
+      val communitySynchronizerProto: Seq[(File, String)] = packProtobufFiles(
+        "community" / "synchronizer",
+        "synchronizer",
       )
 
       val protoFiles =
-        ledgerApiProto ++ communityBaseProto ++ communityParticipantProto ++ communityAdminProto ++ communityDomainProto
+        ledgerApiProto ++ communityBaseProto ++ communityParticipantProto ++ communityAdminProto ++ communitySynchronizerProto
 
       log.info("Invoking bundle generator")
       // add license to package

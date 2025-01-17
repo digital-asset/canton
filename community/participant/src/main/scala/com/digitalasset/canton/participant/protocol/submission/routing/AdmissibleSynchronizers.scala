@@ -47,11 +47,11 @@ private[routing] final class AdmissibleSynchronizers(
   ): EitherT[FutureUnlessShutdown, TransactionRoutingError, NonEmpty[Set[SynchronizerId]]] = {
 
     def queryPartyTopologySnapshotClient(
-        domainPartyTopologySnapshotClient: (SynchronizerId, PartyTopologySnapshotClient)
+        synchronizerPartyTopologySnapshotClient: (SynchronizerId, PartyTopologySnapshotClient)
     ): EitherT[FutureUnlessShutdown, TransactionRoutingError, Option[
       (SynchronizerId, Map[LfPartyId, PartyInfo])
     ]] = {
-      val (synchronizerId, partyTopologySnapshotClient) = domainPartyTopologySnapshotClient
+      val (synchronizerId, partyTopologySnapshotClient) = synchronizerPartyTopologySnapshotClient
       val allParties = submitters.view ++ informees.view
       partyTopologySnapshotClient
         .activeParticipantsOfPartiesWithInfo(allParties.toSeq)
@@ -226,7 +226,7 @@ private[routing] final class AdmissibleSynchronizers(
 
     for {
       topology <- queryTopology()
-      _ = logger.debug(s"Topology queried for the following domains: ${topology.keySet}")
+      _ = logger.debug(s"Topology queried for the following synchronizers: ${topology.keySet}")
       knownParties = topology.view.values.map(_.keySet).fold(Set.empty)(_ ++ _)
       _ <- ensureAllSubmittersAreKnown(knownParties)
       _ <- ensureAllInformeesAreKnown(knownParties)
