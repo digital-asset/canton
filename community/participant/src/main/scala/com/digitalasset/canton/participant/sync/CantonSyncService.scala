@@ -199,7 +199,6 @@ class CantonSyncService(
 
   private val partyAllocation = new PartyAllocation(
     participantId,
-    participantNodeEphemeralState,
     partyOps,
     partyNotifier,
     isActive,
@@ -629,7 +628,7 @@ class CantonSyncService(
   }
 
   override def allocateParty(
-      hint: Option[LfPartyId],
+      hint: LfPartyId,
       rawSubmissionId: LedgerSubmissionId,
   )(implicit
       traceContext: TraceContext
@@ -1012,9 +1011,9 @@ class CantonSyncService(
       connected <- go(List(), configs.toList)
       _ = if (configs.nonEmpty) {
         if (connected.nonEmpty)
-          logger.info("Starting sync-domains for global reconnect of domains")
+          logger.info("Starting connected-synchronizer for global reconnect of synchronizers")
         else
-          logger.info("Not starting any sync-domain as none can be contacted")
+          logger.info("Not starting any connected-synchronizer as none can be contacted")
       }
       // step subscribe
       _ <- startConnectedSynchronizers(connected).mapK(FutureUnlessShutdown.outcomeK)
@@ -1276,7 +1275,7 @@ class CantonSyncService(
     } else {
 
       logger.debug(s"About to connect to synchronizer: ${synchronizerAlias.unwrap}")
-      val domainMetrics = metrics.domainMetrics(synchronizerAlias)
+      val connectedSynchronizerMetrics = metrics.connectedSynchronizerMetrics(synchronizerAlias)
 
       val ret: EitherT[FutureUnlessShutdown, SyncServiceError, Unit] = for {
 
@@ -1325,7 +1324,7 @@ class CantonSyncService(
                 synchronizerHandle.topologyClient.setSynchronizerTimeTracker(tracker)
                 tracker
               },
-              domainMetrics,
+              connectedSynchronizerMetrics,
               parameters.cachingConfigs.sessionEncryptionKeyCache,
               participantId,
             )
@@ -1366,7 +1365,7 @@ class CantonSyncService(
             reassignmentCoordination,
             commandProgressTracker,
             clock,
-            domainMetrics,
+            connectedSynchronizerMetrics,
             futureSupervisor,
             synchronizerLoggerFactory,
             testingConfig,

@@ -33,8 +33,8 @@ trait InFlightSubmissionStoreTest extends AsyncWordSpec with BaseTest {
   lazy val changeId4 = mkChangeIdHash(4)
   lazy val submissionId1 = DefaultDamlValues.submissionId(1).some
   lazy val submissionId2 = DefaultDamlValues.submissionId(2).some
-  lazy val synchronizerId1 = SynchronizerId.tryFromString("domain1::id")
-  lazy val synchronizerId2 = SynchronizerId.tryFromString("domain2::id")
+  lazy val synchronizerId1 = SynchronizerId.tryFromString("synchronizer1::id")
+  lazy val synchronizerId2 = SynchronizerId.tryFromString("synchronizer2::id")
   lazy val messageId1 = new UUID(0, 1)
   lazy val messageId2 = new UUID(0, 2)
   lazy val messageId3 = new UUID(0, 3)
@@ -129,7 +129,7 @@ trait InFlightSubmissionStoreTest extends AsyncWordSpec with BaseTest {
               submission1.messageId,
             )
             .failOnShutdown
-          lookupMsgIdWrongDomain <- store
+          lookupMsgIdwrongSynchronizer <- store
             .lookupSomeMessageId(synchronizerId2, submission1.messageId)
             .failOnShutdown
         } yield {
@@ -141,7 +141,7 @@ trait InFlightSubmissionStoreTest extends AsyncWordSpec with BaseTest {
           lookupEarliest1 shouldBe Some(submission1.associatedTimestamp)
           lookupEarliest2 shouldBe None
           lookupMsgId1 shouldBe Some(submission1)
-          lookupMsgIdWrongDomain shouldBe None
+          lookupMsgIdwrongSynchronizer shouldBe None
         }
       }
 

@@ -122,7 +122,7 @@ class ParticipantReferencesExtensions(participants: Seq[ParticipantReference])(i
         )
         .discard
 
-    @Help.Summary("Connect to a domain")
+    @Help.Summary("Connect to a synchronizer")
     def connect(
         config: SynchronizerConnectionConfig,
         validation: SequencerConnectionValidation = SequencerConnectionValidation.All,
@@ -141,7 +141,7 @@ class ParticipantReferencesExtensions(participants: Seq[ParticipantReference])(i
           synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
         """)
     def connect_local(
-        domain: SequencerReference,
+        sequencer: SequencerReference,
         alias: SynchronizerAlias,
         manualConnect: Boolean = false,
         synchronize: Option[NonNegativeDuration] = Some(
@@ -150,7 +150,7 @@ class ParticipantReferencesExtensions(participants: Seq[ParticipantReference])(i
     ): Unit = {
       val config =
         ParticipantCommands.synchronizers.reference_to_config(
-          NonEmpty.mk(Seq, SequencerAlias.Default -> domain).toMap,
+          NonEmpty.mk(Seq, SequencerAlias.Default -> sequencer).toMap,
           alias,
           manualConnect,
         )

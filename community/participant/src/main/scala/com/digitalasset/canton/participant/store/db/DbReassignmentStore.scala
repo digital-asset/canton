@@ -202,7 +202,7 @@ class DbReassignmentStore(
 
     ErrorUtil.requireArgument(
       reassignmentData.targetSynchronizer == targetSynchronizerId,
-      s"Domain $targetSynchronizerId: Reassignment store cannot store reassignment for synchronizer ${reassignmentData.targetSynchronizer}",
+      s"Synchronizer $targetSynchronizerId: Reassignment store cannot store reassignment for synchronizer ${reassignmentData.targetSynchronizer}",
     )
     def insert(dbReassignmentId: DbReassignmentId): DBIO[Int] =
       sqlu"""
@@ -533,7 +533,7 @@ class DbReassignmentStore(
   ) = {
     import DbStorage.Implicits.BuilderChain.*
 
-    val domainFilter = sql"target_synchronizer_idx=$indexedTargetSynchronizer"
+    val synchronizerFilter = sql"target_synchronizer_idx=$indexedTargetSynchronizer"
 
     val notFinishedFilter = if (onlyNotFinished)
       sql" and time_of_completion_request_counter is null and time_of_completion_timestamp is null"
@@ -546,7 +546,7 @@ class DbReassignmentStore(
      where
    """
 
-    base ++ domainFilter ++ notFinishedFilter
+    base ++ synchronizerFilter ++ notFinishedFilter
   }
 
   override def find(
@@ -778,7 +778,7 @@ class DbReassignmentStore(
         FutureUnlessShutdown.pure(Option.empty[Source[IndexedSynchronizer]])
       )(sd => indexedSynchronizerF(sd).map(Some(_)))
 
-      filterDomains = indexedSourceSynchronizerO match {
+      filterSynchronizers = indexedSourceSynchronizerO match {
         case Some(source) => Some(sql"source_synchronizer_idx=$source")
         case None => None
       }
@@ -794,7 +794,7 @@ class DbReassignmentStore(
       }
 
       filter =
-        Seq(filterDomains, filterUnassignmentTs, filterCompletionTs)
+        Seq(filterSynchronizers, filterUnassignmentTs, filterCompletionTs)
           .filter(_.nonEmpty)
           .collect { case Some(i) => i }
           .intercalate(sql" and ")

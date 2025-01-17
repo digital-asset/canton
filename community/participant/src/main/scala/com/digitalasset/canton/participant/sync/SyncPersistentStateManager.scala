@@ -47,7 +47,7 @@ trait SyncPersistentStateLookup {
 /** Manages participant-relevant state for a synchronizer that needs to survive reconnects
   *
   * Factory for [[com.digitalasset.canton.participant.store.SyncPersistentState]]. Tries to discover existing persistent states or create new ones
-  * and checks consistency of synchronizer parameters and unique contract key domains
+  * and checks consistency of synchronizer parameters and unique contract key synchronizers
   */
 class SyncPersistentStateManager(
     participantId: ParticipantId,
@@ -117,7 +117,7 @@ class SyncPersistentStateManager(
     IndexedSynchronizer.indexed(this.indexedStringStore)(synchronizerId)
 
   /** Retrieves the [[com.digitalasset.canton.participant.store.SyncPersistentState]] from the [[com.digitalasset.canton.participant.sync.SyncPersistentStateManager]]
-    * for the given synchronizer if there is one. Otherwise creates a new [[com.digitalasset.canton.participant.store.SyncPersistentState]] for the domain
+    * for the given synchronizer if there is one. Otherwise creates a new [[com.digitalasset.canton.participant.store.SyncPersistentState]] for the synchronizer
     * and registers it with the [[com.digitalasset.canton.participant.sync.SyncPersistentStateManager]].
     * Checks that the [[com.digitalasset.canton.protocol.StaticSynchronizerParameters]] are the same as what has been persisted (if so)
     * and enforces the unique contract key synchronizer constraints.
