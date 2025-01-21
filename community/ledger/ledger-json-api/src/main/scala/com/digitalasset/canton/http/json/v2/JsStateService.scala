@@ -20,6 +20,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import io.circe.Codec
 import io.circe.generic.semiauto.deriveCodec
 import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Flow
 import sttp.capabilities.pekko.PekkoStreams
 import sttp.tapir.generic.auto.*
@@ -35,7 +36,8 @@ class JsStateService(
 )(implicit
     val executionContext: ExecutionContext,
     val esf: ExecutionSequencerFactory,
-  wsConfig: WebsocketConfig,
+    materializer: Materializer,
+    wsConfig: WebsocketConfig,
 ) extends Endpoints
     with NamedLogging {
 
@@ -50,6 +52,10 @@ class JsStateService(
   def endpoints() = List(
     websocket(
       activeContractsEndpoint,
+      getActiveContractsStream,
+    ),
+    asList(
+      activeContractsListEndpoint,
       getActiveContractsStream,
     ),
     withServerLogic(JsStateService.getConnectedDomainsEndpoint, getConnectedDomains),
@@ -107,6 +113,7 @@ class JsStateService(
         withCloseDelay = true,
       )
     }
+
 }
 
 object JsStateService extends DocumentationEndpoints {
@@ -127,6 +134,13 @@ object JsStateService extends DocumentationEndpoints {
     )
     .description("Get active contracts stream")
 
+  val activeContractsListEndpoint = state.post
+    .in(sttp.tapir.stringToPath("active-contracts"))
+    .in(jsonBody[state_service.GetActiveContractsRequest])
+    .out(jsonBody[Seq[JsGetActiveContractsResponse]])
+    .inStreamListParams()
+    .description("Query active contracts list (blocking call)")
+
   val getConnectedDomainsEndpoint = state.get
     .in(sttp.tapir.stringToPath("connected-domains"))
     .in(query[String]("party"))
@@ -145,6 +159,7 @@ object JsStateService extends DocumentationEndpoints {
 
   override def documentation: Seq[AnyEndpoint] = Seq(
     activeContractsEndpoint,
+    activeContractsListEndpoint,
     getConnectedDomainsEndpoint,
     getLedgerEndEndpoint,
     getLastPrunedOffsetsEndpoint,
