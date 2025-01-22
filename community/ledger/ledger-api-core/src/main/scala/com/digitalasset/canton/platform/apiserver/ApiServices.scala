@@ -39,6 +39,7 @@ import com.digitalasset.canton.platform.apiserver.services.command.{
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.apiserver.services.transaction.{
   EventQueryServiceImpl,
+  KeyTypeValidatorImpl,
   TransactionServiceImpl,
 }
 import com.digitalasset.canton.platform.config.{
@@ -190,8 +191,17 @@ object ApiServices {
           transactionServiceRequestValidator,
         )
 
+      val keyTypeValidator =
+        new KeyTypeValidatorImpl(engine, packagesService, packageMetadataStore, metrics)
+
       val apiEventQueryService =
-        EventQueryServiceImpl.create(ledgerId, eventQueryService, telemetry, loggerFactory)
+        EventQueryServiceImpl.create(
+          ledgerId,
+          eventQueryService,
+          keyTypeValidator,
+          telemetry,
+          loggerFactory,
+        )
 
       val apiLedgerIdentityService =
         ApiLedgerIdentityService.create(ledgerId, telemetry, loggerFactory)
