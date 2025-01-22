@@ -184,7 +184,6 @@ class HttpService(
             metadataServiceEnabled = startSettings.damlDefinitionsServiceEnabled,
             writeService,
             mat.executionContext,
-            mat,
             loggerFactory,
           )
 
