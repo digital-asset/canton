@@ -164,14 +164,15 @@ object DocsOpenBuild {
       val generateReferenceJsonConf = target.value / "generateReferenceJsonConf"
       IO.delete(generateReferenceJsonConf)
       val simpleConfig = generateReferenceJsonConf / "simple-topology.conf"
-      val distributedConfig = generateReferenceJsonConf / "distributed-single-domain-topology.conf"
+      val distributedConfig =
+        generateReferenceJsonConf / "distributed-single-synchronizer-topology.conf"
       val includes = generateReferenceJsonConf / "include"
       IO.copyFile(
         appSourceDir / "pack" / "examples" / "01-simple-topology" / "simple-topology.conf",
         simpleConfig,
       )
       IO.copyFile(
-        enterpriseAppSourceDir / "test" / "resources" / "distributed-single-domain-topology.conf",
+        enterpriseAppSourceDir / "test" / "resources" / "distributed-single-synchronizer-topology.conf",
         distributedConfig,
       )
       IO.copyDirectory(

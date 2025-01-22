@@ -6,6 +6,37 @@ Please also consult the [full documentation of this release](https://docs.daml.c
 ## Until 2025-01-22 (Exclusive)
 
 - Added metric `daml.mediator.approved-requests.total` to count the number of approved confirmation requests
+- Topology related error codes have been renamed to contain the prefix `TOPOLOGY_`:
+  - Simple additions of prefix
+    - `SECRET_KEY_NOT_IN_STORE` -> `TOPOLOGY_SECRET_KEY_NOT_IN_STORE`
+    - `SERIAL_MISMATCH` -> `TOPOLOGY_SERIAL_MISMATCH`
+    - `INVALID_SYNCHRONIZER` -> `TOPOLOGY_INVALID_SYNCHRONIZER`
+    - `NO_APPROPRIATE_SIGNING_KEY_IN_STORE` -> `TOPOLOGY_NO_APPROPRIATE_SIGNING_KEY_IN_STORE`
+    - `NO_CORRESPONDING_ACTIVE_TX_TO_REVOKE` -> `TOPOLOGY_NO_CORRESPONDING_ACTIVE_TX_TO_REVOKE`
+    - `REMOVING_LAST_KEY_MUST_BE_FORCED` -> `TOPOLOGY_REMOVING_LAST_KEY_MUST_BE_FORCED`
+    - `DANGEROUS_COMMAND_REQUIRES_FORCE_ALIEN_MEMBER` -> `TOPOLOGY_DANGEROUS_COMMAND_REQUIRES_FORCE_ALIEN_MEMBER`
+    - `REMOVING_KEY_DANGLING_TRANSACTIONS_MUST_BE_FORCED` -> `TOPOLOGY_REMOVING_KEY_DANGLING_TRANSACTIONS_MUST_BE_FORCED`
+    - `INCREASE_OF_SUBMISSION_TIME_TOLERANCE` -> `TOPOLOGY_INCREASE_OF_SUBMISSION_TIME_TOLERANCE`
+    - `INSUFFICIENT_KEYS` -> `TOPOLOGY_INSUFFICIENT_KEYS`
+    - `UNKNOWN_MEMBERS` -> `TOPOLOGY_UNKNOWN_MEMBERS`
+    - `UNKNOWN_PARTIES` -> `TOPOLOGY_UNKNOWN_PARTIES`
+    - `ILLEGAL_REMOVAL_OF_SYNCHRONIZER_TRUST_CERTIFICATE` -> `TOPOLOGY_ILLEGAL_REMOVAL_OF_SYNCHRONIZER_TRUST_CERTIFICATE`
+    - `PARTICIPANT_ONBOARDING_REFUSED` -> `TOPOLOGY_PARTICIPANT_ONBOARDING_REFUSED`
+    - `MEDIATORS_ALREADY_IN_OTHER_GROUPS` -> `TOPOLOGY_MEDIATORS_ALREADY_IN_OTHER_GROUPS`
+    - `MEMBER_CANNOT_REJOIN_SYNCHRONIZER` -> `TOPOLOGY_MEMBER_CANNOT_REJOIN_SYNCHRONIZER`
+    - `NAMESPACE_ALREADY_IN_USE` -> `TOPOLOGY_NAMESPACE_ALREADY_IN_USE`
+    - `DANGEROUS_VETTING_COMMAND_REQUIRES_FORCE_FLAG` -> `TOPOLOGY_DANGEROUS_VETTING_COMMAND_REQUIRES_FORCE_FLAG`
+    - `DEPENDENCIES_NOT_VETTED` -> `TOPOLOGY_DEPENDENCIES_NOT_VETTED`
+    - `CANNOT_VET_DUE_TO_MISSING_PACKAGES` -> `TOPOLOGY_CANNOT_VET_DUE_TO_MISSING_PACKAGES`
+  - Additional minor renaming
+    - `INVALID_TOPOLOGY_TX_SIGNATURE_ERROR` -> `TOPOLOGY_INVALID_TOPOLOGY_TX_SIGNATURE`
+    - `DUPLICATE_TOPOLOGY_TRANSACTION` -> `TOPOLOGY_DUPLICATE_TRANSACTION`
+    - `UNAUTHORIZED_TOPOLOGY_TRANSACTION` -> `TOPOLOGY_UNAUTHORIZED_TRANSACTION`
+    - `INVALID_TOPOLOGY_MAPPING` -> `TOPOLOGY_INVALID_MAPPING`
+    - `INCONSISTENT_TOPOLOGY_SNAPSHOT` -> `TOPOLOGY_INCONSISTENT_SNAPSHOT`
+    - `MISSING_TOPOLOGY_MAPPING` -> `TOPOLOGY_MISSING_MAPPING`
+- Added last_descendant_node_id in the exercised event of the ledger api. This field specifies the upper boundary of the
+  node ids of the events in the same transaction that appeared as a result of the exercised event.
 
 ## Until 2025-01-15 (Exclusive)
 
@@ -15,8 +46,11 @@ Please also consult the [full documentation of this release](https://docs.daml.c
   - The fields `max_inflight_validation_requests` and `max_submission_rate` are now declared as `optional uint32`,
     which also means that absent values are not encoded anymore as negative values, but as absent values.
     Negative values will result in a parsing error and a rejected request.
+- Moved the `canton.monitoring.log-query-cost` option to `canton.monitoring.logging.query-cost`
+- Changed the `signedBy` parameter of the console command `topology.party_to_participant_mapping.propose` from `Optional`
+  to `Seq`.
 
-## Until 2025-01-010 (Exclusive)
+## Until 2025-01-10 (Exclusive)
 
 ### Initial Topology Snapshot Validation
 The initial topology snapshot, both for initializing a new domain and for onboarding a new member,
