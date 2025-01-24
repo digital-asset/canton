@@ -109,7 +109,7 @@ import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContextExecutor, Future}
 import scala.jdk.FutureConverters.*
 import scala.util.chaining.scalaUtilChainingOps
-import scala.util.{Failure, Right, Success}
+import scala.util.{Failure, Right, Success, Try}
 
 /** The Canton-based synchronization service.
   *
@@ -1450,8 +1450,18 @@ class CantonSyncService(
     } yield {
       connectedDomainsMap.remove(domainId) match {
         case Some(syncDomain) =>
-          syncDomain.close()
-          logger.info(show"Disconnected from $domain")
+          Try(Lifecycle.close(syncDomain)(logger)) match {
+            case Success(_) =>
+              logger.info(show"Disconnected from $domain")
+            case Failure(ex) =>
+              if (parameters.exitOnFatalFailures)
+                FatalError.exitOnFatalError(
+                  show"Failed to disconnect from $domain due to an exception",
+                  ex,
+                  logger,
+                )
+              else throw ex
+          }
         case None =>
           logger.info(show"Nothing to do, as we are not connected to $domain")
       }

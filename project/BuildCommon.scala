@@ -291,6 +291,27 @@ object BuildCommon {
         log.info("Adding version info to demo files")
         runCommand(f"bash ./release/add-release-version.sh ${version.value}", log)
       }
+
+      // Prepare interactive submission example
+      // Write the daml commit into a file so it can be used in the release artifact to download the correct protobuf files
+      // from the daml repo
+      val interactiveSubmissionExamplePath =
+        "community" / "app" / "src" / "pack" / "examples" / "08-interactive-submission" / "v1"
+      val damlCommitFile = interactiveSubmissionExamplePath / "daml_commit"
+      val pb = new java.lang.ProcessBuilder(
+        "bash",
+        "-c",
+        s"source ./release/versions.sh && $$(write_daml_commit_to_file ${damlCommitFile.pathAsString})",
+      )
+      pb.redirectErrorStream(true)
+      val process = pb.start()
+      val bufferedReader = process.inputReader()
+      if (process.waitFor() != 0) {
+        import scala.jdk.CollectionConverters.*
+        log.warn("Failed to write daml commit file for interactive submission example")
+        log.warn(bufferedReader.lines().toList.asScala.mkString(System.lineSeparator()))
+      }
+
       val releaseNotes: Seq[(File, String)] = {
         val sourceFile: File =
           file(s"release-notes/${version.value}.md")
@@ -591,7 +612,7 @@ object BuildCommon {
     lazy val `community-app` = project
       .in(file("community/app"))
       .dependsOn(
-        `community-app-base`,
+        `community-app-base` % "compile->compile;test->test",
         `community-common` % "test->test",
         `community-integration-testing` % "test->test",
       )
@@ -648,7 +669,7 @@ object BuildCommon {
       .in(file("community/app-base"))
       .dependsOn(
         `community-domain`,
-        `community-participant`,
+        `community-participant` % "compile->compile;test->test",
       )
       .settings(
         sharedCantonSettings,
@@ -837,7 +858,7 @@ object BuildCommon {
       .in(file("community/participant"))
       .dependsOn(
         `community-common` % "test->test",
-        `ledger-json-api`,
+        `ledger-json-api` % "compile->compile;test->test",
         DamlProjects.`daml-jwt`,
       )
       .enablePlugins(DamlPlugin)
