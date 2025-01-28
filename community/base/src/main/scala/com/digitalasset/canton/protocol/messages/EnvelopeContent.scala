@@ -23,11 +23,10 @@ final case class EnvelopeContent(message: UnsignedProtocolMessage)(
     v30.EnvelopeContent(message.toProtoSomeEnvelopeContentV30)
 }
 
-object EnvelopeContent
-    extends HasProtocolVersionedWithContextAndValidationCompanion[EnvelopeContent, HashOps] {
+object EnvelopeContent extends VersioningCompanionContextPVValidation2[EnvelopeContent, HashOps] {
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoConverter(
+    ProtoVersion(30) -> VersionedProtoCodec(
       ProtocolVersion.v33
     )(v30.EnvelopeContent)(
       supportedProtoVersion(_)(fromProtoV30),

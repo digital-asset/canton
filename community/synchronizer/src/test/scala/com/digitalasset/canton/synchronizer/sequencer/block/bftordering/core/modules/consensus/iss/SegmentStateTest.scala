@@ -96,7 +96,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
           PreparesStored(BlockMetadata.mk(epochInfo.number, blockNumber), ViewNumber.First)
         )
         segmentState.isBlockComplete(blockNumber) shouldBe false
-        segmentState.confirmCompleteBlockStored(blockNumber, ViewNumber.First)
+        segmentState.confirmCompleteBlockStored(blockNumber)
         segmentState.isBlockComplete(blockNumber) shouldBe true
       }
 
@@ -308,7 +308,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
       val _ = assertNoLogs(segment.processEvent(PbftSignedNetworkMessage(myCommit)))
       val _ = assertNoLogs(segment.processEvent(createPrePrepareStored(block1, view1)))
       val _ = assertNoLogs(segment.processEvent(createPreparesStored(block1, view1)))
-      segment.confirmCompleteBlockStored(block1, view1)
+      segment.confirmCompleteBlockStored(block1)
       segment.isBlockComplete(block1) shouldBe true
 
       // Create and receive "local" timeout event
@@ -493,7 +493,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
       segment.isViewChangeInProgress shouldBe false
       segment.currentView shouldBe view2
 
-      segment.confirmCompleteBlockStored(block1, view1)
+      segment.confirmCompleteBlockStored(block1)
 
       results should contain theSameElementsInOrderAs List(
         ViewChangeCompleted(
@@ -503,7 +503,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         ),
         // as a result of processing the new-view that contains a commit certificate for block1,
         // block one gets completed as see in the presence of the result below and the absence of prepares for it
-        CompletedBlock(pp1, commits, view2),
+        CompletedBlock(CommitCertificate(pp1, commits), view2),
         SignPbftMessage(
           createPrepare(slotNumbers(1), view2, myId, bottomPP1.message.hash).message
         ),
@@ -1052,7 +1052,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
             )
         )
 
-        segment.confirmCompleteBlockStored(blockNumber, thirdView)
+        segment.confirmCompleteBlockStored(blockNumber)
         segment.isBlockComplete(blockNumber) shouldBe true
       }
 
@@ -1118,7 +1118,7 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         )
       )
       // note: local commit from myId is already created as part of processing logic
-      segment.confirmCompleteBlockStored(block1, view1)
+      segment.confirmCompleteBlockStored(block1)
       segment.isBlockComplete(block1) shouldBe true
 
       // Simulate a local timeout via PbftTimeout event
@@ -1552,7 +1552,9 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(RetransmittedCommitCertificate(otherPeer1, commitCertificate))
       )
 
-      results should contain theSameElementsInOrderAs List(CompletedBlock(pp1, commits, view1))
+      results should contain theSameElementsInOrderAs List(
+        CompletedBlock(CommitCertificate(pp1, commits), view1)
+      )
 
       // should also take the commit cert during a view change
 
@@ -1572,7 +1574,9 @@ class SegmentStateTest extends AsyncWordSpec with BftSequencerBaseTest {
         segment.processEvent(RetransmittedCommitCertificate(otherPeer1, commitCertificate2))
       )
 
-      results2 should contain theSameElementsInOrderAs List(CompletedBlock(pp2, commits2, view1))
+      results2 should contain theSameElementsInOrderAs List(
+        CompletedBlock(CommitCertificate(pp2, commits2), view1)
+      )
     }
   }
 
@@ -1673,7 +1677,7 @@ object SegmentStateTest {
 
   def extractCompletedBlocks(results: Seq[ProcessResult]) = results.collect {
     case c: CompletedBlock =>
-      c.prePrepare.message.blockMetadata
+      c.commitCertificate.prePrepare.message.blockMetadata
   }
 
   def createCommit(

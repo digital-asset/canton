@@ -8,7 +8,6 @@ import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.crypto.SigningKeyUsage.nonEmptyIntersection
 import com.digitalasset.canton.crypto.kms.{Kms, KmsKeyId}
 import com.digitalasset.canton.crypto.store.KmsMetadataStore.KmsMetadata
 import com.digitalasset.canton.crypto.store.{CryptoPublicStore, KmsCryptoPrivateStore}
@@ -94,7 +93,7 @@ trait KmsPrivateCrypto extends CryptoPrivateApi with FlagCloseable {
       )
     } yield publicKey
 
-  protected[crypto] def signBytes(
+  def signBytes(
       bytes: ByteString,
       signingKeyId: Fingerprint,
       usage: NonEmpty[Set[SigningKeyUsage]],
@@ -117,18 +116,21 @@ trait KmsPrivateCrypto extends CryptoPrivateApi with FlagCloseable {
                 .leftWiden[SigningError]
             case Right(bytes) =>
               for {
+                // This assumes that the public key's usage and key spec is the same as the private key used for signing
                 pubKey <- publicStore
                   .signingKey(signingKeyId)
                   .toRight[SigningError](SigningError.UnknownSigningKey(signingKeyId))
-                _ <- EitherT.cond[FutureUnlessShutdown](
-                  nonEmptyIntersection(usage, pubKey.usage),
-                  (),
-                  SigningError.InvalidSigningKey(
-                    s"Signing key ${pubKey.fingerprint} [${pubKey.usage}] is not valid for usage $usage"
-                  ),
-                )
+                _ <- CryptoKeyValidation
+                  .ensureUsage(
+                    usage,
+                    pubKey.usage,
+                    pubKey.id,
+                    _ =>
+                      SigningError.InvalidKeyUsage(pubKey.id, pubKey.usage.forgetNE, usage.forgetNE),
+                  )
+                  .toEitherT[FutureUnlessShutdown]
                 signatureRaw <- kms
-                  .sign(kmsKeyId, bytes, signingAlgorithmSpec)
+                  .sign(kmsKeyId, bytes, signingAlgorithmSpec, pubKey.keySpec)
                   .leftMap[SigningError](err => SigningError.FailedToSign(err.show))
               } yield Signature.create(
                 signatureFormat,

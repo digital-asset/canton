@@ -76,10 +76,11 @@ object Consensus {
 
     final case class BlockOrdered(
         block: OrderedBlock,
-        commits: Seq[SignedMessage[ConsensusSegment.ConsensusMessage.Commit]],
+        commitCertificate: CommitCertificate,
     ) extends ConsensusMessage
 
-    final case class CompleteEpochStored(epoch: Epoch) extends ConsensusMessage
+    final case class CompleteEpochStored(epoch: Epoch, commitCertificates: Seq[CommitCertificate])
+        extends ConsensusMessage
 
     final case class SegmentCompletedEpoch(
         segmentFirstBlockNumber: BlockNumber,
@@ -97,8 +98,11 @@ object Consensus {
         with MessageFrom
 
     final case object PeriodicStatusBroadcast extends RetransmissionsMessage
-    final case class SegmentStatus(segmentIndex: Int, status: ConsensusStatus.SegmentStatus)
-        extends RetransmissionsMessage
+    final case class SegmentStatus(
+        epochNumber: EpochNumber,
+        segmentIndex: Int,
+        status: ConsensusStatus.SegmentStatus,
+    ) extends RetransmissionsMessage
     final case class NetworkMessage(message: RetransmissionsNetworkMessage)
         extends RetransmissionsMessage
 
@@ -126,7 +130,7 @@ object Consensus {
     }
 
     object RetransmissionRequest
-        extends HasMemoizedProtocolVersionedWithContextCompanion[
+        extends VersioningCompanionContextMemoization[
           RetransmissionRequest,
           SequencerId,
         ] {
@@ -163,7 +167,7 @@ object Consensus {
 
       override def versioningTable: VersioningTable = VersioningTable(
         ProtoVersion(30) ->
-          VersionedProtoConverter(
+          VersionedProtoCodec(
             ProtocolVersion.v33
           )(v1.RetransmissionMessage)(
             supportedProtoVersionMemoized(_)(
@@ -198,7 +202,7 @@ object Consensus {
     }
 
     object RetransmissionResponse
-        extends HasMemoizedProtocolVersionedWithContextCompanion[
+        extends VersioningCompanionContextMemoization[
           RetransmissionResponse,
           SequencerId,
         ] {
@@ -240,7 +244,7 @@ object Consensus {
 
       override def versioningTable: VersioningTable = VersioningTable(
         ProtoVersion(30) ->
-          VersionedProtoConverter(
+          VersionedProtoCodec(
             ProtocolVersion.v33
           )(v1.RetransmissionMessage)(
             supportedProtoVersionMemoized(_)(
@@ -285,7 +289,7 @@ object Consensus {
     }
 
     object BlockTransferRequest
-        extends HasMemoizedProtocolVersionedWithContextCompanion[
+        extends VersioningCompanionContextMemoization[
           BlockTransferRequest,
           SequencerId,
         ] {
@@ -318,7 +322,7 @@ object Consensus {
 
       override def versioningTable: VersioningTable = VersioningTable(
         ProtoVersion(30) ->
-          VersionedProtoConverter(
+          VersionedProtoCodec(
             ProtocolVersion.v33
           )(v1.StateTransferMessage)(
             supportedProtoVersionMemoized(_)(
@@ -356,7 +360,7 @@ object Consensus {
     }
 
     object BlockTransferResponse
-        extends HasMemoizedProtocolVersionedWithContextCompanion[
+        extends VersioningCompanionContextMemoization[
           BlockTransferResponse,
           SequencerId,
         ] {
@@ -400,7 +404,7 @@ object Consensus {
 
       override def versioningTable: VersioningTable = VersioningTable(
         ProtoVersion(30) ->
-          VersionedProtoConverter(
+          VersionedProtoCodec(
             ProtocolVersion.v33
           )(v1.StateTransferMessage)(
             supportedProtoVersionMemoized(_)(
@@ -410,8 +414,11 @@ object Consensus {
           )
       )
     }
+    final case class UnverifiedStateTransferMessage(
+        signedMessage: SignedMessage[StateTransferMessage.StateTransferNetworkMessage]
+    ) extends StateTransferMessage
 
-    final case class NetworkMessage(message: StateTransferNetworkMessage)
+    final case class VerifiedStateTransferMessage(message: StateTransferNetworkMessage)
         extends StateTransferMessage
 
     final case class ResendBlockTransferRequest(

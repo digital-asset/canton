@@ -261,6 +261,7 @@ create table par_reassignments (
 
   -- UTC timestamp in microseconds relative to EPOCH
   unassignment_timestamp bigint not null,
+  source_synchronizer_id varchar collate "C" not null,
   unassignment_request_counter bigint not null,
   unassignment_request bytea,
   -- UTC timestamp in microseconds relative to EPOCH
@@ -268,10 +269,11 @@ create table par_reassignments (
   unassignment_result bytea,
 
   -- defined if reassignment was completed
-  time_of_completion_request_counter bigint,
+  assignment_toc_request_counter bigint,
   -- UTC timestamp in microseconds relative to EPOCH
-  time_of_completion_timestamp bigint,
-  source_protocol_version integer not null
+  assignment_toc_timestamp bigint,
+  source_protocol_version integer not null,
+  contract bytea not null
 );
 
 -- stores all requests for the request journal
@@ -329,6 +331,7 @@ create table par_outstanding_acs_commitments (
   to_inclusive bigint not null,
   counter_participant varchar collate "C" not null,
   matching_state smallint not null,
+  multi_hosted_cleared bool not null default false,
   constraint check_nonempty_interval_outstanding check(to_inclusive > from_exclusive)
 );
 
@@ -880,16 +883,24 @@ create table ord_metadata_output_blocks (
   epoch_number bigint not null,
   block_number bigint not null,
   bft_ts bigint not null,
-  epoch_could_alter_sequencing_topology bool not null, -- Cumulative over all blocks in the epoch (restart support)
-  pending_topology_changes_in_next_epoch bool not null, -- Possibly true only for last block in epoch
   primary key (block_number),
   -- enable idempotent writes: "on conflict, do nothing"
   constraint unique_output_block unique (
     epoch_number,
     block_number,
-    bft_ts,
-    epoch_could_alter_sequencing_topology,
-    pending_topology_changes_in_next_epoch
+    bft_ts
+  )
+);
+
+-- Stores output metadata for epochs
+create table ord_metadata_output_epochs (
+  epoch_number bigint not null,
+  could_alter_ordering_topology bool not null,
+  primary key (epoch_number),
+  -- enable idempotent writes: "on conflict, do nothing"
+  constraint unique_output_epoch unique (
+    epoch_number,
+    could_alter_ordering_topology
   )
 );
 

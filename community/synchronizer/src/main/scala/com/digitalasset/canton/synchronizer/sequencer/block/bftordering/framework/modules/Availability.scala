@@ -27,13 +27,13 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v1
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.version.{
-  HasMemoizedProtocolVersionedWithContextCompanion,
   HasProtocolVersionedWrapper,
   HasRepresentativeProtocolVersion,
   ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  VersionedProtoConverter,
+  VersionedProtoCodec,
+  VersioningCompanionContextMemoization,
 }
 import com.google.protobuf.ByteString
 
@@ -123,14 +123,13 @@ object Availability {
         super[HasProtocolVersionedWrapper].toByteString
     }
 
-    object RemoteBatch
-        extends HasMemoizedProtocolVersionedWithContextCompanion[RemoteBatch, SequencerId] {
+    object RemoteBatch extends VersioningCompanionContextMemoization[RemoteBatch, SequencerId] {
 
       override def name: String = "RemoteBatch"
 
       override def versioningTable: VersioningTable = VersioningTable(
         ProtoVersion(30) ->
-          VersionedProtoConverter(
+          VersionedProtoCodec(
             ProtocolVersion.v33
           )(v1.AvailabilityMessage)(
             supportedProtoVersionMemoized(_)(
@@ -196,7 +195,7 @@ object Availability {
     }
 
     object RemoteBatchAcknowledged
-        extends HasMemoizedProtocolVersionedWithContextCompanion[
+        extends VersioningCompanionContextMemoization[
           RemoteBatchAcknowledged,
           SequencerId,
         ] {
@@ -205,7 +204,7 @@ object Availability {
 
       override def versioningTable: VersioningTable = VersioningTable(
         ProtoVersion(30) ->
-          VersionedProtoConverter(
+          VersionedProtoCodec(
             ProtocolVersion.v33
           )(v1.AvailabilityMessage)(
             supportedProtoVersionMemoized(_)(
@@ -313,7 +312,7 @@ object Availability {
     }
 
     object FetchRemoteBatchData
-        extends HasMemoizedProtocolVersionedWithContextCompanion[
+        extends VersioningCompanionContextMemoization[
           FetchRemoteBatchData,
           SequencerId,
         ] {
@@ -322,7 +321,7 @@ object Availability {
 
       override def versioningTable: VersioningTable = VersioningTable(
         ProtoVersion(30) ->
-          VersionedProtoConverter(
+          VersionedProtoCodec(
             ProtocolVersion.v33
           )(v1.AvailabilityMessage)(
             supportedProtoVersionMemoized(_)(
@@ -387,7 +386,7 @@ object Availability {
     }
 
     object RemoteBatchDataFetched
-        extends HasMemoizedProtocolVersionedWithContextCompanion[
+        extends VersioningCompanionContextMemoization[
           RemoteBatchDataFetched,
           SequencerId,
         ] {
@@ -396,7 +395,7 @@ object Availability {
 
       override def versioningTable: VersioningTable = VersioningTable(
         ProtoVersion(30) ->
-          VersionedProtoConverter(
+          VersionedProtoCodec(
             ProtocolVersion.v33
           )(v1.AvailabilityMessage)(
             supportedProtoVersionMemoized(_)(

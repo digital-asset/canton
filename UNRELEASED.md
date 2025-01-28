@@ -3,6 +3,31 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2025-01-29 (Exclusive)
+- Added a buffer for serving events that is limited by an upper bound for memory consumption:
+    ```hocon
+        canton.sequencers.<sequencer>.sequencer.block.writer {
+          type = high-throughput // NB: this is required for the writer config to be parsed properly
+          
+          // maximum memory the buffered events will occupy
+          buffered-events-max-memory = 2MiB // Default value
+          // batch size for warming up the events buffer at the start of the sequencer until the buffer is full
+          buffered-events-preload-batch-size = 50 // Default value
+        }
+    ```
+  - The previous setting `canton.sequencers.<sequencer>.sequencer.block.writer.max-buffered-events-size` has been removed and has no effect anymore
+- The sequencer's payload cache configuration changed slightly to disambiguate the memory-limit config from a number-of-elements config:
+    ```hocon
+    canton.sequencers.<sequencer>.parameters.caching {
+      sequencer-payload-cache {
+        expire-after-access = "1 minute" // Default value
+        maximum-memory = 200MiB // Default value
+      }
+    }
+    ```
+  - The previous setting `canton.sequencers.<sequencer>.parameters.caching.sequencer-payload-cache.maximum-size` has been removed and has no effect anymore.
+
+
 ## Until 2025-01-22 (Exclusive)
 
 - Added metric `daml.mediator.approved-requests.total` to count the number of approved confirmation requests

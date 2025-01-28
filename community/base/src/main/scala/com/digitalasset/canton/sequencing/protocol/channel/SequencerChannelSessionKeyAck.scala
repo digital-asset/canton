@@ -19,13 +19,12 @@ final case class SequencerChannelSessionKeyAck()(
     v30.SequencerChannelSessionKeyAck()
 }
 
-object SequencerChannelSessionKeyAck
-    extends HasProtocolVersionedCompanion[SequencerChannelSessionKeyAck] {
+object SequencerChannelSessionKeyAck extends VersioningCompanion[SequencerChannelSessionKeyAck] {
   override val name: String = "SequencerChannelSessionKeyAck"
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(-1) -> UnsupportedProtoCodec(),
-    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.dev)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.dev)(
       v30.SequencerChannelSessionKeyAck
     )(
       supportedProtoVersion(_)(fromProtoV30),

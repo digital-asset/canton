@@ -2,11 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import BuildCommon.*
-import DocsOpenBuild.DocsPaths.{
-  cantonDocsSourceDirectory,
-  repositoryRoot,
-  snippetDirectiveScriptDirectory,
-}
+import DocsOpenBuild.DocsPaths.{cantonDocsSourceDirectory, repositoryRoot, pythonScriptsDirectory}
 import sbt.*
 import sbt.Keys.*
 import sbt.internal.LogManager
@@ -23,7 +19,7 @@ object DocsOpenBuild {
     def cantonDocsSourceDirectory(docsOpenDir: File): File =
       docsOpenDir / "src" / "sphinx"
 
-    def snippetDirectiveScriptDirectory(docsOpenDir: File): File =
+    def pythonScriptsDirectory(docsOpenDir: File): File =
       docsOpenDir / "src" / "main" / "resources"
 
   }
@@ -53,10 +49,8 @@ object DocsOpenBuild {
         "[generateRst][test] Run RST-preprocessor tests ..."
       )
 
-      val testPath = sourceDirectory.value / "main" / "resources"
+      val testPath = pythonScriptsDirectory(baseDirectory.value)
       runCommand(s"python -m unittest discover -v -s $testPath", log)
-      val docsTestPath = snippetDirectiveScriptDirectory(baseDirectory.value)
-      runCommand(s"python -m unittest discover -v -s $docsTestPath", log)
 
       log.info(
         "[generateRst][clean] Clean RST-preprocessor output directories and copy RST sources ..."
@@ -65,7 +59,6 @@ object DocsOpenBuild {
       val source = sourceDirectory.value / "sphinx"
       val preprocessed = sourceDirectory.value / "preprocessed-sphinx"
       val snippetJsonSource = targetDirectory.value / "pre"
-      val snippetJsonTarget = preprocessed / "includes" / "snippet_data"
       val generated = targetDirectory.value / "generated"
 
       IO.delete(preprocessed)
@@ -74,24 +67,25 @@ object DocsOpenBuild {
       val cantonDocsSourcePath = cantonDocsSourceDirectory(baseDirectory.value)
       IO.copyDirectory(cantonDocsSourcePath, preprocessed)
       IO.copyDirectory(source, preprocessed)
-      IO.copyDirectory(snippetJsonSource, snippetJsonTarget)
       IO.createDirectory(generated)
     }
 
-  def generateRstResolveSnippet(sourceDirectory: SettingKey[File]): Def.Initialize[Task[String]] =
+  def generateRstResolveSnippet(
+      sourceDirectory: SettingKey[File],
+      targetDirectory: SettingKey[File],
+  ): Def.Initialize[Task[String]] =
     Def.task {
       val log: ManagedLogger = streams.value.log
 
       val target = sourceDirectory.value / "preprocessed-sphinx"
-      val snippetJsonTarget = target / "includes" / "snippet_data"
+      val snippetJsonSource = targetDirectory.value / "pre"
 
       log.info(
         "[generateRst][preprocessing:step 2] Replacing custom `.. snippet::` directives with RST code blocks ..."
       )
 
-      val snippetScriptPath =
-        snippetDirectiveScriptDirectory(baseDirectory.value) / "snippet_directive.py"
-      runCommand(s"python $snippetScriptPath $snippetJsonTarget $target", log)
+      val script = pythonScriptsDirectory(baseDirectory.value) / "snippet_directive.py"
+      runCommand(s"python $script $snippetJsonSource $target", log)
     }
 
   def generateRstResolveLiteralInclude(
@@ -107,7 +101,7 @@ object DocsOpenBuild {
       )
 
       val scriptPath =
-        snippetDirectiveScriptDirectory(baseDirectory.value) / "literalinclude_directive.py"
+        pythonScriptsDirectory(baseDirectory.value) / "literalinclude_directive.py"
       runCommand(s"python $scriptPath $target", log)
     }
 

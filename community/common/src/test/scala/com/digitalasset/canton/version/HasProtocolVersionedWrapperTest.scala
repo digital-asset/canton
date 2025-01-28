@@ -41,8 +41,9 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
         protoVersion: Int,
         expectedProtocolVersion: ProtocolVersion,
     ): ParsingResult[Message] = Message
-      .fromByteString(expectedProtocolVersion)(
-        VersionedMessage[Message](bytes, protoVersion).toByteString
+      .fromByteString(
+        expectedProtocolVersion,
+        VersionedMessage[Message](bytes, protoVersion).toByteString,
       )
 
     "set correct protocol version depending on the proto version" in {
@@ -54,9 +55,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
 
       // Round trip serialization
       Message
-        .fromByteString(basePV + 2)(
-          expectedV1Deserialization.toByteString
-        )
+        .fromByteString(basePV + 2, expectedV1Deserialization.toByteString)
         .value shouldBe expectedV1Deserialization
 
       val messageV2 = VersionedMessageV2("Hey", 42, 43.0).toByteString
@@ -66,9 +65,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
 
       // Round trip serialization
       Message
-        .fromByteString(basePV + 3)(
-          expectedV2Deserialization.toByteString
-        )
+        .fromByteString(basePV + 3, expectedV2Deserialization.toByteString)
         .value shouldBe expectedV2Deserialization
     }
 
@@ -120,7 +117,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
     }
 
     "status consistency between protobuf messages and protocol versions" in {
-      new HasMemoizedProtocolVersionedWrapperCompanion[Message] {
+      new VersioningCompanionMemoization[Message] {
 
         // Used by the compiled string below
         @unused
@@ -135,7 +132,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
         override def versioningTable: VersioningTable = ???
 
         @unused
-        private def createVersionedProtoConverter[
+        private def createVersionedProtoCodec[
             ProtoClass <: scalapb.GeneratedMessage,
             Status <: ProtocolVersionAnnotation.Status,
         ](
@@ -144,9 +141,9 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
             deserializer: ProtoClass => DataByteString => ParsingResult[Message],
             serializer: Message => ProtoClass,
         ) =
-          VersionedProtoConverter.apply[
+          VersionedProtoCodec.apply[
             Message,
-            (ByteString, ByteString),
+            Unit,
             Message,
             Message.type,
             ProtoClass,
@@ -161,7 +158,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
         clue("can use a stable proto message in a stable protocol version") {
           assertCompiles(
             """
-             createVersionedProtoConverter(
+             createVersionedProtoCodec(
                 VersionedMessageV1,
                 stablePV,
                 Message.fromProtoV1,
@@ -173,7 +170,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
         clue("can use a stable proto message in an alpha protocol version") {
           assertCompiles(
             """
-             createVersionedProtoConverter(
+             createVersionedProtoCodec(
                 VersionedMessageV1,
                 alphaPV,
                 Message.fromProtoV1,
@@ -185,7 +182,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
         clue("can use an alpha proto message in an alpha protocol version") {
           assertCompiles(
             """
-             createVersionedProtoConverter(
+             createVersionedProtoCodec(
                 VersionedMessageV2,
                 alphaPV,
                 Message.fromProtoV2,
@@ -197,7 +194,7 @@ class HasProtocolVersionedWrapperTest extends AnyWordSpec with BaseTest {
         clue("can not use an alpha proto message in a stable protocol version") {
           assertTypeError(
             """
-             createVersionedProtoConverter(
+             createVersionedProtoCodec(
                 VersionedMessageV2,
                 stablePV,
                 Message.fromProtoV2,
@@ -240,7 +237,7 @@ object HasProtocolVersionedWrapperTest {
     def toProtoV2 = VersionedMessageV2(msg, iValue, dValue)
   }
 
-  object Message extends HasMemoizedProtocolVersionedWrapperCompanion[Message] {
+  object Message extends VersioningCompanionMemoization[Message] {
     def name: String = "Message"
 
     /*
@@ -250,21 +247,21 @@ object HasProtocolVersionedWrapperTest {
         protocolVersion     30    31    32    33    34  ...
      */
     override val versioningTable: VersioningTable = VersioningTable(
-      ProtoVersion(1) -> VersionedProtoConverter(ProtocolVersion.createAlpha((basePV + 2).v))(
+      ProtoVersion(1) -> VersionedProtoCodec(ProtocolVersion.createAlpha((basePV + 2).v))(
         VersionedMessageV1
       )(
         supportedProtoVersionMemoized(_)(fromProtoV1),
         _.toProtoV1,
       ),
       // Can use a stable Protobuf message in a stable protocol version
-      ProtoVersion(0) -> VersionedProtoConverter(ProtocolVersion.createStable(basePV.v))(
+      ProtoVersion(0) -> VersionedProtoCodec(ProtocolVersion.createStable(basePV.v))(
         VersionedMessageV0
       )(
         supportedProtoVersionMemoized(_)(fromProtoV0),
         _.toProtoV0,
       ),
       // Can use an alpha Protobuf message in an alpha protocol version
-      ProtoVersion(2) -> VersionedProtoConverter(
+      ProtoVersion(2) -> VersionedProtoCodec(
         ProtocolVersion.createAlpha((basePV + 3).v)
       )(VersionedMessageV2)(
         supportedProtoVersionMemoized(_)(fromProtoV2),

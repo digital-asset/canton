@@ -739,13 +739,7 @@ object BuildCommon {
         coverageExcludedPackages := formatCoverageExcludes(
           """
             |<empty>
-            |com\.digitalasset\.canton\.protocol\.v0\..*
-            |com\.digitalasset\.canton\.domain\.v0\..*
-            |com\.digitalasset\.canton\.identity\.v0\..*
-            |com\.digitalasset\.canton\.identity\.admin\.v0\..*
-            |com\.digitalasset\.canton\.domain\.api\.v0\..*
-            |com\.digitalasset\.canton\.v0\..*
-            |com\.digitalasset\.canton\.protobuf\..*
+            |com\.digitalasset\.canton\.protocol\.v30\..*
       """
         ),
         addProtobufFilesToHeaderCheck(Compile),
@@ -823,18 +817,13 @@ object BuildCommon {
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
         ),
-        // Ensure the package scoped options will be picked up by sbt-protoc if used downstream
-        // See https://scalapb.github.io/docs/customizations/#publishing-package-scoped-options
-        Compile / packageBin / packageOptions += (
-          Package.ManifestAttributes(
-            "ScalaPB-Options-Proto" -> "com/digitalasset/canton/domain/scalapb/package.proto"
-          )
-        ),
         // excluded generated protobuf classes from code coverage
         coverageExcludedPackages := formatCoverageExcludes(
           """
             |<empty>
-            |com\.digitalasset\.canton\.domain\.admin\.v0\..*
+            |com\.digitalasset\.canton\.admin\.mediator\.v30\..*
+            |com\.digitalasset\.canton\.admin\.sequencer\.v30\..*
+            |com\.digitalasset\.canton\.admin\.synchronizer\.v30\..*
       """
         ),
         addProtobufFilesToHeaderCheck(Compile),
@@ -1401,6 +1390,7 @@ object BuildCommon {
           sharedCommunitySettings,
           libraryDependencies ++= Seq(
             circe_parser,
+            circe_generic_extras,
             upickle,
             ujson_circe,
             tapir_json_circe,

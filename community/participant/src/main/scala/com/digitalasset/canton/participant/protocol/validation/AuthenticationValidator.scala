@@ -11,6 +11,7 @@ import com.digitalasset.canton.crypto.{
   Hash,
   InteractiveSubmission,
   Signature,
+  SigningKeyUsage,
   SynchronizerSnapshotSyncCryptoApi,
 }
 import com.digitalasset.canton.data.{
@@ -31,7 +32,7 @@ import com.digitalasset.canton.participant.protocol.validation.AuthenticationErr
   MultipleExternallySignedRootViews,
 }
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.LazyAsyncReInterpretation
-import com.digitalasset.canton.participant.util.DAMLe.TransactionEnricher
+import com.digitalasset.canton.participant.util.DAMLe.{CreateNodeEnricher, TransactionEnricher}
 import com.digitalasset.canton.protocol.{ExternalAuthorization, RequestId}
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -47,6 +48,7 @@ private[protocol] object AuthenticationValidator {
       synchronizerId: SynchronizerId,
       protocolVersion: ProtocolVersion,
       transactionEnricher: TransactionEnricher,
+      createNodeEnricher: CreateNodeEnricher,
       logger: TracedLogger,
   )(implicit
       traceContext: TraceContext,
@@ -75,6 +77,7 @@ private[protocol] object AuthenticationValidator {
                 requestId = parsedRequest.requestId,
                 synchronizerId = synchronizerId,
                 transactionEnricher = transactionEnricher,
+                createNodeEnricher = createNodeEnricher,
                 logger = logger,
               )
             } yield participantSignatureError.orElse(externalSignatureError)
@@ -114,6 +117,7 @@ private[protocol] object AuthenticationValidator {
               view.rootHash.unwrap,
               submittingParticipant,
               signature,
+              SigningKeyUsage.ProtocolOnly,
             )
             .leftMap(_.show)
         } yield ()).fold(
@@ -155,6 +159,7 @@ private[protocol] object AuthenticationValidator {
       reInterpretedTopLevelViews: LazyAsyncReInterpretation,
       synchronizerId: SynchronizerId,
       transactionEnricher: TransactionEnricher,
+      createNodeEnricher: CreateNodeEnricher,
       requestId: RequestId,
       logger: TracedLogger,
   )(implicit
@@ -189,6 +194,7 @@ private[protocol] object AuthenticationValidator {
                   synchronizerId,
                   protocolVersion,
                   transactionEnricher,
+                  createNodeEnricher,
                 )
                 // If Hash computation is successful, verify the signature is valid
                 .flatMap { hash =>

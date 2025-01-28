@@ -76,7 +76,7 @@ class SegmentState(
 
       new SegmentBlockState(
         viewNumber =>
-          new PbftBlockState.InProgress(
+          new PbftBlockState(
             membership,
             clock,
             pbftMessageValidator,
@@ -89,15 +89,15 @@ class SegmentState(
             loggerFactory,
           ),
         completedBlocks.find(_.blockNumber == blockNumber),
+        abort,
       )
     }
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   def processEvent(
       event: PbftEvent
-  )(implicit traceContext: TraceContext): Seq[ProcessResult] = {
-    val blockCompletion = blockCompletionState
-    val processResults = event match {
+  )(implicit traceContext: TraceContext): Seq[ProcessResult] =
+    event match {
       case PbftSignedNetworkMessage(signedMessage) =>
         signedMessage.message match {
           case _: PbftNormalCaseMessage =>
@@ -119,18 +119,6 @@ class SegmentState(
         processCommitCertificate(msg)
     }
 
-    // if the block has been completed in a previous view and it gets completed again as a result of a view change
-    // in a higher view, we don't want to signal again that the block got completed
-    processResults.filter {
-      case c: CompletedBlock
-          if blockCompletion(
-            segment.relativeBlockIndex(c.prePrepare.message.blockMetadata.blockNumber)
-          ) =>
-        false
-      case _ => true
-    }
-  }
-
   private def processMessagesStored(pbftMessagesStored: PbftMessagesStored)(implicit
       traceContext: TraceContext
   ): Seq[ProcessResult] =
@@ -145,8 +133,8 @@ class SegmentState(
         }
     }
 
-  def confirmCompleteBlockStored(blockNumber: BlockNumber, viewNumber: ViewNumber): Unit =
-    segmentBlocks(segment.relativeBlockIndex(blockNumber)).confirmCompleteBlockStored(viewNumber)
+  def confirmCompleteBlockStored(blockNumber: BlockNumber): Unit =
+    segmentBlocks(segment.relativeBlockIndex(blockNumber)).confirmCompleteBlockStored()
 
   def isBlockComplete(blockNumber: BlockNumber): Boolean =
     segmentBlocks(segment.relativeBlockIndex(blockNumber)).isComplete

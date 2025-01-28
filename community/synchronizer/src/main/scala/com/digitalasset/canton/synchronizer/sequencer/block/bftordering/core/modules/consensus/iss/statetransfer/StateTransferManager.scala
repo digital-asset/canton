@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer
 
-import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssConsensusModule.DefaultLeaderSelectionPolicy
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
@@ -12,6 +11,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   EpochState,
   TimeoutManager,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.NumberIdentifiers.{
   EpochLength,
@@ -73,6 +73,7 @@ class StateTransferManager[E <: Env[E]](
 
   def startStateTransfer(
       activeMembership: Membership,
+      activeCryptoProvider: CryptoProvider[E],
       latestCompletedEpoch: EpochStore.Epoch,
       startEpoch: EpochNumber,
   )(abort: String => Nothing)(implicit
@@ -92,37 +93,46 @@ class StateTransferManager[E <: Env[E]](
         new BlockTransferResponseQuorumBuilder(activeMembership)
       )
 
-      activeMembership.otherPeers.foreach { peerId =>
-        blockTransferResponseTimeouts
-          .put(peerId, new TimeoutManager(loggerFactory, RetryTimeout, peerId))
-          .foreach(_ => abort(s"There should be no timeout manager for peer $peerId yet"))
-
-        val blockTransferRequest =
-          StateTransferMessage.BlockTransferRequest.create(
-            startEpoch,
-            latestCompletedEpochNumber,
-            activeMembership.myId,
-          )
-        // TODO(#20458) properly sign this message
-        val signedMessage = SignedMessage(blockTransferRequest, Signature.noSignature)
-
-        sendBlockTransferRequest(signedMessage, to = peerId)(abort)
+      val blockTransferRequest =
+        StateTransferMessage.BlockTransferRequest.create(
+          startEpoch,
+          latestCompletedEpochNumber,
+          activeMembership.myId,
+        )
+      messageSender.signMessage(activeCryptoProvider, blockTransferRequest) { signedMessage =>
+        activeMembership.otherPeers.foreach { peerId =>
+          blockTransferResponseTimeouts
+            .put(peerId, new TimeoutManager(loggerFactory, RetryTimeout, peerId))
+            .foreach(_ => abort(s"There should be no timeout manager for peer $peerId yet"))
+          sendBlockTransferRequest(signedMessage, to = peerId)(abort)
+        }
       }
     }
 
   def handleStateTransferMessage(
       message: Consensus.StateTransferMessage,
       activeMembership: Membership,
+      activeCryptoProvider: CryptoProvider[E],
       latestCompletedEpoch: EpochStore.Epoch,
   )(abort: String => Nothing)(implicit
       context: E#ActorContextT[Consensus.Message[E]],
       traceContext: TraceContext,
   ): StateTransferMessageResult =
     message match {
-      case StateTransferMessage.NetworkMessage(message) =>
+      case StateTransferMessage.UnverifiedStateTransferMessage(unverifiedMessage) =>
+        StateTransferMessageValidator.verifyStateTransferMessage(
+          unverifiedMessage,
+          activeMembership,
+          activeCryptoProvider,
+          loggerFactory,
+        )
+        StateTransferMessageResult.Continue
+
+      case StateTransferMessage.VerifiedStateTransferMessage(message) =>
         handleStateTransferNetworkMessage(
           message,
           activeMembership,
+          activeCryptoProvider,
           latestCompletedEpoch,
         )(abort)
 
@@ -144,6 +154,7 @@ class StateTransferManager[E <: Env[E]](
   private def handleStateTransferNetworkMessage(
       message: Consensus.StateTransferMessage.StateTransferNetworkMessage,
       activeMembership: Membership,
+      activeCryptoProvider: CryptoProvider[E],
       latestCompletedEpoch: EpochStore.Epoch,
   )(abort: String => Nothing)(implicit
       context: E#ActorContextT[Consensus.Message[E]],
@@ -168,6 +179,7 @@ class StateTransferManager[E <: Env[E]](
                   .info(s"State transfer: peer $from is catching up from epoch $startEpoch")
 
               messageSender.sendBlockTransferResponse(
+                activeCryptoProvider,
                 to = from,
                 request.startEpoch,
                 latestCompletedEpoch,

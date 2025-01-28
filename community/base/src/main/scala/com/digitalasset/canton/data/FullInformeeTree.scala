@@ -62,12 +62,11 @@ final case class FullInformeeTree private (tree: GenTransactionTree)(
   override protected def pretty: Pretty[FullInformeeTree] = prettyOfParam(_.tree)
 }
 
-object FullInformeeTree
-    extends HasProtocolVersionedWithContextAndValidationCompanion[FullInformeeTree, HashOps] {
+object FullInformeeTree extends VersioningCompanionContextPVValidation2[FullInformeeTree, HashOps] {
   override val name: String = "FullInformeeTree"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v33)(v30.FullInformeeTree)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v33)(v30.FullInformeeTree)(
       supportedProtoVersion(_)(fromProtoV30),
       _.toProtoV30,
     )

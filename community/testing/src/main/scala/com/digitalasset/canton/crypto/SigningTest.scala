@@ -4,14 +4,13 @@
 package com.digitalasset.canton.crypto
 
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.SignatureCheckError.{
   InvalidSignature,
   InvalidSignatureFormat,
   KeyAlgoSpecsMismatch,
   SignatureWithWrongKey,
 }
-import com.digitalasset.canton.crypto.SigningError.{InvalidSigningKey, UnknownSigningKey}
+import com.digitalasset.canton.crypto.SigningError.UnknownSigningKey
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.{BaseTest, FailOnShutdown}
 import com.google.protobuf.ByteString
@@ -22,6 +21,7 @@ import scala.annotation.nowarn
 trait SigningTest extends AsyncWordSpec with BaseTest with CryptoTestHelper with FailOnShutdown {
 
   def signingProvider(
+      supportedSigningKeySpecs: Set[SigningKeySpec],
       supportedSigningAlgorithmSpecs: Set[SigningAlgorithmSpec],
       newCrypto: => FutureUnlessShutdown[Crypto],
   ): Unit = {
@@ -33,6 +33,11 @@ trait SigningTest extends AsyncWordSpec with BaseTest with CryptoTestHelper with
 
     forAll(supportedSigningAlgorithmSpecs) { signingAlgorithmSpec =>
       forAll(signingAlgorithmSpec.supportedSigningKeySpecs.forgetNE) { signingKeySpec =>
+        require(
+          supportedSigningKeySpecs.contains(signingKeySpec),
+          s"selected key spec $signingKeySpec must be supported by the crypto provider: $supportedSigningKeySpecs",
+        )
+
         s"Sign with $signingKeySpec key and $signingAlgorithmSpec algorithm" should {
 
           "serialize and deserialize a signing public key via protobuf" in {
@@ -121,7 +126,12 @@ trait SigningTest extends AsyncWordSpec with BaseTest with CryptoTestHelper with
               sig <- crypto.privateCrypto
                 .sign(hash, publicKey.id, SigningKeyUsage.ProtocolOnly, signingAlgorithmSpec)
                 .valueOrFail("sign")
-              res = crypto.pureCrypto.verifySignature(hash, publicKey, sig)
+              res = crypto.pureCrypto.verifySignature(
+                hash,
+                publicKey,
+                sig,
+                SigningKeyUsage.ProtocolOnly,
+              )
             } yield res shouldEqual Either.unit
           }
 
@@ -165,7 +175,7 @@ trait SigningTest extends AsyncWordSpec with BaseTest with CryptoTestHelper with
                     Some(otherSigningAlgorithmSpec),
                   )
                   crypto.pureCrypto
-                    .verifySignature(hash, publicKey, wrongSpecSig)
+                    .verifySignature(hash, publicKey, wrongSpecSig, SigningKeyUsage.ProtocolOnly)
                     .left
                     .value shouldBe a[KeyAlgoSpecsMismatch]
 
@@ -180,12 +190,22 @@ trait SigningTest extends AsyncWordSpec with BaseTest with CryptoTestHelper with
                         realSig.signingAlgorithmSpec,
                       )
                       crypto.pureCrypto
-                        .verifySignature(hash, publicKey, wrongFormatSig)
+                        .verifySignature(
+                          hash,
+                          publicKey,
+                          wrongFormatSig,
+                          SigningKeyUsage.ProtocolOnly,
+                        )
                         .left
                         .value shouldBe a[InvalidSignatureFormat]
                     }
                 }
-              res = crypto.pureCrypto.verifySignature(hash, publicKey, fakeSig)
+              res = crypto.pureCrypto.verifySignature(
+                hash,
+                publicKey,
+                fakeSig,
+                SigningKeyUsage.ProtocolOnly,
+              )
             } yield res.left.value shouldBe a[InvalidSignature]
           }
 
@@ -207,7 +227,12 @@ trait SigningTest extends AsyncWordSpec with BaseTest with CryptoTestHelper with
                 realSig.signedBy,
                 None, // for backwards compatibility, the algorithm specification will be derived from the key's supported algorithms if it is not explicitly set.
               )
-              res = crypto.pureCrypto.verifySignature(hash, publicKey, noSpecSig)
+              res = crypto.pureCrypto.verifySignature(
+                hash,
+                publicKey,
+                noSpecSig,
+                SigningKeyUsage.ProtocolOnly,
+              )
             } yield res shouldEqual Either.unit
           }
 
@@ -225,22 +250,55 @@ trait SigningTest extends AsyncWordSpec with BaseTest with CryptoTestHelper with
               sig <- crypto.privateCrypto
                 .sign(hash, publicKey.id, SigningKeyUsage.ProtocolOnly, signingAlgorithmSpec)
                 .valueOrFail("sign")
+              verifyErr = crypto.pureCrypto.verifySignature(
+                hash,
+                publicKey2,
+                sig,
+                SigningKeyUsage.ProtocolOnly,
+              )
+            } yield verifyErr.left.value shouldBe a[SignatureWithWrongKey]
+          }.failOnShutdown
+
+          "fail to sign and verify if the public key does not have the correct usage" in {
+            for {
+              crypto <- newCrypto
+              publicKey <- getSigningPublicKey(
+                crypto,
+                SigningKeyUsage.ProtocolOnly,
+                signingKeySpec,
+              )
+              hash = TestHash.digest("foobar")
+              sig <- crypto.privateCrypto
+                .sign(hash, publicKey.id, SigningKeyUsage.ProtocolOnly, signingAlgorithmSpec)
+                .valueOrFail("sign")
               sigErr <- crypto.privateCrypto
                 .sign(
                   hash,
                   publicKey.id,
-                  NonEmpty.mk(
-                    Set,
-                    SigningKeyUsage.Namespace,
-                    SigningKeyUsage.IdentityDelegation,
-                  ),
+                  SigningKeyUsage.NamespaceOrIdentityDelegation,
                   signingAlgorithmSpec,
                 )
                 .value
-              verifyErr = crypto.pureCrypto.verifySignature(hash, publicKey2, sig)
+              _ <- crypto.privateCrypto
+                .sign(hash, publicKey.id, SigningKeyUsage.All, signingAlgorithmSpec)
+                .valueOrFail("sign")
+              res = crypto.pureCrypto.verifySignature(
+                hash,
+                publicKey,
+                sig,
+                SigningKeyUsage.IdentityDelegationOnly,
+              )
+              _ = crypto.pureCrypto
+                .verifySignature(
+                  hash,
+                  publicKey,
+                  sig,
+                  SigningKeyUsage.All,
+                )
+                .valueOrFail("verify")
             } yield {
-              sigErr.left.value shouldBe a[InvalidSigningKey]
-              verifyErr.left.value shouldBe a[SignatureWithWrongKey]
+              sigErr.left.value shouldBe a[SigningError.InvalidKeyUsage]
+              res.left.value shouldBe a[SignatureCheckError.InvalidKeyUsage]
             }
           }.failOnShutdown
 

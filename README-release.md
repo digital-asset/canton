@@ -9,7 +9,7 @@ authorization and privacy faithfully.
 * It allows developers to balance auditability requirements with the right to forget, making it well-suited for building
   GDPR-compliant systems.
 
-* Canton handles authentication and data transport through our so-called synchronization domains.
+* Canton handles authentication and data transport through our so-called connected synchronizers.
 
 * Synchronizers can be deployed at will to address scalability, operational or trust concerns.
 

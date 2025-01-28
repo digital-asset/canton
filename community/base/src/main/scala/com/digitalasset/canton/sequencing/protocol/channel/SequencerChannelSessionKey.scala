@@ -24,13 +24,12 @@ final case class SequencerChannelSessionKey(
     v30.SequencerChannelSessionKey(Some(encryptedSessionKey.toProtoV30))
 }
 
-object SequencerChannelSessionKey
-    extends HasProtocolVersionedCompanion[SequencerChannelSessionKey] {
+object SequencerChannelSessionKey extends VersioningCompanion[SequencerChannelSessionKey] {
   override val name: String = "SequencerChannelSessionKey"
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(-1) -> UnsupportedProtoCodec(),
-    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.dev)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.dev)(
       v30.SequencerChannelSessionKey
     )(
       supportedProtoVersion(_)(fromProtoV30),
