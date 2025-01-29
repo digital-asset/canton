@@ -74,7 +74,7 @@ final case class UnassignmentViewTree(
 }
 
 object UnassignmentViewTree
-    extends HasProtocolVersionedWithContextAndValidationWithTaggedProtocolVersionCompanion[
+    extends VersioningCompanionContextTaggedPVValidation2[
       UnassignmentViewTree,
       Source,
       HashOps,
@@ -83,7 +83,7 @@ object UnassignmentViewTree
   override val name: String = "UnassignmentViewTree"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v33)(v30.ReassignmentViewTree)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v33)(v30.ReassignmentViewTree)(
       supportedProtoVersion(_)((context, proto) => fromProtoV30(context)(proto)),
       _.toProtoV30,
     )
@@ -108,10 +108,9 @@ object UnassignmentViewTree
     for {
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
       res <- GenReassignmentViewTree.fromProtoV30(
-        UnassignmentCommonData.fromByteString(expectedProtocolVersion.unwrap)(
-          (hashOps, expectedProtocolVersion)
-        ),
-        UnassignmentView.fromByteString(expectedProtocolVersion.unwrap)(hashOps),
+        UnassignmentCommonData
+          .fromByteString(expectedProtocolVersion.unwrap, (hashOps, expectedProtocolVersion)),
+        UnassignmentView.fromByteString(expectedProtocolVersion.unwrap, hashOps),
       )((commonData, view) =>
         UnassignmentViewTree(commonData, view)(
           rpv,
@@ -184,14 +183,14 @@ final case class UnassignmentCommonData private (
 }
 
 object UnassignmentCommonData
-    extends HasMemoizedProtocolVersionedWithContextCompanion[
+    extends VersioningCompanionContextMemoization[
       UnassignmentCommonData,
       (HashOps, Source[ProtocolVersion]),
     ] {
   override val name: String = "UnassignmentCommonData"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v33)(v30.UnassignmentCommonData)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v33)(v30.UnassignmentCommonData)(
       supportedProtoVersionMemoized(_)(fromProtoV30),
       _.toProtoV30,
     )
@@ -327,12 +326,11 @@ final case class UnassignmentView private (
   )
 }
 
-object UnassignmentView
-    extends HasMemoizedProtocolVersionedWithContextCompanion[UnassignmentView, HashOps] {
+object UnassignmentView extends VersioningCompanionContextMemoization[UnassignmentView, HashOps] {
   override val name: String = "UnassignmentView"
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v33)(v30.UnassignmentView)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v33)(v30.UnassignmentView)(
       supportedProtoVersionMemoized(_)(fromProtoV30),
       _.toProtoV30,
     )

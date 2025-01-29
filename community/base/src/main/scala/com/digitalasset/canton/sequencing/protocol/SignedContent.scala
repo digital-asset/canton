@@ -24,13 +24,13 @@ import com.digitalasset.canton.serialization.{
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{
-  HasMemoizedProtocolVersionedWrapperCompanion2,
   HasProtocolVersionedWrapper,
   OriginalByteString,
   ProtoVersion,
   ProtocolVersion,
   RepresentativeProtocolVersion,
-  VersionedProtoConverter,
+  VersionedProtoCodec,
+  VersioningCompanionMemoization2,
 }
 import com.google.protobuf.ByteString
 
@@ -78,7 +78,7 @@ final case class SignedContent[+A <: HasCryptographicEvidence] private (
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SignatureCheckError, Unit] = {
     val hash = SignedContent.hashContent(snapshot.pureCrypto, content, purpose)
-    snapshot.verifySignature(hash, member, signature)
+    snapshot.verifySignature(hash, member, signature, SigningKeyUsage.ProtocolOnly)
   }
 
   def deserializeContent[B <: HasCryptographicEvidence](
@@ -106,7 +106,7 @@ final case class SignedContent[+A <: HasCryptographicEvidence] private (
 }
 
 object SignedContent
-    extends HasMemoizedProtocolVersionedWrapperCompanion2[
+    extends VersioningCompanionMemoization2[
       SignedContent[HasCryptographicEvidence],
       SignedContent[BytestringWithCryptographicEvidence],
     ] {
@@ -114,7 +114,7 @@ object SignedContent
   override def name: String = "SignedContent"
 
   override def versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v33)(v30.SignedContent)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v33)(v30.SignedContent)(
       supportedProtoVersionMemoized(_)(fromProtoV30),
       _.toProtoV30,
     )

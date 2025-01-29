@@ -61,7 +61,7 @@ trait SigningOps {
       signingKey: SigningPrivateKey,
       usage: NonEmpty[Set[SigningKeyUsage]],
       signingAlgorithmSpec: SigningAlgorithmSpec = defaultSigningAlgorithmSpec,
-  ): Either[SigningError, Signature] =
+  )(implicit traceContext: TraceContext): Either[SigningError, Signature] =
     signBytes(hash.getCryptographicEvidence, signingKey, usage, signingAlgorithmSpec)
 
   /** Preferably, we sign a hash; however, we also allow signing arbitrary bytes when necessary. */
@@ -70,21 +70,23 @@ trait SigningOps {
       signingKey: SigningPrivateKey,
       usage: NonEmpty[Set[SigningKeyUsage]],
       signingAlgorithmSpec: SigningAlgorithmSpec = defaultSigningAlgorithmSpec,
-  ): Either[SigningError, Signature]
+  )(implicit traceContext: TraceContext): Either[SigningError, Signature]
 
   /** Confirms if the provided signature is a valid signature of the payload using the public key */
   def verifySignature(
       hash: Hash,
       publicKey: SigningPublicKey,
       signature: Signature,
-  ): Either[SignatureCheckError, Unit] =
-    verifySignature(hash.getCryptographicEvidence, publicKey, signature)
+      usage: NonEmpty[Set[SigningKeyUsage]],
+  )(implicit traceContext: TraceContext): Either[SignatureCheckError, Unit] =
+    verifySignature(hash.getCryptographicEvidence, publicKey, signature, usage)
 
   protected[crypto] def verifySignature(
       bytes: ByteString,
       publicKey: SigningPublicKey,
       signature: Signature,
-  ): Either[SignatureCheckError, Unit]
+      usage: NonEmpty[Set[SigningKeyUsage]],
+  )(implicit traceContext: TraceContext): Either[SignatureCheckError, Unit]
 }
 
 /** Signing operations that require access to stored private keys. */
@@ -105,7 +107,8 @@ trait SigningPrivateOps {
     signBytes(hash.getCryptographicEvidence, signingKeyId, usage, signingAlgorithmSpec)
 
   /** Signs the byte string directly, however it is encouraged to sign a hash. */
-  protected[crypto] def signBytes(
+  @VisibleForTesting
+  def signBytes(
       bytes: ByteString,
       signingKeyId: Fingerprint,
       usage: NonEmpty[Set[SigningKeyUsage]],
@@ -132,7 +135,7 @@ trait SigningPrivateStoreOps extends SigningPrivateOps {
 
   protected val signingOps: SigningOps
 
-  override protected[crypto] def signBytes(
+  override def signBytes(
       bytes: ByteString,
       signingKeyId: Fingerprint,
       usage: NonEmpty[Set[SigningKeyUsage]],
@@ -715,7 +718,7 @@ object SigningKeySpec {
       v30.SigningKeySpec.SIGNING_KEY_SPEC_EC_CURVE25519
   }
 
-  /** Elliptic Curve Key from the P-256 curve (aka Secp256r1)
+  /** Elliptic Curve Key from the P-256 curve (aka secp256r1)
     * as defined in https://doi.org/10.6028/NIST.FIPS.186-4
     */
   case object EcP256 extends SigningKeySpec {
@@ -724,13 +727,23 @@ object SigningKeySpec {
       v30.SigningKeySpec.SIGNING_KEY_SPEC_EC_P256
   }
 
-  /** Elliptic Curve Key from the P-384 curve (aka Secp384r1)
+  /** Elliptic Curve Key from the P-384 curve (aka secp384r1)
     * as defined in https://doi.org/10.6028/NIST.FIPS.186-4
     */
   case object EcP384 extends SigningKeySpec {
     override val name: String = "EC-P384"
     override def toProtoEnum: v30.SigningKeySpec =
       v30.SigningKeySpec.SIGNING_KEY_SPEC_EC_P384
+  }
+
+  /** Elliptic Curve Key from SECG P256k1 curve (aka secp256k1)
+    * commonly used in bitcoin and ethereum
+    * as defined in https://www.secg.org/sec2-v2.pdf
+    */
+  case object EcSecp256k1 extends SigningKeySpec {
+    override val name: String = "EC-Secp256k1"
+    override def toProtoEnum: v30.SigningKeySpec =
+      v30.SigningKeySpec.SIGNING_KEY_SPEC_EC_SECP256K1
   }
 
   def fromProtoEnum(
@@ -748,6 +761,8 @@ object SigningKeySpec {
         Right(SigningKeySpec.EcP256)
       case v30.SigningKeySpec.SIGNING_KEY_SPEC_EC_P384 =>
         Right(SigningKeySpec.EcP384)
+      case v30.SigningKeySpec.SIGNING_KEY_SPEC_EC_SECP256K1 =>
+        Right(SigningKeySpec.EcSecp256k1)
     }
 
   /** If keySpec is unspecified, use the old SigningKeyScheme from the key */
@@ -823,7 +838,7 @@ object SigningAlgorithmSpec {
   case object EcDsaSha256 extends SigningAlgorithmSpec {
     override val name: String = "EC-DSA-SHA256"
     override val supportedSigningKeySpecs: NonEmpty[Set[SigningKeySpec]] =
-      NonEmpty.mk(Set, SigningKeySpec.EcP256)
+      NonEmpty.mk(Set, SigningKeySpec.EcP256, SigningKeySpec.EcSecp256k1)
     override val supportedSignatureFormats: NonEmpty[Set[SignatureFormat]] =
       NonEmpty.mk(Set, SignatureFormat.Der)
     override def toProtoEnum: v30.SigningAlgorithmSpec =
@@ -1389,13 +1404,27 @@ object SigningError {
     )
   }
 
-  final case class UnsupportedKeySpec(
+  final case class KeyAlgoSpecsMismatch(
       signingKeySpec: SigningKeySpec,
-      supportedKeySpecs: Set[SigningKeySpec],
+      algorithmSpec: SigningAlgorithmSpec,
+      supportedKeySpecsByAlgo: Set[SigningKeySpec],
   ) extends SigningError {
-    override def pretty: Pretty[UnsupportedKeySpec] = prettyOfClass(
+    override def pretty: Pretty[KeyAlgoSpecsMismatch] = prettyOfClass(
       param("signingKeySpec", _.signingKeySpec),
-      param("supportedKeySpecs", _.supportedKeySpecs),
+      param("algorithmSpec", _.algorithmSpec),
+      param("supportedKeySpecsByAlgo", _.supportedKeySpecsByAlgo),
+    )
+  }
+
+  final case class InvalidKeyUsage(
+      keyId: Fingerprint,
+      keyUsage: Set[SigningKeyUsage],
+      expectedKeyUsage: Set[SigningKeyUsage],
+  ) extends SigningError {
+    override def pretty: Pretty[InvalidKeyUsage] = prettyOfClass(
+      param("keyId", _.keyId),
+      param("keyUsage", _.keyUsage),
+      param("expectedKeyUsage", _.expectedKeyUsage),
     )
   }
 
@@ -1519,6 +1548,18 @@ object SignatureCheckError {
     override def pretty: Pretty[UnsupportedKeySpec] = prettyOfClass(
       param("signingKeySpec", _.signingKeySpec),
       param("supportedKeySpecs", _.supportedKeySpecs),
+    )
+  }
+
+  final case class InvalidKeyUsage(
+      keyId: Fingerprint,
+      keyUsage: Set[SigningKeyUsage],
+      expectedKeyUsage: Set[SigningKeyUsage],
+  ) extends SignatureCheckError {
+    override def pretty: Pretty[InvalidKeyUsage] = prettyOfClass(
+      param("keyId", _.keyId),
+      param("keyUsage", _.keyUsage),
+      param("expectedKeyUsages", _.expectedKeyUsage),
     )
   }
 

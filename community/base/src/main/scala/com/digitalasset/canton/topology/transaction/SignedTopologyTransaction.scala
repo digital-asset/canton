@@ -134,7 +134,7 @@ case class SignedTopologyTransaction[+Op <: TopologyChangeOp, +M <: TopologyMapp
 }
 
 object SignedTopologyTransaction
-    extends HasProtocolVersionedWithContextCompanion[
+    extends VersioningCompanionContext[
       SignedTopologyTransaction[TopologyChangeOp, TopologyMapping],
       // Validation is done in synchronizer store but not in authorized store
       ProtocolVersionValidation,
@@ -151,7 +151,7 @@ object SignedTopologyTransaction
     SignedTopologyTransaction[TopologyChangeOp.Replace, TopologyMapping]
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v33)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v33)(
       v30.SignedTopologyTransaction
     )(
       supportedProtoVersion(_)(fromProtoV30),
@@ -232,7 +232,7 @@ object SignedTopologyTransaction
   ): ParsingResult[GenericSignedTopologyTransaction] = {
     val v30.SignedTopologyTransaction(txBytes, signaturesP, isProposal) = transactionP
     for {
-      transaction <- TopologyTransaction.fromByteString(protocolVersionValidation)(txBytes)
+      transaction <- TopologyTransaction.fromByteString(protocolVersionValidation, txBytes)
       signatures <- ProtoConverter.parseRequiredNonEmpty(
         Signature.fromProtoV30,
         "SignedTopologyTransaction.signatures",
@@ -244,7 +244,7 @@ object SignedTopologyTransaction
 
   def createGetResultSynchronizerTopologyTransaction: GetResult[GenericSignedTopologyTransaction] =
     GetResult { r =>
-      fromTrustedByteString(r.<<[ByteString]).valueOr(err =>
+      fromTrustedByteStringPVV(r.<<[ByteString]).valueOr(err =>
         throw new DbSerializationException(
           s"Failed to deserialize SignedTopologyTransaction: $err"
         )
@@ -292,12 +292,12 @@ final case class SignedTopologyTransactions[
 }
 
 object SignedTopologyTransactions
-    extends HasProtocolVersionedWithContextCompanion[
+    extends VersioningCompanionContext[
       SignedTopologyTransactions[TopologyChangeOp, TopologyMapping],
-      ProtocolVersion,
+      ProtocolVersionValidation,
     ] {
   override val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v33)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v33)(
       v30.SignedTopologyTransactions
     )(
       supportedProtoVersion(_)(fromProtoV30),
@@ -319,15 +319,17 @@ object SignedTopologyTransactions
     )
 
   def fromProtoV30(
-      expectedProtocolVersion: ProtocolVersion,
+      expectedProtocolVersion: ProtocolVersionValidation,
       proto: v30.SignedTopologyTransactions,
   ): ParsingResult[SignedTopologyTransactions[TopologyChangeOp, TopologyMapping]] =
     for {
       transactions <- proto.signedTransaction
         .traverse(
-          SignedTopologyTransaction.fromByteString(expectedProtocolVersion)(
-            ProtocolVersionValidation.PV(expectedProtocolVersion)
-          )(_)
+          SignedTopologyTransaction.fromByteString(
+            expectedProtocolVersion,
+            expectedProtocolVersion,
+            _,
+          )
         )
       rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
     } yield SignedTopologyTransactions(transactions)(rpv)

@@ -59,15 +59,15 @@
     },
     "sample" : [
       {
-        "line" : "2019-12-24 10:24:30,545 [ScalaTest-run-running-ScenarioRunnerTest] INFO  c.d.c.d.DomainInit:ScenarioRunnerTest/domain=da - Starting admin-api services on port 9019",
+        "line" : "2019-12-24 10:24:30,545 [ScalaTest-run-running-ScenarioRunnerTest] INFO  c.d.c.e.CantonNodeBootstrapImpl$SetupCrypto:SimplestPing/sequencer=sequencer1 - Starting admin-api services on port AdminServerConfig",
         "level" : "info"
       },
       {
-        "line" : "2019-12-24 10:24:30,545 [thread with spaces] WARN  c.d.c.d.DomainInit:name-with-hyphens - Starting admin-api services on port 9019",
+        "line" : "2019-12-24 10:24:30,545 [thread with spaces] WARN  c.d.c.e.CantonNodeBootstrapImpl$SetupCrypto:name-with-hyphens - Starting admin-api services on port AdminServerConfig",
         "level" : "warning"
       },
       {
-        "line" : "2019-12-24 10:24:30,545 [thread with spaces] WARN  c.d.c.d.DomainInit:name with space - Starting admin-api services on port 9019",
+        "line" : "2019-12-24 10:24:30,545 [thread with spaces] WARN  c.d.c.e.CantonNodeBootstrapImpl$SetupCrypto:name with space - Starting admin-api services on port AdminServerConfig",
         "level" : "warning"
       },
       {
@@ -75,11 +75,11 @@
         "level" : "debug"
       },
       {
-        "line" : "2020-08-06 13:57:29,509 [grpc-default-executor-0] DEBUG c.d.c.s.c.t.GrpcSequencerClientTransport:ParticipantRestartStaticTimeTest/domain=da tid:QS3FE8SH - Request handshake has succeeded for sequencer.",
+        "line" : "2020-08-06 13:57:29,509 [grpc-default-executor-0] DEBUG c.d.c.s.c.t.GrpcSequencerClientTransport:ParticipantRestartStaticTimeTest/synchronizer=da tid:QS3FE8SH - Request handshake has succeeded for sequencer.",
         "level": "debug"
       },
       {
-        "line" : "2019-12-24 10:24:30,545 [thread with spaces] ERROR  c.d.c.d.DomainInit:Test tid=ABCDEFG - body contains - dash",
+        "line" : "2019-12-24 10:24:30,545 [thread with spaces] ERROR  c.d.c.e.CantonNodeBootstrapImpl$SetupCrypto:Test tid=ABCDEFG - body contains - dash",
         "level" : "error"
       },
       {

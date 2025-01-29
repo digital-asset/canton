@@ -87,13 +87,13 @@ final case class StaticSynchronizerParameters(
     )
 }
 object StaticSynchronizerParameters
-    extends HasProtocolVersionedCompanion[StaticSynchronizerParameters]
+    extends VersioningCompanion[StaticSynchronizerParameters]
     with ProtocolVersionedCompanionDbHelpers[StaticSynchronizerParameters] {
 
   // Note: if you need static synchronizer parameters for testing, look at BaseTest.defaultStaticSynchronizerParametersWith
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v33)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v33)(
       v30.StaticSynchronizerParameters
     )(
       supportedProtoVersion(_)(fromProtoV30),
@@ -456,11 +456,10 @@ final case class DynamicSynchronizerParameters private (
     )
 }
 
-object DynamicSynchronizerParameters
-    extends HasProtocolVersionedCompanion[DynamicSynchronizerParameters] {
+object DynamicSynchronizerParameters extends VersioningCompanion[DynamicSynchronizerParameters] {
 
   val versioningTable: VersioningTable = VersioningTable(
-    ProtoVersion(30) -> VersionedProtoConverter(ProtocolVersion.v33)(
+    ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v33)(
       v30.DynamicSynchronizerParameters
     )(
       supportedProtoVersion(_)(fromProtoV30),

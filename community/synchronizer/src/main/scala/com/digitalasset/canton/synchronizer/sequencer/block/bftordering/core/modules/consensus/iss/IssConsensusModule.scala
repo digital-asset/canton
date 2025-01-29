@@ -10,8 +10,11 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis.GenesisEpoch
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.{
+  EpochStore,
+  Genesis,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.leaders.{
   LeaderSelectionPolicy,
   SimpleLeaderSelectionPolicy,
@@ -35,6 +38,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.EpochInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
+  CommitCertificate,
   OrderedBlock,
   OrderedBlockForOutput,
 }
@@ -82,6 +86,7 @@ final class IssConsensusModule[E <: Env[E]](
     clock: Clock,
     metrics: BftOrderingMetrics,
     segmentModuleRefFactory: SegmentModuleRefFactory[E],
+    retransmissionsManager: RetransmissionsManager[E],
     private val thisPeer: SequencerId,
     override val dependencies: ConsensusModuleDependencies[E],
     override val loggerFactory: NamedLoggerFactory,
@@ -96,12 +101,6 @@ final class IssConsensusModule[E <: Env[E]](
     private var activeMembership: Membership = initialState.membership,
 )(
     private var catchupDetector: CatchupDetector = new DefaultCatchupDetector(activeMembership),
-    private var retransmissionsManager: RetransmissionsManager[E] = new RetransmissionsManager[E](
-      initialState.epochState,
-      activeMembership.otherPeers,
-      dependencies.p2pNetworkOut,
-      loggerFactory,
-    ),
     private var newEpochTopology: Option[Consensus.NewEpochTopology[E]] =
       None, // Only passed in tests
 )(implicit mc: MetricsContext)
@@ -127,7 +126,7 @@ final class IssConsensusModule[E <: Env[E]](
     "Starting with " +
       s"membership = ${initialState.membership}, " +
       s"latest completed epoch = ${initialState.latestCompletedEpoch.info}, " +
-      s"current epoch = ${initialState.epochState.epoch.info} (completed: ${initialState.epochState.isEpochComplete})"
+      s"current epoch = ${initialState.epochState.epoch.info} (completed: ${initialState.epochState.epochCompletionStatus.isComplete})"
   )(TraceContext.empty)
 
   private var latestCompletedEpoch: EpochStore.Epoch = initialState.latestCompletedEpoch
@@ -171,12 +170,14 @@ final class IssConsensusModule[E <: Env[E]](
             )
             onboardingAndServerStateTransferManager.startStateTransfer(
               activeMembership,
+              activeCryptoProvider,
               latestCompletedEpoch,
               startEpoch,
             )(abort)
           case BootstrapKind.RegularStartup =>
             startSegmentModulesAndCompleteInit()
-            retransmissionsManager.startRequesting()
+            if (initialState.epochState.epoch.info.number != Genesis.GenesisEpochNumber)
+              retransmissionsManager.startEpoch(initialState.epochState)
         }
 
       case Consensus.Admin.GetOrderingTopology(callback) =>
@@ -278,13 +279,7 @@ final class IssConsensusModule[E <: Env[E]](
             processPbftMessage(pbftMessage)
         }
 
-        retransmissionsManager = new RetransmissionsManager[E](
-          epochState,
-          activeMembership.otherPeers,
-          dependencies.p2pNetworkOut,
-          loggerFactory,
-        )
-        retransmissionsManager.startRequesting()
+        retransmissionsManager.startEpoch(epochState)
     }
 
   private def handleProtocolMessage(
@@ -299,6 +294,7 @@ final class IssConsensusModule[E <: Env[E]](
           onboardingAndServerStateTransferManager.handleStateTransferMessage(
             stateTransferMessage,
             activeMembership,
+            activeCryptoProvider,
             latestCompletedEpoch,
           )(abort)
 
@@ -425,14 +421,16 @@ final class IssConsensusModule[E <: Env[E]](
 
       case Consensus.ConsensusMessage.BlockOrdered(
             orderedBlock: OrderedBlock,
-            commits,
+            commitCertificate: CommitCertificate,
           ) =>
         emitConsensusLatencyStats(metrics)
 
-        epochState.confirmBlockCompleted(orderedBlock.metadata, commits)
+        epochState.confirmBlockCompleted(orderedBlock.metadata, commitCertificate)
 
-        if (epochState.isEpochComplete)
-          completeEpoch()
+        epochState.epochCompletionStatus match {
+          case EpochState.Complete(commitCertificates) => completeEpoch(commitCertificates)
+          case _ => ()
+        }
 
         // TODO(#16761) - ensure the output module gets and processes the ordered block
         val epochNumber = epochState.epoch.info.number
@@ -451,7 +449,7 @@ final class IssConsensusModule[E <: Env[E]](
           )
         )
 
-      case Consensus.ConsensusMessage.CompleteEpochStored(epoch) =>
+      case Consensus.ConsensusMessage.CompleteEpochStored(epoch, commitCertificates) =>
         logger.debug(s"$messageType: stored w/ epoch = ${epoch.info.number}")
         val currentEpochNumber = epochState.epoch.info.number
 
@@ -464,7 +462,7 @@ final class IssConsensusModule[E <: Env[E]](
             s"Trying to complete future epoch ${epoch.info.number} before local epoch $currentEpochNumber has caught up!"
           )
         else {
-          retransmissionsManager.stopRequesting()
+          retransmissionsManager.endEpoch(commitCertificates)
           epochState.completeEpoch(epoch.info.number)
           epochState.close()
 
@@ -496,7 +494,7 @@ final class IssConsensusModule[E <: Env[E]](
       context.self.asyncSend(
         NewEpochTopology(EpochNumber.First, activeMembership.orderingTopology, activeCryptoProvider)
       )
-    } else if (!epochState.isEpochComplete) {
+    } else if (!epochState.epochCompletionStatus.isComplete) {
       logger.debug("Started during an in-progress epoch, starting segment modules")
       epochState.startSegmentModules()
     } else {
@@ -649,7 +647,7 @@ final class IssConsensusModule[E <: Env[E]](
       )()
     )
 
-  private def completeEpoch()(implicit
+  private def completeEpoch(commitCertificates: Seq[CommitCertificate])(implicit
       context: E#ActorContextT[Consensus.Message[E]],
       traceContext: TraceContext,
   ): Unit = {
@@ -661,7 +659,8 @@ final class IssConsensusModule[E <: Env[E]](
 
     pipeToSelf(epochStore.completeEpoch(epochInfo.number)) {
       case Failure(exception) => Consensus.ConsensusMessage.AsyncException(exception)
-      case Success(_) => Consensus.ConsensusMessage.CompleteEpochStored(epochSnapshot)
+      case Success(_) =>
+        Consensus.ConsensusMessage.CompleteEpochStored(epochSnapshot, commitCertificates)
     }
   }
 }

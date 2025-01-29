@@ -287,12 +287,14 @@ create or replace view debug.par_reassignments as
     unassignment_global_offset,
     assignment_global_offset,
     debug.canton_timestamp(unassignment_timestamp) as unassignment_timestamp,
+    source_synchronizer_id,
     unassignment_request_counter,
     unassignment_request,
     debug.canton_timestamp(unassignment_decision_time) as unassignment_decision_time,
     unassignment_result,
-    debug.canton_timestamp(time_of_completion_request_counter) as time_of_completion_request_counter,
-    debug.canton_timestamp(time_of_completion_timestamp) as time_of_completion_timestamp,
+    contract,
+    debug.canton_timestamp(assignment_toc_request_counter) as assignment_toc_request_counter,
+    debug.canton_timestamp(assignment_toc_timestamp) as assignment_toc_timestamp,
     source_protocol_version
   from par_reassignments;
 
@@ -331,7 +333,8 @@ create or replace view debug.par_outstanding_acs_commitments as
     counter_participant,
     debug.canton_timestamp(from_exclusive) as from_exclusive,
     debug.canton_timestamp(to_inclusive) as to_inclusive,
-    matching_state
+    matching_state,
+    multi_hosted_cleared
   from par_outstanding_acs_commitments;
 
 create or replace view debug.par_last_computed_acs_commitments as
@@ -666,10 +669,14 @@ create or replace view debug.ord_metadata_output_blocks as
   select
     epoch_number,
     block_number,
-    debug.canton_timestamp(bft_ts) as bft_ts,
-    epoch_could_alter_sequencing_topology,
-    pending_topology_changes_in_next_epoch
+    debug.canton_timestamp(bft_ts) as bft_ts
   from ord_metadata_output_blocks;
+
+create or replace view debug.ord_metadata_output_epochs as
+  select
+    epoch_number,
+    could_alter_ordering_topology
+  from ord_metadata_output_epochs;
 
 create or replace view debug.common_static_strings as
   select
