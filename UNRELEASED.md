@@ -60,8 +60,11 @@ Please also consult the [full documentation of this release](https://docs.daml.c
     - `INVALID_TOPOLOGY_MAPPING` -> `TOPOLOGY_INVALID_MAPPING`
     - `INCONSISTENT_TOPOLOGY_SNAPSHOT` -> `TOPOLOGY_INCONSISTENT_SNAPSHOT`
     - `MISSING_TOPOLOGY_MAPPING` -> `TOPOLOGY_MISSING_MAPPING`
-- Added last_descendant_node_id in the exercised event of the ledger api. This field specifies the upper boundary of the
-  node ids of the events in the same transaction that appeared as a result of the exercised event.
+- Added the last_descendant_node_id field in the exercised event of the ledger api. This field specifies the upper
+  boundary of the node ids of the events in the same transaction that appeared as a result of the exercised event.
+- Removed the child_node_ids and the root_node_ids fields from the exercised event of the ledger api. After this change
+  it will be possible to check that an event is child of another or a root event through the descendant relationship
+  using the last_descendant_node_id field.
 
 ## Until 2025-01-15 (Exclusive)
 

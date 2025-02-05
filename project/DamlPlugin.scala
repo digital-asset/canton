@@ -380,7 +380,7 @@ object DamlPlugin extends AutoPlugin {
     val damlScriptDars = for {
       depVersion <- damlLanguageVersions
     } yield {
-      ("daml-script", s"daml3-script-$depVersion")
+      ("daml-script", s"daml-script-$depVersion")
     }
 
     val damlLibsEnv = (for {

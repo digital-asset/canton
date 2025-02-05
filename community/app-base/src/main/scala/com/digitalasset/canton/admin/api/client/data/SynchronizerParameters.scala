@@ -13,19 +13,20 @@ import com.digitalasset.canton.admin.api.client.data.crypto.{
   RequiredSigningSpecs,
   SymmetricKeyScheme,
 }
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
   CommunityCryptoConfig,
   CryptoConfig,
   NonNegativeFiniteDuration,
   PositiveDurationSeconds,
 }
+import com.digitalasset.canton.crypto.SignatureFormat
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters.InvalidDynamicSynchronizerParameters
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.{
-  AcsCommitmentsCatchUpConfig,
+  AcsCommitmentsCatchUpParameters as AcsCommitmentsCatchUpParametersInternal,
   DynamicSynchronizerParameters as DynamicSynchronizerParametersInternal,
-  OnboardingRestriction,
+  OnboardingRestriction as OnboardingRestrictionInternal,
   StaticSynchronizerParameters as StaticSynchronizerParametersInternal,
   v30,
 }
@@ -52,6 +53,7 @@ final case class StaticSynchronizerParameters(
     requiredSymmetricKeySchemes: NonEmpty[Set[SymmetricKeyScheme]],
     requiredHashAlgorithms: NonEmpty[Set[HashAlgorithm]],
     requiredCryptoKeyFormats: NonEmpty[Set[CryptoKeyFormat]],
+    requiredSignatureFormats: NonEmpty[Set[SignatureFormat]],
     protocolVersion: ProtocolVersion,
 ) {
   def writeToFile(outputFile: String): Unit =
@@ -120,7 +122,7 @@ object StaticSynchronizerParameters {
     StaticSynchronizerParameters(staticSynchronizerParametersInternal)
   }
 
-  private def requiredKeySchemes[P, A](
+  private def parseRequiredSet[P, A](
       field: String,
       content: Seq[P],
       parse: (String, P) => ParsingResult[A],
@@ -136,6 +138,7 @@ object StaticSynchronizerParameters {
       requiredSymmetricKeySchemesP,
       requiredHashAlgorithmsP,
       requiredCryptoKeyFormatsP,
+      requiredSignatureFormatsP,
       protocolVersionP,
     ) = synchronizerParametersP
 
@@ -145,12 +148,12 @@ object StaticSynchronizerParameters {
           "required_signing_specs"
         )
       )
-      requiredSigningAlgorithmSpecs <- requiredKeySchemes(
+      requiredSigningAlgorithmSpecs <- parseRequiredSet(
         "required_signing_algorithm_specs",
         requiredSigningSpecsP.algorithms,
         SynchronizerCrypto.SigningAlgorithmSpec.fromProtoEnum,
       )
-      requiredSigningKeySpecs <- requiredKeySchemes(
+      requiredSigningKeySpecs <- parseRequiredSet(
         "required_signing_key_specs",
         requiredSigningSpecsP.keys,
         SynchronizerCrypto.SigningKeySpec.fromProtoEnum,
@@ -160,30 +163,35 @@ object StaticSynchronizerParameters {
           "required_encryption_specs"
         )
       )
-      requiredEncryptionAlgorithmSpecs <- requiredKeySchemes(
+      requiredEncryptionAlgorithmSpecs <- parseRequiredSet(
         "required_encryption_algorithm_specs",
         requiredEncryptionSpecsP.algorithms,
         SynchronizerCrypto.EncryptionAlgorithmSpec.fromProtoEnum,
       )
-      requiredEncryptionKeySpecs <- requiredKeySchemes(
+      requiredEncryptionKeySpecs <- parseRequiredSet(
         "required_encryption_key_specs",
         requiredEncryptionSpecsP.keys,
         SynchronizerCrypto.EncryptionKeySpec.fromProtoEnum,
       )
-      requiredSymmetricKeySchemes <- requiredKeySchemes(
+      requiredSymmetricKeySchemes <- parseRequiredSet(
         "required_symmetric_key_schemes",
         requiredSymmetricKeySchemesP,
         SynchronizerCrypto.SymmetricKeyScheme.fromProtoEnum,
       )
-      requiredHashAlgorithms <- requiredKeySchemes(
+      requiredHashAlgorithms <- parseRequiredSet(
         "required_hash_algorithms",
         requiredHashAlgorithmsP,
         SynchronizerCrypto.HashAlgorithm.fromProtoEnum,
       )
-      requiredCryptoKeyFormats <- requiredKeySchemes(
+      requiredCryptoKeyFormats <- parseRequiredSet(
         "required_crypto_key_formats",
         requiredCryptoKeyFormatsP,
         SynchronizerCrypto.CryptoKeyFormat.fromProtoEnum,
+      )
+      requiredSignatureFormats <- parseRequiredSet(
+        "required_signature_formats",
+        requiredSignatureFormatsP,
+        SynchronizerCrypto.SignatureFormat.fromProtoEnum,
       )
       // Data in the console is not really validated, so we allow for deleted
       protocolVersion <- ProtocolVersion.fromProtoPrimitive(protocolVersionP, allowDeleted = true)
@@ -196,6 +204,7 @@ object StaticSynchronizerParameters {
         requiredSymmetricKeySchemes,
         requiredHashAlgorithms,
         requiredCryptoKeyFormats,
+        requiredSignatureFormats,
         protocolVersion,
       )
     )
@@ -213,9 +222,9 @@ final case class DynamicSynchronizerParameters(
     reconciliationInterval: PositiveDurationSeconds,
     maxRequestSize: NonNegativeInt,
     sequencerAggregateSubmissionTimeout: NonNegativeFiniteDuration,
-    trafficControlParameters: Option[TrafficControlParameters],
+    trafficControl: Option[TrafficControlParameters],
     onboardingRestriction: OnboardingRestriction,
-    acsCommitmentsCatchUpConfig: Option[AcsCommitmentsCatchUpConfig],
+    acsCommitmentsCatchUp: Option[AcsCommitmentsCatchUpParameters],
     participantSynchronizerLimits: ParticipantSynchronizerLimits,
     submissionTimeRecordTimeTolerance: NonNegativeFiniteDuration,
 ) {
@@ -256,10 +265,10 @@ final case class DynamicSynchronizerParameters(
       maxRequestSize: NonNegativeInt = maxRequestSize,
       sequencerAggregateSubmissionTimeout: NonNegativeFiniteDuration =
         sequencerAggregateSubmissionTimeout,
-      trafficControlParameters: Option[TrafficControlParameters] = trafficControlParameters,
+      trafficControl: Option[TrafficControlParameters] = trafficControl,
       onboardingRestriction: OnboardingRestriction = onboardingRestriction,
-      acsCommitmentsCatchUpConfig: Option[AcsCommitmentsCatchUpConfig] =
-        acsCommitmentsCatchUpConfig,
+      acsCommitmentsCatchUpParameters: Option[AcsCommitmentsCatchUpParameters] =
+        acsCommitmentsCatchUp,
       submissionTimeRecordTimeTolerance: NonNegativeFiniteDuration =
         submissionTimeRecordTimeTolerance,
   ): DynamicSynchronizerParameters = this.copy(
@@ -272,9 +281,9 @@ final case class DynamicSynchronizerParameters(
     reconciliationInterval = reconciliationInterval,
     maxRequestSize = maxRequestSize,
     sequencerAggregateSubmissionTimeout = sequencerAggregateSubmissionTimeout,
-    trafficControlParameters = trafficControlParameters,
+    trafficControl = trafficControl,
     onboardingRestriction = onboardingRestriction,
-    acsCommitmentsCatchUpConfig = acsCommitmentsCatchUpConfig,
+    acsCommitmentsCatchUp = acsCommitmentsCatchUpParameters,
     participantSynchronizerLimits = ParticipantSynchronizerLimits(confirmationRequestsMaxRate),
     submissionTimeRecordTimeTolerance = submissionTimeRecordTimeTolerance,
   )
@@ -300,9 +309,11 @@ final case class DynamicSynchronizerParameters(
           maxRequestSize = MaxRequestSize(maxRequestSize),
           sequencerAggregateSubmissionTimeout =
             InternalNonNegativeFiniteDuration.fromConfig(sequencerAggregateSubmissionTimeout),
-          trafficControlParameters = trafficControlParameters.map(_.toInternal),
-          onboardingRestriction = onboardingRestriction,
-          acsCommitmentsCatchUpConfigParameter = acsCommitmentsCatchUpConfig,
+          trafficControl = trafficControl.map(_.toInternal),
+          onboardingRestriction =
+            onboardingRestriction.transformInto[OnboardingRestrictionInternal],
+          acsCommitmentsCatchUpParameters = acsCommitmentsCatchUp
+            .map(_.transformInto[AcsCommitmentsCatchUpParametersInternal]),
           participantSynchronizerLimits = participantSynchronizerLimits.toInternal,
           submissionTimeRecordTimeTolerance =
             InternalNonNegativeFiniteDuration.fromConfig(submissionTimeRecordTimeTolerance),
@@ -329,3 +340,71 @@ object DynamicSynchronizerParameters {
   ): DynamicSynchronizerParameters =
     synchronizer.transformInto[DynamicSynchronizerParameters]
 }
+
+sealed trait OnboardingRestriction extends Product with Serializable {
+  def toProtoV30: v30.OnboardingRestriction
+  def isLocked: Boolean
+  def isRestricted: Boolean
+  final def isOpen: Boolean = !isLocked
+}
+object OnboardingRestriction {
+  def fromProtoV30(
+      onboardingRestrictionP: v30.OnboardingRestriction
+  ): ParsingResult[OnboardingRestriction] = onboardingRestrictionP match {
+    case v30.OnboardingRestriction.ONBOARDING_RESTRICTION_UNRESTRICTED_OPEN =>
+      Right(UnrestrictedOpen)
+    case v30.OnboardingRestriction.ONBOARDING_RESTRICTION_UNRESTRICTED_LOCKED =>
+      Right(UnrestrictedLocked)
+    case v30.OnboardingRestriction.ONBOARDING_RESTRICTION_RESTRICTED_OPEN => Right(RestrictedOpen)
+    case v30.OnboardingRestriction.ONBOARDING_RESTRICTION_RESTRICTED_LOCKED =>
+      Right(RestrictedLocked)
+    case v30.OnboardingRestriction.Unrecognized(value) =>
+      Left(ProtoDeserializationError.UnrecognizedEnum("onboarding_restriction", value))
+    case v30.OnboardingRestriction.ONBOARDING_RESTRICTION_UNSPECIFIED =>
+      Left(ProtoDeserializationError.FieldNotSet("onboarding_restriction"))
+  }
+
+  /** Anyone can join */
+  final case object UnrestrictedOpen extends OnboardingRestriction {
+    override def toProtoV30: v30.OnboardingRestriction =
+      v30.OnboardingRestriction.ONBOARDING_RESTRICTION_UNRESTRICTED_OPEN
+
+    override def isLocked: Boolean = false
+    override def isRestricted: Boolean = false
+  }
+
+  /** In theory, anyone can join, except now, the registration procedure is closed */
+  final case object UnrestrictedLocked extends OnboardingRestriction {
+    override def toProtoV30: v30.OnboardingRestriction =
+      v30.OnboardingRestriction.ONBOARDING_RESTRICTION_UNRESTRICTED_LOCKED
+
+    override def isLocked: Boolean = true
+    override def isRestricted: Boolean = false
+  }
+
+  /** Only participants on the allowlist can join
+    *
+    * Requires the synchronizer owners to issue a valid ParticipantSynchronizerPermission transaction
+    */
+  final case object RestrictedOpen extends OnboardingRestriction {
+    override def toProtoV30: v30.OnboardingRestriction =
+      v30.OnboardingRestriction.ONBOARDING_RESTRICTION_RESTRICTED_OPEN
+
+    override def isLocked: Boolean = false
+    override def isRestricted: Boolean = true
+  }
+
+  /** Only participants on the allowlist can join in theory, except now, the registration procedure is closed */
+  final case object RestrictedLocked extends OnboardingRestriction {
+    override def toProtoV30: v30.OnboardingRestriction =
+      v30.OnboardingRestriction.ONBOARDING_RESTRICTION_RESTRICTED_LOCKED
+
+    override def isLocked: Boolean = true
+    override def isRestricted: Boolean = true
+  }
+}
+
+final case class AcsCommitmentsCatchUpParameters(
+    catchUpIntervalSkip: PositiveInt,
+    nrIntervalsToTriggerCatchUp: PositiveInt,
+)

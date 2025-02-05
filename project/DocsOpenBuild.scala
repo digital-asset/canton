@@ -182,7 +182,10 @@ object DocsOpenBuild {
         distributedConfig.getPath,
         "--log-level-stdout=off",
       )
-      val out = runCanton(releaseDirectory, args, None, log)
+      // Using the GENERATE_METRICS_FOR_DOCS environment variable as a flag (enabled when set) to explicitly register
+      // metrics which usually are registered by the application on-demand only.
+      // Without it, the metrics documentation generation is going to miss such on-demand registered metrics.
+      val out = runCanton(releaseDirectory, args, None, log, ("GENERATE_METRICS_FOR_DOCS", ""))
       IO.write(outFile, out)
       // Rename the generateReferenceJson log/canton.log file to be recognizable
       val cantonLogDir = new File("log")
@@ -192,13 +195,19 @@ object DocsOpenBuild {
       outFile
     }
 
-  def runCanton(packPath: File, args: Seq[String], cwd: Option[File], log: Logger): String = {
+  def runCanton(
+      packPath: File,
+      args: Seq[String],
+      cwd: Option[File],
+      log: Logger,
+      extraEnv: (String, String)*
+  ): String = {
     import scala.sys.process.{Process, ProcessLogger}
 
     val appPath = (packPath / "bin" / "canton").getPath
     val stdOut = mutable.MutableList[String]()
     val stdErr = mutable.MutableList[String]()
-    val exitCode = Process(Seq(appPath) ++ args, cwd) ! ProcessLogger(
+    val exitCode = Process(Seq(appPath) ++ args, cwd, extraEnv: _*) ! ProcessLogger(
       line => stdOut += line,
       line => {
         log.info(s"Error detected: $line")

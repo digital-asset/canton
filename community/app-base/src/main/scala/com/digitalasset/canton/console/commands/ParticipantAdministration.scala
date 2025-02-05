@@ -39,7 +39,7 @@ import com.digitalasset.canton.console.{
   ParticipantReference,
   SequencerReference,
 }
-import com.digitalasset.canton.crypto.SyncCryptoApiProvider
+import com.digitalasset.canton.crypto.SyncCryptoApiParticipantProvider
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.grpc.ByteStringStreamObserver
@@ -463,7 +463,7 @@ class LocalParticipantTestingGroup(
     "Return the sync crypto api provider, which provides access to all cryptographic methods",
     FeatureFlag.Testing,
   )
-  def crypto_api(): SyncCryptoApiProvider = check(FeatureFlag.Testing) {
+  def crypto_api(): SyncCryptoApiParticipantProvider = check(FeatureFlag.Testing) {
     access(node => node.sync.syncCrypto)
   }
 

@@ -67,14 +67,13 @@ class EpochState[E <: Env[E]](
       metricsAccumulator.commitVotes,
     )
 
-  private val commitCertificates =
-    Array.fill[Option[CommitCertificate]](epoch.info.length.toInt)(None)
-  completedBlocks.foreach(b =>
-    commitCertificates(epoch.info.relativeBlockIndex(b.blockNumber)) = Some(b.commitCertificate)
-  )
-
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var lastBlockCommitMessagesOption: Option[Seq[SignedMessage[Commit]]] = None
+
+  private val commitCertificates =
+    Array.fill[Option[CommitCertificate]](epoch.info.length.toInt)(None)
+  completedBlocks.foreach(b => setCommitCertificate(b.blockNumber, b.commitCertificate))
+
   def lastBlockCommitMessages: Seq[SignedMessage[Commit]] =
     lastBlockCommitMessagesOption.getOrElse(abort("The current epoch's last block is not complete"))
 
@@ -87,9 +86,7 @@ class EpochState[E <: Env[E]](
       segment.originalLeader -> segmentModuleRefFactory(
         new SegmentState(
           segment,
-          epoch.info.number,
-          epoch.membership,
-          epoch.leaders,
+          epoch,
           clock,
           completedBlocks,
           abort,
@@ -100,8 +97,8 @@ class EpochState[E <: Env[E]](
       )
     })
 
-  private val mySegmentModule = segmentModules.get(epoch.membership.myId)
-  private val mySegment = epoch.segments.find(_.originalLeader == epoch.membership.myId)
+  private val mySegmentModule = segmentModules.get(epoch.currentMembership.myId)
+  private val mySegment = epoch.segments.find(_.originalLeader == epoch.currentMembership.myId)
 
   private val blockToSegmentModule: Map[BlockNumber, E#ModuleRefT[ConsensusSegment.Message]] = {
     val blockToLeader = (for {
@@ -121,7 +118,7 @@ class EpochState[E <: Env[E]](
         ConsensusSegment.RetransmissionsMessage.StatusRequest(segmentIndex)
       )
     }
-    new EpochStatusBuilder(epoch.membership.myId, epoch.info.number, epoch.segments.size)
+    new EpochStatusBuilder(epoch.currentMembership.myId, epoch.info.number, epoch.segments.size)
   }
 
   def processRetransmissionsRequest(
@@ -168,11 +165,7 @@ class EpochState[E <: Env[E]](
       blockMetadata: BlockMetadata,
       commitCertificate: CommitCertificate,
   )(implicit traceContext: TraceContext): Unit = {
-    val blockIndex = epoch.info.relativeBlockIndex(blockMetadata.blockNumber)
-    commitCertificates(blockIndex) = Some(commitCertificate)
-
-    if (blockMetadata.blockNumber == epoch.info.lastBlockNumber)
-      lastBlockCommitMessagesOption = Some(commitCertificate.commits)
+    setCommitCertificate(blockMetadata.blockNumber, commitCertificate)
     sendMessageToSegmentModules(ConsensusSegment.ConsensusMessage.BlockOrdered(blockMetadata))
   }
 
@@ -192,6 +185,17 @@ class EpochState[E <: Env[E]](
   def processPbftMessage(event: ConsensusSegment.ConsensusMessage.PbftEvent)(implicit
       traceContext: TraceContext
   ): Unit = sendMessageToSegmentModules(event)
+
+  private def setCommitCertificate(
+      blockNumber: BlockNumber,
+      commitCertificate: CommitCertificate,
+  ): Unit = {
+    val blockIndex = epoch.info.relativeBlockIndex(blockNumber)
+    commitCertificates(blockIndex) = Some(commitCertificate)
+
+    if (blockNumber == epoch.info.lastBlockNumber)
+      lastBlockCommitMessagesOption = Some(commitCertificate.commits)
+  }
 
   private def sendMessageToSegmentModules(
       msg: ConsensusSegment.ConsensusMessage
@@ -227,14 +231,16 @@ object EpochState {
 
   final case class Epoch(
       info: EpochInfo,
-      membership: Membership,
+      currentMembership: Membership,
+      previousMembership: Membership,
       leaderSelectionPolicy: LeaderSelectionPolicy,
   ) {
 
     // If leaders.size > epoch length, not every leader can be assigned a segment. Thus, we rotate them
     // to provide more fairness.
     val leaders: Seq[SequencerId] = {
-      val selectedLeaders = leaderSelectionPolicy.selectLeaders(membership.orderingTopology.peers)
+      val selectedLeaders =
+        leaderSelectionPolicy.selectLeaders(currentMembership.orderingTopology.peers)
       if (selectedLeaders.sizeIs > info.length.toInt) {
         leaderSelectionPolicy.rotateLeaders(selectedLeaders, info.number)
       } else selectedLeaders.toSeq
