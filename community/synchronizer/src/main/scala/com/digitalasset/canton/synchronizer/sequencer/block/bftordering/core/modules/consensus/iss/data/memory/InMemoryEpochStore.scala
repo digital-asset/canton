@@ -333,6 +333,7 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
               }
             }
         }
+        .map(_.sortBy(_.orderedBlock.metadata.blockNumber))
     }
 }
 
@@ -353,6 +354,6 @@ final class InMemoryEpochStore extends GenericInMemoryEpochStore[PekkoEnv] {
   override protected def createFuture[T](action: String)(
       value: () => Try[T]
   ): PekkoFutureUnlessShutdown[T] =
-    PekkoFutureUnlessShutdown(action, FutureUnlessShutdown.fromTry(value()))
+    PekkoFutureUnlessShutdown(action, () => FutureUnlessShutdown.fromTry(value()))
   override def close(): Unit = ()
 }

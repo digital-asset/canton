@@ -25,6 +25,7 @@ import scoverage.ScoverageKeys.*
 import wartremover.WartRemover
 import wartremover.WartRemover.autoImport.*
 
+import java.nio.file.StandardOpenOption
 import scala.collection.compat.toOptionCompanionExtension
 import scala.language.postfixOps
 
@@ -149,15 +150,21 @@ object BuildCommon {
     unitTest := mkTestJob(n => !n.startsWith("com.digitalasset.canton.integration.tests")).value
   }
 
-  def runCommand(command: String, log: ManagedLogger, optError: Option[String] = None): String = {
+  def runProcess(
+      process: scala.sys.process.ProcessBuilder,
+      commandAsString: String,
+      log: ManagedLogger,
+      optError: Option[String] = None,
+  ): String = {
     import scala.sys.process.Process
     val processLogger = new DamlPlugin.BufferedLogger
-    log.debug(s"Running $command")
-    val exitCode = Process(command) ! processLogger
+    log.debug(s"Running $commandAsString")
+    val exitCode = process ! processLogger
     val output = processLogger.output()
     if (exitCode != 0) {
-      val errorMsg = s"A problem occurred when executing command `$command` in `build.sbt`: ${System
-          .lineSeparator()} $output"
+      val errorMsg =
+        s"A problem occurred when executing command `$commandAsString` in `build.sbt`: ${System
+            .lineSeparator()} $output"
       log.error(errorMsg)
       if (optError.isDefined) log.error(optError.getOrElse(""))
       throw new IllegalStateException(errorMsg)
@@ -165,6 +172,16 @@ object BuildCommon {
     if (output != "") log.info(processLogger.output())
     output
   }
+
+  def runCommand(command: String, log: ManagedLogger, optError: Option[String] = None): String =
+    runProcess(scala.sys.process.Process(command), command, log, optError)
+
+  def runSeqCommand(
+      command: Seq[String],
+      log: ManagedLogger,
+      optError: Option[String] = None,
+  ): String =
+    runProcess(scala.sys.process.Process(command), command.mkString(" "), log, optError)
 
   private def formatCoverageExcludes(excludes: String): String =
     excludes.stripMargin.trim.split(System.lineSeparator).mkString(";")
@@ -291,6 +308,16 @@ object BuildCommon {
         log.info("Adding version info to demo files")
         runCommand(f"bash ./release/add-release-version.sh ${version.value}", log)
       }
+
+      // Prepare interactive submission example
+      // Write the daml commit into a file so it can be used in the release artifact to download the correct protobuf files
+      // from the daml repo
+      val interactiveSubmissionExamplePath =
+        "community" / "app" / "src" / "pack" / "examples" / "08-interactive-submission" / "v1"
+      val damlCommitFile = interactiveSubmissionExamplePath / "daml_commit"
+      val damlVersion: String = Dependencies.daml_libraries_version
+      damlCommitFile.writeText(damlVersion.split('.').last.tail)(Seq(StandardOpenOption.CREATE))
+
       val releaseNotes: Seq[(File, String)] = {
         val sourceFile: File =
           file(s"release-notes/${version.value}.md")
@@ -601,7 +628,7 @@ object BuildCommon {
     lazy val `community-app` = project
       .in(file("community/app"))
       .dependsOn(
-        `community-app-base`,
+        `community-app-base` % "compile->compile;test->test",
         `community-common` % "test->test",
         `community-integration-testing` % "test->test",
       )
@@ -658,7 +685,7 @@ object BuildCommon {
       .in(file("community/app-base"))
       .dependsOn(
         `community-synchronizer`,
-        `community-participant`,
+        `community-participant` % "compile->compile;test->test",
       )
       .settings(
         sharedCantonCommunitySettings,
@@ -833,7 +860,7 @@ object BuildCommon {
       .in(file("community/participant"))
       .dependsOn(
         `community-common` % "test->test",
-        `ledger-json-api`,
+        `ledger-json-api` % "compile->compile;test->test",
         DamlProjects.`daml-jwt`,
       )
       .enablePlugins(DamlPlugin)
@@ -1225,6 +1252,7 @@ object BuildCommon {
       .in(file("community/ledger/ledger-common"))
       .dependsOn(
         DamlProjects.`ledger-api`,
+        DamlProjects.`bindings-java` % "test->test",
         `util-logging` % "compile->compile;test->test",
         `ledger-common-dars-lf-v2-1` % "test",
         `util-external`,

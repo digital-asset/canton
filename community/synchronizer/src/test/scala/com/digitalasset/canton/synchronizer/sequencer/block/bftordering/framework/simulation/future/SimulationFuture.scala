@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import cats.Traverse
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.PureFun
 
 import scala.util.Try
 
@@ -15,11 +16,11 @@ sealed trait SimulationFuture[T] {
 }
 
 object SimulationFuture {
-  final case class Pure[T](fun: () => Try[T]) extends SimulationFuture[T] {
+  final case class Pure[T](name: String, fun: () => Try[T]) extends SimulationFuture[T] {
     override def resolveValue(): Try[T] = fun()
 
     override def schedule(timeGenerator: () => CantonTimestamp): RunningFuture[T] =
-      RunningFuture.Pure(RunningFuture.Scheduled(timeGenerator(), () => resolveValue()))
+      RunningFuture.Pure(name, RunningFuture.Scheduled(timeGenerator(), () => resolveValue()))
   }
 
   final case class Zip[X, Y](fut1: SimulationFuture[X], fut2: SimulationFuture[Y])
@@ -46,5 +47,18 @@ object SimulationFuture {
       RunningFuture.Map(future.schedule(timeGenerator), fun)
   }
 
-  def apply[T](resolveValue: () => Try[T]): SimulationFuture[T] = Pure(resolveValue)
+  final case class FlatMap[R1, R2](
+      fut1: SimulationFuture[R1],
+      fut2: PureFun[R1, SimulationFuture[R2]],
+  ) extends SimulationFuture[R2] {
+    override def resolveValue(): Try[R2] =
+      fut1.resolveValue().map(fut2).flatMap(_.resolveValue())
+
+    // TODO(#23754): support finer-grained simulation of `FlatMap` futures
+    override def schedule(timeGenerator: () => CantonTimestamp): RunningFuture[R2] =
+      RunningFuture.Pure("flatMap", RunningFuture.Scheduled(timeGenerator(), () => resolveValue()))
+  }
+
+  def apply[T](name: String)(resolveValue: () => Try[T]): SimulationFuture[T] =
+    Pure(name, resolveValue)
 }

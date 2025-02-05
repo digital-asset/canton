@@ -16,7 +16,7 @@ import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
-import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiProvider}
+import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiParticipantProvider}
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   Offset,
@@ -68,6 +68,7 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
   SyncServicePurgeSynchronizerError,
   SyncServiceSynchronizerDisabledUs,
   SyncServiceSynchronizerDisconnect,
+  SyncServiceUnknownSynchronizer,
 }
 import com.digitalasset.canton.participant.synchronizer.*
 import com.digitalasset.canton.participant.topology.*
@@ -134,7 +135,7 @@ class CantonSyncService(
     partyOps: PartyOps,
     identityPusher: ParticipantTopologyDispatcher,
     partyNotifier: LedgerServerPartyNotifier,
-    val syncCrypto: SyncCryptoApiProvider,
+    val syncCrypto: SyncCryptoApiParticipantProvider,
     val pruningProcessor: PruningProcessor,
     engine: Engine,
     private[canton] val commandProgressTracker: CommandProgressTracker,
@@ -475,7 +476,7 @@ class CantonSyncService(
       submissionId: LedgerSubmissionId,
       _pruneAllDivulgedContracts: Boolean, // Canton always prunes divulged contracts ignoring this flag
   ): CompletionStage[PruningResult] =
-    (withNewTrace("CantonSyncService.prune") { implicit traceContext => span =>
+    withNewTrace("CantonSyncService.prune") { implicit traceContext => span =>
       span.setAttribute("submission_id", submissionId)
       pruneInternally(pruneUpToInclusive)
         .fold(
@@ -485,7 +486,7 @@ class CantonSyncService(
         .onShutdown(
           PruningResult.NotPruned(GrpcErrors.AbortedDueToShutdown.Error().asGoogleGrpcStatus)
         )
-    }).asJava
+    }.asJava
 
   def pruneInternally(
       pruneUpToInclusive: Offset
@@ -878,16 +879,28 @@ class CantonSyncService(
           )
     } yield ()
 
-  /** Reconnect to all configured synchronizers that have autoStart = true */
+  /** Reconnect configured synchronizers
+    *
+    * @param ignoreFailures If true, a failure will not interrupt reconnects
+    * @param isTriggeredManually True if the call of this method is triggered by an explicit call to the connectivity service,
+    *                            false if the call of this method is triggered by a node restart or transition to active
+    *
+    * @param mustBeActive If true, only executes if the instance is active
+    * @return The list of connected synchronizers
+    */
   def reconnectSynchronizers(
       ignoreFailures: Boolean,
-      mustBeActive: Boolean = true,
+      isTriggeredManually: Boolean,
+      mustBeActive: Boolean,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Seq[SynchronizerAlias]] =
     if (isActive() || !mustBeActive)
       connectQueue.executeEUS(
-        performReconnectSynchronizers(ignoreFailures),
+        performReconnectSynchronizers(
+          ignoreFailures = ignoreFailures,
+          isTriggeredManually = isTriggeredManually,
+        ),
         "reconnect synchronizers",
       )
     else {
@@ -895,8 +908,8 @@ class CantonSyncService(
       EitherT.leftT(SyncServiceError.SyncServicePassiveReplica.Error())
     }
 
-  private def performReconnectSynchronizers(ignoreFailures: Boolean)(implicit
-      traceContext: TraceContext
+  private def performReconnectSynchronizers(ignoreFailures: Boolean, isTriggeredManually: Boolean)(
+      implicit traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Seq[SynchronizerAlias]] = {
 
     // TODO(i2833): do this in parallel to speed up start-up once this is stable enough
@@ -988,10 +1001,15 @@ class CantonSyncService(
         .mapFilter(aliasManager.aliasForSynchronizerId)
         .toSet
 
-    def shouldConnectTo(config: StoredSynchronizerConnectionConfig): Boolean =
-      config.status.isActive && !config.config.manualConnect && !connectedSynchronizers.contains(
+    def shouldConnectTo(config: StoredSynchronizerConnectionConfig): Boolean = {
+      val alreadyConnected = connectedSynchronizers.contains(
         config.config.synchronizerAlias
       )
+
+      val manualConnectRequired = config.config.manualConnect
+
+      config.status.isActive && (!manualConnectRequired || isTriggeredManually) && !alreadyConnected
+    }
 
     for {
       configs <- EitherT.pure[FutureUnlessShutdown, SyncServiceError](
@@ -1304,6 +1322,11 @@ class CantonSyncService(
           synchronizerHandle.staticParameters,
         )
 
+        // Used to manage (and abort!) all promises related to the synchronizer
+        // To be closed by ConnectedSynchronizer
+        promiseUSFactory: DefaultPromiseUnlessShutdownFactory =
+          new DefaultPromiseUnlessShutdownFactory(timeouts, loggerFactory)
+
         ephemeral <- EitherT.right[SyncServiceError](
           syncEphemeralStateFactory
             .createFromPersistent(
@@ -1323,6 +1346,7 @@ class CantonSyncService(
                 synchronizerHandle.topologyClient.setSynchronizerTimeTracker(tracker)
                 tracker
               },
+              promiseUSFactory,
               connectedSynchronizerMetrics,
               parameters.cachingConfigs.sessionEncryptionKeyCache,
               participantId,
@@ -1364,6 +1388,7 @@ class CantonSyncService(
             reassignmentCoordination,
             commandProgressTracker,
             clock,
+            promiseUSFactory,
             connectedSynchronizerMetrics,
             futureSupervisor,
             synchronizerLoggerFactory,
@@ -1496,9 +1521,7 @@ class CantonSyncService(
     for {
       synchronizerId <- EitherT.fromOption[FutureUnlessShutdown](
         aliasManager.synchronizerIdForAlias(synchronizerAlias),
-        Status.INVALID_ARGUMENT.withDescription(
-          s"The synchronizer with alias ${synchronizerAlias.unwrap} is unknown."
-        ),
+        SyncServiceUnknownSynchronizer.Error(synchronizerAlias).asGrpcError.getStatus,
       )
       _ <- connectedSynchronizersMap
         .get(synchronizerId)
@@ -1880,7 +1903,7 @@ object CantonSyncService {
         partyOps: PartyOps,
         identityPusher: ParticipantTopologyDispatcher,
         partyNotifier: LedgerServerPartyNotifier,
-        syncCrypto: SyncCryptoApiProvider,
+        syncCrypto: SyncCryptoApiParticipantProvider,
         engine: Engine,
         commandProgressTracker: CommandProgressTracker,
         syncEphemeralStateFactory: SyncEphemeralStateFactory,
@@ -1914,7 +1937,7 @@ object CantonSyncService {
         partyOps: PartyOps,
         identityPusher: ParticipantTopologyDispatcher,
         partyNotifier: LedgerServerPartyNotifier,
-        syncCrypto: SyncCryptoApiProvider,
+        syncCrypto: SyncCryptoApiParticipantProvider,
         engine: Engine,
         commandProgressTracker: CommandProgressTracker,
         syncEphemeralStateFactory: SyncEphemeralStateFactory,

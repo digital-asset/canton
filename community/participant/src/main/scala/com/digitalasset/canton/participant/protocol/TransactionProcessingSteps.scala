@@ -123,7 +123,7 @@ class TransactionProcessingSteps(
     confirmationResponseFactory: TransactionConfirmationResponseFactory,
     modelConformanceChecker: ModelConformanceChecker,
     staticSynchronizerParameters: StaticSynchronizerParameters,
-    crypto: SynchronizerSyncCryptoClient,
+    crypto: SynchronizerCryptoClient,
     metrics: TransactionProcessingMetrics,
     serializableContractAuthenticator: SerializableContractAuthenticator,
     transactionEnricher: TransactionEnricher,
@@ -572,7 +572,7 @@ class TransactionProcessingSteps(
       val randomnessMap =
         batch.foldLeft(Map.empty[ViewHash, PromiseUnlessShutdown[SecureRandomness]]) {
           case (m, evt) =>
-            m + (evt.protocolMessage.viewHash -> new PromiseUnlessShutdown[SecureRandomness](
+            m + (evt.protocolMessage.viewHash -> PromiseUnlessShutdown.supervised[SecureRandomness](
               "secure-randomness",
               futureSupervisor,
             ))
@@ -631,7 +631,7 @@ class TransactionProcessingSteps(
               )
             }
           checked(randomnessMap(transactionViewEnvelope.protocolMessage.viewHash))
-            .completeWith(randomnessF)
+            .completeWithUS(randomnessF)
             .discard
           randomnessF
         }
@@ -1216,7 +1216,6 @@ class TransactionProcessingSteps(
       commitSet = commitSet,
       createdContracts = txValidationResult.createdContracts,
       witnessed = txValidationResult.witnessed,
-      hostedWitnesses = txValidationResult.hostedWitnesses,
       completionInfoO = completionInfoO,
       lfTx = modelConformanceResult.suffixedTransaction,
     )
@@ -1231,7 +1230,6 @@ class TransactionProcessingSteps(
       commitSet: CommitSet,
       createdContracts: Map[LfContractId, SerializableContract],
       witnessed: Map[LfContractId, SerializableContract],
-      hostedWitnesses: Set[LfPartyId],
       completionInfoO: Option[CompletionInfo],
       lfTx: WellFormedTransaction[WithSuffixesAndMerged],
   )(implicit
@@ -1273,7 +1271,6 @@ class TransactionProcessingSteps(
           ),
           transaction = LfCommittedTransaction(lfTx.unwrap),
           updateId = lfTxId,
-          hostedWitnesses = hostedWitnesses.toList,
           contractMetadata = contractMetadata,
           synchronizerId = synchronizerId,
           requestCounter = requestCounter,
@@ -1330,7 +1327,6 @@ class TransactionProcessingSteps(
         commitSet = commitSet,
         createdContracts = createdContracts,
         witnessed = usedAndCreated.contracts.witnessed,
-        hostedWitnesses = usedAndCreated.hostedWitnesses,
         completionInfoO = completionInfoO,
         lfTx = validSubTransaction,
       )

@@ -45,7 +45,7 @@ object EventsTable {
         .collectFirst { case Some(tc) => tc }
         .map(DamlTraceContext.parseFrom)
 
-    private def flatTransaction(events: Seq[Entry[Event]]): Option[ApiTransaction] =
+    private def transaction(events: Seq[Entry[Event]]): Option[ApiTransaction] =
       events.headOption.flatMap { first =>
         val flatEvents =
           TransactionConversion.removeTransient(events.iterator.map(_.event).toVector)
@@ -73,7 +73,7 @@ object EventsTable {
     def toGetTransactionsResponse(
         events: Seq[Entry[Event]]
     ): List[(Long, GetUpdatesResponse)] =
-      flatTransaction(events).toList.map(tx =>
+      transaction(events).toList.map(tx =>
         tx.offset -> GetUpdatesResponse(GetUpdatesResponse.Update.Transaction(tx))
           .withPrecomputedSerializedSize()
       )
@@ -121,36 +121,24 @@ object EventsTable {
           )
       }
 
-    def toGetFlatTransactionResponse(
+    def toGetTransactionResponse(
         events: Seq[Entry[Event]]
     ): Option[GetTransactionResponse] =
-      flatTransaction(events).map(tx => GetTransactionResponse(Some(tx)))
+      transaction(events).map(tx => GetTransactionResponse(Some(tx)))
 
     private def treeOf(
         events: Seq[Entry[TreeEvent]]
-    ): (Map[Int, TreeEvent], Seq[Int], Option[DamlTraceContext]) = {
-
-      // The identifiers of all visible events in this transactions, preserving
-      // the order in which they are retrieved from the index
-      val visible = events.map(_.event.nodeId)
-      val visibleSet = visible.toSet
+    ): (Map[Int, TreeEvent], Option[DamlTraceContext]) = {
 
       // All events in this transaction by their identifier, with their children
       // filtered according to those visible for this request
       val eventsById =
         events.iterator
           .map(_.event)
-          .map(e => e.nodeId -> e.filterChildNodeIds(visibleSet))
+          .map(e => e.nodeId -> e)
           .toMap
 
-      // All event identifiers that appear as a child of another item in this response
-      val children = eventsById.valuesIterator.flatMap(_.childNodeIds).toSet
-
-      // The roots for this request are all visible items
-      // that are not a child of some other visible item
-      val rootEventIds = visible.filterNot(children)
-
-      (eventsById, rootEventIds, extractTraceContext(events))
+      (eventsById, extractTraceContext(events))
 
     }
 
@@ -158,7 +146,7 @@ object EventsTable {
         events: Seq[Entry[TreeEvent]]
     ): Option[ApiTransactionTree] =
       events.headOption.map { first =>
-        val (eventsById, rootNodeIds, traceContext) = treeOf(events)
+        val (eventsById, traceContext) = treeOf(events)
         ApiTransactionTree(
           updateId = first.updateId,
           commandId = first.commandId.getOrElse(""),
@@ -166,7 +154,6 @@ object EventsTable {
           effectiveAt = Some(TimestampConversion.fromLf(first.ledgerEffectiveTime)),
           offset = first.offset,
           eventsById = eventsById,
-          rootNodeIds = rootNodeIds,
           synchronizerId = first.synchronizerId,
           traceContext = traceContext,
           recordTime = Some(TimestampConversion.fromLf(first.recordTime)),
@@ -181,7 +168,7 @@ object EventsTable {
           .withPrecomputedSerializedSize()
       )
 
-    def toGetTransactionResponse(
+    def toGetTransactionTreeResponse(
         events: Seq[Entry[TreeEvent]]
     ): Option[GetTransactionTreeResponse] =
       transactionTree(events).map(tx => GetTransactionTreeResponse(Some(tx)))

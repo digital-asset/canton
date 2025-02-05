@@ -30,6 +30,13 @@ trait OutputMetadataStore[E <: Env[E]] extends AutoCloseable {
   protected final def insertBlockIfMissingActionName(metadata: OutputBlockMetadata): String =
     s"insert output metadata for block number ${metadata.blockNumber} if missing"
 
+  def getBlock(blockNumber: BlockNumber)(implicit
+      traceContext: TraceContext
+  ): E#FutureUnlessShutdownT[Option[OutputBlockMetadata]]
+
+  protected final def getBlockMetadataActionName(blockNumber: BlockNumber): String =
+    s"get output metadata for block number $blockNumber if missing"
+
   def insertEpochIfMissing(
       metadata: OutputEpochMetadata
   )(implicit
@@ -105,7 +112,7 @@ object OutputMetadataStore {
   ): OutputMetadataStore[PekkoEnv] =
     storage match {
       case _: MemoryStorage =>
-        new InMemoryOutputMetadataStore
+        new InMemoryOutputMetadataStore(loggerFactory)
       case dbStorage: DbStorage =>
         new DbOutputMetadataStore(dbStorage, timeouts, loggerFactory)
     }
