@@ -169,10 +169,14 @@ class EpochState[E <: Env[E]](
     sendMessageToSegmentModules(ConsensusSegment.ConsensusMessage.BlockOrdered(blockMetadata))
   }
 
-  def completeEpoch(epochNumber: EpochNumber)(implicit traceContext: TraceContext): Unit =
+  def notifyEpochCompletionToSegments(epochNumber: EpochNumber)(implicit
+      traceContext: TraceContext
+  ): Unit =
     sendMessageToSegmentModules(ConsensusSegment.ConsensusMessage.CompletedEpoch(epochNumber))
 
-  def cancelEpoch(epochNumber: EpochNumber)(implicit traceContext: TraceContext): Unit =
+  def notifyEpochCancellationToSegments(epochNumber: EpochNumber)(implicit
+      traceContext: TraceContext
+  ): Unit =
     sendMessageToSegmentModules(ConsensusSegment.ConsensusMessage.CancelEpoch(epochNumber))
 
   def proposalCreated(orderingBlock: OrderingBlock, epochNumber: EpochNumber)(implicit

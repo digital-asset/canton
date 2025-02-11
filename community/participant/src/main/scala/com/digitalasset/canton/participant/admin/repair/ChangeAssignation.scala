@@ -72,7 +72,7 @@ private final class ChangeAssignation(
       _ <- targetPersistentState.unwrap.reassignmentStore
         .completeReassignment(
           unassignmentData.payload.reassignmentId,
-          unassignmentData.targetTimeOfChange.unwrap,
+          unassignmentData.targetTimeOfChange.unwrap.timestamp,
         )
         .toEitherT
       _ <- persistAssignments(

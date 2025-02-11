@@ -3,12 +3,29 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+- DarService and Package service on the admin-api have been cleaned up:
+  - Before, a DAR was referred through a hash over the zip file. Now, the DAR ID is the main package ID.
+  - Renamed all `hash` arguments to `darId`.
+  - Added name and version of DAR and package entries to the admin API commands.
+  - Renamed the field `source description` to `description` and stored it with the DAR, not the packages.
+  - Renamed the command `list_contents` to `get_content` to disambiguate with `list` (both for packages and DARs).
+  - Added a new command `packages.list_references` to support listing which DARs are referencing a particular
+    package.
+
+## Until 2025-02-12 (Exclusive)
+- Added the concept of temporary topology stores. A temporary topology store is not connected to any synchronizer store 
+  and therefore does not automatically submit transactions to synchronizers. Temporary topology stores can be used
+  for the synchronizer bootstrapping ceremony to not "pollute" the synchronizer owners' authorized stores. Another use
+  case is to upload a topology snapshot and inspect the snapshot via the usual topology read service endpoints.
+  - Temporary topology stores can be managed via the services `TopologyManagerWriteService.CreateTemporaryTopologyStore` and `TopologyManagerWriteService.DropTemporaryTopologyStore`.
+  - **BREAKING CHANGE**: The `string store` parameters in the `TopologyManagerWriteService` have been changed to `StoreId store`.
+
 ## Until 2025-01-29 (Exclusive)
 - Added a buffer for serving events that is limited by an upper bound for memory consumption:
     ```hocon
         canton.sequencers.<sequencer>.sequencer.block.writer {
           type = high-throughput // NB: this is required for the writer config to be parsed properly
-          
+
           // maximum memory the buffered events will occupy
           buffered-events-max-memory = 2MiB // Default value
           // batch size for warming up the events buffer at the start of the sequencer until the buffer is full
@@ -27,9 +44,9 @@ Please also consult the [full documentation of this release](https://docs.daml.c
     ```
   - The previous setting `canton.sequencers.<sequencer>.parameters.caching.sequencer-payload-cache.maximum-size` has been removed and has no effect anymore.
 
-
 ## Until 2025-01-22 (Exclusive)
-
+- Changed the console User.isActive to isDeactivated to align with the Ledger API
+- Added new prototype for declarative api
 - Added metric `daml.mediator.approved-requests.total` to count the number of approved confirmation requests
 - Topology related error codes have been renamed to contain the prefix `TOPOLOGY_`:
   - Simple additions of prefix

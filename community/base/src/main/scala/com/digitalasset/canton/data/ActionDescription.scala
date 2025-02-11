@@ -34,7 +34,10 @@ import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{LfChoiceName, LfInterfaceId, LfPackageId, LfPartyId, LfVersioned}
 import com.digitalasset.daml.lf.value.{Value, ValueCoder, ValueOuterClass}
+import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import monocle.Lens
+import monocle.macros.GenLens
 
 /** Summarizes the information that is needed in addition to the other fields of [[ViewParticipantData]] for
   * determining the root action of a view.
@@ -392,6 +395,22 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
       param("seed", _.seed),
       paramIfTrue("failed", _.failed),
     )
+
+    @VisibleForTesting
+    private[data] def copy(packagePreference: Set[LfPackageId]): ExerciseActionDescription =
+      ExerciseActionDescription(
+        inputContractId = this.inputContractId,
+        templateId = this.templateId,
+        choice = this.choice,
+        interfaceId = this.interfaceId,
+        packagePreference = packagePreference,
+        chosenValue = this.chosenValue,
+        actors = this.actors,
+        byKey = this.byKey,
+        seed = this.seed,
+        failed = this.failed,
+      )(representativeProtocolVersion)
+
   }
 
   object ExerciseActionDescription {
@@ -449,6 +468,10 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
         )(protocolVersion)
       )
 
+    @VisibleForTesting
+    val packagePreferenceUnsafe: Lens[ExerciseActionDescription, Set[LfPackageId]] =
+      GenLens[ExerciseActionDescription].apply(_.packagePreference)
+
   }
 
   final case class FetchActionDescription(
@@ -465,6 +488,10 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
       with NoCopy {
 
     override def seedOption: Option[LfHash] = None
+
+    // Fetch nodes that have been dispatched via a interface have an implicit package preference
+    def packagePreference: Set[LfPackageId] =
+      if (interfaceId.nonEmpty) Set(templateId.packageId) else Set.empty
 
     override protected def toProtoDescriptionV30: v30.ActionDescription.Description.Fetch =
       v30.ActionDescription.Description.Fetch(
