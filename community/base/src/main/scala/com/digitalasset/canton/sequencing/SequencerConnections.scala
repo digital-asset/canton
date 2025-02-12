@@ -232,6 +232,10 @@ object SequencerConnectionValidation {
     override val toProtoV30: v30.SequencerConnectionValidation =
       v30.SequencerConnectionValidation.ACTIVE
   }
+  object StrictActive extends SequencerConnectionValidation {
+    override val toProtoV30: v30.SequencerConnectionValidation =
+      v30.SequencerConnectionValidation.STRICT_ACTIVE
+  }
 
   def fromProtoV30(
       proto: v30.SequencerConnectionValidation
@@ -240,6 +244,7 @@ object SequencerConnectionValidation {
       case v30.SequencerConnectionValidation.DISABLED => Right(Disabled)
       case v30.SequencerConnectionValidation.ALL => Right(All)
       case v30.SequencerConnectionValidation.ACTIVE => Right(Active)
+      case v30.SequencerConnectionValidation.STRICT_ACTIVE => Right(StrictActive)
       case _ =>
         Left(
           ProtoDeserializationError.ValueConversionError(

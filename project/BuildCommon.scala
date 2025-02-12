@@ -25,6 +25,7 @@ import scoverage.ScoverageKeys.*
 import wartremover.WartRemover
 import wartremover.WartRemover.autoImport.*
 
+import java.nio.file.StandardOpenOption
 import scala.collection.compat.toOptionCompanionExtension
 import scala.language.postfixOps
 
@@ -298,19 +299,8 @@ object BuildCommon {
       val interactiveSubmissionExamplePath =
         "community" / "app" / "src" / "pack" / "examples" / "08-interactive-submission" / "v1"
       val damlCommitFile = interactiveSubmissionExamplePath / "daml_commit"
-      val pb = new java.lang.ProcessBuilder(
-        "bash",
-        "-c",
-        s"source ./release/versions.sh && $$(write_daml_commit_to_file ${damlCommitFile.pathAsString})",
-      )
-      pb.redirectErrorStream(true)
-      val process = pb.start()
-      val bufferedReader = process.inputReader()
-      if (process.waitFor() != 0) {
-        import scala.jdk.CollectionConverters.*
-        log.warn("Failed to write daml commit file for interactive submission example")
-        log.warn(bufferedReader.lines().toList.asScala.mkString(System.lineSeparator()))
-      }
+      val damlVersion: String = Dependencies.daml_libraries_version
+      damlCommitFile.writeText(damlVersion.split('.').last.tail)(Seq(StandardOpenOption.CREATE))
 
       val releaseNotes: Seq[(File, String)] = {
         val sourceFile: File =

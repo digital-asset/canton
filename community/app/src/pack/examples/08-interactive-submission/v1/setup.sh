@@ -41,12 +41,13 @@ DAML_COMMIT_FILE="daml_commit"
 
 # In the release artifact there will be a file with the commit hash in it
 if [[ -f "$DAML_COMMIT_FILE" ]]; then
+    echo "Using Daml commit $DAML_COMMIT read from $DAML_COMMIT_FILE"
     DAML_COMMIT=$(<"$DAML_COMMIT_FILE")
 else
-    repo_root=$(git rev-parse --show-toplevel)
-    source "$repo_root/release/versions.sh"
+    source "$ROOT_PATH/scripts/daml_version_util.sh"
     # When run from the repo, we extract the commit from DamlVersions.scala
-    DAML_COMMIT=$(cd "$repo_root" && echo $(get_daml_commit))
+    DAML_COMMIT=$(cd "$ROOT_PATH" && echo $(get_daml_commit))
+    echo "Using Daml commit $DAML_COMMIT extracted from DamlVersions.scala"
 fi
 
 # Proto for LF Values, not packaged directly in canton so we need to get it from the daml repo

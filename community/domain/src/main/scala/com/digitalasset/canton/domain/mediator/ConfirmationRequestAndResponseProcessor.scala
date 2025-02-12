@@ -806,7 +806,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
             // This can happen after a fail-over or as part of an attack.
             val cause =
               s"Received a confirmation response at $ts by ${response.sender} with an unknown request id ${response.requestId}. Discarding response..."
-            val error = MediatorError.InvalidMessage.Reject(cause)
+            val error = MediatorError.UnknownRequest.Reject(cause)
             error.log()
 
             OptionT.none[FutureUnlessShutdown, ResponseAggregator]

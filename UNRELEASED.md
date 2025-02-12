@@ -3,6 +3,11 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2025-02-12 (Exclusive)
+
+- Duplicated confirmation requests are now rejected with the error `MEDIATOR_RECEIVED_DUPLICATED_REQUEST` instead of `MEDIATOR_RECEIVED_MALFORMED_MESSAGE`. Confirmation responses for unknown requests are now rejected with the error `MEDIATOR_UNKNOWN_REQUEST` instead of `MEDIATOR_INVALID_MESSAGE`. Both are logged at INFO level instead of WARN.
+- New sequencer connection validation mode `STRICT_ACTIVE` behaves like `ACTIVE` except that it fails when the threshold of sequencers is not reached.
+
 ## Until 2025-01-22 (Exclusive)
 
 - Added metric `daml.mediator.approved-requests.total` to count the number of approved confirmation requests

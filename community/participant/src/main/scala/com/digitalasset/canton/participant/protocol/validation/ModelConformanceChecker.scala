@@ -54,7 +54,7 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithSuffixesAndMerged,
   WithoutSuffixes,
 }
-import com.digitalasset.canton.protocol.hash.HashTracer.NoOp
+import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
@@ -479,6 +479,7 @@ object ModelConformanceChecker {
         protocolVersion: ProtocolVersion,
         transactionEnricher: TransactionEnricher,
         createNodeEnricher: CreateNodeEnricher,
+        hashTracer: HashTracer,
     )(implicit
         traceContext: TraceContext,
         ec: ExecutionContext,
@@ -522,7 +523,7 @@ object ModelConformanceChecker {
               ),
               reInterpretationResult.metadata.seeds,
               protocolVersion,
-              hashTracer = NoOp,
+              hashTracer = hashTracer,
             )
             .leftMap(_.message)
         )
