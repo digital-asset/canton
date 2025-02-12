@@ -425,25 +425,29 @@ object BuildCommon {
 
   lazy val sharedCommunitySettings = sharedSettings ++ JvmRulesPlugin.damlRepoHeaderSettings
 
-  lazy val cantonWarts = Seq(
-    // DirectGrpcServiceInvocation prevents direct invocation of gRPC services through a stub, but this is often useful in tests
-    Compile / compile / wartremoverErrors += Wart.custom(
-      "com.digitalasset.canton.DirectGrpcServiceInvocation"
-    ),
-    Compile / compile / wartremoverErrors += Wart.custom(
-      "com.digitalasset.canton.EnforceVisibleForTesting"
-    ),
-    wartremoverErrors += Wart.custom("com.digitalasset.canton.DiscardedFuture"),
-    wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureAndThen"),
-    wartremoverErrors += Wart.custom("com.digitalasset.canton.FutureTraverse"),
-    wartremoverErrors += Wart.custom("com.digitalasset.canton.GlobalExecutionContext"),
-    // NonUnitForEach is too aggressive for integration tests where we often ignore the result of console commands
-    Compile / compile / wartremoverErrors += Wart.custom("com.digitalasset.canton.NonUnitForEach"),
-    wartremoverErrors += Wart.custom("com.digitalasset.canton.RequireBlocking"),
-    wartremoverErrors += Wart.custom("com.digitalasset.canton.SynchronizedFuture"),
-    wartremoverErrors += Wart.custom("com.digitalasset.canton.TryFailed"),
-    wartremover.WartRemover.dependsOnLocalProjectWarts(CommunityProjects.`wartremover-extension`),
-  ).flatMap(_.settings)
+  lazy val cantonWarts = {
+    val prefix = "com.digitalasset.canton."
+
+    Seq(
+      // DirectGrpcServiceInvocation prevents direct invocation of gRPC services through a stub, but this is often useful in tests
+      Compile / compile / wartremoverErrors += Wart.custom(
+        s"${prefix}DirectGrpcServiceInvocation"
+      ),
+      Compile / compile / wartremoverErrors += Wart.custom(s"${prefix}EnforceVisibleForTesting"),
+      wartremoverErrors += Wart.custom(s"${prefix}DiscardedFuture"),
+      wartremoverErrors += Wart.custom(s"${prefix}FutureAndThen"),
+      wartremoverErrors += Wart.custom(s"${prefix}FutureTraverse"),
+      wartremoverErrors += Wart.custom(s"${prefix}GlobalExecutionContext"),
+      // NonUnitForEach is too aggressive for integration tests where we often ignore the result of console commands
+      Compile / compile / wartremoverErrors += Wart.custom(s"${prefix}NonUnitForEach"),
+      wartremoverErrors += Wart.custom(s"${prefix}RequireBlocking"),
+      // In tests, we often serialize protos directly
+      Compile / compile / wartremoverErrors += Wart.custom(s"${prefix}ProtobufToByteString"),
+      wartremoverErrors += Wart.custom(s"${prefix}SynchronizedFuture"),
+      wartremoverErrors += Wart.custom(s"${prefix}TryFailed"),
+      wartremover.WartRemover.dependsOnLocalProjectWarts(CommunityProjects.`wartremover-extension`),
+    ).flatMap(_.settings)
+  }
 
   // applies to all Canton-based sub-projects (descendants of util-external, excluding util-external itself)
   lazy val sharedCantonSettingsExternal: Seq[Def.Setting[_]] = sharedSettings ++ cantonWarts ++ Seq(
@@ -1113,6 +1117,7 @@ object BuildCommon {
           cats,
           grpc_stub,
           mockito_scala % Test,
+          scalapb_runtime_grpc,
           scalatestMockito % Test,
           scalatest % Test,
           wartremover_dep,

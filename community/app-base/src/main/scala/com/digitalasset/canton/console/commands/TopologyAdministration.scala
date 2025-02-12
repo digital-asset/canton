@@ -39,8 +39,8 @@ import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.grpc.ByteStringStreamObserver
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.admin.grpc.TopologyStore.Authorized
-import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, TopologyStore}
+import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId.Authorized
+import com.digitalasset.canton.topology.admin.grpc.{BaseQuery, TopologyStoreId}
 import com.digitalasset.canton.topology.admin.v30.{
   ExportTopologySnapshotResponse,
   GenesisStateResponse,
@@ -50,7 +50,6 @@ import com.digitalasset.canton.topology.store.{
   StoredTopologyTransaction,
   StoredTopologyTransactions,
   TimeQuery,
-  TopologyStoreId,
 }
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
@@ -198,13 +197,13 @@ class TopologyAdministrationGroup(
       filterStore: String,
       filterSynchronizerId: String,
   ): Either[String, Unit] = {
-    val storeO: Option[TopologyStore] =
-      OptionUtil.emptyStringAsNone(filterStore).map(TopologyStore.tryFromString)
+    val storeO: Option[TopologyStoreId] =
+      OptionUtil.emptyStringAsNone(filterStore).map(TopologyStoreId.tryFromString)
     val synchronizerO: Option[SynchronizerId] =
       OptionUtil.emptyStringAsNone(filterSynchronizerId).map(SynchronizerId.tryFromString)
 
     (storeO, synchronizerO) match {
-      case (Some(TopologyStore.Synchronizer(synchronizerStore)), Some(synchronizer)) =>
+      case (Some(TopologyStoreId.Synchronizer(synchronizerStore)), Some(synchronizer)) =>
         Either.cond(
           synchronizerStore == synchronizer,
           (),
@@ -214,6 +213,35 @@ class TopologyAdministrationGroup(
       case _ => Either.unit
     }
   }
+
+  @Help.Summary("Creates a temporary topology store.")
+  @Help.Description(
+    """A temporary topology store is useful for orchestrating the synchronizer founding ceremony or importing a topology snapshot for later inspection.
+      |Temporary topology stores are not persisted and all transactions are kept in memory only, which means restarting the node causes the loss of all
+      |transactions in that store.
+      |Additionally, temporary topology stores are not connected to any synchronizer, so there is no automatic propagation of topology transactions
+      |from the temporary store to connected synchronizers."""
+  )
+  def create_temporary_topology_store(
+      name: String,
+      protocolVersion: ProtocolVersion,
+  ): TopologyStoreId.Temporary =
+    consoleEnvironment.run {
+      adminCommand(TopologyAdminCommands.Write.CreateTemporaryStore(name, protocolVersion))
+    }
+
+  @Help.Summary(
+    "This command drops a temporary topology store and all transactions contained in it."
+  )
+  @Help.Description(
+    """Dropping a temporary topology store is not reversible and all topology transactions in the store will
+      |be permanently dropped.
+      |It's not possible to delete the authorized store or any synchronizer store with this command."""
+  )
+  def drop_temporary_topology_store(temporaryStoreId: TopologyStoreId.Temporary): Unit =
+    consoleEnvironment.run {
+      adminCommand(TopologyAdminCommands.Write.DropTemporaryStore(temporaryStoreId))
+    }
 
   @Help.Summary("Inspect all topology transactions at once")
   @Help.Group("All Transactions")
@@ -252,22 +280,36 @@ class TopologyAdministrationGroup(
         err =>
           throw new IllegalArgumentException(s"import_topology_snapshot failed: $err")
       }
-    def import_topology_snapshot(topologyTransactions: ByteString, store: String): Unit =
+    def import_topology_snapshot(
+        topologyTransactions: ByteString,
+        store: String,
+        synchronize: Option[NonNegativeDuration] = Some(
+          consoleEnvironment.commandTimeouts.unbounded
+        ),
+    ): Unit =
       consoleEnvironment.run {
         adminCommand(
-          TopologyAdminCommands.Write.ImportTopologySnapshot(topologyTransactions, store)
+          TopologyAdminCommands.Write
+            .ImportTopologySnapshot(
+              topologyTransactions,
+              store,
+              synchronize,
+            )
         )
       }
 
     def load(
         transactions: Seq[GenericSignedTopologyTransaction],
         store: String,
-        forceChanges: ForceFlag*
+        forceFlags: ForceFlags = ForceFlags.none,
+        synchronize: Option[NonNegativeDuration] = Some(
+          consoleEnvironment.commandTimeouts.unbounded
+        ),
     ): Unit =
       consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommands.Write
-            .AddTransactions(transactions, store, ForceFlags(forceChanges*))
+            .AddTransactions(transactions, store, forceFlags, synchronize)
         )
       }
 
@@ -276,7 +318,10 @@ class TopologyAdministrationGroup(
     def load_single_from_file(
         file: String,
         store: String,
-        forceChanges: ForceFlag*
+        forceFlags: ForceFlags = ForceFlags.none,
+        synchronize: Option[NonNegativeDuration] = Some(
+          consoleEnvironment.commandTimeouts.unbounded
+        ),
     ): Unit = {
       val transaction = SignedTopologyTransaction
         .readFromTrustedFilePVV(file)
@@ -289,7 +334,7 @@ class TopologyAdministrationGroup(
       consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommands.Write
-            .AddTransactions(Seq(transaction), store, ForceFlags(forceChanges*))
+            .AddTransactions(Seq(transaction), store, forceFlags, synchronize)
         )
       }
     }
@@ -301,7 +346,10 @@ class TopologyAdministrationGroup(
     def load_single_from_files(
         files: Seq[String],
         store: String,
-        forceChanges: ForceFlag*
+        forceFlags: ForceFlags = ForceFlags.none,
+        synchronize: Option[NonNegativeDuration] = Some(
+          consoleEnvironment.commandTimeouts.unbounded
+        ),
     ): Unit = {
       val transactions = files.map { file =>
         SignedTopologyTransaction
@@ -316,7 +364,7 @@ class TopologyAdministrationGroup(
       consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommands.Write
-            .AddTransactions(transactions, store, ForceFlags(forceChanges*))
+            .AddTransactions(transactions, store, forceFlags, synchronize)
         )
       }
     }
@@ -326,7 +374,10 @@ class TopologyAdministrationGroup(
     def load_multiple_from_file(
         file: String,
         store: String,
-        forceChanges: ForceFlag*
+        forceFlags: ForceFlags = ForceFlags.none,
+        synchronize: Option[NonNegativeDuration] = Some(
+          consoleEnvironment.commandTimeouts.unbounded
+        ),
     ): Unit = {
       val transactions = SignedTopologyTransactions
         .readFromTrustedFile(ProtocolVersionValidation.NoValidation, file)
@@ -339,7 +390,7 @@ class TopologyAdministrationGroup(
       consoleEnvironment.run {
         adminCommand(
           TopologyAdminCommands.Write
-            .AddTransactions(transactions.transactions, store, ForceFlags(forceChanges*))
+            .AddTransactions(transactions.transactions, store, forceFlags, synchronize)
         )
       }
     }
@@ -608,6 +659,7 @@ class TopologyAdministrationGroup(
         synchronizerOwners: Seq[Member],
         sequencers: Seq[SequencerId],
         mediators: Seq[MediatorId],
+        store: String,
     ): Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]] = {
       val isSynchronizerOwner = synchronizerOwners.contains(instance.id)
       require(isSynchronizerOwner, s"Only synchronizer owners should call $functionFullName.")
@@ -616,7 +668,7 @@ class TopologyAdministrationGroup(
         instance.topology.transactions
           .find_latest_by_mapping_hash[M](
             hash,
-            filterStore = AuthorizedStore.filterName,
+            filterStore = store,
             includeProposals = true,
           )
           .map(_.transaction)
@@ -633,7 +685,7 @@ class TopologyAdministrationGroup(
                   ProtocolVersion.latest,
                 ),
               signedBy = None,
-              store = Some(AuthorizedStore.filterName),
+              store = Some(store),
               synchronize = None,
             )
           )
@@ -649,7 +701,7 @@ class TopologyAdministrationGroup(
               group = NonNegativeInt.zero,
               active = mediators,
               signedBy = None,
-              store = Some(AuthorizedStore.filterName),
+              store = Some(store),
             )
           )
 
@@ -661,7 +713,7 @@ class TopologyAdministrationGroup(
               threshold = PositiveInt.one,
               active = sequencers,
               signedBy = None,
-              store = Some(AuthorizedStore.filterName),
+              store = Some(store),
             )
           )
 
@@ -679,10 +731,17 @@ class TopologyAdministrationGroup(
         sequencers: Seq[SequencerId],
         mediators: Seq[MediatorId],
         outputFile: String,
+        store: String,
     ): Unit = {
 
       val transactions =
-        generate_genesis_topology(synchronizerId, synchronizerOwners, sequencers, mediators)
+        generate_genesis_topology(
+          synchronizerId,
+          synchronizerOwners,
+          sequencers,
+          mediators,
+          store,
+        )
 
       SignedTopologyTransactions(transactions, ProtocolVersion.latest).writeToFile(outputFile)
     }
@@ -808,6 +867,7 @@ class TopologyAdministrationGroup(
         mustFullyAuthorize = mustFullyAuthorize,
         forceChanges = ForceFlags.none,
         store = store,
+        waitToBecomeEffective = synchronize,
       )
 
       synchronisation.runAdminCommand(synchronize)(command)
@@ -865,6 +925,7 @@ class TopologyAdministrationGroup(
           change = TopologyChangeOp.Replace,
           mustFullyAuthorize = mustFullyAuthorize,
           forceChanges = forceFlags,
+          waitToBecomeEffective = synchronize,
         )
       )
 
@@ -919,6 +980,7 @@ class TopologyAdministrationGroup(
               change = TopologyChangeOp.Remove,
               mustFullyAuthorize = mustFullyAuthorize,
               forceChanges = forceChanges,
+              waitToBecomeEffective = synchronize,
             )
           )
 
@@ -1011,6 +1073,7 @@ class TopologyAdministrationGroup(
         change = change,
         mustFullyAuthorize = mustFullyAuthorize,
         store = store,
+        waitToBecomeEffective = synchronize,
       )
       synchronisation.runAdminCommand(synchronize)(command)
     }
@@ -1199,7 +1262,7 @@ class TopologyAdministrationGroup(
           .list(
             filterKeyOwnerUid = nodeInstance.uid.toProtoPrimitive
           )
-          .filter(_.context.store != Authorized)
+          .filter(_.context.storeId != Authorized)
           .forall(_.item.keys.contains(newKey))
       )(consoleEnvironment)
 
@@ -1330,6 +1393,7 @@ class TopologyAdministrationGroup(
           serial = Some(serial),
           mustFullyAuthorize = mustFullyAuthorize,
           forceChanges = force,
+          waitToBecomeEffective = synchronize,
         )
       )
   }
@@ -1387,6 +1451,7 @@ class TopologyAdministrationGroup(
           serial = Some(serial),
           mustFullyAuthorize = mustFullyAuthorize,
           forceChanges = force,
+          waitToBecomeEffective = synchronize,
         )
       )
   }
@@ -1396,8 +1461,8 @@ class TopologyAdministrationGroup(
   object party_to_participant_mappings extends Helpful {
 
     private def findCurrent(party: PartyId, store: String) =
-      TopologyStoreId(store) match {
-        case TopologyStoreId.SynchronizerStore(synchronizerId, _) =>
+      TopologyStoreId.tryFromString(store) match {
+        case TopologyStoreId.Synchronizer(synchronizerId) =>
           expectAtMostOneResult(
             list(
               synchronizerId,
@@ -1406,8 +1471,11 @@ class TopologyAdministrationGroup(
               operation = None,
             )
           )
+        case TopologyStoreId.Temporary(temp) =>
+          // TODO(#20978) make it work with temporary stores
+          ???
 
-        case TopologyStoreId.AuthorizedStore =>
+        case TopologyStoreId.Authorized =>
           expectAtMostOneResult(
             list_from_authorized(
               filterParty = party.filterString,
@@ -1567,6 +1635,7 @@ class TopologyAdministrationGroup(
         mustFullyAuthorize = mustFullyAuthorize,
         store = store,
         forceChanges = forceFlags,
+        waitToBecomeEffective = synchronize,
       )
 
       synchronisation.runAdminCommand(synchronize)(command)
@@ -1619,7 +1688,7 @@ class TopologyAdministrationGroup(
 
     /** Check whether the node knows about `party` being hosted on `hostingParticipants` and synchronizer `synchronizerId`,
       * optionally the specified expected permission and threshold.
-      * @param synchronizerId             Synchronizer on which the party should be hosted
+      * @param synchronizerId       Synchronizer on which the party should be hosted
       * @param party                The party which needs to be hosted
       * @param hostingParticipants  Expected hosting participants
       * @param permission           If specified, the expected permission
@@ -1867,6 +1936,7 @@ class TopologyAdministrationGroup(
         serial = serial,
         mustFullyAuthorize = mustFullyAuthorize,
         change = change,
+        waitToBecomeEffective = synchronize,
       )
       synchronisation.runAdminCommand(synchronize)(cmd)
     }
@@ -1927,6 +1997,7 @@ class TopologyAdministrationGroup(
         store = store.getOrElse(synchronizerId.filterString),
         mustFullyAuthorize = mustFullyAuthorize,
         change = change,
+        waitToBecomeEffective = synchronize,
       )
 
       synchronisation.runAdminCommand(synchronize)(cmd)
@@ -2094,6 +2165,7 @@ class TopologyAdministrationGroup(
           serial = serial,
           change = TopologyChangeOp.Replace,
           mustFullyAuthorize = mustFullyAuthorize,
+          waitToBecomeEffective = synchronize,
         )
       )
   }
@@ -2249,6 +2321,7 @@ class TopologyAdministrationGroup(
         mustFullyAuthorize = mustFullyAuthorize,
         store = store,
         forceChanges = force,
+        waitToBecomeEffective = synchronize,
       )
 
       synchronisation.runAdminCommand(synchronize)(command).discard
@@ -2469,6 +2542,7 @@ class TopologyAdministrationGroup(
         mustFullyAuthorize = mustFullyAuthorize,
         forceChanges = ForceFlags.none,
         store = store.getOrElse(synchronizerId.filterString),
+        waitToBecomeEffective = synchronize,
       )
 
       synchronisation.runAdminCommand(synchronize)(command)
@@ -2510,6 +2584,7 @@ class TopologyAdministrationGroup(
         mustFullyAuthorize = mustFullyAuthorize,
         forceChanges = ForceFlags.none,
         store = store.getOrElse(synchronizerId.filterString),
+        waitToBecomeEffective = synchronize,
       )
 
       synchronisation.runAdminCommand(synchronize)(command)
@@ -2563,7 +2638,8 @@ class TopologyAdministrationGroup(
          serial: the expected serial this topology transaction should have. Serials must be contiguous and start at 1.
                  This transaction will be rejected if another fully authorized transaction with the same serial already
                  exists, or if there is a gap between this serial and the most recently used serial.
-                 If None, the serial will be automatically selected by the node."""
+                 If None, the serial will be automatically selected by the node.
+         synchronize: Synchronization timeout to wait until the proposal has been observed on the synchronizer."""
     )
     def propose(
         synchronizerId: SynchronizerId,
@@ -2574,6 +2650,9 @@ class TopologyAdministrationGroup(
         mustFullyAuthorize: Boolean = false,
         signedBy: Option[Fingerprint] = None,
         serial: Option[PositiveInt] = None,
+        synchronize: Option[config.NonNegativeDuration] = Some(
+          consoleEnvironment.commandTimeouts.unbounded
+        ),
     ): SignedTopologyTransaction[TopologyChangeOp, SequencerSynchronizerState] =
       consoleEnvironment.run {
         adminCommand(
@@ -2585,6 +2664,7 @@ class TopologyAdministrationGroup(
             mustFullyAuthorize = mustFullyAuthorize,
             forceChanges = ForceFlags.none,
             store = store.getOrElse(synchronizerId.filterString),
+            waitToBecomeEffective = synchronize,
           )
         )
       }
@@ -2687,6 +2767,7 @@ class TopologyAdministrationGroup(
           mustFullyAuthorize = mustFullyAuthorize,
           store = store.getOrElse(synchronizerId.filterString),
           forceChanges = force,
+          waitToBecomeEffective = synchronize,
         )
       )
 

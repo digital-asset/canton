@@ -647,10 +647,11 @@ class CantonSyncService(
         packageService.value
           .upload(
             darBytes = dar,
-            fileNameO = None,
+            description = Some("uploaded-via-ledger-api"),
             submissionIdO = Some(submissionId),
             vetAllPackages = true,
             synchronizeVetting = synchronizeVettingOnConnectedSynchronizers,
+            expectedMainPackageId = None,
           )
           .map(_ => SubmissionResult.Acknowledged)
           .onShutdown(Left(CommonErrors.ServerIsShuttingDown.Reject()))

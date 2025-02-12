@@ -18,14 +18,14 @@ object Dependencies {
   lazy val incompatibleLogging: Array[ExclusionRule] =
     Array(ExclusionRule("org.slf4j"), ExclusionRule("ch.qos.logback"))
 
-  lazy val scala_version = "2.13.15"
+  lazy val scala_version = "2.13.16"
   lazy val scala_version_short = "2.13"
 
   lazy val pekko_version = "1.1.2"
   // TODO(#10617) We have cloned pekko's BroadcastHub implementation in community/lib/pekko/src/main/scala/pekko/stream/scaladsl/BroadcastHub.scala
   //  When updating pekko, make sure to update the clone as well, including the tests in community/lib/pekko/src/main/scala/pekko
   lazy val pekko_http_version = "1.1.0"
-  lazy val ammonite_version = "3.0.0"
+  lazy val ammonite_version = "3.0.1"
   lazy val apispec_version = "0.11.3"
   lazy val awaitility_version = "4.2.0"
   lazy val aws_version = "2.29.5"

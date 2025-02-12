@@ -112,62 +112,67 @@ object JvmRulesPlugin extends AutoPlugin {
     "-Wnonunit-statement",
   ) // disable value discard and non-unit statement checks on tests
 
+  private val wartsCompileScopeExclusions = Seq(
+    Wart.Any,
+    Wart.ArrayEquals,
+    Wart.AutoUnboxing,
+    Wart.CaseClassPrivateApply,
+    Wart.Equals,
+    Wart.DefaultArguments,
+    Wart.ExplicitImplicitTypes,
+    Wart.FinalVal,
+    Wart.ForeachEntry,
+    Wart.ImplicitConversion,
+    Wart.ImplicitParameter,
+    Wart.JavaSerializable,
+    Wart.LeakingSealed,
+    Wart.ListAppend,
+    Wart.ListUnapply,
+    Wart.MutableDataStructures,
+    Wart.NoNeedImport,
+    Wart.NonUnitStatements,
+    Wart.Nothing,
+    Wart.Overloading,
+    Wart.PlatformDefault,
+    Wart.PublicInference,
+    Wart.Recursion,
+    Wart.RedundantConversions,
+    Wart.ScalaApp,
+    Wart.SeqApply,
+    Wart.SeqUpdated,
+    Wart.StringPlusAny,
+    Wart.ThreadSleep,
+    Wart.Throw,
+    Wart.ToString,
+    Wart.TripleQuestionMark,
+  )
+
   lazy val wartremoverErrorsForCompileScope: Seq[Wart] = {
     val allWarts =
-      Warts.allBut(
-        Wart.Any,
-        Wart.ArrayEquals,
-        Wart.AutoUnboxing,
-        Wart.CaseClassPrivateApply,
-        Wart.Equals,
-        Wart.DefaultArguments,
-        Wart.ExplicitImplicitTypes,
-        Wart.FinalVal,
-        Wart.ForeachEntry,
-        Wart.ImplicitConversion,
-        Wart.ImplicitParameter,
-        Wart.JavaSerializable,
-        Wart.LeakingSealed,
-        Wart.ListAppend,
-        Wart.ListUnapply,
-        Wart.MutableDataStructures,
-        Wart.NoNeedImport,
-        Wart.NonUnitStatements,
-        Wart.Nothing,
-        Wart.Overloading,
-        Wart.PlatformDefault,
-        Wart.PublicInference,
-        Wart.Recursion,
-        Wart.RedundantConversions,
-        Wart.ScalaApp,
-        Wart.SeqApply,
-        Wart.SeqUpdated,
-        Wart.StringPlusAny,
-        Wart.ThreadSleep,
-        Wart.Throw,
-        Wart.ToString,
-        Wart.TripleQuestionMark,
-      ) ++ Seq(
+      Warts.allBut(wartsCompileScopeExclusions*) ++ Seq(
         ContribWart.UnintendedLaziness
       )
 
     unlessWartsAreDisabledWithSystemProperty(allWarts)
   }
 
-  val wartremoverErrorsForTestScope =
-    unlessWartsAreDisabledWithSystemProperty(
-      Wart.EitherProjectionPartial,
-      Wart.Enumeration,
-      Wart.JavaConversions,
-      Wart.Option2Iterable,
-      Wart.OptionPartial,
-      Wart.Product,
-      Wart.Return,
-      Wart.Serializable,
-      Wart.While,
-      Wart.FinalCaseClass,
-      ContribWart.UnintendedLaziness,
+  val wartremoverErrorsForTestScope: Seq[Wart] = {
+    val exclusions = wartsCompileScopeExclusions ++ Seq(
+      Wart.AnyVal,
+      Wart.AsInstanceOf,
+      Wart.GlobalExecutionContext,
+      Wart.IsInstanceOf,
+      Wart.IterableOps,
+      Wart.ListUnapplySeq,
+      Wart.ObjectThrowable,
+      Wart.Null,
+      Wart.Var,
     )
+
+    val allWarts = Warts.allBut(exclusions*) ++ Seq(ContribWart.UnintendedLaziness)
+
+    unlessWartsAreDisabledWithSystemProperty(allWarts)
+  }
 
   override def projectSettings =
     Seq(

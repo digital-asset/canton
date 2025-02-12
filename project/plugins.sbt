@@ -1,8 +1,8 @@
 // Linting plugins
-addSbtPlugin("org.wartremover" % "sbt-wartremover" % "3.2.2")
-addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.1.1")
+addSbtPlugin("org.wartremover" % "sbt-wartremover" % "3.3.0")
+addSbtPlugin("org.wartremover" % "sbt-wartremover-contrib" % "2.2.1")
 addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.4.6")
-addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.13.0")
+addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.14.0")
 addSbtPlugin("com.lightbend.sbt" % "sbt-java-formatter" % "0.7.0")
 
 // Code coverage
@@ -12,7 +12,7 @@ addSbtPlugin("org.scoverage" % "sbt-scoverage" % "2.2.2")
 addSbtPlugin("com.github.sbt" % "sbt-site-sphinx" % "1.7.0")
 
 // Ensure we have license headers in all relevant source files
-addSbtPlugin("de.heikoseeberger" % "sbt-header" % "5.6.0")
+addSbtPlugin("de.heikoseeberger" % "sbt-header" % "5.10.0")
 
 // Required to "reStart" command which improves working with server applications in sbt. Not spray specific.
 addSbtPlugin("io.spray" % "sbt-revolver" % "0.9.1")

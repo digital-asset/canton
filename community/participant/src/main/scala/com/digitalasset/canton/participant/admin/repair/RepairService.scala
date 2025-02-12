@@ -1084,13 +1084,10 @@ final class RepairService(
       lfPackageId: LfPackageId
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
     for {
-      packageDescription <- EitherT.right(
-        packageDependencyResolver.getPackageDescription(lfPackageId)
-      )
-      _packageVetted <- EitherTUtil
-        .condUnitET[FutureUnlessShutdown](
-          packageDescription.nonEmpty,
-          log(s"Failed to locate package $lfPackageId"),
+      _packageVetted <- packageDependencyResolver
+        .getPackageDescription(lfPackageId)
+        .toRight(
+          log(s"Failed to locate package $lfPackageId")
         )
     } yield ()
 
