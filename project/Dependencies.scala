@@ -203,6 +203,10 @@ object Dependencies {
   lazy val circe_core = "io.circe" %% "circe-core" % circe_version
   lazy val circe_generic =
     "io.circe" %% "circe-generic" % circe_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
+
+  lazy val circe_generic_extras =
+    "io.circe" %% "circe-generic-extras" % circe_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
+
   lazy val circe_parser = "io.circe" %% "circe-parser" % circe_version
   lazy val circe_yaml = "io.circe" %% "circe-yaml" % circe_yaml_version
 

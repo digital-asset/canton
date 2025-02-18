@@ -62,13 +62,13 @@ class JsEventService(
   }
 }
 
-case class JsCreated(
-    created_event: JsEvent.CreatedEvent,
-    domain_id: String,
+final case class JsCreated(
+                            createdEvent: JsEvent.CreatedEvent,
+                            domainId: String,
 )
-case class JsArchived(
-    archived_event: JsEvent.ArchivedEvent,
-    domain_id: String,
+final case class JsArchived(
+                             archivedEvent: JsEvent.ArchivedEvent,
+                             domainId: String,
 )
 
 case class JsGetEventsByContractIdResponse(
