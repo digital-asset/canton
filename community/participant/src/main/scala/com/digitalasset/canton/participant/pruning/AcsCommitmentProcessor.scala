@@ -18,10 +18,9 @@ import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeInt,
   NonNegativeLong,
-  PositiveInt,
   PositiveNumeric,
 }
-import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
+import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -45,7 +44,10 @@ import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.RunningCommitments
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.protocol.ContractIdSyntax.*
-import com.digitalasset.canton.protocol.messages.AcsCommitment.CommitmentType
+import com.digitalasset.canton.protocol.messages.AcsCommitment.{
+  CommitmentType,
+  HashedCommitmentType,
+}
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   CommitmentPeriod,
@@ -62,9 +64,8 @@ import com.digitalasset.canton.pruning.{
   ConfigForSynchronizerThresholds,
   PruningStatus,
 }
-import com.digitalasset.canton.sequencing.client.SendAsyncClientError.RequestRefused
 import com.digitalasset.canton.sequencing.client.{SendResult, SequencerClientSend}
-import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients, SendAsyncError}
+import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.processing.EffectiveTime
@@ -204,6 +205,7 @@ class AcsCommitmentProcessor private (
     testingConfig: TestingConfigInternal,
     clock: Clock,
     exitOnFatalFailures: Boolean,
+    batchingConfig: BatchingConfig,
     maxCommitmentSendDelayMillis: Option[NonNegativeInt],
 )(implicit ec: ExecutionContext)
     extends AcsChangeListener
@@ -651,6 +653,7 @@ class AcsCommitmentProcessor private (
             contractStore,
             enableAdditionalConsistencyChecks,
             completedPeriod.toInclusive.forgetRefinement,
+            batchingConfig,
           )
 
         _ <-
@@ -1103,7 +1106,7 @@ class AcsCommitmentProcessor private (
     } yield {
       val response = possibleCatchUpCmts.nonEmpty &&
         possibleCatchUpCmts.forall { case (_period, commitment) =>
-          commitment == AcsCommitmentProcessor.emptyCommitment
+          commitment == AcsCommitmentProcessor.hashedEmptyCommitment
         }
       logger.debug(
         s"Period $period is a catch-up period $response with the computed catch-up commitments $possibleCatchUpCmts"
@@ -1251,7 +1254,7 @@ class AcsCommitmentProcessor private (
   /* Logs all necessary messages and returns whether the remote commitment matches the local ones */
   private def matches(
       remote: AcsCommitment,
-      local: Iterable[(CommitmentPeriod, AcsCommitment.CommitmentType)],
+      local: Iterable[(CommitmentPeriod, AcsCommitment.HashedCommitmentType)],
       lastPruningTime: Option[CantonTimestamp],
       possibleCatchUp: Boolean,
   )(implicit traceContext: TraceContext): Boolean =
@@ -1266,7 +1269,7 @@ class AcsCommitmentProcessor private (
         // It could, however, happen that a counter-participant, perhaps maliciously, sends a commitment despite
         // not having received a commitment from us; in this case, we simply reply with an empty commitment, but we
         // issue a mismatch only if the counter-commitment was not empty
-        if (remote.commitment != LtHash16().getByteString())
+        if (remote.commitment != hashedEmptyCommitment)
           Errors.MismatchError.NoSharedContracts.Mismatch(synchronizerId, remote).report()
 
         // Due to the condition of this branch, in catch-up mode we don't reply with an empty commitment in between
@@ -1530,7 +1533,7 @@ class AcsCommitmentProcessor private (
       msgs: Map[ParticipantId, AcsCommitment]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val items = msgs.map { case (pid, msg) =>
-      AcsCommitmentStore.CommitmentData(pid, msg.period, msg.commitment)
+      AcsCommitmentStore.ParticipantCommitmentData(pid, msg.period, msg.commitment)
     }
     NonEmpty.from(items.toList).fold(FutureUnlessShutdown.unit)(store.storeComputed(_))
   }
@@ -1579,13 +1582,8 @@ class AcsCommitmentProcessor private (
                   case _ => // Failed to sequence the message, so no update to the metric
                 },
               )
-              .leftMap {
-                case RequestRefused(SendAsyncError.ShuttingDown(_)) =>
-                  logger.info(
-                    s"$message as the sequencer is shutting down. Once the sequencer is back, we'll recover."
-                  )
-                case other =>
-                  logger.warn(s"$message: $other")
+              .leftMap { other =>
+                logger.warn(s"$message: $other")
               }
               .value
           } yield (),
@@ -1739,7 +1737,7 @@ class AcsCommitmentProcessor private (
     } yield ()
   private def markPeriods(
       cmt: AcsCommitment,
-      commitments: Iterable[(CommitmentPeriod, CommitmentType)],
+      commitments: Iterable[(CommitmentPeriod, HashedCommitmentType)],
       lastPruningTime: Option[PruningStatus],
       possibleCatchUp: Boolean,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
@@ -1816,6 +1814,8 @@ object AcsCommitmentProcessor extends HasLoggerName {
     ) => FutureUnlessShutdown[Unit]
 
   val emptyCommitment: AcsCommitment.CommitmentType = LtHash16().getByteString()
+  val hashedEmptyCommitment: AcsCommitment.HashedCommitmentType =
+    AcsCommitment.hashCommitment(emptyCommitment)
 
   def apply(
       synchronizerId: SynchronizerId,
@@ -1837,6 +1837,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       testingConfig: TestingConfigInternal,
       clock: Clock,
       exitOnFatalFailures: Boolean,
+      batchingConfig: BatchingConfig,
       maxCommitmentSendDelayMillis: Option[NonNegativeInt] = None,
   )(implicit
       ec: ExecutionContext,
@@ -1896,6 +1897,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
         testingConfig,
         clock,
         exitOnFatalFailures,
+        batchingConfig,
         maxCommitmentSendDelayMillis,
       )
       // We trigger the processing of the buffered commitments, but we do not wait for it to complete here,
@@ -2300,6 +2302,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       contractStore: ContractStore,
       enableAdditionalConsistencyChecks: Boolean,
       toInclusive: CantonTimestamp, // end of interval used to snapshot the ACS
+      batchingConfig: BatchingConfig,
   )(implicit
       ec: ExecutionContext,
       namedLoggingContext: NamedLoggingContext,
@@ -2320,10 +2323,9 @@ object AcsCommitmentProcessor extends HasLoggerName {
         activations: Map[LfContractId, ReassignmentCounter]
     ): FutureUnlessShutdown[AcsChange] =
       for {
-        // TODO(i9270) extract magic numbers
         storedActivatedContracts <- MonadUtil.batchedSequentialTraverse(
-          parallelism = PositiveInt.tryCreate(20),
-          chunkSize = PositiveInt.tryCreate(500),
+          parallelism = batchingConfig.parallelism,
+          chunkSize = batchingConfig.maxItemsInBatch,
         )(activations.keySet.toSeq)(withMetadataSeq)
       } yield {
         AcsChange(
@@ -2436,7 +2438,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
         final case class Mismatch(
             synchronizerId: SynchronizerId,
             remote: AcsCommitment,
-            local: Seq[(CommitmentPeriod, AcsCommitment.CommitmentType)],
+            local: Seq[(CommitmentPeriod, AcsCommitment.HashedCommitmentType)],
         ) extends Alarm(cause = "The local commitment does not match the remote commitment")
       }
 

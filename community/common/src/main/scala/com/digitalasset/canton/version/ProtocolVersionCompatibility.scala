@@ -9,6 +9,7 @@ import com.daml.error.{ErrorCode, Explanation, Resolution}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.{CantonConfigValidator, UniformCantonConfigValidation}
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.error.CantonError
 import com.digitalasset.canton.error.CantonErrorGroups.HandshakeErrorGroup
@@ -127,7 +128,8 @@ final case class MinProtocolError(
     s"The version required by the synchronizer (${server.toString}) is lower than the minimum version configured by the participant (${clientMinimumProtocolVersion
         .map(_.toString)
         .getOrElse("")}). " +
-      s"${if (clientSupportsRequiredVersion) "The participant supports the version required by the synchronizer and would be able to connect to the synchronizer if the minimum required version is configured to be lower."} "
+      s"${if (clientSupportsRequiredVersion) "The participant supports the version required by the synchronizer and would be able to connect to the synchronizer if the minimum required version is configured to be lower."
+        else ""} "
 }
 
 final case class VersionNotSupportedError(
@@ -215,10 +217,15 @@ object SynchronizerProtocolVersion {
   * configure a minimum [[ProtocolVersion]] in [[com.digitalasset.canton.participant.config.LocalParticipantConfig]]
   * which is supported by the corresponding participant release.
   */
-final case class ParticipantProtocolVersion(version: ProtocolVersion) {
+final case class ParticipantProtocolVersion(version: ProtocolVersion)
+    extends UniformCantonConfigValidation {
   def unwrap: ProtocolVersion = version
 }
 object ParticipantProtocolVersion {
+  implicit val participantProtocolVersionCanontConfigValidator
+      : CantonConfigValidator[ParticipantProtocolVersion] =
+    CantonConfigValidator.validateAll
+
   implicit val participantProtocolVersionWriter: ConfigWriter[ParticipantProtocolVersion] =
     ConfigWriter.toString(_.version.toProtoPrimitiveS)
 

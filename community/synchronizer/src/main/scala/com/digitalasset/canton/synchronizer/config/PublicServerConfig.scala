@@ -5,7 +5,8 @@ package com.digitalasset.canton.synchronizer.config
 
 import com.daml.jwt.JwtTimestampLeeway
 import com.digitalasset.canton.config.*
-import com.digitalasset.canton.config.RequireTypes.{ExistingFile, NonNegativeInt, Port}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
+import com.digitalasset.canton.config.manual.CantonConfigValidatorDerivation
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import io.netty.handler.ssl.SslContext
 
@@ -42,7 +43,8 @@ final case class PublicServerConfig(
     maxTokenExpirationInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofHours(1),
     useExponentialRandomTokenExpiration: Boolean = false,
     overrideMaxRequestSize: Option[NonNegativeInt] = None,
-) extends ServerConfig {
+) extends ServerConfig
+    with UniformCantonConfigValidation {
 
   override def authServices: Seq[AuthServiceConfig] = Seq.empty
 
@@ -50,12 +52,15 @@ final case class PublicServerConfig(
 
   override def adminToken: Option[String] = None
 
-  lazy val clientConfig: ClientConfig =
-    ClientConfig(address, port, tls.map(c => TlsClientConfig(Some(c.certChainFile), None)))
+  lazy val clientConfig: SequencerApiClientConfig = SequencerApiClientConfig(
+    address,
+    port,
+    tls.map(c => TlsClientConfigOnlyTrustFile(Some(c.certChainFile))),
+  )
 
   override def sslContext: Option[SslContext] = tls.map(CantonServerBuilder.baseSslContext)
 
-  override def serverCertChainFile: Option[ExistingFile] = tls.map(_.certChainFile)
+  override def serverCertChainFile: Option[PemFileOrString] = tls.map(_.certChainFile)
 
   /** This setting has no effect. Therfore hardcoding it to 0.
     */
@@ -63,5 +68,13 @@ final case class PublicServerConfig(
   def connection: String = {
     val scheme = tls.fold("http")(_ => "https")
     s"$scheme://$address:$port"
+  }
+}
+
+object PublicServerConfig {
+  implicit val publicServerConfigCantonConfigValidator
+      : CantonConfigValidator[PublicServerConfig] = {
+    import CantonConfigValidatorInstances.*
+    CantonConfigValidatorDerivation[PublicServerConfig]
   }
 }

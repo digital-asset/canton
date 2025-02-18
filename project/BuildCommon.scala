@@ -547,6 +547,7 @@ object BuildCommon {
       `daml-adjustable-clock`,
       `daml-tls`,
       `kms-driver-api`,
+      `kms-driver-testing`,
       `ledger-common`,
       `ledger-common-dars`,
       `ledger-common-dars-lf-v2-1`,
@@ -560,7 +561,7 @@ object BuildCommon {
 
     // Project for utilities that are also used outside of the Canton repo
     lazy val `util-external` = project
-      .in(file("daml-common-staging/util-external"))
+      .in(file("base/util-external"))
       .dependsOn(
         `daml-errors`,
         `wartremover-extension` % "compile->compile;test->test",
@@ -586,7 +587,7 @@ object BuildCommon {
       )
 
     lazy val `daml-grpc-utils` = project
-      .in(file("daml-common-staging/grpc-utils"))
+      .in(file("base/grpc-utils"))
       .dependsOn(
         DamlProjects.`google-common-protos-scala`
       )
@@ -873,6 +874,7 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           cats,
           chimney,
+          grpc_inprocess,
           daml_lf_encoder % Test,
           daml_lf_parser % Test,
           daml_lf_archive_encoder % Test,
@@ -1011,6 +1013,23 @@ object BuildCommon {
           slf4j_api,
           opentelemetry_api,
         ),
+      )
+
+    lazy val `kms-driver-testing` = project
+      .in(file("community/kms-driver-testing"))
+      .dependsOn(
+        `kms-driver-api`,
+        `community-testing`,
+      )
+      .settings(
+        sharedCantonSettings,
+        libraryDependencies ++= Seq(
+          scalatest
+        ),
+        // TODO(i19491): Move to non-uber JAR
+        UberLibrary.assemblySettings("kms-driver-testing"),
+        // when building the fat jar, we need to properly merge our artefacts
+        assembly / assemblyMergeStrategy := mergeStrategy((assembly / assemblyMergeStrategy).value),
       )
 
     // Project for specifying the sequencer driver API
@@ -1200,7 +1219,7 @@ object BuildCommon {
       )
 
     lazy val `daml-errors` = project
-      .in(file("daml-common-staging/daml-errors"))
+      .in(file("base/daml-errors"))
       .dependsOn(
         DamlProjects.`google-common-protos-scala`,
         `wartremover-extension` % "compile->compile;test->test",
@@ -1219,7 +1238,7 @@ object BuildCommon {
       )
 
     lazy val `daml-tls` = project
-      .in(file("daml-common-staging/daml-tls"))
+      .in(file("base/daml-tls"))
       .dependsOn(
         `util-external` % "test->compile",
         `wartremover-extension` % "compile->compile;test->test",
@@ -1242,7 +1261,7 @@ object BuildCommon {
       )
 
     lazy val `daml-adjustable-clock` = project
-      .in(file("daml-common-staging/adjustable-clock"))
+      .in(file("base/adjustable-clock"))
       .settings(
         sharedCommunitySettings,
         coverageEnabled := false,
@@ -1396,6 +1415,7 @@ object BuildCommon {
           h2,
           flyway,
           flyway_postgres,
+          grpc_inprocess,
           anorm,
           daml_lf_encoder % Test,
           daml_libs_scala_grpc_test_utils % Test,
@@ -1519,7 +1539,7 @@ object BuildCommon {
       Seq("-Xsource:3", "-deprecation", "-Xfatal-warnings", "-Ywarn-unused", "-Ywarn-value-discard")
 
     lazy val `daml-jwt` = project
-      .in(file("daml-common-staging/daml-jwt"))
+      .in(file("base/daml-jwt"))
       .disablePlugins(WartRemover)
       .settings(
         sharedCommunitySettings,
