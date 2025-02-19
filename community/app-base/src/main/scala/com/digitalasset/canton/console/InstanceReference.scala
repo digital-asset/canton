@@ -1349,7 +1349,8 @@ class LocalMediatorReference(consoleEnvironment: ConsoleEnvironment, val name: S
 
 class RemoteMediatorReference(val environment: ConsoleEnvironment, val name: String)
     extends MediatorReference(environment, name)
-    with RemoteInstanceReference {
+    with RemoteInstanceReference
+    with SequencerConnectionAdministration {
 
   def adminToken: Option[String] = config.token
 

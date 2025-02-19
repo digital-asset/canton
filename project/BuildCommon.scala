@@ -1392,6 +1392,7 @@ object BuildCommon {
             .filterNot(_ == "-Xsource:3"),
           libraryDependencies ++= Seq(
             circe_parser,
+            circe_generic_extras,
             upickle,
             ujson_circe,
             tapir_json_circe,

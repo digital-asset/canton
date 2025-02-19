@@ -820,7 +820,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         domainOwners: Seq[InstanceReference],
         domainThreshold: PositiveInt,
         sequencers: Seq[SequencerReference],
-        mediatorsToSequencers: Map[MediatorReference, Seq[SequencerReference]],
+        mediatorsToSequencers: Map[MediatorReference, (Seq[SequencerReference], PositiveInt)],
         mediatorRequestAmplification: SubmissionRequestAmplification,
     ): DomainId = {
       val (decentralizedNamespace, foundingTxs) =
@@ -897,13 +897,13 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
 
       mediatorsToSequencers
         .filter(!_._1.health.initialized())
-        .foreach { case (mediator, mediatorSequencers) =>
+        .foreach { case (mediator, (mediatorSequencers, threshold)) =>
           mediator.setup.assign(
             domainId,
             SequencerConnections.tryMany(
               mediatorSequencers
                 .map(s => s.sequencerConnection.withAlias(SequencerAlias.tryCreate(s.name))),
-              PositiveInt.one,
+              threshold,
               mediatorRequestAmplification,
             ),
             // if we run bootstrap ourselves, we should have been able to reach the nodes
@@ -933,7 +933,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
       domain(
         domainName,
         sequencers,
-        mediators.map(_ -> sequencers).toMap,
+        mediators.map(_ -> (sequencers, PositiveInt.one)).toMap,
         domainOwners,
         domainThreshold,
         staticDomainParameters,
@@ -947,7 +947,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
     def domain(
         domainName: String,
         sequencers: Seq[SequencerReference],
-        mediatorsToSequencers: Map[MediatorReference, Seq[SequencerReference]],
+        mediatorsToSequencers: Map[MediatorReference, (Seq[SequencerReference], PositiveInt)],
         domainOwners: Seq[InstanceReference],
         domainThreshold: PositiveInt,
         staticDomainParameters: data.StaticDomainParameters,

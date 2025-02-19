@@ -14,6 +14,7 @@ import com.google.protobuf
 import com.google.protobuf.field_mask.FieldMask
 import com.google.protobuf.struct.Struct
 import com.google.protobuf.util.JsonFormat
+import io.circe.generic.extras.Configuration
 import io.circe.generic.semiauto.deriveCodec
 import io.circe.{Codec, Decoder, Encoder, Json}
 import io.grpc.Status
@@ -29,29 +30,41 @@ import scala.util.Try
 /** JSON wrappers that do not belong to a particular service */
 object JsSchema {
 
+  implicit val config: Configuration = Configuration.default.copy(
+    useDefaults = true
+  )
   final case class JsTransaction(
-      update_id: String,
-      command_id: String,
-      workflow_id: String,
-      effective_at: com.google.protobuf.timestamp.Timestamp,
+      updateId: String,
+      commandId: String,
+      workflowId: String,
+      effectiveAt: com.google.protobuf.timestamp.Timestamp,
       events: Seq[JsEvent.Event],
       offset: Long,
-      domain_id: String,
-      trace_context: Option[TraceContext],
-      record_time: com.google.protobuf.timestamp.Timestamp,
+      domainId: String,
+      traceContext: Option[TraceContext],
+      recordTime: com.google.protobuf.timestamp.Timestamp,
   )
 
   final case class JsTransactionTree(
-      update_id: String,
-      command_id: String,
-      workflow_id: String,
-      effective_at: Option[protobuf.timestamp.Timestamp],
+      updateId: String,
+      commandId: String,
+      workflowId: String,
+      effectiveAt: Option[protobuf.timestamp.Timestamp],
       offset: Long,
-      events_by_id: Map[String, JsTreeEvent.TreeEvent],
-      root_event_ids: Seq[String],
-      domain_id: String,
-      trace_context: Option[TraceContext],
-      record_time: protobuf.timestamp.Timestamp,
+      eventsById: Map[String, JsTreeEvent.TreeEvent],
+      rootEventIds :Seq[String],
+      domainId: String,
+      traceContext: Option[TraceContext],
+      recordTime: protobuf.timestamp.Timestamp,
+  )
+
+  final case class JsTopologyTransaction(
+      updateId: String,
+      events: Seq[JsTopologyEvent.Event],
+      offset: Long,
+      domainId: String,
+      traceContext: Option[TraceContext],
+      recordTime: com.google.protobuf.timestamp.Timestamp,
   )
 
   final case class JsStatus(
@@ -61,35 +74,50 @@ object JsSchema {
   )
 
   final case class JsInterfaceView(
-      interface_id: String,
-      view_status: JsStatus,
-      view_value: Option[Json],
+      interfaceId: String,
+      viewStatus: JsStatus,
+      viewValue: Option[Json],
   )
 
   object JsEvent {
     sealed trait Event
 
     final case class CreatedEvent(
-        event_id: String,
-        contract_id: String,
-        template_id: String,
-        contract_key: Option[Json],
-        create_argument: Option[Json],
-        created_event_blob: protobuf.ByteString,
-        interface_views: Seq[JsInterfaceView],
-        witness_parties: Seq[String],
-        signatories: Seq[String],
-        observers: Seq[String],
-        created_at: protobuf.timestamp.Timestamp,
-        package_name: String,
+                                   eventId: String,
+                                   contractId: String,
+                                   templateId: String,
+                                   contractKey: Option[Json],
+                                   createArgument: Option[Json],
+                                   createdEventBlob: protobuf.ByteString,
+                                   interfaceViews: Seq[JsInterfaceView],
+                                   witnessParties: Seq[String],
+                                   signatories: Seq[String],
+                                   observers: Seq[String],
+                                   createdAt: protobuf.timestamp.Timestamp,
+                                   packageName: String,
     ) extends Event
 
     final case class ArchivedEvent(
-        event_id: String,
-        contract_id: String,
-        template_id: String,
-        witness_parties: Seq[String],
-        package_name: String,
+        eventId: String,
+        contractId: String,
+        templateId: String,
+        witnessParties: Seq[String],
+        packageName: String,
+    ) extends Event
+  }
+
+  object JsTopologyEvent {
+    sealed trait Event
+
+    final case class ParticipantAuthorizationChanged(
+        partyId: String,
+        participantId: String,
+        participantPermission: Int,
+    ) extends Event
+
+    final case class ParticipantAuthorizationRevoked(
+        partyId: String,
+        participantId: String,
     ) extends Event
   }
 
@@ -97,18 +125,18 @@ object JsSchema {
     sealed trait TreeEvent
 
     final case class ExercisedTreeEvent(
-        event_id: String,
-        contract_id: String,
-        template_id: String,
-        interface_id: Option[String],
+        eventId: String,
+        contractId: String,
+        templateId: String,
+        interfaceId: Option[String],
         choice: String,
-        choice_argument: Json,
-        acting_parties: Seq[String],
+        choiceArgument: Json,
+        actingParties: Seq[String],
         consuming: Boolean,
-        witness_parties: Seq[String],
-        child_event_ids: Seq[String],
-        exercise_result: Json,
-        package_name: String,
+        witnessParties: Seq[String],
+        childEventIds: Seq[String],
+        exerciseResult: Json,
+        packageName: String,
     ) extends TreeEvent
 
     final case class CreatedTreeEvent(value: CreatedEvent) extends TreeEvent
