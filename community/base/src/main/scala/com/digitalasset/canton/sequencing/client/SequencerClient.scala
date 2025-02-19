@@ -460,7 +460,7 @@ abstract class SequencerClientImpl(
             .leftMap { err =>
               val message = s"Error signing submission request $err"
               logger.error(message)
-              SendAsyncClientError.RequestRefused(SendAsyncError.RequestRefused(message))
+              SendAsyncClientError.RequestFailed(message)
             }
 
           _ <- amplifiedSend(
@@ -477,7 +477,7 @@ abstract class SequencerClientImpl(
       .leftSemiflatMap { err =>
         // increment appropriate error metrics
         err match {
-          case SendAsyncClientError.RequestRefused(SendAsyncError.Overloaded(_)) =>
+          case SendAsyncClientError.RequestRefused(error) if error.isOverload =>
             metrics.submissions.overloaded.inc()
           case _ =>
         }
@@ -529,7 +529,7 @@ abstract class SequencerClientImpl(
               s"Failed to send request with message id $messageId to $sequencerId: $error"
             )
             Either.cond(
-              patienceO.isDefined,
+              patienceO.isEmpty,
               Left(error),
               nextState,
             )
@@ -591,9 +591,14 @@ abstract class SequencerClientImpl(
         }
 
       performUnlessClosingEitherUSF(s"sending message $messageId to sequencer $sequencerId") {
-        logger.debug(
-          s"Sending message ID ${signedRequest.content.messageId} to sequencer $sequencerId"
-        )
+        NonEmpty.from(previousSequencers) match {
+          case None =>
+            logger.debug(s"Sending message ID $messageId to sequencer $sequencerId")
+          case Some(previousNE) =>
+            logger.info(
+              s"Amplifying submission request with message ID $messageId (attempt ${previousSequencers.size + 1}). Sending now to sequencer $sequencerId. Previous attempted sequencer ${previousNE.head1}."
+            )
+        }
         val submissionCostOrZero =
           signedRequest.content.submissionCost.map(_.cost.value).getOrElse(0L)
         metrics.trafficConsumption.trafficCostOfSubmittedEvent.mark(submissionCostOrZero)(

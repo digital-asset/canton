@@ -54,11 +54,11 @@ object UberLibrary {
         ).value,
     )
 
-  def assemblySettings(project: String): Seq[Def.Setting[?]] = Seq(
+  def assemblySettings(project: String, includeDeps: Boolean = false): Seq[Def.Setting[?]] = Seq(
     // Conforming to the Maven dependency naming convention.
     assembly / assemblyJarName := s"${project}_${scalaBinaryVersion.value}-${version.value}.jar",
     // Do not assembly dependencies other than local projects.
-    assemblyPackageDependency / assembleArtifact := false,
+    assemblyPackageDependency / assembleArtifact := includeDeps,
     assemblyPackageScala / assembleArtifact := false,
   )
 

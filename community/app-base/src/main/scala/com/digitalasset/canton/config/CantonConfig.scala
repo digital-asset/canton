@@ -30,6 +30,7 @@ import com.digitalasset.canton.config.InitConfigBase.NodeIdentifierConfig
 import com.digitalasset.canton.config.PackageMetadataViewConfig
 import com.digitalasset.canton.config.RequireTypes.*
 import com.digitalasset.canton.config.StartupMemoryCheckConfig.ReportingLevel
+import com.digitalasset.canton.config.manual.CantonConfigValidatorDerivation
 import com.digitalasset.canton.console.{AmmoniteConsoleConfig, FeatureFlag}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.kms.KmsKeyId
@@ -102,7 +103,8 @@ import com.typesafe.config.{
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.pekko.stream.ThrottleMode
 import pureconfig.*
-import pureconfig.error.CannotConvert
+import pureconfig.ConfigReader.Result
+import pureconfig.error.{CannotConvert, ConfigReaderFailures, ConvertFailure}
 import pureconfig.generic.{FieldCoproductHint, ProductHint}
 
 import java.io.File
@@ -124,7 +126,13 @@ final case class DeadlockDetectionConfig(
     enabled: Boolean = true,
     interval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(3),
     warnInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(10),
-)
+) extends UniformCantonConfigValidation
+
+object DeadlockDetectionConfig {
+  implicit val deadlockDetectionConfigCantonConfigValidator
+      : CantonConfigValidator[DeadlockDetectionConfig] =
+    CantonConfigValidatorDerivation[DeadlockDetectionConfig]
+}
 
 /** Configuration for metrics and tracing
   *
@@ -141,8 +149,14 @@ final case class MonitoringConfig(
     logging: LoggingConfig = LoggingConfig(),
     dumpNumRollingLogFiles: NonNegativeInt = MonitoringConfig.defaultDumpNumRollingLogFiles,
 ) extends LazyLogging
+    with UniformCantonConfigValidation
 
 object MonitoringConfig {
+  implicit val monitoringConfigCantonConfigValidator: CantonConfigValidator[MonitoringConfig] = {
+    import CantonConfigValidatorInstances.*
+    CantonConfigValidatorDerivation[MonitoringConfig]
+  }
+
   private val defaultDumpNumRollingLogFiles = NonNegativeInt.tryCreate(0)
 }
 
@@ -161,9 +175,13 @@ final case class ConsoleCommandTimeout(
     ledgerCommand: NonNegativeDuration = ConsoleCommandTimeout.defaultLedgerCommandsTimeout,
     ping: NonNegativeDuration = ConsoleCommandTimeout.defaultPingTimeout,
     testingBong: NonNegativeDuration = ConsoleCommandTimeout.defaultTestingBongTimeout,
-)
+) extends UniformCantonConfigValidation
 
 object ConsoleCommandTimeout {
+  implicit val consoleCommandTimeoutCantonConfigValidator
+      : CantonConfigValidator[ConsoleCommandTimeout] =
+    CantonConfigValidatorDerivation[ConsoleCommandTimeout]
+
   val defaultBoundedTimeout: NonNegativeDuration = NonNegativeDuration.tryFromDuration(1.minute)
   val defaultUnboundedTimeout: NonNegativeDuration =
     NonNegativeDuration.tryFromDuration(Duration.Inf)
@@ -177,16 +195,23 @@ object ConsoleCommandTimeout {
 final case class TimeoutSettings(
     console: ConsoleCommandTimeout = ConsoleCommandTimeout(),
     processing: ProcessingTimeout = ProcessingTimeout(),
-)
+) extends UniformCantonConfigValidation
+
+object TimeoutSettings {
+  implicit val timeoutSettingsCantonConfigValidator: CantonConfigValidator[TimeoutSettings] =
+    CantonConfigValidatorDerivation[TimeoutSettings]
+}
 
 sealed trait ClockConfig extends Product with Serializable
 object ClockConfig {
+  implicit val clockConfigCantonConfigValidator: CantonConfigValidator[ClockConfig] =
+    CantonConfigValidatorDerivation[ClockConfig]
 
   /** Configure Canton to use a simclock
     *
     * A SimClock's time only progresses when [[com.digitalasset.canton.time.SimClock.advance]] is explicitly called.
     */
-  case object SimClock extends ClockConfig
+  case object SimClock extends ClockConfig with UniformCantonConfigValidation
 
   /** Configure Canton to use the wall clock (default)
     *
@@ -195,7 +220,9 @@ object ClockConfig {
     *                the time of the clock will by shifted by the associated duration, which can be positive
     *                or negative. The clock shift will be constant during the life of the node.
     */
-  final case class WallClock(skews: Map[String, FiniteDuration] = Map.empty) extends ClockConfig
+  final case class WallClock(skews: Map[String, FiniteDuration] = Map.empty)
+      extends ClockConfig
+      with UniformCantonConfigValidation
 
   /** Configure Canton to use a remote clock
     *
@@ -206,7 +233,9 @@ object ClockConfig {
     * For such cases we can use a remote clock. However, no user should ever require this.
     * @param remoteApi admin-port of the node to read the time from
     */
-  final case class RemoteClock(remoteApi: ClientConfig) extends ClockConfig
+  final case class RemoteClock(remoteApi: FullClientConfig)
+      extends ClockConfig
+      with UniformCantonConfigValidation
 
 }
 
@@ -218,7 +247,13 @@ object ClockConfig {
 final case class RetentionPeriodDefaults(
     sequencer: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofDays(7),
     mediator: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofDays(7),
-)
+) extends UniformCantonConfigValidation
+
+object RetentionPeriodDefaults {
+  implicit val retentionPeriodDefaultsCantonConfigValidator
+      : CantonConfigValidator[RetentionPeriodDefaults] =
+    CantonConfigValidatorDerivation[RetentionPeriodDefaults]
+}
 
 /** Parameters for testing Canton. Use default values in a production environment.
   *
@@ -252,9 +287,15 @@ final case class CantonParameters(
     startupMemoryCheckConfig: StartupMemoryCheckConfig = StartupMemoryCheckConfig(
       ReportingLevel.Warn
     ),
-) {
+) extends UniformCantonConfigValidation {
   def getStartupParallelism(numThreads: Int): Int =
     startupParallelism.fold(numThreads)(_.value)
+}
+object CantonParameters {
+  implicit val cantonParametersCantonConfigValidator: CantonConfigValidator[CantonParameters] = {
+    import CantonConfigValidatorInstances.*
+    CantonConfigValidatorDerivation[CantonParameters]
+  }
 }
 
 /** Control which features are turned on / off in Canton
@@ -267,16 +308,20 @@ final case class CantonFeatures(
     enablePreviewCommands: Boolean = false,
     enableTestingCommands: Boolean = false,
     enableRepairCommands: Boolean = false,
-) {
+) extends UniformCantonConfigValidation {
   def featureFlags: Set[FeatureFlag] =
     (Seq(FeatureFlag.Stable)
       ++ (if (enableTestingCommands) Seq(FeatureFlag.Testing) else Seq())
       ++ (if (enablePreviewCommands) Seq(FeatureFlag.Preview) else Seq())
       ++ (if (enableRepairCommands) Seq(FeatureFlag.Repair) else Seq())).toSet
 }
+object CantonFeatures {
+  implicit val cantonFeaturesCantonConfigValidator: CantonConfigValidator[CantonFeatures] =
+    CantonConfigValidatorDerivation[CantonFeatures]
+}
 
 /** Root configuration parameters for a single Canton process. */
-trait CantonConfig {
+trait CantonConfig extends CantonConfigValidation {
 
   type ParticipantConfigType <: LocalParticipantConfig & ConfigDefaults[
     DefaultPorts,
@@ -613,6 +658,17 @@ object CantonConfig {
         deriveReader[EncryptedPrivateStoreConfig]
       implicit val privateKeyStoreConfigReader: ConfigReader[PrivateKeyStoreConfig] =
         deriveReader[PrivateKeyStoreConfig]
+
+      implicit val gcpKmsConfigReader: ConfigReader[KmsConfig.Gcp] =
+        deriveReader[KmsConfig.Gcp]
+      implicit val awsKmsConfigReader: ConfigReader[KmsConfig.Aws] =
+        deriveReader[KmsConfig.Aws]
+      implicit val driverKmsConfigReader: ConfigReader[KmsConfig.Driver] =
+        deriveReader[KmsConfig.Driver]
+      implicit val kmsConfigReader: ConfigReader[KmsConfig] =
+        deriveReader[KmsConfig]
+      implicit val cryptoReader: ConfigReader[CryptoConfig] =
+        deriveReader[CryptoConfig]
     }
 
     lazy implicit final val sequencerTestingInterceptorReader
@@ -666,13 +722,43 @@ object CantonConfig {
         .enableNestedOpt("auto-init", _.copy(identity = None))
     }
 
-    lazy implicit final val clientConfigReader: ConfigReader[ClientConfig] = {
+    lazy implicit final val pemFileReader: ConfigReader[PemFile] = new ConfigReader[PemFile] {
+      override def from(cur: ConfigCursor): Result[PemFile] = cur.asString.flatMap { s =>
+        ExistingFile.create(new File(s)) match {
+          case Right(file) => Right(PemFile(file))
+          case Left(error) =>
+            val failureReason = CannotConvert(s, PemFile.getClass.getName, error.message)
+            Left(ConfigReaderFailures(ConvertFailure(failureReason, cur)))
+        }
+      }
+    }
+
+    lazy implicit final val pemFileOrStringReader: ConfigReader[PemFileOrString] =
+      new ConfigReader[PemFileOrString] {
+        override def from(cur: ConfigCursor): Result[PemFileOrString] = cur.asString.flatMap { s =>
+          if (s.contains("-----BEGIN")) {
+            // assume it's a PEM string
+            Right(PemString(s))
+          } else {
+            // assume it's a file path
+            pemFileReader.from(cur)
+          }
+        }
+      }
+
+    lazy implicit final val fullClientConfigReader: ConfigReader[FullClientConfig] = {
       implicit val tlsClientConfigReader: ConfigReader[TlsClientConfig] =
         deriveReader[TlsClientConfig]
-      deriveReader[ClientConfig]
+      deriveReader[FullClientConfig]
     }
     lazy implicit final val remoteParticipantConfigReader: ConfigReader[RemoteParticipantConfig] =
       deriveReader[RemoteParticipantConfig]
+    lazy implicit final val sequencerApiclientConfigReader
+        : ConfigReader[SequencerApiClientConfig] = {
+      implicit val tlsClientConfigOnlyTrustFileReader: ConfigReader[TlsClientConfigOnlyTrustFile] =
+        deriveReader[TlsClientConfigOnlyTrustFile]
+      deriveReader[SequencerApiClientConfig]
+    }
 
     lazy implicit final val nodeMonitoringConfigReader: ConfigReader[NodeMonitoringConfig] = {
       implicit val httpHealthServerConfigReader: ConfigReader[HttpHealthServerConfig] =
@@ -754,17 +840,6 @@ object CantonConfig {
 
     lazy implicit final val topologyConfigReader: ConfigReader[TopologyConfig] =
       deriveReader[TopologyConfig]
-    private lazy implicit final val sequencerConnectionConfigCertificateFileReader
-        : ConfigReader[SequencerConnectionConfig.CertificateFile] =
-      deriveReader[SequencerConnectionConfig.CertificateFile]
-    lazy implicit final val sequencerConnectionConfigGrpcReader
-        : ConfigReader[SequencerConnectionConfig.Grpc] =
-      deriveReader[SequencerConnectionConfig.Grpc]
-    lazy implicit final val sequencerConnectionConfigReader
-        : ConfigReader[SequencerConnectionConfig] =
-      deriveReader[SequencerConnectionConfig]
-        // since the big majority of users will use GRPC, default to it so that they don't need to specify `type = grpc`
-        .orElse(ConfigReader[SequencerConnectionConfig.Grpc])
 
     // NOTE: the below readers should move to community / enterprise
     lazy implicit final val communitySequencerConfigDatabaseReader
@@ -789,6 +864,18 @@ object CantonConfig {
     lazy implicit final val communityNewDatabaseSequencerWriterConfigLowLatencyReader
         : ConfigReader[SequencerWriterConfig.LowLatency] =
       deriveReader[SequencerWriterConfig.LowLatency]
+
+    implicit val memoryReader: ConfigReader[StorageConfig.Memory] =
+      deriveReader[StorageConfig.Memory]
+    implicit val h2Reader: ConfigReader[DbConfig.H2] =
+      deriveReader[DbConfig.H2]
+    implicit val postgresReader: ConfigReader[DbConfig.Postgres] =
+      deriveReader[DbConfig.Postgres]
+    implicit val dbConfigReader: ConfigReader[DbConfig] =
+      deriveReader[DbConfig]
+    implicit val storageConfigReader: ConfigReader[StorageConfig] =
+      deriveReader[StorageConfig]
+
     implicit val endpointReader: ConfigReader[Endpoint] =
       deriveReader[Endpoint]
     implicit val bftBlockOrdererBftTopologyReader: ConfigReader[BftBlockOrderer.BftNetwork] =
@@ -1134,11 +1221,39 @@ object CantonConfig {
         deriveWriter[EncryptedPrivateStoreConfig]
       implicit val privateKeyStoreConfigWriter: ConfigWriter[PrivateKeyStoreConfig] =
         deriveWriter[PrivateKeyStoreConfig]
+
+      implicit val driverKmsConfigWriter: ConfigWriter[KmsConfig.Driver] =
+        ConfigWriter.fromFunction { driverConfig =>
+          implicit val driverConfigWriter: ConfigWriter[ConfigValue] =
+            Crypto.driverConfigWriter(driverConfig)
+          deriveWriter[KmsConfig.Driver].to(driverConfig)
+        }
+      implicit val awsKmsConfigWriter: ConfigWriter[KmsConfig.Aws] =
+        deriveWriter[KmsConfig.Aws]
+      implicit val gcpKmsConfigWriter: ConfigWriter[KmsConfig.Gcp] =
+        deriveWriter[KmsConfig.Gcp]
+      implicit val kmsConfigWriter: ConfigWriter[KmsConfig] =
+        deriveWriter[KmsConfig]
+      implicit val cryptoWriter: ConfigWriter[CryptoConfig] =
+        deriveWriter[CryptoConfig]
     }
 
     implicit val sequencerTestingInterceptorWriter
         : ConfigWriter[DatabaseSequencerConfig.TestingInterceptor] =
       ConfigWriter.toString(_ => "None")
+
+    lazy implicit final val pemFileOrStringWriter: ConfigWriter[PemFileOrString] =
+      new ConfigWriter[PemFileOrString] {
+        override def to(value: PemFileOrString): ConfigValue = value match {
+          case PemFile(file) => ConfigValueFactory.fromAnyRef(file.unwrap.toString)
+          case pemString: PemString => ConfigValueFactory.fromAnyRef(pemString.pemString)
+        }
+      }
+
+    lazy implicit final val pemFileWriter: ConfigWriter[PemFile] = new ConfigWriter[PemFile] {
+      override def to(value: PemFile): ConfigValue =
+        ConfigValueFactory.fromAnyRef(value.pemFile.unwrap.toString)
+    }
 
     lazy implicit final val tlsClientCertificateWriter: ConfigWriter[TlsClientCertificate] =
       deriveWriter[TlsClientCertificate]
@@ -1186,10 +1301,16 @@ object CantonConfig {
       InitConfigBase.writerForSubtype(deriveWriter[ParticipantInitConfig])
     }
 
-    lazy implicit final val clientConfigWriter: ConfigWriter[ClientConfig] = {
+    lazy implicit final val fullClientConfigWriter: ConfigWriter[FullClientConfig] = {
       implicit val tlsClientConfigWriter: ConfigWriter[TlsClientConfig] =
         deriveWriter[TlsClientConfig]
-      deriveWriter[ClientConfig]
+      deriveWriter[FullClientConfig]
+    }
+    lazy implicit final val sequencerApiClientConfigWriter
+        : ConfigWriter[SequencerApiClientConfig] = {
+      implicit val tlsClientConfigOnlyTrustFileWriter: ConfigWriter[TlsClientConfigOnlyTrustFile] =
+        deriveWriter[TlsClientConfigOnlyTrustFile]
+      deriveWriter[SequencerApiClientConfig]
     }
     lazy implicit final val remoteParticipantConfigWriter: ConfigWriter[RemoteParticipantConfig] =
       deriveWriter[RemoteParticipantConfig]
@@ -1274,15 +1395,6 @@ object CantonConfig {
 
     lazy implicit final val topologyConfigWriter: ConfigWriter[TopologyConfig] =
       deriveWriter[TopologyConfig]
-    lazy implicit final val sequencerConnectionConfigCertificateFileWriter
-        : ConfigWriter[SequencerConnectionConfig.CertificateFile] =
-      deriveWriter[SequencerConnectionConfig.CertificateFile]
-    lazy implicit final val sequencerConnectionConfigGrpcWriter
-        : ConfigWriter[SequencerConnectionConfig.Grpc] =
-      deriveWriter[SequencerConnectionConfig.Grpc]
-    lazy implicit final val sequencerConnectionConfigWriter
-        : ConfigWriter[SequencerConnectionConfig] =
-      deriveWriter[SequencerConnectionConfig]
 
     // NOTE: the below writers should move to community / enterprise
     lazy implicit final val communitySequencerConfigDatabaseWriter
@@ -1309,12 +1421,25 @@ object CantonConfig {
     lazy implicit final val communityDatabaseSequencerWriterConfigLowLatencyWriter
         : ConfigWriter[SequencerWriterConfig.LowLatency] =
       deriveWriter[SequencerWriterConfig.LowLatency]
+
+    implicit val memoryWriter: ConfigWriter[StorageConfig.Memory] =
+      deriveWriter[StorageConfig.Memory]
+    implicit val h2Writer: ConfigWriter[DbConfig.H2] =
+      confidentialWriter[DbConfig.H2](x => x.copy(config = DbConfig.hideConfidential(x.config)))
+    implicit val postgresWriter: ConfigWriter[DbConfig.Postgres] =
+      confidentialWriter[DbConfig.Postgres](x =>
+        x.copy(config = DbConfig.hideConfidential(x.config))
+      )
+    implicit val storageConfigWriter: ConfigWriter[StorageConfig] =
+      deriveWriter[StorageConfig]
+
     implicit val endpointWriter: ConfigWriter[Endpoint] =
       deriveWriter[Endpoint]
     implicit val bftBlockOrdererBftTopologyWriter: ConfigWriter[BftBlockOrderer.BftNetwork] =
       deriveWriter[BftBlockOrderer.BftNetwork]
     implicit val bftBlockOrdererConfigWriter: ConfigWriter[BftBlockOrderer.Config] =
       deriveWriter[BftBlockOrderer.Config]
+
     implicit val communitySequencerConfigBftSequencerWriter
         : ConfigWriter[CommunitySequencerConfig.BftSequencer] =
       deriveWriter[CommunitySequencerConfig.BftSequencer]

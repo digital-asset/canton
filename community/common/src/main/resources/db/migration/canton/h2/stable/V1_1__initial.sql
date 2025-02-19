@@ -237,12 +237,10 @@ create table par_reassignments (
 
     -- reassignment data
     source_protocol_version integer not null,
-    -- TODO(i23636): remove this once we remove the computation of incomplete reassignments from the reassignmentStore
     contract binary large object not null,
 
     -- UTC timestamp in microseconds relative to EPOCH
     unassignment_timestamp bigint not null,
-    -- TODO(i23636): remove this once we remove the computation of incomplete reassignments from the reassignmentStore
     source_synchronizer_id  varchar not null,
     unassignment_request binary large object,
     unassignment_global_offset bigint,
@@ -357,9 +355,9 @@ create table par_commitment_queue (
     -- UTC timestamp in microseconds relative to EPOCH
     to_inclusive bigint not null,
     commitment binary large object not null,
-    commitment_hash varchar not null, -- A shorter hash (SHA-256) of the commitment for the primary key instead of the binary large object
+    commitment_hex varchar not null,  -- As a hex string so that it is indexable in H2
     constraint check_nonempty_interval_queue check(to_inclusive > from_exclusive),
-    primary key (synchronizer_idx, sender, counter_participant, from_exclusive, to_inclusive, commitment_hash)
+    primary key (synchronizer_idx, sender, counter_participant, from_exclusive, to_inclusive, commitment_hex)
 );
 
 create index idx_par_commitment_queue_by_time on par_commitment_queue (synchronizer_idx, to_inclusive);
