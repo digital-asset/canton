@@ -44,9 +44,10 @@ object Release {
   )
 
   /** Split lines in 3 parts:
-    * - Everything up until the line that either matches releaseVersion or is strictly lower than it
-    * - Possibly the line that matches releaseVersion if it exists
-    * - Everything the matching line, or strictly higher than releaseVersion
+    *   - Everything up until the line that either matches releaseVersion or is strictly lower than
+    *     it
+    *   - Possibly the line that matches releaseVersion if it exists
+    *   - Everything the matching line, or strictly higher than releaseVersion
     */
   private def splitFile(
       lines: List[String],
@@ -108,8 +109,8 @@ object Release {
       }
   }
 
-  /** Checks if the release defined in releaseArgs is defined in the file.
-    * If not, add a line with that version
+  /** Checks if the release defined in releaseArgs is defined in the file. If not, add a line with
+    * that version
     */
   def fixReleaseVersion(releaseArgs: ParsedVersion)(implicit log: ManagedLogger): Unit = {
     val versionRegexString =
@@ -138,8 +139,9 @@ object Release {
     )
   }
 
-  /** Checks if the release defined in releaseArgs has supported protocol versions defined in the file.
-    * If not, add a line with that version, and a mapping using the protocol versions of to the closest lower version found in the file
+  /** Checks if the release defined in releaseArgs has supported protocol versions defined in the
+    * file. If not, add a line with that version, and a mapping using the protocol versions of to
+    * the closest lower version found in the file
     */
   def fixReleaseToProtocolVersion(releaseArgs: ParsedVersion)(implicit log: ManagedLogger): Unit = {
     val semVerRegex =

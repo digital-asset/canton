@@ -252,8 +252,8 @@ object DamlPlugin extends AutoPlugin {
     inConfig(Compile)(baseDamlPluginSettings) ++
       inConfig(Test)(baseDamlPluginSettings)
 
-  /** Verify that the versions in the daml.yaml file match what is being used in the sbt project.
-    * If a mismatch is found a [[sbt.internal.MessageOnlyException]] will be thrown.
+  /** Verify that the versions in the daml.yaml file match what is being used in the sbt project. If
+    * a mismatch is found a [[sbt.internal.MessageOnlyException]] will be thrown.
     */
   private def checkProjectVersions(
       projectVersionOverride: ProjectVersionOverride,
@@ -315,8 +315,9 @@ object DamlPlugin extends AutoPlugin {
     }
   }
 
-  /** We intentionally take the unusual step of checking in certain DARs to ensure stable package ids across different Daml versions.
-    * This task will take the dynamically built DAR and update the checked in version.
+  /** We intentionally take the unusual step of checking in certain DARs to ensure stable package
+    * ids across different Daml versions. This task will take the dynamically built DAR and update
+    * the checked in version.
     */
   private def updateFixedDar(
       sourceDirectory: File,
@@ -543,7 +544,8 @@ object DamlPlugin extends AutoPlugin {
     }
   }
 
-  /** Calls the Daml Codegen for the provided DAR file (hence, is suitable to use in a sourceGenerator task)
+  /** Calls the Daml Codegen for the provided DAR file (hence, is suitable to use in a
+    * sourceGenerator task)
     */
   def generateCode(
       log: Logger,

@@ -39,6 +39,7 @@ lazy val `dam-grpc-utils` = CommunityProjects.`daml-grpc-utils`
 lazy val `daml-adjustable-clock` = CommunityProjects.`daml-adjustable-clock`
 lazy val `kms-driver-api` = CommunityProjects.`kms-driver-api`
 lazy val `kms-driver-testing` = CommunityProjects.`kms-driver-testing`
+lazy val `mock-kms-driver` = CommunityProjects.`mock-kms-driver`
 lazy val `ledger-api-core` = CommunityProjects.`ledger-api-core`
 lazy val `ledger-json-api` = CommunityProjects.`ledger-json-api`
 lazy val `ledger-api-tools` = CommunityProjects.`ledger-api-tools`
