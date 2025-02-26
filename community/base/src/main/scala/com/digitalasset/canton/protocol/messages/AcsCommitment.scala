@@ -103,12 +103,15 @@ object CommitmentPeriod {
 
 }
 
-/** A commitment to the active contract set (ACS) that is shared between two participants on a given synchronizer at a given time.
+/** A commitment to the active contract set (ACS) that is shared between two participants on a given
+  * synchronizer at a given time.
   *
-  *  Given a commitment scheme to the ACS, the semantics are as follows: the sender declares that the shared ACS was exactly
-  *  the one committed to, at every commitment tick during the specified period and as determined by the period's interval.
+  * Given a commitment scheme to the ACS, the semantics are as follows: the sender declares that the
+  * shared ACS was exactly the one committed to, at every commitment tick during the specified
+  * period and as determined by the period's interval.
   *
-  *  The interval is assumed to be a round number of seconds. The ticks then start at the Java EPOCH time, and are exactly `interval` apart.
+  * The interval is assumed to be a round number of seconds. The ticks then start at the Java EPOCH
+  * time, and are exactly `interval` apart.
   */
 abstract sealed case class AcsCommitment private (
     synchronizerId: SynchronizerId,
@@ -261,7 +264,7 @@ object AcsCommitment extends VersioningCompanionMemoization[AcsCommitment] {
       GetResult[ParticipantId],
       GetResult[ParticipantId],
       GetResult[CommitmentPeriod],
-      Hash.getResultHashFromHexString,
+      GetResult[Hash],
     ).andThen { case (sender, counterParticipant, period, commitment) =>
       new AcsCommitment(synchronizerId, sender, counterParticipant, period, commitment)(
         protocolVersionRepresentativeFor(protocolVersion),

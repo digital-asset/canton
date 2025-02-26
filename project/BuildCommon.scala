@@ -548,6 +548,7 @@ object BuildCommon {
       `daml-tls`,
       `kms-driver-api`,
       `kms-driver-testing`,
+      `mock-kms-driver`,
       `ledger-common`,
       `ledger-common-dars`,
       `ledger-common-dars-lf-v2-1`,
@@ -1028,6 +1029,21 @@ object BuildCommon {
         ),
         // TODO(i19491): Move to non-uber JAR
         UberLibrary.assemblySettings("kms-driver-testing"),
+        // when building the fat jar, we need to properly merge our artefacts
+        assembly / assemblyMergeStrategy := mergeStrategy((assembly / assemblyMergeStrategy).value),
+      )
+
+    lazy val `mock-kms-driver` = project
+      .in(file("community/mock-kms-driver"))
+      .dependsOn(
+        `kms-driver-api`,
+        `community-base`,
+        `kms-driver-testing` % Test,
+      )
+      .settings(
+        sharedCantonSettings,
+        // TODO(i19491): Move to non-uber JAR
+        UberLibrary.assemblySettings("mock-kms-driver"),
         // when building the fat jar, we need to properly merge our artefacts
         assembly / assemblyMergeStrategy := mergeStrategy((assembly / assemblyMergeStrategy).value),
       )

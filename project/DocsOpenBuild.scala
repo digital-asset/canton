@@ -102,6 +102,7 @@ object DocsOpenBuild {
 
       val scriptPath =
         pythonScriptsDirectory(baseDirectory.value) / "literalinclude_directive.py"
+
       runCommand(s"python $scriptPath $target", log)
     }
 

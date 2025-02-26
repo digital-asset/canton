@@ -4,8 +4,7 @@ import wartremover.Wart
 import wartremover.WartRemover.autoImport.*
 import wartremover.contrib.ContribWart
 
-/** Settings for all JVM projects in this build. Contains compiler flags,
-  * settings for tests, etc.
+/** Settings for all JVM projects in this build. Contains compiler flags, settings for tests, etc.
   */
 object JvmRulesPlugin extends AutoPlugin {
   private val enableUnusedSymbolsChecks = true // Can be turned to false during development
