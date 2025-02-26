@@ -9,7 +9,6 @@ import cats.syntax.parallel.*
 import com.digitalasset.canton.DomainAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.Crypto
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.{
   DomainTopologyInitializationCallback,
@@ -25,7 +24,7 @@ import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.topology.TopologyComponentFactory
 import com.digitalasset.canton.protocol.StaticDomainParameters
 import com.digitalasset.canton.resource.Storage
-import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore, SequencedEventStore}
+import com.digitalasset.canton.store.{IndexedDomain, IndexedStringStore}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.{DomainId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
@@ -91,9 +90,6 @@ class SyncDomainPersistentStateManager(
         domainIdIndexed <- EitherT.right(IndexedDomain.indexed(indexedStringStore)(domainId))
         staticDomainParameters <- getStaticDomainParameters(domainId)
         persistentState = createPersistentState(domainIdIndexed, staticDomainParameters)
-        _lastProcessedPresent <- persistentState.sequencedEventStore
-          .find(SequencedEventStore.LatestUpto(CantonTimestamp.MaxValue))
-          .leftMap(_ => "No persistent event")
         _ = logger.debug(s"Discovered existing state for $alias")
       } yield put(persistentState)
 
