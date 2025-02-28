@@ -484,6 +484,7 @@ object BuildCommon {
   object CommunityProjects {
 
     lazy val allProjects = Set(
+      `grpc-utils`,
       `util-external`,
       `util-logging`,
       `community-app`,
@@ -530,6 +531,20 @@ object BuildCommon {
           pureconfig_core,
         ),
         JvmRulesPlugin.damlRepoHeaderSettings,
+      )
+
+    lazy val `grpc-utils` = project
+      .in(file("daml-common-staging/grpc-utils"))
+      .dependsOn(
+        DamlProjects.`google-common-protos-scala`
+      )
+      .settings(
+        sharedSettings,
+        libraryDependencies ++= Seq(
+          grpc_api,
+          scalapb_runtime_grpc,
+          scalatest % Test,
+        ),
       )
 
     lazy val `util-logging` = project
@@ -653,8 +668,11 @@ object BuildCommon {
       .dependsOn(
         `slick-fork`,
         `util-external`,
+        `grpc-utils`,
         DamlProjects.`daml-copy-common`,
+        DamlProjects.`daml-copy-common-2`,
         DamlProjects.`bindings-java`,
+        DamlProjects.`daml-jwt`,
         // No strictly internal dependencies on purpose so that this can be a foundational module and avoid circular dependencies
       )
       .settings(
@@ -841,6 +859,7 @@ object BuildCommon {
         `ledger-api-core`,
         `ledger-json-api`,
         DamlProjects.`daml-copy-testing` % "test",
+        DamlProjects.`daml-jwt`,
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -1178,6 +1197,8 @@ object BuildCommon {
         `community-base`,
         `community-common`,
         `community-testing` % "test->test",
+        `grpc-utils`,
+        DamlProjects.`daml-jwt`,
       )
       .settings(
         sharedCantonSettings,
@@ -1275,6 +1296,7 @@ object BuildCommon {
       .dependsOn(
         `ledger-api-core`,
         DamlProjects.`daml-copy-testing`, // for testing metrics dependency
+        DamlProjects.`daml-jwt`,
       )
       .settings(
         sharedCantonSettings,
@@ -1303,6 +1325,7 @@ object BuildCommon {
     lazy val allProjects = Set(
       `daml-copy-macro`,
       `daml-copy-protobuf-java`,
+      `daml-jwt`,
       `google-common-protos-scala`,
       `ledger-api`,
       `bindings-java`,
@@ -1383,6 +1406,24 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           scalapb_runtime
         ),
+      )
+
+    lazy val `daml-jwt` = project
+      .in(file("daml-common-staging/daml-jwt"))
+      .disablePlugins(WartRemover)
+      .dependsOn(`daml-copy-common-0`, `daml-copy-testing-1` % Test)
+      .settings(
+        sharedSettings,
+        scalacOptions += "-Wconf:src=src_managed/.*:silent",
+        libraryDependencies ++= Seq(
+          auth0_java,
+          auth0_jwks,
+          scalatest % Test,
+          scalaz_core,
+          slf4j_api,
+        ),
+        coverageEnabled := false,
+        JvmRulesPlugin.damlRepoHeaderSettings,
       )
 
     // this project builds scala protobuf versions that include
@@ -1540,7 +1581,6 @@ object BuildCommon {
             "libs-scala/build-info/src/main/scala",
             "libs-scala/concurrent/src/main/scala",
             "libs-scala/grpc-utils/src/main/scala", // (ledger-api/grpc-definitions:ledger_api_proto_scala)
-            "libs-scala/jwt/src/main/scala",
             "libs-scala/logging-entries/src/main/scala",
             "libs-scala/ports/src/main/scala",
             "libs-scala/resources/src/main/2.13",
