@@ -25,8 +25,8 @@ import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.{
 }
 import com.digitalasset.canton.admin.api.client.data.{ListPartiesResult, TemplateId}
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.{AuthServiceConfig, NonNegativeDuration}
 import com.digitalasset.canton.console.ConsoleEnvironment.Implicits.*
 import com.digitalasset.canton.crypto.{CryptoPureApi, Salt}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -34,7 +34,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NodeLo
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.admin.repair.RepairService
 import com.digitalasset.canton.participant.admin.v0
-import com.digitalasset.canton.participant.config.{AuthServiceConfig, BaseParticipantConfig}
+import com.digitalasset.canton.participant.config.BaseParticipantConfig
 import com.digitalasset.canton.participant.ledger.api.JwtTokenUtilities
 import com.digitalasset.canton.participant.ledger.api.client.ValueRemapper
 import com.digitalasset.canton.protocol.SerializableContract.LedgerCreateTime
@@ -664,7 +664,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           applicationId: String,
       ): Map[PartyId, String] = {
         val secret = participant.config.ledgerApi.authServices
-          .collectFirst { case AuthServiceConfig.UnsafeJwtHmac256(secret, _, _) =>
+          .collectFirst { case AuthServiceConfig.UnsafeJwtHmac256(secret, _, _, _, _) =>
             secret.unwrap
           }
           .getOrElse("notasecret")
