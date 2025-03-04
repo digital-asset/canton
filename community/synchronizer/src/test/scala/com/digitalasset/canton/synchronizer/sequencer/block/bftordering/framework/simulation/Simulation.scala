@@ -245,7 +245,7 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
       .map(endpoint => endpoint -> SimulationP2PNetworkManager.fakeSequencerId(endpoint))
       .toMap
 
-    logger.info(s"Onboarding new sequencers ${endpointToSequencerId.values}")
+    logger.info(s"Onboarding new sequencers ${endpointToSequencerId.values} at ${clock.now}")
 
     // add endpoints to existing peers
     endpoints.foreach { endpoint =>
@@ -350,7 +350,7 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
           case InternalTick(machineName, to, _, msg) =>
             executeEvent(machineName, to, msg)
           case RunFuture(machine, to, toRun, fun, traceContext) =>
-            logger.info(s"Future ${toRun.name} for $machine:$to completed")
+            logger.trace(s"Future ${toRun.name} for $machine:$to completed")
             executeFuture(machine, to, toRun, fun, traceContext)
             verifier.aFutureHappened(machine)
           case ReceiveNetworkMessage(machineName, msg, traceContext) =>
@@ -455,10 +455,9 @@ final case class Machine[OnboardingDataT, SystemNetworkMessageT](
     allReactors.clear()
     val system = new SimulationModuleSystem(nodeCollector, loggerFactory)
     logger.info("Initializing modules again to simulate restart")
-    val _ = init.systemInitializerFactory(onboardingDataProvider.provide(peer))(
-      system,
-      simulationP2PNetworkManager,
-    )
+    val _ = init
+      .systemInitializerFactory(onboardingDataProvider.provide(peer))
+      .initialize(system, simulationP2PNetworkManager)
   }
 }
 

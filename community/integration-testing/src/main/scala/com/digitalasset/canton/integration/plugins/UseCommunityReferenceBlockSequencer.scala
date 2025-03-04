@@ -6,7 +6,7 @@ package com.digitalasset.canton.integration.plugins
 import com.digitalasset.canton
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.{
-  CantonCommunityConfig,
+  CantonConfig,
   CantonRequireTypes,
   DbConfig,
   DbParametersConfig,
@@ -22,11 +22,8 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencerBas
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory}
 import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
-import com.digitalasset.canton.synchronizer.sequencer.config.CommunitySequencerNodeConfig
-import com.digitalasset.canton.synchronizer.sequencer.{
-  BlockSequencerConfig,
-  CommunitySequencerConfig,
-}
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
+import com.digitalasset.canton.synchronizer.sequencer.{BlockSequencerConfig, SequencerConfig}
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.reference.{
   CommunityReferenceSequencerDriverFactory,
   ReferenceSequencerDriver,
@@ -43,7 +40,7 @@ class UseCommunityReferenceBlockSequencer[S <: StorageConfig](
 )(implicit c: ClassTag[S])
     extends UseReferenceBlockSequencerBase[
       S,
-      CommunitySequencerConfig,
+      SequencerConfig,
       CommunityEnvironment,
       CommunityTestConsoleEnvironment,
     ](loggerFactory, "reference", sequencerGroups) {
@@ -51,13 +48,13 @@ class UseCommunityReferenceBlockSequencer[S <: StorageConfig](
   private val driverFactory = new CommunityReferenceSequencerDriverFactory
 
   override def driverConfigs(
-      config: CantonCommunityConfig,
+      config: CantonConfig,
       storageConfigs: Map[CantonRequireTypes.InstanceName, S],
-  ): Map[InstanceName, CommunitySequencerConfig] = {
+  ): Map[InstanceName, SequencerConfig] = {
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext.forClass(loggerFactory, classOf[UseCommunityReferenceBlockSequencer[S]])
     config.sequencers.keys.map { sequencerName =>
-      sequencerName -> CommunitySequencerConfig.External(
+      sequencerName -> SequencerConfig.External(
         driverFactory.name,
         BlockSequencerConfig(),
         ConfigCursor(
@@ -79,7 +76,7 @@ class UseCommunityReferenceBlockSequencer[S <: StorageConfig](
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
-  override def beforeEnvironmentCreated(config: CantonCommunityConfig): CantonCommunityConfig = {
+  override def beforeEnvironmentCreated(config: CantonConfig): CantonConfig = {
     // in H2 we need to make db name unique, but it has to be matching for all sequencers, so we cache it
     lazy val dbNamesH2: Map[String, String] = dbNames.forgetNE.map { dbName =>
       dbName -> generateUniqueH2DatabaseName(dbName)
@@ -129,12 +126,12 @@ class UseCommunityReferenceBlockSequencer[S <: StorageConfig](
         }.toMap
     }
 
-    val sequencersToConfig: Map[InstanceName, CommunitySequencerConfig] =
+    val sequencersToConfig: Map[InstanceName, SequencerConfig] =
       driverConfigs(config, storageConfigMap)
 
     def mapSequencerConfigs(
-        kv: (InstanceName, CommunitySequencerNodeConfig)
-    ): (InstanceName, CommunitySequencerNodeConfig) = kv match {
+        kv: (InstanceName, SequencerNodeConfig)
+    ): (InstanceName, SequencerNodeConfig) = kv match {
       case (name, cfg) =>
         (
           name,

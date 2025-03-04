@@ -72,7 +72,7 @@ class TransactionTreeFactoryImpl(
     with NamedLogging {
 
   private val unicumGenerator = new UnicumGenerator(cryptoOps)
-  private val cantonContractIdVersion = AuthenticatedContractIdVersionV10
+  private val cantonContractIdVersion = AuthenticatedContractIdVersionV11
   private val transactionViewDecompositionFactory = TransactionViewDecompositionFactory
 
   override def createTransactionTree(
@@ -511,6 +511,7 @@ class TransactionTreeFactoryImpl(
       LedgerCreateTime(state.ledgerTime),
       contractMetadata,
       serializedCantonContractInst,
+      cantonContractIdVersion,
     )
 
     val contractId = cantonContractIdVersion.fromDiscriminator(discriminator, unicum)
@@ -522,7 +523,7 @@ class TransactionTreeFactoryImpl(
       rawContractInstance = serializedCantonContractInst,
       metadata = contractMetadata,
       ledgerCreateTime = LedgerCreateTime(state.ledgerTime),
-      contractSalt = Some(contractSalt.unwrap),
+      contractSalt = contractSalt.unwrap,
     )
     state.setCreatedContractInfo(contractId, createdInfo)
 

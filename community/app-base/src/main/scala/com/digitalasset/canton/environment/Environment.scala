@@ -36,6 +36,7 @@ import com.digitalasset.canton.synchronizer.mediator.{
 }
 import com.digitalasset.canton.synchronizer.metrics.MediatorMetrics
 import com.digitalasset.canton.synchronizer.sequencer.SequencerNodeBootstrap
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.telemetry.{ConfiguredOpenTelemetry, OpenTelemetryFactory}
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
@@ -57,10 +58,9 @@ import scala.util.control.NonFatal
   */
 trait Environment extends NamedLogging with AutoCloseable with NoTracing {
 
-  type Config <: CantonConfig & ConfigDefaults[DefaultPorts, Config]
   type Console <: ConsoleEnvironment
 
-  val config: Config
+  val config: CantonConfig
   val testingConfig: TestingConfigInternal
 
   val loggerFactory: NamedLoggerFactory
@@ -455,7 +455,7 @@ trait Environment extends NamedLogging with AutoCloseable with NoTracing {
 
   protected def createSequencer(
       name: String,
-      sequencerConfig: Config#SequencerNodeConfigType,
+      sequencerConfig: SequencerNodeConfig,
   ): SequencerNodeBootstrap
 
   protected def createMediator(
@@ -557,7 +557,7 @@ object Environment {
 
 trait EnvironmentFactory[E <: Environment] {
   def create(
-      config: E#Config,
+      config: CantonConfig,
       loggerFactory: NamedLoggerFactory,
       testingConfigInternal: TestingConfigInternal = TestingConfigInternal(),
   ): E

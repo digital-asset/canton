@@ -9,11 +9,11 @@ import cats.syntax.functorFilter.*
 import com.daml.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.store.db.DbCryptoPublicStore
 import com.digitalasset.canton.crypto.store.memory.InMemoryCryptoPublicStore
-import com.digitalasset.canton.crypto.{KeyName, *}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.error.{BaseCantonError, CantonErrorGroups}
+import com.digitalasset.canton.error.{CantonBaseError, CantonErrorGroups}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -92,6 +92,11 @@ trait CryptoPublicStore extends AutoCloseable { this: NamedLogging =>
   def signingKey(signingKeyId: Fingerprint)(implicit
       traceContext: TraceContext
   ): OptionT[FutureUnlessShutdown, SigningPublicKey] =
+    signingKeyWithName(signingKeyId).map(_.publicKey)
+
+  def signingKeyWithName(signingKeyId: Fingerprint)(implicit
+      traceContext: TraceContext
+  ): OptionT[FutureUnlessShutdown, SigningPublicKeyWithName] =
     retrieveKeyAndUpdateCache(signingKeyMap, readSigningKey(_))(signingKeyId)
 
   protected def readSigningKey(signingKeyId: Fingerprint)(implicit
@@ -113,6 +118,11 @@ trait CryptoPublicStore extends AutoCloseable { this: NamedLogging =>
   def encryptionKey(encryptionKeyId: Fingerprint)(implicit
       traceContext: TraceContext
   ): OptionT[FutureUnlessShutdown, EncryptionPublicKey] =
+    encryptionKeyWithName(encryptionKeyId).map(_.publicKey)
+
+  def encryptionKeyWithName(encryptionKeyId: Fingerprint)(implicit
+      traceContext: TraceContext
+  ): OptionT[FutureUnlessShutdown, EncryptionPublicKeyWithName] =
     retrieveKeyAndUpdateCache(encryptionKeyMap, readEncryptionKey(_))(encryptionKeyId)
 
   protected def readEncryptionKey(encryptionKeyId: Fingerprint)(implicit
@@ -147,13 +157,13 @@ trait CryptoPublicStore extends AutoCloseable { this: NamedLogging =>
   private def retrieveKeyAndUpdateCache[KN <: PublicKeyWithName](
       cache: TrieMap[Fingerprint, KN],
       readKey: Fingerprint => OptionT[FutureUnlessShutdown, KN],
-  )(keyId: Fingerprint): OptionT[FutureUnlessShutdown, KN#PK] =
+  )(keyId: Fingerprint): OptionT[FutureUnlessShutdown, KN] =
     cache.get(keyId) match {
-      case Some(key) => OptionT.some(key.publicKey)
+      case Some(key) => OptionT.some(key)
       case None =>
         readKey(keyId).map { key =>
           cache.putIfAbsent(keyId, key).discard
-          key.publicKey
+          key
         }
     }
 
@@ -325,10 +335,10 @@ object CryptoPublicStoreError extends CantonErrorGroups.CommandErrorGroup {
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
     final case class Wrap(reason: CryptoPublicStoreError)
-        extends BaseCantonError.Impl(cause = "An error occurred with the public crypto store")
+        extends CantonBaseError.Impl(cause = "An error occurred with the public crypto store")
 
     final case class WrapStr(reason: String)
-        extends BaseCantonError.Impl(cause = "An error occurred with the public crypto store")
+        extends CantonBaseError.Impl(cause = "An error occurred with the public crypto store")
   }
 
   final case class FailedToInsertKey(keyId: Fingerprint, reason: String)

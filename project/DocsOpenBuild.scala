@@ -106,6 +106,33 @@ object DocsOpenBuild {
       runCommand(s"python $scriptPath $target", log)
     }
 
+  def copyLedgerApiProtoDocs(
+      sourceDirectory: SettingKey[File]
+  ): Def.Initialize[Task[Unit]] =
+    Def.task {
+      import scala.sys.process._
+
+      val log: ManagedLogger = streams.value.log
+
+      val filesToCopy = Map(
+        (DamlProjects.`ledger-api` / Compile / sourceManaged).value / "proto-docs.rst" -> sourceDirectory.value / "preprocessed-sphinx" / "reference" / "lapi-proto-docs.rst",
+        (DamlProjects.`ledger-api-value` / Compile / sourceManaged).value / "proto-docs.rst" -> sourceDirectory.value / "preprocessed-sphinx" / "reference" / "lapi-value-proto-docs.rst.inc",
+      )
+
+      val postProcessScript = file("community/docs/post-process.sh")
+
+      filesToCopy.foreach { case (copyFromPath, copyToPath) =>
+        log.info(
+          s"[copyLedgerApiProtoDocs] Copying the Ledger API reference from $copyFromPath to $copyToPath ..."
+        )
+
+        IO.copyFile(copyFromPath, copyToPath)
+        val postProcessResult = s"$postProcessScript $copyToPath".!!
+
+        println(postProcessResult)
+      }
+    }
+
   def generateRst(
       sourceDirectory: SettingKey[File],
       resourceDirectory: SettingKey[File],
@@ -129,6 +156,8 @@ object DocsOpenBuild {
           s"python $scriptPath $cantonRoot ${generateReferenceJson.value} $source $preprocessed ${targetDirectory.value}",
           log,
         )
+
+        copyLedgerApiProtoDocs(sourceDirectory).value
       }
 
   def generateReferenceJson(

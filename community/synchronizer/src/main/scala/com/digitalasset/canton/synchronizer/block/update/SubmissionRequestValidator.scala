@@ -13,7 +13,7 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi, SynchronizerCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.error.{BaseAlarm, BaseCantonError}
+import com.digitalasset.canton.error.{BaseAlarm, CantonBaseError}
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.GroupAddressResolver
@@ -650,7 +650,11 @@ private[update] final class SubmissionRequestValidator(
         case None =>
           // New aggregation
           validateAggregationRule(submissionRequest, sequencingTimestamp, rule).map { _ =>
-            val fresh = FreshInFlightAggregation(submissionRequest.maxSequencingTime, rule)
+            val fresh = FreshInFlightAggregation(
+              sequencingTimestamp,
+              submissionRequest.maxSequencingTime,
+              rule,
+            )
             InFlightAggregation.initial(fresh) -> InFlightAggregationUpdate(
               Some(fresh),
               Chain.empty,
@@ -666,6 +670,7 @@ private[update] final class SubmissionRequestValidator(
 
       aggregatedSender = AggregatedSender(
         submissionRequest.sender,
+        submissionRequest.maxSequencingTime,
         AggregationBySender(
           sequencingTimestamp,
           submissionRequest.batch.envelopes.map(_.signatures),
@@ -846,7 +851,7 @@ private[update] object SubmissionRequestValidator {
       case _: SubmissionOutcome.Deliver => None
       case _: SubmissionOutcome.DeliverReceipt => None
       case reject: SubmissionOutcome.Reject =>
-        BaseCantonError.statusErrorCodes(reject.error).headOption
+        CantonBaseError.statusErrorCodes(reject.error).headOption
       case SubmissionOutcome.Discard => Some("discarded")
     }
 

@@ -3,10 +3,12 @@
 
 package com.digitalasset.canton.participant.protocol
 
+import cats.data.EitherT
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.Update
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing.EventInfo
@@ -61,31 +63,11 @@ class ParticipantTopologyTerminateProcessing(
             s"Invalid: findEffectiveStateChanges with onlyAtEffective = true should return only one EffectiveStateChange for effective time $effectiveTime, only the first one is taken into consideration."
           )
         events = effectiveStateChanges.headOption.flatMap(getNewEvents)
-        _ = events.foreach { case EventInfo(event, requireLocalPartyReplication) =>
-          (for {
-            _ <- recordOrderPublisher.scheduleFloatingEventPublication(
-              timestamp = effectiveTime.value,
-              eventFactory = _ => Some(event),
-            )
-            _ <-
-              if (pauseSynchronizerIndexingDuringPartyReplication && requireLocalPartyReplication)
-                recordOrderPublisher.scheduleEventBuffering(effectiveTime.value)
-              else
-                Right(())
-          } yield ()) match {
-            case Right(()) =>
-              logger.debug(
-                s"Scheduled topology event publication with sequencer counter: $sc, sequenced time: $sequencedTime, effective time: $effectiveTime"
-              )
-
-            case Left(invalidTime) =>
-              // invariant: sequencedTime <= effectiveTime
-              // at this point we did not tick sequencedTime yet
-              ErrorUtil.invalidState(
-                s"Cannot schedule topology event as record time is already at $invalidTime (publication with sequencer counter: $sc, sequenced time: $sequencedTime, effective time: $effectiveTime)"
-              )
-          }
-        }
+        _ <- FutureUnlessShutdown.lift(
+          events
+            .map(scheduleEvent(effectiveTime, sequencedTime, sc, _))
+            .getOrElse(UnlessShutdown.unit)
+        )
       } yield ()
     } else {
       // invariant: initial record time < first processed record time, so we can safely omit ticking and publishing here
@@ -96,10 +78,56 @@ class ParticipantTopologyTerminateProcessing(
       FutureUnlessShutdown.unit
     }
 
+  private def scheduleEvent(
+      effectiveTime: EffectiveTime,
+      sequencedTime: SequencedTime,
+      sc: SequencerCounter,
+      eventInfo: EventInfo,
+  )(implicit traceContext: TraceContext): UnlessShutdown[Unit] =
+    (for {
+      _ <- EitherT(
+        recordOrderPublisher.scheduleFloatingEventPublication(
+          timestamp = effectiveTime.value,
+          eventFactory = _ => Some(eventInfo.event),
+        )
+      )
+      _ <- EitherT(
+        if (
+          pauseSynchronizerIndexingDuringPartyReplication && eventInfo.requireLocalPartyReplication
+        )
+          recordOrderPublisher.scheduleEventBuffering(effectiveTime.value)
+        else
+          UnlessShutdown.Outcome(Right(()))
+      )
+    } yield ()).value.map {
+      case Right(()) =>
+        logger.debug(
+          s"Scheduled topology event publication with sequencer counter: $sc, sequenced time: $sequencedTime, effective time: $effectiveTime"
+        )
+
+      case Left(invalidTime) =>
+        // invariant: sequencedTime <= effectiveTime
+        // at this point we did not tick sequencedTime yet
+        ErrorUtil.invalidState(
+          s"Cannot schedule topology event as record time is already at $invalidTime (publication with sequencer counter: $sc, sequenced time: $sequencedTime, effective time: $effectiveTime)"
+        )
+    }
+
+  /** Scheduling missing events at synchronizer initialization.
+    *
+    * This process takes care of both scheduling missing events at crash recovery, and scheduling
+    * missing events at joining a synchronizer the first time (bootstrapping).
+    *
+    * @param topologyEventPublishedOnInitialRecordTime
+    *   There could be at most one topology event per record-time, this information helps to make
+    *   precise scheduling at recovery.
+    * @param traceContextForSequencedEvent
+    *   Helper function to look up TraceContext for sequenced timestamps.
+    */
   def scheduleMissingTopologyEventsAtInitialization(
       topologyEventPublishedOnInitialRecordTime: Boolean,
       traceContextForSequencedEvent: CantonTimestamp => FutureUnlessShutdown[Option[TraceContext]],
-      parallelism: Int,
+      parallelism: PositiveInt,
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
@@ -108,21 +136,49 @@ class ParticipantTopologyTerminateProcessing(
       s"Fetching effective state changes after initial record time $initialRecordTime at synchronizer-startup for topology event recovery."
     )
     for {
-      effectiveChanges <- store.findEffectiveStateChanges(
+      trustCertificateEffectiveTime <- store
+        .findFirstTrustCertificateForParticipant(participantId)
+        .map {
+          case Some(trustCertTx) => trustCertTx.validFrom.value
+          case None =>
+            ErrorUtil.invalidState(
+              "Missing Trust Certificate topology transaction at initialization."
+            )
+        }
+      outstandingEffectiveChanges <- store.findEffectiveStateChanges(
         fromEffectiveInclusive = initialRecordTime,
         onlyAtEffective = false,
       )
-      eventsWithSequencedTimeWithoutTraceContext = effectiveChanges
-        .filter(_.sequencedTime.value <= initialRecordTime)
-        .flatMap(effectiveChange =>
+      eventFromEffectiveChangeWithInitializationTraceContext =
+        (effectiveChange: EffectiveStateChange) =>
           getNewEvents(effectiveChange)
             .map(eventInfo => eventInfo.event -> effectiveChange.sequencedTime.value)
+      eventsFromBootstrapping = outstandingEffectiveChanges.view
+        .filter(
+          // changes coming from bootstrapping (not a mistake, topology state initialization is happening for this bound - topology transaction will be emitted to new member which are sequenced after the trustCertificateEffectiveTime)
+          _.sequencedTime.value <= trustCertificateEffectiveTime
         )
+        .flatMap(eventFromEffectiveChangeWithInitializationTraceContext)
+        .toVector
+      eventsFromProcessingWithoutTraceContext = outstandingEffectiveChanges.view
+        .filter(
+          // changes coming from topology processing
+          _.sequencedTime.value > trustCertificateEffectiveTime
+        )
+        .filter(
+          // all sequenced above initialRecordTime (if any) will be re-processed
+          _.sequencedTime.value <= initialRecordTime
+        )
+        .flatMap(eventFromEffectiveChangeWithInitializationTraceContext)
+        .toVector
       _ = logger.info(
-        s"Fetching trace-contexts for ${eventsWithSequencedTimeWithoutTraceContext.size} topology-updates for topology event recovery."
+        s"Found ${eventsFromBootstrapping.size} outstanding events from synchronizer bootstrapping and ${eventsFromProcessingWithoutTraceContext.size} outstanding events from topology processing to process."
       )
-      eventsWithSequencedTime <- MonadUtil.parTraverseWithLimit(parallelism)(
-        eventsWithSequencedTimeWithoutTraceContext
+      _ = logger.info(
+        s"Fetching trace-contexts for ${eventsFromProcessingWithoutTraceContext.size} topology-updates for topology event recovery."
+      )
+      eventsFromProcessing <- MonadUtil.parTraverseWithLimit(parallelism)(
+        eventsFromProcessingWithoutTraceContext
       ) { case (event, sequencedTime) =>
         traceContextForSequencedEvent(sequencedTime).map {
           case Some(sourceEventTraceContext) =>
@@ -135,11 +191,12 @@ class ParticipantTopologyTerminateProcessing(
             event -> sequencedTime
         }
       }
+      allEvents = eventsFromBootstrapping ++ eventsFromProcessing
     } yield {
       logger.info(
-        s"Scheduling #${eventsWithSequencedTime.size} topology events at synchronizer-startup."
+        s"Scheduling ${allEvents.size} topology events at synchronizer-startup."
       )
-      eventsWithSequencedTime.foreach(
+      allEvents.foreach(
         scheduleEventAtRecovery(topologyEventPublishedOnInitialRecordTime)
       )
     }
@@ -151,38 +208,40 @@ class ParticipantTopologyTerminateProcessing(
     case (event, sequencedTime) =>
       implicit val traceContext: TraceContext = event.traceContext
       val effectiveTime = event.effectiveTime
-      recordOrderPublisher.scheduleFloatingEventPublication(
-        timestamp = effectiveTime,
-        eventFactory = _ => Some(event),
-      ) match {
-        case Right(()) =>
-          logger.debug(
-            s"Re-scheduled topology event publication after restart, with sequenced time: $sequencedTime, effective time: $effectiveTime"
-          )
-
-        case Left(`initialRecordTime`) =>
-          if (topologyEventPublishedOnInitialRecordTime) {
+      recordOrderPublisher
+        .scheduleFloatingEventPublication(
+          timestamp = effectiveTime,
+          eventFactory = _ => Some(event),
+        )
+        .foreach {
+          case Right(()) =>
             logger.debug(
-              s"Omit re-scheduling topology event publication after restart: a topology event is already published at initial record time: $initialRecordTime. (sequenced time: $sequencedTime, effective time: $effectiveTime)"
+              s"Scheduled topology event publication at initialization, with sequenced time: $sequencedTime, effective time: $effectiveTime"
             )
-          } else {
-            recordOrderPublisher.scheduleFloatingEventPublicationImmediately {
-              actualEffectiveTime =>
-                assert(actualEffectiveTime == initialRecordTime)
-                Some(event)
-            }.discard
-            logger.debug(
-              s"Re-scheduled topology event publication immediately after restart, as record time is already the effective time, and no topology event was published at this time. (sequenced time: $sequencedTime, effective time: $effectiveTime)"
-            )
-          }
 
-        case Left(invalidTime) =>
-          // invariant: sequencedTime <= effectiveTime
-          // at this point we did not tick sequencedTime yet
-          ErrorUtil.invalidState(
-            s"Cannot schedule topology event as record time is already at $invalidTime (publication with sequenced time: $sequencedTime, effective time: $effectiveTime)"
-          )
-      }
+          case Left(`initialRecordTime`) =>
+            if (topologyEventPublishedOnInitialRecordTime) {
+              logger.debug(
+                s"Omit scheduling topology event publication at initialization: a topology event is already published at initial record time: $initialRecordTime. (sequenced time: $sequencedTime, effective time: $effectiveTime)"
+              )
+            } else {
+              recordOrderPublisher.scheduleFloatingEventPublicationImmediately {
+                actualEffectiveTime =>
+                  assert(actualEffectiveTime == initialRecordTime)
+                  Some(event)
+              }.discard
+              logger.debug(
+                s"Scheduled topology event publication immediately at initialization, as record time is already the effective time, and no topology event was published at this time. (sequenced time: $sequencedTime, effective time: $effectiveTime)"
+              )
+            }
+
+          case Left(invalidTime) =>
+            // invariant: sequencedTime <= effectiveTime
+            // at this point we did not tick sequencedTime yet
+            ErrorUtil.invalidState(
+              s"Cannot schedule topology event as record time is already at $invalidTime (publication with sequenced time: $sequencedTime, effective time: $effectiveTime)"
+            )
+        }
   }
 
   private def getNewEvents(effectiveStateChange: EffectiveStateChange)(implicit

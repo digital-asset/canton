@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.implicits.catsSyntaxOptionId
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.error.ErrorCode
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.ProtoDeserializationError.{
   ProtoDeserializationFailure,
@@ -24,7 +23,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
-import com.digitalasset.canton.participant.admin.PackageService.{DarDescription, DarId}
+import com.digitalasset.canton.participant.admin.PackageService.{DarDescription, DarMainPackageId}
 import com.digitalasset.canton.participant.admin.data.UploadDarData
 import com.digitalasset.canton.participant.admin.{
   CantonPackageServiceError,
@@ -76,10 +75,10 @@ class GrpcPackageService(
     val ret =
       service
         .validateDar(request.data, request.filename)
-        .map(darId => v30.ValidateDarResponse(darId = darId.unwrap))
+        .map(mainPackageId => v30.ValidateDarResponse(mainPackageId = mainPackageId.unwrap))
     EitherTUtil.toFuture(
       ret
-        .leftMap(ErrorCode.asGrpcError)
+        .leftMap(_.asGrpcError)
         .onShutdown(Left(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError))
     )
   }
@@ -144,7 +143,7 @@ class GrpcPackageService(
             request.force,
           )
           .onShutdown(Left(GrpcErrors.AbortedDueToShutdown.Error()))
-          .leftMap(ErrorCode.asGrpcError)
+          .leftMap(_.asGrpcError)
       } yield {
         v30.RemovePackageResponse(success = Some(Empty()))
       }
@@ -155,7 +154,7 @@ class GrpcPackageService(
   override def vetDar(request: v30.VetDarRequest): Future[v30.VetDarResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val ret = for {
-      hash <- EitherT.fromEither[Future](extractDarId(request.darId))
+      hash <- EitherT.fromEither[Future](extractMainPackageId(request.mainPackageId))
       _unit <- service
         .vetDar(
           hash,
@@ -172,7 +171,7 @@ class GrpcPackageService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
     val ret = for {
-      hash <- EitherT.fromEither[Future](extractDarId(request.darId))
+      hash <- EitherT.fromEither[Future](extractMainPackageId(request.mainPackageId))
       _unit <- service
         .unvetDar(hash)
         .leftMap(_.asGrpcError)
@@ -184,7 +183,7 @@ class GrpcPackageService(
 
   override def removeDar(request: v30.RemoveDarRequest): Future[v30.RemoveDarResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val hashE = extractDarId(request.darId)
+    val hashE = extractMainPackageId(request.mainPackageId)
     val ret =
       for {
         hash <- EitherT.fromEither[Future](hashE)
@@ -197,27 +196,30 @@ class GrpcPackageService(
     EitherTUtil.toFuture(ret)
   }
 
-  private def extractDarId(darId: String): Either[StatusRuntimeException, DarId] =
-    DarId
-      .create(darId)
+  private def extractMainPackageId(
+      mainPackageId: String
+  ): Either[StatusRuntimeException, DarMainPackageId] =
+    DarMainPackageId
+      .create(mainPackageId)
       .leftMap(err =>
         Status.INVALID_ARGUMENT
-          .withDescription(s"Invalid dar hash: $darId [$err]")
+          .withDescription(s"Invalid DAR main package-id: $mainPackageId [$err]")
           .asRuntimeException()
       )
 
   override def getDar(request: v30.GetDarRequest): Future[v30.GetDarResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val ret = for {
-      darId <- EitherT.fromEither[FutureUnlessShutdown](
-        DarId
-          .fromProtoPrimitive(request.darId)
+      mainPackageId <- EitherT.fromEither[FutureUnlessShutdown](
+        DarMainPackageId
+          .fromProtoPrimitive(request.mainPackageId)
           .leftMap(ProtoDeserializationFailure.Wrap(_))
       )
       dar <- service
-        .getDar(darId)
+        .getDar(mainPackageId)
         .toRight(
-          CantonPackageServiceError.Fetching.DarNotFound.Reject("getDar", darId.unwrap): CantonError
+          CantonPackageServiceError.Fetching.DarNotFound
+            .Reject("getDar", mainPackageId.unwrap): CantonError
         )
     } yield v30.GetDarResponse(
       payload = ByteString.copyFrom(dar.bytes),
@@ -235,9 +237,9 @@ class GrpcPackageService(
         .map(_.filter(_.name.str.startsWith(filterName)))
         .asGrpcFuture
     } yield v30.ListDarsResponse(dars.map {
-      case DarDescription(darId, description, name, version) =>
+      case DarDescription(mainPackageId, description, name, version) =>
         v30.DarDescription(
-          main = darId.unwrap,
+          main = mainPackageId.unwrap,
           name = name.toProtoPrimitive,
           version = version.toProtoPrimitive,
           description = description.toProtoPrimitive,
@@ -259,7 +261,7 @@ class GrpcPackageService(
   private def darDescriptionToProto(descriptor: DarDescription): v30.DarDescription =
     v30
       .DarDescription(
-        main = descriptor.darId.mainPackageId.toProtoPrimitive,
+        main = descriptor.mainPackageId.toProtoPrimitive,
         name = descriptor.name.toProtoPrimitive,
         version = descriptor.version.toProtoPrimitive,
         description = descriptor.description.toProtoPrimitive,
@@ -270,20 +272,22 @@ class GrpcPackageService(
   ): Future[v30.GetDarContentsResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val res = for {
-      darId <- EitherT.fromEither[FutureUnlessShutdown](
-        DarId.fromProtoPrimitive(request.darId).leftMap(ProtoDeserializationFailure.Wrap(_))
+      mainPackageId <- EitherT.fromEither[FutureUnlessShutdown](
+        DarMainPackageId
+          .fromProtoPrimitive(request.mainPackageId)
+          .leftMap(ProtoDeserializationFailure.Wrap(_))
       )
       description <- service
-        .getDar(darId)
+        .getDar(mainPackageId)
         .toRight(
           CantonPackageServiceError.Fetching.DarNotFound
-            .Reject("getDar", darId.unwrap)
+            .Reject("getDar", mainPackageId.unwrap)
         )
       packages <- service
-        .getDarContents(darId)
+        .getDarContents(mainPackageId)
         .toRight(
           CantonPackageServiceError.Fetching.DarNotFound
-            .Reject("getDarContents", darId.unwrap): CantonError
+            .Reject("getDarContents", mainPackageId.unwrap): CantonError
         )
     } yield {
       v30.GetDarContentsResponse(

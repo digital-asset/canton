@@ -51,15 +51,8 @@ object CreatedContract {
       rolledBack: Boolean,
   ): Either[String, CreatedContract] =
     CantonContractIdVersion
-      .ensureCantonContractId(contract.contractId)
+      .extractCantonContractIdVersion(contract.contractId)
       .leftMap(err => s"Encountered invalid Canton contract id: ${err.toString}")
-      .flatMap { _ =>
-        // Contracts created with the "authenticated" contract id prefix-of-suffix
-        // must have contract_salt present in order to be properly authenticated (and used for explicit disclosure)
-        ProtoConverter
-          .required("contract_salt", contract.contractSalt)
-          .leftMap(err => s"Failed instantiating created contract: ${err.message}")
-      }
       .map(_ => new CreatedContract(contract, consumedInCore, rolledBack))
 
   def tryCreate(
