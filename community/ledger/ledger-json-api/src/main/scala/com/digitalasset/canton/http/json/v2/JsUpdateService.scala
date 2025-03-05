@@ -11,6 +11,7 @@ import com.digitalasset.canton.http.json.v2.JsSchema.JsEvent.CreatedEvent
 import com.digitalasset.canton.http.json.v2.JsSchema.{JsTransaction, JsTransactionTree}
 import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
 import com.digitalasset.canton.http.json.v2.JsSchema.JsCantonError
+import com.digitalasset.canton.http.json.v2.Protocol.Protocol
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import sttp.tapir.generic.auto.*
 import sttp.tapir.json.circe.*
@@ -160,7 +161,8 @@ class JsUpdateService(
     }
 
   private def getFlats(
-      caller: CallerContext
+      caller: CallerContext,
+      protocol: Protocol,
   ): TracedInput[Unit] => Flow[update_service.GetUpdatesRequest, JsGetUpdatesResponse, NotUsed] =
     req => {
       implicit val token = caller.token()
@@ -168,12 +170,14 @@ class JsUpdateService(
       prepareSingleWsStream(
         updateServiceClient(caller.token())(TraceContext.empty).getUpdates,
         (r: update_service.GetUpdatesResponse) => protocolConverters.GetUpdatesResponse.toJson(r),
+        protocol = protocol,
         withCloseDelay = true,
       )
     }
 
   private def getTrees(
-      caller: CallerContext
+      caller: CallerContext,
+      protocol: Protocol,
   ): TracedInput[Unit] => Flow[
     update_service.GetUpdatesRequest,
     JsGetUpdateTreesResponse,
@@ -186,6 +190,7 @@ class JsUpdateService(
         updateServiceClient(caller.token()).getUpdateTrees,
         (r: update_service.GetUpdateTreesResponse) =>
           protocolConverters.GetUpdateTreesResponse.toJson(r),
+        protocol = protocol,
         withCloseDelay = true,
       )
     }

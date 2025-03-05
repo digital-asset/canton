@@ -15,6 +15,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import sttp.tapir.generic.auto.*
 import sttp.tapir.json.circe.*
 import com.digitalasset.canton.http.json.v2.JsContractEntry.{JsActiveContract, JsContractEntry, JsIncompleteAssigned, JsIncompleteUnassigned}
+import com.digitalasset.canton.http.json.v2.Protocol.Protocol
 import com.digitalasset.canton.ledger.client.LedgerClient
 import com.digitalasset.canton.tracing.TraceContext
 import io.circe.Codec
@@ -97,7 +98,8 @@ class JsStateService(
       .resultToRight
 
   private def getActiveContractsStream(
-      caller: CallerContext
+      caller: CallerContext,
+      protocol: Protocol,
   ): TracedInput[Unit] => Flow[
     state_service.GetActiveContractsRequest,
     JsGetActiveContractsResponse,
@@ -110,6 +112,7 @@ class JsStateService(
         stateServiceClient(caller.token())(TraceContext.empty).getActiveContracts,
         (r: state_service.GetActiveContractsResponse) =>
           protocolConverters.GetActiveContractsResponse.toJson(r),
+        protocol = protocol,
         withCloseDelay = true,
       )
     }

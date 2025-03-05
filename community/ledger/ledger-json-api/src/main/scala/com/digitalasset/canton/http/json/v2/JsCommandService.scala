@@ -4,24 +4,15 @@
 package com.digitalasset.canton.http.json.v2
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.ledger.api.v2.command_service.{
-  CommandServiceGrpc,
-  SubmitAndWaitRequest,
-  SubmitAndWaitResponse,
-}
+import com.daml.ledger.api.v2.command_service.{CommandServiceGrpc, SubmitAndWaitRequest, SubmitAndWaitResponse}
 import com.google.protobuf
 import com.daml.ledger.api.v2.commands.Commands.DeduplicationPeriod
-import com.daml.ledger.api.v2.{
-  command_completion_service,
-  command_submission_service,
-  commands,
-  completion,
-  reassignment_command,
-}
+import com.daml.ledger.api.v2.{command_completion_service, command_submission_service, commands, completion, reassignment_command}
 import com.digitalasset.canton.http.WebsocketConfig
 import com.digitalasset.canton.http.json.v2.Endpoints.{CallerContext, TracedInput, v2Endpoint}
 import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
 import com.digitalasset.canton.http.json.v2.JsSchema.{JsCantonError, JsTransaction, JsTransactionTree}
+import com.digitalasset.canton.http.json.v2.Protocol.Protocol
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import sttp.tapir.generic.auto.*
 import sttp.tapir.json.circe.*
@@ -102,7 +93,8 @@ class JsCommandService(
   )
 
   private def commandCompletionStream(
-      caller: CallerContext
+      caller: CallerContext,
+      protocol: Protocol,
   ): TracedInput[Unit] => Flow[
     command_completion_service.CompletionStreamRequest,
     command_completion_service.CompletionStreamResponse,
@@ -112,6 +104,8 @@ class JsCommandService(
     prepareSingleWsStream(
       commandCompletionServiceClient(caller.token()).completionStream,
       Future.successful[command_completion_service.CompletionStreamResponse],
+      protocol = protocol,
+      withCloseDelay = false,
     )
   }
 
