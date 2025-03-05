@@ -61,6 +61,7 @@ object Dependencies {
 
   lazy val oracle_version = "19.18.0.0"
   lazy val pekko_http_backend_version = "3.9.0"
+  lazy val protostuff_version = "3.1.40"
   lazy val postgres_version = "42.7.3"
   lazy val pprint_version = "0.8.1"
   lazy val prometheus_version = "0.16.0"
@@ -328,6 +329,8 @@ object Dependencies {
   // We have to exclude conflicting parser version
   lazy val ujson_circe =
     "com.lihaoyi" %% "ujson-circe" % upickle_version exclude ("io.circe", "circe-parser_2.13")
+
+  lazy val protostuff_parser = "io.protostuff" % "protostuff-parser" % protostuff_version
 
   object resolveDependency {
     import io.circe.*, io.circe.parser.*, io.circe.generic.auto.*, io.circe.syntax.*

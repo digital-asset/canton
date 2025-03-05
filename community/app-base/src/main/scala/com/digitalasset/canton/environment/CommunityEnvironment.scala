@@ -4,7 +4,7 @@
 package com.digitalasset.canton.environment
 
 import cats.syntax.either.*
-import com.digitalasset.canton.config.{CantonCommunityConfig, TestingConfigInternal}
+import com.digitalasset.canton.config.{CantonConfig, TestingConfigInternal}
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
   ConsoleEnvironmentBinding,
@@ -28,19 +28,17 @@ import com.digitalasset.canton.synchronizer.mediator.{
   MediatorNodeParameters,
 }
 import com.digitalasset.canton.synchronizer.metrics.MediatorMetrics
-import com.digitalasset.canton.synchronizer.sequencer.config.CommunitySequencerNodeConfig
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.{
   CommunitySequencerFactory,
   SequencerNodeBootstrap,
 }
 
 class CommunityEnvironment(
-    override val config: CantonCommunityConfig,
+    override val config: CantonConfig,
     override val testingConfig: TestingConfigInternal,
     override val loggerFactory: NamedLoggerFactory,
 ) extends Environment {
-
-  override type Config = CantonCommunityConfig
 
   override protected val participantNodeFactory
       : ParticipantNodeBootstrap.Factory[LocalParticipantConfig, ParticipantNodeBootstrap] =
@@ -60,7 +58,7 @@ class CommunityEnvironment(
 
   override protected def createSequencer(
       name: String,
-      sequencerConfig: CommunitySequencerNodeConfig,
+      sequencerConfig: SequencerNodeConfig,
   ): SequencerNodeBootstrap = {
     val nodeFactoryArguments = NodeFactoryArguments(
       name,
@@ -141,7 +139,7 @@ class CommunityEnvironment(
 
 object CommunityEnvironmentFactory extends EnvironmentFactory[CommunityEnvironment] {
   override def create(
-      config: CantonCommunityConfig,
+      config: CantonConfig,
       loggerFactory: NamedLoggerFactory,
       testingConfigInternal: TestingConfigInternal,
   ): CommunityEnvironment =

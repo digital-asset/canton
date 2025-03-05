@@ -1,5 +1,5 @@
-// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates.
-// Proprietary code. All rights reserved.
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.crypto.kms.driver.testing.v1
 
@@ -29,6 +29,8 @@ trait KmsDriverTest extends AsyncWordSpec with BaseTest with HasExecutionContext
   protected val predefinedEncryptionKeys: Map[EncryptionKeySpec, String] = Map.empty
 
   protected val predefinedSymmetricKey: Option[String] = None
+
+  protected lazy val emptyContext = Context.root()
 
   /** Create a new specific KMS Driver instance */
   protected def newKmsDriver(): KmsDriver
@@ -61,7 +63,6 @@ trait KmsDriverTest extends AsyncWordSpec with BaseTest with HasExecutionContext
           driver.supportedEncryptionAlgoSpecs,
         )
 
-      val emptyContext = Context.root()
       val testData = "test".getBytes
 
       "report health eventually as ok" in {

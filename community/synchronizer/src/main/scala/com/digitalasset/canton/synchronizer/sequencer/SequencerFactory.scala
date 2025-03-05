@@ -47,6 +47,7 @@ trait SequencerFactory extends FlagCloseable with HasCloseContext {
       trafficConfig: SequencerTrafficConfig,
       runtimeReady: FutureUnlessShutdown[Unit],
       sequencerSnapshot: Option[SequencerSnapshot],
+      authenticationServices: Option[AuthenticationServices],
   )(implicit
       traceContext: TraceContext,
       tracer: Tracer,
@@ -121,6 +122,7 @@ class CommunityDatabaseSequencerFactory(
       trafficConfig: SequencerTrafficConfig,
       runtimeReady: FutureUnlessShutdown[Unit],
       sequencerSnapshot: Option[SequencerSnapshot],
+      authenticationServices: Option[AuthenticationServices],
   )(implicit
       traceContext: TraceContext,
       tracer: Tracer,
@@ -184,7 +186,7 @@ object CommunitySequencerFactory extends MkSequencerFactory {
   )(sequencerConfig: SequencerConfig)(implicit
       executionContext: ExecutionContext
   ): SequencerFactory = sequencerConfig match {
-    case communityDbConfig: CommunitySequencerConfig.Database =>
+    case communityDbConfig: SequencerConfig.Database =>
       new CommunityDatabaseSequencerFactory(
         communityDbConfig,
         metrics,
@@ -195,7 +197,7 @@ object CommunitySequencerFactory extends MkSequencerFactory {
         loggerFactory,
       )
 
-    case CommunitySequencerConfig.BftSequencer(blockSequencerConfig, config) =>
+    case SequencerConfig.BftSequencer(blockSequencerConfig, config) =>
       new BftSequencerFactory(
         config,
         blockSequencerConfig,
@@ -209,13 +211,21 @@ object CommunitySequencerFactory extends MkSequencerFactory {
         blockSequencerConfig.testingInterceptor,
       )
 
-    case CommunitySequencerConfig.External(
+    case SequencerConfig.External(
           sequencerType,
           blockSequencerConfig,
           config,
         ) =>
+      // Each external sequencer driver must have a unique identifier. Yet, we have two
+      // implementations of the external reference sequencer driver:
+      // - `community-reference` for the community edition
+      // - `reference` for the enterprise edition
+      // So if the sequencer type is `reference` and we're in community edition,
+      // we need to convert it to `community-reference`.
+      val actualSequencerType =
+        if (sequencerType == "reference") "community-reference" else sequencerType
       DriverBlockSequencerFactory(
-        sequencerType,
+        actualSequencerType,
         SequencerDriver.DriverApiVersion,
         config,
         blockSequencerConfig,
@@ -228,8 +238,5 @@ object CommunitySequencerFactory extends MkSequencerFactory {
         loggerFactory,
         blockSequencerConfig.testingInterceptor,
       )
-
-    case config: SequencerConfig =>
-      throw new UnsupportedOperationException(s"Invalid config type ${config.getClass}")
   }
 }

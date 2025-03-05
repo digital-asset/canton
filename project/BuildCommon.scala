@@ -1023,7 +1023,7 @@ object BuildCommon {
         `community-testing`,
       )
       .settings(
-        sharedCantonSettings,
+        sharedCantonCommunitySettings,
         libraryDependencies ++= Seq(
           scalatest
         ),
@@ -1037,15 +1037,11 @@ object BuildCommon {
       .in(file("community/mock-kms-driver"))
       .dependsOn(
         `kms-driver-api`,
-        `community-base`,
+        `community-base`, // Required for JCE crypto
         `kms-driver-testing` % Test,
       )
       .settings(
-        sharedCantonSettings,
-        // TODO(i19491): Move to non-uber JAR
-        UberLibrary.assemblySettings("mock-kms-driver"),
-        // when building the fat jar, we need to properly merge our artefacts
-        assembly / assemblyMergeStrategy := mergeStrategy((assembly / assemblyMergeStrategy).value),
+        sharedCantonCommunitySettings
       )
 
     // Project for specifying the sequencer driver API
@@ -1471,6 +1467,7 @@ object BuildCommon {
             daml_observability_pekko_http_metrics,
             daml_timer_utils,
             pekko_http,
+            protostuff_parser,
             sttp_apiscpec_openapi_circe_yaml,
             sttp_apiscpec_asyncapi_circe_yaml,
             scalapb_json4s,
@@ -1627,6 +1624,9 @@ object BuildCommon {
     // from the jar file built in the daml repository
     lazy val `ledger-api-value` = project
       .in(file("community/lib/ledger-api-value"))
+      .dependsOn(
+        `google-common-protos-scala`
+      )
       .disablePlugins(
         BufPlugin
       )
@@ -1638,12 +1638,20 @@ object BuildCommon {
         dependencyOverrides ++= Seq(),
         // compile proto files that we've extracted here
         Compile / PB.protoSources ++= Seq(target.value / "protobuf_external"),
+        Compile / PB.targets ++= Seq(
+          PB.gens.plugin("doc") -> (Compile / sourceManaged).value
+        ),
+        Compile / PB.protocOptions := Seq(
+          // the generated file can be found in src_managed, if another location is needed this can be specified via the --doc_out flag
+          "--doc_opt=" + file("community/docs/rst_lapi_value.tmpl") + "," + "proto-docs.rst"
+        ),
         coverageEnabled := false,
         // skip header check
         headerSources / excludeFilter := HiddenFileFilter || "*",
         headerResources / excludeFilter := HiddenFileFilter || "*",
         libraryDependencies ++= Seq(
-          daml_ledger_api_value % "protobuf"
+          daml_ledger_api_value % "protobuf",
+          protoc_gen_doc asProtocPlugin (),
         ),
       )
 
@@ -1673,7 +1681,7 @@ object BuildCommon {
         ),
         Compile / PB.protocOptions := Seq(
           // the generated file can be found in src_managed, if another location is needed this can be specified via the --doc_out flag
-          "--doc_opt=" + (Compile / baseDirectory).value.getAbsolutePath + "/docs/rst_mmd.tmpl," + "proto-docs.rst"
+          "--doc_opt=" + file("community/docs/rst_lapi.tmpl") + "," + "proto-docs.rst"
         ),
         Compile / unmanagedResources += (ThisBuild / baseDirectory).value / "community/ledger-api/VERSION",
         coverageEnabled := false,
