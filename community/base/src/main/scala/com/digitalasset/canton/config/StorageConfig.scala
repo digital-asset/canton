@@ -23,6 +23,14 @@ import scala.jdk.CollectionConverters.*
   *                    If false, the node will wait indefinitely for the database to come up
   * @param migrationsPaths Where should database migrations be read from. Enables specialized DDL for different database servers (e.g. Postgres).
   * @param connectionTimeout How long to wait for acquiring a database connection
+  * @param failedToFatalDelay
+  *   Delay after which, if the storage is continuously in a Failed state, it will escalate to
+  *   Fatal. The default value is 5 minutes. Components that use the storage as a health dependency
+  *   can then determine how to react. Currently, the sequencer declares it as a fatal dependency
+  *   for its liveness health, which means it will transition to NOT_SERVING if this delay is
+  *   exceeded, allowing a monitoring infrastructure to restart it. **NOTE**: Currently this only
+  *   applies to [[com.digitalasset.canton.resource.DbStorageSingle]], which is only used by the
+  *   sequencer. TODO(i24240): Apply the same behavior to `DbStorageMulti`
   * @param warnOnSlowQuery Optional time when we start logging a query as slow.
   * @param warnOnSlowQueryInterval How often to repeat the logging statement for slow queries.
   * @param unsafeCleanOnValidationError TO BE USED ONLY FOR TESTING! Clean the database if validation during DB migration fails.
@@ -32,7 +40,7 @@ import scala.jdk.CollectionConverters.*
   *                          Only migrations above {@code baselineVersion} will then be applied.</p>
   *                          <p>This is useful for databases projects where the initial vendor schema is not empty</p>
   *                          If baseline should be called on migrate for non-empty schemas, { @code false} if not. (default: { @code false})
-  * @param migrateAndStart if true, db migrations will be applied to the database (default is to abort start if db migrates are pending to force an explicit updgrade)
+  * @param migrateAndStart if true, db migrations will be applied to the database (default is to abort start if db migrates are pending to force an explicit upgrade)
   */
 final case class DbParametersConfig(
     maxConnections: Option[Int] = None,
@@ -40,6 +48,7 @@ final case class DbParametersConfig(
     failFastOnStartup: Boolean = true,
     migrationsPaths: Seq[String] = Seq.empty,
     connectionTimeout: NonNegativeFiniteDuration = DbConfig.defaultConnectionTimeout,
+    failedToFatalDelay: NonNegativeFiniteDuration = DbConfig.defaultFailedToFatalDelay,
     warnOnSlowQuery: Option[PositiveFiniteDuration] = None,
     warnOnSlowQueryInterval: PositiveFiniteDuration =
       DbParametersConfig.defaultWarnOnSlowQueryInterval,
@@ -59,7 +68,11 @@ final case class DbParametersConfig(
       paramIfDefined("maxConnections", _.maxConnections),
       param("connectionAllocation", _.connectionAllocation),
       param("failFast", _.failFastOnStartup),
+      paramIfNonEmpty("migrationPaths", _.migrationsPaths.map(_.unquoted)),
+      param("connectionTimeout", _.connectionTimeout),
+      param("failedToFatalDelay", _.failedToFatalDelay),
       paramIfDefined("warnOnSlowQuery", _.warnOnSlowQuery),
+      param("migrateAndStart", _.migrateAndStart),
     )
 }
 
@@ -302,11 +315,19 @@ object CommunityDbConfig {
     protected val stableMigrationPath: String = DbConfig.postgresMigrationsPathStable
 
   }
+
+  object Postgres {
+    // We enable `tcpKeepAlive` in the Postgres JDBC driver in order to improve detection of
+    // failed connections in the Hikari connection pool.
+    // See https://github.com/brettwooldridge/HikariCP/wiki/Setting-Driver-or-OS-TCP-Keepalive
+    val defaultConfig: Config = DbConfig.toConfig(Map("properties.tcpKeepAlive" -> true))
+  }
 }
 
 object DbConfig {
 
   val defaultConnectionTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(5)
+  val defaultFailedToFatalDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMinutes(5)
 
   private val stableDir = "stable"
   private val devDir = "dev"
@@ -375,7 +396,8 @@ object DbConfig {
         enforceDelayClose(
           enforcePgMode(enforceSingleConnection(writeH2UrlIfNotSet(h2.config)))
         ).withFallback(h2.defaultConfig)
-      case postgres: PostgresDbConfig => postgres.config
+      case postgres: PostgresDbConfig =>
+        postgres.config.withFallback(CommunityDbConfig.Postgres.defaultConfig)
       case other => other.config
     }).withFallback(commonDefaults)
   }
