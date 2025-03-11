@@ -4,7 +4,6 @@
 package com.digitalasset.canton.ledger.api.validation
 
 import cats.syntax.traverse.*
-import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v2.commands.Command.Command.{
   Create as ProtoCreate,
   CreateAndExercise as ProtoCreateAndExercise,
@@ -17,6 +16,7 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionRequest,
   PrepareSubmissionRequest,
 }
+import com.digitalasset.base.error.ContextualizedErrorLogger
 import com.digitalasset.canton.data.{DeduplicationPeriod, Offset}
 import com.digitalasset.canton.ledger.api.util.{DurationConversion, TimestampConversion}
 import com.digitalasset.canton.ledger.api.validation.CommandsValidator.{
@@ -42,6 +42,7 @@ import scala.collection.immutable
 final class CommandsValidator(
     validateDisclosedContracts: ValidateDisclosedContracts,
     validateUpgradingPackageResolutions: ValidateUpgradingPackageResolutions,
+    topologyAwarePackageSelectionEnabled: Boolean = false,
 ) {
 
   import FieldValidator.*
@@ -105,7 +106,12 @@ final class CommandsValidator(
       disclosedContracts = validatedDisclosedContracts,
       synchronizerId = Some(synchronizerId),
       packageMap = packageResolutions.packageMap,
-      packagePreferenceSet = packageResolutions.packagePreferenceSet,
+      packagePreferenceSet =
+        if (topologyAwarePackageSelectionEnabled) {
+          // TODO(#23334): move the decision point into the TopologyAwareCommandExecutor
+          prepareRequest.packageIdSelectionPreference.map(Ref.PackageId.assertFromString).toSet
+        } else
+          packageResolutions.packagePreferenceSet,
       prefetchKeys = prefetchKeys,
     )
 
@@ -167,7 +173,12 @@ final class CommandsValidator(
       disclosedContracts = validatedDisclosedContracts,
       synchronizerId = synchronizerId,
       packageMap = packageResolutions.packageMap,
-      packagePreferenceSet = packageResolutions.packagePreferenceSet,
+      packagePreferenceSet =
+        if (topologyAwarePackageSelectionEnabled) {
+          // TODO(#23334): move the decision point into the TopologyAwareCommandExecutor
+          commands.packageIdSelectionPreference.map(Ref.PackageId.assertFromString).toSet
+        } else
+          packageResolutions.packagePreferenceSet,
       prefetchKeys = prefetchKeys,
     )
 

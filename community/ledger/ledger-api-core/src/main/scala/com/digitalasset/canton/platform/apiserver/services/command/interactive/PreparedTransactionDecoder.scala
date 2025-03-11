@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.apiserver.services.command.interactive
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.error.ContextualizedErrorLogger
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.DamlTransaction.Node.VersionedNode
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.Metadata
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.Metadata.ProcessedDisclosedContract.Contract
@@ -15,6 +14,7 @@ import com.daml.ledger.api.v2.interactive.{
   interactive_submission_service as iss,
 }
 import com.daml.ledger.api.v2.value as lapiValue
+import com.digitalasset.base.error.ContextualizedErrorLogger
 import com.digitalasset.canton.data.ProcessedDisclosedContract
 import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.ExecuteRequest
 import com.digitalasset.canton.ledger.api.validation.StricterValueValidator
@@ -23,7 +23,7 @@ import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.SubmitterInfo.ExternallySignedSubmission
 import com.digitalasset.canton.ledger.participant.state.{SubmitterInfo, Update}
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.platform.apiserver.execution.CommandExecutionResult
+import com.digitalasset.canton.platform.apiserver.execution.CommandInterpretationResult
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.PreparedTransactionCodec.*
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.PreparedTransactionDecoder.DeserializationResult
 import com.digitalasset.canton.protocol.{LfNode, LfNodeId}
@@ -52,7 +52,7 @@ import scala.util.Try
 
 object PreparedTransactionDecoder {
   final case class DeserializationResult(
-      commandExecutionResult: CommandExecutionResult,
+      commandExecutionResult: CommandInterpretationResult,
       transactionUUID: UUID,
       mediatorGroup: Int,
   )
@@ -477,7 +477,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
         .transformIntoPartial[ImmArray[com.digitalasset.canton.data.ProcessedDisclosedContract]]
         .toFutureWithLoggedFailures("Failed to deserialize disclosed contracts", logger)
     } yield {
-      val commandExecutionResult = CommandExecutionResult(
+      val commandExecutionResult = CommandInterpretationResult(
         submitterInfo = submitterInfo,
         optSynchronizerId = Some(synchronizerId),
         transactionMeta = transactionMeta,

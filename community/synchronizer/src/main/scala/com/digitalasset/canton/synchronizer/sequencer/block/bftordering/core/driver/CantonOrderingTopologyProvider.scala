@@ -12,6 +12,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.top
   OrderingTopologyProvider,
   TopologyActivationTime,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   OrderingTopology,
   SequencingParameters,
@@ -22,6 +23,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.processing.SequencedTime
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.ExecutionContext
@@ -55,13 +57,14 @@ private[driver] final class CantonOrderingTopologyProvider(
 
     logger.debug(s"Awaiting max timestamp for snapshot at activation time $activationTime")
     val maxTimestampF =
-      // `awaitMaxTimestampUS` is exclusive on its input, so we call it on `activationTime.value`
-      //   rather than on `activationTime.value.immediatePredecessor`.
-      cryptoApi.awaitMaxTimestamp(activationTime.value).map { maxTimestamp =>
-        logger.debug(
-          s"Max timestamp $maxTimestamp awaited successfully for snapshot at activation time $activationTime"
-        )
-        maxTimestamp
+      // `awaitMaxTimestamp` is inclusive on its input, but `activationTime` already reflects the timestamp
+      // that we needs to be observed to retrieve the correct topology snapshot.
+      cryptoApi.awaitMaxTimestamp(SequencedTime(activationTime.value.immediatePredecessor)).map {
+        maxTimestamp =>
+          logger.debug(
+            s"Max timestamp $maxTimestamp awaited successfully for snapshot at activation time $activationTime"
+          )
+          maxTimestamp
       }
 
     logger.debug(s"Querying topology snapshot for activation time $activationTime")
@@ -81,31 +84,31 @@ private[driver] final class CantonOrderingTopologyProvider(
         s"Sequencer group queried successfully on snapshot at $snapshotTimestamp: $maybeSequencerGroup"
       )
 
-      maybePeers = maybeSequencerGroup.map(_.active)
-      maybePeersFirstKnownAt <-
-        maybePeers
+      maybeSequencers = maybeSequencerGroup.map(_.active)
+      maybeSequencersFirstKnownAt <-
+        maybeSequencers
           .map(computeFirstKnownAtTimestamps(_, snapshot))
           .sequence
       _ = logger.debug(
-        s"Peer \"first known at\" timestamps queried successfully on snapshot at $snapshotTimestamp: $maybePeersFirstKnownAt"
+        s"Sequencer \"first known at\" timestamps queried successfully on snapshot at $snapshotTimestamp: $maybeSequencersFirstKnownAt"
       )
 
       sequencingDynamicParameters <- getDynamicSequencingParameters(snapshot.ipsSnapshot)
       _ = logger.debug(
         s"Dynamic sequencing parameters queried successfully on snapshot at $snapshotTimestamp: $sequencingDynamicParameters"
       )
-    } yield maybePeersFirstKnownAt.map { peersFirstKnownAt =>
-      val peersActiveAt = peersFirstKnownAt.view
-        .mapValues(
-          // We first get all the peers from the synchronizer client, so the default value should never be needed.
-          _.fold(TopologyActivationTime(CantonTimestamp.MaxValue)) { case (_, effectiveTime) =>
-            TopologyActivationTime.fromEffectiveTime(effectiveTime)
-          }
-        )
-        .toMap
+    } yield maybeSequencersFirstKnownAt.map { sequencersFirstKnownAt =>
+      val sequencersActiveAt = sequencersFirstKnownAt.view.map { case (sequencerId, firstKnownAt) =>
+        // We first get all the nodes from the synchronizer client, so the default value should never be needed.
+        BftNodeId(SequencerNodeId.toBftNodeId(sequencerId)) -> firstKnownAt.fold(
+          TopologyActivationTime(CantonTimestamp.MaxValue)
+        ) { case (_, effectiveTime) =>
+          TopologyActivationTime.fromEffectiveTime(effectiveTime)
+        }
+      }.toMap
       val topology =
         OrderingTopology(
-          peersActiveAt,
+          sequencersActiveAt,
           sequencingDynamicParameters,
           activationTime,
           areTherePendingCantonTopologyChanges = maxTimestamp.exists { case (_, maxEffectiveTime) =>
@@ -121,17 +124,17 @@ private[driver] final class CantonOrderingTopologyProvider(
   }
 
   private def computeFirstKnownAtTimestamps(
-      peers: Seq[SequencerId],
+      sequencers: Seq[SequencerId],
       snapshot: SynchronizerSnapshotSyncCryptoApi,
   )(implicit traceContext: TraceContext) =
-    peers
-      .map { peerId =>
-        snapshot.ipsSnapshot.memberFirstKnownAt(peerId).map(peerId -> _)
+    sequencers
+      .map { sequencerId =>
+        snapshot.ipsSnapshot.memberFirstKnownAt(sequencerId).map(sequencerId -> _)
       }
       .sequence
-      .map { peerIdsToTimestamps =>
-        logger.debug("Peer \"first known at\" timestamps queried successfully")
-        peerIdsToTimestamps.toMap
+      .map { sequencersToTimestamps =>
+        logger.debug("\"first known at\" timestamps queried successfully")
+        sequencersToTimestamps.toMap
       }
 
   private def getDynamicSequencingParameters(

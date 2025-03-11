@@ -5,29 +5,10 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.dr
 
 import cats.data.EitherT
 import cats.syntax.either.*
-import com.daml.jwt.JwtTimestampLeeway
 import com.daml.metrics.api.MetricsContext
 import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
-import com.digitalasset.canton.config.manual.CantonConfigValidatorDerivation
-import com.digitalasset.canton.config.{
-  AuthServiceConfig,
-  BasicKeepAliveServerConfig,
-  CantonConfigValidator,
-  CantonConfigValidatorInstances,
-  ClientConfig,
-  FullClientConfig,
-  KeepAliveClientConfig,
-  PemFileOrString,
-  ProcessingTimeout,
-  QueryCostMonitoringConfig,
-  ServerConfig,
-  StorageConfig,
-  TlsClientConfig,
-  TlsServerConfig,
-  UniformCantonConfigValidation,
-}
+import com.digitalasset.canton.config.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.CantonNodeParameters
@@ -53,17 +34,15 @@ import com.digitalasset.canton.synchronizer.sequencer.block.BlockOrderer
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.BftOrderingSequencerAdminService
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftOrderingModuleSystemInitializer.BftOrderingStores
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftBlockOrderer.Config
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.AvailabilityModuleConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftBlockOrdererConfig.DefaultAuthenticationTokenManagerConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssConsensusModule
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssSegmentModule.BlockCompletionTimeout
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.PekkoBlockSubscription
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.OutputMetadataStore
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.time.BftTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.networking.GrpcNetworking
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.networking.GrpcNetworking.P2PEndpoint
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.networking.authentication.ServerAuthenticatingServerFilter
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.networking.data.P2PEndpointsStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.OrderingTopologyProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.{
@@ -75,7 +54,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   SystemInitializer,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.ModuleRef
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.NumberIdentifiers.BlockNumber
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BlockNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.snapshot.SequencerSnapshotAdditionalInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
@@ -106,25 +85,23 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import io.grpc.stub.StreamObserver
 import io.grpc.{ServerInterceptors, ServerServiceDefinition}
-import io.netty.handler.ssl.SslContext
 import org.apache.pekko.stream.scaladsl.Source
 import org.apache.pekko.stream.{KillSwitch, Materializer}
 
 import java.security.SecureRandom
 import java.time.Instant
-import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.Random
 
 final class BftBlockOrderer(
-    config: Config,
+    config: BftBlockOrdererConfig,
     sharedLocalStorage: Storage,
     synchronizerId: SynchronizerId,
     sequencerId: SequencerId,
     protocolVersion: ProtocolVersion,
     clock: Clock,
     orderingTopologyProvider: OrderingTopologyProvider[PekkoEnv],
-    authenticationServices: Option[
+    authenticationServicesO: Option[
       AuthenticationServices
     ], // Owned and managed by the sequencer runtime, absent in some tests
     nodeParameters: CantonNodeParameters,
@@ -140,19 +117,19 @@ final class BftBlockOrderer(
     with NamedLogging
     with FlagCloseableAsync {
 
-  import BftBlockOrderer.*
-
   require(
     sequencerSubscriptionInitialHeight >= BlockNumber.First,
     s"The sequencer subscription initial height must be non-negative, but was $sequencerSubscriptionInitialHeight",
   )
+
+  private val thisNode = SequencerNodeId.toBftNodeId(sequencerId)
 
   // The initial metrics factory, which also pre-initializes histograms (as required by OpenTelemetry), is built
   //  very early in the Canton bootstrap process, before unique IDs for synchronizer nodes are even available,
   //  so it doesn't include the sequencer ID in the labels, rather just the node name AKA "instance name".
   //
   //  The instance name, though, coming from the Canton config, is operator-chosen and is, in general, not unique and
-  //  even uncorrelated with the sequencer ID, while the BFT ordering system must refer to peers uniquely and, thus,
+  //  even uncorrelated with the sequencer ID, while the BFT ordering system must refer to nodes uniquely and, thus,
   //  refers to them only by their sequencer IDs.
   //
   //  Since we want to always be able to correlate the sequencer IDs included as additional metrics context, e.g. in
@@ -163,7 +140,7 @@ final class BftBlockOrderer(
   //  Also, we do it as soon as the BFT block orderer is created, so that all BFT ordering sequencers include it in all
   //  emitted metrics.
   private implicit val metricsContext: MetricsContext =
-    MetricsContext(metrics.global.labels.ReportingSequencer -> sequencerId.toProtoPrimitive)
+    MetricsContext(metrics.global.labels.ReportingSequencer -> thisNode)
 
   // Initialize the non-compliant behavior meter so that a value appears even if all behavior is compliant.
   metrics.security.noncompliant.behavior.mark(0)
@@ -175,7 +152,7 @@ final class BftBlockOrderer(
   override protected val loggerFactory: NamedLoggerFactory =
     namedLoggerFactory
       .append(
-        "bftOrderingPeerEndpoint",
+        "bftOrderingEndpoint",
         config.initialNetwork.map(_.serverEndpoint.toString).getOrElse("unknown"),
       )
 
@@ -188,23 +165,53 @@ final class BftBlockOrderer(
       noTracingLogger,
     )
 
-  private val p2pGrpcNetworking =
-    new GrpcNetworking(
-      servers = config.initialNetwork.toList.map { case P2PNetworkConfig(serverEndpoint, _, _) =>
-        createServer(serverEndpoint)
-      },
-      authenticationServices.map { as =>
-        GrpcNetworking.Authentication(
+  private val maybeAuthenticationServices =
+    Option
+      .when(config.initialNetwork.exists(_.endpointAuthentication.enabled))(
+        authenticationServicesO
+      )
+      .flatten
+
+  private val authenticationTokenManagerConfig =
+    config.initialNetwork
+      .map(_.endpointAuthentication.authToken)
+      .getOrElse(DefaultAuthenticationTokenManagerConfig)
+
+  private val maybeServerAuthenticatingFilter =
+    maybeAuthenticationServices.map { authenticationServices =>
+      new ServerAuthenticatingServerFilter(
+        synchronizerId,
+        sequencerId,
+        authenticationServices.syncCryptoForAuthentication.crypto,
+        Seq(protocolVersion),
+        authenticationTokenManagerConfig,
+        timeouts,
+        loggerFactory,
+      )
+    }
+
+  private val p2pGrpcNetworking = {
+    val maybeGrpcNetworkingAuthenticationInitialState =
+      maybeAuthenticationServices.map { authenticationServices =>
+        GrpcNetworking.AuthenticationInitialState(
           protocolVersion,
           synchronizerId,
           sequencerId,
-          as.syncCryptoForAuthentication,
+          authenticationServices,
+          authenticationTokenManagerConfig,
+          serverEndpoint = config.initialNetwork.map { initialNetwork =>
+            P2PEndpoint.fromEndpointConfig(initialNetwork.serverEndpoint.clientConfig)
+          },
           clock,
         )
-      },
+      }
+    new GrpcNetworking(
+      config.initialNetwork.map(_.serverEndpoint).map(createServer),
+      maybeGrpcNetworkingAuthenticationInitialState,
       timeouts,
       loggerFactory,
     )
+  }
 
   private val localStorage = {
     implicit val traceContext: TraceContext = TraceContext.empty
@@ -257,10 +264,10 @@ final class BftBlockOrderer(
     ),
   ) = createModuleSystem()
 
-  // Start the gRPC servers only now because they need the modules to be available before serving requests,
-  //  else tryCreateServerEndpoint could end up with a null input module. However, we still need
+  // Start the gRPC server only now because they need the modules to be available before serving requests,
+  //  else `tryCreateServerEndpoint` could end up with a `null` input module. However, we still need
   //  to create the networking component first because the modules depend on it.
-  p2pGrpcNetworking.serverRole.startServers()
+  p2pGrpcNetworking.serverRole.startServer()
 
   private def createModuleSystem() =
     PekkoModuleSystem.tryCreate(
@@ -326,7 +333,7 @@ final class BftBlockOrderer(
       )
     new BftOrderingModuleSystemInitializer(
       protocolVersion,
-      sequencerId,
+      thisNode,
       config,
       BlockNumber(sequencerSubscriptionInitialHeight),
       // TODO(#18910) test with multiple epoch lengths >= 1 (incl. 1)
@@ -357,7 +364,7 @@ final class BftBlockOrderer(
   ): StreamObserver[BftOrderingServiceReceiveRequest] = {
     p2pGrpcNetworking.serverRole.addClientHandle(clientEndpoint)
     PekkoGrpcP2PNetworking.tryCreateServerHandle(
-      sequencerId,
+      SequencerNodeId.toBftNodeId(sequencerId),
       p2pNetworkInModuleRef,
       clientEndpoint,
       p2pGrpcNetworking.serverRole.cleanupClientHandle,
@@ -393,16 +400,23 @@ final class BftBlockOrderer(
                 ),
                 executionContext,
               ),
-              authenticationServices.map(_.authenticationInterceptor).toList.asJava,
+              List( // Filters are applied in reverse order
+                maybeServerAuthenticatingFilter,
+                maybeAuthenticationServices.map(
+                  _.authenticationServerInterceptor
+                ),
+              ).flatten.asJava,
             )
           )
       // Also offer the authentication service on BFT P2P endpoints, so that the BFT orderers don't have to also know the sequencer API endpoints
-      authenticationServices.fold(logger.info("P2P authentication disabled")) { as =>
+      maybeAuthenticationServices.fold(
+        logger.info("P2P authentication disabled")
+      ) { authenticationServices =>
         logger.info("P2P authentication enabled")
         activeServerBuilder
           .addService(
             SequencerAuthenticationServiceGrpc.bindService(
-              as.sequencerAuthenticationService,
+              authenticationServices.sequencerAuthenticationService,
               executionContext,
             )
           )
@@ -453,16 +467,17 @@ final class BftBlockOrderer(
     blockSubscription.subscription().map(BlockFormat.blockOrdererBlockToRawLedgerBlock(logger))
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] =
-    Seq[AsyncOrSyncCloseable](
-      SyncCloseable("p2pGrpcNetworking.close()", p2pGrpcNetworking.close()),
-      SyncCloseable("p2pServerGrpcExecutor.shutdown()", p2pServerGrpcExecutor.shutdown()),
-      SyncCloseable("blockSubscription.close()", blockSubscription.close()),
-      SyncCloseable("epochStore.close()", epochStore.close()),
-      SyncCloseable("outputStore.close()", outputStore.close()),
-      SyncCloseable("availabilityStore.close()", availabilityStore.close()),
-      SyncCloseable("p2pEndpointsStore.close()", p2pEndpointsStore.close()),
-      SyncCloseable("shutdownPekkoActorSystem()", shutdownPekkoActorSystem()),
-    ) ++
+    maybeServerAuthenticatingFilter.map(_.closeAsync()).getOrElse(Seq.empty) ++
+      Seq[AsyncOrSyncCloseable](
+        SyncCloseable("p2pGrpcNetworking.close()", p2pGrpcNetworking.close()),
+        SyncCloseable("p2pServerGrpcExecutor.shutdown()", p2pServerGrpcExecutor.shutdown()),
+        SyncCloseable("blockSubscription.close()", blockSubscription.close()),
+        SyncCloseable("epochStore.close()", epochStore.close()),
+        SyncCloseable("outputStore.close()", outputStore.close()),
+        SyncCloseable("availabilityStore.close()", availabilityStore.close()),
+        SyncCloseable("p2pEndpointsStore.close()", p2pEndpointsStore.close()),
+        SyncCloseable("shutdownPekkoActorSystem()", shutdownPekkoActorSystem()),
+      ) ++
       Seq[Option[AsyncOrSyncCloseable]](
         Option.when(localStorage != sharedLocalStorage)(
           SyncCloseable("dedicatedLocalStorage.close()", localStorage.close())
@@ -560,123 +575,4 @@ final class BftBlockOrderer(
         f.futureUnlessShutdown().failOnShutdownToAbortException(description)
       )(ErrorLoggingContext.fromTracedLogger(logger))
   }
-}
-
-object BftBlockOrderer {
-
-  val DefaultMaxRequestPayloadBytes: Int = 1 * 1024 * 1024
-  val DefaultMaxMempoolQueueSize: Int = 10 * 1024
-  val DefaultMaxRequestsInBatch: Short = 16
-  val DefaultMinRequestsInBatch: Short = 3
-  val DefaultMaxBatchCreationInterval: FiniteDuration = 100.milliseconds
-  val DefaultMaxBatchesPerProposal: Short = 16
-  val DefaultOutputFetchTimeout: FiniteDuration = 1.second
-
-  /** @param maxRequestsInBatch
-    *   A maximum number of requests in a batch. Needs to be the same across the network for the BFT
-    *   time assumptions to hold. It is validated in runtime.
-    * @param maxBatchesPerBlockProposal
-    *   A maximum number of batches per block proposal (pre-prepare). Needs to be the same across
-    *   the network for the BFT time assumptions to hold. It is validated in runtime.
-    */
-  final case class Config(
-      maxRequestPayloadBytes: Int = DefaultMaxRequestPayloadBytes,
-      maxMempoolQueueSize: Int = DefaultMaxMempoolQueueSize,
-      // TODO(#24184) make a dynamic sequencing parameter
-      maxRequestsInBatch: Short = DefaultMaxRequestsInBatch,
-      minRequestsInBatch: Short = DefaultMinRequestsInBatch,
-      maxBatchCreationInterval: FiniteDuration = DefaultMaxBatchCreationInterval,
-      // TODO(#24184) make a dynamic sequencing parameter
-      maxBatchesPerBlockProposal: Short = DefaultMaxBatchesPerProposal,
-      outputFetchTimeout: FiniteDuration = DefaultOutputFetchTimeout,
-      initialNetwork: Option[P2PNetworkConfig] = None,
-      storage: Option[StorageConfig] = None,
-  ) extends UniformCantonConfigValidation {
-    // The below parameters are not yet dynamically configurable.
-    private val EmptyBlockCreationIntervalMultiplayer = 3L
-    require(
-      BlockCompletionTimeout > AvailabilityModuleConfig.EmptyBlockCreationInterval * EmptyBlockCreationIntervalMultiplayer,
-      s"The block completion timeout should be sufficiently larger (currently $EmptyBlockCreationIntervalMultiplayer times) " +
-        "than the empty block creation interval to avoid unnecessary view changes.",
-    )
-
-    private val maxRequestsPerBlock = maxBatchesPerBlockProposal * maxRequestsInBatch
-    require(
-      maxRequestsPerBlock < BftTime.MaxRequestsPerBlock,
-      s"Maximum block size too big: $maxRequestsInBatch maximum requests per batch and " +
-        s"$maxBatchesPerBlockProposal maximum batches per block proposal means " +
-        s"$maxRequestsPerBlock maximum requests per block, " +
-        s"but the maximum number allowed of requests per block is ${BftTime.MaxRequestsPerBlock}",
-    )
-  }
-  object Config {
-    implicit val configCantonConfigValidator: CantonConfigValidator[Config] =
-      CantonConfigValidatorDerivation[Config]
-  }
-
-  final case class P2PNetworkConfig(
-      serverEndpoint: P2PServerConfig,
-      peerEndpoints: Seq[P2PEndpointConfig],
-      overwriteStoredEndpoints: Boolean = false,
-  ) extends UniformCantonConfigValidation
-  object P2PNetworkConfig {
-    implicit val bftNetworkCanonConfigValidator: CantonConfigValidator[P2PNetworkConfig] =
-      CantonConfigValidatorDerivation[P2PNetworkConfig]
-  }
-
-  final case class P2PServerConfig(
-      override val address: String,
-      override val internalPort: Option[Port] = None,
-      tls: Option[TlsServerConfig] = None,
-      override val maxInboundMessageSize: NonNegativeInt = ServerConfig.defaultMaxInboundMessageSize,
-  ) extends ServerConfig
-      with UniformCantonConfigValidation {
-
-    override val jwtTimestampLeeway: Option[JwtTimestampLeeway] = None
-    override val keepAliveServer: Option[BasicKeepAliveServerConfig] = None
-    override val authServices: Seq[AuthServiceConfig] = Seq.empty
-    override val adminToken: Option[String] = None
-
-    override def sslContext: Option[SslContext] = tls.map(CantonServerBuilder.sslContext(_))
-
-    override def serverCertChainFile: Option[PemFileOrString] = tls.map(_.certChainFile)
-
-    def clientConfig: FullClientConfig =
-      FullClientConfig(
-        address,
-        port,
-        tls = tls.map(_.clientConfig),
-        keepAliveClient = None,
-      )
-  }
-  object P2PServerConfig {
-    implicit val adminServerConfigCantonConfigValidator: CantonConfigValidator[P2PServerConfig] = {
-      import CantonConfigValidatorInstances.*
-      CantonConfigValidatorDerivation[P2PServerConfig]
-    }
-  }
-
-  final case class P2PEndpointConfig(
-      override val address: String,
-      override val port: Port,
-      override val tlsConfig: Option[TlsClientConfig] = Some(
-        TlsClientConfig(trustCollectionFile = None, clientCert = None, enabled = true)
-      ),
-  ) extends ClientConfig
-      with UniformCantonConfigValidation {
-    override val keepAliveClient: Option[KeepAliveClientConfig] = None
-  }
-  object P2PEndpointConfig {
-    implicit val p2pEndpointConfigCantonConfigValidator
-        : CantonConfigValidator[P2PEndpointConfig] = {
-      import CantonConfigValidatorInstances.*
-      CantonConfigValidatorDerivation[P2PEndpointConfig]
-    }
-  }
-
-  final case class EndpointId(
-      address: String,
-      port: Port,
-      tls: Boolean,
-  )
 }

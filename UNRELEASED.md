@@ -12,6 +12,20 @@ Please also consult the [full documentation of this release](https://docs.daml.c
   **NOTE** Currently, this parameter is only used by the `DbStorageSingle` component, which is only used by the sequencer.
 - Addressing a DAR on the admin api is simplified: Instead of the DAR ID concept, we directly use the main package-id, which is synonymous.
   - Renamed all `darId` arguments to `mainPackageId`
+- Topology-aware package selection has been introduced to enhance package selection for smart contract upgrades during command interpretation.
+  When enabled, the new logic leverages the topology state of connected synchronizers to optimally select packages for transactions, ensuring they pass vetting checks on counter-participants.
+  This feature is disabled by default and can be enabled with the following configuration: `participant.ledger-api.topology-aware-package-selection.enabled = true`
+
+## Until 2025-03-03 (Exclusive)
+- The SubmitAndWaitForTransaction endpoint has been changed to expect a SubmitAndWaitForTransactionRequest instead of a
+  SubmitAndWaitRequest.
+- The SubmitAndWaitForTransactionRequest message was added which additionally to the Commands contains the required
+  transaction_format field that defines the format of the transaction that will be returned. To retain the old
+  behavior, the transaction_format field should be defined with:
+    - transaction_shape set to ACS_DELTA
+    - event_format defined with:
+      - filters_by_party containing wildcard-template filter for all original Commands.act_as parties
+      - verbose flag set
 
 ## Until 2025-02-26 (Exclusive)
 - The interactive submission service and external signing authorization logic are now always enabled. The following configuration fields must be removed from the participant's configuration:

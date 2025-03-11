@@ -5,8 +5,8 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
-import com.daml.error.*
 import com.daml.metrics.api.MetricsContext
+import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resolution}
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
@@ -244,18 +244,10 @@ object TransactionProcessor {
     override def underlyingProcessorError(): Option[ProcessorError] = None
   }
 
-  trait TransactionSubmissionError extends TransactionProcessorError with TransactionError {
-    override protected def pretty: Pretty[TransactionSubmissionError] =
-      this.prettyOfString(_ =>
-        this.code.toMsg(
-          cause,
-          correlationId = None,
-          limit = None,
-        ) + "; " + ContextualizedErrorLogger.formatContextAsString(
-          context
-        )
-      )
-  }
+  trait TransactionSubmissionError
+      extends TransactionProcessorError
+      with TransactionError
+      with TransactionErrorPrettyPrinting
 
   object SubmissionErrors extends SubmissionErrorGroup {
 

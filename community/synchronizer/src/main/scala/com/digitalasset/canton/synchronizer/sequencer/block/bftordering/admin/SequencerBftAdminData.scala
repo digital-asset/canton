@@ -21,7 +21,8 @@ import com.digitalasset.canton.sequencer.admin.v30.{
   TlsClientCertificate as ProtoTlsClientCertificate,
   TlsPeerEndpoint as ProtoTlsPeerEndpoint,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftBlockOrderer.P2PEndpointConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftBlockOrdererConfig.P2PEndpointConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.SequencerNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.networking.GrpcNetworking
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.networking.GrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.topology.SequencerId
@@ -213,7 +214,7 @@ object SequencerBftAdminData {
   final case class OrderingTopology(currentEpoch: Long, sequencerIds: Seq[SequencerId]) {
 
     def toProto: GetOrderingTopologyResponse =
-      GetOrderingTopologyResponse(currentEpoch, sequencerIds.map(_.toProtoPrimitive))
+      GetOrderingTopologyResponse(currentEpoch, sequencerIds.map(SequencerNodeId.toBftNodeId))
   }
 
   object OrderingTopology {
