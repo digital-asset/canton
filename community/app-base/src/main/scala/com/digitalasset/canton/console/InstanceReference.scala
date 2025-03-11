@@ -99,7 +99,7 @@ trait LocalInstanceReferenceCommon extends InstanceReferenceCommon with NoTracin
   val consoleEnvironment: ConsoleEnvironment
   private[console] val nodes: Nodes.GenericNodes
 
-  def adminToken: Option[String]
+  def adminToken: Option[String] = None
 
   @Help.Summary("Database related operations")
   @Help.Group("Database")
@@ -369,8 +369,6 @@ trait LocalDomainReference
 
   override protected[console] def startingNode: Option[DomainNodeBootstrap] =
     consoleEnvironment.environment.domains.getStarting(name)
-
-  def adminToken: Option[String] = None
 }
 
 class CommunityLocalDomainReference(
@@ -662,7 +660,7 @@ class LocalParticipantReference(
     new LocalParticipantPartiesAdministrationGroup(this, this, consoleEnvironment, loggerFactory)
 
   /** secret, not publicly documented way to get the admin token */
-  def adminToken: Option[String] = underlying.map(_.adminToken.secret)
+  override def adminToken: Option[String] = underlying.map(_.adminToken.secret)
 
   override def equals(obj: Any): Boolean =
     obj match {

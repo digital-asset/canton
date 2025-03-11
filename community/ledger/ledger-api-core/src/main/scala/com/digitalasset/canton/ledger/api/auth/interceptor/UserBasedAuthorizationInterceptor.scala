@@ -40,11 +40,12 @@ class UserBasedAuthorizationInterceptor(
   import LoggingContextWithTrace.implicitExtractTraceContext
 
   override def headerToClaims(
-      headers: Metadata
+      headers: Metadata,
+      serviceName: String,
   )(implicit loggingContextWithTrace: LoggingContextWithTrace) = {
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContextWithTrace)
     authService
-      .decodeMetadata(headers)
+      .decodeMetadata(headers, serviceName)
       .asScala
       .flatMap(fallbackToIdpAuthService(headers, _))
       .flatMap(resolveAuthenticatedUserRights)

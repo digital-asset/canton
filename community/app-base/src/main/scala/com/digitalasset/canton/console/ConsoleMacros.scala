@@ -664,7 +664,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           applicationId: String,
       ): Map[PartyId, String] = {
         val secret = participant.config.ledgerApi.authServices
-          .collectFirst { case AuthServiceConfig.UnsafeJwtHmac256(secret, _, _, _, _) =>
+          .collectFirst { case AuthServiceConfig.UnsafeJwtHmac256(secret, _, _, _, _, _) =>
             secret.unwrap
           }
           .getOrElse("notasecret")

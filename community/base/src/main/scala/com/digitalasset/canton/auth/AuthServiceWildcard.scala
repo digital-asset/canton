@@ -11,7 +11,8 @@ import java.util.concurrent.{CompletableFuture, CompletionStage}
 /** An AuthService that authorizes all calls by always returning a wildcard [[ClaimSet.Claims]] */
 object AuthServiceWildcard extends AuthService {
   override def decodeMetadata(
-      headers: Metadata
+      headers: Metadata,
+      serviceName: String,
   )(implicit traceContext: TraceContext): CompletionStage[ClaimSet] =
     CompletableFuture.completedFuture(ClaimSet.Claims.Wildcard)
 }

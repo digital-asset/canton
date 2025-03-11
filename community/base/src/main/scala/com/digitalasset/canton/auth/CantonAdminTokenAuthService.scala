@@ -30,7 +30,8 @@ object CantonAdminToken {
 class CantonAdminTokenAuthService(adminTokenO: Option[CantonAdminToken], parent: Seq[AuthService])
     extends AuthService {
   override def decodeMetadata(
-      headers: Metadata
+      headers: Metadata,
+      serviceName: String,
   )(implicit traceContext: TraceContext): CompletionStage[ClaimSet] = {
     val bearerTokenRegex = "Bearer (.*)".r
     val authToken = for {
@@ -41,14 +42,15 @@ class CantonAdminTokenAuthService(adminTokenO: Option[CantonAdminToken], parent:
     } yield ()
     authToken
       .map(_ => wildcard)
-      .getOrElse(if (parent.isEmpty) wildcard else decodeMetadataParent(headers))
+      .getOrElse(if (parent.isEmpty) wildcard else decodeMetadataParent(headers, serviceName))
   }
 
   private val wildcard = CompletableFuture.completedFuture(ClaimSet.Claims.Wildcard: ClaimSet)
   private val deny = CompletableFuture.completedFuture(ClaimSet.Unauthenticated: ClaimSet)
 
   private def decodeMetadataParent(
-      headers: Metadata
+      headers: Metadata,
+      serviceName: String,
   )(implicit traceContext: TraceContext): CompletionStage[ClaimSet] =
     // iterate until we find one claim set which is not unauthenticated
     parent.foldLeft(deny) { case (acc, elem) =>
@@ -56,7 +58,7 @@ class CantonAdminTokenAuthService(adminTokenO: Option[CantonAdminToken], parent:
         if (prevClaims != ClaimSet.Unauthenticated)
           CompletableFuture.completedFuture(prevClaims)
         else
-          elem.decodeMetadata(headers)
+          elem.decodeMetadata(headers, serviceName)
       }
     }
 
