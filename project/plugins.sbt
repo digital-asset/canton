@@ -12,7 +12,7 @@ addSbtPlugin("org.scoverage" % "sbt-scoverage" % "2.0.9")
 addSbtPlugin("com.github.sbt" % "sbt-site-sphinx" % "1.7.0")
 
 // Ensure we have license headers in all relevant source files
-addSbtPlugin("de.heikoseeberger" % "sbt-header" % "5.6.0")
+addSbtPlugin("de.heikoseeberger" % "sbt-header" % "5.10.0")
 
 // Required to "reStart" command which improves working with server applications in sbt. Not spray specific.
 addSbtPlugin("io.spray" % "sbt-revolver" % "0.9.1")

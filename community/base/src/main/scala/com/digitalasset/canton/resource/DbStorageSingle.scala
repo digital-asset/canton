@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.option.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{DbConfig, ProcessingTimeout, QueryCostMonitoringConfig}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.health.ComponentHealthState
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
@@ -22,13 +23,14 @@ import com.digitalasset.canton.resource.DbStorage.{DbAction, DbStorageCreationEx
 import com.digitalasset.canton.time.EnrichedDurations.*
 import com.digitalasset.canton.time.{Clock, PeriodicAction}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.ResourceUtil
+import com.digitalasset.canton.util.{LoggerUtil, ResourceUtil}
 import slick.jdbc.JdbcBackend.Database
 
 import java.sql.SQLException
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future, blocking}
+import scala.jdk.DurationConverters.JavaDurationOps
 
 /** DB Storage implementation that assumes a single process accessing the underlying database. */
 class DbStorageSingle private (
@@ -47,6 +49,7 @@ class DbStorageSingle private (
     with NamedLogging {
 
   private val isActiveRef = new AtomicReference[Boolean](true)
+  private val timeWhenFailureStartedRef = new AtomicReference[Option[CantonTimestamp]](None)
 
   override lazy val initialHealthState: ComponentHealthState =
     if (isActiveRef.get()) ComponentHealthState.Ok()
@@ -119,11 +122,35 @@ class DbStorageSingle private (
       val valid = ResourceUtil.withResource(connection)(
         _.isValid(dbConfig.parameters.connectionTimeout.duration.toSeconds.toInt)
       )
-      if (valid) resolveUnhealthy()
+      if (valid) {
+        timeWhenFailureStartedRef.set(None)
+        resolveUnhealthy()
+      }
       valid
     } catch {
       case e: SQLException =>
-        failureOccurred(DatabaseConnectionLost(e.getMessage))
+        val failedToFatalDelay = dbConfig.parameters.failedToFatalDelay.duration
+        val now = clock.now
+
+        val failureDurationExceededDelay = timeWhenFailureStartedRef.getAndUpdate {
+          case previous @ Some(_) => previous
+          case None => Some(now)
+        } match {
+          case None => false
+          case Some(timeWhenFailureStarted) =>
+            val failureDuration = (now - timeWhenFailureStarted).toScala
+            logger.debug(
+              s"Storage has been failing since $timeWhenFailureStarted (${LoggerUtil.roundDurationForHumans(failureDuration)} ago)"
+            )
+            failureDuration > failedToFatalDelay
+        }
+
+        if (failureDurationExceededDelay)
+          fatalOccurred(
+            s"Storage failed for more than ${LoggerUtil.roundDurationForHumans(failedToFatalDelay)}"
+          )
+        else failureOccurred(DatabaseConnectionLost(e.getMessage))
+
         false
     })).map { active =>
       val old = isActiveRef.getAndSet(active)

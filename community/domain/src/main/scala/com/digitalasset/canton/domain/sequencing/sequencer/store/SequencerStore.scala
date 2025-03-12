@@ -580,6 +580,7 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
 
   /** Reset the watermark to an earlier value, i.e. in case of working as a part of block sequencer.
     * Also sets the sequencer as offline. If current watermark value is before `ts`, it will be left unchanged.
+    * If a watermark doesn't yet exist, it won't be inserted, because it would effectively mean setting it to a future value.
     */
   def resetWatermark(instanceIndex: Int, ts: CantonTimestamp)(implicit
       traceContext: TraceContext
@@ -705,12 +706,12 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
     }
   }
 
-  /** Delete all events that are ahead of the watermark of this sequencer.
+  /** Delete all events and checkpoints that are ahead of the watermark of this sequencer.
     * These events will not have been read and should be removed before returning the sequencer online.
     * Should not be called alongside updating the watermark for this sequencer and only while the sequencer is offline.
     * Returns the watermark that was used for the deletion.
     */
-  def deleteEventsPastWatermark(instanceIndex: Int)(implicit
+  def deleteEventsAndCheckpointsPastWatermark(instanceIndex: Int)(implicit
       traceContext: TraceContext
   ): Future[Option[CantonTimestamp]]
 

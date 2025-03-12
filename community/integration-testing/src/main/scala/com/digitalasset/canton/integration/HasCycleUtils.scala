@@ -11,8 +11,6 @@ import com.digitalasset.canton.examples.java.cycle as M
 import com.digitalasset.canton.topology.PartyId
 
 /** Adds the ability to run cycles to integration tests
-  *
-  * Please note that you need to upload CantonExamples.dar to the ledger before you can use this test
   */
 trait HasCycleUtils[E <: Environment, TCE <: TestConsoleEnvironment[E]] {
   this: BaseIntegrationTest[E, TCE] =>
