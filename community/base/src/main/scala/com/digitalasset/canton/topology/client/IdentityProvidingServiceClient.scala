@@ -105,7 +105,7 @@ trait TopologyClientApi[+T] { this: HasFutureSupervision =>
   /** The approximate timestamp
     *
     * This is either the last observed sequencer timestamp OR the effective timestamp after we
-    * observed the time difference of (effective - sequencer = epsilon) to elapse
+    * observed the time difference of (effective - sequencer = epsilon)
     */
   def approximateTimestamp: CantonTimestamp
 
@@ -172,13 +172,19 @@ trait TopologyClientApi[+T] { this: HasFutureSupervision =>
       timestamp: CantonTimestamp
   )(implicit traceContext: TraceContext): Option[FutureUnlessShutdown[Unit]]
 
-  /** Finds the topology transaction with maximum effective time whose effects would be visible, at
-    * earliest i.e. if delay is 0, in a topology snapshot at `effectiveTime`, and yields the
-    * sequenced and actual effective time of that topology transaction, if necessary after waiting
-    * to observe a timestamp at or after sequencing time `effectiveTime.immediatePredecessor` that
-    * the topology processor has fully processed.
+  /** Returns an optional future which will complete when the sequenced timestamp has been observed
+    *
+    * If the timestamp is already observed, returns None.
     */
-  def awaitMaxTimestamp(sequencedTime: CantonTimestamp)(implicit
+  def awaitSequencedTimestamp(timestampInclusive: SequencedTime)(implicit
+      traceContext: TraceContext
+  ): Option[FutureUnlessShutdown[Unit]]
+
+  /** Finds the transaction with maximum effective time that has been sequenced before or at
+    * `sequencedTime` and yields the sequenced / effective time of that transaction. Potentially
+    * waits for `sequencedTime` to be observed.
+    */
+  def awaitMaxTimestamp(sequencedTime: SequencedTime)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[(SequencedTime, EffectiveTime)]]
 }
@@ -975,9 +981,13 @@ private[client] trait PartyTopologySnapshotLoader
 }
 
 trait VettedPackagesLoader {
-  private[client] def loadVettedPackages(
+  def loadVettedPackages(
       participant: ParticipantId
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Map[PackageId, VettedPackage]]
+
+  def loadVettedPackages(participants: Seq[ParticipantId])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[ParticipantId, Map[PackageId, VettedPackage]]]
 }
 
 trait VettedPackagesSnapshotLoader extends VettedPackagesSnapshotClient with VettedPackagesLoader {

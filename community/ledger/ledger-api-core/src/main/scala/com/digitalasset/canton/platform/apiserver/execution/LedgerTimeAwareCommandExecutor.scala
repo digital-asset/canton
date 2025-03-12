@@ -3,7 +3,9 @@
 
 package com.digitalasset.canton.platform.apiserver.execution
 
+import cats.data.EitherT
 import com.digitalasset.canton.ledger.api.Commands
+import com.digitalasset.canton.ledger.participant.state.RoutingSynchronizerState
 import com.digitalasset.canton.ledger.participant.state.index.MaximumLedgerTime
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
@@ -13,6 +15,7 @@ import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.Time
 import com.digitalasset.daml.lf.value.Value.ContractId
+import monocle.Monocle.toAppliedFocusOps
 
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success}
@@ -36,21 +39,33 @@ private[apiserver] final class LedgerTimeAwareCommandExecutor(
   override def execute(
       commands: Commands,
       submissionSeed: crypto.Hash,
+      routingSynchronizerState: RoutingSynchronizerState,
+      usedForExternallySigningTransaction: Boolean,
   )(implicit
-      loggingContext: LoggingContextWithTrace,
-      ec: ExecutionContext,
-  ): FutureUnlessShutdown[Either[ErrorCause, CommandExecutionResult]] =
-    loop(commands, submissionSeed, maxRetries)
+      loggingContext: LoggingContextWithTrace
+  ): EitherT[FutureUnlessShutdown, ErrorCause, CommandExecutionResult] =
+    EitherT(
+      loop(
+        commands = commands,
+        submissionSeed = submissionSeed,
+        routingSynchronizerState = routingSynchronizerState,
+        retriesLeft = maxRetries,
+        forExternallySigned = usedForExternallySigningTransaction,
+      )
+    )
 
   private[this] def loop(
       commands: Commands,
       submissionSeed: crypto.Hash,
+      routingSynchronizerState: RoutingSynchronizerState,
       retriesLeft: Int,
+      forExternallySigned: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): FutureUnlessShutdown[Either[ErrorCause, CommandExecutionResult]] =
     delegate
-      .execute(commands, submissionSeed)
+      .execute(commands, submissionSeed, routingSynchronizerState, forExternallySigned)
+      .value
       .flatMap {
         case e @ Left(_) =>
           // Permanently failed
@@ -59,19 +74,23 @@ private[apiserver] final class LedgerTimeAwareCommandExecutor(
           // Command execution was successful.
           // Check whether the ledger time used for input is consistent with the output,
           // and advance output time or re-execute the command if necessary.
-          val usedContractIds: Set[ContractId] = cer.transaction
+          val usedContractIds: Set[ContractId] = cer.commandInterpretationResult.transaction
             .inputContracts[ContractId]
             .collect { case id: ContractId => id }
 
           def failed =
             FutureUnlessShutdown.pure(Left(ErrorCause.LedgerTime(maxRetries - retriesLeft)))
-          def success(c: CommandExecutionResult) = FutureUnlessShutdown.pure(Right(c))
+          def success(c: CommandExecutionResult) =
+            FutureUnlessShutdown.pure(Right(c))
           def retry(c: Commands) = {
             metrics.execution.retry.mark()
-            loop(c, submissionSeed, retriesLeft - 1)
+            loop(c, submissionSeed, routingSynchronizerState, retriesLeft - 1, forExternallySigned)
           }
 
-          resolveMaximumLedgerTime(cer.processedDisclosedContracts, usedContractIds)
+          resolveMaximumLedgerTime(
+            cer.commandInterpretationResult.processedDisclosedContracts,
+            usedContractIds,
+          )
             .transformWithHandledAborted {
               case Success(MaximumLedgerTime.NotAvailable) =>
                 success(cer)
@@ -80,7 +99,8 @@ private[apiserver] final class LedgerTimeAwareCommandExecutor(
                   if maxUsedTime <= commands.commands.ledgerEffectiveTime =>
                 success(cer)
 
-              case Success(MaximumLedgerTime.Max(maxUsedTime)) if !cer.dependsOnLedgerTime =>
+              case Success(MaximumLedgerTime.Max(maxUsedTime))
+                  if !cer.commandInterpretationResult.dependsOnLedgerTime =>
                 logger.debug(
                   s"Advancing ledger effective time for the output from ${commands.commands.ledgerEffectiveTime} to $maxUsedTime"
                 )
@@ -125,7 +145,9 @@ private[apiserver] final class LedgerTimeAwareCommandExecutor(
       res: CommandExecutionResult,
       newTime: Time.Timestamp,
   ): CommandExecutionResult =
-    res.copy(transactionMeta = res.transactionMeta.copy(ledgerEffectiveTime = newTime))
+    res
+      .focus(_.commandInterpretationResult.transactionMeta.ledgerEffectiveTime)
+      .replace(newTime)
 
   private[this] def advanceInputTime(cmd: Commands, newTime: Time.Timestamp): Commands =
     cmd.copy(commands = cmd.commands.copy(ledgerEffectiveTime = newTime))

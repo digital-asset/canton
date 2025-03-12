@@ -64,11 +64,11 @@ final class CachingSynchronizerTopologyClient(
 
   private val maxTimestampCache: TracedAsyncLoadingCache[
     FutureUnlessShutdown,
-    CantonTimestamp,
+    SequencedTime,
     Option[(SequencedTime, EffectiveTime)],
   ] = ScaffeineCache.buildTracedAsync[
     FutureUnlessShutdown,
-    CantonTimestamp,
+    SequencedTime,
     Option[(SequencedTime, EffectiveTime)],
   ](
     cache = cachingConfigs.synchronizerClientMaxTimestamp.buildScaffeine(),
@@ -164,6 +164,10 @@ final class CachingSynchronizerTopologyClient(
   )(implicit traceContext: TraceContext): Option[FutureUnlessShutdown[Unit]] =
     delegate.awaitTimestamp(timestamp)
 
+  override def awaitSequencedTimestamp(timestampInclusive: SequencedTime)(implicit
+      traceContext: TraceContext
+  ): Option[FutureUnlessShutdown[Unit]] = delegate.awaitSequencedTimestamp(timestampInclusive)
+
   override def approximateTimestamp: CantonTimestamp = delegate.approximateTimestamp
 
   override def currentSnapshotApproximation(implicit
@@ -224,7 +228,7 @@ final class CachingSynchronizerTopologyClient(
     super.setSynchronizerTimeTracker(tracker)
   }
 
-  override def awaitMaxTimestamp(sequencedTime: CantonTimestamp)(implicit
+  override def awaitMaxTimestamp(sequencedTime: SequencedTime)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[(SequencedTime, EffectiveTime)]] =
     maxTimestampCache.get(sequencedTime)
@@ -315,9 +319,14 @@ private class ForwardingTopologySnapshotClient(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Set[PartyId]] =
     parent.inspectKnownParties(filterParty, filterParticipant)
 
-  override private[client] def loadVettedPackages(participant: ParticipantId)(implicit
+  override def loadVettedPackages(participant: ParticipantId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[PackageId, VettedPackage]] = parent.loadVettedPackages(participant)
+
+  override def loadVettedPackages(participants: Seq[ParticipantId])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[ParticipantId, Map[PackageId, VettedPackage]]] =
+    parent.loadVettedPackages(participants)
 
   override private[client] def loadUnvettedPackagesOrDependenciesUsingLoader(
       participant: ParticipantId,
@@ -455,6 +464,8 @@ class CachingTopologySnapshot(
     .buildTracedAsync[FutureUnlessShutdown, ParticipantId, Map[PackageId, VettedPackage]](
       cache = cachingConfigs.packageVettingCache.buildScaffeine(),
       loader = implicit traceContext => x => parent.loadVettedPackages(x),
+      allLoader =
+        Some(implicit traceContext => participants => parent.loadVettedPackages(participants.toSeq)),
     )(logger, "packageVettingCache")
 
   private val mediatorsCache =
@@ -530,13 +541,7 @@ class CachingTopologySnapshot(
         Map[ParticipantId, ParticipantAttributes]
       ],
   )(implicit traceContext: TraceContext) =
-    // split up the request into separate chunks so that we don't block the cache for too long
-    // when loading very large batches
-    MonadUtil
-      .batchedSequentialTraverse(batchingConfig.parallelism, batchingConfig.maxItemsInBatch)(
-        parties
-      )(parties => partyCache.getAll(parties)(traceContext).map(_.toSeq))
-      .map(_.toMap)
+    getAllBatched(parties)(partyCache.getAll(_)(traceContext))
 
   override def loadParticipantStates(
       participants: Seq[ParticipantId]
@@ -545,10 +550,15 @@ class CachingTopologySnapshot(
   ): FutureUnlessShutdown[Map[ParticipantId, ParticipantAttributes]] =
     participantCache.getAll(participants).map(_.collect { case (k, Some(v)) => (k, v) })
 
-  override private[client] def loadVettedPackages(participant: ParticipantId)(implicit
+  override def loadVettedPackages(participant: ParticipantId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[PackageId, VettedPackage]] =
     packageVettingCache.get(participant)
+
+  override def loadVettedPackages(participants: Seq[ParticipantId])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[ParticipantId, Map[PackageId, VettedPackage]]] =
+    getAllBatched(participants)(packageVettingCache.getAll(_)(traceContext))
 
   private[client] def loadUnvettedPackagesOrDependenciesUsingLoader(
       participant: ParticipantId,
@@ -648,4 +658,15 @@ class CachingTopologySnapshot(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[PartyKeyTopologySnapshotClient.PartyAuthorizationInfo]] =
     partyAuthorizationsCache.get(party)
+
+  private def getAllBatched[K, V](
+      keys: Seq[K]
+  )(fetchAll: Seq[K] => FutureUnlessShutdown[Map[K, V]]): FutureUnlessShutdown[Map[K, V]] =
+    // split up the request into separate chunks so that we don't block the cache for too long
+    // when loading very large batches
+    MonadUtil
+      .batchedSequentialTraverse(batchingConfig.parallelism, batchingConfig.maxItemsInBatch)(keys)(
+        fetchAll(_).map(_.toSeq)
+      )
+      .map(_.toMap)
 }

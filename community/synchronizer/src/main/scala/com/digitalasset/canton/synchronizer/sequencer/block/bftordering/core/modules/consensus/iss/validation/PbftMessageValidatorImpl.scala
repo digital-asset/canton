@@ -6,13 +6,14 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftBlockOrderer
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState.{
   Epoch,
   Segment,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssConsensusModuleMetrics.emitNonCompliance
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.NumberIdentifiers.EpochNumber
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.PrePrepare
 
 trait PbftMessageValidator {
@@ -21,7 +22,7 @@ trait PbftMessageValidator {
 
 final class PbftMessageValidatorImpl(segment: Segment, epoch: Epoch, metrics: BftOrderingMetrics)(
     abort: String => Nothing
-)(implicit mc: MetricsContext, config: BftBlockOrderer.Config)
+)(implicit mc: MetricsContext, config: BftBlockOrdererConfig)
     extends PbftMessageValidator {
 
   import PbftMessageValidatorImpl.*
@@ -209,32 +210,42 @@ final class PbftMessageValidatorImpl(segment: Segment, epoch: Epoch, metrics: Bf
     val canonicalCommitSet = prePrepare.canonicalCommitSet.sortedCommits
     val epochNumber = epoch.info.number
 
+    def validate(topology: OrderingTopology) =
+      for {
+        _ <- Either.cond(
+          topology.hasStrongQuorum(canonicalCommitSet.size),
+          (), {
+            emitNonComplianceMetrics(prePrepare)
+            s"Canonical commit set for block ${prePrepare.blockMetadata} has size ${canonicalCommitSet.size} " +
+              s"which is below the strong quorum of ${topology.strongQuorum}"
+          },
+        )
+        // This check is stricter than needed, i.e., all commit messages are checked. It's because nodes always send
+        //  exactly the strong quorum of commits (for performance and simplicity).
+        _ <- canonicalCommitSet.traverse(commit =>
+          Either.cond(
+            topology.contains(commit.from),
+            (), {
+              emitNonComplianceMetrics(prePrepare)
+              s"Canonical commit set for block ${prePrepare.blockMetadata} contains commit from '${commit.from}' " +
+                s"that is not part of current topology ${topology.nodes}"
+            },
+          )
+        )
+      } yield ()
+
     canonicalCommitSet
       .map(_.message.blockMetadata.epochNumber)
       .headOption
       .map { canonicalCommitSetEpoch =>
         val previousEpochNumber = epochNumber - 1
-        val messagePrefix =
-          s"Canonical commit set for block ${prePrepare.blockMetadata} has size ${canonicalCommitSet.size} " +
-            "which is below the strong quorum of"
+
         if (canonicalCommitSetEpoch == epochNumber) {
           val topology = epoch.currentMembership.orderingTopology
-          Either.cond(
-            topology.hasStrongQuorum(canonicalCommitSet.size),
-            (), {
-              emitNonComplianceMetrics(prePrepare)
-              s"$messagePrefix ${topology.strongQuorum}"
-            },
-          )
+          validate(topology)
         } else if (canonicalCommitSetEpoch == previousEpochNumber) {
           val topology = epoch.previousMembership.orderingTopology
-          Either.cond(
-            topology.hasStrongQuorum(canonicalCommitSet.size),
-            (), {
-              emitNonComplianceMetrics(prePrepare)
-              s"$messagePrefix ${topology.strongQuorum}"
-            },
-          )
+          validate(topology)
         } else {
           emitNonComplianceMetrics(prePrepare)
           Left(

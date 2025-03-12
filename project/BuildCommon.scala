@@ -1028,7 +1028,7 @@ object BuildCommon {
           scalatest
         ),
         // TODO(i19491): Move to non-uber JAR
-        UberLibrary.assemblySettings("kms-driver-testing"),
+        UberLibrary.assemblySettings("kms-driver-testing", includeDeps = true),
         // when building the fat jar, we need to properly merge our artefacts
         assembly / assemblyMergeStrategy := mergeStrategy((assembly / assemblyMergeStrategy).value),
       )
