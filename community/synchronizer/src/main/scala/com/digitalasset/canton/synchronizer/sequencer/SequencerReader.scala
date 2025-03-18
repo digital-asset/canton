@@ -209,7 +209,83 @@ class SequencerReader(
         registeredTopologyClientMember.memberId,
         loggerFactoryForMember,
       )
-      reader.from(offset, initialReadState)
+      reader.from(_.counter < offset, initialReadState)
+    })
+
+  def readV2(member: Member, timestampInclusive: Option[CantonTimestamp])(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, CreateSubscriptionError, Sequencer.EventSource] =
+    performUnlessClosingEitherUSF(functionFullName)(for {
+      registeredTopologyClientMember <- EitherT
+        .fromOptionF(
+          store.lookupMember(topologyClientMember),
+          CreateSubscriptionError.UnknownMember(topologyClientMember),
+        )
+        .leftWiden[CreateSubscriptionError]
+      registeredMember <- EitherT
+        .fromOptionF(
+          store.lookupMember(member),
+          CreateSubscriptionError.UnknownMember(member),
+        )
+        .leftWiden[CreateSubscriptionError]
+      // check they haven't been disabled
+      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+        registeredMember.enabled,
+        CreateSubscriptionError.MemberDisabled(member): CreateSubscriptionError,
+      )
+      // We use the sequencing time of the topology transaction that registered the member on the synchronizer
+      // as the latestTopologyClientRecipientTimestamp
+      memberOnboardingTxSequencingTime <- EitherT.right(
+        syncCryptoApi.headSnapshot.ipsSnapshot
+          .memberFirstKnownAt(member)
+          .map {
+            case Some((sequencedTime, _)) => sequencedTime.value
+            case None =>
+              ErrorUtil.invalidState(
+                s"Member $member unexpectedly not known to the topology client"
+              )
+          }
+      )
+      initialReadState <- EitherT.right(
+        startFromClosestCounterCheckpointV2(
+          ReadState.initial(
+            member,
+            registeredMember,
+            latestTopologyClientRecipientTimestamp = memberOnboardingTxSequencingTime,
+          ),
+          timestampInclusive,
+        )
+      )
+      // validate we are in the bounds of the data that this sequencer can serve
+      lowerBoundO <- EitherT.right(store.fetchLowerBound())
+      _ <- EitherT
+        .cond[FutureUnlessShutdown](
+          lowerBoundO.forall(_ <= initialReadState.nextReadTimestamp),
+          (), {
+            val lowerBoundText = lowerBoundO.map(_.toString).getOrElse("epoch")
+            val timestampText = timestampInclusive
+              .map(timestamp => s"$timestamp (inclusive)")
+              .getOrElse("the beginning")
+            val errorMessage =
+              show"Subscription for $member from $timestampText would require reading data from ${initialReadState.nextReadTimestamp} but our lower bound is ${lowerBoundText.unquoted}."
+
+            logger.error(errorMessage)
+            CreateSubscriptionError.EventsUnavailableForTimestamp(timestampInclusive, errorMessage)
+          },
+        )
+        .leftWiden[CreateSubscriptionError]
+    } yield {
+      val loggerFactoryForMember = loggerFactory.append("subscriber", member.toString)
+      val reader = new EventsReader(
+        member,
+        registeredMember,
+        registeredTopologyClientMember.memberId,
+        loggerFactoryForMember,
+      )
+      reader.from(
+        event => timestampInclusive.exists(event.unvalidatedEvent.timestamp < _),
+        initialReadState,
+      )
     })
 
   private[SequencerReader] class EventsReader(
@@ -223,11 +299,14 @@ class SequencerReader(
 
     private def unvalidatedEventsSourceFromCheckpoint(initialReadState: ReadState)(implicit
         traceContext: TraceContext
-    ): Source[(SequencerCounter, Sequenced[IdOrPayload]), NotUsed] =
+    ): Source[(SequencerCounter, PreviousEventTimestamp, Sequenced[IdOrPayload]), NotUsed] =
       eventSignaller
         .readSignalsForMember(member, registeredMember.memberId)
         .via(
-          FetchLatestEventsFlow[(SequencerCounter, Sequenced[IdOrPayload]), ReadState](
+          FetchLatestEventsFlow[
+            (SequencerCounter, PreviousEventTimestamp, Sequenced[IdOrPayload]),
+            ReadState,
+          ](
             initialReadState,
             state => fetchUnvalidatedEventsBatchFromCheckpoint(state)(traceContext),
             (state, _) => !state.lastBatchWasFull,
@@ -341,6 +420,7 @@ class SequencerReader(
           Either[(CantonTimestamp, TopologyTimestampVerificationError), SyncCryptoApi]
         ],
         counter: SequencerCounter,
+        previousTimestamp: PreviousEventTimestamp,
         unvalidatedEvent: Sequenced[P],
     ) {
       def mapEventPayload[Q](f: P => Q): ValidatedSnapshotWithEvent[Q] =
@@ -348,17 +428,18 @@ class SequencerReader(
           topologyClientTimestampBefore,
           snapshotOrError,
           counter,
+          previousTimestamp,
           unvalidatedEvent.map(f),
         )
     }
 
     def validateEvent(
         topologyClientTimestampBefore: Option[CantonTimestamp],
-        sequenced: (SequencerCounter, Sequenced[IdOrPayload]),
+        sequenced: (SequencerCounter, PreviousEventTimestamp, Sequenced[IdOrPayload]),
     ): FutureUnlessShutdown[
       (TopologyClientTimestampAfter, ValidatedSnapshotWithEvent[IdOrPayload])
     ] = {
-      val (counter, unvalidatedEvent) = sequenced
+      val (counter, previousTimestamp, unvalidatedEvent) = sequenced
 
       def validateTopologyTimestamp(
           topologyTimestamp: CantonTimestamp,
@@ -393,6 +474,7 @@ class SequencerReader(
               topologyClientTimestampBefore,
               Some(snapshotOrError.leftMap(topologyTimestamp -> _)),
               counter,
+              previousTimestamp,
               unvalidatedEvent,
             )
           }
@@ -415,6 +497,7 @@ class SequencerReader(
               topologyClientTimestampBefore,
               None,
               counter,
+              previousTimestamp,
               unvalidatedEvent,
             )
           )
@@ -426,7 +509,12 @@ class SequencerReader(
         snapshotWithEvent: ValidatedSnapshotWithEvent[Batch[ClosedEnvelope]]
     ): FutureUnlessShutdown[UnsignedEventData] = {
       implicit val traceContext = snapshotWithEvent.unvalidatedEvent.traceContext
-      import snapshotWithEvent.{counter, topologyClientTimestampBefore, unvalidatedEvent}
+      import snapshotWithEvent.{
+        counter,
+        previousTimestamp,
+        topologyClientTimestampBefore,
+        unvalidatedEvent,
+      }
 
       def validationSuccess(
           eventF: FutureUnlessShutdown[SequencedEvent[ClosedEnvelope]],
@@ -451,6 +539,7 @@ class SequencerReader(
           val eventF =
             mkSequencedEvent(
               counter,
+              previousTimestamp,
               unvalidatedEvent,
               None,
               topologyClientTimestampBefore,
@@ -461,6 +550,7 @@ class SequencerReader(
           val eventF =
             mkSequencedEvent(
               counter,
+              previousTimestamp,
               unvalidatedEvent,
               Some(topologySnapshot.ipsSnapshot),
               topologyClientTimestampBefore,
@@ -501,6 +591,7 @@ class SequencerReader(
               )
             DeliverError.create(
               counter,
+              previousTimestamp,
               unvalidatedEvent.timestamp,
               synchronizerId,
               unvalidatedEvent.event.messageId,
@@ -514,6 +605,7 @@ class SequencerReader(
           } else {
             Deliver.create(
               counter,
+              previousTimestamp,
               unvalidatedEvent.timestamp,
               synchronizerId,
               None,
@@ -579,7 +671,10 @@ class SequencerReader(
             .tapOnShutdown(validatedSnapshotsWithEvents.killSwitch.shutdown())
         )
 
-    def from(startAt: SequencerCounter, initialReadState: ReadState)(implicit
+    def from(
+        dropWhile: ValidatedSnapshotWithEvent[IdOrPayload] => Boolean,
+        initialReadState: ReadState,
+    )(implicit
         traceContext: TraceContext
     ): Sequencer.EventSource = {
       val unvalidatedEventsSrc = unvalidatedEventsSourceFromCheckpoint(initialReadState)
@@ -589,7 +684,7 @@ class SequencerReader(
       val eventsSource =
         validatedEventSrc
           // drop events we don't care about before fetching payloads
-          .dropWhile(_.counter < startAt)
+          .dropWhile(dropWhile)
           .viaMat(KillSwitches.single)(Keep.both)
           .injectKillSwitch { case (_, killSwitch) => killSwitch }
           .via(fetchPayloadsForEventsBatch())
@@ -648,7 +743,9 @@ class SequencerReader(
         readState: ReadState
     )(implicit
         traceContext: TraceContext
-    ): FutureUnlessShutdown[(ReadState, Seq[(SequencerCounter, Sequenced[IdOrPayload])])] =
+    ): FutureUnlessShutdown[
+      (ReadState, Seq[(SequencerCounter, PreviousEventTimestamp, Sequenced[IdOrPayload])])
+    ] =
       for {
         readEvents <- store.readEvents(
           readState.memberId,
@@ -660,9 +757,14 @@ class SequencerReader(
         // we may be rebuilding counters from a checkpoint before what was actually requested
         // in which case don't return events that we don't need to serve
         val nextSequencerCounter = readState.nextCounterAccumulator
-        val eventsWithCounter =
-          readEvents.events.zipWithIndex.map { case (event, n) =>
-            (nextSequencerCounter + n, event)
+        val (_, eventsWithCounterAndPTReversed) =
+          readEvents.events.zipWithIndex.foldLeft(
+            (
+              readState.nextPreviousEventTimestamp,
+              List.empty[(SequencerCounter, PreviousEventTimestamp, Sequenced[IdOrPayload])],
+            )
+          ) { case ((previousTimestamp, sofar), (event, n)) =>
+            (Some(event.timestamp), (nextSequencerCounter + n, previousTimestamp, event) +: sofar)
           }
         val newReadState = readState.update(readEvents, config.readBatchSize)
         if (newReadState.nextReadTimestamp < readState.nextReadTimestamp) {
@@ -673,7 +775,7 @@ class SequencerReader(
         if (logger.underlying.isDebugEnabled) {
           newReadState.changeString(readState).foreach(logger.debug(_))
         }
-        (newReadState, eventsWithCounter)
+        (newReadState, eventsWithCounterAndPTReversed.reverse)
       }
 
     private def signEvent(
@@ -722,6 +824,7 @@ class SequencerReader(
       */
     private def mkSequencedEvent(
         counter: SequencerCounter,
+        previousTimestamp: PreviousEventTimestamp,
         event: Sequenced[Batch[ClosedEnvelope]],
         topologySnapshotO: Option[
           TopologySnapshot
@@ -783,6 +886,7 @@ class SequencerReader(
             val filteredBatch = Batch.filterClosedEnvelopesFor(batch, member, memberGroupRecipients)
             Deliver.create[ClosedEnvelope](
               counter,
+              previousTimestamp,
               timestamp,
               synchronizerId,
               messageIdO,
@@ -804,6 +908,7 @@ class SequencerReader(
           FutureUnlessShutdown.pure(
             Deliver.create[ClosedEnvelope](
               counter,
+              previousTimestamp,
               timestamp,
               synchronizerId,
               Some(messageId),
@@ -820,6 +925,7 @@ class SequencerReader(
           FutureUnlessShutdown.pure(
             DeliverError.create(
               counter,
+              previousTimestamp,
               timestamp,
               synchronizerId,
               messageId,
@@ -842,16 +948,48 @@ class SequencerReader(
         readState.memberId,
         requestedCounter,
       )
+      previousEventTimestamp <-
+        closestCheckpoint.fold(FutureUnlessShutdown.pure(None: Option[CantonTimestamp]))(
+          checkpoint => store.fetchPreviousEventTimestamp(readState.memberId, checkpoint.timestamp)
+        )
     } yield {
       val startText = closestCheckpoint.fold("the beginning")(_.toString)
       logger.debug(
         s"Subscription for ${readState.member} at $requestedCounter will start from $startText"
       )
-      closestCheckpoint.fold(readState)(readState.startFromCheckpoint)
+      closestCheckpoint.fold(readState)(checkpoint =>
+        readState.startFromCheckpoint(checkpoint, previousEventTimestamp)
+      )
+    }
+
+  /** Update the read state to start from the closest counter checkpoint if available */
+  private def startFromClosestCounterCheckpointV2(
+      readState: ReadState,
+      timestampInclusive: Option[CantonTimestamp],
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[ReadState] =
+    for {
+      closestCheckpoint <- store.fetchClosestCheckpointBeforeV2(
+        readState.memberId,
+        timestampInclusive,
+      )
+      previousEventTimestamp <-
+        closestCheckpoint.fold(FutureUnlessShutdown.pure(None: Option[CantonTimestamp]))(
+          checkpoint => store.fetchPreviousEventTimestamp(readState.memberId, checkpoint.timestamp)
+        )
+    } yield {
+      val startText = closestCheckpoint.fold("the beginning")(_.toString)
+      logger.debug(
+        s"Subscription for ${readState.member} at $timestampInclusive (inclusive) will start from $startText"
+      )
+      closestCheckpoint.fold(readState)(checkpoint =>
+        readState.startFromCheckpoint(checkpoint, previousEventTimestamp)
+      )
     }
 }
 
 object SequencerReader {
+
+  type PreviousEventTimestamp = Option[CantonTimestamp]
 
   /** State to keep track of when serving a read subscription */
   private[SequencerReader] final case class ReadState(
@@ -861,6 +999,7 @@ object SequencerReader {
       latestTopologyClientRecipientTimestamp: Option[CantonTimestamp],
       lastBatchWasFull: Boolean = false,
       nextCounterAccumulator: SequencerCounter = SequencerCounter.Genesis,
+      nextPreviousEventTimestamp: Option[CantonTimestamp] = None,
   ) extends PrettyPrinting {
 
     def changeString(previous: ReadState): Option[String] = {
@@ -869,6 +1008,11 @@ object SequencerReader {
       val items = Seq(
         build(nextReadTimestamp, previous.nextReadTimestamp, "nextReadTs"),
         build(nextCounterAccumulator, previous.nextCounterAccumulator, "nextCounterAcc"),
+        build(
+          nextPreviousEventTimestamp,
+          previous.nextPreviousEventTimestamp,
+          "nextPreviousEventTimestamp",
+        ),
         build(lastBatchWasFull, previous.lastBatchWasFull, "lastBatchWasFull"),
       ).flatten
       if (items.nonEmpty) {
@@ -884,6 +1028,12 @@ object SequencerReader {
       copy(
         // increment the counter by the number of events we've now processed
         nextCounterAccumulator = nextCounterAccumulator + readEvents.events.size.toLong,
+
+        // set the previous event timestamp to the last event we've read or keep the current one if we got no results
+        nextPreviousEventTimestamp = readEvents.events.lastOption match {
+          case Some(event) => Some(event.timestamp)
+          case None => nextPreviousEventTimestamp
+        },
         // set the timestamp to next timestamp from the read events or keep the current timestamp if we got no results
         nextReadTimestamp = readEvents.nextTimestamp
           .getOrElse(nextReadTimestamp),
@@ -894,11 +1044,15 @@ object SequencerReader {
     /** Apply a previously recorded counter checkpoint so that we don't have to start from 0 on
       * every subscription
       */
-    def startFromCheckpoint(checkpoint: CounterCheckpoint): ReadState =
+    def startFromCheckpoint(
+        checkpoint: CounterCheckpoint,
+        previousEventTimestamp: Option[CantonTimestamp],
+    ): ReadState =
       // with this checkpoint we'll start reading from this timestamp and as reads are not inclusive we'll receive the next event after this checkpoint first
       copy(
         nextCounterAccumulator = checkpoint.counter + 1,
         nextReadTimestamp = checkpoint.timestamp,
+        nextPreviousEventTimestamp = previousEventTimestamp,
         latestTopologyClientRecipientTimestamp = checkpoint.latestTopologyClientTimestamp,
       )
 
@@ -909,6 +1063,7 @@ object SequencerReader {
       param("latestTopologyClientRecipientTimestamp", _.latestTopologyClientRecipientTimestamp),
       param("lastBatchWasFull", _.lastBatchWasFull),
       param("nextCounterAccumulator", _.nextCounterAccumulator),
+      param("nextPreviousEventTimestamp", _.nextPreviousEventTimestamp),
     )
   }
 

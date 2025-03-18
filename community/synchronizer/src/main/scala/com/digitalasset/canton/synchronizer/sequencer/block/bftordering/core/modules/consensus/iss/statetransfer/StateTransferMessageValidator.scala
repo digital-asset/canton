@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer
 
-import com.digitalasset.canton.crypto.{HashPurpose, SigningKeyUsage}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.shortType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.CryptoProvider
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.CryptoProvider.AuthenticatedMessageType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
@@ -33,14 +33,9 @@ object StateTransferMessageValidator {
         s"'$from' is requesting state transfer while not being active, active nodes are: $nodes",
       )
       _ <- Either.cond(
-        request.startEpoch > Genesis.GenesisEpochNumber,
+        request.epoch > Genesis.GenesisEpochNumber,
         (),
-        s"state transfer is supported only after genesis, but start epoch ${request.startEpoch} received",
-      )
-      _ <- Either.cond(
-        request.startEpoch > request.latestCompletedEpoch,
-        (),
-        s"start epoch ${request.startEpoch} is not greater than latest completed epoch ${request.latestCompletedEpoch}",
+        s"state transfer is supported only after genesis, but start epoch ${request.epoch} received",
       )
     } yield ()
   }
@@ -60,8 +55,7 @@ object StateTransferMessageValidator {
         activeCryptoProvider
           .verifySignedMessage(
             unverifiedMessage,
-            HashPurpose.BftSignedStateTransferMessage,
-            SigningKeyUsage.ProtocolOnly,
+            AuthenticatedMessageType.BftSignedStateTransferMessage,
           )
       ) {
         case Failure(exception) =>

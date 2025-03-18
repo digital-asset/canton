@@ -4,7 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss
 
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.{HashPurpose, SigningKeyUsage, SyncCryptoError}
+import com.digitalasset.canton.crypto.SyncCryptoError
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState.Epoch
@@ -14,6 +14,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.EpochInProgress
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.shortType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.CryptoProvider
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.CryptoProvider.AuthenticatedMessageType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
@@ -270,7 +271,7 @@ class IssSegmentModule[E <: Env[E]](
           if (leaderSegmentState.exists(_.moreSlotsToAssign))
             initiatePull(orderedBatchIds)
           else if (orderedBatchIds.nonEmpty)
-            availability.asyncSend(Availability.Consensus.Ack(orderedBatchIds))
+            availability.asyncSend(Availability.Consensus.Ordered(orderedBatchIds))
         }
 
         // Some block completion logic is in the parent ISS consensus module,
@@ -353,7 +354,7 @@ class IssSegmentModule[E <: Env[E]](
 
     def handleStore(store: StoreResult, sendMsg: () => Unit): Unit = store match {
       case StorePrePrepare(prePrepare) =>
-        context.pipeToSelf(epochStore.addPrePrepare(prePrepare)) {
+        pipeToSelfWithFutureTracking(epochStore.addPrePrepare(prePrepare)) {
           case Failure(exception) =>
             logAsyncException(exception)
             // We can't send messages back from here as the module might be already stopped.
@@ -415,8 +416,7 @@ class IssSegmentModule[E <: Env[E]](
             case Left(message) =>
               cryptoProvider.signMessage(
                 message,
-                HashPurpose.BftSignedConsensusMessage,
-                SigningKeyUsage.ProtocolOnly,
+                AuthenticatedMessageType.BftSignedConsensusMessage,
               )
             case Right(signedMessage) =>
               context.pureFuture(Right(signedMessage))
@@ -513,8 +513,7 @@ class IssSegmentModule[E <: Env[E]](
     pipeToSelfWithFutureTracking(
       cryptoProvider.signMessage(
         pbftMessage,
-        HashPurpose.BftSignedConsensusMessage,
-        SigningKeyUsage.ProtocolOnly,
+        AuthenticatedMessageType.BftSignedConsensusMessage,
       )
     ) {
       case Failure(exception) =>
@@ -537,8 +536,7 @@ class IssSegmentModule[E <: Env[E]](
     pipeToSelfWithFutureTracking(
       cryptoProvider.signMessage(
         message,
-        HashPurpose.BftSignedRetransmissionMessage,
-        SigningKeyUsage.ProtocolOnly,
+        AuthenticatedMessageType.BftSignedRetransmissionMessage,
       )
     ) {
       case Failure(exception) =>
@@ -560,7 +558,7 @@ class IssSegmentModule[E <: Env[E]](
     }
 
   private def initiatePull(
-      ackedBatchIds: Seq[BatchId] = Seq.empty
+      orderedBatchIds: Seq[BatchId] = Seq.empty
   )(implicit traceContext: TraceContext): Unit = {
     logger.debug("Consensus requesting new proposal from local availability")
     availability.asyncSend(
@@ -568,7 +566,7 @@ class IssSegmentModule[E <: Env[E]](
         epoch.currentMembership.orderingTopology,
         cryptoProvider,
         epoch.info.number,
-        if (ackedBatchIds.nonEmpty) Some(Availability.Consensus.Ack(ackedBatchIds)) else None,
+        orderedBatchIds,
       )
     )
   }

@@ -29,12 +29,12 @@ import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success, Try}
 
-sealed trait LifeCycleRegistrationHandle {
+trait LifeCycleRegistrationHandle {
   def cancel(): Boolean
   def isScheduled: Boolean
 }
 
-sealed trait HasRunOnClosing {
+trait HasRunOnClosing {
 
   /** Returns whether the component is closing or has already been closed. No new tasks can be added
     * with [[runOnClose]] during closing.
@@ -45,20 +45,43 @@ sealed trait HasRunOnClosing {
     *
     * @return
     *   An [[com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome]] indicates that the task will
-    *   have been run when the [[LifeCycleManager.closeAsync]] method completes unless the returned
-    *   [[LifeCycleRegistrationHandle]] was used to cancel the task or the task has been
-    *   [[RunOnClosing.done]] beforehand.
+    *   have been run when the `LifeCycleManager`'s `closeAsync` method completes or when
+    *   `AutoCloseable`'s `close` method returns, unless the returned `LifeCycleRegistrationHandle`
+    *   was used to cancel the task or the task has been done beforehand.
     *   [[com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown]] if the task is not
     *   run due to closing. This always happens if [[isClosing]] returns true.
     */
   def runOnClose(task: RunOnClosing): UnlessShutdown[LifeCycleRegistrationHandle]
+
+  /** Register a task to run when closing is initiated, or run it immediately if closing is already
+    * ongoing. Unlike [[runOnClose]], this method does not guarantee that this task will have run by
+    * the time the `LifeCycleManager`'s `closeAsync` method completes or `AutoCloseable`'s `close`
+    * returns. This is because the task is run immediately if the component has already been closed.
+    */
+  def runOnOrAfterClose(
+      task: RunOnClosing
+  )(implicit traceContext: TraceContext): LifeCycleRegistrationHandle =
+    runOnClose(task).onShutdown {
+      runTaskUnlessDone(task)
+      LifeCycleManager.DummyHandle
+    }
+
+  /** Variant of [[runOnOrAfterClose]] that does not return a
+    * [[com.digitalasset.canton.lifecycle.LifeCycleRegistrationHandle]].
+    */
+  final def runOnOrAfterClose_(task: RunOnClosing)(implicit traceContext: TraceContext): Unit =
+    runOnOrAfterClose(task).discard
+
+  protected[this] def runTaskUnlessDone(task: RunOnClosing)(implicit
+      traceContext: TraceContext
+  ): Unit
 }
 
-sealed trait HasSynchronizeWithClosing extends HasRunOnClosing {
+trait HasSynchronizeWithClosing extends HasRunOnClosing {
 
   /** Runs the computation `f` only if the component is not yet closing. If so, the component will
-    * delay releasing its resources until `f` has finished or the [[synchronizeWithClosingPatience]]
-    * has elapsed.
+    * delay releasing its resources until `f` has finished or the
+    * [[LifeCycleManager.synchronizeWithClosingPatience]] has elapsed.
     *
     * @return
     *   [[com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown]] if `f` has not
@@ -67,18 +90,39 @@ sealed trait HasSynchronizeWithClosing extends HasRunOnClosing {
     * @see
     *   HasRunOnClosing.isClosing
     */
+  @SuppressWarnings(Array("org.wartremover.warts.TryPartial"))
   def synchronizeWithClosing[A](name: String)(f: => A)(implicit
       traceContext: TraceContext
-  ): UnlessShutdown[A]
+  ): UnlessShutdown[A] =
+    synchronizeWithClosingF(name)(Try(f)).map(_.get)
 
   /** Runs the computation `f` only if the component is not yet closing. If so, the component will
     * delay releasing its resources until `f` has completed (as defined by the
     * [[com.digitalasset.canton.util.Thereafter]] instance) or the
-    * [[synchronizeWithClosingPatience]] has elapsed.
+    * [[LifeCycleManager.synchronizeWithClosingPatience]] has elapsed.
+    *
+    * @return
+    *   The computation completes with
+    *   [[com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown]] if `f` has not
+    *   run. Otherwise it is the result of running `f`.
+    *
+    * @see
+    *   HasRunOnClosing.isClosing
+    */
+  def synchronizeWithClosingUSF[F[_], A](name: String)(f: => F[A])(implicit
+      traceContext: TraceContext,
+      F: Thereafter[F],
+      A: AbsorbUnlessShutdown[F],
+  ): F[A] = A.absorbOuter(synchronizeWithClosingF(name)(f))
+
+  /** Runs the computation `f` only if the component is not yet closing. If so, the component will
+    * delay releasing its resources until `f` has completed (as defined by the
+    * [[com.digitalasset.canton.util.Thereafter]] instance) or the
+    * [[LifeCycleManager.synchronizeWithClosingPatience]] has elapsed.
     *
     * @return
     *   [[com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown]] if `f` has not
-    *   run. Otherwise the result of running `f`
+    *   run. Otherwise the result of running `f`.
     *
     * @see
     *   HasRunOnClosing.isClosing
@@ -86,12 +130,7 @@ sealed trait HasSynchronizeWithClosing extends HasRunOnClosing {
   def synchronizeWithClosingF[F[_], A](name: String)(f: => F[A])(implicit
       traceContext: TraceContext,
       F: Thereafter[F],
-  )
-  // TODO(#16601) The outer `UnlessShutdown` is a bit clumsy.
-  //  If we add a method `UnlessShutdown[F[A]] => G[A]` to Thereafter, we should be good
-      : UnlessShutdown[F[A]]
-
-  def synchronizeWithClosingPatience: FiniteDuration
+  ): UnlessShutdown[F[A]]
 }
 
 /** Ensures orderly shutdown for a set of [[LifeCycleManager.ManagedResource]]s and dependent
@@ -108,7 +147,7 @@ sealed trait HasSynchronizeWithClosing extends HasRunOnClosing {
   *      [[LifeCycleManager]]s also start running their [[RunOnClosing]] tasks.
   *   1. '''Synchronize with closing''': The [[LifeCycleManager]] waits until all its
   *      [[HasSynchronizeWithClosing.synchronizeWithClosing]] computations have finished or until
-  *      [[HasSynchronizeWithClosing.synchronizeWithClosingPatience]] has elapsed.
+  *      [[LifeCycleManager.synchronizeWithClosingPatience]] has elapsed.
   *   1. '''Release''': The [[LifeCycleManager]] releases all its
   *      [[LifeCycleManager.ManagedResource]]s and instructs dependent [[LifeCycleManager]]s to do
   *      so in ascending priority order. Within the same priority, releasing is unordered and
@@ -134,7 +173,9 @@ sealed trait HasSynchronizeWithClosing extends HasRunOnClosing {
 sealed trait LifeCycleManager extends HasSynchronizeWithClosing { self =>
   def name: String
 
-  /** If a token is returned, the task will have run before the [[closeAsync]] method returns. */
+  /** If a token is returned, the task will have run before the [[LifeCycleManager]]'s `closeAsync`
+    * method returns.
+    */
   override final def runOnClose(
       task: RunOnClosing
   ): UnlessShutdown[LifeCycleRegistrationHandle] =
@@ -179,6 +220,8 @@ sealed trait LifeCycleManager extends HasSynchronizeWithClosing { self =>
     * call.
     */
   def closeAsync()(implicit traceContext: TraceContext): Future[Unit]
+
+  def synchronizeWithClosingPatience: FiniteDuration
 }
 
 object LifeCycleManager {
@@ -328,12 +371,6 @@ object LifeCycleManager {
         .accumulate(task, priority)
         .bimap(_.traceContext, handle => new LifeCycleRegistrationHandleImpl(handle))
 
-    @SuppressWarnings(Array("org.wartremover.warts.TryPartial"))
-    override def synchronizeWithClosing[A](name: String)(f: => A)(implicit
-        traceContext: TraceContext
-    ): UnlessShutdown[A] =
-      synchronizeWithClosingF(name)(Try(f)).map(_.get)
-
     override def synchronizeWithClosingF[F[_], A](name: String)(f: => F[A])(implicit
         traceContext: TraceContext,
         F: Thereafter[F],
@@ -366,18 +403,24 @@ object LifeCycleManager {
             // this method to run through the protocol.
             logger.info(s"Closing life cycle manager $name with trace ID $traceContext.")
             val drainingIterator = tasks.drain().buffered
-            // Propagate the close signal and run all run-on-closing tasks.
-            doRunOnClosingUpTo(drainingIterator, LifeCycleManagerImpl.runOnClosingPriority)
+            // Propagate the close signal synchronously
+            doRunOnClosingUpTo(
+              drainingIterator,
+              LifeCycleManagerImpl.closeSignalPropagationPriority,
+            )
 
             implicit val ec: ExecutionContext = directExecutionContext
-            synchronizeAndReleaseRegistered(drainingIterator).thereafter { _ =>
-              // We remove the handlers from the parent manager only once the closing has completed.
-              // This ensures that the parent manager's close method will not return before this dependency
-              // has finished closing.
-              parentHandles.foreach(_.cancelAll())
-              logger.debug(s"Closing life cycle manager $name has completed")
-              closingInfo.closingCompleted.success(())
-            }
+            // Execute the RunOnClosing tasks in another thread
+            doRunOnClosingAsync(drainingIterator)
+              .flatMap(_ => synchronizeAndReleaseRegistered(drainingIterator))
+              .thereafter { _ =>
+                // We remove the handlers from the parent manager only once the closing has completed.
+                // This ensures that the parent manager's close method will not return before this dependency
+                // has finished closing.
+                parentHandles.foreach(_.cancelAll())
+                logger.debug(s"Closing life cycle manager $name has completed")
+                closingInfo.closingCompleted.success(())
+              }
           case Some(prevCloseInfo) =>
             logger.debug(
               s"Closing of life cycle manager $name has previously been initiated with trace ID ${prevCloseInfo.traceContext}. Skipping propagation of the close signal."
@@ -385,6 +428,16 @@ object LifeCycleManager {
             prevCloseInfo.closingCompleted.future
         }
       }
+
+    private def doRunOnClosingAsync(
+        iterator: BufferedIterator[(LifeCycleManagerTask, TwoPhasePriorityAccumulator.Priority)]
+    )(implicit traceContext: TraceContext): Future[Unit] =
+      Future {
+        doRunOnClosingUpTo(
+          iterator,
+          LifeCycleManagerImpl.runOnClosingPriority,
+        )
+      }(executionContext)
 
     /** Called when the constructor detects that the parent manager has already been closed.
       * Fast-forwards to the final closing state because we know that there cannot be any tasks
@@ -464,7 +517,7 @@ object LifeCycleManager {
             doRunOnClosingUpTo(iterator, LifeCycleManagerImpl.runOnClosingPriority)
           case ExplicitlyClosing =>
             // It is fine to immediately return because the "run on shutdown" step in the shutdown procedure
-            // does not require that all registered `RunOnShutdown` tasks have been run by the time the
+            // does not require that all registered `RunOnClosing` tasks have been run by the time the
             // parent manager starts with the "synchronize with closing" or "actually close" steps
             // of the shutdown procedure.
             logger.debug(
@@ -509,7 +562,7 @@ object LifeCycleManager {
           iterator.head match {
             case (task: RunOnClosing, priority) if priority <= priorityInclusive =>
               iterator.next().discard
-              doRunOnClosing(task)
+              runTaskUnlessDone(task)
               go()
             case _ =>
               // This method is not meant to be used to close managed resources. So stop here.
@@ -523,13 +576,11 @@ object LifeCycleManager {
       go()
     }
 
-    private[this] def doRunOnClosing(runOnClosing: RunOnClosing)(implicit
+    override protected[this] def runTaskUnlessDone(task: RunOnClosing)(implicit
         traceContext: TraceContext
     ): Unit =
       // TODO(#16601): Time-box these tasks!
-      Try(runOnClosing.run()).forFailed(t =>
-        logger.warn(s"Task '${runOnClosing.name}' failed on closing!", t)
-      )
+      Try(task.run()).forFailed(t => logger.warn(s"Task '${task.name}' failed on closing!", t))
 
     private[this] def releaseRegistered(
         iterator: BufferedIterator[(LifeCycleManagerTask, TwoPhasePriorityAccumulator.Priority)]
@@ -767,13 +818,18 @@ object LifeCycleManager {
 
     /** How often to poll to check that all tasks have completed. */
     private val maxSleepMillis: Long = 500
+  }
 
-    private final class LifeCycleRegistrationHandleImpl(
-        handle: TwoPhasePriorityAccumulator.ItemHandle
-    ) extends LifeCycleRegistrationHandle {
-      override def cancel(): Boolean = handle.remove()
-      override def isScheduled: Boolean = handle.accumulated
-    }
+  private[lifecycle] final class LifeCycleRegistrationHandleImpl(
+      handle: TwoPhasePriorityAccumulator.ItemHandle
+  ) extends LifeCycleRegistrationHandle {
+    override def cancel(): Boolean = handle.remove()
+    override def isScheduled: Boolean = handle.accumulated
+  }
+
+  private[lifecycle] object DummyHandle extends LifeCycleRegistrationHandle {
+    override def cancel(): Boolean = false
+    override def isScheduled: Boolean = false
   }
 
   /** A managed resource is supposed to be released by its associated life cycle manager
@@ -789,11 +845,12 @@ object LifeCycleManager {
         traceContext: TraceContext
     ): Future[Unit] =
       releaseByManager()
-
   }
 }
 
-/** Trait that can be registered with a [[LifeCycleManager]] to run on shutdown */
+/** Trait that can be registered with a [[LifeCycleManager]] or [[OnShutdownRunner]] to run on
+  * closing / shutdown.
+  */
 trait RunOnClosing extends LifeCycleManager.LifeCycleManagerTask {
 
   /** The name, used for logging during shutdown */

@@ -30,6 +30,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.OutputModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.OutputModule.RequestInspector
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.OutputMetadataStore
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.PruningModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.networking.data.P2PEndpointsStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.networking.{
   BftP2PNetworkIn,
@@ -239,6 +240,13 @@ private[bftordering] class BftOrderingModuleSystemInitializer[E <: Env[E]](
             timeouts,
             requestInspector,
           ),
+        pruning = () =>
+          new PruningModule(
+            config.pruningConfig,
+            stores,
+            loggerFactory,
+            timeouts,
+          ),
       )
     ).initialize(moduleSystem, networkManager)
   }
@@ -269,6 +277,8 @@ private[bftordering] class BftOrderingModuleSystemInitializer[E <: Env[E]](
       // Use the previous topology (not containing this node) as current topology when onboarding.
       //  This prevents relying on newly onboarded nodes for state transfer.
       currentTopology = if (onboarding) previousTopology else initialTopology,
+      // Note that, when onboarding, the crypto provider corresponds to the onboarding node activation timestamp
+      //  (so that its signing key is present), and, as a consequence, it might be more recent than the current topology.
       initialCryptoProvider,
       currentLeaders = if (onboarding) previousLeaders else initialLeaders,
       previousTopology,

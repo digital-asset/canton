@@ -115,8 +115,8 @@ object DocsOpenBuild {
       val log: ManagedLogger = streams.value.log
 
       val filesToCopy = Map(
-        (DamlProjects.`ledger-api` / Compile / sourceManaged).value / "proto-docs.rst" -> sourceDirectory.value / "preprocessed-sphinx" / "reference" / "lapi-proto-docs.rst",
-        (DamlProjects.`ledger-api-value` / Compile / sourceManaged).value / "proto-docs.rst" -> sourceDirectory.value / "preprocessed-sphinx" / "reference" / "lapi-value-proto-docs.rst.inc",
+        (DamlProjects.`ledger-api` / Compile / sourceManaged).value / "proto-docs.rst" -> sourceDirectory.value / "preprocessed-sphinx" / "sdk" / "reference" / "lapi-proto-docs.rst",
+        (DamlProjects.`ledger-api-value` / Compile / sourceManaged).value / "proto-docs.rst" -> sourceDirectory.value / "preprocessed-sphinx" / "sdk" / "reference" / "lapi-value-proto-docs.rst.inc",
       )
 
       val postProcessScript = file("community/docs/post-process.sh")

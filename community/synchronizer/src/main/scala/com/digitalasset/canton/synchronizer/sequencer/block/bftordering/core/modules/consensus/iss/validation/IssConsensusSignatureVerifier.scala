@@ -4,17 +4,23 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.validation
 
 import cats.syntax.either.*
-import com.digitalasset.canton.crypto.{HashPurpose, SignatureCheckError, SigningKeyUsage}
+import com.digitalasset.canton.crypto.SignatureCheckError
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.CryptoProvider
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.CryptoProvider.AuthenticatedMessageType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.{
   AvailabilityAck,
   OrderingBlock,
   ProofOfAvailability,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.ConsensusCertificate
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.{
+  CommitCertificate,
+  ConsensusCertificate,
+  PrepareCertificate,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopologyInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.{
+  Commit,
   PbftNetworkMessage,
   PrePrepare,
   Prepare,
@@ -102,7 +108,7 @@ final class IssConsensusSignatureVerifier[E <: Env[E]] {
         proofOfAvailability.expirationTime,
         ack.from,
       )
-      cryptoProvider.verifySignature(hash, ack.from, ack.signature, SigningKeyUsage.ProtocolOnly)
+      cryptoProvider.verifySignature(hash, ack.from, ack.signature)
     }
   }
 
@@ -130,11 +136,12 @@ final class IssConsensusSignatureVerifier[E <: Env[E]] {
           canonicalCommitSet,
           from,
         ) =>
+      implicit val cryptoProvider: CryptoProvider[E] = topologyInfo.currentCryptoProvider
       // Canonical commit sets are validated in more detail later in the process
       val maybeCanonicalCommitSetEpochNumber =
         canonicalCommitSet.sortedCommits.map(_.message.blockMetadata.epochNumber).headOption
       val prePrepareEpochNumber = blockMetadata.epochNumber
-      implicit val cryptoProvider: CryptoProvider[E] =
+      val cryptoProviderForCanonicalCommits =
         if (maybeCanonicalCommitSetEpochNumber.contains(prePrepareEpochNumber)) {
           topologyInfo.currentCryptoProvider
         } else {
@@ -142,9 +149,19 @@ final class IssConsensusSignatureVerifier[E <: Env[E]] {
         }
       collectFuturesAndFlatten(
         canonicalCommitSet.sortedCommits.map(
-          validateSignedMessage(_ => context.pureFuture(Either.unit[Seq[SignatureCheckError]]))
+          validateCommit(_, cryptoProviderForCanonicalCommits)
         ) :+ validateOrderingBlock(block)
       )
+  }
+
+  private def validateCommit(
+      commit: SignedMessage[Commit],
+      cryptoProvider: CryptoProvider[E],
+  )(implicit context: E#ActorContextT[Consensus.Message[E]], traceContext: TraceContext) = {
+    implicit val cp: CryptoProvider[E] = cryptoProvider
+    validateSignedMessage((_: PbftNetworkMessage) =>
+      context.pureFuture(Either.unit[Seq[SignatureCheckError]])
+    )(commit)
   }
 
   private def validateViewChange(
@@ -155,17 +172,17 @@ final class IssConsensusSignatureVerifier[E <: Env[E]] {
       traceContext: TraceContext,
   ): VerificationResult = message match {
     case ConsensusSegment.ConsensusMessage.ViewChange(
-          blockMetadata,
-          segmentIndex,
-          viewNumber,
-          localTimestamp,
+          _blockMetadata,
+          _segmentIndex,
+          _viewNumber,
+          _localTimestamp,
           certs,
-          from,
+          _from,
         ) =>
       collectFuturesAndFlatten(certs.map(validateConsensusCertificate(_, topologyInfo)))
   }
 
-  private def validateConsensusCertificate(
+  def validateConsensusCertificate(
       certificate: ConsensusCertificate,
       topologyInfo: OrderingTopologyInfo[E],
   )(implicit
@@ -173,7 +190,16 @@ final class IssConsensusSignatureVerifier[E <: Env[E]] {
       traceContext: TraceContext,
   ): VerificationResult = {
     implicit val implicitCryptoProvider: CryptoProvider[E] = topologyInfo.currentCryptoProvider
-    validateSignedMessage[PrePrepare](validatePrePrepare(_, topologyInfo))(certificate.prePrepare)
+    val prePrepareValidationF =
+      validateSignedMessage[PrePrepare](validatePrePrepare(_, topologyInfo))(certificate.prePrepare)
+    val reminderValidationF: VerificationResult = certificate match {
+      case CommitCertificate(_, commits) =>
+        collectFuturesAndFlatten(commits.map(validateCommit(_, topologyInfo.currentCryptoProvider)))
+      case PrepareCertificate(_, _) =>
+        // TODO(#18194) implement
+        context.pureFuture(Either.unit[Seq[SignatureCheckError]])
+    }
+    collectFuturesAndFlatten(Seq(prePrepareValidationF, reminderValidationF))
   }
 
   private def validateSignedMessage[A <: PbftNetworkMessage](
@@ -190,8 +216,7 @@ final class IssConsensusSignatureVerifier[E <: Env[E]] {
           Seq(
             cryptoProvider.verifySignedMessage(
               signedMessage,
-              HashPurpose.BftSignedConsensusMessage,
-              SigningKeyUsage.ProtocolOnly,
+              AuthenticatedMessageType.BftSignedConsensusMessage,
             )
           )
         ),

@@ -8,23 +8,20 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.Prepare
 import com.digitalasset.canton.ConsoleScriptRunner
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.config.StorageConfig.Memory
 import com.digitalasset.canton.crypto.InteractiveSubmission
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.Environment
-import com.digitalasset.canton.integration.CommunityTests.{
-  CommunityIntegrationTest,
-  IsolatedCommunityEnvironments,
-}
-import com.digitalasset.canton.integration.plugins.UseCommunityReferenceBlockSequencer
+import com.digitalasset.canton.integration.plugins.{UseCommunityReferenceBlockSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ExampleIntegrationTest.*
 import com.digitalasset.canton.integration.{
   CommunityEnvironmentDefinition,
+  CommunityIntegrationTest,
   ConfigTransform,
   ConfigTransforms,
+  IsolatedEnvironments,
 }
+import com.digitalasset.canton.ledger.api.services.InteractiveSubmissionService.TransactionData
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLogging}
-import com.digitalasset.canton.platform.apiserver.execution.CommandInterpretationResult
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.PreparedTransactionEncoder
 import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.topology.SynchronizerId
@@ -42,7 +39,7 @@ import scala.sys.process.Process
 
 abstract class ExampleIntegrationTest(configPaths: File*)
     extends CommunityIntegrationTest
-    with IsolatedCommunityEnvironments
+    with IsolatedEnvironments
     with HasConsoleScriptRunner {
 
   protected def additionalConfigTransform: Seq[ConfigTransform] =
@@ -68,6 +65,7 @@ abstract class ExampleIntegrationTest(configPaths: File*)
 
 trait HasConsoleScriptRunner { this: NamedLogging =>
   import org.scalatest.EitherValues.*
+
   def runScript(scriptPath: File)(implicit env: Environment): Unit =
     ConsoleScriptRunner.run(env, scriptPath.toJava, logger = logger).value.discard
 }
@@ -109,8 +107,7 @@ sealed abstract class SimplePingExampleIntegrationTest
   }
 }
 
-final class SimplePingExampleReferenceIntegrationTestDefault
-    extends SimplePingExampleIntegrationTest {
+final class SimplePingExampleReferenceIntegrationTestH2 extends SimplePingExampleIntegrationTest {
   registerPlugin(new UseCommunityReferenceBlockSequencer[DbConfig.H2](loggerFactory))
 }
 
@@ -208,7 +205,7 @@ sealed abstract class InteractiveSubmissionDemoExampleIntegrationTest
   }
 
   def buildV1Hash(
-      commandExecutionResult: CommandInterpretationResult,
+      preparedTransactionData: TransactionData,
       transactionUUID: UUID,
       mediatorGroup: PositiveInt,
       synchronizerId: SynchronizerId,
@@ -216,20 +213,20 @@ sealed abstract class InteractiveSubmissionDemoExampleIntegrationTest
   ) =
     InteractiveSubmission.computeVersionedHash(
       HashingSchemeVersion.V1,
-      commandExecutionResult.transaction,
-      InteractiveSubmission.TransactionMetadataForHashing.createFromDisclosedContracts(
-        commandExecutionResult.submitterInfo.actAs.toSet,
-        commandExecutionResult.submitterInfo.commandId,
+      preparedTransactionData.transaction,
+      InteractiveSubmission.TransactionMetadataForHashing.create(
+        preparedTransactionData.submitterInfo.actAs.toSet,
+        preparedTransactionData.submitterInfo.commandId,
         transactionUUID,
         mediatorGroup.value,
         synchronizerId,
-        Option.when(commandExecutionResult.dependsOnLedgerTime)(
-          commandExecutionResult.transactionMeta.ledgerEffectiveTime
+        Option.when(preparedTransactionData.dependsOnLedgerTime)(
+          preparedTransactionData.transactionMeta.ledgerEffectiveTime
         ),
-        commandExecutionResult.transactionMeta.submissionTime,
-        commandExecutionResult.processedDisclosedContracts,
+        preparedTransactionData.transactionMeta.submissionTime,
+        preparedTransactionData.inputContracts,
       ),
-      commandExecutionResult.transactionMeta.optNodeSeeds
+      preparedTransactionData.transactionMeta.optNodeSeeds
         .getOrElse(ImmArray.empty)
         .toList
         .toMap,
@@ -241,14 +238,14 @@ sealed abstract class InteractiveSubmissionDemoExampleIntegrationTest
     import env.*
     forAll {
       (
-          commandExecutionResult: CommandInterpretationResult,
+          preparedTransactionData: TransactionData,
           synchronizerId: SynchronizerId,
           transactionUUID: UUID,
           mediatorGroup: PositiveInt,
       ) =>
         val hashTracer = HashTracer.StringHashTracer(traceSubNodes = true)
         val expectedHash = buildV1Hash(
-          commandExecutionResult,
+          preparedTransactionData,
           transactionUUID,
           mediatorGroup,
           synchronizerId,
@@ -257,7 +254,7 @@ sealed abstract class InteractiveSubmissionDemoExampleIntegrationTest
 
         val result = for {
           encoded <- encoder.serializeCommandInterpretationResult(
-            commandExecutionResult,
+            preparedTransactionData,
             synchronizerId,
             transactionUUID,
             mediatorGroup.value,
@@ -279,9 +276,9 @@ sealed abstract class InteractiveSubmissionDemoExampleIntegrationTest
   }
 }
 
-final class InteractiveSubmissionDemoExampleIntegrationTestInMemory
+final class InteractiveSubmissionDemoExampleIntegrationTestH2
     extends InteractiveSubmissionDemoExampleIntegrationTest {
-  registerPlugin(new UseCommunityReferenceBlockSequencer[Memory](loggerFactory))
+  registerPlugin(new UseH2(loggerFactory))
 }
 
 sealed abstract class RepairExampleIntegrationTest

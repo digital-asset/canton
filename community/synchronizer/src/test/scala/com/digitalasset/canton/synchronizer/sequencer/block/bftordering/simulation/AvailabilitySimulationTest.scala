@@ -69,7 +69,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   SimulationEnv,
   SimulationInitializer,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.onboarding.EmptyOnboardingDataProvider
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.onboarding.EmptyOnboardingManager
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.topology.{
   SimulationOrderingTopologyProvider,
   SimulationTopologyHelpers,
@@ -241,6 +241,7 @@ class AvailabilitySimulationTest extends AnyFlatSpec with BaseTest {
       config: BftBlockOrdererConfig,
       random: Random,
       simulationModel: SimulationModel,
+      orderingTopology: OrderingTopology,
       cryptoProvider: CryptoProvider[SimulationEnv],
       clock: Clock,
       store: mutable.Map[BatchId, OrderingRequestBatch] => AvailabilityStore[SimulationEnv],
@@ -307,7 +308,7 @@ class AvailabilitySimulationTest extends AnyFlatSpec with BaseTest {
     val sequencerIds = config.initialNetwork.toList
       .flatMap(_.peerEndpoints.map(P2PEndpoint.fromEndpointConfig))
       .map(Simulation.endpointToNode)
-    val membership = Membership.forTesting(thisNode, sequencerIds.toSet)
+    val membership = Membership(thisNode, orderingTopology, sequencerIds)
     val availabilityStore = store(simulationModel.availabilityStorage)
     val availabilityConfig = AvailabilityModuleConfig(
       config.maxRequestsInBatch,
@@ -432,6 +433,7 @@ class AvailabilitySimulationTest extends AnyFlatSpec with BaseTest {
       val topologyInit = range.map { n =>
         val endpointConfig = endpoints(n)
         val endpoint = PlainTextP2PEndpoint(endpointConfig.address, endpointConfig.port)
+          .asInstanceOf[P2PEndpoint]
         val node = Simulation.endpointToNode(endpoint)
 
         val orderingTopologyProvider =
@@ -440,7 +442,7 @@ class AvailabilitySimulationTest extends AnyFlatSpec with BaseTest {
             () => endpointsSimulationTopologyData,
             loggerFactory,
           )
-        val (_, cryptoProvider) = SimulationTopologyHelpers.resolveOrderingTopology(
+        val (orderingTopology, cryptoProvider) = SimulationTopologyHelpers.resolveOrderingTopology(
           orderingTopologyProvider.getOrderingTopologyAt(Genesis.GenesisTopologyActivationTime)
         )
 
@@ -454,6 +456,7 @@ class AvailabilitySimulationTest extends AnyFlatSpec with BaseTest {
             configs(n),
             new Random(n),
             simulationModels(n),
+            orderingTopology,
             cryptoProvider,
             clock,
             xs => new SimulationAvailabilityStore(xs),
@@ -464,7 +467,7 @@ class AvailabilitySimulationTest extends AnyFlatSpec with BaseTest {
       val simulation =
         SimulationModuleSystem(
           topologyInit,
-          EmptyOnboardingDataProvider,
+          EmptyOnboardingManager,
           simSettings,
           clock,
           timeouts,
