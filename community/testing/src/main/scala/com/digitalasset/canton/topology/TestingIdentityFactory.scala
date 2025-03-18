@@ -378,6 +378,16 @@ class TestingIdentityFactory(
         ): Option[FutureUnlessShutdown[Unit]] =
           awaitTimestamp(timestamp).map(FutureUnlessShutdown.outcomeF)
 
+        override def awaitSequencedTimestamp(timestamp: CantonTimestamp)(implicit
+            traceContext: TraceContext
+        ): Option[Future[Unit]] = Option.when(timestamp > upToInclusive) {
+          ErrorUtil.internalErrorAsync(
+            new IllegalArgumentException(
+              s"Attempt to obtain a topology snapshot at $timestamp that will never be available"
+            )
+          )
+        }
+
         override def approximateTimestamp: CantonTimestamp =
           currentSnapshotApproximation(TraceContext.empty).timestamp
 

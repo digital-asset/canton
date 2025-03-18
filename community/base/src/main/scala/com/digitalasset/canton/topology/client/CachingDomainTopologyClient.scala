@@ -162,6 +162,10 @@ final class CachingDomainTopologyClient(
   )(implicit traceContext: TraceContext): Option[FutureUnlessShutdown[Unit]] =
     delegate.awaitTimestampUS(timestamp)
 
+  override def awaitSequencedTimestamp(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Option[Future[Unit]] = delegate.awaitSequencedTimestamp(timestamp)
+
   override def approximateTimestamp: CantonTimestamp = delegate.approximateTimestamp
 
   override def currentSnapshotApproximation(implicit

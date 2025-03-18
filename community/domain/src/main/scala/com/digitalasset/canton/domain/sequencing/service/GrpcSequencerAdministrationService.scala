@@ -186,11 +186,6 @@ class GrpcSequencerAdministrationService(
           EitherT.rightT[Future, BaseCantonError](EffectiveTime(timestamp))
       }
 
-      _ <- domainTimeTracker
-        .awaitTick(referenceEffective.value)
-        .map(EitherT.right[CantonError](_).void)
-        .getOrElse(EitherTUtil.unit[BaseCantonError])
-
       /* find the sequencer snapshot that contains a sequenced timestamp that is >= to the reference/onboarding effective time
        if we take the sequencing time here, we might miss out topology transactions between sequencerSnapshot.lastTs and effectiveTime
        in the following scenario:
@@ -210,10 +205,22 @@ class GrpcSequencerAdministrationService(
 
       sequencerSnapshot <- sequencer.snapshot(referenceEffective.value)
 
+      // Wait for the domain time tracker to observe the sequencerSnapshot.lastTs.
+      // This is only serves as a potential trigger for the topology client, in case no
+      // additional message comes in, because topologyClient.awaitSequencedTimestamp does not
+      // trigger a tick.
+      _ <- domainTimeTracker
+        .awaitTick(sequencerSnapshot.lastTs)
+        .map(EitherT.right[CantonError](_).void)
+        .getOrElse(EitherTUtil.unit[BaseCantonError])
+
       // wait for the snapshot's lastTs to be processed by the topology client,
       // which implies that all topology transactions will have been properly processed and stored.
+      // Pass the block's lastTs immediate successor, because the topology client is one tick ahead.
       _ <- EitherT.right(
-        topologyClient.awaitTimestamp(sequencerSnapshot.lastTs).getOrElse(Future.unit)
+        topologyClient
+          .awaitSequencedTimestamp(sequencerSnapshot.lastTs.immediateSuccessor)
+          .getOrElse(Future.unit)
       )
 
       topologySnapshot <- EitherT.right[BaseCantonError](

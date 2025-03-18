@@ -180,6 +180,14 @@ trait TopologyClientApi[+T] { this: HasFutureSupervision =>
       timestamp: CantonTimestamp
   )(implicit traceContext: TraceContext): Option[FutureUnlessShutdown[Unit]]
 
+  /** Returns an optional future which will complete when the sequenced timestamp has been observed
+    *
+    * If the timestamp is already observed, returns None.
+    */
+  def awaitSequencedTimestamp(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Option[Future[Unit]]
+
   /** Finds the topology transaction with maximum effective time whose effects would be visible,
     * at earliest i.e. if delay is 0, in a topology snapshot at `effectiveTime`, and yields
     * the sequenced and actual effective time of that topology transaction, if necessary after waiting
