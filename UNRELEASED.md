@@ -3,6 +3,15 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2025-03-12 (Exclusive)
+### External Signing
+
+- **BREAKING CHANGE** The `ProcessedDisclosedContract` message in the `Metadata` message of the `interactive_submission_service.proto` file has been renamed to `InputContract`, and the
+  field `disclosed_events` in the same `Metadata` message renamed to `input_contracts` to better represent its content.
+- Input contracts available on the preparing participant can now be used to prepare a command (it was previously required to explicitly disclose all input contracts in the `prepare` request)
+  If some input contracts are missing from both the participant local store and the explicitly disclosed contracts, the `prepare` call will fail.
+- The synchronizer ID is now optional and can be omitted in the prepare request. If left empty, a suitable sychronizer will be selected automatically.
+
 ## Until 2025-03-05 (Exclusive)
 - Fixed slow sequencer shapshot query on the aggregate submission tables in the case when sequencer onboarding state
   is requested much later and there's more data accumulated in the table:

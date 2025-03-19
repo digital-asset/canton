@@ -57,7 +57,7 @@ abstract class SequencerApiTest
 
     lazy val sequencer: CantonSequencer = {
       val sequencer = SequencerApiTest.this.createSequencer(
-        topologyFactory.forOwnerAndSynchronizer(owner = mediatorId, synchronizerId)
+        topologyFactory.forOwnerAndSynchronizer(owner = sequencerId, synchronizerId)
       )
       registerAllTopologyMembers(topologyFactory.topologySnapshot(), sequencer)
       sequencer
@@ -995,7 +995,12 @@ trait SequencerApiTestUtils
     members
       .parTraverseFilter { member =>
         for {
-          source <- valueOrFail(sequencer.read(member, firstSequencerCounter))(
+          source <- valueOrFail(
+            if (firstSequencerCounter == SequencerCounter.Genesis)
+              sequencer.readV2(member, None)
+            else
+              sequencer.read(member, firstSequencerCounter)
+          )(
             s"Read for $member"
           )
           events <- FutureUnlessShutdown.outcomeF(
@@ -1074,7 +1079,7 @@ trait SequencerApiTestUtils
       val event = message.signedEvent.content
 
       event match {
-        case Deliver(_, _, _, messageIdO, batch, _, trafficReceipt) =>
+        case Deliver(_, _, _, _, messageIdO, batch, _, trafficReceipt) =>
           withClue(s"Received the wrong number of envelopes for recipient $member") {
             batch.envelopes.length shouldBe expectedMessage.envs.length
           }
@@ -1111,6 +1116,7 @@ trait SequencerApiTestUtils
         event.signedEvent.content match {
           case DeliverError(
                 _counter,
+                _previousTimestamp,
                 _timestamp,
                 _synchronizerId,
                 messageId,

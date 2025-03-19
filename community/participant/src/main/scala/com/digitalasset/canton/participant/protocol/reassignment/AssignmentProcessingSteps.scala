@@ -46,7 +46,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
-import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.util.ReassignmentTag.Target
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   LfPartyId,
@@ -183,7 +183,6 @@ private[reassignment] class AssignmentProcessingSteps(
           mediator,
           unassignmentResult,
           assignmentUuid,
-          unassignmentData.sourceProtocolVersion,
           targetProtocolVersion,
           unassignmentData.unassignmentRequest.reassigningParticipants,
         )
@@ -193,7 +192,10 @@ private[reassignment] class AssignmentProcessingSteps(
       submittingParticipantSignature <- recentSnapshot
         .sign(rootHash.unwrap, SigningKeyUsage.ProtocolOnly)
         .leftMap(ReassignmentSigningError.apply)
-      mediatorMessage = fullTree.mediatorMessage(submittingParticipantSignature)
+      mediatorMessage = fullTree.mediatorMessage(
+        submittingParticipantSignature,
+        staticSynchronizerParameters.map(_.protocolVersion),
+      )
       recipientsSet <- activeParticipantsOfParty(stakeholders.all.toSeq)
       recipients <- EitherT.fromEither[FutureUnlessShutdown](
         Recipients
@@ -363,10 +365,8 @@ private[reassignment] class AssignmentProcessingSteps(
         )(parsedRequest)
 
     } yield {
-      val responseF =
-        if (
-          assignmentValidationResult.isReassigningParticipant && !assignmentValidationResult.validationResult.isUnassignmentDataNotFound
-        )
+      val responseF = if (assignmentValidationResult.isReassigningParticipant) {
+        if (!assignmentValidationResult.validationResult.isUnassignmentDataNotFound)
           createConfirmationResponses(
             parsedRequest.requestId,
             parsedRequest.snapshot.ipsSnapshot,
@@ -374,8 +374,14 @@ private[reassignment] class AssignmentProcessingSteps(
             parsedRequest.fullViewTree.confirmingParties,
             assignmentValidationResult,
           ).map(_.map((_, Recipients.cc(parsedRequest.mediator))))
-        else // TODO(i22993): Not sending a confirmation response is a workaround to make possible to process the assignment before unassignment
+        else {
+          logger.info(
+            "Not sending a confirmation response because unassignment data is not found in the reassignment store"
+          )
           FutureUnlessShutdown.pure(None)
+        }
+      } else // TODO(i22993): Not sending a confirmation response is a workaround to make possible to process the assignment before unassignment
+        FutureUnlessShutdown.pure(None)
 
       // We consider that we rejected if we fail to process or if at least one of the responses is not "approve"
       val locallyRejectedF = responseF.map(
@@ -573,7 +579,6 @@ object AssignmentProcessingSteps {
       targetMediator: MediatorGroupRecipient,
       unassignmentResult: DeliveredUnassignmentResult,
       assignmentUuid: UUID,
-      sourceProtocolVersion: Source[ProtocolVersion],
       targetProtocolVersion: Target[ProtocolVersion],
       reassigningParticipants: Set[ParticipantId],
   ): Either[ReassignmentProcessorError, FullAssignmentTree] = {
@@ -599,7 +604,6 @@ object AssignmentProcessingSteps {
           viewSalt,
           contract,
           unassignmentResult,
-          sourceProtocolVersion,
           targetProtocolVersion,
           reassignmentCounter,
         )

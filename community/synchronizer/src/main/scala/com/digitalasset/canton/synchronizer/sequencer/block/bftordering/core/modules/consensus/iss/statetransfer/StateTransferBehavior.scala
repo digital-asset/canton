@@ -32,17 +32,47 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.PbftNetworkMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.dependencies.ConsensusModuleDependencies
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{Env, ModuleRef}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
+  Env,
+  ModuleRef,
+  PureFun,
+}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
 
 import scala.collection.mutable
+import scala.util.{Failure, Success}
 
-/** A state transfer behavior for [[IssConsensusModule]]. It uses [[StateTransferManager]] and
-  * inherits its limitations. In particular, the topology at the catch-up starting epoch is assumed
-  * to allow the whole catch-up process to complete and, if this is not the case, the catch-up will
-  * fail and the node will need to be re-onboarded.
+/** A state transfer behavior for [[IssConsensusModule]]. There are 2 types of state transfer:
+  * onboarding (for new nodes) and catch-up (for lagging-behind nodes). These two types work
+  * similarly, differing only in the triggering mechanism. State transfer requests commit
+  * certificates from a single node at a time and advances the topology accordingly, supporting
+  * multiple topology changes throughout the process. Thus, it depends on historical topology state
+  * from the latest pruning point. Moreover, it might use keys that are currently revoked (and even
+  * compromised) in signature verification during at least part of the process. The latter
+  * limitation is acceptable because key rotation, combined with regular pruning, generally prevents
+  * compromised keys in Canton.
+  *
+  * The flow is as follows:
+  *   - Cancel existing segment modules.
+  *   - If it's onboarding, start by storing the first epoch.
+  *   - Request blocks from the current epoch (also starts catch-up).
+  *   - Receive blocks one by one from a single epoch (to avoid exceeding the maximum gRPC message
+  *     size and OOM errors). In the future, we might want to pull blocks from more epochs for
+  *     better performance.
+  *   - Once all blocks from the epoch are validated and stored, wait for a NewEpochTopology message
+  *     from the Output module (indicating that all relevant batches have been fetched).
+  *   - Store both the completed epoch and the new (subsequent) epoch in the epoch store.
+  *   - Repeat the process by requesting blocks from the new epoch.
+  *   - Upon receiving a NewEpochTopology message for the first epoch after state transfer, store
+  *     the last state-transferred epoch and complete state transfer by transitioning to the default
+  *     [[IssConsensusModule]] behavior. At this point, (re)send the NewEpochTopology message.
+  *
+  * Crash Recovery: Since state transfer sequentially stores all new and completed epochs, it
+  * inherits the crash-fault tolerance capabilities of the BFT orderer. Additionally, it still
+  * depends on the idempotency of the stores when state-transferring blocks/batches from partially
+  * transferred epochs after a restart.
   */
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
 final class StateTransferBehavior[E <: Env[E]](
@@ -106,12 +136,21 @@ final class StateTransferBehavior[E <: Env[E]](
               s"$messageType: $stateTransferType state transfer cannot be already in progress during another state transfer"
             )
           }
-          stateTransferManager.startStateTransfer(
-            initialState.topologyInfo.currentMembership,
-            initialState.topologyInfo.currentCryptoProvider,
-            initialState.latestCompletedEpoch,
-            initialState.stateTransferStartEpoch,
-          )(abort)
+          val startEpochInfo = initialState.epochState.epoch.info
+          val membership = initialState.topologyInfo.currentMembership
+          val cryptoProvider = initialState.topologyInfo.currentCryptoProvider
+
+          stateTransferType match {
+            case StateTransferType.Onboarding =>
+              startOnboarding(startEpochInfo, membership, cryptoProvider, messageType)
+            case StateTransferType.Catchup =>
+              stateTransferManager.startCatchUp(
+                membership,
+                cryptoProvider,
+                initialState.latestCompletedEpoch,
+                initialState.stateTransferStartEpoch,
+              )(abort)
+          }
         }
 
       case stateTransferMessage: Consensus.StateTransferMessage =>
@@ -124,48 +163,82 @@ final class StateTransferBehavior[E <: Env[E]](
             previousEpochMaxBftTime,
             lastBlockFromPreviousEpochMode,
           ) =>
-        val epochInfo = epochState.epoch.info
-        logger.info(
-          s"$messageType: setting latest completed epoch $epochInfo from $stateTransferType state transfer"
-        )
-        // Providing an empty commit message set, which results in using the BFT time monotonicity adjustment for
-        //  the first block produced by the state-transferred node as a leader.
-        val lastCommitSet = Seq.empty
-        latestCompletedEpoch = EpochStore.Epoch(epochInfo, lastCommitSet)
-
+        val currentEpochInfo = epochState.epoch.info
         if (lastBlockFromPreviousEpochMode == Mode.StateTransfer.LastBlock) {
           logger.info(
-            s"$messageType: received first epoch ($newEpochNumber) after $stateTransferType state transfer, " +
-              s"transitioning back to consensus"
+            s"$messageType: received first epoch (${newEpochTopologyMessage.epochNumber}) after $stateTransferType " +
+              s"state transfer, storing it"
           )
-          transitionBackToConsensus(newEpochTopologyMessage)
+          completeStateTransfer(newEpochTopologyMessage, messageType)
         } else {
-          val latestCompletedEpochNumber = latestCompletedEpoch.info.number
-          val currentEpochNumber = epochInfo.number
-
-          if (
-            newEpochNumber == currentEpochNumber + 1 && newEpochNumber == latestCompletedEpochNumber + 1
-          ) {
-            val orderingTopology = initialState.topologyInfo.currentTopology
+          val currentEpochNumber = currentEpochInfo.number
+          if (newEpochNumber == currentEpochNumber + 1) {
             val newEpochInfo =
-              epochInfo.next(epochLength, orderingTopology.activationTime, previousEpochMaxBftTime)
-            // TODO(#23567) store epochs
-            logger.debug(
-              s"$messageType: setting new epoch ${newEpochInfo.number} during $stateTransferType state transfer"
+              currentEpochInfo.next(
+                epochLength,
+                newMembership.orderingTopology.activationTime,
+                previousEpochMaxBftTime,
+              )
+            storeEpochs(
+              currentEpochInfo,
+              newEpochInfo,
+              newMembership,
+              newCryptoProvider,
+              messageType,
             )
-            setNewEpochState(newEpochInfo, newMembership, newCryptoProvider)
           } else {
             abort(
-              s"$messageType: internal inconsistency,  $stateTransferType state transfer received wrong new topology " +
+              s"$messageType: internal inconsistency, $stateTransferType state transfer received wrong new topology " +
                 s"for epoch $newEpochNumber, expected ${currentEpochNumber + 1}"
             )
           }
         }
 
+      case Consensus.NewEpochStored(newEpochInfo, membership, cryptoProvider: CryptoProvider[E]) =>
+        logger.debug(
+          s"$messageType: setting new epoch ${newEpochInfo.number} during $stateTransferType state transfer"
+        )
+        setNewEpochState(newEpochInfo, membership, cryptoProvider)
+        stateTransferManager.stateTransferNewEpoch(
+          newEpochInfo.number,
+          membership,
+          initialState.topologyInfo.currentCryptoProvider, // used only for signing the request
+        )(abort)
+
+      case Consensus.StateTransferCompleted(newEpochTopologyMessage) =>
+        val currentEpochInfo = epochState.epoch.info
+        // Providing an empty commit message set, which results in using the BFT time monotonicity adjustment for
+        //  the first block produced by the state-transferred node as a leader.
+        val lastCommitSet = Seq.empty
+        latestCompletedEpoch = EpochStore.Epoch(currentEpochInfo, lastCommitSet)
+        logger.info(
+          s"$messageType: completed $stateTransferType state transfer (including batches), transitioning back to consensus"
+        )
+        transitionBackToConsensus(newEpochTopologyMessage)
+
       case Consensus.ConsensusMessage.AsyncException(e) =>
         logger.error(s"$messageType: exception raised from async consensus message: ${e.toString}")
 
       case _ => postponedQueue.enqueue(message)
+    }
+  }
+
+  private def startOnboarding(
+      startEpochInfo: EpochInfo,
+      membership: Membership,
+      cryptoProvider: CryptoProvider[E],
+      messageType: => String,
+  )(implicit context: E#ActorContextT[Consensus.Message[E]], traceContext: TraceContext): Unit = {
+    val startEpochNumber = startEpochInfo.number
+    // State transfer will be started once the NewEpochStored message is received.
+    logger.debug(s"$messageType: storing start epoch $startEpochNumber")
+    // Storing this epoch should theoretically allow catching up after a restart during onboarding.
+    //  However, sequencer node crash recovery is not supported during onboarding.
+    pipeToSelf(epochStore.startEpoch(startEpochInfo)) {
+      case Failure(exception) => Consensus.ConsensusMessage.AsyncException(exception)
+      case Success(_) =>
+        logger.debug(s"$messageType: stored start epoch $startEpochNumber")
+        Consensus.NewEpochStored(startEpochInfo, membership, cryptoProvider)
     }
   }
 
@@ -177,8 +250,8 @@ final class StateTransferBehavior[E <: Env[E]](
     val result =
       stateTransferManager.handleStateTransferMessage(
         stateTransferMessage,
-        initialState.topologyInfo,
-        initialState.latestCompletedEpoch,
+        activeTopologyInfo,
+        latestCompletedEpoch,
       )(abort)
 
     handleStateTransferMessageResult(messageType, result)
@@ -203,13 +276,60 @@ final class StateTransferBehavior[E <: Env[E]](
       case StateTransferMessageResult.BlockTransferCompleted(
             endEpochNumber,
             numberOfTransferredEpochs,
-            numberOfTransferredBlocks,
           ) =>
         logger.info(
           s"$messageType: $stateTransferType block transfer completed at epoch $endEpochNumber with " +
-            s"$numberOfTransferredEpochs epochs ($numberOfTransferredBlocks blocks) transferred"
+            s"$numberOfTransferredEpochs epochs transferred"
         )
     }
+
+  private def storeEpochs(
+      currentEpochInfo: EpochInfo,
+      newEpochInfo: EpochInfo,
+      newMembership: Membership,
+      newCryptoProvider: CryptoProvider[E],
+      messageType: => String,
+  )(implicit context: E#ActorContextT[Consensus.Message[E]], traceContext: TraceContext): Unit = {
+    val currentEpochNumber = currentEpochInfo.number
+    val newEpochNumber = newEpochInfo.number
+    logger.debug(
+      s"$messageType: storing completed epoch $currentEpochNumber and new epoch $newEpochNumber"
+    )
+    pipeToSelf(
+      context.flatMapFuture(
+        epochStore.completeEpoch(currentEpochNumber),
+        PureFun.Const(epochStore.startEpoch(newEpochInfo)),
+      )
+    ) {
+      case Failure(exception) => Consensus.ConsensusMessage.AsyncException(exception)
+      case Success(_) =>
+        logger.debug(
+          s"$messageType: stored completed epoch $currentEpochNumber and new epoch $newEpochNumber"
+        )
+        Consensus.NewEpochStored(newEpochInfo, newMembership, newCryptoProvider)
+    }
+  }
+
+  private def completeStateTransfer(
+      newEpochTopologyMessage: Consensus.NewEpochTopology[E],
+      messageType: => String,
+  )(implicit
+      context: E#ActorContextT[Consensus.Message[E]],
+      traceContext: TraceContext,
+  ): Unit = {
+    val lastStateTransferredEpochNumber = epochState.epoch.info.number
+    logger.debug(
+      s"$messageType: storing last state-transferred epoch $lastStateTransferredEpochNumber"
+    )
+    pipeToSelf(epochStore.completeEpoch(lastStateTransferredEpochNumber)) {
+      case Failure(exception) => Consensus.ConsensusMessage.AsyncException(exception)
+      case Success(_) =>
+        logger.debug(
+          s"$messageType: stored last state-transferred epoch $lastStateTransferredEpochNumber"
+        )
+        Consensus.StateTransferCompleted(newEpochTopologyMessage)
+    }
+  }
 
   private def transitionBackToConsensus(newEpochTopologyMessage: Consensus.NewEpochTopology[E])(
       implicit
@@ -265,6 +385,11 @@ final class StateTransferBehavior[E <: Env[E]](
     activeTopologyInfo = activeTopologyInfo.updateMembership(newMembership, newCryptoProvider)
     val currentMembership = activeTopologyInfo.currentMembership
     catchupDetector.updateMembership(currentMembership)
+
+    latestCompletedEpoch = EpochStore.Epoch(
+      epochState.epoch.info,
+      lastBlockCommits = Seq.empty, // not relevant in the middle of state transfer
+    )
 
     val newEpoch =
       Epoch(

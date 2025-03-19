@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Implements the transaction hashing specification defined in the README.md at https://github.com/digital-asset/canton/blob/main/community/ledger-api/src/main/protobuf/com/daml/ledger/api/v2/interactive/README.md
+# Implements the transaction hashing specification defined in the README.md at https://github.com/digital-asset/canton/blob/main/community/ledger-api/src/release-line-3.2/protobuf/com/daml/ledger/api/v2/interactive/README.md
 
 import com.daml.ledger.api.v2.interactive.interactive_submission_service_pb2 as interactive_submission_service_pb2
 from google.protobuf.json_format import MessageToJson
@@ -248,12 +248,12 @@ def encode_metadata(metadata):
         )
         + encode_int64(metadata.submission_time)
         + encode_repeated(
-            metadata.disclosed_events, encode_processed_disclosed_contract
+            metadata.input_contracts, encode_input_contract
         )
     )
 
 
-def encode_processed_disclosed_contract(contract):
+def encode_input_contract(contract):
     return encode_int64(contract.created_at) + sha256(
         encode_create_node(contract.v1, "unused_node_id", [])
     )

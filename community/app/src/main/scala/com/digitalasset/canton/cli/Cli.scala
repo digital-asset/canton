@@ -5,6 +5,7 @@ package com.digitalasset.canton.cli
 
 import ch.qos.logback.classic.Level
 import com.digitalasset.canton.buildinfo.BuildInfo
+import com.digitalasset.canton.cli.Command.Sandbox
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import scopt.OptionParser
 
@@ -56,6 +57,7 @@ final case class Cli(
     kmsLogImmediateFlush: Option[Boolean] = None,
     bootstrapScriptPath: Option[File] = None,
     manualStart: Boolean = false,
+    exitAfterBootstrap: Boolean = false,
 ) {
 
   /** sets the properties our logback.xml is looking for */
@@ -160,7 +162,12 @@ object Cli {
         .text(
           "Set configuration file(s).\n" +
             inColumns(second = "If several configuration files assign values to the same key,\n") +
-            inColumns(second = "the last value is taken.")
+            inColumns(second =
+              "the last value is taken. For a 'sandbox' command, its default config\n"
+            ) +
+            inColumns(second =
+              "is processed first, followed by files defined with '-c' and '--config'"
+            )
         )
         .valueName("<file1>,<file2>,...")
         .unbounded()
@@ -356,10 +363,67 @@ object Cli {
             .action((target, cli) => cli.copy(command = Some(Command.Generate(target))))
         )
 
+      note("") // Newline
+      cmd("sandbox")
+        .text("Run Canton sandbox")
+        .action((_, cli) => cli.copy(command = Some(Sandbox)))
+        .children(
+          opt[Unit]("exit-after-bootstrap")
+            .hidden()
+            .action((_, cli) => cli.copy(exitAfterBootstrap = true)),
+          opt[Int]("ledger-api-port")
+            .text("Port for the sandbox Ledger API")
+            .action((port, cli) =>
+              cli ++ ("canton.participants.sandbox.ledger-api.port" -> port.toString)
+            ),
+          opt[Int]("admin-api-port")
+            .text("Port for the sandbox Admin API")
+            .action((port, cli) =>
+              cli ++ ("canton.participants.sandbox.admin-api.port" -> port.toString)
+            ),
+          opt[Int]("json-api-port")
+            .text("Port for the sandbox Json API")
+            .action((port, cli) =>
+              cli ++ ("canton.participants.sandbox.http-ledger-api.server.port" -> port.toString)
+            ),
+          opt[Int]("sequencer-public-port")
+            .text("Port for the sequencer Public API")
+            .action((port, cli) =>
+              cli ++ ("canton.sequencers.sequencer1.public-api.port" -> port.toString)
+            ),
+          opt[Int]("sequencer-admin-port")
+            .text("Port for the sequencer Admin API")
+            .action((port, cli) =>
+              cli ++ ("canton.sequencers.sequencer1.admin-api.port" -> port.toString)
+            ),
+          opt[Int]("mediator-admin-port")
+            .text("Port for the mediator Admin API")
+            .action((port, cli) =>
+              cli ++ ("canton.mediators.mediator1.admin-api.port" -> port.toString)
+            ),
+          opt[String]("canton-port-file")
+            .text("File that will contain the canton sandbox ports when ready")
+            .action((portFile, cli) => cli ++ ("canton.parameters.ports-file" -> portFile)),
+          opt[Unit]("static-time")
+            .text("Time on the sandbox should advance only when requested through the time service")
+            .action((_, cli) =>
+              cli ++ ("canton.parameters.clock.type" -> "sim-clock") ++ ("canton.participants.sandbox.testing-time.type" -> "monotonic-time")
+            ),
+        )
+
       checkConfig(cli =>
-        if (cli.configFiles.isEmpty && cli.configMap.isEmpty) {
+        if (
+          cli.configFiles.isEmpty && cli.configMap.isEmpty && !cli.command.contains(Command.Sandbox)
+        ) {
           failure(
-            "at least one config has to be defined either as files (-c) or as key-values (-C)"
+            "at least one config has to be defined either as files (-c), as key-values (-C) or as sandbox's default config"
+          )
+        } else success
+      )
+      checkConfig(cli =>
+        if (cli.bootstrapScriptPath.nonEmpty && cli.command.contains(Command.Sandbox)) {
+          failure(
+            "bootstrap script cannot be defined together with the 'sandbox' command"
           )
         } else success
       )
@@ -367,4 +431,10 @@ object Cli {
       override def showUsageOnError: Option[Boolean] = Some(true)
 
     }
+
+  implicit class UpdateCli(cli: Cli) {
+    def ++(keyValue: (String, String)): Cli = cli.copy(
+      configMap = Map(keyValue) ++ cli.configMap
+    )
+  }
 }

@@ -1371,6 +1371,16 @@ object BuildCommon {
           (Compile / damlDarOutput).value / "upgrade-tests-3.0.0.dar",
           s"com.daml.ledger.test.java.upgrade_3_0_0",
         ),
+        (
+          (Compile / damlSourceDirectory).value / "main" / "daml" / "upgrade_fetch" / "1.0.0",
+          (Compile / damlDarOutput).value / "upgrade-fetch-tests-1.0.0.dar",
+          s"com.daml.ledger.test.java.upgrade_fetch_1_0_0",
+        ),
+        (
+          (Compile / damlSourceDirectory).value / "main" / "daml" / "upgrade_fetch" / "2.0.0",
+          (Compile / damlDarOutput).value / "upgrade-fetch-tests-2.0.0.dar",
+          s"com.daml.ledger.test.java.upgrade_fetch_2_0_0",
+        ),
       ),
       Compile / damlBuildOrder := Seq(
         // define the packages that have a dependency in the right order, the omitted will be compiled before those listed
