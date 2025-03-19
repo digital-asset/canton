@@ -8,13 +8,14 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.{ProcessingTimeout, TopologyConfig}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.protocol.*
-import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.{DomainId, Member}
 import com.digitalasset.canton.tracing.TraceContext
@@ -36,6 +37,7 @@ class SequencerBasedRegisterTopologyTransactionHandle(
     sequencerClient: SequencerClient,
     val domainId: DomainId,
     val member: Member,
+    domainTimeTracker: DomainTimeTracker,
     clock: Clock,
     topologyConfig: TopologyConfig,
     protocolVersion: ProtocolVersion,
@@ -49,6 +51,7 @@ class SequencerBasedRegisterTopologyTransactionHandle(
   private val service =
     new DomainTopologyService(
       sequencerClient,
+      domainTimeTracker,
       clock,
       topologyConfig,
       protocolVersion,
@@ -83,6 +86,7 @@ class SequencerBasedRegisterTopologyTransactionHandle(
 
 class DomainTopologyService(
     sequencerClient: SequencerClient,
+    domainTimeTracker: DomainTimeTracker,
     clock: Clock,
     topologyConfig: TopologyConfig,
     protocolVersion: ProtocolVersion,
@@ -98,8 +102,12 @@ class DomainTopologyService(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[TopologyTransactionsBroadcast.State]] = {
     val sendCallback = SendCallback.future
+    val maxSequencingTime =
+      clock.now.add(topologyConfig.topologyTransactionRegistrationTimeout.toInternal.duration)
 
-    performUnlessClosingEitherUSF(functionFullName)(sendRequest(request, sendCallback))
+    performUnlessClosingEitherUSF(functionFullName)(
+      sendRequest(request, maxSequencingTime, sendCallback)
+    )
       .biSemiflatMap(
         sendAsyncClientError => {
           logger.warn(
@@ -109,7 +117,10 @@ class DomainTopologyService(
             TopologyTransactionsBroadcast.State.Failed
           )
         },
-        _result =>
+        _result => {
+          // request a tick for maxSequencing time, so that a node with no traffic
+          // can still determine whether the topology broadcast timed out or not.
+          domainTimeTracker.requestTick(maxSequencingTime)
           sendCallback.future
             .map {
               case SendResult.Success(_) =>
@@ -119,7 +130,8 @@ class DomainTopologyService(
                   s"The submitted topology transactions were not sequenced. Error=[$notSequenced]. Transactions=${request.broadcasts}"
                 )
                 TopologyTransactionsBroadcast.State.Failed
-            },
+            }
+        },
       )
       .merge
       .map(Seq.fill(request.broadcasts.flatMap(_.transactions).size)(_))
@@ -127,6 +139,7 @@ class DomainTopologyService(
 
   private def sendRequest(
       request: TopologyTransactionsBroadcast,
+      maxSequencingTime: CantonTimestamp,
       sendCallback: SendCallback,
   )(implicit
       traceContext: TraceContext
@@ -138,8 +151,7 @@ class DomainTopologyService(
     EitherTUtil.logOnErrorU(
       sequencerClient.sendAsync(
         Batch.of(protocolVersion, (request, Recipients.cc(TopologyBroadcastAddress.recipient))),
-        maxSequencingTime =
-          clock.now.add(topologyConfig.topologyTransactionRegistrationTimeout.toInternal.duration),
+        maxSequencingTime = maxSequencingTime,
         callback = sendCallback,
         // Do not amplify because we are running our own retry loop here anyway
         amplify = false,

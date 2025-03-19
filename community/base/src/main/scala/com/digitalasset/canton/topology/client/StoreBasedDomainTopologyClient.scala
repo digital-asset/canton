@@ -29,7 +29,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref.PackageId
-import com.google.common.annotations.VisibleForTesting
 
 import java.time.Duration as JDuration
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
@@ -300,20 +299,21 @@ class StoreBasedDomainTopologyClient(
   ): Option[FutureUnlessShutdown[Unit]] =
     effectiveTimeAwaiter.awaitKnownTimestampUS(timestamp)
 
-  @VisibleForTesting
-  private[client] def awaitSequencedTimestampUS(timestamp: CantonTimestamp)(implicit
+  override def awaitSequencedTimestamp(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): Option[FutureUnlessShutdown[Unit]] =
-    sequencedTimeAwaiter.awaitKnownTimestampUS(timestamp)
+  ): Option[Future[Unit]] =
+    sequencedTimeAwaiter.awaitKnownTimestamp(timestamp)
 
   override def awaitMaxTimestampUS(sequencedTime: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[(SequencedTime, EffectiveTime)]] =
     for {
       // We wait for the sequenced time to be processed to ensure that `maxTimestamp`'s output is stable.
-      _ <- awaitSequencedTimestampUS(sequencedTime).getOrElse(
-        FutureUnlessShutdown.unit
-      )
+      _ <- awaitSequencedTimestamp(sequencedTime)
+        .map(FutureUnlessShutdown.outcomeF)
+        .getOrElse(
+          FutureUnlessShutdown.unit
+        )
       maxTimestamp <- FutureUnlessShutdown.outcomeF(
         store.maxTimestamp(sequencedTime, includeRejected = false)
       )

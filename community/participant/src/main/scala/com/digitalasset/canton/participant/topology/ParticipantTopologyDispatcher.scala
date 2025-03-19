@@ -25,7 +25,7 @@ import com.digitalasset.canton.participant.domain.DomainRegistryError
 import com.digitalasset.canton.participant.store.SyncDomainPersistentState
 import com.digitalasset.canton.participant.sync.SyncDomainPersistentStateManager
 import com.digitalasset.canton.sequencing.client.SequencerClient
-import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
@@ -237,6 +237,7 @@ class ParticipantTopologyDispatcher(
       protocolVersion: ProtocolVersion,
       client: DomainTopologyClientWithInit,
       sequencerClient: SequencerClient,
+      domainTimeTracker: DomainTimeTracker,
   ): ParticipantTopologyDispatcherHandle = {
     val domainLoggerFactory = loggerFactory.append("domainId", domainId.toString)
     new ParticipantTopologyDispatcherHandle {
@@ -244,6 +245,7 @@ class ParticipantTopologyDispatcher(
         sequencerClient,
         domainId,
         participantId,
+        domainTimeTracker,
         clock,
         config.topology,
         protocolVersion,

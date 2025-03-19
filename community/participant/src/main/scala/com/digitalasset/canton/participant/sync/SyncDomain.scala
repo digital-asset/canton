@@ -332,6 +332,7 @@ class SyncDomain(
     staticDomainParameters.protocolVersion,
     domainHandle.topologyClient,
     sequencerClient,
+    ephemeral.timeTracker,
   )
 
   private val messageDispatcher: FutureUnlessShutdown[MessageDispatcher] =

@@ -27,7 +27,7 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast
 import com.digitalasset.canton.sequencing.client.SequencerClient
-import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.client.DomainTopologyClientWithInit
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
@@ -424,6 +424,7 @@ class DomainOutboxFactory(
       protocolVersion: ProtocolVersion,
       targetTopologyClient: DomainTopologyClientWithInit,
       sequencerClient: SequencerClient,
+      domainTimeTracker: DomainTimeTracker,
       clock: Clock,
       domainLoggerFactory: NamedLoggerFactory,
   )(implicit
@@ -434,6 +435,7 @@ class DomainOutboxFactory(
       sequencerClient,
       domainId,
       memberId,
+      domainTimeTracker,
       clock,
       topologyConfig,
       protocolVersion,
@@ -550,6 +552,7 @@ class DomainOutboxFactorySingleCreate(
       protocolVersion: ProtocolVersion,
       targetTopologyClient: DomainTopologyClientWithInit,
       sequencerClient: SequencerClient,
+      domainTimeTracker: DomainTimeTracker,
       clock: Clock,
       domainLoggerFactory: NamedLoggerFactory,
   )(implicit
@@ -569,6 +572,7 @@ class DomainOutboxFactorySingleCreate(
       protocolVersion,
       targetTopologyClient,
       sequencerClient,
+      domainTimeTracker,
       clock,
       domainLoggerFactory,
     ).tap(outbox => outboxRef.putIfAbsent(outbox).discard)

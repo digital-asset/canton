@@ -152,7 +152,7 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
         val fixture = new Fixture()
         import fixture.*
         val awaitSequencedTimestampF =
-          client.awaitSequencedTimestampUS(ts2).getOrElse(fail("expected future"))
+          client.awaitSequencedTimestamp(ts2).getOrElse(fail("expected future"))
 
         observed(SequencedTime(ts1), EffectiveTime(ts1))
         awaitSequencedTimestampF.isCompleted shouldBe false
@@ -165,7 +165,7 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
           val fixture = new Fixture()
           import fixture.*
           val awaitSequencedTimestampF =
-            client.awaitSequencedTimestampUS(ts2).getOrElse(fail("expected future"))
+            client.awaitSequencedTimestamp(ts2).getOrElse(fail("expected future"))
 
           updateHead(
             SequencedTime(ts1),
@@ -188,7 +188,7 @@ trait StoreBasedTopologySnapshotTest extends AsyncWordSpec with BaseTest with Ha
         val fixture = new Fixture()
         import fixture.*
         observed(SequencedTime(ts1), EffectiveTime(CantonTimestamp.MinValue))
-        client.awaitSequencedTimestampUS(ts1) shouldBe None
+        client.awaitSequencedTimestamp(ts1) shouldBe None
       }
     }
 

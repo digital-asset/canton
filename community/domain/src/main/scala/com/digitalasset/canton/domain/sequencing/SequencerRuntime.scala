@@ -414,6 +414,7 @@ class SequencerRuntime(
           staticDomainParameters.protocolVersion,
           topologyClient,
           client,
+          timeTracker,
           clock,
           loggerFactory,
         )

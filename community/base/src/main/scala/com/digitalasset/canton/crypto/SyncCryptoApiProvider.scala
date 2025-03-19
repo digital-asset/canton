@@ -438,6 +438,11 @@ class DomainSyncCryptoClient(
   ): Option[FutureUnlessShutdown[Unit]] =
     ips.awaitTimestampUS(timestamp)
 
+  override def awaitSequencedTimestamp(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): Option[Future[Unit]] =
+    ips.awaitSequencedTimestamp(timestamp)
+
   override def currentSnapshotApproximation(implicit
       traceContext: TraceContext
   ): DomainSnapshotSyncCryptoApi =
