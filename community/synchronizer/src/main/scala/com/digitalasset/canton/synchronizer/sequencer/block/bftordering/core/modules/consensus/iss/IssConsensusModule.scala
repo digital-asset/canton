@@ -22,7 +22,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis.{
   GenesisEpoch,
   GenesisEpochInfo,
-  GenesisPreviousEpochMaxBftTime,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.retransmissions.RetransmissionsManager
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer.*
@@ -92,7 +91,7 @@ final class IssConsensusModule[E <: Env[E]](
     override val dependencies: ConsensusModuleDependencies[E],
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
-    // TODO(#23618): we cannot queue all messages (e.g., during state transfer) due to a potential OOM error
+    // TODO(#23484): we cannot queue all messages (e.g., during state transfer) due to a potential OOM error
     private val futurePbftMessageQueue: mutable.Queue[SignedMessage[PbftNetworkMessage]] =
       new mutable.Queue(),
     private val queuedConsensusMessages: Seq[Consensus.Message[E]] = Seq.empty,
@@ -212,14 +211,12 @@ final class IssConsensusModule[E <: Env[E]](
             newEpochNumber,
             newMembership,
             newCryptoProvider: CryptoProvider[E],
-            previousEpochMaxBftTime,
             lastBlockFromPreviousEpochMode,
           ) =>
         val currentEpochInfo = epochState.epoch.info
         val newEpochInfo = currentEpochInfo.next(
           epochLength,
           newMembership.orderingTopology.activationTime,
-          previousEpochMaxBftTime,
         )
         // Init is currently not complete for state transfer
         if (lastBlockFromPreviousEpochMode == Mode.StateTransfer.LastBlock) {
@@ -494,7 +491,6 @@ final class IssConsensusModule[E <: Env[E]](
                 newEpochNumber,
                 newMembership,
                 cryptoProvider,
-                previousEpochMaxBftTime,
                 _,
               )
             ) =>
@@ -502,7 +498,6 @@ final class IssConsensusModule[E <: Env[E]](
           val newEpochInfo = currentEpochInfo.next(
             epochLength,
             newMembership.orderingTopology.activationTime,
-            previousEpochMaxBftTime,
           )
           if (newEpochNumber != newEpochInfo.number) {
             abort(
@@ -533,7 +528,6 @@ final class IssConsensusModule[E <: Env[E]](
           EpochNumber.First,
           activeTopologyInfo.currentMembership,
           activeTopologyInfo.currentCryptoProvider,
-          GenesisPreviousEpochMaxBftTime,
           lastBlockFromPreviousEpochMode = Mode.FromConsensus,
         )
       )
@@ -818,7 +812,6 @@ object IssConsensusModule {
           ConsensusSegment.ConsensusMessage.PrePrepare.fromProto(
             header.blockMetadata,
             header.viewNumber,
-            header.timestamp,
             value,
             from,
           )(originalByteString)
@@ -826,7 +819,6 @@ object IssConsensusModule {
           ConsensusSegment.ConsensusMessage.Prepare.fromProto(
             header.blockMetadata,
             header.viewNumber,
-            header.timestamp,
             value,
             from,
           )(originalByteString)
@@ -834,7 +826,6 @@ object IssConsensusModule {
           ConsensusSegment.ConsensusMessage.Commit.fromProto(
             header.blockMetadata,
             header.viewNumber,
-            header.timestamp,
             value,
             from,
           )(originalByteString)
@@ -842,7 +833,6 @@ object IssConsensusModule {
           ConsensusSegment.ConsensusMessage.ViewChange.fromProto(
             header.blockMetadata,
             header.viewNumber,
-            header.timestamp,
             value,
             from,
           )(originalByteString)
@@ -850,7 +840,6 @@ object IssConsensusModule {
           ConsensusSegment.ConsensusMessage.NewView.fromProto(
             header.blockMetadata,
             header.viewNumber,
-            header.timestamp,
             value,
             from,
           )(originalByteString)

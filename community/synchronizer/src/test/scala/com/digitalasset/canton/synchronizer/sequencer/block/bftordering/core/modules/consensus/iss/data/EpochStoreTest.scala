@@ -364,7 +364,7 @@ trait EpochStoreTest extends AsyncWordSpec {
             pbftMessagesInProgress = 4,
           ))
 
-          _ <- store.prune(epochNumberInclusive = EpochNumber.First)
+          _ <- store.prune(epochNumberExclusive = EpochNumber(1L))
           numberOfRecordsAfterPrune1 <- store.loadNumberOfRecords
           _ = numberOfRecordsAfterPrune1 shouldBe (EpochStore.NumberOfRecords(
             epochs = 2L,
@@ -372,7 +372,7 @@ trait EpochStoreTest extends AsyncWordSpec {
             pbftMessagesInProgress = 4,
           ))
 
-          _ <- store.prune(epochNumberInclusive = EpochNumber(1L))
+          _ <- store.prune(epochNumberExclusive = EpochNumber(2L))
           numberOfRecordsAfterPrune2 <- store.loadNumberOfRecords
           _ = numberOfRecordsAfterPrune2 shouldBe (EpochStore.NumberOfRecords(
             epochs = 1L,
@@ -380,7 +380,7 @@ trait EpochStoreTest extends AsyncWordSpec {
             pbftMessagesInProgress = 4,
           ))
 
-          _ <- store.prune(epochNumberInclusive = EpochNumber(2L))
+          _ <- store.prune(epochNumberExclusive = EpochNumber(3L))
           numberOfRecordsAfterPrune3 <- store.loadNumberOfRecords
           _ = numberOfRecordsAfterPrune3 shouldBe (EpochStore.NumberOfRecords(
             epochs = 0L,
@@ -404,7 +404,6 @@ object EpochStoreTest {
     .create(
       BlockMetadata.mk(epochNumber, blockNumber),
       ViewNumber(viewNumber),
-      CantonTimestamp.Epoch,
       OrderingBlock(Seq.empty),
       CanonicalCommitSet(Set.empty),
       from = BftNodeId("address"),
@@ -421,7 +420,6 @@ object EpochStoreTest {
         BlockMetadata.mk(epochNumber, blockNumber),
         ViewNumber(viewNumber),
         Hash.digest(HashPurpose.BftOrderingPbftBlock, ByteString.EMPTY, HashAlgorithm.Sha256),
-        CantonTimestamp.Epoch,
         from = BftNodeId("address"),
       )
       .fakeSign
@@ -452,7 +450,6 @@ object EpochStoreTest {
         BlockMetadata.mk(epochNumber, segmentNumber),
         0,
         ViewNumber(viewNumber),
-        CantonTimestamp.Epoch,
         consensusCerts = Seq.empty,
         BftNodeId("address"),
       )
@@ -468,7 +465,6 @@ object EpochStoreTest {
         BlockMetadata.mk(epochNumber, segmentNumber),
         segmentIndex = 0,
         viewNumber = ViewNumber(viewNumber),
-        localTimestamp = CantonTimestamp.Epoch,
         viewChanges = Seq.empty,
         prePrepares = Seq.empty,
         BftNodeId("address"),

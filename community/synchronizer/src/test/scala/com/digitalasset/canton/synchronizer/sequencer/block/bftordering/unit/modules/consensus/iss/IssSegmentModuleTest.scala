@@ -85,7 +85,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
     .create(
       block0Metadata1Node,
       ViewNumber.First,
-      clock.now,
       OrderingBlock.empty,
       CanonicalCommitSet.empty,
       myId,
@@ -105,7 +104,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
     BlockNumber(10L),
     DefaultEpochLength,
     Genesis.GenesisTopologyActivationTime,
-    Genesis.GenesisPreviousEpochMaxBftTime,
   )
   private val block9Commits1Node = Seq(
     Commit
@@ -124,7 +122,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
     .create(
       block10Metadata1Node,
       ViewNumber.First,
-      clock.now,
       OrderingBlock(oneRequestOrderingBlock1Ack.proofs),
       CanonicalCommitSet(block9Commits1Node.toSet),
       myId,
@@ -143,21 +140,18 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
     bottomBlock(
       BlockMetadata.mk(SecondEpochNumber, BlockNumber(10L)),
       SecondViewNumber,
-      clock.now,
       from = myId,
     )
   private val bottomBlock1 =
     bottomBlock(
       BlockMetadata.mk(SecondEpochNumber, 11L),
       SecondViewNumber,
-      clock.now,
       from = myId,
     )
   private val bottomBlock2 =
     bottomBlock(
       BlockMetadata.mk(SecondEpochNumber, 12L),
       SecondViewNumber,
-      clock.now,
       from = myId,
     )
   private val prepareBottomBlock0 = prepareFromPrePrepare(bottomBlock0.message)(from = myId)
@@ -167,7 +161,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
       block10Metadata1Node,
       segmentIndex = 0,
       SecondViewNumber,
-      clock.now,
       consensusCerts = Seq.empty,
       from = myId,
     )
@@ -176,7 +169,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
     block10Metadata1Node,
     segmentIndex = 0,
     SecondViewNumber,
-    clock.now,
     viewChanges = Seq(viewChange1Node1BlockNoProgress),
     prePrepares = Seq(bottomBlock0),
     from = myId,
@@ -536,7 +528,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
         val expectedPrePrepare = PrePrepare.create(
           blockMetadata,
           ViewNumber.First,
-          clock.now,
           OrderingBlock(oneRequestOrderingBlock3Ack.proofs),
           CanonicalCommitSet.empty,
           myId,
@@ -646,7 +637,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
           .create(
             blockMetadata,
             ViewNumber.First,
-            clock.now,
             OrderingBlock(oneRequestOrderingBlock3Ack.proofs),
             CanonicalCommitSet.empty,
             remoteNode,
@@ -839,7 +829,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
             block10Metadata1Node,
             segmentIndex = 0,
             viewNumber = nextView,
-            clock.now,
             consensusCerts = Seq(
               CommitCertificate(
                 block10PrePrepare1Node,
@@ -854,7 +843,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
             block10Metadata1Node,
             segmentIndex = 0,
             viewNumber = nextView,
-            clock.now,
             viewChanges = Seq(expectedViewChange),
             prePrepares = Seq(block10PrePrepare1Node, bottomBlock1, bottomBlock2),
             from = myId,
@@ -1022,7 +1010,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
             blockMetadata,
             segmentIndex = blockOrder4Nodes.indexOf(myId),
             viewNumber = nextView,
-            clock.now,
             consensusCerts = Seq.empty,
             from = from,
           )
@@ -1290,7 +1277,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
           .create(
             blockMetadata4Nodes(blockOrder4Nodes.indexOf(remoteNode)),
             ViewNumber.First,
-            clock.now,
             OrderingBlock(oneRequestOrderingBlock3Ack.proofs),
             CanonicalCommitSet.empty,
             remoteNode,
@@ -1419,7 +1405,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
       val prePrepare = PrePrepare.create(
         blockMetadata,
         ViewNumber.First,
-        clock.now,
         OrderingBlock(oneRequestOrderingBlock3Ack.proofs),
         CanonicalCommitSet.empty,
         myId,
@@ -1586,7 +1571,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
             blockMetadata,
             segmentIndex = blockOrder4Nodes.indexOf(myId),
             viewNumber = SecondViewNumber,
-            clock.now,
             consensusCerts =
               Seq[ConsensusCertificate](PrepareCertificate(prePrepare.fakeSign, prepares)),
             from = myId,
@@ -1617,7 +1601,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
           bottomBlock(
             blockMetadata4Nodes(blockOrder4Nodes.indexOf(myId) + allIds.size),
             SecondViewNumber,
-            clock.now,
             from = otherIds(0),
           )
 
@@ -1627,7 +1610,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
               blockMetadata,
               segmentIndex = blockOrder4Nodes.indexOf(myId),
               viewNumber = SecondViewNumber,
-              clock.now,
               consensusCerts = Seq.empty,
               from = otherIds(i),
             )
@@ -1639,13 +1621,11 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
             blockMetadata,
             segmentIndex = blockOrder4Nodes.indexOf(myId),
             viewNumber = SecondViewNumber,
-            clock.now,
             ViewChange
               .create(
                 blockMetadata,
                 segmentIndex = blockOrder4Nodes.indexOf(myId),
                 viewNumber = SecondViewNumber,
-                clock.now,
                 consensusCerts =
                   Seq[ConsensusCertificate](PrepareCertificate(prePrepare.fakeSign, prepares)),
                 from = myId,
@@ -1731,7 +1711,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
       epochInfo: EpochInfo = GenesisEpoch.info.next(
         epochLength,
         Genesis.GenesisTopologyActivationTime,
-        Genesis.GenesisPreviousEpochMaxBftTime,
       )
   ): IssSegmentModule[E] = {
     implicit val metricsContext: MetricsContext = MetricsContext.Empty
@@ -1763,7 +1742,6 @@ class IssSegmentModuleTest extends AsyncWordSpec with BaseTest with HasExecution
       new EpochMetricsAccumulator(),
       storePbftMessages = storeMessages,
       epochStore,
-      clock,
       cryptoProvider,
       latestCompletedEpochLastCommits,
       epochInProgress,
@@ -1795,7 +1773,7 @@ private object IssSegmentModuleTest {
       ProofOfAvailability(
         aBatchId,
         Seq(AvailabilityAck(myId, Signature.noSignature)),
-        CantonTimestamp.MaxValue,
+        EpochNumber.First,
       )
     )
   )
@@ -1804,7 +1782,7 @@ private object IssSegmentModuleTest {
       ProofOfAvailability(
         aBatchId,
         otherIds.map(AvailabilityAck(_, Signature.noSignature)),
-        CantonTimestamp.MaxValue,
+        EpochNumber.First,
       )
     )
   )
@@ -1818,7 +1796,6 @@ private object IssSegmentModuleTest {
         prePrepare.blockMetadata,
         viewNumber,
         prePrepare.hash,
-        prePrepare.localTimestamp,
         from,
       )
       .fakeSign
@@ -1832,7 +1809,7 @@ private object IssSegmentModuleTest {
         prePrepare.blockMetadata,
         viewNumber,
         prePrepare.hash,
-        prePrepare.localTimestamp,
+        CantonTimestamp.Epoch,
         from,
       )
       .fakeSign
@@ -1847,14 +1824,12 @@ private object IssSegmentModuleTest {
   def bottomBlock(
       blockMetadata: BlockMetadata,
       view: ViewNumber,
-      now: CantonTimestamp,
       from: BftNodeId,
   ): SignedMessage[PrePrepare] =
     PrePrepare
       .create(
         blockMetadata,
         view,
-        now,
         OrderingBlock(Seq.empty),
         CanonicalCommitSet(Set.empty),
         from,

@@ -3,11 +3,10 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer
 
-import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.TimeoutManager
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.validation.IssConsensusSignatureVerifier
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
@@ -24,11 +23,12 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.StateTransferMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.dependencies.ConsensusModuleDependencies
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.utils.BftNodeShuffler
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.SingleUseCell
+import com.google.common.annotations.VisibleForTesting
 
-import scala.collection.mutable
-import scala.concurrent.duration.DurationInt
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Random, Success}
 
 /** Manages a single state transfer instance in a client role and multiple state transfer instances
   * in a server role.
@@ -37,20 +37,18 @@ import scala.util.{Failure, Success}
   *
   * Design document: https://docs.google.com/document/d/1oB1KtnpM7OiNDWQoRUL0NuoEFJYUjg58ECYIjSi4sIM
   */
-@SuppressWarnings(Array("org.wartremover.warts.Var"))
 class StateTransferManager[E <: Env[E]](
     thisNode: BftNodeId,
     dependencies: ConsensusModuleDependencies[E],
     epochLength: EpochLength, // TODO(#19289) support variable epoch lengths
     epochStore: EpochStore[E],
     override val loggerFactory: NamedLoggerFactory,
-) extends NamedLogging {
+)(implicit config: BftBlockOrdererConfig)
+    extends NamedLogging {
 
-  import StateTransferManager.*
+  private val stateTransferStartEpoch = new SingleUseCell[EpochNumber]
 
-  private var stateTransferStartEpoch: Option[EpochNumber] = None
-
-  private val signatureVerifier = new IssConsensusSignatureVerifier[E]()
+  private val validator = new StateTransferMessageValidator[E](loggerFactory)
 
   private val messageSender = new StateTransferMessageSender[E](
     thisNode,
@@ -60,10 +58,23 @@ class StateTransferManager[E <: Env[E]](
     loggerFactory,
   )
 
-  private val blockTransferResponseTimeouts =
-    mutable.Map[BftNodeId, TimeoutManager[E, Consensus.Message[E], BftNodeId]]()
+  @VisibleForTesting
+  private[bftordering] val maybeBlockTransferResponseTimeoutManager =
+    new SingleUseCell[TimeoutManager[E, Consensus.Message[E], EpochNumber]]
+  private def blockTransferResponseTimeoutManager(abort: String => Nothing) =
+    maybeBlockTransferResponseTimeoutManager.getOrElse(
+      abort(
+        "Internal inconsistency: there should be a block transfer response timeout manager available"
+      )
+    )
 
-  def inBlockTransfer: Boolean = stateTransferStartEpoch.isDefined
+  private val maybeNodeShuffler = new SingleUseCell[BftNodeShuffler]
+  private def nodeShuffler(abort: String => Nothing) =
+    maybeNodeShuffler.getOrElse(
+      abort("Internal inconsistency: there should be a node shuffler available")
+    )
+
+  def inStateTransfer: Boolean = stateTransferStartEpoch.isDefined
 
   def startCatchUp(
       membership: Membership,
@@ -74,24 +85,19 @@ class StateTransferManager[E <: Env[E]](
       context: E#ActorContextT[Consensus.Message[E]],
       traceContext: TraceContext,
   ): Unit =
-    if (inBlockTransfer) {
+    if (inStateTransfer) {
       logger.debug("State transfer: already in progress")
     } else {
       val latestCompletedEpochNumber = latestCompletedEpoch.info.number
       logger.info(
         s"State transfer: starting catch-up from epoch $startEpoch, latest completed epoch is $latestCompletedEpochNumber"
       )
-      stateTransferStartEpoch = Some(startEpoch)
+      initStateTransfer(startEpoch, abort)
 
       val blockTransferRequest =
         StateTransferMessage.BlockTransferRequest.create(startEpoch, membership.myId)
       messageSender.signMessage(cryptoProvider, blockTransferRequest) { signedMessage =>
-        membership.otherNodes.headOption.foreach { node => // TODO(#24524) rotate nodes
-          blockTransferResponseTimeouts
-            .put(node, new TimeoutManager(loggerFactory, RetryTimeout, node))
-            .foreach(_ => abort(s"There should be no timeout manager for '$node' yet"))
-          sendBlockTransferRequest(signedMessage, to = node)(abort)
-        }
+        sendBlockTransferRequest(signedMessage, membership)(abort)
       }
     }
 
@@ -102,22 +108,46 @@ class StateTransferManager[E <: Env[E]](
   )(
       abort: String => Nothing
   )(implicit context: E#ActorContextT[Consensus.Message[E]], traceContext: TraceContext): Unit = {
-    if (stateTransferStartEpoch.isEmpty) {
-      logger.info(s"State transfer: starting onboarding state transfer from epoch $newEpochNumber")
-      stateTransferStartEpoch = Some(newEpochNumber)
-    } else {
+    if (inStateTransfer) {
       logger.info(s"State transfer: requesting new epoch $newEpochNumber")
+    } else {
+      logger.info(s"State transfer: starting onboarding state transfer from epoch $newEpochNumber")
+      initStateTransfer(newEpochNumber, abort)
     }
     val blockTransferRequest =
       StateTransferMessage.BlockTransferRequest.create(newEpochNumber, membership.myId)
     messageSender.signMessage(cryptoProvider, blockTransferRequest) { signedMessage =>
-      membership.otherNodes.headOption.foreach { node => // TODO(#24524) rotate nodes
-        blockTransferResponseTimeouts
-          .put(node, new TimeoutManager(loggerFactory, RetryTimeout, node))
-          .discard
-        sendBlockTransferRequest(signedMessage, to = node)(abort)
-      }
+      sendBlockTransferRequest(signedMessage, membership)(abort)
     }
+  }
+
+  private def initStateTransfer(startEpoch: EpochNumber, abort: String => Nothing): Unit = {
+    stateTransferStartEpoch
+      .putIfAbsent(startEpoch)
+      .foreach(_ =>
+        abort(
+          "Internal inconsistency: state transfer manager in a client role should not be reused"
+        )
+      )
+    maybeBlockTransferResponseTimeoutManager
+      .putIfAbsent(
+        new TimeoutManager[E, Consensus.Message[E], EpochNumber](
+          loggerFactory,
+          config.epochStateTransferRetryTimeout,
+          timeoutId = startEpoch, // reuse the start epoch number, not relevant
+        )
+      )
+      .foreach(_ =>
+        abort(
+          "Internal inconsistency: block transfer response timeout manager should be set only once"
+        )
+      )
+    // Derive the random seed from the epoch number so that it's deterministic.
+    // Note that if multiple nodes are onboarded from the same epoch or come back online after a network partition,
+    //  they might use the same serving nodes around the same time.
+    maybeNodeShuffler
+      .putIfAbsent(new BftNodeShuffler(new Random(startEpoch)))
+      .foreach(_ => abort("Internal inconsistency: node shuffler should be set only once"))
   }
 
   def handleStateTransferMessage(
@@ -130,19 +160,18 @@ class StateTransferManager[E <: Env[E]](
   ): StateTransferMessageResult =
     message match {
       case StateTransferMessage.UnverifiedStateTransferMessage(unverifiedMessage) =>
-        StateTransferMessageValidator.verifyStateTransferMessage(
+        validator.verifyStateTransferMessage(
           unverifiedMessage,
           topologyInfo.currentMembership,
           topologyInfo.currentCryptoProvider,
-          loggerFactory,
         )
         StateTransferMessageResult.Continue
 
       case StateTransferMessage.VerifiedStateTransferMessage(message) =>
         handleStateTransferNetworkMessage(message, topologyInfo, latestCompletedEpoch)(abort)
 
-      case StateTransferMessage.ResendBlockTransferRequest(blockTransferRequest, to) =>
-        sendBlockTransferRequest(blockTransferRequest, to)(abort) // TODO(#24524) rotate nodes
+      case StateTransferMessage.RetryBlockTransferRequest(request) =>
+        sendBlockTransferRequest(request, topologyInfo.currentMembership)(abort)
         StateTransferMessageResult.Continue
 
       case StateTransferMessage.BlockVerified(
@@ -153,15 +182,28 @@ class StateTransferManager[E <: Env[E]](
         storeBlock(commitCert, remoteLatestCompleteEpoch, from)
 
       case StateTransferMessage.BlockStored(commitCert, remoteLatestCompleteEpoch, from) =>
-        if (inBlockTransfer) {
-          handleStoredBlock(commitCert, remoteLatestCompleteEpoch, from)(abort)
+        if (inStateTransfer) {
+          handleStoredBlock(commitCert, remoteLatestCompleteEpoch)
         } else {
           logger.info(
-            s"State transfer: stored block ${commitCert.prePrepare.message.blockMetadata} while not in state transfer"
+            s"State transfer: stored block ${commitCert.prePrepare.message.blockMetadata} from '$from' " +
+              s"while not in state transfer"
           )
-          StateTransferMessageResult.Continue
         }
+        StateTransferMessageResult.Continue
     }
+
+  def epochTransferred(epochNumber: EpochNumber)(abort: String => Nothing)(implicit
+      traceContext: TraceContext
+  ): Unit = {
+    logger.info(
+      s"State transfer: fully transferred epoch $epochNumber (including batches), cancelling the timeout"
+    )
+    // Currently, epoch completion in state transfer is entirely Output-based, i.e., all batches from an epoch
+    //  need to be fetched to cancel the timeout. If it's cancelled too soon, while "only" batches are left to fetch,
+    //  the state-transferring node will ask another node for blocks and rely on the idempotency of the stores.
+    blockTransferResponseTimeoutManager(abort).cancelTimeout()
+  }
 
   private def handleStateTransferNetworkMessage(
       message: Consensus.StateTransferMessage.StateTransferNetworkMessage,
@@ -173,10 +215,11 @@ class StateTransferManager[E <: Env[E]](
   ): StateTransferMessageResult =
     message match {
       case request @ StateTransferMessage.BlockTransferRequest(epoch, from) =>
-        StateTransferMessageValidator
+        validator
           .validateBlockTransferRequest(request, orderingTopologyInfo.currentMembership)
           .fold(
-            validationMessage => logger.info(s"State transfer: $validationMessage, dropping..."),
+            // TODO(#23313) emit metrics
+            validationError => logger.warn(s"State transfer: $validationError, dropping..."),
             { _ =>
               logger.info(s"State transfer: '$from' is requesting block transfer for epoch $epoch")
 
@@ -191,8 +234,12 @@ class StateTransferManager[E <: Env[E]](
         StateTransferMessageResult.Continue
 
       case response: StateTransferMessage.BlockTransferResponse =>
-        if (inBlockTransfer) {
-          handleBlockTransferResponse(response, orderingTopologyInfo)
+        if (inStateTransfer) {
+          handleBlockTransferResponse(
+            response,
+            latestCompletedEpoch.info.number,
+            orderingTopologyInfo,
+          )
         } else {
           val blockMetadata = response.commitCertificate.map(_.prePrepare.message.blockMetadata)
           logger.info(
@@ -204,58 +251,70 @@ class StateTransferManager[E <: Env[E]](
     }
 
   private def sendBlockTransferRequest(
-      blockTransferRequest: SignedMessage[StateTransferMessage.BlockTransferRequest],
-      to: BftNodeId,
+      request: SignedMessage[StateTransferMessage.BlockTransferRequest],
+      membership: Membership,
   )(abort: String => Nothing)(implicit
       context: E#ActorContextT[Consensus.Message[E]],
       traceContext: TraceContext,
   ): Unit =
-    if (inBlockTransfer) {
-      blockTransferResponseTimeouts
-        .getOrElse(to, abort(s"No timeout manager for '$to'"))
-        .scheduleTimeout(
-          StateTransferMessage.ResendBlockTransferRequest(blockTransferRequest, to)
-        )
-      messageSender.sendBlockTransferRequest(blockTransferRequest, to)
+    if (inStateTransfer) {
+      // Ask a single node for an entire epoch of blocks to compromise between noise for different nodes
+      //  and load balancing. Note that we're shuffling (instead of round-robin), so the same node might be chosen
+      //  multiple times in a row, resulting in uneven load balancing for certain periods. On the other hand,
+      //  the order in which nodes are chosen is less predictable.
+      val servingNode =
+        nodeShuffler(abort)
+          .shuffle(membership.otherNodes.toSeq)
+          .headOption
+          .getOrElse(
+            abort(
+              "Internal inconsistency: there should be at least one serving node to send a block transfer request to"
+            )
+          )
+      blockTransferResponseTimeoutManager(abort)
+        .scheduleTimeout(StateTransferMessage.RetryBlockTransferRequest(request))
+      messageSender.sendBlockTransferRequest(request, servingNode)
     } else {
       logger.info(
-        s"State transfer: not sending a block transfer request to '$to' when not in state transfer (likely a race)"
+        s"State transfer: not sending a block transfer request when not in state transfer (likely a race)"
       )
     }
 
   private def handleBlockTransferResponse(
       response: StateTransferMessage.BlockTransferResponse,
+      latestLocallyCompletedEpoch: EpochNumber,
       orderingTopologyInfo: OrderingTopologyInfo[E],
   )(implicit
       context: E#ActorContextT[Consensus.Message[E]],
       traceContext: TraceContext,
   ): StateTransferMessageResult =
-    response.commitCertificate.fold[StateTransferMessageResult](
-      StateTransferMessageResult.NothingToStateTransfer
-    ) { commitCert =>
-      // TODO(#24524) validate response
-      val from = response.from
-      context.pipeToSelf(
-        signatureVerifier.validateConsensusCertificate(commitCert, orderingTopologyInfo)
-      ) {
-        case Success(Right(())) =>
-          Some(StateTransferMessage.BlockVerified(commitCert, response.latestCompletedEpoch, from))
-        case Success(Left(errors)) =>
+    validator
+      .validateBlockTransferResponse(
+        response,
+        latestLocallyCompletedEpoch,
+        orderingTopologyInfo.currentMembership,
+      )
+      .fold(
+        { validationError =>
+          logger.warn(s"State transfer: $validationError, dropping...")
           // TODO(#23313) emit metrics
-          logger.warn(
-            s"State transfer: commit certificate from '$from' failed signature verification, dropping: $errors"
-          )
-          None
-        case Failure(exception) =>
-          // TODO(#23313) emit metrics
-          logger.warn(
-            s"State transfer: commit certificate from '$from' could not be verified, dropping",
-            exception,
-          )
-          None
-      }
-      StateTransferMessageResult.Continue
-    }
+          StateTransferMessageResult.Continue
+        },
+        { _ =>
+          val from = response.from
+          response.commitCertificate match {
+            case None => StateTransferMessageResult.NothingToStateTransfer(from)
+            case Some(commitCert) =>
+              validator.verifyCommitCertificate(
+                commitCert,
+                from,
+                response.latestCompletedEpoch,
+                orderingTopologyInfo,
+              )
+              StateTransferMessageResult.Continue
+          }
+        },
+      )
 
   private def storeBlock(
       commitCert: CommitCertificate,
@@ -277,58 +336,29 @@ class StateTransferManager[E <: Env[E]](
   private def handleStoredBlock(
       commitCert: CommitCertificate,
       remoteLatestCompleteEpoch: EpochNumber,
-      from: BftNodeId,
-  )(abort: String => Nothing)(implicit
-      traceContext: TraceContext
-  ): StateTransferMessageResult = {
-    val startEpoch = stateTransferStartEpoch.getOrElse(abort("Should be in state transfer"))
-    // TODO(#24524) calculate reasonably
-    // Right now, the state transfer end epoch is the latest remotely completed epoch according to the last received
-    //  block transfer response, so slow/malicious nodes can significantly impact the process.
-    val endEpoch = remoteLatestCompleteEpoch
-
+  )(implicit traceContext: TraceContext): Unit = {
     val prePrepare = commitCert.prePrepare.message
     val blockMetadata = prePrepare.blockMetadata
     // TODO(#19289) support variable epoch lengths
     val blockLastInEpoch = (blockMetadata.blockNumber + 1) % epochLength == 0
+    // TODO(#24717) calculate reasonably
+    // Right now, the state transfer end epoch is the latest remotely completed epoch according to the last received
+    //  block transfer response, so slow/malicious nodes can significantly impact the process.
+    val endEpoch = remoteLatestCompleteEpoch
 
     // Blocks within an epoch can be received and stored out of order, but that's fine because the Output module
     //  orders them (has a Peano queue).
     logger.debug(s"State transfer: sending block $blockMetadata to Output")
     messageSender.sendBlockToOutput(prePrepare, blockLastInEpoch, endEpoch)
-
-    if (blockMetadata.epochNumber == endEpoch && blockLastInEpoch) {
-      // Clean up remaining timeouts as we're done with block transfer
-      blockTransferResponseTimeouts.view.values.foreach(_.cancelTimeout())
-      blockTransferResponseTimeouts.clear()
-      val numberOfTransferredEpochs = remoteLatestCompleteEpoch - startEpoch + 1
-      StateTransferMessageResult.BlockTransferCompleted(endEpoch, numberOfTransferredEpochs)
-    } else if (blockLastInEpoch) {
-      // Cancel a timeout if exists
-      blockTransferResponseTimeouts.get(from).foreach(_.cancelTimeout())
-      // Wait for storing new epoch
-      StateTransferMessageResult.Continue
-    } else {
-      StateTransferMessageResult.Continue
-    }
   }
-}
-
-object StateTransferManager {
-  private val RetryTimeout = 10.seconds
 }
 
 sealed trait StateTransferMessageResult extends Product with Serializable
 
 object StateTransferMessageResult {
 
-  case object NothingToStateTransfer extends StateTransferMessageResult
-
   // Signals that state transfer is in progress
   case object Continue extends StateTransferMessageResult
 
-  final case class BlockTransferCompleted(
-      endEpochNumber: EpochNumber,
-      numberOfTransferredEpochs: Long,
-  ) extends StateTransferMessageResult
+  final case class NothingToStateTransfer(from: BftNodeId) extends StateTransferMessageResult
 }

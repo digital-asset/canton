@@ -543,7 +543,7 @@ object BuildCommon {
       `pekko-fork`,
       `magnolify-addon`,
       `demo`,
-      `daml-errors`,
+      `base-errors`,
       `daml-adjustable-clock`,
       `daml-tls`,
       `kms-driver-api`,
@@ -564,7 +564,7 @@ object BuildCommon {
     lazy val `util-external` = project
       .in(file("base/util-external"))
       .dependsOn(
-        `daml-errors`,
+        `base-errors`,
         `wartremover-extension` % "compile->compile;test->test",
       )
       .settings(
@@ -604,7 +604,7 @@ object BuildCommon {
     lazy val `util-logging` = project
       .in(file("community/util-logging"))
       .dependsOn(
-        `daml-errors` % "compile->compile;test->test",
+        `base-errors` % "compile->compile;test->test",
         `daml-grpc-utils`,
       )
       .settings(
@@ -934,7 +934,7 @@ object BuildCommon {
 
     lazy val `community-admin-api` = project
       .in(file("community/admin-api"))
-      .dependsOn(`util-external`, `daml-errors` % "compile->compile;test->test")
+      .dependsOn(`util-external`, `base-errors` % "compile->compile;test->test")
       .settings(
         sharedCantonCommunitySettings,
         libraryDependencies ++= Seq(
@@ -994,12 +994,31 @@ object BuildCommon {
         // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
         // runtime errors while testing and none have been found so far, so this should be fine for now
         dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.0.1",
+        libraryDependencies ++= Seq(
+          testcontainers,
+          testcontainers_postgresql,
+          toxiproxy_java,
+          opentelemetry_proto,
+          circe_yaml,
+        ),
 
         // This library contains a lot of testing helpers that previously existing in testing scope
         // As such, in order to minimize the diff when creating this library, the same rules that
         // applied to `test` scope are used here. This can be reviewed in the future.
         scalacOptions --= JvmRulesPlugin.scalacOptionsToDisableForTests,
         Compile / compile / wartremoverErrors := JvmRulesPlugin.wartremoverErrorsForTestScope,
+
+        // TODO(i12766): producing an empty file because there are errors in running the `doc` task
+        Compile / packageDoc := {
+          val destination = (Compile / packageDoc / artifactPath).value
+          IO.touch(destination)
+          destination
+        },
+
+        // TODO(i12761): package individual libraries instead of uber JARs for external consumption
+        UberLibrary.assemblySettings("community-integration-testing"),
+        // when building the fat jar, we need to properly merge our artefacts
+        assembly / assemblyMergeStrategy := mergeStrategy((assembly / assemblyMergeStrategy).value),
       )
 
     lazy val `kms-driver-api` = project
@@ -1230,8 +1249,8 @@ object BuildCommon {
         addFilesToHeaderCheck("*.daml", "daml", Compile),
       )
 
-    lazy val `daml-errors` = project
-      .in(file("base/daml-errors"))
+    lazy val `base-errors` = project
+      .in(file("base/errors"))
       .dependsOn(
         DamlProjects.`google-common-protos-scala`,
         `wartremover-extension` % "compile->compile;test->test",
@@ -1416,7 +1435,7 @@ object BuildCommon {
     lazy val `ledger-api-core` = project
       .in(file("community/ledger/ledger-api-core"))
       .dependsOn(
-        `daml-errors` % "test->test",
+        `base-errors` % "test->test",
         `daml-tls` % "test->test",
         `ledger-common` % "compile->compile;test->test",
         `community-common` % "compile->compile;test->test",

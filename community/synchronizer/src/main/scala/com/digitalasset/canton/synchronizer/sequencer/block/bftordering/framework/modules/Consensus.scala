@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.Epoch
@@ -412,10 +411,8 @@ object Consensus {
     final case class VerifiedStateTransferMessage(message: StateTransferNetworkMessage)
         extends StateTransferMessage
 
-    final case class ResendBlockTransferRequest(
-        blockTransferRequest: SignedMessage[BlockTransferRequest],
-        to: BftNodeId,
-    ) extends StateTransferMessage
+    final case class RetryBlockTransferRequest(request: SignedMessage[BlockTransferRequest])
+        extends StateTransferMessage
 
     final case class BlockVerified[E <: Env[E]](
         commitCertificate: CommitCertificate,
@@ -438,7 +435,6 @@ object Consensus {
       epochNumber: EpochNumber,
       membership: Membership,
       cryptoProvider: CryptoProvider[E],
-      previousEpochMaxBftTime: CantonTimestamp,
       lastBlockFromPreviousEpochMode: OrderedBlockForOutput.Mode,
   ) extends Message[E]
 

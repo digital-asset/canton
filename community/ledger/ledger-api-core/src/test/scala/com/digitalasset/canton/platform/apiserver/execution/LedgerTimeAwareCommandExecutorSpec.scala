@@ -4,8 +4,8 @@
 package com.digitalasset.canton.platform.apiserver.execution
 
 import cats.data.EitherT
+import com.digitalasset.canton.data.DeduplicationPeriod
 import com.digitalasset.canton.data.DeduplicationPeriod.DeduplicationDuration
-import com.digitalasset.canton.data.{DeduplicationPeriod, ProcessedDisclosedContract}
 import com.digitalasset.canton.ledger.api.{CommandId, Commands}
 import com.digitalasset.canton.ledger.participant.state.index.MaximumLedgerTime
 import com.digitalasset.canton.ledger.participant.state.{
@@ -17,15 +17,16 @@ import com.digitalasset.canton.ledger.participant.state.{
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.platform.apiserver.FatContractInstanceHelper
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause.LedgerTime
+import com.digitalasset.canton.protocol.LfTransactionVersion
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.{BaseTest, FailOnShutdown}
 import com.digitalasset.daml.lf.command.ApiCommands as LfCommands
 import com.digitalasset.daml.lf.crypto.Hash
-import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageName, PackageVersion}
+import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageName}
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
-import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.{TestNodeBuilder, TransactionBuilder}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
@@ -66,20 +67,21 @@ class LedgerTimeAwareCommandExecutorSpec
     )
   )
 
+  private val alice = Ref.Party.assertFromString("alice")
+
   private val processedDisclosedContracts = ImmArray(
-    ProcessedDisclosedContract(
+    FatContractInstanceHelper.buildFatContractInstance(
       templateId = Identifier.assertFromString("some:pkg:identifier"),
       packageName = PackageName.assertFromString("pkg-name"),
-      packageVersion = Some(PackageVersion.assertFromString("1.0.0")),
+      packageVersion = None,
       contractId = cid,
       argument = Value.ValueNil,
       createdAt = Time.Timestamp.Epoch,
       driverMetadata = Bytes.Empty,
-      signatories = Set.empty,
-      stakeholders = Set.empty,
+      signatories = Set(alice),
+      stakeholders = Set(alice),
       keyOpt = None,
-      // TODO(#19494): Change to minVersion once 2.2 is released and 2.1 is removed
-      version = LanguageVersion.v2_dev,
+      version = LfTransactionVersion.minVersion,
     )
   )
   private val synchronizerRank = SynchronizerRank.single(SynchronizerId.tryFromString("some::sync"))
@@ -96,7 +98,7 @@ class LedgerTimeAwareCommandExecutorSpec
         SubmitterInfo(
           Nil,
           Nil,
-          Ref.ApplicationId.assertFromString("foobar"),
+          Ref.UserId.assertFromString("foobar"),
           Ref.CommandId.assertFromString("foobar"),
           DeduplicationDuration(Duration.ofMinutes(1)),
           None,
@@ -152,7 +154,7 @@ class LedgerTimeAwareCommandExecutorSpec
 
     val commands = Commands(
       workflowId = None,
-      applicationId = Ref.ApplicationId.assertFromString("applicationId"),
+      userId = Ref.UserId.assertFromString("userId"),
       commandId = CommandId(Ref.CommandId.assertFromString("commandId")),
       submissionId = None,
       actAs = Set.empty,
@@ -192,7 +194,7 @@ class LedgerTimeAwareCommandExecutorSpec
               SubmitterInfo(
                 Nil,
                 Nil,
-                Ref.ApplicationId.assertFromString("foobar"),
+                Ref.UserId.assertFromString("foobar"),
                 Ref.CommandId.assertFromString("foobar"),
                 DeduplicationDuration(Duration.ofMinutes(1)),
                 None,

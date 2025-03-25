@@ -548,9 +548,6 @@ create table par_in_flight_submission (
     -- Sequencer timestamp after which this submission will not be sequenced any more, in microsecond precision relative to EPOCH
     -- If set, this submission is considered unsequenced.
     sequencing_timeout bigint,
-    -- Sequencer counter assigned to this submission.
-    -- Must be set iff sequencing_timeout is not set.
-    sequencer_counter bigint,
     -- Sequencer timestamp assigned to this submission, in microsecond precision relative to EPOCH
     -- Must be set iff sequencing_timeout is not set.
     sequencing_time bigint,
@@ -576,11 +573,11 @@ create table par_settings(
 );
 
 create table par_command_deduplication (
-  -- hash of the change ID (application_id + command_id + act_as) as a hex string
+  -- hash of the change ID (user_id + command_id + act_as) as a hex string
   change_id_hash varchar primary key,
 
-  -- the application ID that requested the change
-  application_id varchar not null,
+  -- the user ID that requested the change
+  user_id varchar not null,
   -- the command ID
   command_id varchar not null,
   -- the act as parties serialized as a Protobuf blob
@@ -793,8 +790,6 @@ create table ord_epochs (
     epoch_length bigint not null,
     -- Sequencing instant of the topology snapshot in force for the epoch
     topology_ts bigint not null,
-    -- the bft time of the last transaction of the last block from the previous epoch
-    previous_epoch_max_ts bigint not null,
     -- whether the epoch is in progress
     in_progress bool not null
 );
@@ -802,6 +797,8 @@ create table ord_epochs (
 create table ord_availability_batch(
     id varchar not null,
     batch binary large object not null,
+    -- assigned at batch creation and used to calculate epoch expiration
+    epoch_number bigint not null,
     primary key (id)
 );
 
@@ -869,6 +866,16 @@ create table ord_metadata_output_epochs (
     epoch_number bigint not null,
     could_alter_ordering_topology bool not null,
     primary key (epoch_number)
+);
+
+-- inclusive lower bound of when blocks can be read.
+-- if empty it means all blocks can be read.
+-- is updated when bft-sequencer is pruned meaning that
+-- only events from later epochs can be served (earlier events have probably been pruned)
+create table ord_output_lower_bound (
+    single_row_lock char(1) not null default 'X' primary key check(single_row_lock = 'X'),
+    epoch_number bigint not null,
+    block_number bigint not null
 );
 
 -- Stores P2P endpoints from the configuration or admin command

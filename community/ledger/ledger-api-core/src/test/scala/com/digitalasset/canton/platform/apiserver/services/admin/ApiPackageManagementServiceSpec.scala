@@ -15,7 +15,7 @@ import com.daml.nonempty.NonEmpty
 import com.daml.tracing.DefaultOpenTelemetry
 import com.daml.tracing.TelemetrySpecBase.*
 import com.digitalasset.base.error.ErrorsAssertions
-import com.digitalasset.canton.data.{CantonTimestamp, Offset, ProcessedDisclosedContract}
+import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.error.{TransactionError, TransactionRoutingError}
 import com.digitalasset.canton.ledger.api.health.HealthStatus
 import com.digitalasset.canton.ledger.participant.state
@@ -36,9 +36,9 @@ import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.{TestTelemetrySetup, TraceContext}
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.{BaseTest, LfKeyResolver, LfPackageId, LfPartyId}
-import com.digitalasset.daml.lf.data.Ref.{ApplicationId, CommandId, Party, SubmissionId, WorkflowId}
+import com.digitalasset.daml.lf.data.Ref.{CommandId, Party, SubmissionId, UserId, WorkflowId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
-import com.digitalasset.daml.lf.transaction.SubmittedTransaction
+import com.digitalasset.daml.lf.transaction.{FatContractInstance, SubmittedTransaction}
 import com.google.protobuf.ByteString
 import io.opentelemetry.api.trace.Tracer
 import io.opentelemetry.sdk.OpenTelemetrySdk
@@ -86,7 +86,7 @@ class ApiPackageManagementServiceSpec
           span.end()
         }
         .map { _ =>
-          testTelemetrySetup.reportedSpanAttributes should contain(anApplicationIdSpanAttribute)
+          testTelemetrySetup.reportedSpanAttributes should contain(anUserIdSpanAttribute)
           succeed
         }
     }
@@ -139,8 +139,8 @@ object ApiPackageManagementServiceSpec {
     ): Future[SubmissionResult] = {
       val telemetryContext = traceContext.toDamlTelemetryContext(tracer)
       telemetryContext.setAttribute(
-        anApplicationIdSpanAttribute._1,
-        anApplicationIdSpanAttribute._2,
+        anUserIdSpanAttribute._1,
+        anUserIdSpanAttribute._2,
       )
       Future.successful(state.SubmissionResult.Acknowledged)
     }
@@ -150,8 +150,8 @@ object ApiPackageManagementServiceSpec {
     ): Future[SubmissionResult] = {
       val telemetryContext = traceContext.toDamlTelemetryContext(tracer)
       telemetryContext.setAttribute(
-        anApplicationIdSpanAttribute._1,
-        anApplicationIdSpanAttribute._2,
+        anUserIdSpanAttribute._1,
+        anUserIdSpanAttribute._2,
       )
       Future.successful(state.SubmissionResult.Acknowledged)
     }
@@ -177,7 +177,7 @@ object ApiPackageManagementServiceSpec {
         // Currently, the estimated interpretation cost is not used
         _estimatedInterpretationCost: Long,
         keyResolver: LfKeyResolver,
-        processedDisclosedContracts: ImmArray[ProcessedDisclosedContract],
+        processedDisclosedContracts: ImmArray[FatContractInstance],
     )(implicit
         traceContext: TraceContext
     ): CompletionStage[SubmissionResult] =
@@ -185,7 +185,7 @@ object ApiPackageManagementServiceSpec {
 
     override def submitReassignment(
         submitter: Party,
-        applicationId: ApplicationId,
+        userId: UserId,
         commandId: CommandId,
         submissionId: Option[SubmissionId],
         workflowId: Option[WorkflowId],

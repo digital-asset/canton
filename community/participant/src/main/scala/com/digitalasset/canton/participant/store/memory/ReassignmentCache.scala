@@ -172,8 +172,11 @@ class ReassignmentCache(
     FutureUnlessShutdown,
     ReassignmentStore.UnknownReassignmentId,
     ReassignmentStore.ReassignmentEntry,
-  ] =
-    reassignmentStore.findReassignmentEntry(reassignmentId)
+  ] = reassignmentStore.findReassignmentEntry(reassignmentId)
+
+  override def listInFlightReassignmentIds()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[ReassignmentId]] = reassignmentStore.listInFlightReassignmentIds()
 
   override def onClosed(): Unit =
     pendingCompletions.foreach { case (_, promise) =>
@@ -194,6 +197,7 @@ class ReassignmentCache(
       unassignmentTs,
       completionTs,
     )
+
 }
 
 object ReassignmentCache {
