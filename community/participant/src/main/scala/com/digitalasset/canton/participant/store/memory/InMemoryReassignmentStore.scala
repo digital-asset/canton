@@ -320,6 +320,7 @@ class InMemoryReassignmentStore(
             .tryCreate(
               entry.sourceSynchronizer,
               entry.unassignmentTs,
+              entry.unassignmentRequest,
               entry.reassignmentGlobalOffset,
               validAt,
             )
@@ -411,6 +412,13 @@ class InMemoryReassignmentStore(
       FutureUnlessShutdown.pure(
         reassignmentEntryMap.get(reassignmentId).toRight(UnknownReassignmentId(reassignmentId))
       )
+    )
+
+  override def listInFlightReassignmentIds()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[ReassignmentId]] =
+    FutureUnlessShutdown.pure(
+      reassignmentEntryMap.filter { case (_, entry) => entry.assignmentTs.isEmpty }.keys.toSeq
     )
 
 }

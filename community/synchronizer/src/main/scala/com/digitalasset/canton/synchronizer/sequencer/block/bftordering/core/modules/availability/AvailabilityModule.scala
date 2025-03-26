@@ -7,7 +7,6 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Signature
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -53,6 +52,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Output,
   P2PNetworkOut,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.utils.BftNodeShuffler
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
@@ -72,6 +72,7 @@ import AvailabilityModuleMetrics.{emitDisseminationStateStats, emitInvalidMessag
   */
 final class AvailabilityModule[E <: Env[E]](
     initialMembership: Membership,
+    initialEpochNumber: EpochNumber,
     initialCryptoProvider: CryptoProvider[E],
     availabilityStore: data.AvailabilityStore[E],
     config: AvailabilityModuleConfig,
@@ -90,6 +91,10 @@ final class AvailabilityModule[E <: Env[E]](
   import AvailabilityModule.*
 
   private val thisNode = initialMembership.myId
+  private val nodeShuffler = new BftNodeShuffler(random)
+
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  private var lastKnownEpochNumber = initialEpochNumber
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var activeMembership = initialMembership
@@ -187,7 +192,10 @@ final class AvailabilityModule[E <: Env[E]](
     lazy val messageType = shortType(disseminationMessage)
 
     disseminationMessage match {
-      case Availability.LocalDissemination.LocalBatchCreated(batchId, batch) =>
+      case Availability.LocalDissemination.LocalBatchCreated(requests) =>
+        val batch = OrderingRequestBatch.create(requests, lastKnownEpochNumber)
+        val batchId = BatchId.from(batch)
+
         logger.debug(s"$messageType: received $batchId from local mempool")
         pipeToSelf(availabilityStore.addBatch(batchId, batch)) {
           case Failure(exception) =>
@@ -200,9 +208,9 @@ final class AvailabilityModule[E <: Env[E]](
         logger.debug(s"$messageType: persisted local batches ${batches.map(_._1)}, now signing")
         signLocalBatchesAndContinue(batches)
 
-      case Availability.LocalDissemination.RemoteBatchStored(batchId, expirationTime, from) =>
+      case Availability.LocalDissemination.RemoteBatchStored(batchId, epochNumber, from) =>
         logger.debug(s"$messageType: local store persisted $batchId from $from, signing")
-        signRemoteBatchAndContinue(batchId, expirationTime, from)
+        signRemoteBatchAndContinue(batchId, epochNumber, from)
 
       case LocalDissemination.LocalBatchesStoredSigned(batches) =>
         disseminateLocalBatches(messageType, batches)
@@ -231,7 +239,7 @@ final class AvailabilityModule[E <: Env[E]](
 
   private def signRemoteBatchAndContinue(
       batchId: BatchId,
-      expirationTime: CantonTimestamp,
+      epochNumber: EpochNumber,
       from: BftNodeId,
   )(implicit
       context: E#ActorContextT[Availability.Message[E]],
@@ -239,7 +247,7 @@ final class AvailabilityModule[E <: Env[E]](
   ): Unit =
     pipeToSelf(
       activeCryptoProvider.signHash(
-        AvailabilityAck.hashFor(batchId, expirationTime, activeMembership.myId)
+        AvailabilityAck.hashFor(batchId, epochNumber, activeMembership.myId)
       )
     )(handleFailure(s"Failed to sign $batchId") { signature =>
       LocalDissemination.RemoteBatchStoredSigned(batchId, from, signature)
@@ -252,7 +260,7 @@ final class AvailabilityModule[E <: Env[E]](
     pipeToSelf(
       context.sequenceFuture(batches.map { case (batchId, batch) =>
         activeCryptoProvider.signHash(
-          AvailabilityAck.hashFor(batchId, batch.expirationTime, activeMembership.myId)
+          AvailabilityAck.hashFor(batchId, batch.epochNumber, activeMembership.myId)
         )
       })
     ) {
@@ -295,7 +303,7 @@ final class AvailabilityModule[E <: Env[E]](
             signature =>
               DisseminationProgress(
                 activeMembership.orderingTopology,
-                InProgressBatchMetadata(batchId, batch.expirationTime, batch.stats),
+                InProgressBatchMetadata(batchId, batch.epochNumber, batch.stats),
                 Set(AvailabilityAck(thisNode, signature)),
               ),
           )
@@ -390,6 +398,7 @@ final class AvailabilityModule[E <: Env[E]](
             forEpochNumber,
             ordered,
           ) =>
+        lastKnownEpochNumber = forEpochNumber
         handleConsensusProposalRequest(
           messageType,
           orderingTopology,
@@ -655,19 +664,19 @@ final class AvailabilityModule[E <: Env[E]](
 
               case Success(_) =>
                 Availability.LocalDissemination
-                  .RemoteBatchStored(batchId, batch.expirationTime, from)
+                  .RemoteBatchStored(batchId, batch.epochNumber, from)
             },
         )
 
       case Availability.RemoteDissemination.RemoteBatchAcknowledged(batchId, from, signature) =>
         disseminationProtocolState.disseminationProgress
           .get(batchId)
-          .map(_.batchMetadata.expirationTime) match {
-          case Some(expirationTime) =>
+          .map(_.batchMetadata.epochNumber) match {
+          case Some(epochNumber) =>
             pipeToSelf(
               activeCryptoProvider
                 .verifySignature(
-                  AvailabilityAck.hashFor(batchId, expirationTime, from),
+                  AvailabilityAck.hashFor(batchId, epochNumber, from),
                   from,
                   signature,
                 )
@@ -989,7 +998,6 @@ final class AvailabilityModule[E <: Env[E]](
     )
   }
 
-  @SuppressWarnings(Array("org.wartremover.warts.IterableOps"))
   private def extractNodes(
       acks: Option[Seq[AvailabilityAck]],
       useCurrentTopology: Boolean = false,
@@ -1000,8 +1008,9 @@ final class AvailabilityModule[E <: Env[E]](
     val nodes =
       if (useCurrentTopology) activeMembership.otherNodes.toSeq
       else acks.getOrElse(abort("No availability acks provided for extracting nodes")).map(_.from)
-    val shuffled = random.shuffle(nodes)
-    shuffled.head -> shuffled.tail
+    val shuffled = nodeShuffler.shuffle(nodes)
+    val head = shuffled.headOption.getOrElse(abort("There should be at least one node to extract"))
+    head -> shuffled.tail
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.While"))
@@ -1134,6 +1143,25 @@ final class AvailabilityModule[E <: Env[E]](
           emitInvalidMessage(metrics, from)
           s"Batch $batchId from '$from' contains more requests (${batch.requests.size}) than allowed " +
             s"(${config.maxRequestsInBatch}), skipping"
+        },
+      )
+
+      _ <- Either.cond(
+        batch.epochNumber > lastKnownEpochNumber - OrderingRequestBatch.BatchValidityDurationEpochs,
+        (), {
+          emitInvalidMessage(metrics, from)
+          s"Batch $batchId from '$from' contains an expired batch at epoch number ${batch.epochNumber} " +
+            s"which is ${OrderingRequestBatch.BatchValidityDurationEpochs} " +
+            s"epochs or more older than last known epoch $lastKnownEpochNumber, skipping"
+        },
+      )
+
+      _ <- Either.cond(
+        batch.epochNumber < lastKnownEpochNumber + OrderingRequestBatch.BatchValidityDurationEpochs * 2,
+        (), {
+          emitInvalidMessage(metrics, from)
+          s"Batch $batchId from '$from' contains a batch whose epoch number ${batch.epochNumber} is too far in the future " +
+            s"compared to last known epoch $lastKnownEpochNumber, skipping"
         },
       )
     } yield ()

@@ -247,8 +247,6 @@ class StartableStoppableLedgerApiServer(
       indexService <- new IndexServiceOwner(
         dbSupport = dbSupport,
         config = indexServiceConfig,
-        experimentalEnableTopologyEvents =
-          config.cantonParameterConfig.experimentalEnableTopologyEvents,
         participantId = config.participantId,
         metrics = config.metrics,
         inMemoryState = inMemoryState,
@@ -361,6 +359,7 @@ class StartableStoppableLedgerApiServer(
         interactiveSubmissionServiceConfig = config.serverConfig.interactiveSubmissionService,
         lfValueTranslation = lfValueTranslationForInteractiveSubmission,
         keepAlive = config.serverConfig.keepAliveServer,
+        clock = config.clock,
       )
       _ <- startHttpApiIfEnabled(timedSyncService)
       _ <- config.serverConfig.userManagementService.additionalAdminUserId
@@ -470,7 +469,6 @@ class StartableStoppableLedgerApiServer(
         (config.serverConfig.indexService.offsetCheckpointCacheUpdateInterval + config.serverConfig.indexService.idleStreamOffsetCheckpointTimeout).toProtoPrimitive
       )
     ),
-    partyTopologyEvents = config.cantonParameterConfig.experimentalEnableTopologyEvents,
     topologyAwarePackageSelection = config.serverConfig.topologyAwarePackageSelection.enabled,
   )
 

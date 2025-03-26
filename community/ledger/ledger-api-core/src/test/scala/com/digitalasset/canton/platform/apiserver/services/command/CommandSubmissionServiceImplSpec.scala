@@ -20,32 +20,33 @@ import com.digitalasset.canton.ledger.participant.state.{
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
-import com.digitalasset.canton.platform.apiserver.SeedService
 import com.digitalasset.canton.platform.apiserver.execution.{
   CommandExecutionResult,
   CommandExecutor,
   CommandInterpretationResult,
 }
 import com.digitalasset.canton.platform.apiserver.services.{ErrorCause, TimeProviderType}
+import com.digitalasset.canton.platform.apiserver.{FatContractInstanceHelper, SeedService}
+import com.digitalasset.canton.protocol.LfTransactionVersion
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.command.ApiCommands as LfCommands
 import com.digitalasset.daml.lf.crypto.Hash
-import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageName, PackageVersion}
+import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageName}
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.Error as LfError
 import com.digitalasset.daml.lf.interpretation.Error as LfInterpretationError
-import com.digitalasset.daml.lf.language.{LanguageVersion, LookupError, Reference}
+import com.digitalasset.daml.lf.language.{LookupError, Reference}
 import com.digitalasset.daml.lf.transaction.test.TreeTransactionBuilder.*
 import com.digitalasset.daml.lf.transaction.test.{
   TestNodeBuilder,
   TransactionBuilder,
   TreeTransactionBuilder,
 }
-import com.digitalasset.daml.lf.transaction.{Node as LfNode, *}
+import com.digitalasset.daml.lf.transaction.{Node as _, *}
 import com.digitalasset.daml.lf.value.Value
 import com.google.rpc.status.Status as RpcStatus
 import io.grpc.{Status, StatusRuntimeException}
@@ -221,44 +222,33 @@ class CommandSubmissionServiceImplSpec
     val seedService = SeedService.WeakRandom
     val commandExecutor = mock[CommandExecutor]
     val metrics = LedgerApiServerMetrics.ForTesting
+    val alice = Ref.Party.assertFromString("alice")
 
     val synchronizerId: SynchronizerId = SynchronizerId.tryFromString("x::synchronizerId")
+
+    val processedDisclosedContract =
+      FatContractInstanceHelper.buildFatContractInstance(
+        templateId = Identifier.assertFromString("some:pkg:identifier"),
+        packageName = PackageName.assertFromString("pkg-name"),
+        packageVersion = None,
+        contractId = TransactionBuilder.newCid,
+        argument = Value.ValueNil,
+        createdAt = Timestamp.Epoch,
+        driverMetadata = Bytes.Empty,
+        signatories = Set(alice),
+        stakeholders = Set(alice),
+        keyOpt = None,
+        version = LfTransactionVersion.minVersion,
+      )
+
     val disclosedContract = DisclosedContract(
-      FatContractInstance.fromCreateNode(
-        LfNode.Create(
-          coid = TransactionBuilder.newCid,
-          packageName = PackageName.assertFromString("pkg-name"),
-          packageVersion = Some(PackageVersion.assertFromString("0.1.2")),
-          templateId = Identifier.assertFromString("some:pkg:identifier"),
-          arg = Value.ValueNil,
-          signatories = Set(Ref.Party.assertFromString("alice")),
-          stakeholders = Set(Ref.Party.assertFromString("alice")),
-          keyOpt = None,
-          version = LanguageVersion.v2_dev,
-        ),
-        createTime = Timestamp.Epoch,
-        cantonData = Bytes.Empty,
-      ),
+      fatContractInstance = processedDisclosedContract,
       synchronizerIdO = Some(synchronizerId),
     )
 
-    val processedDisclosedContract = com.digitalasset.canton.data.ProcessedDisclosedContract(
-      templateId = Identifier.assertFromString("some:pkg:identifier"),
-      packageName = PackageName.assertFromString("pkg-name"),
-      packageVersion = Some(PackageVersion.assertFromString("0.1.2")),
-      contractId = TransactionBuilder.newCid,
-      argument = Value.ValueNil,
-      createdAt = Timestamp.Epoch,
-      driverMetadata = Bytes.Empty,
-      signatories = Set.empty,
-      stakeholders = Set.empty,
-      keyOpt = None,
-      // TODO(#19494): Change to minVersion once 2.2 is released and 2.1 is removed
-      version = LanguageVersion.v2_dev,
-    )
     val commands = Commands(
       workflowId = None,
-      applicationId = Ref.ApplicationId.assertFromString("app"),
+      userId = Ref.UserId.assertFromString("app"),
       commandId = CommandId(Ref.CommandId.assertFromString("cmd")),
       submissionId = None,
       actAs = Set.empty,
@@ -278,7 +268,7 @@ class CommandSubmissionServiceImplSpec
     val submitterInfo = SubmitterInfo(
       actAs = Nil,
       readAs = Nil,
-      applicationId = Ref.ApplicationId.assertFromString("foobar"),
+      userId = Ref.UserId.assertFromString("foobar"),
       commandId = Ref.CommandId.assertFromString("foobar"),
       deduplicationPeriod = DeduplicationDuration(Duration.ofMinutes(1)),
       submissionId = None,

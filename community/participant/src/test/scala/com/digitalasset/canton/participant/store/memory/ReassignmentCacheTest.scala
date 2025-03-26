@@ -35,7 +35,7 @@ class ReassignmentCacheTest extends AsyncWordSpec with BaseTest with HasExecutor
   import ReassignmentStoreTest.*
 
   private val reassignmentData =
-    mkReassignmentDataForSynchronizer(
+    mkUnassignmentDataForSynchronizer(
       reassignment10,
       mediator1,
       targetSynchronizerId = targetSynchronizerId,
@@ -365,6 +365,11 @@ object ReassignmentCacheTest extends BaseTest {
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, UnknownReassignmentId, ReassignmentEntry] =
       baseStore.findReassignmentEntry(reassignmentId)
+
+    override def listInFlightReassignmentIds()(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Seq[ReassignmentId]] = baseStore.listInFlightReassignmentIds()
+
   }
 
   object HookReassignmentStore {

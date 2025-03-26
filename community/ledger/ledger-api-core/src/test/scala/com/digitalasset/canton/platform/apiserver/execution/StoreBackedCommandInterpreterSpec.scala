@@ -8,7 +8,7 @@ import com.daml.logging.LoggingContext
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{CryptoPureApi, Salt, SaltSeed}
-import com.digitalasset.canton.data.{DeduplicationPeriod, ProcessedDisclosedContract}
+import com.digitalasset.canton.data.DeduplicationPeriod
 import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.api.{CommandId, Commands, DisclosedContract}
 import com.digitalasset.canton.ledger.participant.state.SyncService
@@ -103,10 +103,10 @@ class StoreBackedCommandInterpreterSpec
   )
 
   private val processedDisclosedContracts = ImmArray(
-    ProcessedDisclosedContract(
+    FatContractInstance.fromCreateNode(
       create = disclosedCreateNode,
-      createdAt = disclosedContractCreateTime,
-      driverMetadata = salt,
+      createTime = disclosedContractCreateTime,
+      cantonData = salt,
     )
   )
 
@@ -151,7 +151,7 @@ class StoreBackedCommandInterpreterSpec
   ) =
     Commands(
       workflowId = None,
-      applicationId = Ref.ApplicationId.assertFromString("applicationId"),
+      userId = Ref.UserId.assertFromString("userId"),
       commandId = CommandId(Ref.CommandId.assertFromString("commandId")),
       submissionId = None,
       actAs = Set.empty,
@@ -266,8 +266,7 @@ class StoreBackedCommandInterpreterSpec
     val stakeholderContractId: LfContractId = LfContractId.assertFromString("00" + "00" * 32 + "03")
     val stakeholderContract = ContractState.Active(
       contractInstance = Versioned(
-        // TODO(#19494): Change to minVersion once 2.2 is released and 2.1 is removed
-        LfTransactionVersion.maxVersion,
+        LfTransactionVersion.minVersion,
         ContractInstance(packageName = packageName, template = identifier, arg = Value.ValueTrue),
       ),
       ledgerEffectiveTime = Timestamp.now(),
@@ -334,7 +333,7 @@ class StoreBackedCommandInterpreterSpec
 
       val commands = Commands(
         workflowId = None,
-        applicationId = Ref.ApplicationId.assertFromString("applicationId"),
+        userId = Ref.UserId.assertFromString("userId"),
         commandId = CommandId(Ref.CommandId.assertFromString("commandId")),
         submissionId = None,
         actAs = Set.empty,

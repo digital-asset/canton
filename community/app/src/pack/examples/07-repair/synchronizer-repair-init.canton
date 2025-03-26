@@ -8,7 +8,7 @@ bootstrap.synchronizer(
   mediators = Seq(mediator1),
   synchronizerOwners = Seq(sequencer1, mediator1),
   synchronizerThreshold = PositiveInt.two,
-  staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+  staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
 )
 
 // upload the Daml model to all participants
@@ -16,7 +16,7 @@ val darPath = Option(System.getProperty("canton-examples.dar-path")).getOrElse("
 participants.all.dars.upload(darPath)
 
 val Alice = participant1.parties.enable("Alice")
-val Bob = participant2.parties.enable("Bob", waitForSynchronizer = SynchronizerChoice.All)
+val Bob = participant2.parties.enable("Bob")
 
 // setup parties and connect participants to synchronizer
 Seq(participant1, participant2).foreach(_.synchronizers.connect_local(sequencer1, alias = "lostSynchronizer"))

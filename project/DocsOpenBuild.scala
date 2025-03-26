@@ -165,7 +165,7 @@ object DocsOpenBuild {
       communityAppSourceDirectory: SettingKey[File],
       enterpriseAppSourceDirectory: SettingKey[File],
       enterpriseAppTarget: SettingKey[File],
-      enterpriseIntegrationTestingSourceDirectory: SettingKey[File],
+      communityIntegrationTestingSourceDirectory: SettingKey[File],
       resourceDirectory: SettingKey[File],
       sourceDirectory: SettingKey[File],
       target: SettingKey[File],
@@ -179,8 +179,8 @@ object DocsOpenBuild {
       outFile.getParentFile.mkdirs()
       val appSourceDir = communityAppSourceDirectory.value
       val enterpriseAppSourceDir = enterpriseAppSourceDirectory.value
-      val enterpriseIntegrationTestingSourceDir =
-        enterpriseIntegrationTestingSourceDirectory.value
+      val communityIntegrationTestingSourceDir =
+        communityIntegrationTestingSourceDirectory.value
       val scriptPath =
         (resourceDirectory.value / "console-reference.canton").getPath
       val targetDirectory = enterpriseAppTarget.value
@@ -200,7 +200,7 @@ object DocsOpenBuild {
         distributedConfig,
       )
       IO.copyDirectory(
-        enterpriseIntegrationTestingSourceDir / "main" / "resources" / "include",
+        communityIntegrationTestingSourceDir / "main" / "resources" / "include",
         includes,
       )
       val args = Seq(

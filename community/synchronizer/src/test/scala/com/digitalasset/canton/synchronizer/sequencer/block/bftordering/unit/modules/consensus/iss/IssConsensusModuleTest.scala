@@ -20,7 +20,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   GenesisEpoch,
   GenesisEpochInfo,
   GenesisEpochNumber,
-  GenesisPreviousEpochMaxBftTime,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.memory.GenericInMemoryEpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.{
@@ -143,7 +142,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
             BlockNumber.First,
             epochLength,
             TopologyActivationTime(aTimestamp),
-            GenesisPreviousEpochMaxBftTime,
           ),
           Seq.empty,
         )
@@ -170,7 +168,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
             EpochNumber(2L),
             aMembership,
             failingCryptoProvider,
-            aTimestamp,
             Mode.FromConsensus,
           )
         )
@@ -193,7 +190,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
               BlockNumber.First,
               epochLength,
               latestTopologyActivationTime,
-              aTimestamp,
             ),
             Seq.empty,
           )
@@ -227,14 +223,13 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
                 allIds,
               ),
               failingCryptoProvider,
-              GenesisPreviousEpochMaxBftTime,
               Mode.FromConsensus,
             )
           )
 
           verify(epochStore, expectedStartEpochCalls).startEpoch(
             latestCompletedEpochFromStore.info
-              .next(epochLength, nextTopologyActivationTime, GenesisPreviousEpochMaxBftTime)
+              .next(epochLength, nextTopologyActivationTime)
           )
           succeed
         }
@@ -243,16 +238,15 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
       "start segment modules only once after restart with delayed Start signal" in {
         val segmentModuleMock = mock[ModuleRef[ConsensusSegment.Message]]
         val stateTransferManagerMock = mock[StateTransferManager[ProgrammableUnitTestEnv]]
-        when(stateTransferManagerMock.inBlockTransfer).thenReturn(true)
+        when(stateTransferManagerMock.inStateTransfer).thenReturn(true)
         val epochStore = mock[EpochStore[ProgrammableUnitTestEnv]]
         val cryptoProvider = failingCryptoProvider[ProgrammableUnitTestEnv]
 
         val aTopologyActivationTime = Genesis.GenesisTopologyActivationTime
-        val aPreviousEpochMaxBftTime = Genesis.GenesisPreviousEpochMaxBftTime
         val aStartEpoch =
-          GenesisEpoch.info.next(epochLength, aTopologyActivationTime, aPreviousEpochMaxBftTime)
+          GenesisEpoch.info.next(epochLength, aTopologyActivationTime)
         val newEpochInfo =
-          aStartEpoch.next(epochLength, aTopologyActivationTime, aPreviousEpochMaxBftTime)
+          aStartEpoch.next(epochLength, aTopologyActivationTime)
         val membership =
           Membership(
             myId,
@@ -265,7 +259,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
             aStartEpoch.startBlockNumber,
             aStartEpoch.length,
             aTopologyActivationTime,
-            GenesisPreviousEpochMaxBftTime,
           ),
           Seq.empty,
         )
@@ -277,7 +270,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
                 .create(
                   BlockMetadata(aStartEpoch.number, blockNum),
                   ViewNumber.First,
-                  aTopologyActivationTime.value,
                   OrderingBlock.empty,
                   CanonicalCommitSet.empty,
                   myId,
@@ -321,7 +313,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
             newEpochInfo.number,
             membership,
             cryptoProvider,
-            GenesisPreviousEpochMaxBftTime,
             Mode.FromConsensus,
           )
         )
@@ -352,7 +343,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
             BlockNumber.First,
             epochLength,
             aTopologyActivationTime,
-            GenesisPreviousEpochMaxBftTime,
           ),
           Seq.empty,
         )
@@ -362,7 +352,7 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
         when(epochStore.latestEpoch(includeInProgress = true)).thenReturn(() =>
           EpochStore.Epoch(
             latestCompletedEpochFromStore.info
-              .next(epochLength, aTopologyActivationTime, GenesisPreviousEpochMaxBftTime),
+              .next(epochLength, aTopologyActivationTime),
             Seq.empty,
           )
         )
@@ -370,7 +360,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
           latestCompletedEpochFromStore.info.next(
             epochLength,
             aTopologyActivationTime,
-            GenesisPreviousEpochMaxBftTime,
           )
         when(epochStore.loadEpochProgress(activeStartingEpochInfo)).thenReturn(() =>
           EpochStore.EpochInProgress(
@@ -390,7 +379,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
             EpochNumber(1L),
             aMembership,
             failingCryptoProvider,
-            GenesisPreviousEpochMaxBftTime,
             Mode.FromConsensus,
           )
         )
@@ -407,7 +395,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
             BlockNumber.First,
             epochLength,
             TopologyActivationTime(aTimestamp),
-            GenesisPreviousEpochMaxBftTime,
           ),
           Seq.empty,
         )
@@ -440,7 +427,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
                 EpochNumber(1L),
                 aMembership,
                 failingCryptoProvider,
-                GenesisPreviousEpochMaxBftTime,
                 Mode.FromConsensus,
               )
             ),
@@ -469,7 +455,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
               BlockNumber.First,
               epochLength,
               latestTopologyActivationTime,
-              GenesisPreviousEpochMaxBftTime,
             ),
             Seq.empty,
           )
@@ -500,7 +485,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
                     nodes,
                   ),
                   failingCryptoProvider,
-                  GenesisPreviousEpochMaxBftTime,
                   Mode.FromConsensus,
                 )
               ),
@@ -512,7 +496,7 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
 
           verify(epochStore, expectedStartEpochCalls).startEpoch(
             latestCompletedEpochFromStore.info
-              .next(epochLength, nextTopologyActivationTime, GenesisPreviousEpochMaxBftTime)
+              .next(epochLength, nextTopologyActivationTime)
           )
           succeed
         }
@@ -554,7 +538,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
                   membership,
                   _,
                   _,
-                  _,
                 )
               )
               if epochNumber == EpochNumber.First && membership.orderingTopology == anOrderingTopology =>
@@ -586,7 +569,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
                 BlockNumber.First,
                 EpochLength(0),
                 TopologyActivationTime(aTimestamp),
-                GenesisPreviousEpochMaxBftTime,
               ),
               lastBlockCommits = Seq.empty,
             )
@@ -611,7 +593,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
                   .create(
                     BlockMetadata.mk(EpochNumber.First, BlockNumber.First),
                     ViewNumber.First,
-                    CantonTimestamp.Epoch,
                     OrderingBlock.empty,
                     CanonicalCommitSet.empty,
                     from = myId,
@@ -679,7 +660,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
           EpochNumber.First,
           aMembership,
           failingCryptoProvider,
-          GenesisPreviousEpochMaxBftTime,
           Mode.FromConsensus,
         )
         val selfSentMessages = context.extractSelfMessages()
@@ -688,7 +668,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
                 Consensus.NewEpochTopology(
                   epochNumber,
                   membership,
-                  _,
                   _,
                   _,
                 )
@@ -707,7 +686,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
           val prePrepare = PrePrepare.create(
             blockMetadata4Nodes(n),
             ViewNumber.First,
-            clock.now,
             OrderingBlock(oneRequestOrderingBlock.proofs),
             CanonicalCommitSet(Set.empty),
             leaderOfBlock,
@@ -753,7 +731,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
         val aStartEpoch = GenesisEpoch.info.next(
           epochLength,
           Genesis.GenesisTopologyActivationTime,
-          Genesis.GenesisPreviousEpochMaxBftTime,
         )
         val aStartEpochNumber = aStartEpoch.number
 
@@ -807,7 +784,6 @@ class IssConsensusModuleTest extends AsyncWordSpec with BaseTest with HasExecuti
               PrePrepare.create( // Just to trigger the catch-up check
                 blockMetadata4Nodes(1),
                 ViewNumber.First,
-                clock.now,
                 OrderingBlock(oneRequestOrderingBlock.proofs),
                 CanonicalCommitSet(Set.empty),
                 allIds(1),
@@ -1020,7 +996,7 @@ private[iss] object IssConsensusModuleTest {
   val allIds: Seq[BftNodeId] = (myId +: otherIds).sorted
   val aBatchId: BatchId = BatchId.createForTesting("A batch id")
   val oneRequestOrderingBlock: OrderingBlock = OrderingBlock(
-    Seq(ProofOfAvailability(aBatchId, Seq.empty, CantonTimestamp.MaxValue))
+    Seq(ProofOfAvailability(aBatchId, Seq.empty, EpochNumber.First))
   )
 
   private val anOrderingTopology = OrderingTopology.forTesting(allIds.toSet)

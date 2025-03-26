@@ -3,6 +3,22 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2025-03-25 (Exclusive)
+- `_recordId` removed from Daml records in Json API
+- Removed `default-close-delay` from `ws-config` (websocket config) in `http-service` configuration (close delay is no longer necessary).
+
+## Until 2025-03-20 (Exclusive)
+### Smart-contract upgrading
+- A new query endpoint for supporting topology-aware package selection in command submission construction is added to the Ledger API:
+    - gRPC: `com.daml.ledger.api.v2.interactive.InteractiveSubmissionService.GetPreferredPackageVersion`
+    - JSON: `/v2/interactive-submission/preferred-package-version`
+
+## Until 2025-03-19 (Exclusive)
+### Application ID rename to User ID
+
+- **BREAKING CHANGE** Ledger API, Canton console, Canton, and Ledger API DB schemas changed in a non-backwards compatible manner. This is a pure rename that keeps all the associated semantics intact, with the exception of format, and validation thereof, of the user_id field. (Please see value.proto for the differences)
+- For the detailed list of changed Ledger API proto messages please see docs-open/src/sphinx/reference/lapi-migration-guide.rst
+
 ## Until 2025-03-12 (Exclusive)
 ### External Signing
 
