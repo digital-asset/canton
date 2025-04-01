@@ -440,6 +440,13 @@ class DatabaseSequencer(
       MetricsHelper.updateAgeInHoursGauge(clock, metrics.maxEventAge, oldestEventTimestamp)
     )
 
+  override def awaitContainingBlockLastTimestamp(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, SequencerError, CantonTimestamp] =
+    EitherT.right(
+      Future.successful(timestamp)
+    ) // DatabaseSequencer doesn't have a concept of blocks
+
   override def snapshot(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): EitherT[Future, SequencerError, SequencerSnapshot] =

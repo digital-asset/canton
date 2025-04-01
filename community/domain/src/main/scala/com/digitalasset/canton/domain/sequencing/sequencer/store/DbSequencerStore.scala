@@ -977,14 +977,10 @@ class DbSequencerStore(
     } yield checkpoints
     for {
       checkpointsAtTimestamp <- storage.query(query.transactionally, functionFullName)
-      lastTs = checkpointsAtTimestamp
-        .map(_._2.timestamp)
-        .maxOption
-        .getOrElse(CantonTimestamp.MinValue)
-      statusAtTimestamp <- status(lastTs)
+      statusAtTimestamp <- status(timestamp)
     } yield {
       SequencerSnapshot(
-        lastTs,
+        timestamp,
         UninitializedBlockHeight,
         checkpointsAtTimestamp.fmap(_.counter),
         statusAtTimestamp,
