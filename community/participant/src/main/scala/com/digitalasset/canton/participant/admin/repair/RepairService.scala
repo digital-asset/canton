@@ -22,7 +22,7 @@ import com.digitalasset.canton.crypto.{Salt, SyncCryptoApiProvider}
 import com.digitalasset.canton.data.{CantonTimestamp, RepairContract}
 import com.digitalasset.canton.ledger.api.validation.{
   FieldValidator as LedgerApiFieldValidations,
-  StricterValueValidator as LedgerApiValueValidator,
+  StricterNumericValueValidator as LedgerApiValueValidator,
 }
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,

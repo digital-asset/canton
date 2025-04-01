@@ -375,6 +375,7 @@ object ApiServices {
           validateUpgradingPackageResolutions = validateUpgradingPackageResolutions,
           enableExplicitDisclosure = enableExplicitDisclosure,
           authenticateSerializableContract = serializableContractAuthenticators.input,
+          stricterPartyValidation = commandConfig.stricterPartyValidation,
         )
         val (apiSubmissionService, commandSubmissionService) =
           CommandSubmissionServiceImpl.createApiService(
