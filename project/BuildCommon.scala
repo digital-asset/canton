@@ -542,6 +542,7 @@ object BuildCommon {
       `wartremover-extension`,
       `pekko-fork`,
       `magnolify-addon`,
+      `scalatest-addon`,
       `demo`,
       `base-errors`,
       `daml-adjustable-clock`,
@@ -635,8 +636,10 @@ object BuildCommon {
       .in(file("community/app"))
       .dependsOn(
         `community-app-base` % "compile->compile;test->test",
-        `community-common` % "test->test",
-        `community-integration-testing` % "test->test",
+        `community-common` % "compile->compile;test->test",
+        `community-synchronizer` % "compile->compile;test->test",
+        `community-integration-testing` % Test,
+        `sequencer-driver-api-conformance-tests` % Test,
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -677,12 +680,21 @@ object BuildCommon {
         },
         assembly / mainClass := Some("com.digitalasset.canton.CantonCommunityApp"),
         assembly / assemblyJarName := s"canton-open-source-${version.value}.jar",
-        // clearing the damlBuild tasks to prevent compiling which does not work due to relative file "data-dependencies";
-        // "data-dependencies" daml.yaml setting relies on hardcoded "0.0.1" project version
-        Compile / damlBuild := Seq(), // message-0.0.1.dar is hardcoded and contact-0.0.1.dar is built by MessagingExampleIntegrationTest
-        Compile / damlProjectVersionOverride := Some("0.0.1"),
+        // Explicit set the Daml project dependency to common
+        Test / damlDependencies := (`community-common` / Compile / damlBuild).value :+ (`ledger-common` / Test / resourceDirectory).value / "test-models" / "model-tests-1.15.dar",
+        Test / damlEnableJavaCodegen := true,
+        Test / damlCodeGeneration := Seq(
+          (
+            (Test / sourceDirectory).value / "daml" / "CantonTest",
+            (Test / damlDarOutput).value / "CantonTests-3.3.0.dar",
+            "com.digitalasset.canton.damltests",
+          )
+        ),
+        Test / useVersionedDarName := true,
+        Test / damlEnableProjectVersionOverride := false,
         addProtobufFilesToHeaderCheck(Compile),
         addFilesToHeaderCheck("*.sh", "../pack", Compile),
+        addFilesToHeaderCheck("*.daml", "../test/daml", Compile),
         addFilesToHeaderCheck("*.sh", ".", Test),
         JvmRulesPlugin.damlRepoHeaderSettings,
       )
@@ -721,6 +733,7 @@ object BuildCommon {
         `magnolify-addon` % "compile->compile",
         // No strictly internal dependencies on purpose so that this can be a foundational module and avoid circular dependencies
         `slick-fork`,
+        `scalatest-addon` % "compile->test",
         `kms-driver-api`,
       )
       .settings(
@@ -1000,6 +1013,7 @@ object BuildCommon {
           toxiproxy_java,
           opentelemetry_proto,
           circe_yaml,
+          daml_http_test_utils,
         ),
 
         // This library contains a lot of testing helpers that previously existing in testing scope
@@ -1008,17 +1022,29 @@ object BuildCommon {
         scalacOptions --= JvmRulesPlugin.scalacOptionsToDisableForTests,
         Compile / compile / wartremoverErrors := JvmRulesPlugin.wartremoverErrorsForTestScope,
 
-        // TODO(i12766): producing an empty file because there are errors in running the `doc` task
+        // TODO(i12761): package individual libraries instead of uber JARs for external consumption
+        UberLibrary.assemblySettings("community-integration-testing-lib"),
+        // when building the fat jar, we need to properly merge our artefacts
+        assembly / assemblyMergeStrategy := mergeStrategy((assembly / assemblyMergeStrategy).value),
+      )
+
+    // TODO(i12761): package individual libraries instead of uber JARs for external consumption
+    lazy val `community-integration-testing-lib` = project
+      .settings(sharedCantonCommunitySettings)
+      .settings(UberLibrary.of(`community-integration-testing`))
+      .settings(
         Compile / packageDoc := {
+          // TODO(i12766): producing an empty file because there are errors in running the `doc` task
           val destination = (Compile / packageDoc / artifactPath).value
           IO.touch(destination)
           destination
         },
 
-        // TODO(i12761): package individual libraries instead of uber JARs for external consumption
-        UberLibrary.assemblySettings("community-integration-testing"),
-        // when building the fat jar, we need to properly merge our artefacts
-        assembly / assemblyMergeStrategy := mergeStrategy((assembly / assemblyMergeStrategy).value),
+        // The dependency override is needed because `community-testing` depends transitively on
+        // `scalatest` and `community-app-base` depends transitively on `ammonite`, which in turn
+        // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
+        // runtime errors while testing and none have been found so far, so this should be fine for now
+        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.0.1",
       )
 
     lazy val `kms-driver-api` = project
@@ -1047,9 +1073,21 @@ object BuildCommon {
           scalatest
         ),
         // TODO(i19491): Move to non-uber JAR
-        UberLibrary.assemblySettings("kms-driver-testing", includeDeps = true),
+        UberLibrary.assemblySettings("kms-driver-testing-lib"),
         // when building the fat jar, we need to properly merge our artefacts
         assembly / assemblyMergeStrategy := mergeStrategy((assembly / assemblyMergeStrategy).value),
+      )
+
+    // TODO(i12761): package individual libraries instead of uber JARs for external consumption
+    lazy val `kms-driver-testing-lib` = project
+      .settings(sharedCantonCommunitySettings)
+      .settings(UberLibrary.of(`kms-driver-testing`))
+      .settings(
+        // The dependency override is needed because `community-testing` depends transitively on
+        // `scalatest` and `community-app-base` depends transitively on `ammonite`, which in turn
+        // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
+        // runtime errors while testing and none have been found so far, so this should be fine for now
+        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.0.1"
       )
 
     lazy val `mock-kms-driver` = project
@@ -1205,6 +1243,15 @@ object BuildCommon {
           scalacheck,
           scalatest % Test,
         ),
+      )
+
+    lazy val `scalatest-addon` = project
+      .in(file("community/lib/scalatest"))
+      .settings(
+        sharedSettings,
+        libraryDependencies += scalatest,
+        // Exclude to apply our license header to any Scala files
+        headerSources / excludeFilter := "*.scala",
       )
 
     lazy val `demo` = project
