@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.admin
 
-import com.digitalasset.base.error.DamlRpcError
+import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.{PackageMetadataViewConfig, ProcessingTimeout}
@@ -23,6 +23,7 @@ import com.digitalasset.canton.participant.store.memory.{
   MutablePackageMetadataViewImpl,
 }
 import com.digitalasset.canton.participant.util.DAMLe
+import com.digitalasset.canton.platform.apiserver.services.admin.PackageUpgradeValidator
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.{
   BaseTest,
@@ -257,12 +258,11 @@ class PackageUploaderTest
         expectedErrorAssertionOnIncompatibleUpload = None,
       )
     }
-
   }
 
   private def checkUpgradeValidation(
       withInitializedTestEnv: WithInitializedTestEnv,
-      expectedErrorAssertionOnIncompatibleUpload: Option[DamlRpcError => Assertion],
+      expectedErrorAssertionOnIncompatibleUpload: Option[RpcError => Assertion],
   ) = {
     import withInitializedTestEnv.*
     val darV1 = PackageTestUtils
@@ -342,7 +342,11 @@ class PackageUploaderTest
       damlPackageStore: DamlPackageStore = new InMemoryDamlPackageStore(loggerFactory),
       upgradeValidation: Boolean = true,
   )(test: WithInitializedTestEnv => Assertion): Assertion = {
-    val testEnv = new WithInitializedTestEnv(initialize, damlPackageStore, upgradeValidation) {
+    val testEnv = new WithInitializedTestEnv(
+      initialize,
+      damlPackageStore,
+      upgradeValidation,
+    ) {
       override def run(): Assertion = {
         super.run()
         test(this)
@@ -367,8 +371,14 @@ class PackageUploaderTest
       packageMetadataViewConfig = PackageMetadataViewConfig(),
       timeouts = ProcessingTimeout(),
     )
+    val packageUpgradeValidator = new PackageUpgradeValidator(
+      getLfArchive = loggingContextWithTrace =>
+        packageId => packageStore.getPackage(packageId)(loggingContextWithTrace.traceContext),
+      loggerFactory = loggerFactory,
+    )
     val packageUploader = new PackageUploader(
       clock = clock,
+      packageStore = packageStore,
       engine = DAMLe.newEngine(
         enableLfDev = false,
         enableLfBeta = false,
@@ -376,12 +386,8 @@ class PackageUploaderTest
       ),
       enableUpgradeValidation = upgradeValidation,
       futureSupervisor = FutureSupervisor.Noop,
-      packageDependencyResolver = new PackageDependencyResolver(
-        damlPackageStore = packageStore,
-        timeouts = ProcessingTimeout(),
-        loggerFactory = loggerFactory,
-      ),
       packageMetadataView = mutablePackageMetadataViewImpl,
+      packageUpgradeValidator = packageUpgradeValidator,
       exitOnFatalFailures = false,
       timeouts = ProcessingTimeout(),
       loggerFactory = loggerFactory,

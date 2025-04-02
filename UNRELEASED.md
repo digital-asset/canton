@@ -3,6 +3,53 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2025-04-04 (Exclusive)
+### ACS Export and Import
+The ACS export and import now use an ACS snapshot containing LAPI active contracts, as opposed to the Canton internal
+active contracts. Further, the ACS export now requires a ledger offset for taking the ACS snapshot, instead of an
+optional timestamp. The new ACS export does not feature an offboarding flag anymore; offboarding is not ready for production use and
+will be addressed in a future release.
+
+For party replication, we want to take (export) the ACS snapshot at the ledger offset when the topology transaction
+results in a (to be replicated) party being added (onboarded) on a participant. The new command
+`find_party_max_activation_offset` allows to find such offset. (Analogously, the new `find_party_max_deactivation_offset`
+command allows to find the ledger offset when a party is removed (offboarded) from a participant).
+
+The 3.3 release contains both variants: `export_acs_old`/`import_acs_old` and `export_acs`/`import_acs`.
+A subsequent release is only going to contain the LAPI active contract `export_acs`/`import_acs` commands (and their protobuf
+implementation).
+
+**BREAKING CHANGE**
+- Renamed Canton console commands.
+  - Details: Renaming of the current `{export|import}_acs` to the `{export|import}_acs_old` console commands.
+- Changed protobuf service and message definitions.
+  - Details: Renaming of the `{Export|Import}Acs` rpc together with their `{Export|Import}Acs{Request|Response}`
+    messages to the `{Export|Import}AcsOld` rpc together with their `{Export|Import}AcsOld{Request|Response}` messages
+    in the `participant_repair_service.proto`
+- Deprecation of `{export|import}_acs_old` console commands, its implementation and protobuf representation.
+- New endpoint location for the new `export_acs`.
+  - Details: The new `export_acs` and its protobuf implementation are no longer part of the participant repair
+    administration; but now are located in the participant parties' administration: `party_management_service.proto`.
+    Consequently, the `export_acs` endpoint is accessible without requiring a set repair flag.
+- Same endpoint location for the new `import_acs`.
+  - Details: `import_acs` and its protobuf implementation are still part of the participant repair administration. Thus,
+    using it still requires a set repair flag.
+- No backwards compatibility for ACS snapshots.
+  Details: An ACS snapshot that has been exported with 3.2 needs to be imported with `import_acs_old`.
+- Renamed the current `ActiveContact` to `ActiveContactOld`. And deprecation of `ActiveContactOld`, and in particular
+  its method to `ActiveContactOld#fromFile`
+- Renamed the current `import_acs_from_file` repair macro to `import_acs_old_from_file`. And deprecation of
+  `import_acs_old_from_file`.
+
+## Until 2025-03-27 (Exclusive)
+### Reassignment Batching
+
+**BREAKING CHANGE**
+- SubmitReassignmentRequest now accepts a list of reassignment commands rather than just one.
+- In the update stream, Reassignment now contains a list of events rather than just one.
+- UnassignedEvent messages now additionally contain an offset and a node_id.
+- For the detailed list of changed Ledger API proto messages please see docs-open/src/sphinx/reference/lapi-migration-guide.rst
+
 ## Until 2025-03-25 (Exclusive)
 - `_recordId` removed from Daml records in Json API
 - Removed `default-close-delay` from `ws-config` (websocket config) in `http-service` configuration (close delay is no longer necessary).
@@ -18,6 +65,104 @@ Please also consult the [full documentation of this release](https://docs.daml.c
 
 - **BREAKING CHANGE** Ledger API, Canton console, Canton, and Ledger API DB schemas changed in a non-backwards compatible manner. This is a pure rename that keeps all the associated semantics intact, with the exception of format, and validation thereof, of the user_id field. (Please see value.proto for the differences)
 - For the detailed list of changed Ledger API proto messages please see docs-open/src/sphinx/reference/lapi-migration-guide.rst
+
+## Until 2025-03-17 (Exclusive)
+### Universal Streams in ledger api (Backwards compatible changes)
+- The `GetActiveContractsRequest` message was extended with the `event_format` field of `EventFormat` type. The
+  `event_format` should not be set simultaneously with the `filter` or `verbose` field. Look at docs-open/src/sphinx/reference/lapi-migration-guide.rst
+on how to achieve the original behaviour.
+- The `GetUpdatesRequest` message was extended with the `update_format` field of `UpdateFormat` type.
+    - For the `GetUpdateTrees` method it must be unset.
+    - For the `GetUpdates` method the `update_format` should not be set simultaneously with the filter or verbose field.
+    Look at docs-open/src/sphinx/reference/lapi-migration-guide.rst on how to achieve the original behaviour.
+- The `GetTransactionByOffsetRequest` and the `GetTransactionByIdRequest` were extended with the `transaction_format`
+  field of the `TransactionFormat` type.
+    - For the `GetTransactionTreeByOffset` or the `GetTransactionTreeById` method it must be unset.
+    - For the `GetTransactionByOffset` or the `GetTransactionById` method it should not be set simultaneously with the
+      `requesting_parties` field. Look at docs-open/src/sphinx/reference/lapi-migration-guide.rst on how to achieve the
+      original behaviour.
+- The `GetEventsByContractIdRequest` was extended with the `event_format` field of the `EventFormat` type. It should not
+  be set simultaneously with the `requesting_parties` field. Look at
+  docs-open/src/sphinx/reference/lapi-migration-guide.rst on how to achieve the original behaviour.
+- The `UpdateFormat` message was added. It specifies what updates to include in the stream and how to render them.
+  ```protobuf
+  message UpdateFormat {
+    TransactionFormat include_transactions = 1;
+    EventFormat include_reassignments = 2;
+    TopologyFormat include_topology_events = 3;
+  }
+  ```
+  All of its fields are optional and define how transactions, reassignments and topology events will be formatted. If
+  a field is not set then the respective updates will not be transmitted.
+- The `TransactionFormat` message was added. It specifies what events to include in the transactions and what data to
+  compute and include for them.
+  ```protobuf
+  message TransactionFormat {
+    EventFormat event_format = 1;
+    TransactionShape transaction_shape = 2;
+  }
+  ```
+- The `TransactionShape` enum defines the event shape for `Transaction`s and can have two different flavors AcsDelta and
+  LedgerEffects.
+  ```protobuf
+  enum TransactionShape {
+    TRANSACTION_SHAPE_ACS_DELTA = 1;
+    TRANSACTION_SHAPE_LEDGER_EFFECTS = 2;
+  }
+  ```
+    - AcsDelta
+
+      The transaction shape that is sufficient to maintain an accurate ACS view. This translates to create and archive
+      events. The field witness_parties in events are populated as stakeholders, transaction filter will apply accordingly.
+
+    - LedgerEffects
+
+      The transaction shape that allows maintaining an ACS and also conveys detailed information about all exercises.
+      This translates to create, consuming exercise and non-consuming exercise. The field witness_parties in events are
+      populated as cumulative informees, transaction filter will apply accordingly.
+- The `EventFormat` message was added. It defines both which events should be included and what data should be computed
+  and included for them.
+  ```protobuf
+  message EventFormat {
+    map<string, Filters> filters_by_party = 1;
+    Filters filters_for_any_party = 2;
+    bool verbose = 3;
+  }
+  ```
+    - The `filters_by_party` field define the filters for specific parties on the participant. Each key must be a valid
+      PartyIdString. The interpretation of the filter depends on the transaction shape being filtered:
+        - For **ledger-effects** create and exercise events are returned, for which the witnesses include at least one
+          of the listed parties and match the per-party filter.
+        - For **transaction and active-contract-set streams** create and archive events are returned for all contracts
+          whose stakeholders include at least one of the listed parties and match the per-party filter.
+    - The `filters_for_any_party` define the filters that apply to all the parties existing on the participant.
+    - The `verbose` flag triggers the ledger to include labels for record fields.
+- The `TopologyFormat` message was added. It specifies which topology transactions to include in the output and how to
+  render them. It currently contains only the `ParticipantAuthorizationTopologyFormat` field. If it is unset no topology
+  events will be emitted in the output stream.
+  ```protobuf
+    message TopologyFormat {
+      ParticipantAuthorizationTopologyFormat include_participant_authorization_events = 1;
+    }
+  ```
+- The added `ParticipantAuthorizationTopologyFormat` message specifies which participant authorization topology
+  transactions to include and how to render them. In particular, it contains the list of parties for which the topology
+  transactions should be transmitted. If the list is empty then the topology transactions for all the parties will be
+  streamed.
+  ```protobuf
+  message ParticipantAuthorizationTopologyFormat {
+    repeated string parties = 1;
+  }
+  ```
+- The `ArchivedEvent` and the `ExercisedEvent` messages were extended with the `implemented_interfaces` field. It holds
+  the interfaces implemented by the target template that have been matched from the interface filter query. They are
+  populated only in case interface filters with `include_interface_view` are set and the event is consuming for
+  exercised events.
+- The `Event` message was extended to include additionally the `ExercisedEvent` that can also be present in the
+  `TreeEvent`. When the transaction shape requested is AcsDelta then only `CreatedEvent`s and `ArchivedEvent`s are returned, while when the
+  LedgerEffects shape is requested only `CreatedEvent`s and `ExercisedEvent`s are returned.
+- The java bindings and the json api data structures have changed accordingly to include the changes described above.
+- For the detailed way on how to migrate to the new Ledger API please see docs-open/src/sphinx/reference/lapi-migration-guide.rst
 
 ## Until 2025-03-12 (Exclusive)
 ### External Signing

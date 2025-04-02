@@ -365,8 +365,8 @@ final class AvailabilityModule[E <: Env[E]](
               status.orderingTopology,
               status.batchMetadata,
               status.acks ++ voteToAdd.flatMap { case (from, signature) =>
-                // Since we may be re-requesting votes, we need to ensure we
-                //  don't add different valid signatures from the same node
+                // Reliable deduplication: since we may be re-requesting votes, we need to
+                // ensure that we don't add different valid signatures from the same node
                 if (status.acks.map(_.from).contains(from))
                   None
                 else
@@ -379,6 +379,48 @@ final class AvailabilityModule[E <: Env[E]](
       advanceBatchIfComplete(actingOnMessageType, batchId, _)
     )
   }
+
+  private def updateLastKnownEpochNumberAndForgetExpiredBatches(
+      actingOnMessageType: => String,
+      currentEpoch: EpochNumber,
+  )(implicit
+      traceContext: TraceContext,
+      context: E#ActorContextT[Availability.Message[E]],
+  ): Unit =
+    if (currentEpoch < lastKnownEpochNumber) {
+      abort(
+        s"Trying to update lastKnownEpochNumber in Availability module to $currentEpoch which is lower than the current value $lastKnownEpochNumber"
+      )
+    } else if (lastKnownEpochNumber != currentEpoch) {
+      lastKnownEpochNumber = currentEpoch
+
+      def deleteExpiredBatches[M](
+          map: mutable.Map[BatchId, M],
+          mapName: String,
+      )(getEpochNumber: M => EpochNumber): Unit = {
+        def isBatchExpired(batchEpochNumber: EpochNumber) =
+          batchEpochNumber <= lastKnownEpochNumber - OrderingRequestBatch.BatchValidityDurationEpochs
+        val expiredBatchIds = map.collect {
+          case (batchId, metadata) if isBatchExpired(getEpochNumber(metadata)) => batchId
+        }
+        if (expiredBatchIds.nonEmpty) {
+          logger.warn(
+            s"$actingOnMessageType: Discarding from $mapName the expired batches: $expiredBatchIds"
+          )
+          map --= expiredBatchIds
+        }
+      }
+
+      deleteExpiredBatches(
+        disseminationProtocolState.batchesReadyForOrdering,
+        "batchesReadyForOrdering",
+      )(_.epochNumber)
+
+      deleteExpiredBatches(
+        disseminationProtocolState.disseminationProgress,
+        "disseminationProgress",
+      )(_.batchMetadata.epochNumber)
+    }
 
   private def handleConsensusMessage(
       consensusMessage: Availability.Consensus[E]
@@ -398,7 +440,7 @@ final class AvailabilityModule[E <: Env[E]](
             forEpochNumber,
             ordered,
           ) =>
-        lastKnownEpochNumber = forEpochNumber
+        updateLastKnownEpochNumberAndForgetExpiredBatches(messageType, forEpochNumber)
         handleConsensusProposalRequest(
           messageType,
           orderingTopology,
@@ -482,8 +524,6 @@ final class AvailabilityModule[E <: Env[E]](
       context: E#ActorContextT[Availability.Message[E]],
       traceContext: TraceContext,
   ): Unit = {
-    // TODO(#23297): drop expired batches
-
     val currentOrderingTopology = activeMembership.orderingTopology
 
     reviewInProgressBatches(actingOnMessageType)
@@ -635,10 +675,7 @@ final class AvailabilityModule[E <: Env[E]](
       // Dissemination completed: remove it now from the progress to avoids clashes with delayed / unneeded ACKs
       disseminationProtocolState.disseminationProgress.remove(batchId).discard
       disseminationProtocolState.batchesReadyForOrdering
-        .put(
-          batchId,
-          disseminationProgress.batchMetadata.complete(proof.acks),
-        )
+        .put(batchId, disseminationProgress.batchMetadata.complete(proof.acks))
         .discard
       true
     }
@@ -669,30 +706,41 @@ final class AvailabilityModule[E <: Env[E]](
         )
 
       case Availability.RemoteDissemination.RemoteBatchAcknowledged(batchId, from, signature) =>
-        disseminationProtocolState.disseminationProgress
-          .get(batchId)
-          .map(_.batchMetadata.epochNumber) match {
-          case Some(epochNumber) =>
-            pipeToSelf(
-              activeCryptoProvider
-                .verifySignature(
-                  AvailabilityAck.hashFor(batchId, epochNumber, from),
-                  from,
-                  signature,
-                )
-            ) {
-              case Failure(exception) =>
-                abort(s"Failed to verify $batchId from $from signature: $signature", exception)
-              case Success(Left(exception)) =>
-                emitInvalidMessage(metrics, from)
-                logger.warn(
-                  s"$messageType: $from sent invalid ACK for batch $batchId " +
-                    s"(signature $signature doesn't match), ignoring",
-                  exception,
-                )
-                Availability.NoOp
-              case Success(Right(())) =>
-                LocalDissemination.RemoteBatchAcknowledgeVerified(batchId, from, signature)
+        disseminationProtocolState.disseminationProgress.get(batchId) match {
+          case Some(disseminationProgress) =>
+            // Best-effort deduplication: if a node receives an AvailabilityAck from a peer
+            // for a batchId that already exists, we can drop that Ack immediately, without
+            // bothering to check the signature using the active crypto provider.
+            // However, a duplicate ack may be received while the first Ack's signature is
+            // being verified (which means it's not in `disseminationProtocolState` yet), so we
+            // also need (and have) a duplicate check later in the post-verify message processing.
+            if (disseminationProgress.acks.map(_.from).contains(from))
+              logger.debug(
+                s"$messageType: duplicate remote ack for batch $batchId from $from, ignoring"
+              )
+            else {
+              val epochNumber = disseminationProgress.batchMetadata.epochNumber
+              pipeToSelf(
+                activeCryptoProvider
+                  .verifySignature(
+                    AvailabilityAck.hashFor(batchId, epochNumber, from),
+                    from,
+                    signature,
+                  )
+              ) {
+                case Failure(exception) =>
+                  abort(s"Failed to verify $batchId from $from signature: $signature", exception)
+                case Success(Left(exception)) =>
+                  emitInvalidMessage(metrics, from)
+                  logger.warn(
+                    s"$messageType: $from sent invalid ACK for batch $batchId " +
+                      s"(signature $signature doesn't match), ignoring",
+                    exception,
+                  )
+                  Availability.NoOp
+                case Success(Right(())) =>
+                  LocalDissemination.RemoteBatchAcknowledgeVerified(batchId, from, signature)
+              }
             }
           case None =>
             logger.info(
@@ -700,7 +748,6 @@ final class AvailabilityModule[E <: Env[E]](
                 "but the batch is unknown (potentially already proposed), ignoring"
             )
         }
-
     }
   }
 
