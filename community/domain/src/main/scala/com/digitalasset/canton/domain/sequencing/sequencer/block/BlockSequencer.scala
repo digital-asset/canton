@@ -5,6 +5,7 @@ package com.digitalasset.canton.domain.sequencing.sequencer.block
 
 import cats.data.EitherT
 import cats.syntax.either.*
+import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout}
@@ -32,7 +33,7 @@ import com.digitalasset.canton.domain.sequencing.traffic.store.TrafficPurchasedS
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.pretty.CantonPrettyPrinter
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.resource.Storage
+import com.digitalasset.canton.resource.{DbExceptionRetryPolicy, Storage}
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
@@ -45,6 +46,7 @@ import com.digitalasset.canton.time.{Clock, DomainTimeTracker}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil.condUnitET
+import com.digitalasset.canton.util.retry.Pause
 import com.digitalasset.canton.util.{EitherTUtil, PekkoUtil, SimpleExecutionQueue}
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.ServerServiceDefinition
@@ -54,6 +56,7 @@ import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
 import org.slf4j.event.Level
 
 import scala.collection.concurrent.TrieMap
+import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
 
@@ -368,6 +371,27 @@ class BlockSequencer(
       _ <- blockOrderer.acknowledge(signedAcknowledgeRequest)
       _ <- waitForAcknowledgementF
     } yield ()
+  }
+
+  override def awaitContainingBlockLastTimestamp(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): EitherT[Future, SequencerError, CantonTimestamp] = {
+    val delay = 1.second
+    EitherT(
+      Pause(
+        logger,
+        this,
+        maxRetries = (timeouts.default.duration / delay).toInt,
+        delay,
+        s"$functionFullName($timestamp)",
+      )(
+        store
+          .findBlockContainingTimestamp(timestamp)
+          .map(_.lastTs)
+          .value,
+        DbExceptionRetryPolicy,
+      )
+    )
   }
 
   override def snapshot(

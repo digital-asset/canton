@@ -186,8 +186,18 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest {
     ]] =
       EitherT.pure(Some(TrafficState.empty(timestamp)))
 
-    override def isEnabled(member: Member)(implicit traceContext: TraceContext): Future[Boolean] =
+    override def isEnabled(member: Member)(implicit
+        traceContext: TraceContext
+    ): Future[Boolean] =
       Future.successful(existingMembers.contains(member))
+
+    /** Return the last timestamp of the containing block of the provided timestamp. This is needed
+      * to determine the effective timestamp to observe in topology processing, required to produce
+      * a correct snapshot.
+      */
+    override def awaitContainingBlockLastTimestamp(timestamp: CantonTimestamp)(implicit
+        traceContext: TraceContext
+    ): EitherT[Future, SequencerError, CantonTimestamp] = ???
   }
 
   Seq(("sendAsync", false), ("sendAsyncSigned", true)).foreach { case (name, useSignedSend) =>

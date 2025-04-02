@@ -105,21 +105,10 @@ class InMemorySequencerBlockStore(
     }
     .maxByOption(_.height)
 
-  private def findBlockContainingTimestamp(watermark: CantonTimestamp) =
-    blockToTimestampMap
-      .readOnlySnapshot()
-      .toSeq
-      .collect {
-        case (height, (latestEventTs, latestSequencerEventTsO)) if latestEventTs >= watermark =>
-          BlockInfo(height, latestEventTs, latestSequencerEventTsO)
-      }
-      .minByOption(_.height)
-
-  private def readLatestBlockInfo() =
-    blockToTimestampMap.readOnlySnapshot().maxByOption { case (height, _) => height }.map {
-      case (height, (latestEventTs, latestSequencerEventTsO)) =>
-        BlockInfo(height, latestEventTs, latestSequencerEventTsO)
-    }
+  override def findBlockContainingTimestamp(
+      timestamp: CantonTimestamp
+  )(implicit traceContext: TraceContext): EitherT[Future, SequencerError, BlockInfo] =
+    readStateForBlockContainingTimestamp(timestamp).map(_.latestBlock)
 
   override def readStateForBlockContainingTimestamp(
       timestamp: CantonTimestamp
