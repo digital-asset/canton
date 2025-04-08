@@ -330,6 +330,8 @@ object Dependencies {
   lazy val ujson_circe =
     "com.lihaoyi" %% "ujson-circe" % upickle_version exclude ("io.circe", "circe-parser_2.13")
 
+  // force override to address issue with transitive unicode lib dependency
+  lazy val icu4j_version = "com.ibm.icu" % "icu4j" % "63.1"
   lazy val protostuff_parser = "io.protostuff" % "protostuff-parser" % protostuff_version
 
   object resolveDependency {

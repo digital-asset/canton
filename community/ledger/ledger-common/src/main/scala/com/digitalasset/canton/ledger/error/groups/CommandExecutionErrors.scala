@@ -4,7 +4,6 @@
 package com.digitalasset.canton.ledger.error.groups
 
 import com.digitalasset.base.error.{
-  ContextualizedErrorLogger,
   DamlErrorWithDefiniteAnswer,
   ErrorCategory,
   ErrorCategoryRetry,
@@ -16,6 +15,7 @@ import com.digitalasset.base.error.{
 }
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.error.ParticipantErrorGroup.LedgerApiErrorGroup.CommandExecutionErrorGroup
+import com.digitalasset.canton.logging.ContextualizedErrorLogger
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId}
 import com.digitalasset.daml.lf.engine.Error as LfError
@@ -373,8 +373,31 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
             }
         }
       }
-    }
 
+      @Explanation(
+        """This error occurs if the Daml engine interpreter cannot resolve a package name to any vetted package. This
+          |can be caused by a commmand using an explicit disclosure produced by a package that hasn't been vetted yet
+          |by the participant or by a command that uses a contract whose creation package has been force-unvetted."""
+      )
+      @Resolution(
+        "Ensure the command doesn't use a package that has not been yet vetted or has been unvetted."
+      )
+      object UnresolvedPackageName
+          extends ErrorCode(
+            id = "UNRESOLVED_PACKAGE_NAME",
+            ErrorCategory.InvalidGivenCurrentSystemStateResourceMissing,
+          ) {
+
+        final case class Reject(override val cause: String, packageName: Ref.PackageName)(implicit
+            loggingContext: ContextualizedErrorLogger
+        ) extends DamlErrorWithDefiniteAnswer(
+              cause = cause
+            ) {
+          override def resources: Seq[(ErrorResource, String)] =
+            Seq((ErrorResource.PackageName, packageName))
+        }
+      }
+    }
     @Explanation("""This error occurs if a Daml transaction fails due to an authorization error.
                    |An authorization means that the Daml transaction computed a different set of required submitters than
                    |you have provided during the submission as `actAs` parties.""")
@@ -768,6 +791,7 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
       def Reject(
           cause: String,
           err: LfInterpretationError.FailureStatus,
+          trace: Option[String],
       )(implicit
           loggingContext: ContextualizedErrorLogger
       ) = ErrorCategory.fromInt(err.failureCategory) match {
@@ -781,7 +805,9 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
             override def context: Map[String, String] =
               // ++ on maps takes last key, we don't want users to override `error_id`, so we add this last
               // SerializableErrorCodeComponents also puts `context` first, so fields added by canton cannot be overwritten
-              super.context ++ err.metadata ++ List(("error_id", err.errorId))
+              super.context ++ err.metadata ++ List(("error_id", err.errorId)) ++ trace
+                .map(("exercise_trace", _))
+                .toList
           }
         case None =>
           LedgerApiErrors.InternalError.Generic(

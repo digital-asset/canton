@@ -3,6 +3,36 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2025-04-08 (Exclusive)
+- Json API: http response status codes are based on the corresponding gRPC errors where applicable.
+- Json API: `/v2/users` and `/v2/parties` now support paging
+- Json API: Updated openapi.yaml to correctly represent Timestamps as strings in the JSON API schema
+- The package vetting ledger-effective-time boundaries change to validFrom being inclusive and validUntil being exclusive
+  whereas previously validFrom was exclusive and validUntil was inclusive.
+
+### Ledger API topology transaction to represent addition for (party, participant)
+- The ParticipantAuthorizationAdded message was added to express the inception of a party in a participant.
+- The TopologyEvent message was extended to include the ParticipantAuthorizationAdded.
+- The lapi_events_party_to_participant table was extended by one column the participant_permission_type which holds the
+  state of the participant authorization (Added, Changed, Revoked)
+- The JSON api and the java bindings have changed accordingly to accommodate the changes.
+
+
+## Until 2025-04-05 (Exclusive)
+### Breaking: New External Signing Hashing Scheme
+**BREAKING CHANGE**
+The hashing algorithm for externally signed transactions has been changed in a minor but backward-incompatible way.
+
+- There is a new `interfaceId` field in the `Fetch` node of the transaction that now is part of the hash.
+- The hashing scheme version (now being V2) is now part of the hash
+
+See the [hashing algorithm documentation](https://docs.digitalasset-staging.com/build/3.3/explanations/external-signing/external_signing_hashing_algorithm#fetch) for the updated version.
+The hash provided as part of the `PrepareSubmissionResponse` is updated to the new algorithm as well.
+This updated algorithm is supported under a new `V2` hashing scheme version.
+Support for `V1` has been dropped and will not be supported in Canton 3.3 onward.
+This is relevant for applications that re-compute the hash client-side.
+Such applications must update their implementation in order to use the interactive submission service on Canton 3.3.
+
 ## Until 2025-04-04 (Exclusive)
 ### ACS Export and Import
 The ACS export and import now use an ACS snapshot containing LAPI active contracts, as opposed to the Canton internal
@@ -40,6 +70,13 @@ implementation).
   its method to `ActiveContactOld#fromFile`
 - Renamed the current `import_acs_from_file` repair macro to `import_acs_old_from_file`. And deprecation of
   `import_acs_old_from_file`.
+- Authorization service configuration of the ledger api and admin api is validated. No two services can define
+  the same target scope or audience.
+- Ledger API will now give the `DAML_FAILURE` error instead of the `UNHANDLED_EXCEPTION` error when exceptions are
+  thrown from daml.
+    - Details: This new error structure includes an `error_id` in the `ErrorInfoDetail` metadata, of the form
+      `UNHANDLED_EXCEPTION/Module.Name:ExceptionName` for legacy exceptions, and fully user defined for `failWithStatus`
+      exceptions. Please migrate to `failWithStatus` over daml exceptions before Daml 3.4.
 
 ## Until 2025-03-27 (Exclusive)
 ### Reassignment Batching
@@ -49,6 +86,18 @@ implementation).
 - In the update stream, Reassignment now contains a list of events rather than just one.
 - UnassignedEvent messages now additionally contain an offset and a node_id.
 - For the detailed list of changed Ledger API proto messages please see docs-open/src/sphinx/reference/lapi-migration-guide.rst
+
+## Until 2025-03-26 (Exclusive)
+- Added GetUpdateByOffset and GetUpdateById rpc methods in the ledger api that extend and will replace the existing
+GetTransactionByOffset and GetTransactionById so that one will be able to look up an update by its offset or id.
+- Towards this, the GetUpdateByOffsetRequest and GetUpdateByIdRequest messages were added. Both contain the update
+format to shape the update in its final form. Look at docs-open/src/sphinx/reference/lapi-migration-guide.rst on how
+use the added messages over the GetTransactionByOffsetRequest and GetTransactionByIdRequest.
+- The GetUpdateResponse is the response of both methods that contains the update which can be one of:
+  - a transaction
+  - a reassignment
+  - a topology transaction
+- The java bindings and json api were also extended to include the above changes.
 
 ## Until 2025-03-25 (Exclusive)
 - `_recordId` removed from Daml records in Json API
