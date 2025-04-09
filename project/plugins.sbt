@@ -15,7 +15,7 @@ addSbtPlugin("com.github.sbt" % "sbt-site-sphinx" % "1.7.0")
 addSbtPlugin("de.heikoseeberger" % "sbt-header" % "5.10.0")
 
 // Required to "reStart" command which improves working with server applications in sbt. Not spray specific.
-addSbtPlugin("io.spray" % "sbt-revolver" % "0.9.1")
+addSbtPlugin("io.spray" % "sbt-revolver" % "0.10.0")
 
 addSbtPlugin("com.thesamet" % "sbt-protoc" % "1.0.6")
 libraryDependencies += "com.thesamet.scalapb" %% "compilerplugin" % "0.11.14"
@@ -24,9 +24,8 @@ libraryDependencies += "com.thesamet.scalapb" %% "compilerplugin" % "0.11.14"
 addSbtPlugin("com.thoughtworks.sbt-api-mappings" % "sbt-api-mappings" % "3.0.0")
 
 // unifies scaladoc from all modules into a single artifact
-addSbtPlugin("com.eed3si9n" % "sbt-unidoc" % "0.4.3")
-
-addSbtPlugin("com.eed3si9n" %% "sbt-buildinfo" % "0.9.0")
+addSbtPlugin("com.github.sbt" % "sbt-unidoc" % "0.5.0")
+addSbtPlugin("com.eed3si9n" %% "sbt-buildinfo" % "0.13.1")
 
 // Our DamlPlugin needs to read and write values from daml.yaml files
 // This is a _very_ simple yaml library as we only need to look at two simple keys
@@ -42,7 +41,7 @@ libraryDependencies += "com.github.pathikrit" %% "better-files" % "3.8.0"
 // enable dependency tree plugin (now native as of sbt 1.4.x)
 addDependencyTreePlugin
 
-addSbtPlugin("com.github.cb372" % "sbt-explicit-dependencies" % "0.2.16")
+addSbtPlugin("com.github.cb372" % "sbt-explicit-dependencies" % "0.3.1")
 
 // Allows using some convenient Cats syntax in build files
 libraryDependencies += "org.typelevel" %% "cats-core" % "2.9.0"

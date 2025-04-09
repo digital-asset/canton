@@ -202,7 +202,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[E <: Env[E]](
             dependencies,
             loggerFactory,
             timeouts,
-          )
+          )()
         },
         consensus = (p2pNetworkOutRef, availabilityRef, outputRef) => {
           val dependencies = ConsensusModuleDependencies(
@@ -227,6 +227,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[E <: Env[E]](
             clock,
             metrics,
             segmentModuleRefFactory,
+            random,
             dependencies,
             loggerFactory,
             timeouts,

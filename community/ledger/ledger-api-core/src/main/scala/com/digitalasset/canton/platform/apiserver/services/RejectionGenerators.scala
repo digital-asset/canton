@@ -3,19 +3,14 @@
 
 package com.digitalasset.canton.platform.apiserver.services
 
-import com.digitalasset.base.error.{
-  BaseError,
-  ContextualizedErrorLogger,
-  DamlErrorWithDefiniteAnswer,
-  NoLogging,
-  RpcError,
-}
+import com.digitalasset.base.error.{BaseError, DamlErrorWithDefiniteAnswer, RpcError}
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.error.groups.{
   CommandExecutionErrors,
   ConsistencyErrors,
   RequestValidationErrors,
 }
+import com.digitalasset.canton.logging.{ContextualizedErrorLogger, NoLogging}
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.SynchronizerId
@@ -102,6 +97,9 @@ object RejectionGenerators {
         case _: LfInterpretationError.FailedAuthorization =>
           CommandExecutionErrors.Interpreter.AuthorizationError
             .Reject(renderedMessage)
+        case LfInterpretationError.UnresolvedPackageName(packageName) =>
+          CommandExecutionErrors.Interpreter.LookupErrors.UnresolvedPackageName
+            .Reject(renderedMessage, packageName)
         case e: LfInterpretationError.ContractNotActive =>
           CommandExecutionErrors.Interpreter.ContractNotActive
             .Reject(renderedMessage, e)
@@ -154,7 +152,7 @@ object RejectionGenerators {
             .Reject(renderedMessage, e)
         case e: LfInterpretationError.FailureStatus =>
           CommandExecutionErrors.Interpreter.FailureStatus
-            .Reject(renderedMessage, e)
+            .Reject(renderedMessage, e, transactionTrace)
         case LfInterpretationError.Upgrade(error: LfInterpretationError.Upgrade.ValidationFailed) =>
           CommandExecutionErrors.Interpreter.UpgradeError.ValidationFailed
             .Reject(renderedMessage, error)

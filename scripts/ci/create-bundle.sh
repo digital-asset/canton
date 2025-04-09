@@ -72,6 +72,9 @@ do
         "-c")
           state="copy"
           ;;
+        "-l")
+          state="copyLinks"
+          ;;
         "-r")
           state="rename"
           ;;
@@ -99,6 +102,25 @@ do
       fi
       state="scan"
       ;;
+    "copyLinks")
+          if [[ -e $ff ]]; then
+            if [[ -d $ff ]]; then
+              if [[ -z $(ls -A $ff) ]]; then
+                echo "skipping empty $ff"
+              else
+                echo "copying content from $ff"
+                cp -rL $ff/* $RELEASE_DIR
+              fi
+            else
+              echo "copying file $ff"
+              cp -L $ff $RELEASE_DIR
+            fi
+          else
+            echo "ERROR, no such file $ff for copying"
+            exit 1
+          fi
+          state="scan"
+          ;;
     "rename")
       if [[ -e $ff ]]; then
         rename=$ff

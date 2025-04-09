@@ -11,6 +11,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.FingerprintKeyId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.{
   HasDelayedInit,
@@ -33,6 +34,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.OrderedBlockForOutput
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
+  MessageAuthorizer,
   OrderingTopology,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.{
@@ -70,6 +72,7 @@ import AvailabilityModuleMetrics.{emitDisseminationStateStats, emitInvalidMessag
   * @param random
   *   the random source used to select what node to download batches from
   */
+@SuppressWarnings(Array("org.wartremover.warts.Var"))
 final class AvailabilityModule[E <: Env[E]](
     initialMembership: Membership,
     initialEpochNumber: EpochNumber,
@@ -84,8 +87,12 @@ final class AvailabilityModule[E <: Env[E]](
     override val timeouts: ProcessingTimeout,
     disseminationProtocolState: DisseminationProtocolState = new DisseminationProtocolState(),
     outputFetchProtocolState: MainOutputFetchProtocolState = new MainOutputFetchProtocolState(),
-)(implicit mc: MetricsContext)
-    extends Availability[E]
+)(
+    // Only passed in tests
+    private var messageAuthorizer: MessageAuthorizer = initialMembership.orderingTopology
+)(implicit
+    mc: MetricsContext
+) extends Availability[E]
     with HasDelayedInit[Availability.Message[E]] {
 
   import AvailabilityModule.*
@@ -93,12 +100,9 @@ final class AvailabilityModule[E <: Env[E]](
   private val thisNode = initialMembership.myId
   private val nodeShuffler = new BftNodeShuffler(random)
 
-  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var lastKnownEpochNumber = initialEpochNumber
 
-  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var activeMembership = initialMembership
-  @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var activeCryptoProvider = initialCryptoProvider
 
   disseminationProtocolState.lastProposalTime = Some(clock.now)
@@ -128,28 +132,38 @@ final class AvailabilityModule[E <: Env[E]](
             handleRemoteProtocolMessage(message)
 
           case Availability.UnverifiedProtocolMessage(signedMessage) =>
-            logger.debug(s"Start to verify message from ${signedMessage.from}")
-            pipeToSelf(
-              activeCryptoProvider.verifySignedMessage(
-                signedMessage,
-                AuthenticatedMessageType.BftSignedAvailabilityMessage,
+            val from = signedMessage.from
+            val keyId = FingerprintKeyId.toBftKeyId(signedMessage.signature.signedBy)
+            if (messageAuthorizer.isAuthorized(from, keyId)) {
+              logger.debug(s"Start to verify message from '$from'")
+              pipeToSelf(
+                activeCryptoProvider.verifySignedMessage(
+                  signedMessage,
+                  AuthenticatedMessageType.BftSignedAvailabilityMessage,
+                )
+              ) {
+                case Failure(exception) =>
+                  abort(
+                    s"Can't verify signature for ${signedMessage.message} (signature ${signedMessage.signature})",
+                    exception,
+                  )
+                case Success(Left(exception)) =>
+                  // Info because it can also happen at epoch boundaries
+                  logger.info(
+                    s"Skipping message since we can't verify signature for ${signedMessage.message} (signature ${signedMessage.signature}) reason=$exception"
+                  )
+                  emitInvalidMessage(metrics, from)
+                  Availability.NoOp
+                case Success(Right(())) =>
+                  logger.debug(s"Verified message is from '$from''")
+                  signedMessage.message
+              }
+            } else {
+              logger.info(
+                s"Received a message from '$from' signed with '$keyId' " +
+                  "but it cannot be verified in the currently known " +
+                  s"dissemination topology ${activeMembership.orderingTopology.nodesTopologyInfo}, dropping it"
               )
-            ) {
-              case Failure(exception) =>
-                abort(
-                  s"Can't verify signature for ${signedMessage.message} (signature ${signedMessage.signature})",
-                  exception,
-                )
-              case Success(Left(exception)) =>
-                // Info because it can also happen at epoch boundaries
-                logger.info(
-                  s"Skipping message since we can't verify signature for ${signedMessage.message} (signature ${signedMessage.signature}) reason=$exception"
-                )
-                emitInvalidMessage(metrics, signedMessage.from)
-                Availability.NoOp
-              case Success(Right(())) =>
-                logger.debug(s"Verified message is from ${signedMessage.from}")
-                signedMessage.message
             }
         }
     }
@@ -496,6 +510,7 @@ final class AvailabilityModule[E <: Env[E]](
     )
     activeMembership = activeMembership.copy(orderingTopology = orderingTopology)
     activeCryptoProvider = cryptoProvider
+    messageAuthorizer = orderingTopology
 
     // Review and complete both in-progress and ready disseminations regardless of whether the topology
     //  has changed, so that we also try and complete ones that might have become stuck;

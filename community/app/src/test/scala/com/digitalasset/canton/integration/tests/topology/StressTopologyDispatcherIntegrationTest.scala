@@ -14,7 +14,6 @@ import com.digitalasset.canton.console.{
   LocalParticipantReference,
   ParticipantReference,
 }
-import com.digitalasset.canton.crypto.SigningKeyUsage.matchesRelevantUsages
 import com.digitalasset.canton.crypto.{PublicKey, SigningKeyUsage, SigningPublicKey}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.plugins.{
@@ -132,7 +131,8 @@ trait StressTopologyDispatcherIntegrationTest
       .item
       .keys
       .find {
-        case SigningPublicKey(_, _, _, keyUsage, _) => matchesRelevantUsages(keyUsage, usage)
+        case SigningPublicKey(_, _, _, keyUsage, _) =>
+          SigningKeyUsage.matchesRelevantUsages(keyUsage, usage)
         case _ => false // it's an encryption key
       }
       .valueOrFail(s"No signing keys found for $node")
@@ -216,7 +216,7 @@ trait StressTopologyDispatcherIntegrationTest
               endOffsetInclusive = Some(endOffset),
             )
             .flatMap(_.topologyTransaction.events)
-            .flatMap(_.event.participantAuthorizationChanged)
+            .flatMap(_.event.participantAuthorizationAdded)
             .map(_.partyId)
             .map(PartyId.tryFromProtoPrimitive)
             .map(_.identifier.str)

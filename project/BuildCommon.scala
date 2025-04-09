@@ -4,7 +4,7 @@ import DamlPlugin.autoImport.*
 import Dependencies.{daml_lf_language, *}
 import better.files.{File as BetterFile, *}
 import com.lightbend.sbt.JavaFormatterPlugin
-import com.typesafe.sbt.SbtLicenseReport.autoImportImpl.*
+import sbtlicensereport.SbtLicenseReport.autoImportImpl.*
 import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.{headerResources, headerSources}
 import org.scalafmt.sbt.ScalafmtPlugin
 import pl.project13.scala.sbt.JmhPlugin
@@ -313,7 +313,7 @@ object BuildCommon {
       // Write the daml commit into a file so it can be used in the release artifact to download the correct protobuf files
       // from the daml repo
       val interactiveSubmissionExamplePath =
-        "community" / "app" / "src" / "pack" / "examples" / "08-interactive-submission" / "v1"
+        "community" / "app" / "src" / "pack" / "examples" / "08-interactive-submission"
       val damlCommitFile = interactiveSubmissionExamplePath / "daml_commit"
       val damlVersion: String = Dependencies.daml_libraries_version
       damlCommitFile.writeText(damlVersion.split('.').last.tail)(Seq(StandardOpenOption.CREATE))
@@ -493,7 +493,7 @@ object BuildCommon {
 
   // which files to include into the release package
   lazy val sharedAppPack = Seq(
-    "-c",
+    "-l",
     "community/app/src/pack",
     "-c",
     "community/demo/src/pack",
@@ -688,7 +688,22 @@ object BuildCommon {
             (Test / sourceDirectory).value / "daml" / "CantonTest",
             (Test / damlDarOutput).value / "CantonTests-3.3.0.dar",
             "com.digitalasset.canton.damltests",
-          )
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "CantonTestDev",
+            (Test / damlDarOutput).value / "CantonTestsDev-3.3.0.dar",
+            "com.digitalasset.canton.damltestsdev",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "CantonLfDev",
+            (Test / damlDarOutput).value / "CantonLfDev-3.3.0.dar",
+            "com.digitalasset.canton.lfdev",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "CantonLfV21",
+            (Test / damlDarOutput).value / "CantonLfV21-3.3.0.dar",
+            "com.digitalasset.canton.lfv21",
+          ),
         ),
         Test / useVersionedDarName := true,
         Test / damlEnableProjectVersionOverride := false,
@@ -1543,6 +1558,7 @@ object BuildCommon {
             daml_observability_pekko_http_metrics,
             daml_timer_utils,
             pekko_http,
+            icu4j_version,
             protostuff_parser,
             sttp_apiscpec_openapi_circe_yaml,
             sttp_apiscpec_asyncapi_circe_yaml,
