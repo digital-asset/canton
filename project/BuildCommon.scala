@@ -469,8 +469,13 @@ object BuildCommon {
     Test / testOptions += Tests.Argument("-C", "com.digitalasset.canton.LogReporter")
   )
 
-  lazy val sharedCantonCommunitySettings =
-    sharedCantonSettings ++ JvmRulesPlugin.damlRepoHeaderSettings
+  lazy val sharedCantonCommunitySettings = Def.settings(
+    sharedCantonSettings,
+    JvmRulesPlugin.damlRepoHeaderSettings,
+    Compile / bufLintCheck := (Compile / bufLintCheck)
+      .dependsOn(DamlProjects.`google-common-protos-scala` / PB.unpackDependencies)
+      .value,
+  )
 
   // On circle-ci, between machine executors and dockers, some plugins have different paths
   // ex: -Xplugin:/root/.cache vs -Xplugin:/home/********/.cache/
@@ -1430,6 +1435,7 @@ object BuildCommon {
           "package_management",
           "carbonv1",
           "carbonv2",
+          "upgrade_iface",
         ) ++ (if (lfVersion == "2.dev") Seq("experimental") else Seq.empty)
       )
         yield (
@@ -1464,9 +1470,11 @@ object BuildCommon {
         ),
       ),
       Compile / damlBuildOrder := Seq(
-        // define the packages that have a dependency in the right order, the omitted will be compiled before those listed
+        // define the packages that have a dependency in the right order
+        // packages that are omitted will be compiled after those listed below
         "carbonv1",
         "carbonv2",
+        "upgrade_iface",
       ),
     )
 
@@ -1761,6 +1769,12 @@ object BuildCommon {
       .settings(
         sharedCommunitySettings,
         scalacOptions --= removeCompileFlagsForDaml,
+        Compile / bufLintCheck := (Compile / bufLintCheck)
+          .dependsOn(
+            `google-common-protos-scala` / PB.unpackDependencies,
+            `ledger-api-value` / PB.unpackDependencies,
+          )
+          .value,
         Compile / PB.targets := Seq(
           // build java codegen too
           PB.gens.java -> (Compile / sourceManaged).value,

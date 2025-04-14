@@ -26,7 +26,7 @@ object Dependencies {
   //  When updating pekko, make sure to update the clone as well, including the tests in community/lib/pekko/src/main/scala/pekko
   lazy val pekko_http_version = "1.1.0"
   lazy val ammonite_version = "3.0.1"
-  lazy val apispec_version = "0.11.3"
+  lazy val apispec_version = "0.11.7"
   lazy val awaitility_version = "4.2.0"
   lazy val aws_version = "2.29.5"
   lazy val better_files_version = "3.9.2"

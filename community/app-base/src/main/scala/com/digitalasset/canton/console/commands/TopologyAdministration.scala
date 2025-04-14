@@ -5,6 +5,7 @@ package com.digitalasset.canton.console.commands
 
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
+import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.RpcError
@@ -96,16 +97,48 @@ class TopologyAdministrationGroup(
                       |defining a so-called namespace, where the signing key has the ultimate control over
                       |issuing new identifiers.
                       |During initialisation, we have to pick such a unique identifier.
-                      |By default, initialisation happens automatically, but it can be turned off by setting the auto-init
-                      |option to false.
+                      |By default, initialisation happens automatically, but it can be changed to either initialize
+                      |manually or to read a set of identities and certificates from a file.
+                      |
                       |Automatic node initialisation is usually turned off to preserve the identity of a participant or synchronizer
-                      |node (during major version upgrades) or if the topology transactions are managed through
-                      |a different topology manager than the one integrated into this node.""")
-  def init_id(identifier: UniqueIdentifier, waitForReady: Boolean = true): Unit = {
+                      |node (during major version upgrades) or if the root namespace key of the node is
+                      |kept offline.
+                      |
+                      |Optionally, a set of delegations can be provided if the root namespace key is not available.
+                      |These delegations can be either in files or passed as objects. Their version needs to match the
+                      |necessary protocol version of the synchronizers we are going to connect to.
+                      |""")
+  def init_id(
+      identifier: UniqueIdentifier,
+      delegations: Seq[GenericSignedTopologyTransaction] = Seq.empty,
+      delegationFiles: Seq[String] = Seq.empty,
+      waitForReady: Boolean = true,
+  ): Unit = {
     if (waitForReady) instance.health.wait_for_ready_for_id()
+    val certs = delegationFiles.traverse(
+      BinaryFileUtil
+        .readByteStringFromFile(_)
+        .flatMap(bytes =>
+          SignedTopologyTransaction
+            .fromByteString(
+              ProtocolVersionValidation.NoValidation,
+              ProtocolVersionValidation.NoValidation,
+              bytes,
+            )
+            .leftMap(_.message)
+        )
+    )
 
     consoleEnvironment.run {
-      adminCommand(TopologyAdminCommands.Init.InitId(identifier.toProtoPrimitive))
+      ConsoleCommandResult.fromEither(certs).flatMap { fileBasedDelegations =>
+        adminCommand(
+          TopologyAdminCommands.Init.InitId(
+            identifier = identifier.identifier.toProtoPrimitive,
+            namespace = identifier.namespace.toProtoPrimitive,
+            delegations = delegations ++ fileBasedDelegations,
+          )
+        )
+      }
     }
   }
 
@@ -809,16 +842,21 @@ class TopologyAdministrationGroup(
   @Help.Summary("Manage namespace delegations")
   @Help.Group("Namespace delegations")
   object namespace_delegations extends Helpful {
-    @Help.Summary("Propose a new namespace delegation")
+
+    @Help.Summary(
+      "Propose a new namespace delegation that is restricted to certain topology mapping types"
+    )
     @Help.Description(
       """A namespace delegation allows the owner of a namespace to delegate signing privileges for
-        |topology transactions on behalf of said namespace to additional signing keys.
+        topology transactions on behalf of said namespace to additional signing keys.
 
         namespace: the namespace for which the target key can be used to sign topology transactions
         targetKey: the target key to be used for signing topology transactions on behalf of the namespace
-        isRootDelegation: when set to true, the target key may authorize topology transactions with any kind of mapping,
-                          including other namespace delegations.
-                          when set to false, the target key may not authorize other namespace delegations for this namespace.
+        delegationRestriction: the types of topology mappings for which targetKey can sign. Can be one of the following values:
+                               - CanSignAllMappings: the target key can sign all topology mappings that are currently known or will be added in future releases.
+                               - CanSignAllButNamespaceDelegations: the target key can sign all topology mappings that are currently known or will be added in future releases,
+                                                                    except for namespace delegations.
+                               - CanSignSpecificMappings(TopologyMapping.Code*): the target key can only sign the specified topology mappings.
 
         store: - "Authorized": the topology transaction will be stored in the node's authorized store and automatically
                                propagated to connected synchronizers, if applicable.
@@ -838,7 +876,7 @@ class TopologyAdministrationGroup(
     def propose_delegation(
         namespace: Namespace,
         targetKey: SigningPublicKey,
-        isRootDelegation: Boolean,
+        delegationRestriction: DelegationRestriction,
         store: TopologyStoreId = TopologyStoreId.Authorized,
         mustFullyAuthorize: Boolean = true,
         serial: Option[PositiveInt] = None,
@@ -850,7 +888,7 @@ class TopologyAdministrationGroup(
     ): SignedTopologyTransaction[TopologyChangeOp, NamespaceDelegation] =
       runAdminCommand(
         TopologyAdminCommands.Write.Propose(
-          NamespaceDelegation.create(namespace, targetKey, isRootDelegation),
+          NamespaceDelegation.create(namespace, targetKey, delegationRestriction),
           signedBy = signedBy,
           store = store,
           serial = serial,
@@ -995,8 +1033,8 @@ class TopologyAdministrationGroup(
         signedBy: Seq[Fingerprint] = Seq.empty,
         change: TopologyChangeOp = TopologyChangeOp.Replace,
     ): SignedTopologyTransaction[TopologyChangeOp, IdentifierDelegation] = {
-      val command = TopologyAdminCommands.Write.Propose(
-        mapping = IdentifierDelegation(
+      val command = new TopologyAdminCommands.Write.Propose(
+        mapping = IdentifierDelegation.create(
           identifier = uid,
           target = targetKey,
         ),
@@ -1006,6 +1044,7 @@ class TopologyAdministrationGroup(
         mustFullyAuthorize = mustFullyAuthorize,
         store = store,
         waitToBecomeEffective = synchronize,
+        forceChanges = ForceFlags.none,
       )
       runAdminCommand(command)
     }

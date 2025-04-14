@@ -3,12 +3,119 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+## Until 2025-04-16 (Exclusive)
+### `InvalidGivenCurrentSystemStateSeekAfterEnd` error category
+The description of existing error category `InvalidGivenCurrentSystemStateSeekAfterEnd` has been generalized.
+As such this error category now describes a failure due to requesting a resource using a parameter value that
+falls beyond the current upper bound (or 'end') defined by the system's state. For example, a request that asks
+for data at a ledger offset which is past the current ledger's end.
+
+With this change, the error category `InvalidGivenCurrentSystemStateSeekAfterEnd` has also been marked as
+`retryable`. Because, it makes sense to retry a failed request assuming the system has progressed in the meantime.
+For example, new ledger entries have been added; and thus a previously requested ledger offset has become valid.
+
+### Traffic fees
+A base event cost can now be added to every sequenced submission.
+The amount is controlled via a new optional field in the `TrafficControlParameters` called `base_event_cost`.
+If not set, the base event cost is 0.
+
+### Acknowledgements
+Sequencers will now conflate acknowledgements coming from a participant within a time window.
+This means that if 2 or more acknowledgements from a given member get submitted during the window,
+only the first will be sequenced and the others will be discarded, until the window has elapsed.
+The conflate time window can be configured with a key in the sequencer configuration.
+Defaults to 45 seconds.
+
+Example: `sequencers.sequencer1.acknowledgements-conflate-window = "1 minute"`
+
+### BREAKING CHANGE: Automatic Node Initialization and Configuration
+
+The node initialization has been modified to better support root namespace keys and using static identities
+for our documentation. Mainly, while before, we had the ``init.auto-init`` flag, we now support a bit more
+versatile configurations.
+
+The config structure looks like this now:
+```
+canton.participants.participant.init = {
+    identity = {
+        type = auto
+        identifier = {
+            type = config // random // explicit(name)
+        }
+    }
+    generate-intermediate-key = false
+    generate-topology-transactions-and-keys = true
+}
+```
+
+A manual identity can be specified via the GRPC API if the configuration is set to ``manual``.
+```
+identity = {
+    type = manual
+}
+```
+
+Alternatively, the identity can be defined in the configuration file, which is equivalent to an
+API based initialization using the ``external`` config:
+```
+    identity = {
+        type = external
+        identifier = name
+        namespace = "optional namespace"
+        delegations = ["namespace delegation files"]
+    }
+```
+
+The old behaviour of ``auto-init = false`` (or ``init.identity = null``) can be recovered using
+```
+canton.participants.participant1.init = {
+    generate-topology-transactions-and-keys = false
+    identity.type = manual
+}
+```
+
+This means that auto-init is now split into two parts: generating the identity and generating
+the subsequent topology transactions.
+
+Additionally, the console command ``node.topology.init_id`` has been changed slightly too:
+It now supports additional parameters ``delegations`` and ``delegationFiles``. These can be used
+to specify the delegations that are necessary to control the identity of the node, which means that
+the ``init_id`` call combined with ``identity.type = manual`` is equivalent to the
+``identity.type = external`` in the config, except that one is declarative via the config, the
+other is interactive via the console. In addition, on the API level, the ``InitId`` request now expects
+the ``unique_identifier`` as its components, ``identifier`` and ``namespace``.
+
+### Ledger API endpoint to submit-and-wait for reassignments
+- Added new endpoint SubmitAndWaitForReassignment to be able to submit a single composite reassignment command, and wait
+  for the reassignment to be returned.
+- The SubmitAndWaitForReassignmentRequest message was added that contains the reassignment commands to be submitted and
+  the event format that defines how the Reassignment will be presented.
+- The java bindings and the json api were extended accordingly.
+
+### NamespaceDelegation can be restricted to a specific set of topology mappings
+- Added field `NamespaceDelegation.restricted_to_mappings` to restrict the target key of a namespace delegation to only be allowed
+  to sign a set of topology mappings. See the documentation for the field in topology.proto.
+  **BREAKING CHANGE**
+- The console command `topology.namespace_delegation.propose_delegation` was changed. The parameter `isRootDelegation: Boolean` is replaced with the parameter
+  `delegationRestriction: DelegationRestriction`, which can be one of the following values:
+    - `CanSignAllMappings`: This is equivalent to the previously known "root delegation", meaning that the target key of the delegation can be used
+      to sign all topology mappings.
+    - `CanSignAllButNamespaceDelegations`: This is equivalent to the previously known "non-root delegation", meaning that the target key of the delegation
+      can be used to sign all topology mappings other than namespace delegations.
+    - `CanSignSpecificMappings(TopologyMapping.Code*)`: The target key of the delegation can only be used to sign the specified mappings.
+
 ## Until 2025-04-08 (Exclusive)
+- Json API: openapi.yaml generated using 3.0.3 version of specification.
 - Json API: http response status codes are based on the corresponding gRPC errors where applicable.
 - Json API: `/v2/users` and `/v2/parties` now support paging
 - Json API: Updated openapi.yaml to correctly represent Timestamps as strings in the JSON API schema
+- Json API: Fields that are mapped to Option, Seq or Map in gRPC are no longer required (default to empty).
 - The package vetting ledger-effective-time boundaries change to validFrom being inclusive and validUntil being exclusive
   whereas previously validFrom was exclusive and validUntil was inclusive.
+- Ledger Metering has been removed. This involved
+  - deleting MeteringReportService in the Ledger API
+  - deleting /v2/metering endpoint in the JSON API
+  - deleting the console ledger_api.metering.get_report command
 
 ### Ledger API topology transaction to represent addition for (party, participant)
 - The ParticipantAuthorizationAdded message was added to express the inception of a party in a participant.
@@ -17,6 +124,19 @@ Please also consult the [full documentation of this release](https://docs.daml.c
   state of the participant authorization (Added, Changed, Revoked)
 - The JSON api and the java bindings have changed accordingly to accommodate the changes.
 
+### Ledger API interface query upgrading
+Streaming and pointwise queries support for smart contract upgrading:
+- Dynamic upgrading of interface filters: on a query for interface `iface`, the Ledger API will deliver events
+  for all templates that can be upgraded to a template version that implements `iface`.
+  The interface filter resolution is dynamic throughout a stream's lifetime: it is re-evaluated on each DAR upload.
+  **Note**: No redaction of history: a DAR upload during an ongoing stream does not affect the already scanned ledger for the respective stream.
+  If clients are interested in re-reading the history in light of the upgrades introduced by a DAR upload,
+  the relevant portion of the ACS view of the client should be rebuilt by re-subscribing to the ACS stream
+  and continuing from there with an update subscription for the interesting interface filter.
+- Dynamic upgrading of interface views: rendering of interface view values is adapted to use
+  the latest infinitely-vetted (with no validUntil bound) package version of an interface instance.
+  **Note**: For performance considerations, the selected version to be rendered for an interface instance is memoized
+  per stream subscription and does not change as the vetting state evolves.
 
 ## Until 2025-04-05 (Exclusive)
 ### Breaking: New External Signing Hashing Scheme
@@ -32,6 +152,7 @@ This updated algorithm is supported under a new `V2` hashing scheme version.
 Support for `V1` has been dropped and will not be supported in Canton 3.3 onward.
 This is relevant for applications that re-compute the hash client-side.
 Such applications must update their implementation in order to use the interactive submission service on Canton 3.3.
+
 
 ## Until 2025-04-04 (Exclusive)
 ### ACS Export and Import
