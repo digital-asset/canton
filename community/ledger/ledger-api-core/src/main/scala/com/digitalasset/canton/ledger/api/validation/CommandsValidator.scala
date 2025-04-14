@@ -16,7 +16,9 @@ import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionRequest,
   PrepareSubmissionRequest,
 }
+import com.daml.ledger.api.v2.reassignment_commands.{ReassignmentCommand, ReassignmentCommands}
 import com.digitalasset.canton.data.{DeduplicationPeriod, Offset}
+import com.digitalasset.canton.ledger.api.messages.command.submission
 import com.digitalasset.canton.ledger.api.util.{DurationConversion, TimestampConversion}
 import com.digitalasset.canton.ledger.api.validation.CommandsValidator.{
   Submitters,
@@ -24,8 +26,9 @@ import com.digitalasset.canton.ledger.api.validation.CommandsValidator.{
 }
 import com.digitalasset.canton.ledger.api.{CommandId, Commands}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
-import com.digitalasset.canton.logging.ContextualizedErrorLogger
+import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.util.OptionUtil
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.daml.lf.command.*
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.value.Value as Lf
@@ -38,6 +41,7 @@ import scalaz.syntax.tag.*
 import java.time.{Duration, Instant}
 import scala.Ordering.Implicits.infixOrderingOps
 import scala.collection.immutable
+import scala.util.Try
 
 final class CommandsValidator(
     validateDisclosedContracts: ValidateDisclosedContracts,
@@ -55,7 +59,7 @@ final class CommandsValidator(
       currentUtcTime: Instant,
       maxDeduplicationDuration: Duration,
   )(implicit
-      contextualizedErrorLogger: ContextualizedErrorLogger
+      errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, Commands] =
     for {
       userId <- requireUserId(prepareRequest.userId, "user_id")
@@ -121,7 +125,7 @@ final class CommandsValidator(
       currentUtcTime: Instant,
       maxDeduplicationDuration: Duration,
   )(implicit
-      contextualizedErrorLogger: ContextualizedErrorLogger
+      errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, Commands] =
     for {
       workflowId <- validateWorkflowId(commands.workflowId)
@@ -182,12 +186,70 @@ final class CommandsValidator(
       prefetchKeys = prefetchKeys,
     )
 
+  def validateReassignmentCommands(
+      reassignmentCommands: ReassignmentCommands
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Either[StatusRuntimeException, submission.SubmitReassignmentRequest] =
+    for {
+      submitter <- requirePartyField(reassignmentCommands.submitter, "submitter")
+      userId <- requireUserId(reassignmentCommands.userId, "user_id")
+      commandId <- requireCommandId(reassignmentCommands.commandId, "command_id")
+      submissionId <- requireSubmissionId(reassignmentCommands.submissionId, "submission_id")
+      workflowId <- validateOptional(Some(reassignmentCommands.workflowId).filter(_.nonEmpty))(
+        requireWorkflowId(_, "workflow_id")
+      )
+      reassignmentCommands <- reassignmentCommands.commands.traverse {
+        _.command match {
+          case ReassignmentCommand.Command.Empty =>
+            Left(ValidationErrors.missingField("command"))
+          case assignCommand: ReassignmentCommand.Command.AssignCommand =>
+            for {
+              sourceSynchronizerId <- requireSynchronizerId(assignCommand.value.source, "source")
+              targetSynchronizerId <- requireSynchronizerId(assignCommand.value.target, "target")
+              longUnassignId <- Try(assignCommand.value.unassignId.toLong).toEither.left.map(_ =>
+                ValidationErrors.invalidField("unassign_id", "Invalid unassign ID")
+              )
+              timestampUnassignId <- Time.Timestamp
+                .fromLong(longUnassignId)
+                .left
+                .map(_ => ValidationErrors.invalidField("unassign_id", "Invalid unassign ID"))
+            } yield Left(
+              submission.AssignCommand(
+                sourceSynchronizerId = Source(sourceSynchronizerId),
+                targetSynchronizerId = Target(targetSynchronizerId),
+                unassignId = timestampUnassignId,
+              )
+            )
+          case unassignCommand: ReassignmentCommand.Command.UnassignCommand =>
+            for {
+              sourceSynchronizerId <- requireSynchronizerId(unassignCommand.value.source, "source")
+              targetSynchronizerId <- requireSynchronizerId(unassignCommand.value.target, "target")
+              cid <- requireContractId(unassignCommand.value.contractId, "contract_id")
+            } yield Right(
+              submission.UnassignCommand(
+                sourceSynchronizerId = Source(sourceSynchronizerId),
+                targetSynchronizerId = Target(targetSynchronizerId),
+                contractId = cid,
+              )
+            )
+        }
+      }
+    } yield submission.SubmitReassignmentRequest(
+      submitter = submitter,
+      userId = userId,
+      commandId = commandId,
+      submissionId = submissionId,
+      workflowId = workflowId,
+      reassignmentCommands = reassignmentCommands,
+    )
+
   def validateLedgerTime(
       currentTime: Instant,
       minLedgerTimeAbs: Option[Timestamp],
       minLedgerTimeRel: Option[DurationP],
   )(implicit
-      contextualizedErrorLogger: ContextualizedErrorLogger
+      errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, Instant] =
     (minLedgerTimeAbs, minLedgerTimeRel) match {
       case (None, None) => Right(currentTime)
@@ -206,7 +268,7 @@ final class CommandsValidator(
   def validateInnerCommands(
       commands: Seq[Command]
   )(implicit
-      contextualizedErrorLogger: ContextualizedErrorLogger
+      errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, immutable.Seq[ApiCommand]] =
     commands.traverse(command => validateInnerCommand(command.command))
 
@@ -214,7 +276,7 @@ final class CommandsValidator(
   def validateInnerCommand(
       command: Command.Command
   )(implicit
-      contextualizedErrorLogger: ContextualizedErrorLogger
+      errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, ApiCommand] =
     command match {
       case c: ProtoCreate =>
@@ -283,7 +345,7 @@ final class CommandsValidator(
   private def validateSubmitters(
       submitters: Submitters[String]
   )(implicit
-      contextualizedErrorLogger: ContextualizedErrorLogger
+      errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, Submitters[Ref.Party]] = {
     def actAsMustNotBeEmpty(effectiveActAs: Set[Ref.Party]) =
       Either.cond(
@@ -306,7 +368,7 @@ final class CommandsValidator(
       deduplicationPeriod: ExecuteSubmissionRequest.DeduplicationPeriod,
       maxDeduplicationDuration: Duration,
   )(implicit
-      contextualizedErrorLogger: ContextualizedErrorLogger
+      errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, DeduplicationPeriod] =
     validateDeduplicationPeriod(
       deduplicationPeriod.transformInto[ProtoCommands.DeduplicationPeriod],
@@ -320,7 +382,7 @@ final class CommandsValidator(
       deduplicationPeriod: ProtoCommands.DeduplicationPeriod,
       maxDeduplicationDuration: Duration,
   )(implicit
-      contextualizedErrorLogger: ContextualizedErrorLogger
+      errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, DeduplicationPeriod] =
     deduplicationPeriod match {
       case ProtoCommands.DeduplicationPeriod.Empty =>
@@ -353,14 +415,14 @@ final class CommandsValidator(
   private def validatePrefetchContractKeys(
       keys: Seq[PrefetchContractKey]
   )(implicit
-      contextualizedErrorLogger: ContextualizedErrorLogger
+      errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, Seq[ApiContractKey]] =
     keys.traverse(validatePrefetchContractKey)
 
   private def validatePrefetchContractKey(
       key: PrefetchContractKey
   )(implicit
-      contextualizedErrorLogger: ContextualizedErrorLogger
+      errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, ApiContractKey] = {
     val PrefetchContractKey(templateIdO, contractKeyO) = key
     for {
