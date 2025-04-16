@@ -230,7 +230,6 @@ final class RepairService(
   ): EitherT[Future, String, Option[ContractToAdd]] =
     for {
       acsState <- readContractAcsState(domain.persistentState, repairContract.contract.contractId)
-      keyState <- EitherT.right(readContractKey(domain, hostedParties, repairContract.contract))
       // Able to recompute contract signatories and stakeholders (and sanity check
       // repairContract metadata otherwise ignored matches real metadata)
       contractWithMetadata <- damle
@@ -255,6 +254,7 @@ final class RepairService(
         repairContract.contract,
         contractWithMetadata,
       )
+      keyState <- EitherT.right(readContractKey(domain, hostedParties, computedContract))
       contractToAdd <- contractToAdd(
         domain,
         repairContract.copy(contract = computedContract),
