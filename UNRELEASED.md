@@ -3,7 +3,65 @@
 Canton CANTON_VERSION has been released on RELEASE_DATE. You can download the Daml Open Source edition from the Daml Connect [Github Release Section](https://github.com/digital-asset/daml/releases/tag/vCANTON_VERSION). The Enterprise edition is available on [Artifactory](https://digitalasset.jfrog.io/artifactory/canton-enterprise/canton-enterprise-CANTON_VERSION.zip).
 Please also consult the [full documentation of this release](https://docs.daml.com/CANTON_VERSION/canton/about.html).
 
+INFO: Note that the **"## Until YYYY-MM-DD (Exclusive)" headers**
+below should all be Wednesdays to align with the weekly release
+schedule, i.e. if you add an entry effective at or after the first
+header, prepend the new date header that corresponds to the
+Wednesday after your change.
+
 ## Until 2025-04-16 (Exclusive)
+### Offline Root Namespace Initialization Scripts
+Scripts to initialize a participant node's identity using an offline root namespace key have been added to the release artifact
+under `scripts/offline-root-key`. An example usage with locally generated keys is available at `examples/10-offline-root-namespace-init`.
+
+### BREAKING CHANGE: Macro renamed
+The `init_id` repair macro has been renamed to `init_id_from_uid`.
+`init_id` still exists but takes the identifier as a string and namespace optionally instead.
+
+### Removed identifier delegation topology request and `IdentityDelegation` usage
+The `IdentifierDelegation` topology request type and its associated signing key usage, `IdentityDelegation`, have
+been removed. This usage was previously reserved for delegating identity-related capabilities but is no
+longer supported. Any existing keys using the `IdentityDelegation` usage will have it ignored during
+deserialization.
+
+### New ACS export endpoint that takes a topology transaction effective time
+The new endpoint (located in `party_management_service.proto`):
+```
+rpc ExportAcsAtTimestamp(ExportAcsAtTimestampRequest) returns (stream ExportAcsAtTimestampResponse)
+```
+exports the ACS for a topology transaction effective time.
+
+At the server side, such timestamp needs to be converted to a ledger offset (internally). This may fail when:
+1) The topology transaction has become effective and is visible in the topology store, but it is not yet visible
+   in the ledger API store. This endpoint returns a retryable gRPC error code to cope with this possibility.
+2) For the given synchronizer (ID) and/or the given topology transaction effective time, no such ledger offset exists.
+   This may happen when an arbitrary timestamp is passed into this endpoint, or when the effective time originates from
+   a topology transaction other than a PartyToParticipant mapping. (Note that the ledger API does not support all
+   topology transactions).
+
+The timestamp parameter for the topology transaction request parameter is expected to originate from a
+PartyToParticipant mapping. For example, use the gRPC topology endpoint (`topology_manager_read_service.proto`):
+```
+rpc ListPartyToParticipant(ListPartyToParticipantRequest) returns (ListPartyToParticipantResponse)
+```
+where the `ListPartyToParticipantResponse`'s `BaseResult` message field `validFrom` contains the topology transaction
+effective time which can be used for this ACS export endpoint.
+
+This endpoint exports the ACS as LAPI active contracts while each contract gets wrapped in an `ActiveContract` message
+(as defined in the `active_contract.proto`).
+
+The ACS import endpoint (located in `participant_repair_service.proto`):
+```
+rpc ImportAcs(stream ImportAcsRequest) returns (ImportAcsResponse);
+```
+imports an ACS snapshot which has been exported with this endpoint.
+
+In the Canton console, the new command `export_acs_at_timestamp` invokes this new ACS export endpoint.
+
+### Topology-aware package selection enabled
+Topology-aware package selection in command submission is enabled by default.
+To disable, toggle `participant.ledger-api.topology-aware-package-selection.enabled = false`
+
 ### `InvalidGivenCurrentSystemStateSeekAfterEnd` error category
 The description of existing error category `InvalidGivenCurrentSystemStateSeekAfterEnd` has been generalized.
 As such this error category now describes a failure due to requesting a resource using a parameter value that
@@ -92,10 +150,13 @@ the ``unique_identifier`` as its components, ``identifier`` and ``namespace``.
   the event format that defines how the Reassignment will be presented.
 - The java bindings and the json api were extended accordingly.
 
-### NamespaceDelegation can be restricted to a specific set of topology mappings
-- Added field `NamespaceDelegation.restricted_to_mappings` to restrict the target key of a namespace delegation to only be allowed
-  to sign a set of topology mappings. See the documentation for the field in topology.proto.
-  **BREAKING CHANGE**
+### BREAKING CHANGE: NamespaceDelegation can be restricted to a specific set of topology mappings
+- `NamespaceDelegation.is_root_delegation` is deprecated and replaced with the `oneof` `NamespaceDelegation.restriction`. See the 
+  protobuf documentation for more details. Existing `NamespaceDelegation` protobuf values can still be read and the hash of
+  existing topology transactions is also preserved. New `NamespaceDelegation`s will only make use of the `restriction` `oneof`. 
+  transaction is also preserved.
+  - The equivalent of `is_root_delegation=true` is `restriction=CanSignAllMappings`.
+  - The equivalent of `is_root_delegation=false` is `restriction=CanSignAllButNamespaceDelegations`
 - The console command `topology.namespace_delegation.propose_delegation` was changed. The parameter `isRootDelegation: Boolean` is replaced with the parameter
   `delegationRestriction: DelegationRestriction`, which can be one of the following values:
     - `CanSignAllMappings`: This is equivalent to the previously known "root delegation", meaning that the target key of the delegation can be used
@@ -103,6 +164,9 @@ the ``unique_identifier`` as its components, ``identifier`` and ``namespace``.
     - `CanSignAllButNamespaceDelegations`: This is equivalent to the previously known "non-root delegation", meaning that the target key of the delegation
       can be used to sign all topology mappings other than namespace delegations.
     - `CanSignSpecificMappings(TopologyMapping.Code*)`: The target key of the delegation can only be used to sign the specified mappings.
+
+### BREAKING CHANGE: Removed IdentifierDelegations
+- All console commands and data types on the admin API related to identifier delegations have been removed.
 
 ## Until 2025-04-08 (Exclusive)
 - Json API: openapi.yaml generated using 3.0.3 version of specification.
