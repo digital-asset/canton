@@ -318,6 +318,20 @@ object BuildCommon {
       val damlVersion: String = Dependencies.daml_libraries_version
       damlCommitFile.writeText(damlVersion.split('.').last.tail)(Seq(StandardOpenOption.CREATE))
 
+      // Create a lighter buf image for offline root key scripts
+      val requiredTypes = List(
+        "com.digitalasset.canton.protocol.v30.TopologyTransaction",
+        "com.digitalasset.canton.version.v1.UntypedVersionedMessage",
+        "com.digitalasset.canton.protocol.v30.SignedTopologyTransaction",
+        "com.digitalasset.canton.crypto.v30.SigningPublicKey",
+      )
+      val imagePath =
+        "community" / "app" / "src" / "pack" / "scripts" / "offline-root-key" / "root_namespace_buf_image.bin"
+      runCommand(
+        s"buf build ${requiredTypes.mkString("--type=", " --type=", "")} -o ${imagePath.pathAsString}",
+        log,
+      )
+
       val releaseNotes: Seq[(File, String)] = {
         val sourceFile: File =
           file(s"release-notes/${version.value}.md")
@@ -691,22 +705,22 @@ object BuildCommon {
         Test / damlCodeGeneration := Seq(
           (
             (Test / sourceDirectory).value / "daml" / "CantonTest",
-            (Test / damlDarOutput).value / "CantonTests-3.3.0.dar",
+            (Test / damlDarOutput).value / "CantonTests-3.4.0.dar",
             "com.digitalasset.canton.damltests",
           ),
           (
             (Test / sourceDirectory).value / "daml" / "CantonTestDev",
-            (Test / damlDarOutput).value / "CantonTestsDev-3.3.0.dar",
+            (Test / damlDarOutput).value / "CantonTestsDev-3.4.0.dar",
             "com.digitalasset.canton.damltestsdev",
           ),
           (
             (Test / sourceDirectory).value / "daml" / "CantonLfDev",
-            (Test / damlDarOutput).value / "CantonLfDev-3.3.0.dar",
+            (Test / damlDarOutput).value / "CantonLfDev-3.4.0.dar",
             "com.digitalasset.canton.lfdev",
           ),
           (
             (Test / sourceDirectory).value / "daml" / "CantonLfV21",
-            (Test / damlDarOutput).value / "CantonLfV21-3.3.0.dar",
+            (Test / damlDarOutput).value / "CantonLfV21-3.4.0.dar",
             "com.digitalasset.canton.lfv21",
           ),
         ),
@@ -1567,13 +1581,13 @@ object BuildCommon {
             daml_timer_utils,
             pekko_http,
             icu4j_version,
-            protostuff_parser,
             sttp_apiscpec_openapi_circe_yaml,
             sttp_apiscpec_asyncapi_circe_yaml,
             scalapb_json4s,
             daml_libs_scala_scalatest_utils % Test,
             pekko_stream_testkit % Test,
             circe_yaml % Test,
+            protostuff_parser % Test,
           ),
           coverageEnabled := false,
           Test / damlCodeGeneration := Seq(
