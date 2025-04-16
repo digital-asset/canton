@@ -1,0 +1,12 @@
+# Used by `buf build`
+version: v1
+directories:
+  # All module roots of the directories in which we have Protobuf files whose continuity we want to track
+  - community/admin-api/src/main/protobuf
+  - community/base/src/main/protobuf
+  - community/synchronizer/src/main/protobuf
+  - community/ledger-api/src/main/protobuf
+  - community/lib/ledger-api-value/target/protobuf_external
+  - community/ledger/ledger-api-core/src/main/protobuf
+  - community/lib/google-common-protos-scala/target/protobuf_external
+  - community/participant/src/main/protobuf

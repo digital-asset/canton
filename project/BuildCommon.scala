@@ -318,6 +318,20 @@ object BuildCommon {
       val damlVersion: String = Dependencies.daml_libraries_version
       damlCommitFile.writeText(damlVersion.split('.').last.tail)(Seq(StandardOpenOption.CREATE))
 
+      // Create a lighter buf image for offline root key scripts
+      val requiredTypes = List(
+        "com.digitalasset.canton.protocol.v30.TopologyTransaction",
+        "com.digitalasset.canton.version.v1.UntypedVersionedMessage",
+        "com.digitalasset.canton.protocol.v30.SignedTopologyTransaction",
+        "com.digitalasset.canton.crypto.v30.SigningPublicKey",
+      )
+      val imagePath =
+        "community" / "app" / "src" / "pack" / "scripts" / "offline-root-key" / "root_namespace_buf_image.bin"
+      runCommand(
+        s"buf build ${requiredTypes.mkString("--type=", " --type=", "")} -o ${imagePath.pathAsString}",
+        log,
+      )
+
       val releaseNotes: Seq[(File, String)] = {
         val sourceFile: File =
           file(s"release-notes/${version.value}.md")
@@ -796,7 +810,7 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
-          BuildInfoKey("stableProtocolVersions" -> List()),
+          BuildInfoKey("stableProtocolVersions" -> List("33")),
           BuildInfoKey("betaProtocolVersions" -> List()),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",
@@ -945,7 +959,7 @@ object BuildCommon {
         Compile / damlCodeGeneration := Seq(
           (
             (Compile / sourceDirectory).value / "daml" / "AdminWorkflows",
-            (Compile / damlDarOutput).value / "AdminWorkflows.dar",
+            (Compile / resourceDirectory).value / "dar" / "AdminWorkflows.dar",
             "com.digitalasset.canton.participant.admin.workflows",
           ),
           (
@@ -955,12 +969,9 @@ object BuildCommon {
           ),
         ),
         Compile / damlBuildOrder := Seq(
-          "daml/AdminWorkflows/daml.yaml",
-          "daml/PartyReplication/daml.yaml",
+          "daml/PartyReplication/daml.yaml"
         ),
-        // TODO(#16168) Before creating the first stable release with backwards compatibility guarantees,
-        //  make "AdminWorkflows.dar" stable again
-        damlFixedDars := Seq(),
+        damlFixedDars := Seq("AdminWorkflows.dar"),
         addProtobufFilesToHeaderCheck(Compile),
         addFilesToHeaderCheck("*.daml", "daml", Compile),
       )
@@ -1567,13 +1578,13 @@ object BuildCommon {
             daml_timer_utils,
             pekko_http,
             icu4j_version,
-            protostuff_parser,
             sttp_apiscpec_openapi_circe_yaml,
             sttp_apiscpec_asyncapi_circe_yaml,
             scalapb_json4s,
             daml_libs_scala_scalatest_utils % Test,
             pekko_stream_testkit % Test,
             circe_yaml % Test,
+            protostuff_parser % Test,
           ),
           coverageEnabled := false,
           Test / damlCodeGeneration := Seq(
