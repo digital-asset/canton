@@ -257,7 +257,7 @@ final case class Env(loggerFactory: NamedLoggerFactory)(implicit
         _ => None,
         CommonMockMetrics.sequencerClient,
         LoggingConfig(),
-        exitOnTimeout = false,
+        exitOnFatalErrors = false,
         loggerFactory,
         ProtocolVersionCompatibility.supportedProtocols(
           includeAlphaVersions = BaseTest.testedProtocolVersion.isAlpha,

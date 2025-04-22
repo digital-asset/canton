@@ -9,6 +9,10 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## Until 2025-04-23 (Exclusive)
+### Mediator crashes upon a SequencerClient DecreasingSequencerCounter race condition.
+The internal `DecreasingSequencerCounter` race condition can happen following a mediator-side sequencer connection `TransportChange`.
+
 ## Until 2025-04-16 (Exclusive)
 ### Offline Root Namespace Initialization Scripts
 Scripts to initialize a participant node's identity using an offline root namespace key have been added to the release artifact
