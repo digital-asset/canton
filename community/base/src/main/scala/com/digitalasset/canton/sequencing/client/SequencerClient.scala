@@ -22,6 +22,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi, SyncCryptoClient}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.error.FatalError
 import com.digitalasset.canton.health.{
   CloseableHealthComponent,
   ComponentHealthState,
@@ -32,7 +33,12 @@ import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.LifeCycle.toCloseableOption
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.logging.pretty.{CantonPrettyPrinter, Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  NamedLoggerFactory,
+  NamedLogging,
+  TracedLogger,
+}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.protocol.DynamicSynchronizerParametersLookup
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
@@ -48,6 +54,7 @@ import com.digitalasset.canton.sequencing.SequencerAggregatorPekko.{
 import com.digitalasset.canton.sequencing.client.PeriodicAcknowledgements.FetchCleanTimestamp
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.SendAsyncClientResponseError
 import com.digitalasset.canton.sequencing.client.SendCallback.CallbackFuture
+import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.DecreasingSequencerCounter
 import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.*
 import com.digitalasset.canton.sequencing.client.transports.{
@@ -799,7 +806,7 @@ class RichSequencerClientImpl(
     syncCryptoClient: SyncCryptoClient[SyncCryptoApi],
     loggingConfig: LoggingConfig,
     override val trafficStateController: Option[TrafficStateController],
-    exitOnTimeout: Boolean,
+    exitOnFatalErrors: Boolean,
     loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
 )(implicit executionContext: ExecutionContext, tracer: Tracer)
@@ -821,7 +828,7 @@ class RichSequencerClientImpl(
       replayEnabled,
       syncCryptoClient,
       loggingConfig,
-      exitOnTimeout,
+      exitOnFatalErrors,
       loggerFactory,
       futureSupervisor,
     )
@@ -1042,6 +1049,25 @@ class RichSequencerClientImpl(
       loggerFactoryWithSequencerAlias,
     )
 
+    // Match the narrow case of a mediator-side TransportChange causing a sequencer-counter race condition
+    // in the sequencer client and crash the mediator in such cases (#24967).
+    def maybeExitOnFatalError(
+        error: SubscriptionCloseReason[SequencerClientSubscriptionError]
+    ): Unit =
+      (error, member) match {
+        case (
+              SubscriptionCloseReason.HandlerError(
+                EventValidationError(DecreasingSequencerCounter(newSc, oldSc))
+              ),
+              MediatorId(_),
+            ) if exitOnFatalErrors =>
+          exitOnFatalError(
+            s"Decreasing sequencer counter detected from $oldSc to $newSc. Has there been a TransportChange?",
+            logger,
+          )
+        case _ => ()
+      }
+
     val subscription = ResilientSequencerSubscription[SequencerClientSubscriptionError](
       sequencerId,
       protocolVersion,
@@ -1049,6 +1075,7 @@ class RichSequencerClientImpl(
       sequencersTransportState.transport(sequencerId),
       subscriptionHandler.handleEvent,
       startingTimestamp,
+      maybeExitOnFatalError,
       config.initialConnectionRetryDelay.underlying,
       config.warnDisconnectDelay.underlying,
       config.maxConnectionRetryDelay.underlying,
@@ -1070,6 +1097,11 @@ class RichSequencerClientImpl(
 
     subscription
   }
+
+  // overridable for testing to avoid exiting the jvm in tests
+  protected def exitOnFatalError(message: String, logger: TracedLogger)(implicit
+      traceContext: TraceContext
+  ): Unit = FatalError.exitOnFatalError(message, logger)
 
   private class SubscriptionHandler(
       applicationHandler: OrdinaryApplicationHandler[ClosedEnvelope],
