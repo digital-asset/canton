@@ -542,7 +542,7 @@ object BuildCommon {
     lazy val allProjects = Set(
       `daml-grpc-utils`,
       `util-external`,
-      `util-logging`,
+      `util-observability`,
       `community-admin-api`,
       `community-app`,
       `community-app-base`,
@@ -621,8 +621,8 @@ object BuildCommon {
         ),
       )
 
-    lazy val `util-logging` = project
-      .in(file("community/util-logging"))
+    lazy val `util-observability` = project
+      .in(file("community/util-observability"))
       .dependsOn(
         `base-errors` % "compile->compile;test->test",
         `daml-grpc-utils`,
@@ -762,7 +762,7 @@ object BuildCommon {
         DamlProjects.`daml-jwt`,
         DamlProjects.`ledger-api`, // trace-context
         `daml-tls`,
-        `util-logging`,
+        `util-observability`,
         `community-admin-api`,
         `magnolify-addon` % "compile->compile",
         // No strictly internal dependencies on purpose so that this can be a foundational module and avoid circular dependencies
@@ -1140,7 +1140,7 @@ object BuildCommon {
       .in(file("community/sequencer-driver"))
       .dependsOn(
         `util-external`,
-        `util-logging`,
+        `util-observability`,
       )
       .settings(
         sharedCantonCommunitySettings,
@@ -1389,7 +1389,7 @@ object BuildCommon {
       .dependsOn(
         DamlProjects.`ledger-api`,
         DamlProjects.`bindings-java` % "test->test",
-        `util-logging` % "compile->compile;test->test",
+        `util-observability` % "compile->compile;test->test",
         `ledger-common-dars-lf-v2-1` % "test",
         `util-external`,
       )

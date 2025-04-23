@@ -19,7 +19,7 @@ lazy val `pekko-fork` = CommunityProjects.`pekko-fork`
 lazy val `magnolify-addon` = CommunityProjects.`magnolify-addon`
 lazy val `scalatest-addon` = CommunityProjects.`scalatest-addon`
 lazy val `util-external` = CommunityProjects.`util-external`
-lazy val `util-logging` = CommunityProjects.`util-logging`
+lazy val `util-observability` = CommunityProjects.`util-observability`
 lazy val `sequencer-driver-api` = CommunityProjects.`sequencer-driver-api`
 lazy val `sequencer-driver-api-conformance-tests` =
   CommunityProjects.`sequencer-driver-api-conformance-tests`
