@@ -234,17 +234,13 @@ create table par_reassignments (
     source_synchronizer_idx integer not null,
 
     -- reassignment data
-    contract binary large object not null,
+    contracts binary large object array not null,
 
     -- UTC timestamp in microseconds relative to EPOCH
     unassignment_timestamp bigint not null,
     unassignment_request binary large object,
     unassignment_global_offset bigint,
     assignment_global_offset bigint,
-
-    -- UTC timestamp in microseconds relative to EPOCH
-    unassignment_decision_time bigint not null,
-    unassignment_result binary large object,
 
     -- defined if reassignment was completed
     -- UTC timestamp in microseconds relative to EPOCH
@@ -760,9 +756,6 @@ create table seq_traffic_control_consumed_journal (
     -- traffic entries have a unique sequencing_timestamp per member
        primary key (member, sequencing_timestamp)
 );
-
--- This index helps joining traffic receipts without a member reference
-create index on seq_traffic_control_consumed_journal(sequencing_timestamp);
 
 --   BFT Ordering Tables
 

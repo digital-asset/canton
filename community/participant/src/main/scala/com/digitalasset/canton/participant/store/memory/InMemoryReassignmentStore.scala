@@ -23,7 +23,6 @@ import com.digitalasset.canton.participant.protocol.reassignment.{
   UnassignmentData,
 }
 import com.digitalasset.canton.participant.store.ReassignmentStore
-import com.digitalasset.canton.protocol.messages.DeliveredUnassignmentResult
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -49,35 +48,50 @@ class InMemoryReassignmentStore(
     new TrieMap[ReassignmentId, ReassignmentEntry]
 
   override def addUnassignmentData(
-      reassignmentData: UnassignmentData
+      unassignmentData: UnassignmentData
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] = {
     ErrorUtil.requireArgument(
-      reassignmentData.targetSynchronizer == synchronizer,
-      s"Synchronizer $synchronizer: Reassignment store cannot store reassignment for synchronizer ${reassignmentData.targetSynchronizer}",
+      unassignmentData.targetSynchronizer == synchronizer,
+      s"Synchronizer $synchronizer: Reassignment store cannot store reassignment for synchronizer ${unassignmentData.targetSynchronizer}",
     )
 
-    logger.debug(s"Add reassignment request in the store: ${reassignmentData.reassignmentId}")
+    logger.debug(s"Add reassignment request in the store: ${unassignmentData.reassignmentId}")
 
-    val reassignmentId = reassignmentData.reassignmentId
-    val newEntry = ReassignmentEntry(reassignmentData, None, None)
+    val reassignmentId = unassignmentData.reassignmentId
+    val newEntry = ReassignmentEntry(unassignmentData, None, None)
 
-    val result: Either[ReassignmentDataAlreadyExists, Unit] = MapsUtil
+    val result: Either[ReassignmentStoreError, Unit] = MapsUtil
       .updateWithConcurrentlyM_[Checked[
-        ReassignmentDataAlreadyExists,
+        ReassignmentStoreError,
         ReassignmentAlreadyCompleted,
         *,
       ], ReassignmentId, ReassignmentEntry](
         reassignmentEntryMap,
         reassignmentId,
         Checked.result(newEntry),
-        _.mergeWith(reassignmentData),
+        merge(_, unassignmentData),
       )
       .toEither
 
     EitherT(FutureUnlessShutdown.pure(result))
   }
+
+  private def merge(
+      reassignmentEntry: ReassignmentEntry,
+      otherUnassignmentData: UnassignmentData,
+  ): Checked[ReassignmentStoreError, ReassignmentAlreadyCompleted, ReassignmentEntry] =
+    for {
+      reassignmentData <- reassignmentEntry.unassignmentDataO match {
+        case None => Checked.result(otherUnassignmentData)
+        case Some(oldUnassignmentData) => Checked.result(oldUnassignmentData)
+      }
+    } yield ReassignmentEntry(
+      reassignmentData,
+      reassignmentEntry.reassignmentGlobalOffset,
+      reassignmentEntry.assignmentTs,
+    )
 
   private def editReassignmentEntry(
       reassignmentId: ReassignmentId,
@@ -96,15 +110,6 @@ class InMemoryReassignmentStore(
         )
 
     EitherT(FutureUnlessShutdown.pure(res))
-  }
-
-  override def addUnassignmentResult(
-      unassignmentResult: DeliveredUnassignmentResult
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] = {
-    val reassignmentId = unassignmentResult.reassignmentId
-    editReassignmentEntry(reassignmentId, _.addUnassignmentResult(unassignmentResult))
   }
 
   override def addReassignmentsOffsets(
@@ -145,7 +150,7 @@ class InMemoryReassignmentStore(
       reassignmentEntry: ReassignmentEntry,
       reassignmentId: ReassignmentId,
       ts: CantonTimestamp,
-  ): Checked[ReassignmentDataAlreadyExists, ReassignmentAlreadyCompleted, ReassignmentEntry] =
+  ): Checked[ReassignmentStoreError, ReassignmentAlreadyCompleted, ReassignmentEntry] =
     reassignmentEntry.assignmentTs match {
       case Some(thisTs) if thisTs != ts =>
         Checked.continueWithResult(
@@ -236,17 +241,15 @@ class InMemoryReassignmentStore(
   ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] = {
     val newEntry = ReassignmentEntry(
       assignmentData.reassignmentId,
-      assignmentData.contract,
-      None,
-      CantonTimestamp.Epoch,
+      assignmentData.contracts.contracts.map(_.contract),
       None,
       None,
       None,
     )
 
-    val result: Either[ReassignmentDataAlreadyExists, Unit] = MapsUtil
+    val result: Either[ReassignmentStoreError, Unit] = MapsUtil
       .updateWithConcurrentlyM_[Checked[
-        ReassignmentDataAlreadyExists,
+        ReassignmentStoreError,
         ReassignmentAlreadyCompleted,
         *,
       ], ReassignmentId, ReassignmentEntry](
@@ -309,8 +312,10 @@ class InMemoryReassignmentStore(
 
     def filter(entry: ReassignmentEntry): Boolean =
       sourceSynchronizer.forall(_ == entry.sourceSynchronizer) &&
-        incompleteReassignment(entry) &&
-        stakeholders.forall(_.exists(entry.contract.metadata.stakeholders))
+        incompleteReassignment(entry) && {
+          val entryStakeholders = entry.contracts.forgetNE.flatMap(_.metadata.stakeholders)
+          stakeholders.forall(_.exists(entryStakeholders.contains(_)))
+        }
 
     val values = reassignmentEntryMap.values
       .to(LazyList)
@@ -387,7 +392,7 @@ class InMemoryReassignmentStore(
         reassignmentEntryMap
           .filter { case (_reassignmentId, entry) =>
             entry.unassignmentRequest
-              .map(_.contract.contractId)
+              .map(_.contracts.contractIds)
               .exists(contractIds.contains) &&
             sourceSynchronizer.forall(source =>
               entry.unassignmentDataO.exists(_.sourceSynchronizer == source)
@@ -397,11 +402,12 @@ class InMemoryReassignmentStore(
             ) &&
             completionTs.forall(ts => entry.assignmentTs.forall(ts == _))
           }
-          .collect { case (reassignmentId, ReassignmentEntry(_, _, Some(request), _, _, _, _)) =>
-            (request.contract.contractId, reassignmentId)
+          .collect { case (reassignmentId, ReassignmentEntry(_, _, Some(request), _, _)) =>
+            request.contracts.contractIds.map(_ -> reassignmentId)
           }
+          .flatten
           .groupBy(_._1)
-          .map { case (cid, value) => (cid, value.values.toSeq) }
+          .map { case (cid, values) => (cid, values.map(_._2).toSeq) }
       )
     )
 

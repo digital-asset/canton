@@ -686,7 +686,7 @@ class ConnectedSynchronizer(
                   Target(synchronizerId),
                   Target(staticSynchronizerParameters),
                   reassignmentCoordination,
-                  data.contract.metadata.stakeholders,
+                  data.contracts.stakeholders.all,
                   data.unassignmentRequest.submitterMetadata,
                   participantId,
                   data.unassignmentRequest.targetTimeProof.timestamp,
@@ -813,9 +813,9 @@ class ConnectedSynchronizer(
         .onShutdown(Left(SubmissionDuringShutdown.Rejection()))
     }
 
-  override def submitUnassignment(
+  override def submitUnassignments(
       submitterMetadata: ReassignmentSubmitterMetadata,
-      contractId: LfContractId,
+      contractIds: Seq[LfContractId],
       targetSynchronizer: Target[SynchronizerId],
       targetProtocolVersion: Target[ProtocolVersion],
   )(implicit
@@ -831,7 +831,7 @@ class ConnectedSynchronizer(
       SynchronizerNotReady(synchronizerId, "The synchronizer is shutting down."),
     ) {
       logger.debug(
-        s"Submitting unassignment of `$contractId` from `$synchronizerId` to `$targetSynchronizer`"
+        s"Submitting unassignment of `$contractIds` from `$synchronizerId` to `$targetSynchronizer`"
       )
 
       if (!ready)
@@ -841,7 +841,7 @@ class ConnectedSynchronizer(
           UnassignmentProcessingSteps
             .SubmissionParam(
               submitterMetadata,
-              contractId,
+              contractIds,
               targetSynchronizer,
               targetProtocolVersion,
             ),
@@ -850,7 +850,7 @@ class ConnectedSynchronizer(
         .onShutdown(Left(SynchronizerNotReady(synchronizerId, "The synchronizer is shutting down")))
     }
 
-  override def submitAssignment(
+  override def submitAssignments(
       submitterMetadata: ReassignmentSubmitterMetadata,
       reassignmentId: ReassignmentId,
   )(implicit

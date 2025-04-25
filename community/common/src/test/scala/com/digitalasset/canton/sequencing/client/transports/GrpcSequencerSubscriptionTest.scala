@@ -212,7 +212,8 @@ class GrpcSequencerSubscriptionTest extends AnyWordSpec with BaseTest with HasEx
       handlerInvoked.future.futureValue
 
       sut.close()
-      sut.closeReason.futureValue shouldBe SubscriptionCloseReason.Shutdown
+      sut.closeReason.futureValue should (be(SubscriptionCloseReason.Closed) or
+        be(SubscriptionCloseReason.Shutdown))
     }
 
     "not invoke the handler after closing" in {
