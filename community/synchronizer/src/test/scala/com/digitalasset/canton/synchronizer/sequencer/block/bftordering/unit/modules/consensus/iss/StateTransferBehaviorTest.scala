@@ -17,6 +17,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer.StateTransferBehavior.StateTransferType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.{
   CryptoProvider,
+  DelegationCryptoProvider,
   TopologyActivationTime,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.ModuleRef
@@ -45,6 +46,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.unit.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.unit.modules.consensus.iss.IssConsensusModuleTest.myId
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.version.ProtocolVersion
 import org.scalatest.wordspec.AsyncWordSpec
 
 import scala.collection.mutable
@@ -296,7 +298,7 @@ class StateTransferBehaviorTest
   }
 
   "receiving a new epoch topology message" should {
-    "store the new epoch" in {
+    "store the new epoch and update availability topology" in {
       val epochStoreMock = mock[EpochStore[ProgrammableUnitTestEnv]]
       when(
         epochStoreMock.latestEpoch(any[Boolean])(any[TraceContext])
@@ -305,10 +307,12 @@ class StateTransferBehaviorTest
         epochStoreMock.loadEpochProgress(eqTo(anEpochStoreEpoch.info))(any[TraceContext])
       ) thenReturn (() => EpochInProgress())
       val stateTransferManagerMock = mock[StateTransferManager[ProgrammableUnitTestEnv]]
+      val availabilityMock = mock[ModuleRef[Availability.Message[ProgrammableUnitTestEnv]]]
       val (context, stateTransferBehavior) =
         createStateTransferBehavior(
           epochStore = epochStoreMock,
           maybeStateTransferManager = Some(stateTransferManagerMock),
+          availabilityModuleRef = availabilityMock,
         )
       implicit val ctx: ContextType = context
 
@@ -334,6 +338,12 @@ class StateTransferBehaviorTest
       )
       verify(epochStoreMock, times(1)).completeEpoch(startEpochNumber)
       verify(epochStoreMock, times(1)).startEpoch(newEpoch)
+      verify(availabilityMock, times(1)).asyncSend(
+        Availability.Consensus.UpdateTopologyDuringStateTransfer[ProgrammableUnitTestEnv](
+          aMembership.orderingTopology,
+          DelegationCryptoProvider(aFakeCryptoProviderInstance, aFakeCryptoProviderInstance),
+        )
+      )
 
       succeed
     }
@@ -520,7 +530,7 @@ object StateTransferBehaviorTest {
     aMembership.leaders,
   )
 
-  private val aCommitCert =
+  private def aCommitCert(implicit synchronizerProtocolVersion: ProtocolVersion) =
     CommitCertificate(
       PrePrepare
         .create(

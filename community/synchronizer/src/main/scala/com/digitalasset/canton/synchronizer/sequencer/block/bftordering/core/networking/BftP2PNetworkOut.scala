@@ -276,7 +276,7 @@ final class BftP2PNetworkOut[E <: Env[E]](
     if (!availabilityStarted) {
       if (maxNodesContemporarilyAuthenticated >= endpointThresholdForAvailabilityStart - 1) {
         logger.debug(
-          s"Tthreshold $endpointThresholdForAvailabilityStart reached: starting availability"
+          s"Threshold $endpointThresholdForAvailabilityStart reached: starting availability"
         )
         dependencies.availability.asyncSend(Availability.Start)
         availabilityStarted = true
@@ -317,7 +317,7 @@ final class BftP2PNetworkOut[E <: Env[E]](
   private def messageToSend(
       message: BftOrderingMessageBody
   )(implicit traceContext: TraceContext): BftOrderingServiceReceiveRequest =
-    BftOrderingServiceReceiveRequest.of(
+    BftOrderingServiceReceiveRequest(
       traceContext.traceId.getOrElse(""),
       Some(message),
       thisNode,

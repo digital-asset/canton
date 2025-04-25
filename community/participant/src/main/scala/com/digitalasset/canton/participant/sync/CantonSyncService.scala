@@ -68,6 +68,8 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
 import com.digitalasset.canton.participant.sync.CantonSyncService.ConnectSynchronizer
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer.SubmissionReady
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
+  PartyAllocationCannotDetermineSynchronizer,
+  PartyAllocationNoSynchronizerError,
   SyncServiceBecamePassive,
   SyncServiceFailedSynchronizerConnection,
   SyncServicePurgeSynchronizerError,
@@ -110,8 +112,8 @@ import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
 
-import java.util.concurrent.CompletionStage
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.{CompletableFuture, CompletionStage}
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.Duration
 import scala.concurrent.{ExecutionContextExecutor, Future}
@@ -156,7 +158,6 @@ class CantonSyncService(
     resourceManagementService: ResourceManagementService,
     parameters: ParticipantNodeParameters,
     connectedSynchronizerFactory: ConnectedSynchronizer.Factory[ConnectedSynchronizer],
-    storage: Storage,
     metrics: ParticipantMetrics,
     sequencerInfoLoader: SequencerInfoLoader,
     val isActive: () => Boolean,
@@ -354,7 +355,6 @@ class CantonSyncService(
     ledgerApiIndexer.asEval(TraceContext.empty),
     aliasManager,
     parameters,
-    Storage.threadsAvailableForWriting(storage),
     new SynchronizerLookup {
       override def isConnected(synchronizerId: SynchronizerId): Boolean =
         connectedSynchronizersLookup.isConnected(synchronizerId)
@@ -392,7 +392,6 @@ class CantonSyncService(
       repairService,
       prepareSynchronizerConnectionForMigration,
       sequencerInfoLoader,
-      parameters.batchingConfig,
       parameters.processingTimeouts,
       loggerFactory,
     )
@@ -673,10 +672,35 @@ class CantonSyncService(
   override def allocateParty(
       hint: LfPartyId,
       rawSubmissionId: LedgerSubmissionId,
+      synchronizerIdO: Option[SynchronizerId],
   )(implicit
       traceContext: TraceContext
-  ): CompletionStage[SubmissionResult] =
-    partyAllocation.allocate(hint, rawSubmissionId)
+  ): CompletionStage[SubmissionResult] = {
+    lazy val onlyConnectedSynchronzier = connectedSynchronizersMap.toSeq match {
+      case Seq((synchronizerId, _)) => Right(synchronizerId)
+      case Seq() =>
+        Left(
+          SubmissionResult.SynchronousError(
+            PartyAllocationNoSynchronizerError.Error(rawSubmissionId).asGrpcStatus
+          )
+        )
+      case otherwise =>
+        Left(
+          SubmissionResult.SynchronousError(
+            PartyAllocationCannotDetermineSynchronizer
+              .Error(hint)
+              .asGrpcStatus
+          )
+        )
+    }
+    val synchronizerIdOrDetectionError =
+      synchronizerIdO.map(Right(_)).getOrElse(onlyConnectedSynchronzier)
+
+    synchronizerIdOrDetectionError
+      .map(partyAllocation.allocate(hint, rawSubmissionId, _))
+      .leftMap(CompletableFuture.completedFuture[SubmissionResult])
+      .merge
+  }
 
   override def uploadDar(dars: Seq[ByteString], submissionId: Ref.SubmissionId)(implicit
       traceContext: TraceContext
@@ -1796,36 +1820,34 @@ class CantonSyncService(
             )
         }
 
-      reassignmentCommands match {
-        case Seq(unassign: ReassignmentCommand.Unassign) =>
-          for {
-            targetProtocolVersion <- getProtocolVersion(unassign.targetSynchronizer.unwrap).map(
-              Target(_)
-            )
-            submissionResult <- doReassignment(
-              synchronizerId = unassign.sourceSynchronizer.unwrap
-            )(
-              _.submitUnassignment(
-                submitterMetadata = ReassignmentSubmitterMetadata(
-                  submitter = submitter,
-                  userId = userId,
-                  submittingParticipant = participantId,
-                  commandId = commandId,
-                  submissionId = submissionId,
-                  workflowId = workflowId,
-                ),
-                contractId = unassign.contractId,
-                targetSynchronizer = unassign.targetSynchronizer,
-                targetProtocolVersion = targetProtocolVersion,
+      ReassignmentCommandsBatch.create(reassignmentCommands) match {
+        case Right(unassigns: ReassignmentCommandsBatch.Unassignments) =>
+          getProtocolVersion(unassigns.target.unwrap)
+            .map(Target(_))
+            .flatMap { targetProtocolVersion =>
+              doReassignment(
+                synchronizerId = unassigns.source.unwrap
+              )(
+                _.submitUnassignments(
+                  submitterMetadata = ReassignmentSubmitterMetadata(
+                    submitter = submitter,
+                    userId = userId,
+                    submittingParticipant = participantId,
+                    commandId = commandId,
+                    submissionId = submissionId,
+                    workflowId = workflowId,
+                  ),
+                  contractIds = unassigns.contractIds,
+                  targetSynchronizer = unassigns.target,
+                  targetProtocolVersion = targetProtocolVersion,
+                )
               )
-            )
-          } yield submissionResult
-
-        case Seq(assign: ReassignmentCommand.Assign) =>
+            }
+        case Right(assigns: ReassignmentCommandsBatch.Assignments) =>
           doReassignment(
-            synchronizerId = assign.targetSynchronizer.unwrap
+            synchronizerId = assigns.target.unwrap
           )(
-            _.submitAssignment(
+            _.submitAssignments(
               submitterMetadata = ReassignmentSubmitterMetadata(
                 submitter = submitter,
                 userId = userId,
@@ -1834,16 +1856,13 @@ class CantonSyncService(
                 submissionId = submissionId,
                 workflowId = workflowId,
               ),
-              reassignmentId = ReassignmentId(assign.sourceSynchronizer, assign.unassignId),
+              reassignmentId = assigns.reassignmentId,
             )
           )
-        case _ =>
-          // TODO(i14020): Handle a valid batch to be specified
+        case Left(invalidBatch) =>
           Future.failed(
             RequestValidationErrors.InvalidArgument
-              .Reject(
-                s"Only a single assign or unassign is currently supported, but got: $reassignmentCommands"
-              )
+              .Reject(s"The batch of reassignment commands was invalid: $invalidBatch")
               .asGrpcError
           )
       }
@@ -2119,7 +2138,6 @@ object CantonSyncService {
         resourceManagementService,
         cantonParameterConfig,
         ConnectedSynchronizer.DefaultFactory,
-        storage,
         metrics,
         sequencerInfoLoader,
         () => storage.isActive,
