@@ -3,10 +3,12 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer
 
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssConsensusModuleMetrics.emitNonCompliance
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.validation.IssConsensusSignatureVerifier
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.shortType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.CryptoProvider.AuthenticatedMessageType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
@@ -31,8 +33,10 @@ import com.digitalasset.canton.tracing.TraceContext
 import scala.util.{Failure, Success}
 
 final class StateTransferMessageValidator[E <: Env[E]](
-    override val loggerFactory: NamedLoggerFactory
-) extends NamedLogging {
+    metrics: BftOrderingMetrics,
+    override val loggerFactory: NamedLoggerFactory,
+)(implicit mc: MetricsContext)
+    extends NamedLogging {
 
   private val signatureVerifier = new IssConsensusSignatureVerifier[E]()
 
@@ -121,34 +125,52 @@ final class StateTransferMessageValidator[E <: Env[E]](
       context: E#ActorContextT[Consensus.Message[E]],
       traceContext: TraceContext,
   ): Unit =
-    if (activeMembership.orderingTopology.nodes.contains(unverifiedMessage.from)) {
-      context.pipeToSelf(
-        activeCryptoProvider
-          .verifySignedMessage(
-            unverifiedMessage,
-            AuthenticatedMessageType.BftSignedStateTransferMessage,
+    unverifiedMessage.message match {
+      case response: BlockTransferResponse =>
+        // Block transfer responses are signed for uniformity/simplicity. However, it is just a thin wrapper around
+        //  commit certificates, which themselves contain signed data that is then verified. As long as there's no other
+        //  data than commit certs included in the responses, the signature verification can be safely skipped.
+        //  As a result, any node can help with state transfer (as long as it provides valid commit certs), even when
+        //  its responses are signed with a new/rotated key.
+        context.self.asyncSend(
+          Consensus.StateTransferMessage.VerifiedStateTransferMessage(response)
+        )
+      case request: BlockTransferRequest =>
+        val from = unverifiedMessage.from
+        if (activeMembership.orderingTopology.nodes.contains(from)) {
+          context.pipeToSelf(
+            activeCryptoProvider
+              .verifySignedMessage(
+                unverifiedMessage,
+                AuthenticatedMessageType.BftSignedStateTransferMessage,
+              )
+          ) {
+            case Failure(exception) =>
+              logger.error(
+                s"Block transfer request $request from $from could not be verified, dropping",
+                exception,
+              )
+              None
+            case Success(Left(errors)) =>
+              logger.warn(
+                s"Block transfer request $request from $from failed verified, dropping: $errors"
+              )
+              emitNonCompliance(metrics)(
+                from,
+                epoch = None,
+                view = None,
+                block = None,
+                metrics.security.noncompliant.labels.violationType.values.StateTransferInvalidMessage,
+              )
+              None
+            case Success(Right(())) =>
+              Some(Consensus.StateTransferMessage.VerifiedStateTransferMessage(request))
+          }
+        } else {
+          logger.info(
+            s"Got block transfer request from $from which is not in active membership, dropping"
           )
-      ) {
-        case Failure(exception) =>
-          logger.error(
-            s"Message $unverifiedMessage from ${unverifiedMessage.from} could not be verified, dropping",
-            exception,
-          )
-          None
-        case Success(Left(errors)) =>
-          logger.warn(
-            s"Message $unverifiedMessage from ${unverifiedMessage.from} failed verified, dropping: $errors"
-          )
-          None
-        case Success(Right(())) =>
-          Some(
-            Consensus.StateTransferMessage.VerifiedStateTransferMessage(unverifiedMessage.message)
-          )
-      }
-    } else {
-      logger.info(
-        s"Got ${shortType(unverifiedMessage.message)} message from ${unverifiedMessage.from} which is not in active membership, dropping"
-      )
+        }
     }
 
   def verifyCommitCertificate(
@@ -164,13 +186,19 @@ final class StateTransferMessageValidator[E <: Env[E]](
           StateTransferMessage.BlockVerified(commitCertificate, from)
         )
       case Success(Left(errors)) =>
-        // TODO(#23313) emit metrics
+        val blockMetadata = commitCertificate.prePrepare.message.blockMetadata
         logger.warn(
           s"State transfer: commit certificate from '$from' failed signature verification, dropping: $errors"
         )
+        emitNonCompliance(metrics)(
+          from,
+          Some(blockMetadata.epochNumber),
+          view = None,
+          Some(blockMetadata.blockNumber),
+          metrics.security.noncompliant.labels.violationType.values.StateTransferInvalidMessage,
+        )
         None
       case Failure(exception) =>
-        // TODO(#23313) emit metrics
         logger.warn(
           s"State transfer: commit certificate from '$from' could not be verified, dropping",
           exception,

@@ -11,7 +11,7 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.Activeness
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.*
 import com.digitalasset.canton.participant.protocol.validation.AuthenticationValidator
 import com.digitalasset.canton.participant.protocol.{ContractAuthenticator, ProcessingSteps}
-import com.digitalasset.canton.protocol.{ReassignmentId, Stakeholders}
+import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
@@ -39,7 +39,6 @@ private[reassignment] class UnassignmentValidation(
 
     val reassignmentId: ReassignmentId =
       ReassignmentId(fullTree.sourceSynchronizer, parsedRequest.requestTimestamp)
-    val contract = fullTree.contract
 
     for {
 
@@ -69,16 +68,8 @@ private[reassignment] class UnassignmentValidation(
       }
 
     } yield UnassignmentValidationResult(
-      rootHash = fullTree.rootHash,
-      contractId = fullTree.contractId,
-      reassignmentCounter = fullTree.reassignmentCounter,
-      templateId = contract.rawContractInstance.contractInstance.unversioned.template,
-      packageName = contract.rawContractInstance.contractInstance.unversioned.packageName,
-      submitterMetadata = fullTree.submitterMetadata,
+      fullTree = fullTree,
       reassignmentId = reassignmentId,
-      targetSynchronizer = fullTree.targetSynchronizer,
-      stakeholders = fullTree.stakeholders.all,
-      targetTimeProof = fullTree.targetTimeProof,
       hostedStakeholders = hostedStakeholders,
       assignmentExclusivity = assignmentExclusivity,
       validationResult = validationResult,
@@ -103,14 +94,13 @@ private[reassignment] class UnassignmentValidation(
       authenticationErrorO <- AuthenticationValidator.verifyViewSignature(parsedRequest)
 
       // Now that the contract and metadata are validated, this is safe to use
-      expectedStakeholders = Stakeholders(fullTree.contract.metadata)
-      expectedTemplateId =
-        fullTree.contract.rawContractInstance.contractInstance.unversioned.template
+      expectedStakeholders = fullTree.contracts.stakeholders
+      packageIds = fullTree.contracts.packageIds
 
       submitterCheckResult <-
         ReassignmentValidation
           .checkSubmitter(
-            ReassignmentRef(fullTree.contractId),
+            ReassignmentRef(fullTree.contracts.contractIds.toSet),
             topologySnapshot = sourceTopology,
             submitter = fullTree.submitter,
             participantId = fullTree.submitterMetadata.submittingParticipant,
@@ -125,7 +115,7 @@ private[reassignment] class UnassignmentValidation(
             sourceTopology,
             targetTopology,
           )(fullTree, recipients)
-            .check(expectedStakeholders, expectedTemplateId)
+            .check(expectedStakeholders, packageIds)
             .value
             .map(_.swap.toSeq)
         case None =>

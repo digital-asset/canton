@@ -78,7 +78,7 @@ object Dependencies {
   lazy val scalatest_version = "3.2.19"
   lazy val scalaz_version = "7.2.33"
   lazy val scopt_version = "4.1.0"
-  lazy val shapeless_version = "2.3.6"
+  lazy val shapeless_version = "2.3.7"
   lazy val slf4j_version = "2.0.6"
   // if you update the slick version, please also update our forked code in community/lib/slick and community/base/slick/util
   lazy val slick_version = "3.5.2"
