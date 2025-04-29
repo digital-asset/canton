@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.protocol.reassignment
 
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentProcessingSteps.ReassignmentProcessorError
 import com.digitalasset.canton.participant.store.ActiveContractStore.Status
-import com.digitalasset.canton.protocol.messages.DeliveredUnassignmentResult
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.topology.SynchronizerId
 
@@ -23,10 +22,10 @@ object UnassignmentProcessorError {
 
   final case class TargetSynchronizerIsSourceSynchronizer(
       synchronizerId: SynchronizerId,
-      contractId: LfContractId,
+      contractIds: Seq[LfContractId],
   ) extends UnassignmentProcessorError {
     override def message: String =
-      s"Cannot unassign contract `$contractId`: source and target synchronizers are the same"
+      s"Cannot unassign contracts `$contractIds`: source and target synchronizers are the same"
   }
 
   final case class UnknownContract(contractId: LfContractId) extends UnassignmentProcessorError {
@@ -42,13 +41,6 @@ object UnassignmentProcessorError {
 
   final case object ReassignmentCounterOverflow extends ReassignmentProcessorError {
     override def message: String = "Reassignment counter overflow"
-  }
-  final case class InvalidResult(
-      reassignmentId: ReassignmentId,
-      result: DeliveredUnassignmentResult.InvalidUnassignmentResult,
-  ) extends UnassignmentProcessorError {
-    override def message: String =
-      s"Cannot unassign `$reassignmentId`: invalid result"
   }
 
   final case class AutomaticAssignmentError(message: String) extends UnassignmentProcessorError
