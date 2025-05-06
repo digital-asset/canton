@@ -1450,7 +1450,6 @@ class CantonSyncService(
             identityPusher,
             synchronizerHandle.topologyFactory
               .createTopologyProcessorFactory(
-                synchronizerHandle.staticParameters,
                 partyNotifier,
                 missingKeysAlerter,
                 synchronizerHandle.topologyClient,
@@ -1862,7 +1861,7 @@ class CantonSyncService(
         case Left(invalidBatch) =>
           Future.failed(
             RequestValidationErrors.InvalidArgument
-              .Reject(s"The batch of reassignment commands was invalid: $invalidBatch")
+              .Reject(s"The batch of reassignment commands was invalid: ${invalidBatch.error}")
               .asGrpcError
           )
       }

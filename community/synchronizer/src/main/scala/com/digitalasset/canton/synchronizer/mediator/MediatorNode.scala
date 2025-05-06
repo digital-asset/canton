@@ -19,8 +19,8 @@ import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.crypto.{
   Crypto,
   CryptoHandshakeValidator,
+  SynchronizerCrypto,
   SynchronizerCryptoClient,
-  SynchronizerCryptoPureApi,
 }
 import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.*
@@ -59,7 +59,10 @@ import com.digitalasset.canton.synchronizer.metrics.MediatorMetrics
 import com.digitalasset.canton.synchronizer.service.GrpcSequencerConnectionService
 import com.digitalasset.canton.time.{Clock, HasUptime, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
+import com.digitalasset.canton.topology.client.{
+  SynchronizerTopologyClient,
+  SynchronizerTopologyClientWithInit,
+}
 import com.digitalasset.canton.topology.processing.{
   InitialTopologySnapshotValidator,
   SequencedTime,
@@ -317,7 +320,7 @@ class MediatorNodeBootstrap(
       EitherT.rightT(
         new StartupNode(
           storage,
-          crypto,
+          SynchronizerCrypto(crypto, staticSynchronizerParameters),
           adminServerRegistry,
           adminToken,
           mediatorId,
@@ -383,7 +386,7 @@ class MediatorNodeBootstrap(
 
   private class StartupNode(
       storage: Storage,
-      crypto: Crypto,
+      crypto: SynchronizerCrypto,
       adminServerRegistry: CantonMutableHandlerRegistry,
       adminToken: CantonAdminToken,
       mediatorId: MediatorId,
@@ -534,7 +537,7 @@ class MediatorNodeBootstrap(
       fetchConfig: () => FutureUnlessShutdown[Option[MediatorSynchronizerConfiguration]],
       saveConfig: MediatorSynchronizerConfiguration => FutureUnlessShutdown[Unit],
       storage: Storage,
-      crypto: Crypto,
+      crypto: SynchronizerCrypto,
       adminServerRegistry: CantonMutableHandlerRegistry,
       staticSynchronizerParameters: StaticSynchronizerParameters,
       synchronizerTopologyStore: TopologyStore[SynchronizerStore],
@@ -572,16 +575,20 @@ class MediatorNodeBootstrap(
           .right(
             TopologyTransactionProcessor.createProcessorAndClientForSynchronizer(
               synchronizerTopologyStore,
+              ips,
               synchronizerId,
-              new SynchronizerCryptoPureApi(staticSynchronizerParameters, crypto.pureCrypto),
+              crypto.pureCrypto,
               arguments.parameterConfig,
               arguments.clock,
               arguments.futureSupervisor,
               synchronizerLoggerFactory,
             )()
           )
-      (topologyProcessor, topologyClient) = topologyProcessorAndClient
-      _ = ips.add(topologyClient)
+      (topologyProcessor, newTopologyClient) = topologyProcessorAndClient
+      topologyClient = ips.add(newTopologyClient) match {
+        case client: SynchronizerTopologyClientWithInit => client
+        case _ => throw new IllegalStateException("Unknown type for topology client")
+      }
 
       // Session signing keys are used only if they are configured in Canton's configuration file.
       syncCryptoWithOptionalSessionKeys = SynchronizerCryptoClient.createWithOptionalSessionKeys(
@@ -590,7 +597,6 @@ class MediatorNodeBootstrap(
         topologyClient,
         staticSynchronizerParameters,
         crypto,
-        new SynchronizerCryptoPureApi(staticSynchronizerParameters, crypto.pureCrypto),
         parameters.sessionSigningKeys,
         parameters.batchingConfig.parallelism,
         timeouts,
@@ -694,7 +700,7 @@ class MediatorNodeBootstrap(
           ).callback(
             new InitialTopologySnapshotValidator(
               staticSynchronizerParameters.protocolVersion,
-              new SynchronizerCryptoPureApi(staticSynchronizerParameters, crypto.pureCrypto),
+              crypto.pureCrypto,
               synchronizerTopologyStore,
               arguments.parameterConfig.processingTimeouts,
               synchronizerLoggerFactory,

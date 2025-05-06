@@ -8,8 +8,8 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.common.sequencer.RegisterTopologyTransactionHandle
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{ProcessingTimeout, TopologyConfig}
-import com.digitalasset.canton.crypto.SigningKeyUsage
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
+import com.digitalasset.canton.crypto.{SigningKeyUsage, SynchronizerCrypto}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
@@ -22,6 +22,7 @@ import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast.S
 import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
+  IdentityProvidingServiceClient,
   StoreBasedSynchronizerTopologyClient,
   SynchronizerTopologyClientWithInit,
 }
@@ -61,6 +62,8 @@ class QueueBasedSynchronizerOutboxTest
   private lazy val clock = new WallClock(timeouts, loggerFactory)
   private lazy val crypto =
     SymbolicCrypto.create(testedReleaseProtocolVersion, timeouts, loggerFactory)
+  private lazy val synchronizerCrypto =
+    SynchronizerCrypto(crypto, defaultStaticSynchronizerParameters)
   private lazy val publicKey =
     crypto.generateSymbolicSigningKey(usage = SigningKeyUsage.NamespaceOnly)
   private lazy val namespace = Namespace(publicKey.id)
@@ -117,7 +120,7 @@ class QueueBasedSynchronizerOutboxTest
     val manager = new SynchronizerTopologyManager(
       participant1.uid,
       clock,
-      crypto,
+      synchronizerCrypto,
       defaultStaticSynchronizerParameters,
       target,
       queue,
@@ -132,6 +135,7 @@ class QueueBasedSynchronizerOutboxTest
       synchronizerId,
       store = target,
       packageDependenciesResolver = StoreBasedSynchronizerTopologyClient.NoPackageDependencies,
+      ips = new IdentityProvidingServiceClient(),
       timeouts = timeouts,
       futureSupervisor = futureSupervisor,
       loggerFactory = loggerFactory,
@@ -280,7 +284,7 @@ class QueueBasedSynchronizerOutboxTest
       target,
       timeouts,
       loggerFactory,
-      crypto,
+      synchronizerCrypto,
       broadcastBatchSize,
     )
     synchronizerOutbox

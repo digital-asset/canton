@@ -4,6 +4,8 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.topology
 
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
+import com.digitalasset.canton.sequencing.protocol.MaxRequestSizeToDeserialize
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.FingerprintKeyId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.networking.GrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.{
@@ -11,13 +13,13 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.top
   OrderingTopologyProvider,
   TopologyActivationTime,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.endpointToTestBftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology.NodeTopologyInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   OrderingTopology,
   SequencingParameters,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.Simulation
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.SimulationModuleSystem.SimulationEnv
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.future.SimulationFuture
 import com.digitalasset.canton.tracing.TraceContext
@@ -40,7 +42,7 @@ class SimulationOrderingTopologyProvider(
             topologyData.onboardingTime.value <= activationTime.value
           }
           .map { case (endpoint, topologyData) =>
-            Simulation.endpointToNode(endpoint) -> topologyData
+            endpointToTestBftNodeId(endpoint) -> topologyData
           }
           .toMap
 
@@ -53,6 +55,9 @@ class SimulationOrderingTopologyProvider(
             )
           }.toMap,
           SequencingParameters.Default,
+          MaxRequestSizeToDeserialize.Limit(
+            DynamicSynchronizerParameters.defaultMaxRequestSize.value
+          ),
           activationTime,
           // Switch the value deterministically so that we trigger all code paths.
           areTherePendingCantonTopologyChanges = activationTime.value.toMicros % 2 == 0,
