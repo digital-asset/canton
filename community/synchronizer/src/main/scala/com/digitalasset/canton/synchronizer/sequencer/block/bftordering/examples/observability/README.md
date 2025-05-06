@@ -9,7 +9,7 @@ in the official documentation.
 * [**Docker**](https://docs.docker.com/get-docker/).
 * [**Docker Compose V2 (as plugin `2.x`)**](https://github.com/docker/compose).
 * Build Canton as follows:
-  * `sbt package`
+  * `sbt packRelease`
   * `cd community/app/target/release/canton`
   * Copy [`Dockerfile`](canton/Dockerfile) there.
   * `docker build . -t canton-community:latest` (or anything matching your [.env](.env)'s `CANTON_IMAGE`).
@@ -41,6 +41,7 @@ The "BFT ordering" dashboard should look like this:
 ![Example Dashboard 1](images/dashboard1.png "Example Dashboard")
 ![Example Dashboard 2](images/dashboard2.png "Example Dashboard")
 ![Example Dashboard 3](images/dashboard3.png "Example Dashboard")
+![Example Dashboard 4](images/dashboard4.png "Example Dashboard (state transfer-related part)")
 
 ## Components
 
@@ -85,22 +86,49 @@ For example:
 
 ```
 @ participant1.synchronizers.list_registered().map(_._1.synchronizerAlias.unwrap)
-res0: Seq[String] = Vector("mysynchronizer")
+res0: Seq[String] = Vector("observabilityExample")
 
 @ sequencer1.bft.get_ordering_topology()
-res1: com.digitalasset.canton.synchronizer.sequencing.sequencer.block.bftordering.admin.SequencerBftAdminData.OrderingTopology = OrderingTopology(
-  currentEpoch = 30L,
-  sequencerIds = Vector(SEQ::sequencer1::122068109171..., SEQ::sequencer2::1220ec0faf93..., SEQ::sequencer3::122078a60382..., SEQ::sequencer4::12203fdba69e...)
+res1: com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData.OrderingTopology = OrderingTopology(
+  currentEpoch = 44L,
+  sequencerIds = Vector(SEQ::sequencer1::1220e3f201ea..., SEQ::sequencer2::1220d2a694d0..., SEQ::sequencer3::1220c4427061..., SEQ::sequencer4::1220ba5cfe72...)
 )
 
 @ sequencer1.bft.get_peer_network_status(None)
 res2: com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData.PeerNetworkStatus = PeerNetworkStatus(
-  endpointStatuses = Vector(
-    PeerEndpointStatus(endpointId = PeerEndpointId(address = "0.0.0.0", port = Port(n = 31032), transportSecurity = false), health = PeerEndpointHealth(status = Authenticated, description = None)),
-    PeerEndpointStatus(endpointId = PeerEndpointId(address = "0.0.0.0", port = Port(n = 31033), transportSecurity = false), health = PeerEndpointHealth(status = Authenticated, description = None)),
-    PeerEndpointStatus(endpointId = PeerEndpointId(address = "0.0.0.0", port = Port(n = 31031), transportSecurity = false), health = PeerEndpointHealth(status = Authenticated, description = None))
+  endpoint statuses = Seq(
+    PeerEndpointStatus(endpointId = Id(url = "http://0.0.0.0:31031", tls = false), health = PeerEndpointHealth(status = Authenticated(sequencerId = SEQ::sequencer2::1220d2a694d0...))),
+    PeerEndpointStatus(endpointId = Id(url = "http://0.0.0.0:31032", tls = false), health = PeerEndpointHealth(status = Authenticated(sequencerId = SEQ::sequencer3::1220c4427061...))),
+    PeerEndpointStatus(endpointId = Id(url = "http://0.0.0.0:31033", tls = false), health = PeerEndpointHealth(status = Authenticated(sequencerId = SEQ::sequencer4::1220ba5cfe72...)))
   )
 )
+```
+
+#### Testing catch-up state transfer
+
+Because a remote console (i.e., remote instance references) is used here, nodes cannot be easily restarted.
+The easiest way to trigger catch-up is to remove some of the connections (copy-paste ready):
+
+```
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftBlockOrdererConfig.{EndpointId, P2PEndpointConfig}
+import com.digitalasset.canton.config.RequireTypes.Port
+sequencer1.bft.remove_peer_endpoint(EndpointId("0.0.0.0", Port.tryCreate(31031), false))
+sequencer3.bft.remove_peer_endpoint(EndpointId("0.0.0.0", Port.tryCreate(31031), false))
+sequencer4.bft.remove_peer_endpoint(EndpointId("0.0.0.0", Port.tryCreate(31031), false))
+sequencer2.bft.remove_peer_endpoint(EndpointId("0.0.0.0", Port.tryCreate(31030), false))
+sequencer2.bft.remove_peer_endpoint(EndpointId("0.0.0.0", Port.tryCreate(31032), false))
+sequencer2.bft.remove_peer_endpoint(EndpointId("0.0.0.0", Port.tryCreate(31033), false))
+```
+
+And then add them back:
+
+```
+sequencer2.bft.add_peer_endpoint(P2PEndpointConfig("0.0.0.0", Port.tryCreate(31030), None))
+sequencer2.bft.add_peer_endpoint(P2PEndpointConfig("0.0.0.0", Port.tryCreate(31032), None))
+sequencer2.bft.add_peer_endpoint(P2PEndpointConfig("0.0.0.0", Port.tryCreate(31033), None))
+sequencer1.bft.add_peer_endpoint(P2PEndpointConfig("0.0.0.0", Port.tryCreate(31031), None))
+sequencer3.bft.add_peer_endpoint(P2PEndpointConfig("0.0.0.0", Port.tryCreate(31031), None))
+sequencer4.bft.add_peer_endpoint(P2PEndpointConfig("0.0.0.0", Port.tryCreate(31031), None))
 ```
 
 ## Stopping
