@@ -4,11 +4,11 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation
 
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.{ProcessingTimeout, TlsClientConfig}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftBlockOrdererConfig.{
   P2PEndpointConfig,
@@ -29,6 +29,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.net
   BftP2PNetworkOut,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.CryptoProvider
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.endpointToTestBftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Module.{
   SystemInitializationResult,
@@ -85,7 +86,7 @@ import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
 import scala.util.Random
 
-class AvailabilitySimulationTest extends AnyFlatSpec with BaseTest {
+class AvailabilitySimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
 
   private val RandomSeed = 4L
   private val SimulationVirtualDuration = 2.minutes
@@ -330,7 +331,7 @@ class AvailabilitySimulationTest extends AnyFlatSpec with BaseTest {
       )
     val sequencerIds = config.initialNetwork.toList
       .flatMap(_.peerEndpoints.map(P2PEndpoint.fromEndpointConfig))
-      .map(Simulation.endpointToNode)
+      .map(endpointToTestBftNodeId)
     val membership = Membership(thisNode, orderingTopology, sequencerIds)
     val availabilityStore = store(simulationModel.availabilityStorage)
     val availabilityConfig = AvailabilityModuleConfig(
@@ -461,7 +462,7 @@ class AvailabilitySimulationTest extends AnyFlatSpec with BaseTest {
         val endpointConfig = endpoints(n)
         val endpoint = PlainTextP2PEndpoint(endpointConfig.address, endpointConfig.port)
           .asInstanceOf[P2PEndpoint]
-        val node = Simulation.endpointToNode(endpoint)
+        val node = endpointToTestBftNodeId(endpoint)
 
         val orderingTopologyProvider =
           new SimulationOrderingTopologyProvider(

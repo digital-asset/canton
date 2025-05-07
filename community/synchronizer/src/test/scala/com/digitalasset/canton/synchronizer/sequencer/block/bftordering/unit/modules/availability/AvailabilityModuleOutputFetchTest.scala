@@ -368,8 +368,8 @@ class AvailabilityModuleOutputFetchTest
           ),
           log => {
             log.level shouldBe Level.WARN
-            log.message should include(
-              "Batch BatchId(SHA-256:f9fbd79100fb...) from 'node1' contains more requests (1) than allowed (0), skipping"
+            log.message should include regex (
+              """Batch BatchId\(SHA-256:[^)]+\) from 'node1' contains more requests \(1\) than allowed \(0\), skipping"""
             )
           },
         )
@@ -621,7 +621,7 @@ class AvailabilityModuleOutputFetchTest
                 Availability.LocalDissemination.LocalBatchesStored(Seq(ABatchId -> ABatch)),
                 Availability.LocalDissemination
                   .LocalBatchesStoredSigned(
-                    Seq(LocalBatchStoredSigned(ABatchId, ABatch, Right(Signature.noSignature)))
+                    Seq(LocalBatchStoredSigned(ABatchId, ABatch, Some(Signature.noSignature)))
                   ),
               ),
               (
