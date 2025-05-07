@@ -339,6 +339,7 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
       initialEpochNumber: EpochNumber = EpochNumber.First,
       maxRequestsInBatch: Short = BftBlockOrdererConfig.DefaultMaxRequestsInBatch,
       maxBatchesPerProposal: Short = BftBlockOrdererConfig.DefaultMaxBatchesPerProposal,
+      maxNonOrderedBatchesPerNode: Short = AvailabilityModuleConfig.MaxNonOrderedBatchesPerNode,
       mempool: ModuleRef[Mempool.Message] = fakeIgnoringModule,
       cryptoProvider: CryptoProvider[E] = failingCryptoProvider[E],
       availabilityStore: data.AvailabilityStore[E] = new FakeAvailabilityStore[E],
@@ -358,6 +359,7 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
       maxRequestsInBatch,
       maxBatchesPerProposal,
       BftBlockOrdererConfig.DefaultOutputFetchTimeout,
+      maxNonOrderedBatchesPerNode,
     )
     val dependencies = AvailabilityModuleDependencies[E](
       mempool,

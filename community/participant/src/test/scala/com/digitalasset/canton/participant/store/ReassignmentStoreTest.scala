@@ -576,8 +576,10 @@ trait ReassignmentStoreTest extends FailOnShutdown {
             queryOffset,
           )
         }
-        incompletes.map(_.reassignmentId) shouldBe expectedReassignmentEntries.map(_.reassignmentId)
-        incompletes shouldBe expectedIncomplete
+        incompletes.map(
+          _.reassignmentId
+        ) should contain theSameElementsAs expectedReassignmentEntries.map(_.reassignmentId)
+        incompletes should contain theSameElementsAs expectedIncomplete
       }
 
       "list incomplete reassignments (unassignment done)" in {

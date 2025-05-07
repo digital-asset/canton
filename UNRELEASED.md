@@ -9,6 +9,9 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## Until 2025-05-07 (Exclusive)
+- The VettedPackage validFrom and validUntil fields have been renamed to validFromInclusive and validFromExclusive.
+
 ## Until 2025-04-30 (Exclusive)
 - JSON API - fixed openapi documentation for maps: (`eventsById`,`filtersByParty`).
 

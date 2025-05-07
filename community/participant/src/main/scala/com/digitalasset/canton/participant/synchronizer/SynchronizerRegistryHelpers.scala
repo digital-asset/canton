@@ -13,7 +13,7 @@ import com.digitalasset.canton.common.sequencer.SequencerConnectClient
 import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader.SequencerAggregatedInfo
 import com.digitalasset.canton.concurrent.HasFutureSupervision
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
-import com.digitalasset.canton.crypto.SyncCryptoApiParticipantProvider
+import com.digitalasset.canton.crypto.{SyncCryptoApiParticipantProvider, SynchronizerCrypto}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
@@ -120,28 +120,18 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging {
         )
         .toEitherT[FutureUnlessShutdown]
 
-      topologyClient <- EitherT.right(
+      newTopologyClient <- EitherT.right(
         performUnlessClosingUSF("create caching client")(
           topologyFactory.createCachingTopologyClient(
             packageDependencyResolver
           )
         )
       )
-      _ = cryptoApiProvider.ips.add(topologyClient)
-      /* If the synchronizer topology client has changed (e.g., due to a node reboot), we need to
-       * create a new instance of `SynchronizerCryptoClient`.
-       *
-       * TODO(#23806): Currently, a new `topologyClient` is always added when a node (re)connects,
-       * which triggers the creation of a new `SynchronizerCryptoClient` and subsequently forces the system
-       * to reset the session signing keys cache.
-       *
-       * Once the underlying issue is resolved, we should ensure that the `topologyClient` in
-       * `cryptoApiProvider.synchronizers` is properly removed whenever the client is closed (e.g. disconnect),
-       * and only then invalidate the cache.
-       *
-       * Refer to https://github.com/DACH-NY/canton/pull/23044 for the implementation.
-       */
-      _ = cryptoApiProvider.invalidateCacheForSynchronizer(synchronizerId)
+
+      topologyClient = cryptoApiProvider.ips.add(newTopologyClient) match {
+        case client: SynchronizerTopologyClientWithInit => client
+        case t => throw new IllegalStateException(s"Unknown type for topology client $t")
+      }
 
       synchronizerCryptoApi <- EitherT.fromEither[FutureUnlessShutdown](
         cryptoApiProvider
@@ -150,6 +140,11 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging {
             SynchronizerRegistryError.SynchronizerRegistryInternalError
               .InvalidState("crypto api for synchronizer is unavailable"): SynchronizerRegistryError
           )
+      )
+
+      synchronizerCrypto = SynchronizerCrypto(
+        cryptoApiProvider.crypto,
+        sequencerAggregatedInfo.staticSynchronizerParameters,
       )
 
       (sequencerClientFactory, sequencerChannelClientFactoryO) = {
@@ -180,7 +175,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging {
           SequencerClientFactory(
             synchronizerId,
             synchronizerCryptoApi,
-            cryptoApiProvider.crypto,
+            synchronizerCrypto,
             sequencerClientConfig,
             participantNodeParameters.tracing.propagation,
             testingConfig,
@@ -208,7 +203,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging {
               new SequencerChannelClientFactory(
                 synchronizerId,
                 synchronizerCryptoApi,
-                cryptoApiProvider.crypto,
+                synchronizerCrypto,
                 sequencerClientConfig,
                 participantNodeParameters.tracing.propagation,
                 sequencerAggregatedInfo.staticSynchronizerParameters,
@@ -276,9 +271,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging {
       _ <- downloadSynchronizerTopologyStateForInitializationIfNeeded(
         syncPersistentStateManager,
         synchronizerId,
-        topologyFactory.createInitialTopologySnapshotValidator(
-          sequencerAggregatedInfo.staticSynchronizerParameters
-        ),
+        topologyFactory.createInitialTopologySnapshotValidator,
         topologyClient,
         sequencerClient,
         partyNotifier,

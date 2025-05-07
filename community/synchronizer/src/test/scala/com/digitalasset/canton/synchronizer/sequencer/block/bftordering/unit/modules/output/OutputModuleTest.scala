@@ -7,7 +7,9 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.sequencer.admin.v30
+import com.digitalasset.canton.sequencing.protocol.MaxRequestSizeToDeserialize
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.block.BlockFormat.OrderedRequest
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
@@ -40,7 +42,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   EpochNumber,
   ViewNumber,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.BatchId
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.{
+  BatchId,
+  ProofOfAvailability,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.bfttime.CanonicalCommitSet
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.{
   BlockMetadata,
@@ -816,6 +821,7 @@ class OutputModuleTest
           createOutputModule[ProgrammableUnitTestEnv](requestInspector = new RequestInspector {
             override def isRequestToAllMembersOfSynchronizer(
                 request: OrderingRequest,
+                maxRequestSizeToDeserialize: MaxRequestSizeToDeserialize,
                 logger: TracedLogger,
                 traceContext: TraceContext,
             )(implicit synchronizerProtocolVersion: ProtocolVersion): Boolean =
@@ -884,6 +890,7 @@ class OutputModuleTest
           requestInspector = new RequestInspector {
             override def isRequestToAllMembersOfSynchronizer(
                 request: OrderingRequest,
+                maxRequestSizeToDeserialize: MaxRequestSizeToDeserialize,
                 logger: TracedLogger,
                 traceContext: TraceContext,
             )(implicit synchronizerProtocolVersion: ProtocolVersion): Boolean =
@@ -943,6 +950,9 @@ class OutputModuleTest
             ),
         ),
         SequencingParameters.Default,
+        MaxRequestSizeToDeserialize.Limit(
+          DynamicSynchronizerParameters.defaultMaxRequestSize.value
+        ), // irrelevant for this test
         topologyActivationTime,
         areTherePendingCantonTopologyChanges = false,
       )
@@ -1233,6 +1243,7 @@ object OutputModuleTest {
 
     override def isRequestToAllMembersOfSynchronizer(
         _request: OrderingRequest,
+        _maxRequestSizeToDeserialize: MaxRequestSizeToDeserialize,
         _logger: TracedLogger,
         _traceContext: TraceContext,
     )(implicit _synchronizerProtocolVersion: ProtocolVersion): Boolean = {
@@ -1277,17 +1288,19 @@ object OutputModuleTest {
       keyIds = Set.empty,
     )
 
-  private def anOrderedBlockForOutput(
+  def anOrderedBlockForOutput(
       epochNumber: Long = EpochNumber.First,
       blockNumber: Long = BlockNumber.First,
       commitTimestamp: CantonTimestamp = aTimestamp,
       lastInEpoch: Boolean = false,
       mode: OrderedBlockForOutput.Mode = OrderedBlockForOutput.Mode.FromConsensus,
-  )(implicit synchronizerProtocolVersion: ProtocolVersion) =
+      batchIds: Seq[BatchId] = Seq.empty,
+  )(implicit synchronizerProtocolVersion: ProtocolVersion): OrderedBlockForOutput =
     OrderedBlockForOutput(
       OrderedBlock(
         BlockMetadata(EpochNumber(epochNumber), BlockNumber(blockNumber)),
-        batchRefs = Seq.empty,
+        batchRefs =
+          batchIds.map(id => ProofOfAvailability(id, Seq.empty, EpochNumber(epochNumber))),
         CanonicalCommitSet(
           Set(
             Commit

@@ -8,7 +8,7 @@ import cats.data.EitherT
 import cats.syntax.parallel.*
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.crypto.Crypto
+import com.digitalasset.canton.crypto.SynchronizerCrypto
 import com.digitalasset.canton.environment.{
   StoreBasedSynchronizerTopologyInitializationCallback,
   SynchronizerTopologyInitializationCallback,
@@ -28,6 +28,7 @@ import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.store.{IndexedStringStore, IndexedSynchronizer}
 import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.topology.client.IdentityProvidingServiceClient
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.StampedLockWithHandle
@@ -55,8 +56,9 @@ class SyncPersistentStateManager(
     storage: Storage,
     val indexedStringStore: IndexedStringStore,
     acsCounterParticipantConfigStore: AcsCounterParticipantConfigStore,
+    ips: IdentityProvidingServiceClient,
     parameters: ParticipantNodeParameters,
-    crypto: Crypto,
+    synchronizerCryptoFactory: StaticSynchronizerParameters => SynchronizerCrypto,
     clock: Clock,
     packageDependencyResolver: PackageDependencyResolver,
     ledgerApiStore: Eval[LedgerApiStore],
@@ -228,7 +230,7 @@ class SyncPersistentStateManager(
         indexedSynchronizer,
         staticSynchronizerParameters,
         clock,
-        crypto,
+        synchronizerCryptoFactory(staticSynchronizerParameters),
         parameters,
         indexedStringStore,
         acsCounterParticipantConfigStore,
@@ -247,8 +249,9 @@ class SyncPersistentStateManager(
       new TopologyComponentFactory(
         synchronizerId,
         protocolVersion,
-        crypto,
+        synchronizerCryptoFactory(state.staticSynchronizerParameters),
         clock,
+        ips,
         parameters.processingTimeouts,
         futureSupervisor,
         parameters.cachingConfigs,
