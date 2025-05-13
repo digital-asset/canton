@@ -2,163 +2,225 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import BuildCommon.*
-import DocsOpenBuild.DocsPaths.{cantonDocsSourceDirectory, repositoryRoot, pythonScriptsDirectory}
 import sbt.*
 import sbt.Keys.*
 import sbt.internal.LogManager
 import sbt.internal.util.ManagedLogger
+import sbt.io.IO
 
+import java.nio.charset.StandardCharsets
+import java.util.regex.Pattern
 import scala.collection.{Seq, mutable}
+import sbt.Tracked
+import sbt.FileInfo
+import sbt.util.ChangeReport
+
+import scala.util.matching.Regex
 
 object DocsOpenBuild {
 
-  object DocsPaths {
+  lazy val makeSiteFull = taskKey[Unit]("Builds docs from scratch")
 
-    def repositoryRoot(docsOpenDir: File): File = docsOpenDir / ".."
+  lazy val reset = taskKey[Unit](
+    "Removes generated content and initializes the preprocessed directory with source files"
+  )
 
-    def cantonDocsSourceDirectory(docsOpenDir: File): File =
-      docsOpenDir / "src" / "sphinx"
+  lazy val generate = taskKey[Unit](
+    "Generates snippet output and other content which needs to be included in the source RST files"
+  )
 
-    def pythonScriptsDirectory(docsOpenDir: File): File =
-      docsOpenDir / "src" / "main" / "resources"
+  lazy val resolve = taskKey[Unit](
+    "Replaces directives/placeholders in RST files with content so that a standard Sphinx build can process it"
+  )
 
+  lazy val rebuild =
+    taskKey[Unit](
+      "Syncs changed source RST files and replaces directives/placeholders in those files only"
+    )
+  lazy val rebuildSnippets =
+    taskKey[Unit]("Re-generates snippet output data and replaces snippet directives with it")
+  lazy val rebuildGeneratedIncludes =
+    taskKey[Unit]("Re-generates include content and replaces include directives with it")
+
+  def runPythonTests(): Def.Initialize[Task[String]] = Def.task {
+    val log: ManagedLogger = streams.value.log
+    val logPrefix = "[docs-open|test][runPythonTests]"
+
+    log.info(s"$logPrefix Run python tests ...")
+
+    val pythonScriptsDirectory = (Compile / resourceDirectory).value
+    runCommand(s"python -m unittest discover -v -s $pythonScriptsDirectory", log)
   }
 
-  def generateSphinxSnippets(`enterprise-app`: Project): Def.Initialize[Task[Unit]] =
-    Def.taskDyn {
+  def resetGeneratedSnippets(): Def.Initialize[Task[Unit]] = Def.task {
+    val log: ManagedLogger = streams.value.log
+    val logPrefix = "[docs-open|reset][resetGeneratedSnippets]"
+
+    val snippetJsonSource = target.value / "pre"
+    IO.delete(snippetJsonSource)
+
+    log.info(s"$logPrefix Cleaned snippet JSON sources output directory $snippetJsonSource")
+  }
+
+  def resetGeneratedIncludes(): Def.Initialize[Task[Unit]] = Def.task {
+    val log: ManagedLogger = streams.value.log
+    val logPrefix = "[docs-open|reset][resetGeneratedIncludes]"
+
+    val generated = target.value / "generated"
+    IO.delete(generated)
+    IO.createDirectory(generated)
+
+    log.info(s"$logPrefix Cleaned generated include output directory $generated")
+  }
+
+  def resetPreprocessed(): Def.Initialize[Task[Unit]] = Def.task {
+    val log: ManagedLogger = streams.value.log
+    val logPrefix = "[docs-open|reset][resetPreprocessed]"
+
+    val source = sourceDirectory.value / "sphinx"
+    val preprocessed: File = target.value / "preprocessed-sphinx"
+
+    IO.delete(preprocessed)
+    IO.copyDirectory(source, preprocessed)
+
+    log.info(s"$logPrefix Replaced $preprocessed with $source")
+  }
+
+  lazy val generateSphinxSnippets =
+    taskKey[Unit](
+      "Render snippets, that is to run the snippets and collect their execution output"
+    )
+
+  lazy val rstToTestMapTask = taskKey[Map[String, String]](
+    "Maps RST source file paths, defined in snippet generation test classes, to their corresponding test class FQDNs"
+  )
+
+  /** Regex to find class definitions extending `SnippetGenerator` and their RST source file which
+    * contains snippet directives.
+    *
+    * Regex: Attempts to capture the test class name (Group 1), and then the RST file path (Group 2
+    * or Group 3). The RST source file path may be given as a positional class argument File("...")
+    * (Group 2), or as a named class argument source=File("...") (Group 3).
+    *
+    * Details:
+    *   - `class\s+([A-Za-z0-9_]+)`: Captures test class name (Group 1)
+    *   - `?:File\s*\(\s*\"([^\"]+)\"`: Captures RST source file path in Group 2
+    *   - `|`: OR
+    *   - `?:.*?source\s*=\s*File\s*\(\s*\"([^\"]+)\"`: Captures RST source file path in Group 3
+    */
+  lazy val snippetTestClassRegex: Regex =
+    """(?s)class\s+([A-Za-z0-9_]+)\s*extends\s+SnippetGenerator\s*\(\s*(?:File\s*\(\s*"([^"]+)"|.*?source\s*=\s*File\s*\(\s*"([^"]+)").*?\)""".r
+
+  def buildRstToTestMap(`enterprise-app`: Project): Def.Initialize[Task[Map[String, String]]] =
+    Def.task {
       val log = streams.value.log
+      val logPrefix = "[docs-open|generate][buildRstToTestMap]"
+
+      val testsDir =
+        (`enterprise-app` / baseDirectory).value / "src" / "test" / "scala" / "com" / "digitalasset" / "canton" / "integration" / "tests"
+      val generatorFile = testsDir / "docs" / "SphinxDocumentationGenerator.scala"
+      val packagePrefix = "com.digitalasset.canton.integration.tests.docs."
+      val pathPrefix = "docs-open/src/sphinx/"
+
+      require(
+        generatorFile.exists() && generatorFile.isFile,
+        s"$logPrefix Missing required file: $generatorFile",
+      )
+
+      log.info(s"$logPrefix Parsing $generatorFile to map RST source files to test classes ...")
+
+      val mapping = snippetTestClassRegex
+        .findAllMatchIn(IO.read(generatorFile))
+        .flatMap { m =>
+          val className = m.group(1)
+          val rstPath = Option(m.group(2)).orElse(Option(m.group(3)))
+
+          rstPath.flatMap { filePath =>
+            if (filePath.startsWith(pathPrefix)) {
+              val relativePath = filePath.stripPrefix(pathPrefix)
+              log.debug(
+                s"$logPrefix Found mapping: '$relativePath' -> '${packagePrefix + className}'"
+              )
+              Some(relativePath -> (packagePrefix + className))
+            } else {
+              log.debug(
+                s"$logPrefix Skipping path '$filePath' for class '$className' (unexpected prefix)"
+              )
+              None
+            }
+          }
+        }
+        .toMap
+
+      log.debug(s"$logPrefix Created RST file to test class mapping with ${mapping.size} entries")
+      mapping
+    }
+
+  /** Generates Sphinx snippets by running associated Scala tests based on the `rstToTestMapping`.
+    *
+    * It evaluates the input task key `changedFilesTask` to get a list of changed source files, uses
+    * the mapping to determine corresponding tests, and runs only those specific tests.
+    *
+    * @param changedFilesTask
+    *   A sequence of changed files to process. Can be the output
+    *   [[DocsOpenBuild.syncSphinxSources]].
+    */
+  def generateSphinxSnippets(
+      enterpriseApp: Project,
+      rstToTestMapTask: TaskKey[Map[String, String]],
+      changedFilesTask: TaskKey[Seq[File]] = allRstFilesTask,
+  ): Def.Initialize[Task[Unit]] = Def.taskDyn {
+    val log = streams.value.log
+    val logPrefix = "[docs-open|generate][generateSphinxSnippets]"
+
+    val rstFiles = changedFilesTask.value.filter(_.getName.endsWith(".rst"))
+    val rstToTestMap = rstToTestMapTask.value
+    val preprocessed = target.value / "preprocessed-sphinx"
+
+    log.debug(s"$logPrefix Using RST file to test class mapping:\n${rstToTestMap.mkString("\n")}")
+
+    val testsToRun = rstFiles.flatMap { rstFile =>
+      IO.relativize(preprocessed, rstFile).flatMap(rstToTestMap.get)
+    }.distinct
+
+    if (testsToRun.nonEmpty) {
       log.info(
-        "[generateSphinxSnippets] Running custom `.. snippet::` directives through tests to collect their output as JSON ..."
+        s"$logPrefix Running `.. snippet::` directives through tests to collect their output as JSON ..."
       )
       mkTestJob(
-        n => n.startsWith("com.digitalasset.canton.integration.tests.docs"),
-        `enterprise-app` / Test / definedTests,
-        `enterprise-app` / Test / testOnly,
+        testName => testsToRun.contains(testName),
+        enterpriseApp / Test / definedTests,
+        enterpriseApp / Test / testOnly,
         verbose = true,
       )
+    } else {
+      log.debug(s"$logPrefix No tests found in mapping for the provided RST files")
+      Def.task(())
     }
+  }
 
-  def generateRstInitialize(
-      sourceDirectory: SettingKey[File],
-      targetDirectory: SettingKey[File],
-  ): Def.Initialize[Task[Unit]] =
+  lazy val generateIncludes = taskKey[String](
+    "Generate RST include content such as console commands, error codes, metrics, etc."
+  )
+
+  def generateIncludes(generateReferenceJson: TaskKey[File]): Def.Initialize[Task[String]] =
     Def.task {
       val log: ManagedLogger = streams.value.log
+      val logPrefix = "[docs-open|generate][generateIncludes]"
 
-      log.info(
-        "[generateRst][test] Run RST-preprocessor tests ..."
-      )
+      log.info(s"$logPrefix Using the reference JSON to preprocess the RST files ...")
 
-      val testPath = pythonScriptsDirectory(baseDirectory.value)
-      runCommand(s"python -m unittest discover -v -s $testPath", log)
-
-      log.info(
-        "[generateRst][clean] Clean RST-preprocessor output directories and copy RST sources ..."
-      )
-
-      val source = sourceDirectory.value / "sphinx"
-      val preprocessed = sourceDirectory.value / "preprocessed-sphinx"
-      val snippetJsonSource = targetDirectory.value / "pre"
-      val generated = targetDirectory.value / "generated"
-
-      IO.delete(preprocessed)
-      IO.delete(generated)
-
-      val cantonDocsSourcePath = cantonDocsSourceDirectory(baseDirectory.value)
-      IO.copyDirectory(cantonDocsSourcePath, preprocessed)
-      IO.copyDirectory(source, preprocessed)
-      IO.createDirectory(generated)
+      val scriptPath = (Compile / resourceDirectory).value / "include_generator.py"
+      runCommand(s"python $scriptPath ${generateReferenceJson.value} ${target.value}", log)
     }
 
-  def generateRstResolveSnippet(
-      sourceDirectory: SettingKey[File],
-      targetDirectory: SettingKey[File],
-  ): Def.Initialize[Task[String]] =
-    Def.task {
-      val log: ManagedLogger = streams.value.log
+  lazy val embed_reference_json =
+    settingKey[File]("The JSON file where the content data is generated")
 
-      val target = sourceDirectory.value / "preprocessed-sphinx"
-      val snippetJsonSource = targetDirectory.value / "pre"
-
-      log.info(
-        "[generateRst][preprocessing:step 2] Replacing custom `.. snippet::` directives with RST code blocks ..."
-      )
-
-      val script = pythonScriptsDirectory(baseDirectory.value) / "snippet_directive.py"
-      runCommand(s"python $script $snippetJsonSource $target", log)
-    }
-
-  def generateRstResolveLiteralInclude(
-      sourceDirectory: SettingKey[File]
-  ): Def.Initialize[Task[String]] =
-    Def.task {
-      val log: ManagedLogger = streams.value.log
-
-      val target = sourceDirectory.value / "preprocessed-sphinx"
-
-      log.info(
-        "[generateRst][preprocessing:step 1] Replacing `.. literalinclude::` directives with RST code blocks ..."
-      )
-
-      val scriptPath =
-        pythonScriptsDirectory(baseDirectory.value) / "literalinclude_directive.py"
-
-      runCommand(s"python $scriptPath $target", log)
-    }
-
-  def copyLedgerApiProtoDocs(
-      sourceDirectory: SettingKey[File]
-  ): Def.Initialize[Task[Unit]] =
-    Def.task {
-      import scala.sys.process._
-
-      val log: ManagedLogger = streams.value.log
-
-      val filesToCopy = Map(
-        (DamlProjects.`ledger-api` / Compile / sourceManaged).value / "proto-docs.rst" -> sourceDirectory.value / "preprocessed-sphinx" / "sdk" / "reference" / "lapi-proto-docs.rst",
-        (DamlProjects.`ledger-api-value` / Compile / sourceManaged).value / "proto-docs.rst" -> sourceDirectory.value / "preprocessed-sphinx" / "sdk" / "reference" / "lapi-value-proto-docs.rst.inc",
-      )
-
-      val postProcessScript = file("community/docs/post-process.sh")
-
-      filesToCopy.foreach { case (copyFromPath, copyToPath) =>
-        log.info(
-          s"[copyLedgerApiProtoDocs] Copying the Ledger API reference from $copyFromPath to $copyToPath ..."
-        )
-
-        IO.copyFile(copyFromPath, copyToPath)
-        val postProcessResult = s"$postProcessScript $copyToPath".!!
-
-        println(postProcessResult)
-      }
-    }
-
-  def generateRst(
-      sourceDirectory: SettingKey[File],
-      resourceDirectory: SettingKey[File],
-      generateReferenceJson: TaskKey[File],
-      targetDirectory: SettingKey[File],
-  ): Def.Initialize[Task[Unit]] =
-    Def
-      .task {
-        val log: ManagedLogger = streams.value.log
-
-        val cantonRoot = repositoryRoot(baseDirectory.value)
-        val source = cantonDocsSourceDirectory(baseDirectory.value)
-        val preprocessed = sourceDirectory.value / "preprocessed-sphinx"
-
-        log.info(
-          "[generateRst][preprocessing:step 3] Using the reference JSON to preprocess the RST files ..."
-        )
-
-        val scriptPath = resourceDirectory.value / "rst-preprocessor.py"
-        runCommand(
-          s"python $scriptPath $cantonRoot ${generateReferenceJson.value} $source $preprocessed ${targetDirectory.value}",
-          log,
-        )
-
-        copyLedgerApiProtoDocs(sourceDirectory).value
-      }
+  lazy val generateReferenceJson =
+    taskKey[File](
+      "Generate the JSON file for the content generation, for example the Canton Console commands"
+    )
 
   def generateReferenceJson(
       embed_reference_json: SettingKey[File],
@@ -166,64 +228,323 @@ object DocsOpenBuild {
       enterpriseAppSourceDirectory: SettingKey[File],
       enterpriseAppTarget: SettingKey[File],
       communityIntegrationTestingSourceDirectory: SettingKey[File],
-      resourceDirectory: SettingKey[File],
-      sourceDirectory: SettingKey[File],
-      target: SettingKey[File],
-  ): Def.Initialize[Task[File]] =
+  ): Def.Initialize[Task[File]] = Def.task {
+    val log = streams.value.log
+    val logPrefix = "[docs-open|generate][generateReferenceJson]"
+
+    log.info(
+      s"$logPrefix Generating the JSON used to populate the documentation for console commands, metrics, etc. ..."
+    )
+
+    val outFile = (Compile / embed_reference_json).value
+    outFile.getParentFile.mkdirs()
+    val appSourceDir = communityAppSourceDirectory.value
+    val enterpriseAppSourceDir = enterpriseAppSourceDirectory.value
+    val communityIntegrationTestingSourceDir =
+      communityIntegrationTestingSourceDirectory.value
+    val scriptPath =
+      ((Compile / resourceDirectory).value / "console-reference.canton").getPath
+    val targetDirectory = enterpriseAppTarget.value
+    val releaseDirectory = targetDirectory / "release" / "canton"
+    val generateReferenceJsonConf = target.value / "generateReferenceJsonConf"
+    IO.delete(generateReferenceJsonConf)
+    val simpleConfig = generateReferenceJsonConf / "simple-topology.conf"
+    val distributedConfig =
+      generateReferenceJsonConf / "distributed-single-synchronizer-topology.conf"
+    val includes = generateReferenceJsonConf / "include"
+    IO.copyFile(
+      appSourceDir / "pack" / "examples" / "01-simple-topology" / "simple-topology.conf",
+      simpleConfig,
+    )
+    IO.copyFile(
+      enterpriseAppSourceDir / "test" / "resources" / "distributed-single-synchronizer-topology.conf",
+      distributedConfig,
+    )
+    IO.copyDirectory(
+      communityIntegrationTestingSourceDir / "main" / "resources" / "include",
+      includes,
+    )
+    val args = Seq(
+      "run",
+      scriptPath,
+      "-c",
+      simpleConfig.getPath,
+      "-c",
+      distributedConfig.getPath,
+      "--log-level-stdout=off",
+    )
+    // Using the GENERATE_METRICS_FOR_DOCS environment variable as a flag (enabled when set) to explicitly register
+    // metrics which usually are registered by the application on-demand only.
+    // Without it, the metrics documentation generation is going to miss such on-demand registered metrics.
+    val out = runCanton(releaseDirectory, args, None, log, ("GENERATE_METRICS_FOR_DOCS", ""))
+    IO.write(outFile, out)
+    // Rename the generateReferenceJson log/canton.log file to be recognizable
+    val cantonLogDir = new File("log")
+    for (cantonLog <- (cantonLogDir * "canton.log").get) {
+      IO.move(cantonLog, cantonLogDir / "create-json.canton.log")
+    }
+    outFile
+  }
+
+  // Used as default argument for resolve* and generate* methods which require a list of RST files
+  val allRstFilesTask =
+    taskKey[Seq[File]]("Provides a default list of all RST files if none specified")
+
+  def findAllRstInPreprocessed(): Def.Initialize[Task[Seq[File]]] = Def.task {
+    val log = streams.value.log
+    val logPrefix = "[docs-open][findAllRstInPreprocessed]"
+
+    val preprocessed = target.value / "preprocessed-sphinx"
+    val allRstFinder: PathFinder = preprocessed ** "*.rst"
+    val allRstFiles: Seq[File] = allRstFinder.get()
+
+    log.debug(s"$logPrefix Found ${allRstFiles.size} RST files in $preprocessed")
+
+    allRstFiles
+  }
+
+  lazy val syncSphinxSources = taskKey[Seq[File]](
+    "Syncs any changed file from the Sphinx source directory to the preprocessed directory. " +
+      "Returns absolute paths to the affected (modified/added/removed) files in the preprocessed directory."
+  )
+
+  def syncSources(): Def.Initialize[Task[Seq[File]]] = Def.task {
+    val log = streams.value.log
+    val logPrefix = "[docs-open|refresh][syncSources]"
+
+    val source = sourceDirectory.value / "sphinx"
+    val preprocessed = target.value / "preprocessed-sphinx"
+
+    // Use separate caches for separate concerns: one for tracking source changes, one for sync state
+    val cacheStoreFactory = streams.value.cacheStoreFactory
+    // This cache is solely focused on detecting changes in the source directory
+    val diffCheckCacheStore = cacheStoreFactory.make("sphinx-source-diff-check")
+    // This cache manages the state of the synchronization process between the source directory and
+    // the preprocessed directory
+    val syncStateCacheStore = cacheStoreFactory.make("sphinx-source-sync-state")
+
+    log.info(
+      s"$logPrefix Checking for changed Sphinx sources in $source ..."
+    )
+
+    val sourceFinder = source ** "*"
+    val sourceFiles = sourceFinder.filter(f => f.isFile).get
+    val sourceFilesSet = sourceFiles.toSet
+
+    // Tracked.diffInputs compares the current set of source files (and their last modified times)
+    // against the information stored in the cache from the previous run. It identifies which source
+    // files are new, which have been modified, and which have been removed since the last check.
+    // In short: Figures out which source files have changed.
+    val differenceTracker = Tracked.diffInputs(diffCheckCacheStore, FileInfo.lastModified)
+
+    val changedSources = differenceTracker(sourceFilesSet) { report: ChangeReport[File] =>
+      val addedModified = report.added ++ report.modified
+      log.info(
+        s"$logPrefix Detected ${addedModified.size} added/modified source files"
+      )
+      addedModified
+    }
+
+    val fileMappings: Seq[(File, File)] = sourceFiles.flatMap { file =>
+      IO.relativize(source, file).map(relPath => (file, preprocessed / relPath))
+    }
+
+    if (fileMappings.nonEmpty) {
+      log.info(s"$logPrefix Sync added/modified source files to '$preprocessed' ...")
+
+      // Sync.sync does the file copying/deletion based on comparing source/target states.
+      // Meaning, it compares the current source files with the state recorded in this cache (representing the
+      // target's state after the last sync) to determine:
+      // - Which new/modified source files need to be copied to the target.
+      // - Which target files correspond to removed source files and need to be deleted.
+      // - Which target files are already up-to-date and can be skipped.
+      // In short: It uses its own cache (syncStateCacheStore) to track the state of the synchronization
+      Sync.sync(syncStateCacheStore)(fileMappings)
+      log.debug(s"$logPrefix Synchronization complete")
+    } else {
+      log.info(s"$logPrefix Unchanged source files, nothing to sync")
+    }
+
+    val changedFiles = fileMappings.collect {
+      case (srcFile, targetFile) if changedSources.contains(srcFile) => targetFile
+    }
+
+    log.debug {
+      val fileDetails = changedFiles.map(f => s"  - ${f.name} (${f.getPath})").mkString("\n")
+      s"$logPrefix Found ${changedFiles.size} changed (preprocessed) files:\n$fileDetails"
+    }
+
+    changedFiles
+  }
+
+  /** Replaces `.. snippet::` directives in RST files with their generated content.
+    *
+    * It executes an external Python script (`snippet_directive_replace.py`) to perform the
+    * replacements. The script uses data from `target/snippet_json_data` and processes the specified
+    * RST files.
+    *
+    * @param changedFilesTask
+    *   A sequence of changed files to process. Can be the output
+    *   [[DocsOpenBuild.syncSphinxSources]].
+    */
+  def resolveSnippets(
+      changedFilesTask: TaskKey[Seq[File]] = allRstFilesTask
+  ): Def.Initialize[Task[String]] =
+    Def.task {
+      val log: ManagedLogger = streams.value.log
+      val logPrefix = "[docs-open|resolve][resolveSnippets]"
+
+      val rstFiles = changedFilesTask.value.filter(_.getName.endsWith(".rst"))
+      if (rstFiles.nonEmpty) {
+        val scriptPath = (Compile / resourceDirectory).value / "snippet_directive_replace.py"
+        val snippetJsonSource = target.value / "snippet_json_data"
+        val rstFilePaths: Seq[String] = rstFiles.map(_.getAbsolutePath)
+        val command: Seq[String] =
+          Seq("python", scriptPath.toString, snippetJsonSource.toString) ++ rstFilePaths
+
+        log.info(s"$logPrefix Replacing `.. snippet::` directives with RST code blocks ...")
+        runCommand(command.mkString(" "), log)
+      } else {
+        "No snippet resolution required"
+      }
+    }
+
+  /** Replaces `.. literalinclude::` directives in RST files with RST code blocks.
+    *
+    * It executes an external Python script (`literalinclude_directive_replace.py`) to perform the
+    * replacements.
+    *
+    * @param changedFilesTask
+    *   A sequence of changed files to process. Can be the output
+    *   [[DocsOpenBuild.syncSphinxSources]].
+    */
+  def resolveLiteralIncludes(
+      changedFilesTask: TaskKey[Seq[File]] = allRstFilesTask
+  ): Def.Initialize[Task[String]] = Def.task {
+    val log: ManagedLogger = streams.value.log
+    val logPrefix = "[docs-open|resolve][resolveLiteralIncludes]"
+
+    val rstFiles = changedFilesTask.value.filter(_.getName.endsWith(".rst"))
+    if (rstFiles.nonEmpty) {
+      val scriptPath = (Compile / resourceDirectory).value / "literalinclude_directive_replace.py"
+      val repoRoot: File = (ThisBuild / baseDirectory).value
+      val rstFilePaths: Seq[String] = rstFiles.map(_.getAbsolutePath)
+      val command: Seq[String] =
+        Seq("python", scriptPath.toString, repoRoot.toString) ++ rstFilePaths
+
+      log.info(s"$logPrefix Replacing `.. literalinclude::` directives with RST code blocks ...")
+      runCommand(command.mkString(" "), log)
+    } else {
+      "No literal include resolution required"
+    }
+  }
+
+  /** Replaces `.. include::` for Canton generated content in RST files.
+    *
+    * @param changedFilesTask
+    *   A sequence of changed files to process. Can be the output
+    *   [[DocsOpenBuild.syncSphinxSources]].
+    */
+  def resolveIncludes(
+      changedFilesTask: TaskKey[Seq[File]] = allRstFilesTask
+  ): Def.Initialize[Task[Unit]] =
     Def.task {
       val log = streams.value.log
-      log.info(
-        "[generateReferenceJson] Generating the JSON used to populate the documentation for console commands, metrics, etc. ..."
+      val logPrefix = "[docs-open|resolve][resolveIncludes]"
+
+      val rstFiles = changedFilesTask.value.filter(_.getName.endsWith(".rst"))
+      val generated = target.value / "generated"
+      val preprocessed = target.value / "preprocessed-sphinx"
+
+      // Defines which .rst files can be processed by this task, needs to be in-sync with what
+      // the generateIncludes task produces
+      val incToRstRelativePathMapping = Map(
+        "versioning.rst.inc" -> "participant/reference/versioning.rst",
+        "topology_versioning.rst.inc" -> "sdk/tutorials/app-dev/external_signing_topology_transaction.rst",
+        "monitoring.rst.sequencer_metrics.inc" -> "participant/howtos/observe/monitoring.rst",
+        "monitoring.rst.mediator_metrics.inc" -> "participant/howtos/observe/monitoring.rst",
+        "monitoring.rst.participant_metrics.inc" -> "participant/howtos/observe/monitoring.rst",
+        "error_codes.rst.inc" -> "participant/reference/error_codes.rst",
+        "console.rst.inc" -> "participant/reference/console.rst",
       )
-      val outFile = (Compile / embed_reference_json).value
-      outFile.getParentFile.mkdirs()
-      val appSourceDir = communityAppSourceDirectory.value
-      val enterpriseAppSourceDir = enterpriseAppSourceDirectory.value
-      val communityIntegrationTestingSourceDir =
-        communityIntegrationTestingSourceDirectory.value
-      val scriptPath =
-        (resourceDirectory.value / "console-reference.canton").getPath
-      val targetDirectory = enterpriseAppTarget.value
-      val releaseDirectory = targetDirectory / "release" / "canton"
-      val generateReferenceJsonConf = target.value / "generateReferenceJsonConf"
-      IO.delete(generateReferenceJsonConf)
-      val simpleConfig = generateReferenceJsonConf / "simple-topology.conf"
-      val distributedConfig =
-        generateReferenceJsonConf / "distributed-single-synchronizer-topology.conf"
-      val includes = generateReferenceJsonConf / "include"
-      IO.copyFile(
-        appSourceDir / "pack" / "examples" / "01-simple-topology" / "simple-topology.conf",
-        simpleConfig,
+
+      val expectedRstFiles = incToRstRelativePathMapping.values.map(preprocessed / _).toSet
+      log.debug(
+        s"$logPrefix RST files defined by mapping: ${expectedRstFiles.mkString("\n\t", "\n\t", "")}"
       )
-      IO.copyFile(
-        enterpriseAppSourceDir / "test" / "resources" / "distributed-single-synchronizer-topology.conf",
-        distributedConfig,
-      )
-      IO.copyDirectory(
-        communityIntegrationTestingSourceDir / "main" / "resources" / "include",
-        includes,
-      )
-      val args = Seq(
-        "run",
-        scriptPath,
-        "-c",
-        simpleConfig.getPath,
-        "-c",
-        distributedConfig.getPath,
-        "--log-level-stdout=off",
-      )
-      // Using the GENERATE_METRICS_FOR_DOCS environment variable as a flag (enabled when set) to explicitly register
-      // metrics which usually are registered by the application on-demand only.
-      // Without it, the metrics documentation generation is going to miss such on-demand registered metrics.
-      val out = runCanton(releaseDirectory, args, None, log, ("GENERATE_METRICS_FOR_DOCS", ""))
-      IO.write(outFile, out)
-      // Rename the generateReferenceJson log/canton.log file to be recognizable
-      val cantonLogDir = new File("log")
-      for (cantonLog <- (cantonLogDir * "canton.log").get) {
-        IO.move(cantonLog, cantonLogDir / "create-json.canton.log")
+
+      val rstFilesWithIncludes = rstFiles.filter(expectedRstFiles.contains)
+
+      if (rstFilesWithIncludes.nonEmpty) {
+        log.info(s"$logPrefix Replacing `.. include::` directives with RST content ...")
+
+        val rstToIncMapping = incToRstRelativePathMapping
+          .groupBy { case (_, rstPath) =>
+            preprocessed / rstPath
+          }
+          .mapValues(_.keys.toSeq)
+
+        rstFilesWithIncludes.foreach { rstFile =>
+          log.debug(s"$logPrefix Preprocessing RST file: $rstFile")
+
+          rstToIncMapping.get(rstFile).foreach { incFileNames =>
+            val originalContent = IO.read(rstFile, StandardCharsets.UTF_8)
+            val updatedContent = incFileNames.foldLeft(originalContent) { (content, incFileName) =>
+              val incFile = generated / incFileName
+              require(incFile.exists(), s"$logPrefix Missing include file: $incFile")
+
+              val incContent = IO.read(incFile, StandardCharsets.UTF_8)
+              val incMarker = s"..\n    Dynamically generated content:\n.. include:: $incFileName"
+
+              require(
+                content.contains(incMarker),
+                s"$logPrefix Marker not found for $incFileName in $rstFile",
+              )
+              require(
+                content.split(Pattern.quote(incMarker), -1).length - 1 == 1,
+                s"$logPrefix Marker for $incFileName appears multiple times in $rstFile",
+              )
+
+              content.replace(incMarker, incContent)
+            }
+
+            if (updatedContent != originalContent) {
+              IO.write(rstFile, updatedContent, StandardCharsets.UTF_8)
+              log.debug(s"$logPrefix Updated $rstFile with include content.")
+            } else {
+              log.debug(s"$logPrefix No changes made to $rstFile.")
+            }
+          }
+        }
+
+        log.debug(s"$logPrefix Include directive replacement complete")
       }
-      outFile
     }
+
+  def resolveLedgerApiProtoDocs(): Def.Initialize[Task[Unit]] = Def.task {
+    import scala.sys.process._
+
+    val log: ManagedLogger = streams.value.log
+    val logPrefix = "[docs-open|resolve][resolveLedgerApiProtoDocs]"
+
+    val preprocessed = target.value / "preprocessed-sphinx"
+    val filesToCopy = Map(
+      (DamlProjects.`ledger-api` / Compile / sourceManaged).value / "proto-docs.rst" -> preprocessed / "sdk" / "reference" / "lapi-proto-docs.rst",
+      (DamlProjects.`ledger-api-value` / Compile / sourceManaged).value / "proto-docs.rst" -> preprocessed / "sdk" / "reference" / "lapi-value-proto-docs.rst.inc",
+    )
+
+    val postProcessScript = file("community/docs/post-process.sh")
+
+    log.info(s"$logPrefix Adding Ledger API reference documentation ...")
+    filesToCopy.foreach { case (copyFromPath, copyToPath) =>
+      log.debug(s"$logPrefix Copying the LAPI reference from $copyFromPath to $copyToPath ...")
+
+      IO.copyFile(copyFromPath, copyToPath)
+      val postProcessResult = s"$postProcessScript $copyToPath".!!
+
+      log.debug(s"$logPrefix Postprocessing result: $postProcessResult")
+    }
+  }
 
   def runCanton(
       packPath: File,
