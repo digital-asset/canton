@@ -204,10 +204,22 @@ object BuildCommon {
         (f, s"$target${Path.sep}${f.getName}")
       }
 
-  private def packProtobufFiles(BaseFile: BetterFile, target: String): Seq[(File, String)] = {
+  private def packProtobufSourceFiles(BaseFile: BetterFile, target: String): Seq[(File, String)] = {
     val path = BaseFile / "src" / "main" / "protobuf"
     val pathJ = path.toJava
     (pathJ ** "*").get
+      .filter { f =>
+        f.isFile && !f.isHidden
+      }
+      .map { f =>
+        (f, Seq("protobuf", target, IO.relativize(pathJ, f).get).mkString(s"${Path.sep}"))
+      }
+  }
+
+  private def packProtobufDependencyFiles(path: BetterFile, target: String): Seq[(File, String)] = {
+    val pathJ = path.toJava
+    val protoFiles = if (pathJ.isDirectory) (pathJ ** "*").get else Seq(pathJ)
+    protoFiles
       .filter { f =>
         f.isFile && !f.isHidden
       }
@@ -326,7 +338,7 @@ object BuildCommon {
         "com.digitalasset.canton.crypto.v30.SigningPublicKey",
       )
       val imagePath =
-        "community" / "app" / "src" / "pack" / "scripts" / "offline-root-key" / "root_namespace_buf_image.bin"
+        "community" / "app" / "src" / "pack" / "scripts" / "offline-root-key" / "root_namespace_buf_image.json.gz"
       runCommand(
         s"buf build ${requiredTypes.mkString("--type=", " --type=", "")} -o ${imagePath.pathAsString}",
         log,
@@ -341,35 +353,55 @@ object BuildCommon {
           Seq()
       }
       //  here, we copy the protobuf files of community manually
-      val ledgerApiProto: Seq[(File, String)] = packProtobufFiles(
+      val ledgerApiProto: Seq[(File, String)] = packProtobufSourceFiles(
         "community" / "ledger-api",
         "ledger-api",
       )
-      val communityBaseProto: Seq[(File, String)] = packProtobufFiles(
+      val communityBaseProto: Seq[(File, String)] = packProtobufSourceFiles(
         "community" / "base",
         "community",
       )
-      val communityParticipantProto: Seq[(File, String)] = packProtobufFiles(
+      val communityParticipantProto: Seq[(File, String)] = packProtobufSourceFiles(
         "community" / "participant",
         "participant",
       )
-      val communityAdminProto: Seq[(File, String)] = packProtobufFiles(
+      val communityAdminProto: Seq[(File, String)] = packProtobufSourceFiles(
         "community" / "admin-api",
         "admin-api",
       )
-      val communitySynchronizerProto: Seq[(File, String)] = packProtobufFiles(
+      val communitySynchronizerProto: Seq[(File, String)] = packProtobufSourceFiles(
         "community" / "synchronizer",
         "synchronizer",
       )
 
+      val commonGoogleProtosRoot =
+        (DamlProjects.`google-common-protos-scala` / target).value / "protobuf_external"
+      val scalapbProto: Seq[(File, String)] = packProtobufDependencyFiles(
+        commonGoogleProtosRoot.toString / "scalapb",
+        "lib/scalapb",
+      )
+      val googleRpcProtos: Seq[(File, String)] = packProtobufDependencyFiles(
+        commonGoogleProtosRoot.toString / "google" / "rpc",
+        "lib/google/rpc",
+      )
+
+      val ledgerApiValueProtosRoot =
+        (DamlProjects.`ledger-api-value` / target).value / "protobuf_external"
+      val ledgerApiValueProto: Seq[(File, String)] = packProtobufDependencyFiles(
+        BetterFile(ledgerApiValueProtosRoot.toString),
+        "ledger-api",
+      )
+
       val protoFiles =
-        ledgerApiProto ++ communityBaseProto ++ communityParticipantProto ++ communityAdminProto ++ communitySynchronizerProto
+        ledgerApiProto ++ communityBaseProto ++ communityParticipantProto ++ communityAdminProto ++ communitySynchronizerProto ++
+          scalapbProto ++ googleRpcProtos ++ ledgerApiValueProto
 
       log.info("Invoking bundle generator")
       // add license to package
       val renames =
         releaseNotes ++ licenseFiles ++ demoSource ++ demoDars ++ demoJars ++ demoArtefacts ++ damlSampleSource ++ damlSampleDars ++ protoFiles
-      val args = bundlePack.value ++ renames.flatMap(x => Seq("-r", x._1.toString, x._2))
+      val args =
+        bundlePack.value ++ renames.flatMap(x => Seq("-r", x._1.toString, x._2))
       // build the canton fat-jar
       val assembleJar = assembly.value
       runCommand(

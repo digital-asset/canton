@@ -11,3 +11,8 @@ Wednesday after your change.
 
 ## Until YYYY-MM-DD (Exclusive)
 
+- Submission time is now called preparation time:
+  - The field `submission_time` for interactive submissions is now called `preparation_time`.
+  - The dynamic domain parameter `submission_time_record_time_tolerance` is now called `preparation_time_record_time_tolerance`.
+  - The error codes `LOCAL_VERDICT_SUBMISSION_TIME_OUT_OF_BOUND` and `TOPOLOGY_INCREASE_OF_SUBMISSION_TIME_TOLERANCE` are now called `LOCAL_VERDICT_PREPARATION_TIME_OUT_OF_BOUND` and `TOPOLOGY_INCREASE_OF_PREPARATION_TIME_TOLERANCE`.
+  - The console commands `set_submission_time_record_time_tolerance` is now called `set_preparation_time_record_time_tolerance`.
