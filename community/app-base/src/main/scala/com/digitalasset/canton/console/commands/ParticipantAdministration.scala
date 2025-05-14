@@ -69,7 +69,13 @@ import com.digitalasset.canton.protocol.{LfContractId, LfVersionedTransaction, S
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
-import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId}
+import com.digitalasset.canton.topology.{
+  ConfiguredPhysicalSynchronizerId,
+  ParticipantId,
+  PartyId,
+  PhysicalSynchronizerId,
+  SynchronizerId,
+}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias, config}
@@ -191,7 +197,7 @@ private[console] object ParticipantCommands {
         synchronizerAlias: SynchronizerAlias,
         connection: String,
         manualConnect: Boolean = false,
-        synchronizerId: Option[SynchronizerId] = None,
+        synchronizerId: Option[PhysicalSynchronizerId] = None,
         certificatesPath: String = "",
         priority: Int = 0,
         initialRetryDelay: Option[NonNegativeFiniteDuration] = None,
@@ -359,7 +365,7 @@ class ParticipantTestingGroup(
 
   @Help.Summary("Fetch the current time from the given synchronizer", FeatureFlag.Testing)
   def fetch_synchronizer_time(
-      synchronizerId: SynchronizerId,
+      synchronizerId: PhysicalSynchronizerId,
       timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.ledgerCommand,
   ): CantonTimestamp =
     check(FeatureFlag.Testing) {
@@ -403,7 +409,7 @@ class ParticipantTestingGroup(
     FeatureFlag.Testing,
   )
   def await_synchronizer_time(
-      synchronizerId: SynchronizerId,
+      synchronizerId: PhysicalSynchronizerId,
       time: CantonTimestamp,
       timeout: NonNegativeDuration = consoleEnvironment.commandTimeouts.ledgerCommand,
   ): Unit =
@@ -1718,7 +1724,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
   object synchronizers extends Helpful {
 
     @Help.Summary("Returns the id of the given synchronizer alias")
-    def id_of(synchronizerAlias: SynchronizerAlias): SynchronizerId =
+    def id_of(synchronizerAlias: SynchronizerAlias): PhysicalSynchronizerId =
       consoleEnvironment.run {
         adminCommand(
           ParticipantAdminCommands.SynchronizerConnectivity.GetSynchronizerId(synchronizerAlias)
@@ -1737,13 +1743,19 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       list_connected().exists { r =>
         r.synchronizerAlias == synchronizerAlias &&
         r.healthy &&
-        participantIsActiveOnSynchronizer(r.synchronizerId, id)
+        participantIsActiveOnSynchronizer(r.synchronizerId.logical, id)
       }
 
     @Help.Summary(
       "Test whether a participant is connected to a synchronizer"
     )
     def is_connected(synchronizerId: SynchronizerId): Boolean =
+      list_connected().exists(_.synchronizerId.logical == synchronizerId)
+
+    @Help.Summary(
+      "Test whether a participant is connected to physical a synchronizer"
+    )
+    def is_connected(synchronizerId: PhysicalSynchronizerId): Boolean =
       list_connected().exists(_.synchronizerId == synchronizerId)
 
     @Help.Summary(
@@ -1952,7 +1964,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           synchronizerAlias - The name you will be using to refer to this synchronizer. Cannot be changed anymore.
           connection - The connection string to connect to this synchronizer. I.e. https://url:port
           manualConnect - Whether this connection should be handled manually and also excluded from automatic re-connect.
-          synchronizerId - Optionally the synchronizerId you expect to see on this synchronizer.
+          synchronizerId - Optionally the physical id you expect to see on this synchronizer.
           certificatesPath - Path to TLS certificate files to use as a trust anchor.
           priority - The priority of the synchronizer. The higher the more likely a synchronizer will be used.
           timeTrackerConfig - The configuration for the synchronizer time tracker.
@@ -1963,7 +1975,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         synchronizerAlias: SynchronizerAlias,
         connection: String,
         manualConnect: Boolean = false,
-        synchronizerId: Option[SynchronizerId] = None,
+        synchronizerId: Option[PhysicalSynchronizerId] = None,
         certificatesPath: String = "",
         priority: Int = 0,
         timeTrackerConfig: SynchronizerTimeTrackerConfig = SynchronizerTimeTrackerConfig(),
@@ -2141,9 +2153,11 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     @Help.Description(
       "For each returned synchronizer, the boolean indicates whether the participant is currently connected to the synchronizer."
     )
-    def list_registered(): Seq[(SynchronizerConnectionConfig, Boolean)] = consoleEnvironment.run {
-      adminCommand(ParticipantAdminCommands.SynchronizerConnectivity.ListRegisteredSynchronizers)
-    }
+    def list_registered()
+        : Seq[(SynchronizerConnectionConfig, ConfiguredPhysicalSynchronizerId, Boolean)] =
+      consoleEnvironment.run {
+        adminCommand(ParticipantAdminCommands.SynchronizerConnectivity.ListRegisteredSynchronizers)
+      }
 
     @Help.Summary("Returns true if a synchronizer is registered using the given alias")
     def is_registered(synchronizerAlias: SynchronizerAlias): Boolean =
@@ -2154,10 +2168,18 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       list_registered().map(_._1).find(_.synchronizerAlias == synchronizerAlias)
 
     @Help.Summary("Modify existing synchronizer connection")
+    @Help.Description("""
+      The arguments are:
+          synchronizerAlias - Alias of the synchronizer
+          modifier - The change to be applied to the config.
+          validation - The validations which need to be done to the connection.
+          physicalSynchronizerId - Physical id of the synchronizer. If empty, the active one will be updated (if none is active, an error is returned).
+    """)
     def modify(
         synchronizerAlias: SynchronizerAlias,
         modifier: SynchronizerConnectionConfig => SynchronizerConnectionConfig,
         validation: SequencerConnectionValidation = SequencerConnectionValidation.All,
+        physicalSynchronizerId: Option[PhysicalSynchronizerId] = None,
     ): Unit =
       consoleEnvironment.runE {
         for {
@@ -2166,7 +2188,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           ).toEither
           cfg <- registeredSynchronizers
             .collectFirst {
-              case (config, _) if config.synchronizerAlias == synchronizerAlias => config
+              case (config, _, _) if config.synchronizerAlias == synchronizerAlias => config
             }
             .toRight(s"No such synchronizer $synchronizerAlias configured")
           newConfig = modifier(cfg)
@@ -2177,6 +2199,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           )
           _ <- adminCommand(
             ParticipantAdminCommands.SynchronizerConnectivity.ModifySynchronizerConnection(
+              physicalSynchronizerId,
               modifier(cfg),
               validation,
             )
@@ -2343,7 +2366,7 @@ class ParticipantHealthAdministration(
 
     consoleEnvironment.run {
       runner.adminCommand(
-        ParticipantAdminCommands.Inspection.CountInFlight(synchronizerId)
+        ParticipantAdminCommands.Inspection.CountInFlight(synchronizerId.logical)
       )
     }
   }

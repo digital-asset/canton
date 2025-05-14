@@ -16,10 +16,14 @@ import com.digitalasset.canton.metrics.{
   DbStorageMetrics,
   DeclarativeApiMetrics,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.ModuleName
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 
+import java.time.{Duration, Instant}
 import scala.collection.mutable
 import scala.concurrent.blocking
+import scala.concurrent.duration.FiniteDuration
+import scala.jdk.DurationConverters.ScalaDurationOps
 
 private[metrics] final class BftOrderingHistograms(val parent: MetricName)(implicit
     inventory: HistogramInventory
@@ -28,6 +32,21 @@ private[metrics] final class BftOrderingHistograms(val parent: MetricName)(impli
   private[metrics] val prefix = parent :+ BftOrderingMetrics.Prefix
 
   private[metrics] val dbStorage = new DbStorageHistograms(parent)
+
+  // Private constructor to avoid being instantiated multiple times by accident
+  private[metrics] final class PerformanceMetrics private[BftOrderingHistograms] {
+    private[metrics] val prefix = BftOrderingHistograms.this.prefix :+ "performance"
+
+    private[metrics] val orderingStageLatency: Item = Item(
+      prefix :+ "ordering-stage-latency",
+      summary = "Ordering stage latency",
+      description =
+        """Records the rate and latency it takes for an ordering stage, which is recorded as a label.
+          |This metric is meaningful only when sequencers' clocks are kept synchronized.""",
+      qualification = MetricQualification.Latency,
+    )
+  }
+  private[metrics] val performance = new PerformanceMetrics
 
   // Private constructor to avoid being instantiated multiple times by accident
   private[metrics] final class GlobalMetrics private[BftOrderingHistograms] {
@@ -134,6 +153,13 @@ private[metrics] final class BftOrderingHistograms(val parent: MetricName)(impli
         description = "Records the rate and latency when writing P2P messages to the network.",
         qualification = MetricQualification.Latency,
       )
+
+      private[metrics] val grpcLatency: Item = Item(
+        prefix :+ "grpc-latency",
+        summary = "Latency of a gRPC message send",
+        description = "Records the rate and latency of a gRPC message send.",
+        qualification = MetricQualification.Latency,
+      )
     }
     private[metrics] val send = new SendMetrics
 
@@ -171,6 +197,36 @@ class BftOrderingMetrics private[metrics] (
 
   override def storageMetrics: DbStorageMetrics = dbStorage
 
+  // Private constructor to avoid being instantiated multiple times by accident
+  final class PerformanceMetrics private[BftOrderingMetrics] {
+
+    // Private constructor to avoid being instantiated multiple times by accident
+    final class OrderingStageLatencyMetrics private[BftOrderingMetrics] {
+      object labels {
+
+        object stages {
+          val Key: String = "ordering-stage"
+        }
+      }
+
+      val timer: Timer =
+        openTelemetryMetricsFactory.timer(histograms.performance.orderingStageLatency.info)
+
+      def emitModuleQueueLatency(
+          moduleName: ModuleName,
+          sendInstant: Instant,
+          maybeDelay: Option[FiniteDuration],
+      )(implicit metricsContext: MetricsContext): Unit = {
+        val latency =
+          Duration.between(sendInstant, Instant.now).minus(maybeDelay.fold(Duration.ZERO)(_.toJava))
+        timer.update(latency)(
+          metricsContext.withExtraLabels(labels.stages.Key -> s"module-queue-${moduleName.name}")
+        )
+      }
+    }
+    val orderingStageLatency = new OrderingStageLatencyMetrics
+  }
+  val performance = new PerformanceMetrics
   // Private constructor to avoid being instantiated multiple times by accident
   final class GlobalMetrics private[BftOrderingMetrics] {
 
@@ -367,6 +423,7 @@ class BftOrderingMetrics private[metrics] (
             case object ConsensusDataEquivocation extends ViolationTypeValue
             case object ConsensusRoleEquivocation extends ViolationTypeValue
             case object StateTransferInvalidMessage extends ViolationTypeValue
+            case object RetransmissionResponseInvalidMessage extends ViolationTypeValue
           }
         }
       }
@@ -415,8 +472,8 @@ class BftOrderingMetrics private[metrics] (
 
       val incomingRetransmissionsRequestsMeter: Meter = openTelemetryMetricsFactory.meter(
         MetricInfo(
-          prefix :+ "incoming-retransmissions",
-          summary = "Incoming retransmissions",
+          prefix :+ "incoming-retransmission-requests",
+          summary = "Incoming retransmissions requests",
           description = "Retransmissions requests received during an epoch",
           qualification = MetricQualification.Traffic,
         )
@@ -424,9 +481,9 @@ class BftOrderingMetrics private[metrics] (
 
       val outgoingRetransmissionsRequestsMeter: Meter = openTelemetryMetricsFactory.meter(
         MetricInfo(
-          prefix :+ "outgoing-retransmissions",
-          summary = "Outgoing retransmissions",
-          description = "Retransmissions sent during an epoch",
+          prefix :+ "outgoing-retransmission-requests",
+          summary = "Outgoing retransmissions requests",
+          description = "Retransmissions requests sent during an epoch",
           qualification = MetricQualification.Traffic,
         )
       )
@@ -445,6 +502,25 @@ class BftOrderingMetrics private[metrics] (
           prefix :+ "retransmitted-commit-certificates",
           summary = "Retransmitted commit certificates",
           description = "Number of commit certificates retransmitted during an epoch",
+          qualification = MetricQualification.Traffic,
+        )
+      )
+
+      val discardedWrongEpochRetransmissionResponseMeter: Meter = openTelemetryMetricsFactory.meter(
+        MetricInfo(
+          prefix :+ "discarded-wrong-epoch-retransmission-responses",
+          summary = "Discarded retransmission response messages",
+          description =
+            "Discarded retransmission response messages for epoch different than current one",
+          qualification = MetricQualification.Traffic,
+        )
+      )
+
+      val discardedRateLimitedRetransmissionRequestMeter: Meter = openTelemetryMetricsFactory.meter(
+        MetricInfo(
+          prefix :+ "discarded-rate-limited-retransmission-requests",
+          summary = "Discarded rate limited retransmission requests",
+          description = "Discarded retransmission requests messages due to rate limiting",
           qualification = MetricQualification.Traffic,
         )
       )
@@ -655,8 +731,21 @@ class BftOrderingMetrics private[metrics] (
         )
       )
 
+      val sendsRetried: Counter = openTelemetryMetricsFactory.counter(
+        MetricInfo(
+          prefix :+ "sends-retried",
+          summary = "P2P sends retried",
+          description =
+            "Total P2P network sends retried after a delay due to missing connectivity.",
+          qualification = MetricQualification.Latency,
+        )
+      )
+
       val networkWriteLatency: Timer =
         openTelemetryMetricsFactory.timer(histograms.p2p.send.networkWriteLatency.info)
+
+      val grpcLatency: Timer =
+        openTelemetryMetricsFactory.timer(histograms.p2p.send.grpcLatency.info)
     }
     val send = new SendMetrics
 

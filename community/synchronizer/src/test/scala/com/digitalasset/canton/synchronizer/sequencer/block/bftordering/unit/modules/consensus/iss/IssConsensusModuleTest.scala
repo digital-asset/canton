@@ -121,7 +121,6 @@ class IssConsensusModuleTest
 
   private val clock = new SimClock(loggerFactory = loggerFactory)
 
-  private implicit val metricsContext: MetricsContext = MetricsContext.Empty
   private implicit val config: BftBlockOrdererConfig = BftBlockOrdererConfig()
 
   private val blockOrder4Nodes =
@@ -534,7 +533,6 @@ class IssConsensusModuleTest
           ConsensusSegment.ConsensusMessage.ViewChange
             .create(
               BlockMetadata(EpochNumber.First, BlockNumber.First),
-              segmentIndex = 1,
               viewNumber = ViewNumber.First,
               consensusCerts = Seq.empty,
               from = myId,
@@ -1085,6 +1083,7 @@ class IssConsensusModuleTest
             fail(_),
             previousEpochsCommitCerts = Map.empty,
             metrics,
+            clock,
             loggerFactory,
           )
         ),
@@ -1093,7 +1092,7 @@ class IssConsensusModuleTest
         loggerFactory,
         timeouts,
         futurePbftMessageQueue,
-        postponedConsensusMessageQueue,
+        Some(postponedConsensusMessageQueue),
       )(maybeOnboardingStateTransferManager)(
         catchupDetector = maybeCatchupDetector.getOrElse(
           new DefaultCatchupDetector(topologyInfo.currentMembership, loggerFactory)

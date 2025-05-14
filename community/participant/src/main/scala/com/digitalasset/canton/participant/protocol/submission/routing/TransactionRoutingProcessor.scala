@@ -43,10 +43,9 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessor.{
 import com.digitalasset.canton.participant.protocol.submission.routing.TransactionRoutingProcessor.inputContractsStakeholders
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizersLookup
-import com.digitalasset.canton.participant.synchronizer.SynchronizerAliasManager
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
-import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
+import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.{LfKeyResolver, LfPartyId, checked}
@@ -96,7 +95,7 @@ class TransactionRoutingProcessor(
     logger.debug(s"Routing the transaction to synchronizer $synchronizerId")
 
     for {
-      // TODO(#23334) Not needed anymore if we just authenticate all before interpretation
+      // TODO(#25385) Not needed anymore if we just authenticate all before interpretation
       //          and ensure we just forward the payload
       inputDisclosedContracts <- EitherT
         .fromEither[FutureUnlessShutdown](
@@ -364,7 +363,7 @@ class TransactionRoutingProcessor(
     } yield ()
   }
 
-  private def wrapSubmissionError[T](synchronizerId: SynchronizerId)(
+  private def wrapSubmissionError[T](synchronizerId: PhysicalSynchronizerId)(
       eitherT: EitherT[FutureUnlessShutdown, TransactionSubmissionError, T]
   )(implicit ec: ExecutionContext): EitherT[FutureUnlessShutdown, TransactionRoutingError, T] =
     eitherT.leftMap(subm => TransactionRoutingError.SubmissionError(synchronizerId, subm))
@@ -375,7 +374,6 @@ object TransactionRoutingProcessor {
   def apply(
       connectedSynchronizersLookup: ConnectedSynchronizersLookup,
       synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
-      synchronizerAliasManager: SynchronizerAliasManager,
       cryptoPureApi: CryptoPureApi,
       participantId: ParticipantId,
       parameters: ParticipantNodeParameters,
@@ -391,16 +389,14 @@ object TransactionRoutingProcessor {
 
     val synchronizerRankComputation = new SynchronizerRankComputation(
       participantId = participantId,
-      priorityOfSynchronizer =
-        priorityOfSynchronizer(synchronizerConnectionConfigStore, synchronizerAliasManager),
+      priorityOfSynchronizer = priorityOfSynchronizer(synchronizerConnectionConfigStore),
       loggerFactory = loggerFactory,
     )
 
     val synchronizerSelectorFactory = new SynchronizerSelectorFactory(
       admissibleSynchronizersComputation =
         new AdmissibleSynchronizersComputation(participantId, loggerFactory),
-      priorityOfSynchronizer =
-        priorityOfSynchronizer(synchronizerConnectionConfigStore, synchronizerAliasManager),
+      priorityOfSynchronizer = priorityOfSynchronizer(synchronizerConnectionConfigStore),
       synchronizerRankComputation = synchronizerRankComputation,
       loggerFactory = loggerFactory,
     )
@@ -420,13 +416,14 @@ object TransactionRoutingProcessor {
   }
 
   private def priorityOfSynchronizer(
-      synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
-      synchronizerAliasManager: SynchronizerAliasManager,
+      synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore
   )(synchronizerId: SynchronizerId): Int = {
     val maybePriority = for {
-      synchronizerAlias <- synchronizerAliasManager.aliasForSynchronizerId(synchronizerId)
-      config <- synchronizerConnectionConfigStore.get(synchronizerAlias).toOption.map(_.config)
-    } yield config.priority
+      priority <- synchronizerConnectionConfigStore
+        .getActive(synchronizerId, singleExpected = false)
+        .toOption
+        .map(_.config.priority)
+    } yield priority
 
     // If the participant is disconnected from the synchronizer while this code is evaluated,
     // we may fail to determine the priority.

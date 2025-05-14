@@ -81,7 +81,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
   BftOrderingServiceReceiveResponse,
 }
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.{Member, SequencerId, SynchronizerId}
+import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId, SequencerId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
@@ -99,9 +99,9 @@ import scala.util.Random
 final class BftBlockOrderer(
     config: BftBlockOrdererConfig,
     sharedLocalStorage: Storage,
-    synchronizerId: SynchronizerId,
+    synchronizerId: PhysicalSynchronizerId,
     sequencerId: SequencerId,
-    protocolVersion: ProtocolVersion,
+    protocolVersion: ProtocolVersion, // TODO(#25482) Reduce duplication in parameters
     clock: Clock,
     orderingTopologyProvider: OrderingTopologyProvider[PekkoEnv],
     authenticationServicesO: Option[
@@ -290,6 +290,7 @@ final class BftBlockOrderer(
       "bftOrderingPekkoModuleSystem",
       createSystemInitializer(),
       createClientNetworkManager(),
+      metrics,
       loggerFactory,
     )
 
@@ -372,6 +373,7 @@ final class BftBlockOrderer(
       p2pGrpcNetworking.clientRole.closeConnection,
       timeouts,
       loggerFactory,
+      metrics,
     )
 
   private def tryCreateServerEndpoint(
@@ -383,7 +385,9 @@ final class BftBlockOrderer(
       p2pNetworkInModuleRef,
       clientEndpoint,
       p2pGrpcNetworking.serverRole.cleanupClientHandle,
+      getMessageSendInstant = msg => msg.sentAt.map(_.asJavaInstant),
       loggerFactory,
+      metrics,
     )
   }
 
@@ -520,7 +524,8 @@ final class BftBlockOrderer(
     val replyPromise = Promise[SequencerNode.SnapshotMessage]()
     val replyRef = new ModuleRef[SequencerNode.SnapshotMessage] {
       override def asyncSendTraced(msg: SequencerNode.SnapshotMessage)(implicit
-          traceContext: TraceContext
+          traceContext: TraceContext,
+          metricsContext: MetricsContext,
       ): Unit =
         replyPromise.success(msg)
     }
@@ -556,7 +561,8 @@ final class BftBlockOrderer(
     val replyPromise = Promise[SequencerNode.Message]()
     val replyRef = new ModuleRef[SequencerNode.Message] {
       override def asyncSendTraced(msg: SequencerNode.Message)(implicit
-          traceContext: TraceContext
+          traceContext: TraceContext,
+          metricsContext: MetricsContext,
       ): Unit =
         replyPromise.success(msg)
     }
