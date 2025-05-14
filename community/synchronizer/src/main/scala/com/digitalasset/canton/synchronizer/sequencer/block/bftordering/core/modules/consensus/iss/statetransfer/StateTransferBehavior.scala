@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftBlockOrdererConfig
@@ -44,6 +45,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.collection.BoundedQueue
+import com.digitalasset.canton.util.collection.BoundedQueue.DropStrategy
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
@@ -105,7 +108,11 @@ final class StateTransferBehavior[E <: Env[E]](
 
   private var cancelledSegments = 0
 
-  private val postponedConsensusMessages = new mutable.Queue[Consensus.Message[E]]()
+  @VisibleForTesting
+  private[bftordering] val postponedConsensusMessages: mutable.Queue[Consensus.Message[E]] =
+    // TODO(#23484): implement per-node quotas
+    // Drop newest to ensure continuity of messages (and resort to another catch-up if necessary)
+    new BoundedQueue(config.consensusQueueMaxSize, DropStrategy.DropNewest)
 
   private val stateTransferManager = maybeCustomStateTransferManager.getOrElse(
     new StateTransferManager(
@@ -215,11 +222,18 @@ final class StateTransferBehavior[E <: Env[E]](
           )
           setNewEpochState(newEpochInfo, membership, cryptoProvider)
         }
+        cleanUpPostponedMessageQueue()
         stateTransferManager.stateTransferNewEpoch(
           newEpochInfo.number,
           membership,
           initialState.topologyInfo.currentCryptoProvider, // used only for signing the request
         )(abort)
+
+      case Consensus.Admin.GetOrderingTopology(callback) =>
+        callback(
+          epochState.epoch.info.number,
+          activeTopologyInfo.currentMembership.orderingTopology.nodes,
+        )
 
       case Consensus.ConsensusMessage.AsyncException(e) =>
         logger.error(s"$messageType: exception raised from async consensus message: ${e.toString}")
@@ -337,6 +351,23 @@ final class StateTransferBehavior[E <: Env[E]](
     }
   }
 
+  private def cleanUpPostponedMessageQueue()(implicit traceContext: TraceContext): Unit = {
+    val currentEpochNumber = epochState.epoch.info.number
+
+    postponedConsensusMessages.dequeueAll {
+      case pbftMessage: Consensus.ConsensusMessage.PbftUnverifiedNetworkMessage =>
+        pbftMessage.underlyingNetworkMessage.message.blockMetadata.epochNumber < currentEpochNumber
+      // We don't store retransmission messages, as they will likely be stale once state transfer is finished.
+      case _: Consensus.RetransmissionsMessage => true
+      case otherMsg =>
+        // In practice, there should be no other messages in the queue than the ones handled above.
+        logger.warn(
+          s"Unexpected unhandled consensus message in the postponed message queue: ${otherMsg.getClass.getSimpleName}"
+        )
+        false
+    }.discard
+  }
+
   private def transitionBackToConsensus(newEpochTopologyMessage: Consensus.NewEpochTopology[E])(
       implicit
       context: E#ActorContextT[Consensus.Message[E]],
@@ -369,6 +400,7 @@ final class StateTransferBehavior[E <: Env[E]](
         abort,
         previousEpochsCommitCerts = Map.empty,
         metrics,
+        clock,
         loggerFactory,
       ),
       random,
@@ -376,7 +408,7 @@ final class StateTransferBehavior[E <: Env[E]](
       loggerFactory,
       timeouts,
       futurePbftMessageQueue = initialState.pbftMessageQueue,
-      postponedConsensusMessageQueue = postponedConsensusMessages,
+      postponedConsensusMessageQueue = Some(postponedConsensusMessages),
     )()(catchupDetector)
 
     context.become(consensusBehavior)

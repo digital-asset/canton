@@ -39,7 +39,12 @@ import com.digitalasset.canton.console.commands.PruningSchedulerAdministration
 import com.digitalasset.canton.crypto.{CryptoPureApi, Salt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NodeLoggingUtil}
+import com.digitalasset.canton.logging.{
+  NamedLoggerFactory,
+  NamedLogging,
+  NodeLoggingUtil,
+  TracedLogger,
+}
 import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection
 import com.digitalasset.canton.participant.config.BaseParticipantConfig
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
@@ -77,6 +82,7 @@ import java.time.Instant
 import scala.annotation.unused
 import scala.collection.mutable
 import scala.concurrent.duration.*
+import scala.sys.process.ProcessLogger
 
 trait ConsoleMacros extends NamedLogging with NoTracing {
 
@@ -85,6 +91,14 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
   @Help.Summary("Console utilities")
   @Help.Group("Utilities")
   object utils extends Helpful {
+
+    @Help.Summary("A process logger that forwards process logs to the canton logs")
+    def cantonProcessLogger(tracedLogger: TracedLogger = logger): ProcessLogger =
+      new ProcessLogger {
+        override def out(s: => String): Unit = tracedLogger.debug(s)
+        override def err(s: => String): Unit = tracedLogger.error(s)
+        override def buffer[T](f: => T): T = f
+      }
 
     @Help.Summary("Reflective inspection of object arguments, handy to inspect case class objects")
     @Help.Description(
@@ -685,15 +699,17 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
             Left(s"${instance.id.member} is currently not active")
           case NodeStatus.Success(status: SequencerStatus) =>
             // sequencer is already fully initialized for this synchronizer
+            // TODO(#25483) This comparison should be physical
             Either.cond(
-              status.synchronizerId == synchronizerId,
+              status.synchronizerId.logical == synchronizerId,
               true,
               s"${instance.id.member} has already been initialized for synchronizer ${status.synchronizerId} instead of $synchronizerId.",
             )
           case NodeStatus.Success(status: MediatorStatus) =>
             // mediator is already fully initialized for this synchronizer
+            // TODO(#25483) This comparison should be physical
             Either.cond(
-              status.synchronizerId == synchronizerId,
+              status.synchronizerId.logical == synchronizerId,
               true,
               s"${instance.id.member} has already been initialized for synchronizer ${status.synchronizerId} instead of $synchronizerId",
             )
@@ -845,7 +861,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         .filter(!_._1.health.initialized())
         .foreach { case (mediator, (mediatorSequencers, threshold)) =>
           mediator.setup.assign(
-            synchronizerId,
+            PhysicalSynchronizerId(synchronizerId, staticSynchronizerParameters.toInternal),
             SequencerConnections.tryMany(
               mediatorSequencers
                 .map(s => s.sequencerConnection.withAlias(SequencerAlias.tryCreate(s.name))),
@@ -874,6 +890,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         |Any participants as synchronizer owners must still manually connect to the synchronizer afterwards.
         """
     )
+    // TODO(#25483) This one should return the physical id
     def synchronizer(
         synchronizerName: String,
         sequencers: Seq[SequencerReference],

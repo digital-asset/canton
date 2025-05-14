@@ -169,5 +169,4 @@ private[integration] trait BaseIntegrationTest
         templateId.getEntityName,
       )
   }
-
 }

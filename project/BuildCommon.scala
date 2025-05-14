@@ -204,10 +204,22 @@ object BuildCommon {
         (f, s"$target${Path.sep}${f.getName}")
       }
 
-  private def packProtobufFiles(BaseFile: BetterFile, target: String): Seq[(File, String)] = {
+  private def packProtobufSourceFiles(BaseFile: BetterFile, target: String): Seq[(File, String)] = {
     val path = BaseFile / "src" / "main" / "protobuf"
     val pathJ = path.toJava
     (pathJ ** "*").get
+      .filter { f =>
+        f.isFile && !f.isHidden
+      }
+      .map { f =>
+        (f, Seq("protobuf", target, IO.relativize(pathJ, f).get).mkString(s"${Path.sep}"))
+      }
+  }
+
+  private def packProtobufDependencyFiles(path: BetterFile, target: String): Seq[(File, String)] = {
+    val pathJ = path.toJava
+    val protoFiles = if (pathJ.isDirectory) (pathJ ** "*").get else Seq(pathJ)
+    protoFiles
       .filter { f =>
         f.isFile && !f.isHidden
       }
@@ -309,15 +321,6 @@ object BuildCommon {
         runCommand(f"bash ./release/add-release-version.sh ${version.value}", log)
       }
 
-      // Prepare interactive submission example
-      // Write the daml commit into a file so it can be used in the release artifact to download the correct protobuf files
-      // from the daml repo
-      val interactiveSubmissionExamplePath =
-        "community" / "app" / "src" / "pack" / "examples" / "08-interactive-submission"
-      val damlCommitFile = interactiveSubmissionExamplePath / "daml_commit"
-      val damlVersion: String = Dependencies.daml_libraries_version
-      damlCommitFile.writeText(damlVersion.split('.').last.tail)(Seq(StandardOpenOption.CREATE))
-
       // Create a lighter buf image for offline root key scripts
       val requiredTypes = List(
         "com.digitalasset.canton.protocol.v30.TopologyTransaction",
@@ -326,7 +329,7 @@ object BuildCommon {
         "com.digitalasset.canton.crypto.v30.SigningPublicKey",
       )
       val imagePath =
-        "community" / "app" / "src" / "pack" / "scripts" / "offline-root-key" / "root_namespace_buf_image.bin"
+        "community" / "app" / "src" / "pack" / "scripts" / "offline-root-key" / "root_namespace_buf_image.json.gz"
       runCommand(
         s"buf build ${requiredTypes.mkString("--type=", " --type=", "")} -o ${imagePath.pathAsString}",
         log,
@@ -341,35 +344,55 @@ object BuildCommon {
           Seq()
       }
       //  here, we copy the protobuf files of community manually
-      val ledgerApiProto: Seq[(File, String)] = packProtobufFiles(
+      val ledgerApiProto: Seq[(File, String)] = packProtobufSourceFiles(
         "community" / "ledger-api",
         "ledger-api",
       )
-      val communityBaseProto: Seq[(File, String)] = packProtobufFiles(
+      val communityBaseProto: Seq[(File, String)] = packProtobufSourceFiles(
         "community" / "base",
         "community",
       )
-      val communityParticipantProto: Seq[(File, String)] = packProtobufFiles(
+      val communityParticipantProto: Seq[(File, String)] = packProtobufSourceFiles(
         "community" / "participant",
         "participant",
       )
-      val communityAdminProto: Seq[(File, String)] = packProtobufFiles(
+      val communityAdminProto: Seq[(File, String)] = packProtobufSourceFiles(
         "community" / "admin-api",
         "admin-api",
       )
-      val communitySynchronizerProto: Seq[(File, String)] = packProtobufFiles(
+      val communitySynchronizerProto: Seq[(File, String)] = packProtobufSourceFiles(
         "community" / "synchronizer",
         "synchronizer",
       )
 
+      val commonGoogleProtosRoot =
+        (DamlProjects.`google-common-protos-scala` / target).value / "protobuf_external"
+      val scalapbProto: Seq[(File, String)] = packProtobufDependencyFiles(
+        commonGoogleProtosRoot.toString / "scalapb",
+        "lib/scalapb",
+      )
+      val googleRpcProtos: Seq[(File, String)] = packProtobufDependencyFiles(
+        commonGoogleProtosRoot.toString / "google" / "rpc",
+        "lib/google/rpc",
+      )
+
+      val ledgerApiValueProtosRoot =
+        (DamlProjects.`ledger-api-value` / target).value / "protobuf_external"
+      val ledgerApiValueProto: Seq[(File, String)] = packProtobufDependencyFiles(
+        BetterFile(ledgerApiValueProtosRoot.toString),
+        "ledger-api",
+      )
+
       val protoFiles =
-        ledgerApiProto ++ communityBaseProto ++ communityParticipantProto ++ communityAdminProto ++ communitySynchronizerProto
+        ledgerApiProto ++ communityBaseProto ++ communityParticipantProto ++ communityAdminProto ++ communitySynchronizerProto ++
+          scalapbProto ++ googleRpcProtos ++ ledgerApiValueProto
 
       log.info("Invoking bundle generator")
       // add license to package
       val renames =
         releaseNotes ++ licenseFiles ++ demoSource ++ demoDars ++ demoJars ++ demoArtefacts ++ damlSampleSource ++ damlSampleDars ++ protoFiles
-      val args = bundlePack.value ++ renames.flatMap(x => Seq("-r", x._1.toString, x._2))
+      val args =
+        bundlePack.value ++ renames.flatMap(x => Seq("-r", x._1.toString, x._2))
       // build the canton fat-jar
       val assembleJar = assembly.value
       runCommand(
@@ -575,6 +598,7 @@ object BuildCommon {
       `ledger-common-dars-lf-v2-dev`,
       `ledger-api-core`,
       `ledger-json-api`,
+      `ledger-json-client`,
       `ledger-api-tools`,
       `ledger-api-string-interning-benchmark`,
       `transcode`,
@@ -1613,6 +1637,77 @@ object BuildCommon {
             ),
           ),
         )
+
+    import org.openapitools.generator.sbt.plugin.OpenApiGeneratorPlugin.autoImport.{
+      openApiInputSpec,
+      openApiConfigFile,
+      openApiOutputDir,
+      openApiGenerate,
+      openApiGenerateApiTests,
+      openApiGenerateModelTests,
+    }
+
+    // This ensures that we generate java classes for openapi.yaml only when it is  changed
+    lazy val cachedOpenApiGenerate = Def.taskDyn {
+      import sbt.util.Tracked
+      import sjsonnew.BasicJsonProtocol.*
+
+      val openApiYamlFile =
+        baseDirectory.value.getParentFile / "ledger-json-api" / "src/test/resources/json-api-docs/openapi.yaml"
+
+      val cacheDir = streams.value.cacheDirectory / "openapi"
+      val inputFile = openApiYamlFile.getCanonicalFile
+
+      val generateOrGet = Tracked.inputChanged(cacheDir / "input") { (hasChanged, _: String) =>
+        if (hasChanged) {
+          Def.task {
+            streams.value.log.info(s"Detected change in ${inputFile.getName}, regenerating...")
+            openApiGenerate.value
+          }
+        } else {
+          Def.task {
+            val log = streams.value.log
+            log.info(s"No change in ${inputFile.getName}, skipping generation")
+            val managedDir = (Test / sourceManaged).value
+            (managedDir ** "*").get.filter(_.isFile)
+          }
+        }
+      }
+
+      generateOrGet(Hash.toHex(Hash(inputFile)))
+    }
+
+    lazy val `ledger-json-client` = project
+      .in(file("community/ledger/ledger-json-client"))
+      .disablePlugins(WartRemover)
+      .dependsOn(`ledger-json-api` % "test->test")
+      .settings(
+        sharedCommunitySettings,
+        name := "ledger-json-client",
+        libraryDependencies := Seq(
+          gson % Test,
+          jackson_databind_nullable % Test,
+          gson_fire % Test,
+          jakarta_annotation_api % Test,
+          scalatest % Test,
+          scalacheck % Test,
+          magnolifyScalacheck % Test,
+          swagger_parser % Test,
+        ),
+        openApiInputSpec := (baseDirectory.value.getParentFile / "ledger-json-api" / "src/test/resources" / "json-api-docs" / "openapi.yaml").toString,
+        openApiConfigFile := (baseDirectory.value.getParentFile / "ledger-json-client" / "config.yaml").toString,
+        openApiOutputDir := (Test / sourceManaged).value.getPath,
+        openApiGenerateApiTests := Some(false),
+        openApiGenerateModelTests := Some(false),
+        Test / sourceGenerators += Def.task {
+          val files = cachedOpenApiGenerate.value
+          files.filter(f =>
+            f.getName.endsWith(".java") &&
+              // Compile only model and necessary classes, to avoid compiling full client with okhttp libs
+              (f.getParentFile.getName == "model" || f.getName == "JSON.java" || f.getName == "ApiException.java")
+          )
+        }.taskValue,
+      )
 
     lazy val `ledger-api-tools` = project
       .in(file("community/ledger/ledger-api-tools"))

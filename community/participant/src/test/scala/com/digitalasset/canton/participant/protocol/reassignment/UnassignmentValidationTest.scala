@@ -38,10 +38,12 @@ import org.scalatest.wordspec.AnyWordSpec
 import java.util.UUID
 
 class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecutionContext {
-  private val sourceSynchronizer = Source(SynchronizerId.tryFromString("synchronizer::source"))
+  private val sourceSynchronizer = Source(
+    SynchronizerId.tryFromString("synchronizer::source").toPhysical
+  )
   private val sourceMediator = MediatorGroupRecipient(MediatorGroupIndex.tryCreate(100))
   private val targetSynchronizer = Target(
-    SynchronizerId(UniqueIdentifier.tryFromProtoPrimitive("synchronizer::target"))
+    SynchronizerId(UniqueIdentifier.tryFromProtoPrimitive("synchronizer::target")).toPhysical
   )
 
   private val signatory: LfPartyId = LfPartyId.assertFromString("signatory::party")
@@ -136,7 +138,9 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
           metadata: ContractMetadata
       ): Either[ReassignmentValidationError, Unit] = {
         val updatedContract = contract.copy(metadata = metadata)
-        performValidation(updatedContract).futureValueUS.value.metadataResultET.futureValueUS
+        performValidation(
+          updatedContract
+        ).futureValueUS.value.contractAuthenticationResultF.futureValueUS
       }
 
       val incorrectStakeholders = testMetadata(
@@ -200,7 +204,7 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
           FullUnassignmentTree(
             UnassignmentViewTree(commonData, view, Source(testedProtocolVersion), pureCrypto)
           )
-        ).futureValueUS.value.metadataResultET.futureValueUS
+        ).futureValueUS.value.contractAuthenticationResultF.futureValueUS
       }
 
       val incorrectMetadata = ContractMetadata.tryCreate(
@@ -222,16 +226,15 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
     "detect non-stakeholder submitter" in {
       def unassignmentValidation(submitter: LfPartyId) = {
         val validation = performValidation(submitter = submitter)
-
-        validation.futureValueUS.value.validationErrors
+        validation.futureValueUS.value.submitterCheckResult
       }
 
       assert(!stakeholders.all.contains(nonStakeholder))
 
-      unassignmentValidation(signatory) shouldBe Nil
+      unassignmentValidation(signatory) shouldBe None
       unassignmentValidation(
         nonStakeholder
-      ) shouldBe Seq(
+      ) shouldBe Some(
         SubmitterMustBeStakeholder(
           ReassignmentRef(contract.contractId),
           submittingParty = nonStakeholder,
@@ -244,7 +247,7 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
       def unassignmentValidation(reassigningParticipants: Set[ParticipantId]) =
         performValidation(
           reassigningParticipantsOverride = reassigningParticipants
-        ).futureValueUS.value.validationErrors
+        ).futureValueUS.value.reassigningParticipantValidationResult
 
       // Happy path / control
       unassignmentValidation(reassigningParticipants = reassigningParticipants) shouldBe Seq()

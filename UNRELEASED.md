@@ -8,6 +8,14 @@ below should all be Wednesdays to align with the weekly release
 schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
+## Until 2025-05-14 (Exclusive)
+- JSON - changes in openapi (`Any` renamed as `ProtoAny`, `Event1` renamed to `TopologyEvent` and fixed, fixed `Field`, `FieldMask`,`JsReassignmentEvent` mappings.
+
+## Until 2025-05-14 (Exclusive)
+- SynchronizerConnectivityService.GetSynchronizerIdResponse.synchronizer_id changed to physical_synchronizer_id
+- SequencerConnectService.GetSynchronizerIdResponse.synchronizer_id changed to physical_synchronizer_id
+- MediatorStatusService.MediatorStatusResponse.MediatorStatusResponseStatus.synchronizer_id changed to physical_synchronizer_id
+- SequencerStatusService.SequencerStatusResponse.SequencerStatusResponseStatus.synchronizer_id changed to physical_synchronizer_id
 
 ## Until 2025-05-07 (Exclusive)
 - The VettedPackage validFrom and validUntil fields have been renamed to validFromInclusive and validFromExclusive.

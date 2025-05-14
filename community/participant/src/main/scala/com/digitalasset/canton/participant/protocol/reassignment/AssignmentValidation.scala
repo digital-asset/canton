@@ -36,7 +36,7 @@ import com.digitalasset.canton.util.ReassignmentTag.Target
 import scala.concurrent.ExecutionContext
 
 private[reassignment] class AssignmentValidation(
-    synchronizerId: Target[SynchronizerId],
+    synchronizerId: Target[PhysicalSynchronizerId],
     staticSynchronizerParameters: Target[StaticSynchronizerParameters],
     participantId: ParticipantId,
     reassignmentCoordination: ReassignmentCoordination,
@@ -148,15 +148,18 @@ private[reassignment] class AssignmentValidation(
             stakeholders = assignmentRequest.stakeholders.all,
           )
           .value
-          .map(_.swap.toSeq)
+          .map(_.swap.toOption)
 
-      authenticationErrorO <- AuthenticationValidator.verifyViewSignature(parsedRequest)
+      participantSignatureVerificationResult <- AuthenticationValidator.verifyViewSignature(
+        parsedRequest
+      )
 
     } yield AssignmentValidationResult.ValidationResult(
       activenessResult = activenessResult,
-      authenticationErrorO = authenticationErrorO,
-      metadataResultET = stakeholdersCheckResultET,
-      validationErrors = submitterCheckResult,
+      participantSignatureVerificationResult = participantSignatureVerificationResult,
+      contractAuthenticationResultF = stakeholdersCheckResultET,
+      submitterCheckResult = submitterCheckResult,
+      reassigningParticipantValidationResult = Seq.empty,
     )
   }
 
@@ -185,7 +188,9 @@ private[reassignment] class AssignmentValidation(
           cryptoSnapshotTargetTs,
           targetTimeProof,
         )
-        .leftMap[ReassignmentProcessorError](ReassignmentParametersError(synchronizerId.unwrap, _))
+        .leftMap[ReassignmentProcessorError](
+          ReassignmentParametersError(synchronizerId.unwrap.logical, _)
+        )
 
       reassignmentDataResult <- EitherT.rightT[FutureUnlessShutdown, ReassignmentProcessorError](
         validateUnassignmentData(
@@ -280,8 +285,8 @@ object AssignmentValidation {
 
   final case class UnexpectedSynchronizer(
       reassignmentId: ReassignmentId,
-      targetSynchronizerId: SynchronizerId,
-      receivedOn: SynchronizerId,
+      targetSynchronizerId: PhysicalSynchronizerId,
+      receivedOn: PhysicalSynchronizerId,
   ) extends AssignmentProcessorError {
     override def message: String =
       s"Cannot assign `$reassignmentId`: expecting synchronizer `$targetSynchronizerId` but received on `$receivedOn`"

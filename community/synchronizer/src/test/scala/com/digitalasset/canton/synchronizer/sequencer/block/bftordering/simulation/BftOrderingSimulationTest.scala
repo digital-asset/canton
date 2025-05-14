@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation
 
-import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.TracedLogger
@@ -95,7 +94,6 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
   def numberOfInitialNodes: Int
   def generateStages(): Seq[SimulationTestStageSettings]
 
-  private implicit val metricsContext: MetricsContext = MetricsContext.Empty
   private val noopMetrics = SequencerMetrics.noop(getClass.getSimpleName).bftOrdering
 
   private lazy val initialIndexRange = 0 until numberOfInitialNodes

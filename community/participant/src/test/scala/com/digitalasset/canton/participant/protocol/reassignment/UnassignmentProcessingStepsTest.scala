@@ -111,11 +111,11 @@ final class UnassignmentProcessingStepsTest
   private val testTopologyTimestamp = CantonTimestamp.Epoch
 
   private lazy val sourceSynchronizer = Source(
-    SynchronizerId(UniqueIdentifier.tryFromProtoPrimitive("source::synchronizer"))
+    SynchronizerId(UniqueIdentifier.tryFromProtoPrimitive("source::synchronizer")).toPhysical
   )
   private lazy val sourceMediator = MediatorGroupRecipient(MediatorGroupIndex.tryCreate(100))
   private lazy val targetSynchronizer = Target(
-    SynchronizerId(UniqueIdentifier.tryFromProtoPrimitive("target::synchronizer"))
+    SynchronizerId(UniqueIdentifier.tryFromProtoPrimitive("target::synchronizer")).toPhysical
   )
 
   private lazy val submitter: LfPartyId = PartyId(
@@ -802,7 +802,7 @@ final class UnassignmentProcessingStepsTest
 
       constructPendingDataAndResponseWith(
         unassignmentProcessingStepsWithoutPackages
-      ).value.pendingData.unassignmentValidationResult.validationErrors.head shouldBe a[
+      ).value.pendingData.unassignmentValidationResult.reassigningParticipantValidationResult.head shouldBe a[
         PackageIdUnknownOrUnvetted
       ]
     }
@@ -871,9 +871,10 @@ final class UnassignmentProcessingStepsTest
           hostedStakeholders = Set(party1),
           validationResult = UnassignmentValidationResult.ValidationResult(
             activenessResult = mkActivenessResult(),
-            authenticationErrorO = None,
-            metadataResultET = EitherT.right(FutureUnlessShutdown.unit),
-            validationErrors = Nil,
+            participantSignatureVerificationResult = None,
+            contractAuthenticationResultF = EitherT.right(FutureUnlessShutdown.unit),
+            submitterCheckResult = None,
+            reassigningParticipantValidationResult = Nil,
           ),
         )
 

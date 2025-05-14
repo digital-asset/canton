@@ -273,7 +273,7 @@ class RepairMacros(override val loggerFactory: NamedLoggerFactory)
           case mediator: MediatorReference =>
             mediator.setup
               .assign(
-                synchronizerId,
+                PhysicalSynchronizerId(synchronizerId, staticSynchronizerParameters.toInternal),
                 sequencerConnections,
               )
 
@@ -493,7 +493,7 @@ class RepairMacros(override val loggerFactory: NamedLoggerFactory)
           partyId,
           removes = List(sourceParticipant.id),
           forceFlags = ForceFlags(DisablePartyWithActiveContracts),
-          store = synchronizer.synchronizerId,
+          store = synchronizer.synchronizerId.logical,
         )
         .discard
     }
@@ -565,10 +565,11 @@ class RepairMacros(override val loggerFactory: NamedLoggerFactory)
   ): Iterator[Map[SynchronizerAlias, Seq[LfContractId]]] = {
     val idToAlias = targetParticipant.synchronizers
       .list_registered()
-      .map { case (synchronizerConnectionConfig, _) =>
+      .map { case (synchronizerConnectionConfig, _, _) =>
         val synchronizerAlias = synchronizerConnectionConfig.synchronizerAlias
         (
-          targetParticipant.synchronizers.id_of(synchronizerAlias),
+          // TODO(#25483) Check this projection
+          targetParticipant.synchronizers.id_of(synchronizerAlias).logical,
           synchronizerAlias,
         )
       }
