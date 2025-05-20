@@ -130,12 +130,15 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
           _ <- valueOrFail(sut.put(config, Active, KnownPhysicalSynchronizerId(synchronizerId)))(
             "failed to add config to synchronizer config store"
           )
-          retrievedConfig <- FutureUnlessShutdown.pure(
-            valueOrFail(sut.get(alias, KnownPhysicalSynchronizerId(synchronizerId)))(
-              "failed to retrieve config from synchronizer config store"
-            )
-          )
-        } yield retrievedConfig.config shouldBe config
+
+          _ = sut
+            .get(alias, KnownPhysicalSynchronizerId(synchronizerId))
+            .value
+            .config shouldBe config
+
+          _ = sut.get(synchronizerId).value.config shouldBe config
+
+        } yield succeed
       }
 
       "store the same config twice for idempotency" in {

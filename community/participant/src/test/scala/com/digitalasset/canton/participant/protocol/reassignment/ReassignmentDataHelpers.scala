@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.participant.protocol.reassignment
 
-import cats.syntax.functor.*
 import com.digitalasset.canton.*
 import com.digitalasset.canton.crypto.{SynchronizerCryptoClient, SynchronizerCryptoPureApi}
 import com.digitalasset.canton.data.{
@@ -40,8 +39,6 @@ final case class ReassignmentDataHelpers(
   private val seedGenerator: SeedGenerator =
     new SeedGenerator(pureCrypto)
 
-  private val protocolVersion: ProtocolVersion = BaseTest.testedProtocolVersion
-
   private def submitterInfo(
       submitter: LfPartyId,
       submittingParticipant: ParticipantId,
@@ -70,8 +67,7 @@ final case class ReassignmentDataHelpers(
       sourceSynchronizer = sourceSynchronizer,
       sourceProtocolVersion = Source(sourceProtocolVersion),
       sourceMediator = sourceMediator,
-      targetSynchronizer = targetSynchronizer.map(_.logical),
-      targetProtocolVersion = Target(protocolVersion),
+      targetSynchronizer = targetSynchronizer,
       targetTimeProof = targetTimeProof,
     )
 

@@ -63,8 +63,8 @@ object PekkoModuleSystem {
                 if (ready)
                   m.ready(pekkoContext.self)
                 sendsAwaitingAModule.foreach {
-                  case Send(message, traceContext, metricsContext, sendInstant, maybeDelay) =>
-                    sendInstant.foreach(
+                  case Send(message, traceContext, metricsContext, maybeSendInstant, maybeDelay) =>
+                    maybeSendInstant.foreach(
                       moduleSystem.metrics.performance.orderingStageLatency.emitModuleQueueLatency(
                         moduleName,
                         _,
@@ -75,10 +75,16 @@ object PekkoModuleSystem {
                 }
                 sendsAwaitingAModule.clear()
                 Behaviors.same
-              case send @ Send(message, traceContext, metricsContext, sendInstant, maybeDelay) =>
+              case send @ Send(
+                    message,
+                    traceContext,
+                    metricsContext,
+                    maybeSendInstant,
+                    maybeDelay,
+                  ) =>
                 maybeModule match {
                   case Some(module) =>
-                    sendInstant.foreach(
+                    maybeSendInstant.foreach(
                       moduleSystem.metrics.performance.orderingStageLatency.emitModuleQueueLatency(
                         moduleName,
                         _,
@@ -165,21 +171,6 @@ object PekkoModuleSystem {
         futureUnlessShutdown: PekkoFutureUnlessShutdown[X]
     )(
         fun: Try[X] => Option[MessageT]
-    )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit = {
-      val latency = moduleSystem.metrics.performance.orderingStageLatency
-      pipeToSelfImpl(
-        timeFuture(latency.timer, futureUnlessShutdown)(
-          metricsContext.withExtraLabels(
-            latency.labels.stages.Key -> futureUnlessShutdown.action
-          )
-        ),
-        fun,
-      )
-    }
-
-    private def pipeToSelfImpl[X](
-        futureUnlessShutdown: PekkoFutureUnlessShutdown[X],
-        fun: Try[X] => Option[MessageT],
     )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit =
       underlying.pipeToSelf(
         toFuture(

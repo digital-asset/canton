@@ -3,17 +3,26 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer
 
+import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssConsensusModuleMetrics.emitNonCompliance
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.validation.IssConsensusSignatureVerifier
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer.StateTransferMessageValidator.StateTransferValidationResult.{
+  InvalidResult,
+  ValidResult,
+}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.validation.{
+  ConsensusCertificateValidator,
+  IssConsensusSignatureVerifier,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.CryptoProvider.AuthenticatedMessageType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
+  BlockNumber,
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
@@ -40,45 +49,94 @@ final class StateTransferMessageValidator[E <: Env[E]](
 
   private val signatureVerifier = new IssConsensusSignatureVerifier[E](metrics)
 
-  def validateBlockTransferRequest(
-      request: BlockTransferRequest,
-      activeMembership: Membership,
-  ): Either[String, Unit] = {
-    val from = request.from
-    val nodes = activeMembership.sortedNodes
+  def validateUnverifiedStateTransferNetworkMessage(
+      msg: SignedMessage[StateTransferMessage.StateTransferNetworkMessage],
+      latestLocallyCompletedEpoch: EpochNumber,
+      orderingTopologyInfo: OrderingTopologyInfo[E],
+  )(implicit
+      context: E#ActorContextT[Consensus.Message[E]],
+      traceContext: TraceContext,
+  ): StateTransferMessageResult = {
 
+    val validationResult =
+      msg.message match {
+        case request: StateTransferMessage.BlockTransferRequest =>
+          validateBlockTransferRequest(request) match {
+            case Left(error) =>
+              val reqError = s"State transfer: invalid BlockTransferRequest: $error, dropping..."
+              InvalidResult(reqError, request.from, Some(request.epoch), None)
+            case Right(()) => ValidResult
+          }
+        case response: StateTransferMessage.BlockTransferResponse =>
+          validateBlockTransferResponse(
+            response,
+            latestLocallyCompletedEpoch,
+            orderingTopologyInfo.currentMembership,
+          ) match {
+            case Left(error) =>
+              val respError = s"State transfer: invalid BlockTransferResponse: $error, dropping..."
+              val blockMetadata = response.commitCertificate.map(_.prePrepare.message.blockMetadata)
+              InvalidResult(
+                respError,
+                response.from,
+                blockMetadata.map(_.epochNumber),
+                blockMetadata.map(_.blockNumber),
+              )
+            case Right(()) => ValidResult
+          }
+      }
+
+    validationResult match {
+      case ValidResult =>
+        verifyStateTransferMessage(
+          msg,
+          orderingTopologyInfo.currentMembership,
+          orderingTopologyInfo.currentCryptoProvider,
+        )
+      case InvalidResult(error, from, epoch, block) =>
+        logger.warn(error)
+        emitNonCompliance(metrics)(
+          from,
+          epoch,
+          view = None,
+          block,
+          metrics.security.noncompliant.labels.violationType.values.StateTransferInvalidMessage,
+        )
+    }
+
+    StateTransferMessageResult.Continue
+  }
+
+  // Note: we skip explicitly checking that `request.from` is a peer in the active topology.
+  // The next step (verify) first checks that the source is active in the topology
+  // before trying to verify the provided cryptographic signature(s)
+  def validateBlockTransferRequest(
+      request: BlockTransferRequest
+  ): Either[String, Unit] =
     for {
-      _ <- Either.cond(
-        nodes.contains(from),
-        (),
-        s"'$from' is requesting state transfer while not being active, active nodes are: $nodes",
-      )
       _ <- Either.cond(
         request.epoch > Genesis.GenesisEpochNumber,
         (),
         s"state transfer is supported only after genesis, but start epoch ${request.epoch} received",
       )
     } yield ()
-  }
 
-  // TODO(#23440) validate commit certificates more or less like this everywhere (except for state transfer specifics)
+  // Note: we don't need to verify that `response.from` is a peer in the active topology.
+  // The BlockTransferResponse message is designed such that the sender of it can be
+  // from a future topology. However, the contained CommitCertificates must be from peers
+  // in the active topology, and this is already checked in the next step (verify).
   def validateBlockTransferResponse(
       response: BlockTransferResponse,
       latestLocallyCompletedEpoch: EpochNumber,
       membership: Membership,
   ): Either[String, Unit] = {
     val from = response.from
-    val nodes = membership.sortedNodes
     val commitCert = response.commitCertificate
     val currentEpoch = latestLocallyCompletedEpoch + 1
-
+    lazy val consensusCertificateValidator = new ConsensusCertificateValidator(
+      membership.orderingTopology.strongQuorum
+    )
     for {
-      _ <- Either.cond(
-        nodes.contains(from),
-        (),
-        s"received a block transfer response from '$from' which has not been active, active nodes: $nodes",
-      )
-      // TODO(#23440) further validate the pre-prepare
       _ <- Either.cond(
         commitCert.forall(_.prePrepare.message.blockMetadata.epochNumber == currentEpoch),
         (), {
@@ -87,33 +145,13 @@ final class StateTransferMessageValidator[E <: Env[E]](
             s"$unexpectedEpoch, expected $currentEpoch"
         },
       )
-      _ <- Either.cond(
-        commitCert.forall(_.commits.forall(_.message.blockMetadata.epochNumber == currentEpoch)),
-        (),
-        s"received a block transfer response from '$from' containing commit(s) with an unexpected epoch, " +
-          s"expected $currentEpoch",
-      )
-      _ <- Either.cond(
-        commitCert.forall(cert =>
-          cert.commits.view.map(_.message.blockMetadata.blockNumber).distinct.sizeIs == 1
-        ),
-        (),
-        s"received a block transfer response from '$from' containing commit(s) not referring to a single block number",
-      )
-      _ <- Either.cond(
-        commitCert.forall(cert =>
-          cert.commits.sizeIs == cert.commits.view.map(_.from).distinct.size
-        ),
-        (),
-        s"received a block transfer response from '$from' containing commits with duplicate senders",
-      )
-      strongQuorum = membership.orderingTopology.strongQuorum
-      _ <- Either.cond(
-        commitCert.forall(_.commits.sizeIs >= strongQuorum),
-        (),
-        s"received a block transfer response from '$from' with insufficient number of commits " +
-          s"${commitCert.map(_.commits.size)}, the minimal number is $strongQuorum (strong quorum)",
-      )
+      _ <- commitCert
+        .map(cert => consensusCertificateValidator.validateConsensusCertificate(cert))
+        .fold[Either[String, Unit]](Right(())) { validationResult =>
+          validationResult.leftMap(error =>
+            s"received a block transfer response from '$from' containing a commit certificate with the following issue: $error"
+          )
+        }
     } yield ()
   }
 
@@ -173,13 +211,13 @@ final class StateTransferMessageValidator[E <: Env[E]](
         }
     }
 
-  def verifyCommitCertificate(
+  def verifyCommitCertificateSignatures(
       commitCertificate: CommitCertificate,
       from: BftNodeId,
       orderingTopologyInfo: OrderingTopologyInfo[E],
   )(implicit context: E#ActorContextT[Consensus.Message[E]], traceContext: TraceContext): Unit =
     context.pipeToSelf(
-      signatureVerifier.validateConsensusCertificate(commitCertificate, orderingTopologyInfo)
+      signatureVerifier.verifyConsensusCertificate(commitCertificate, orderingTopologyInfo)
     ) {
       case Success(Right(())) =>
         Some(
@@ -188,7 +226,7 @@ final class StateTransferMessageValidator[E <: Env[E]](
       case Success(Left(errors)) =>
         val blockMetadata = commitCertificate.prePrepare.message.blockMetadata
         logger.warn(
-          s"State transfer: commit certificate from '$from' failed signature verification, dropping: $errors"
+          s"State transfer: commit certificate ($blockMetadata) from '$from' failed signature verification, dropping: $errors"
         )
         emitNonCompliance(metrics)(
           from,
@@ -205,4 +243,17 @@ final class StateTransferMessageValidator[E <: Env[E]](
         )
         None
     }
+}
+
+object StateTransferMessageValidator {
+  sealed trait StateTransferValidationResult extends Product with Serializable
+  object StateTransferValidationResult {
+    case object ValidResult extends StateTransferValidationResult
+    final case class InvalidResult(
+        error: String,
+        from: BftNodeId,
+        epoch: Option[EpochNumber],
+        block: Option[BlockNumber],
+    ) extends StateTransferValidationResult
+  }
 }

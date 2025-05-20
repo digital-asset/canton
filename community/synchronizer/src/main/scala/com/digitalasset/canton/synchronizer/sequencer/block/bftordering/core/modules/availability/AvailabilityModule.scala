@@ -27,6 +27,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   BftNodeId,
   EpochNumber,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequestBatch.BatchValidityDurationEpochs
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.{
   AvailabilityAck,
   BatchId,
@@ -65,6 +66,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
+import java.time.Instant
 import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
 import scala.jdk.DurationConverters.*
@@ -117,6 +119,8 @@ final class AvailabilityModule[E <: Env[E]](
   private[bftordering] def getActiveCryptoProvider = activeCryptoProvider
   @VisibleForTesting
   private[bftordering] def getMessageAuthorizer = messageAuthorizer
+
+  private var batchWaitStartInstant: Option[Instant] = None
 
   disseminationProtocolState.lastProposalTime = Some(clock.now)
 
@@ -220,10 +224,13 @@ final class AvailabilityModule[E <: Env[E]](
 
     disseminationMessage match {
       case Availability.LocalDissemination.LocalBatchCreated(requests) =>
+        stopBatchWait()
         val batch = OrderingRequestBatch.create(requests, lastKnownEpochNumber)
         val batchId = BatchId.from(batch)
-
         logger.debug(s"$messageType: received $batchId from local mempool")
+        disseminationProtocolState.beingFirstSaved
+          .put(batchId, InitialSaveInProgress(availabilityEnterInstant = Some(Instant.now)))
+          .discard
         pipeToSelf(availabilityStore.addBatch(batchId, batch)) {
           case Failure(exception) =>
             abort(s"Failed to add batch $batchId", exception)
@@ -331,7 +338,14 @@ final class AvailabilityModule[E <: Env[E]](
           // Brand-new progress entry (batch first signed or re-signed)
           val progress = DisseminationProgress(
             activeMembership.orderingTopology,
-            InProgressBatchMetadata(batchId, batch.epochNumber, batch.stats),
+            InProgressBatchMetadata(
+              batchId,
+              batch.epochNumber,
+              batch.stats,
+              availabilityEnterInstant = disseminationProtocolState.beingFirstSaved
+                .remove(batchId)
+                .flatMap(_.availabilityEnterInstant),
+            ),
             Set(AvailabilityAck(thisNode, signature)),
           )
           logger.debug(s"$actingOnMessageType: progress of $batchId is $progress")
@@ -585,7 +599,25 @@ final class AvailabilityModule[E <: Env[E]](
     logger.debug(
       s"$actingOnMessageType: batches $orderedBatches have been acked from consensus as ordered"
     )
-    orderedBatches.foreach(disseminationProtocolState.batchesReadyForOrdering.remove(_).discard)
+    orderedBatches.foreach { orderedBatch =>
+      val removed = disseminationProtocolState.batchesReadyForOrdering.remove(orderedBatch)
+      val now = Instant.now
+      import metrics.performance.orderingStageLatency.*
+      removed
+        .map(_.readyForOrderingInstant)
+        .foreach { readyForOrderingInstant =>
+          readyForOrderingInstant.foreach(
+            emitOrderingStageLatency(
+              labels.stage.values.BatchAvailabilityTotal,
+              _,
+              now,
+            )
+          )
+          logger.debug(
+            s"$actingOnMessageType: batch $orderedBatch is now ordered, removed from dissemination progress"
+          )
+        }
+    }
     initiateMempoolPull(actingOnMessageType)
     emitDisseminationStateStats(metrics, disseminationProtocolState)
   }
@@ -648,7 +680,7 @@ final class AvailabilityModule[E <: Env[E]](
 
     disseminationProtocolState.disseminationProgress =
       disseminationProtocolState.disseminationProgress.map { case (batchId, originalProgress) =>
-        val reviewedProgress = originalProgress.review(currentOrderingTopology)
+        val reviewedProgress = originalProgress.review(thisNode, currentOrderingTopology)
         debugLogReviewedProgressIfAny(
           actingOnMessageType,
           currentOrderingTopology,
@@ -671,6 +703,7 @@ final class AvailabilityModule[E <: Env[E]](
           val reviewedProgress =
             DisseminationProgress.reviewReadyForOrdering(
               disseminatedBatchMetadata,
+              thisNode,
               currentOrderingTopology,
             )
           reviewedProgress.map(disseminatedBatchMetadata -> _)
@@ -740,6 +773,14 @@ final class AvailabilityModule[E <: Env[E]](
       logger.debug(
         s"$actingOnMessageType: $batchId has completed dissemination in ${disseminationProgress.orderingTopology}"
       )
+      import metrics.performance.orderingStageLatency.*
+      disseminationProgress.batchMetadata.availabilityEnterInstant.foreach(
+        emitOrderingStageLatency(
+          labels.stage.values.availability.BatchDissemination,
+          _,
+          Instant.now,
+        )
+      )
       // Dissemination completed: remove it now from the progress to avoids clashes with delayed / unneeded ACKs
       disseminationProtocolState.disseminationProgress.remove(batchId).discard
       disseminationProtocolState.batchesReadyForOrdering
@@ -760,12 +801,19 @@ final class AvailabilityModule[E <: Env[E]](
     disseminationMessage match {
       case Availability.RemoteDissemination.RemoteBatch(batchId, batch, from) =>
         logger.debug(s"$messageType: received request from $from to store batch $batchId")
+        val validationStart = Instant.now
         (for {
           _ <- validateBatch(batchId, batch, from)
           _ <- validateDisseminationQuota(batchId, from)
-        } yield ()).fold(
+        } yield batch).fold(
           error => logger.warn(error),
-          _ =>
+          batch => {
+            import metrics.performance.orderingStageLatency.*
+            emitOrderingStageLatency(
+              labels.stage.values.availability.dissemination.BatchValidation,
+              validationStart,
+              Instant.now,
+            )
             pipeToSelf(availabilityStore.addBatch(batchId, batch)) {
               case Failure(exception) =>
                 abort(s"Failed to add batch $batchId", exception)
@@ -773,7 +821,8 @@ final class AvailabilityModule[E <: Env[E]](
               case Success(_) =>
                 Availability.LocalDissemination
                   .RemoteBatchStored(batchId, batch.epochNumber, from)
-            },
+            }
+          },
         )
 
       case Availability.RemoteDissemination.RemoteBatchAcknowledged(batchId, from, signature) =>
@@ -1160,6 +1209,19 @@ final class AvailabilityModule[E <: Env[E]](
       disseminationProtocolState.batchesReadyForOrdering.take(
         toBeProvidedToConsensus.maxBatchesPerProposal.toInt
       )
+    val now = Instant.now
+    import metrics.performance.orderingStageLatency.*
+    batchesToBeProposed.values
+      .map(_.readyForOrderingInstant)
+      .foreach(
+        _.foreach(
+          emitOrderingStageLatency(
+            labels.stage.values.availability.dissemination.BatchQueuedForBlockInclusion,
+            _,
+            now,
+          )
+        )
+      )
     val proposal =
       Consensus.LocalAvailability.ProposalCreated(
         OrderingBlock(batchesToBeProposed.view.values.map(_.proofOfAvailability).toSeq),
@@ -1177,6 +1239,7 @@ final class AvailabilityModule[E <: Env[E]](
   private def initiateMempoolPull(
       actingOnMessageType: => String
   )(implicit traceContext: TraceContext): Unit = {
+    recordStartWaitIfIdle()
     // we tell mempool we want enough batches to fill up a proposal in order to make up for the one we just created
     // times the multiplier in order to try to disseminate-ahead batches for a following proposal
     val atMost = moduleConfig.maxBatchesPerProposal * DisseminateAheadMultiplier -
@@ -1188,6 +1251,26 @@ final class AvailabilityModule[E <: Env[E]](
       dependencies.mempool.asyncSend(Mempool.CreateLocalBatches(atMost.toShort))
     }
   }
+
+  private def recordStartWaitIfIdle(): Unit = {
+    import disseminationProtocolState.*
+    if (
+      toBeProvidedToConsensus.nonEmpty && batchesReadyForOrdering.isEmpty && disseminationProgress.isEmpty
+    )
+      batchWaitStartInstant = Some(Instant.now)
+  }
+
+  private def stopBatchWait(): Unit =
+    batchWaitStartInstant.foreach { startWait =>
+      val now = Instant.now
+      import metrics.performance.orderingStageLatency.*
+      emitOrderingStageLatency(
+        labels.stage.values.availability.BatchWait,
+        startWait,
+        now,
+      )
+      batchWaitStartInstant = None
+    }
 
   private def handleFailure[ErrorType, Result](
       errorString: => String
@@ -1269,11 +1352,11 @@ final class AvailabilityModule[E <: Env[E]](
       )
 
       _ <- Either.cond(
-        batch.epochNumber > lastKnownEpochNumber - OrderingRequestBatch.BatchValidityDurationEpochs,
+        batch.epochNumber > lastKnownEpochNumber - BatchValidityDurationEpochs,
         (), {
           emitInvalidMessage(metrics, from)
           s"Batch $batchId from '$from' contains an expired batch at epoch number ${batch.epochNumber} " +
-            s"which is ${OrderingRequestBatch.BatchValidityDurationEpochs} " +
+            s"which is $BatchValidityDurationEpochs " +
             s"epochs or more older than last known epoch $lastKnownEpochNumber, skipping"
         },
       )

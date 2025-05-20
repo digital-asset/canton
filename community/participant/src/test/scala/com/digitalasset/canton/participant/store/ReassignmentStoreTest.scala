@@ -399,6 +399,7 @@ trait ReassignmentStoreTest extends FailOnShutdown {
 
       "be idempotent" in {
         val store = mk(indexedTargetSynchronizer)
+
         for {
           _ <- valueOrFail(store.addUnassignmentData(unassignmentData))("add")
 
@@ -1181,7 +1182,7 @@ trait ReassignmentStoreTest extends FailOnShutdown {
         val store = mk(IndexedSynchronizer.tryCreate(sourceSynchronizer1.unwrap, 2))
         loggerFactory.assertInternalError[IllegalArgumentException](
           store.addUnassignmentData(unassignmentData),
-          _.getMessage shouldBe s"Synchronizer ${Target(sourceSynchronizer1.unwrap)}: Reassignment store cannot store reassignment for synchronizer $targetSynchronizerId",
+          _.getMessage shouldBe s"Synchronizer ${Target(sourceSynchronizer1.unwrap.logical)}: Reassignment store cannot store reassignment for synchronizer $targetSynchronizerId",
         )
       }
     }
@@ -1356,16 +1357,20 @@ object ReassignmentStoreTest extends EitherValues with NoTracing {
     ledgerTime = CantonTimestamp.Epoch,
   )
 
-  val synchronizer1 = SynchronizerId(UniqueIdentifier.tryCreate("synchronizer1", "SYNCHRONIZER1"))
+  val synchronizer1 = SynchronizerId(
+    UniqueIdentifier.tryCreate("synchronizer1", "SYNCHRONIZER1")
+  ).toPhysical
   val sourceSynchronizer1 = Source(
-    SynchronizerId(UniqueIdentifier.tryCreate("synchronizer1", "SYNCHRONIZER1"))
+    SynchronizerId(UniqueIdentifier.tryCreate("synchronizer1", "SYNCHRONIZER1")).toPhysical
   )
   val targetSynchronizer1 = Target(
     SynchronizerId(UniqueIdentifier.tryCreate("synchronizer1", "SYNCHRONIZER1"))
   )
   val mediator1 = MediatorGroupRecipient(MediatorGroupIndex.zero)
 
-  val synchronizer2 = SynchronizerId(UniqueIdentifier.tryCreate("synchronizer2", "SYNCHRONIZER2"))
+  val synchronizer2 = SynchronizerId(
+    UniqueIdentifier.tryCreate("synchronizer2", "SYNCHRONIZER2")
+  ).toPhysical
   val sourceSynchronizer2 = Source(
     SynchronizerId(UniqueIdentifier.tryCreate("synchronizer2", "SYNCHRONIZER2"))
   )
@@ -1384,8 +1389,9 @@ object ReassignmentStoreTest extends EitherValues with NoTracing {
     SynchronizerId(UniqueIdentifier.tryCreate("target", "SYNCHRONIZER"))
   )
 
-  val reassignment10 = ReassignmentId(sourceSynchronizer1, CantonTimestamp.Epoch)
-  val reassignment11 = ReassignmentId(sourceSynchronizer1, CantonTimestamp.ofEpochMilli(1))
+  val reassignment10 = ReassignmentId(sourceSynchronizer1.map(_.logical), CantonTimestamp.Epoch)
+  val reassignment11 =
+    ReassignmentId(sourceSynchronizer1.map(_.logical), CantonTimestamp.ofEpochMilli(1))
   val reassignment20 = ReassignmentId(sourceSynchronizer2, CantonTimestamp.Epoch)
 
   val loggerFactoryNotUsed = NamedLoggerFactory.unnamedKey("test", "NotUsed-ReassignmentStoreTest")

@@ -13,7 +13,12 @@ import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong}
 import com.digitalasset.canton.crypto.SyncCryptoApiParticipantProvider
-import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond, Offset}
+import com.digitalasset.canton.data.{
+  BufferedAcsCommitment,
+  CantonTimestamp,
+  CantonTimestampSecond,
+  Offset,
+}
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -25,8 +30,8 @@ import com.digitalasset.canton.participant.admin.inspection.SyncStateInspection.
 }
 import com.digitalasset.canton.participant.protocol.RequestJournal
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervalsProviderFactory
+import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.ActiveContractStore.ActivenessChangeDetail
-import com.digitalasset.canton.participant.store.{SyncPersistentState, *}
 import com.digitalasset.canton.participant.sync.{
   ConnectedSynchronizersLookup,
   SyncPersistentStateManager,
@@ -77,6 +82,7 @@ import java.time.Instant
 import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future}
 
+// TODO(#25483) Should this be physical?
 trait JournalGarbageCollectorControl {
   def disable(synchronizerId: SynchronizerId)(implicit traceContext: TraceContext): Future[Unit]
   def enable(synchronizerId: SynchronizerId)(implicit traceContext: TraceContext): Unit
@@ -656,7 +662,7 @@ final class SyncStateInspection(
                 .peekThrough(dp.toInclusive) // peekThrough takes an upper bound parameter
                 .map(iter =>
                   iter.filter(cmt =>
-                    cmt.period.fromExclusive >= dp.fromExclusive && cmt.synchronizerId.logical == dp.indexedSynchronizer.synchronizerId && (counterParticipants.isEmpty ||
+                    cmt.period.fromExclusive >= dp.fromExclusive && cmt.synchronizerId == dp.indexedSynchronizer.synchronizerId && (counterParticipants.isEmpty ||
                       counterParticipants
                         .contains(cmt.sender))
                   )
@@ -704,7 +710,7 @@ final class SyncStateInspection(
   def bufferedCommitments(
       synchronizerAlias: SynchronizerAlias,
       endAtOrBefore: CantonTimestamp,
-  )(implicit traceContext: TraceContext): Iterable[AcsCommitment] = {
+  )(implicit traceContext: TraceContext): Iterable[BufferedAcsCommitment] = {
     val persistentState = getPersistentState(synchronizerAlias)
     timeouts.inspection
       .awaitUS(s"$functionFullName to and including $endAtOrBefore on $synchronizerAlias")(

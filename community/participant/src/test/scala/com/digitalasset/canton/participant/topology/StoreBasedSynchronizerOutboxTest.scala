@@ -22,7 +22,6 @@ import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast.S
 import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{
-  IdentityProvidingServiceClient,
   StoreBasedSynchronizerTopologyClient,
   SynchronizerTopologyClientWithInit,
 }
@@ -117,7 +116,6 @@ class StoreBasedSynchronizerOutboxTest
       DefaultTestIdentities.physicalSynchronizerId,
       store = target,
       packageDependenciesResolver = StoreBasedSynchronizerTopologyClient.NoPackageDependencies,
-      ips = new IdentityProvidingServiceClient(),
       timeouts = timeouts,
       futureSupervisor = futureSupervisor,
       loggerFactory = loggerFactory,

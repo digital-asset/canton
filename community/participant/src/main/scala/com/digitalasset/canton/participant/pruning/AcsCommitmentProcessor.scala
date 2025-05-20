@@ -30,7 +30,12 @@ import com.digitalasset.canton.config.RequireTypes.{
 }
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
+import com.digitalasset.canton.data.{
+  AcsCommitmentData,
+  BufferedAcsCommitment,
+  CantonTimestamp,
+  CantonTimestampSecond,
+}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.AcsCommitmentErrorGroup
 import com.digitalasset.canton.error.{CantonError, ContextualizedCantonError}
@@ -1274,7 +1279,7 @@ class AcsCommitmentProcessor private (
 
   /* Logs all necessary messages and returns whether the remote commitment matches the local ones */
   private def matches(
-      remote: AcsCommitment,
+      remote: AcsCommitmentData,
       local: Iterable[(CommitmentPeriod, AcsCommitment.HashedCommitmentType)],
       lastPruningTime: Option[CantonTimestamp],
       possibleCatchUp: Boolean,
@@ -1328,7 +1333,7 @@ class AcsCommitmentProcessor private (
     }
 
   private def checkMatchAndMarkSafe(
-      remote: List[AcsCommitment]
+      remote: List[AcsCommitmentData]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     logger.debug(s"Processing ${remote.size} remote commitments")
     remote.parTraverse_ { cmt =>
@@ -1542,8 +1547,8 @@ class AcsCommitmentProcessor private (
           }
         )
 
-        comm <- catchUpTimestamp.fold(FutureUnlessShutdown.pure(Seq.empty[AcsCommitment]))(ts =>
-          store.queue.peekThroughAtOrAfter(ts)
+        comm <- catchUpTimestamp.fold(FutureUnlessShutdown.pure(Seq.empty[BufferedAcsCommitment]))(
+          ts => store.queue.peekThroughAtOrAfter(ts)
         )
 
       } yield {
@@ -1760,7 +1765,7 @@ class AcsCommitmentProcessor private (
       )
     } yield ()
   private def markPeriods(
-      cmt: AcsCommitment,
+      cmt: AcsCommitmentData,
       commitments: Iterable[(CommitmentPeriod, HashedCommitmentType)],
       lastPruningTime: Option[PruningStatus],
       possibleCatchUp: Boolean,
@@ -2450,7 +2455,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
             |the store of this participant or of the counterparty."""
       )
       object NoSharedContracts extends AlarmErrorCode(id = "ACS_MISMATCH_NO_SHARED_CONTRACTS") {
-        final case class Mismatch(synchronizerId: SynchronizerId, remote: AcsCommitment)
+        final case class Mismatch(synchronizerId: SynchronizerId, remote: AcsCommitmentData)
             extends Alarm(
               cause = "Received a commitment where we have no shared contract with the sender"
             )
@@ -2468,7 +2473,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       object CommitmentsMismatch extends AlarmErrorCode(id = "ACS_COMMITMENT_MISMATCH") {
         final case class Mismatch(
             synchronizerId: SynchronizerId,
-            remote: AcsCommitment,
+            remote: AcsCommitmentData,
             local: Seq[(CommitmentPeriod, AcsCommitment.HashedCommitmentType)],
         ) extends Alarm(cause = "The local commitment does not match the remote commitment")
       }

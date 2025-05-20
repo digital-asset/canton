@@ -30,12 +30,11 @@ import com.digitalasset.canton.participant.sync.SyncPersistentStateManager
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.TimeProof
 import com.digitalasset.canton.time.SynchronizerTimeTracker
-import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.SingletonTraverse.syntax.*
 import com.digitalasset.canton.util.{ReassignmentTag, SameReassignmentType, SingletonTraverse}
-import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -55,7 +54,7 @@ class ReassignmentCoordination(
 )(implicit ec: ExecutionContext)
     extends NamedLogging {
 
-  def addPendingUnassignment(reassignmentId: ReassignmentId) =
+  def addPendingUnassignment(reassignmentId: ReassignmentId): Unit =
     pendingUnassignments(reassignmentId.sourceSynchronizer)
       .foreach(_.add(reassignmentId))
 
@@ -166,8 +165,8 @@ class ReassignmentCoordination(
     } yield submissionResult
   }
 
-  // TODO(#25483) This should be physical
-  private[reassignment] def getStaticSynchronizerParameter[T[_]: SingletonTraverse](
+  // TODO(#25483) This one should be removed and the physical one used
+  private[reassignment] def getStaticSynchronizerParameterLogical[T[_]: SingletonTraverse](
       synchronizerId: T[SynchronizerId]
   )(implicit
       traceContext: TraceContext
@@ -176,6 +175,18 @@ class ReassignmentCoordination(
       EitherT.fromOption[FutureUnlessShutdown](
         staticSynchronizerParameterFor(Traced(synchronizerId)),
         UnknownSynchronizer(synchronizerId, "getting static synchronizer parameters"),
+      )
+    }
+
+  private[reassignment] def getStaticSynchronizerParameter[T[_]: SingletonTraverse](
+      synchronizerId: T[PhysicalSynchronizerId]
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, UnknownSynchronizer, T[StaticSynchronizerParameters]] =
+    synchronizerId.traverseSingleton { (_, synchronizerId) =>
+      EitherT.fromOption[FutureUnlessShutdown](
+        staticSynchronizerParameterFor(Traced(synchronizerId.logical)),
+        UnknownSynchronizer(synchronizerId.logical, "getting static synchronizer parameters"),
       )
     }
 
@@ -215,7 +226,7 @@ class ReassignmentCoordination(
       )
 
   private[reassignment] def awaitTimestampAndGetTaggedCryptoSnapshot(
-      targetSynchronizerId: Target[SynchronizerId],
+      targetSynchronizerId: Target[PhysicalSynchronizerId],
       staticSynchronizerParameters: Target[StaticSynchronizerParameters],
       timestamp: CantonTimestamp,
   )(implicit
@@ -225,16 +236,20 @@ class ReassignmentCoordination(
   ]] =
     for {
       _ <- awaitTimestamp(
-        targetSynchronizerId,
+        targetSynchronizerId.map(_.logical),
         staticSynchronizerParameters,
         timestamp,
         FutureUnlessShutdown.unit,
       )
-      snapshot <- cryptoSnapshot(targetSynchronizerId, staticSynchronizerParameters, timestamp)
+      snapshot <- cryptoSnapshot(
+        targetSynchronizerId.map(_.logical),
+        staticSynchronizerParameters,
+        timestamp,
+      )
     } yield snapshot
 
   private[reassignment] def getTimeProofAndSnapshot(
-      targetSynchronizerId: Target[SynchronizerId],
+      targetSynchronizerId: Target[PhysicalSynchronizerId],
       staticSynchronizerParameters: Target[StaticSynchronizerParameters],
   )(implicit
       traceContext: TraceContext
@@ -261,7 +276,7 @@ class ReassignmentCoordination(
   ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Unit] =
     for {
       reassignmentStore <- EitherT.fromEither[FutureUnlessShutdown](
-        reassignmentStoreFor(unassignmentData.targetSynchronizer)
+        reassignmentStoreFor(unassignmentData.targetSynchronizer.map(_.logical))
       )
       _ <- reassignmentStore
         .addUnassignmentData(unassignmentData)
@@ -282,7 +297,7 @@ class ReassignmentCoordination(
       reassignmentStore <- EitherT.fromEither[FutureUnlessShutdown](
         reassignmentStoreFor(target)
       )
-      sourceStaticParams <- getStaticSynchronizerParameter(reassignmentId.sourceSynchronizer)
+      sourceStaticParams <- getStaticSynchronizerParameterLogical(reassignmentId.sourceSynchronizer)
 
       _ <- reassignmentStore
         .addAssignmentDataIfAbsent(
@@ -345,8 +360,7 @@ trait ReassignmentSubmissionHandle {
   def submitUnassignments(
       submitterMetadata: ReassignmentSubmitterMetadata,
       contractIds: Seq[LfContractId],
-      targetSynchronizer: Target[SynchronizerId],
-      targetProtocolVersion: Target[ProtocolVersion],
+      targetSynchronizer: Target[PhysicalSynchronizerId],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, ReassignmentProcessorError, FutureUnlessShutdown[

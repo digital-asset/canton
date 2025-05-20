@@ -99,7 +99,7 @@ trait SyncService
       routingSynchronizerState: RoutingSynchronizerState,
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SynchronizerId, Map[LfPartyId, Set[LfPackageId]]]]
+  ): FutureUnlessShutdown[Map[PhysicalSynchronizerId, Map[LfPartyId, Set[LfPackageId]]]]
 
   // temporary implementation, will be removed with the refactoring of the SyncService interface
   /** Computes the highest ranked synchronizer from the given admissible synchronizers without
@@ -130,12 +130,12 @@ trait SyncService
       submitterInfo: SubmitterInfo,
       transaction: LfSubmittedTransaction,
       transactionMeta: TransactionMeta,
-      admissibleSynchronizers: NonEmpty[Set[SynchronizerId]],
+      admissibleSynchronizers: NonEmpty[Set[PhysicalSynchronizerId]],
       disclosedContractIds: List[LfContractId],
       routingSynchronizerState: RoutingSynchronizerState,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TransactionRoutingError, SynchronizerId]
+  ): EitherT[FutureUnlessShutdown, TransactionRoutingError, PhysicalSynchronizerId]
 
   // temporary implementation, will be removed with the refactoring of the SyncService interface
   /** Computes the best synchronizer for a submitted transaction by checking the submitted

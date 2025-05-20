@@ -8,6 +8,13 @@ below should all be Wednesdays to align with the weekly release
 schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
+## Until 2025-05-21 (Exclusive)
+- The `PartyToParticipant` topology mapping's `HostingParticipant` now has an optional, empty `Onboarding` message
+  for use with Online Party Replication and the `PartyManagementService.AddPartyAsync` endpoint.
+- Add configuration for the size of the inbound metadata on the Ledger API. Changing this value allows
+  the server to accept larger JWT tokens.
+`canton.participants.participant.ledger-api.max-inbound-metadata-size=10240`
+
 ## Until 2025-05-14 (Exclusive)
 - JSON - changes in openapi (`Any` renamed as `ProtoAny`, `Event1` renamed to `TopologyEvent` and fixed, fixed `Field`, `FieldMask`,`JsReassignmentEvent` mappings.
 
@@ -48,6 +55,28 @@ If the synchronizer parameter is not specified and the participant is connected 
 If the participant is not connected to any synchronizer, the request fails with the error `PARTY_ALLOCATION_WITHOUT_CONNECTED_SYNCHRONIZER`.
 
 The authorized store can still be used to store `PartyToParticipant` topology transactions, but users are discouraged from doing so.
+
+### Canton Console commands for universal streams api
+
+- The SubscribeTrees and SubscribeFlat LedgerApiCommands were removed. The SubscribeUpdates should be used instead.
+- The SubmitAndWaitTransactionTree LedgerApiCommand was removed. The SubmitAndWaitTransaction should be used instead.
+- The GetTransactionById and GetTransactionByOffset LedgerApiCommands were removed. The GetUpdateById should be used instead.
+- The following canton console commands have been removed:
+  - ledger_api.updates.{trees, flat}
+  - ledger_api.updates.{trees_with_tx_filter, flat_with_tx_filter}
+  - ledger_api.updates.{subscribe_trees, subscribe_flat}
+  - ledger_api.updates.{by_id, by_offset}
+  - ledger_api.commands.submit_flat
+  - ledger_api.javaapi.updates.{trees, flat}
+  - ledger_api.javaapi.updates.flat_with_tx_filter
+  - ledger_api.javaapi.commands.submit_flat
+- The following canton console commands have been added:
+  - ledger_api.updates.updates
+  - ledger_api.updates.{transactions, reassignments, topology_transactions}
+  - ledger_api.updates.transactions_with_tx_format
+  - ledger_api.updates.subscribe_updates
+  - ledger_api.javaapi.updates.transactions
+  - ledger_api.javaapi.updates.transactions_with_tx_format
 
 ## Until 2025-04-23 (Exclusive)
 - The error code `ABORTED_DUE_TO_SHUTDOWN` is now used instead of the (duplicate) error code `SERVER_IS_SHUTTING_DOWN` that was previously used.

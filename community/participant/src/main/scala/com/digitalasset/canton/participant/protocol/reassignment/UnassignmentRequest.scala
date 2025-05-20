@@ -11,7 +11,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentVal
 import com.digitalasset.canton.participant.protocol.submission.UsableSynchronizers
 import com.digitalasset.canton.sequencing.protocol.{MediatorGroupRecipient, TimeProof}
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -34,8 +34,7 @@ final case class UnassignmentRequest(
     sourceSynchronizer: Source[PhysicalSynchronizerId],
     sourceProtocolVersion: Source[ProtocolVersion],
     sourceMediator: MediatorGroupRecipient,
-    targetSynchronizer: Target[SynchronizerId],
-    targetProtocolVersion: Target[ProtocolVersion],
+    targetSynchronizer: Target[PhysicalSynchronizerId],
     targetTimeProof: TimeProof,
 ) {
 
@@ -67,7 +66,6 @@ final case class UnassignmentRequest(
         targetSynchronizer,
         targetTimeProof,
         sourceProtocolVersion,
-        targetProtocolVersion,
       )
 
     FullUnassignmentTree(UnassignmentViewTree(commonData, view, sourceProtocolVersion, hashOps))
@@ -86,8 +84,7 @@ object UnassignmentRequest {
         ProtocolVersion
       ], // TODO(#25482) Reduce duplication in parameters
       sourceMediator: MediatorGroupRecipient,
-      targetSynchronizer: Target[SynchronizerId],
-      targetProtocolVersion: Target[ProtocolVersion],
+      targetSynchronizer: Target[PhysicalSynchronizerId],
       sourceTopology: Source[TopologySnapshot],
       targetTopology: Target[TopologySnapshot],
   )(implicit
@@ -145,7 +142,6 @@ object UnassignmentRequest {
         sourceProtocolVersion,
         sourceMediator,
         targetSynchronizer,
-        targetProtocolVersion,
         timeProof,
       )
 

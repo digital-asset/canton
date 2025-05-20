@@ -375,7 +375,7 @@ class SequencerRuntime(
         .getOrElse(EitherT.rightT[FutureUnlessShutdown, String](()))
     } yield {
       logger.info("Sequencer runtime initialized")
-      runtimeReadyPromise.outcome(())
+      runtimeReadyPromise.outcome_(())
     }
 
   override def onClosed(): Unit =

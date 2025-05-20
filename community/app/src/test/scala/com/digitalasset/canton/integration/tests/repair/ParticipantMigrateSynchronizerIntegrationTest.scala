@@ -323,7 +323,7 @@ final class ParticipantMigrateSynchronizerIntegrationTest
 
           clue("transferring") {
             participant2.ledger_api.javaapi.commands
-              .submit_flat(
+              .submit(
                 Seq(bob),
                 coid.id.exerciseTransfer(alice.toProtoPrimitive).commands.asScala.toSeq,
               )

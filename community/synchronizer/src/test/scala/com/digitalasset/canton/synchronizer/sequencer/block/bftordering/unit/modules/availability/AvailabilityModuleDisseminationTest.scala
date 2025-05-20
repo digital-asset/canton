@@ -106,8 +106,23 @@ class AvailabilityModuleDisseminationTest
           )
 
           disseminationProtocolState.disseminationProgress should be(empty)
-          disseminationProtocolState.batchesReadyForOrdering should
-            contain only BatchReadyForOrderingNode0Vote
+          locally {
+            import BatchReadyForOrderingNode0Vote._2.*
+            disseminationProtocolState.batchesReadyForOrdering.values.toSeq should
+              matchPattern {
+                case Seq(
+                      DisseminatedBatchMetadata(
+                        `proofOfAvailability`,
+                        `epochNumber`,
+                        `stats`,
+                        _,
+                        _,
+                        _,
+                        _,
+                      )
+                    ) =>
+              }
+          }
           disseminationProtocolState.toBeProvidedToConsensus should be(empty)
         }
     }
@@ -663,8 +678,22 @@ class AvailabilityModuleDisseminationTest
         )
 
         disseminationProtocolState.disseminationProgress should be(empty)
-        disseminationProtocolState.batchesReadyForOrdering should
-          contain only BatchReadyForOrderingNode0And1Votes
+        locally {
+          import BatchReadyForOrderingNode0And1Votes._2.*
+          disseminationProtocolState.batchesReadyForOrdering.values.toSeq should matchPattern {
+            case Seq(
+                  DisseminatedBatchMetadata(
+                    `proofOfAvailability`,
+                    `epochNumber`,
+                    `stats`,
+                    _,
+                    _,
+                    _,
+                    _,
+                  )
+                ) =>
+          }
+        }
         disseminationProtocolState.toBeProvidedToConsensus should be(empty)
       }
     }
@@ -709,8 +738,22 @@ class AvailabilityModuleDisseminationTest
           }
 
           disseminationProtocolState.disseminationProgress should be(empty)
-          disseminationProtocolState.batchesReadyForOrdering should
-            contain only BatchReadyForOrdering4NodesQuorumVotes
+          locally {
+            import BatchReadyForOrdering4NodesQuorumVotes._2.*
+            disseminationProtocolState.batchesReadyForOrdering.values.toSeq should matchPattern {
+              case Seq(
+                    DisseminatedBatchMetadata(
+                      `proofOfAvailability`,
+                      `epochNumber`,
+                      `stats`,
+                      _,
+                      _,
+                      _,
+                      _,
+                    )
+                  ) =>
+            }
+          }
           disseminationProtocolState.toBeProvidedToConsensus should be(empty)
         }
     }

@@ -171,7 +171,7 @@ class TransactionTreeFactoryImpl(
             MapsUtil.mergeMapsOfSets(commandExecutionPackages, inputContractPackages)
           UsableSynchronizers
             .checkPackagesVetted(
-              synchronizerId = synchronizerId.logical,
+              synchronizerId = synchronizerId,
               snapshot = topologySnapshot,
               requiredPackagesByParty = packagesByParty,
               metadata.ledgerTime,

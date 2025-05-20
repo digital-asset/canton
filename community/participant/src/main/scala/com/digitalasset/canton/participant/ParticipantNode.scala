@@ -437,7 +437,6 @@ class ParticipantNodeBootstrap(
           storage,
           indexedStringStore,
           persistentState.map(_.acsCounterParticipantConfigStore).value,
-          ips,
           parameters,
           (staticSynchronizerParameters: StaticSynchronizerParameters) =>
             SynchronizerCrypto(crypto, staticSynchronizerParameters),

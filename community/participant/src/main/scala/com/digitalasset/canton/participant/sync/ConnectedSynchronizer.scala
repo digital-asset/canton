@@ -89,7 +89,6 @@ import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, 
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.{ErrorUtil, FutureUnlessShutdownUtil, MonadUtil}
-import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.engine.Engine
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
@@ -800,8 +799,7 @@ class ConnectedSynchronizer(
   override def submitUnassignments(
       submitterMetadata: ReassignmentSubmitterMetadata,
       contractIds: Seq[LfContractId],
-      targetSynchronizer: Target[SynchronizerId],
-      targetProtocolVersion: Target[ProtocolVersion],
+      targetSynchronizer: Target[PhysicalSynchronizerId],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, ReassignmentProcessorError, FutureUnlessShutdown[
@@ -830,7 +828,6 @@ class ConnectedSynchronizer(
                 submitterMetadata,
                 contractIds,
                 targetSynchronizer,
-                targetProtocolVersion,
               ),
             synchronizerCrypto.currentSnapshotApproximation.ipsSnapshot,
           )
@@ -888,11 +885,6 @@ class ConnectedSynchronizer(
       SyncCloseable(
         "connected-synchronizer",
         LifeCycle.close(
-          // Close the synchronizer crypto client first to stop waiting for snapshots that may block the sequencer subscription
-          synchronizerCrypto,
-          // Close the sequencer client so that the processors won't receive or handle events when
-          // their shutdown is initiated.
-          sequencerClient,
           journalGarbageCollector,
           acsCommitmentProcessor,
           transactionProcessor,

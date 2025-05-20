@@ -143,7 +143,7 @@ trait ReassignmentTest extends CommunityIntegrationTest with SharedEnvironment {
           List.empty.asJava,
         ).create.commands.asScala.toSeq
         val iou = clue("create-iou") {
-          val tx = participant1.ledger_api.javaapi.commands.submit_flat(
+          val tx = participant1.ledger_api.javaapi.commands.submit(
             Seq(payer),
             createIouCmd,
             commandId = "create-Iou",
@@ -258,7 +258,7 @@ trait ReassignmentTest extends CommunityIntegrationTest with SharedEnvironment {
 
       clue(s"use the contract on $synchronizer1") {
         val exerciseCallCmd = contractId.exerciseCall().commands.asScala.toSeq
-        participant2.ledger_api.javaapi.commands.submit_flat(
+        participant2.ledger_api.javaapi.commands.submit(
           Seq(owner),
           exerciseCallCmd,
           commandId = "exercise-Iou",

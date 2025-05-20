@@ -6,7 +6,7 @@ package com.digitalasset.canton.integration.tests
 import cats.syntax.functorFilter.*
 import cats.syntax.option.*
 import com.daml.ledger.api.v2.completion.Completion
-import com.daml.ledger.javaapi.data.TransactionTree
+import com.daml.ledger.javaapi.data.Transaction
 import com.digitalasset.base
 import com.digitalasset.base.error.GrpcStatuses
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands
@@ -138,7 +138,7 @@ trait CommandDeduplicationIntegrationTest
       val dedupPeriod1 = DeduplicationDuration(java.time.Duration.ofHours(1))
       val submissionId1 = "first-submission"
 
-      def submit(submissionId: String, dedupPeriod: DeduplicationPeriod): TransactionTree =
+      def submit(submissionId: String, dedupPeriod: DeduplicationPeriod): Transaction =
         participant1.ledger_api.javaapi.commands.submit(
           Seq(alice),
           Seq(createCycleContract),
@@ -647,7 +647,7 @@ trait CommandDeduplicationIntegrationTest
       val completionEnd = participant1.ledger_api.state.end()
       logger.debug("Submit first command via the command service")
       val submitF = Future {
-        participant1.ledger_api.javaapi.commands.submit_flat(
+        participant1.ledger_api.javaapi.commands.submit(
           Seq(alice),
           Seq(createCycleContract),
           synchronizerId = Some(daId),

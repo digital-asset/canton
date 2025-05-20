@@ -17,6 +17,7 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
   ConfigAlreadyExists,
   MissingConfigForSynchronizer,
   UnknownAlias,
+  UnknownPSId,
 }
 import com.digitalasset.canton.participant.store.{
   StoredSynchronizerConnectionConfig,
@@ -294,6 +295,17 @@ class DbSynchronizerConnectionConfigStore private[store] (
       .flatMap(_.get(configuredPSId))
       .toRight(MissingConfigForSynchronizer(alias, configuredPSId))
 
+  override def get(
+      synchronizerId: PhysicalSynchronizerId
+  ): Either[UnknownPSId, StoredSynchronizerConnectionConfig] = {
+    val id = KnownPhysicalSynchronizerId(synchronizerId)
+
+    synchronizerConfigCache.values
+      .flatMap(_.get(id))
+      .headOption
+      .toRight(UnknownPSId(synchronizerId))
+  }
+
   override def getAll(): Seq[StoredSynchronizerConnectionConfig] =
     synchronizerConfigCache.values.flatMap(_.values).toSeq
 
@@ -406,8 +418,6 @@ class DbSynchronizerConnectionConfigStore private[store] (
     for {
       isChangeNeeded <- EitherT(changeNeeded()).leftWiden[SynchronizerConnectionConfigStore.Error]
       all <- EitherT.right(getAllInternal)
-      _ = logger.debug(s"GEROLF: all: ${all.mkString("\n")}")
-
       _ <-
         if (isChangeNeeded)
           performChange()

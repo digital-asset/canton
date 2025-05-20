@@ -139,9 +139,7 @@ private[reassignment] class AssignmentProcessingSteps(
         .lookup(reassignmentId)
         .leftMap(err => NoReassignmentData(reassignmentId, err))
 
-      targetSynchronizer = unassignmentData.targetSynchronizer.map(
-        PhysicalSynchronizerId(_, staticSynchronizerParameters.unwrap)
-      )
+      targetSynchronizer = unassignmentData.targetSynchronizer
       _ = if (targetSynchronizer != synchronizerId)
         throw new IllegalStateException(
           s"Assignment $reassignmentId: Reassignment data for ${unassignmentData.targetSynchronizer} found on wrong synchronizer $synchronizerId"
@@ -307,6 +305,7 @@ private[reassignment] class AssignmentProcessingSteps(
         checkFree = contractIds,
         checkActive = Set.empty,
         lock = contractIds,
+        lockMaybeUnknown = Set.empty,
         needPriorState = Set.empty,
       )
       val activenessSet = ActivenessSet(
@@ -325,6 +324,13 @@ private[reassignment] class AssignmentProcessingSteps(
           receivedOn = synchronizerId.unwrap,
         )
       )
+
+  // assigned contracts should always be "known" as assignments include the contracts
+  protected override def contractsMaybeUnknown(
+      fullView: FullView,
+      snapshot: SynchronizerSnapshotSyncCryptoApi,
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
+    FutureUnlessShutdown.pure(false)
 
   override def constructPendingDataAndResponse(
       parsedRequest: ParsedRequestType,

@@ -119,7 +119,7 @@ final class MultipleMediatorsMultipleSynchronizersIntegrationTest
           "reassign-contract",
           participant1.adminParty.toProtoPrimitive,
         ).create.commands.loneElement
-      val tx = participant1.ledger_api.javaapi.commands.submit_flat(
+      val tx = participant1.ledger_api.javaapi.commands.submit(
         Seq(participant1.adminParty),
         Seq(cycle),
         synchronizerId = Some(synchronizer1Id),

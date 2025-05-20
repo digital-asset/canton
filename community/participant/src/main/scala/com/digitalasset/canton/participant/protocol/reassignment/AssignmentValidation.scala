@@ -177,7 +177,7 @@ private[reassignment] class AssignmentValidation(
       // TODO(i12926): Check that reassignmentData.unassignmentRequest.targetTimeProof.timestamp is in the past
       cryptoSnapshotTargetTs <- reassignmentCoordination
         .cryptoSnapshot(
-          unassignmentData.targetSynchronizer,
+          unassignmentData.targetSynchronizer.map(_.logical),
           staticSynchronizerParameters,
           targetTimeProof,
         )
