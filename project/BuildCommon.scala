@@ -607,6 +607,7 @@ object BuildCommon {
       `ledger-common-dars-lf-v2-dev`,
       `ledger-api-core`,
       `ledger-json-api`,
+      `ledger-json-client`,
       `ledger-api-tools`,
       `ledger-api-string-interning-benchmark`,
       `transcode`,
@@ -1642,6 +1643,77 @@ object BuildCommon {
             ),
           ),
         )
+
+    import org.openapitools.generator.sbt.plugin.OpenApiGeneratorPlugin.autoImport.{
+      openApiInputSpec,
+      openApiConfigFile,
+      openApiOutputDir,
+      openApiGenerate,
+      openApiGenerateApiTests,
+      openApiGenerateModelTests,
+    }
+
+    // This ensures that we generate java classes for openapi.yaml only when it is  changed
+    lazy val cachedOpenApiGenerate = Def.taskDyn {
+      import sbt.util.Tracked
+      import sjsonnew.BasicJsonProtocol.*
+
+      val openApiYamlFile =
+        baseDirectory.value.getParentFile / "ledger-json-api" / "src/test/resources/json-api-docs/openapi.yaml"
+
+      val cacheDir = streams.value.cacheDirectory / "openapi"
+      val inputFile = openApiYamlFile.getCanonicalFile
+
+      val generateOrGet = Tracked.inputChanged(cacheDir / "input") { (hasChanged, _: String) =>
+        if (hasChanged) {
+          Def.task {
+            streams.value.log.info(s"Detected change in ${inputFile.getName}, regenerating...")
+            openApiGenerate.value
+          }
+        } else {
+          Def.task {
+            val log = streams.value.log
+            log.info(s"No change in ${inputFile.getName}, skipping generation")
+            val managedDir = (Test / sourceManaged).value
+            (managedDir ** "*").get.filter(_.isFile)
+          }
+        }
+      }
+
+      generateOrGet(Hash.toHex(Hash(inputFile)))
+    }
+
+    lazy val `ledger-json-client` = project
+      .in(file("community/ledger/ledger-json-client"))
+      .disablePlugins(WartRemover)
+      .dependsOn(`ledger-json-api` % "test->test")
+      .settings(
+        sharedCommunitySettings,
+        name := "ledger-json-client",
+        libraryDependencies := Seq(
+          gson % Test,
+          jackson_databind_nullable % Test,
+          gson_fire % Test,
+          jakarta_annotation_api % Test,
+          scalatest % Test,
+          scalacheck % Test,
+          magnolifyScalacheck % Test,
+          swagger_parser % Test,
+        ),
+        openApiInputSpec := (baseDirectory.value.getParentFile / "ledger-json-api" / "src/test/resources" / "json-api-docs" / "openapi.yaml").toString,
+        openApiConfigFile := (baseDirectory.value.getParentFile / "ledger-json-client" / "config.yaml").toString,
+        openApiOutputDir := (Test / sourceManaged).value.getPath,
+        openApiGenerateApiTests := Some(false),
+        openApiGenerateModelTests := Some(false),
+        Test / sourceGenerators += Def.task {
+          val files = cachedOpenApiGenerate.value
+          files.filter(f =>
+            f.getName.endsWith(".java") &&
+              // Compile only model and necessary classes, to avoid compiling full client with okhttp libs
+              (f.getParentFile.getName == "model" || f.getName == "JSON.java" || f.getName == "ApiException.java")
+          )
+        }.taskValue,
+      )
 
     lazy val `ledger-api-tools` = project
       .in(file("community/ledger/ledger-api-tools"))

@@ -41,9 +41,13 @@ object Dependencies {
   lazy val dropwizard_version = "4.1.33"
   lazy val flyway_version = "10.15.0"
   lazy val gcp_kms_version = "2.55.0"
+  lazy val gson_version = "2.9.1"
+  lazy val gson_fire_version = "1.9.0"
   lazy val h2_version = "2.2.224"
   lazy val janino_version = "3.1.12"
   lazy val javax_annotations_version = "1.3.2"
+  lazy val jackson_databind_nullable_version = "0.2.6"
+  lazy val jakarta_annotation_api_version = "1.3.5"
   lazy val log4j_version = "2.23.1"
   lazy val logback_version = "1.5.3"
   lazy val logstash_version = "6.6"
@@ -78,11 +82,12 @@ object Dependencies {
   lazy val scalatest_version = "3.2.19"
   lazy val scalaz_version = "7.2.33"
   lazy val scopt_version = "4.1.0"
-  lazy val shapeless_version = "2.3.6"
+  lazy val shapeless_version = "2.3.7"
   lazy val slf4j_version = "2.0.6"
   // if you update the slick version, please also update our forked code in community/lib/slick and community/base/slick/util
   lazy val slick_version = "3.5.2"
   lazy val sttp_version = "3.8.16"
+  lazy val swagger_parser_version = "2.1.22"
   lazy val tapir_client_version = "1.9.11"
   lazy val tapir_version = "1.11.7"
   lazy val testcontainers_version = "1.19.7"
@@ -131,6 +136,9 @@ object Dependencies {
   lazy val grpc_protobuf = "io.grpc" % "grpc-protobuf" % grpc_version
   lazy val grpc_netty = "io.grpc" % "grpc-netty" % grpc_version
   lazy val grpc_netty_shaded = "io.grpc" % "grpc-netty-shaded" % grpc_version
+
+  lazy val gson = "com.google.code.gson" % "gson" % gson_version
+  lazy val gson_fire = "io.gsonfire" % "gson-fire" % gson_fire_version
 
   lazy val netty_boring_ssl =
     "io.netty" % "netty-tcnative-boringssl-static" % netty_boring_ssl_version
@@ -193,7 +201,10 @@ object Dependencies {
 
   lazy val chimney = "io.scalaland" %% "chimney" % chimney_version
   lazy val chimneyJavaConversion = "io.scalaland" %% "chimney-java-collections" % chimney_version
-
+  lazy val jackson_databind_nullable =
+    "org.openapitools" % "jackson-databind-nullable" % jackson_databind_nullable_version
+  lazy val jakarta_annotation_api =
+    "jakarta.annotation" % "jakarta.annotation-api" % jakarta_annotation_api_version
   lazy val magnolia = "com.softwaremill.magnolia1_2" %% "magnolia" % magnolia_version
   lazy val magnolifyShared =
     "com.spotify" % "magnolify-shared_2.13" % magnolifyShared_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
@@ -322,6 +333,9 @@ object Dependencies {
 
   lazy val sttp_pekko_backend =
     "com.softwaremill.sttp.client3" %% "pekko-http-backend" % pekko_http_backend_version
+
+  lazy val swagger_parser =
+    "io.swagger.parser.v3" % "swagger-parser" % swagger_parser_version
 
   // Transcode dependencies
   lazy val upickle = "com.lihaoyi" %% "upickle" % upickle_version

@@ -9,7 +9,18 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
-## Until YYYY-MM-DD (Exclusive)
+## Until 2025-05-14 (Exclusive)
+- JSON - changes in openapi (`Any` renamed as `ProtoAny`, `Event1` renamed to `TopologyEvent` and fixed, fixed `Field`, `FieldMask`,`JsReassignmentEvent` mappings.
+- JSON API - fixed openapi documentation for maps: (`eventsById`,`filtersByParty`).
+- JSON API - changed encoding for protobuf based enums.
+  Following types are now encoded as strings:
+
+    - `HashingSchemeVersion`,
+    - `PackageStatus`,
+    - `ParticipantPermission`,
+    - `SigningAlgorithmSpec`,
+    - `SignatureFormat`,
+    - `TransactionShape`,
 
 - Submission time is now called preparation time:
   - The field `submission_time` for interactive submissions is now called `preparation_time`.

@@ -4,15 +4,20 @@
 package com.digitalasset.canton.participant.protocol.submission.routing
 
 import cats.syntax.foldable.*
-import com.digitalasset.canton.error.TransactionRoutingError.UnableToQueryTopologySnapshot
+import com.digitalasset.canton.crypto.SynchronizerCryptoPureApi
+import com.digitalasset.canton.error.TransactionRoutingError.{
+  UnableToGetStaticParameters,
+  UnableToQueryTopologySnapshot,
+}
 import com.digitalasset.canton.ledger.participant.state.RoutingSynchronizerState
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.participant.protocol.submission.routing.RoutingSynchronizerStateFactory.SyncCryptoPureApiLookup
 import com.digitalasset.canton.participant.sync.{
   ConnectedSynchronizer,
   ConnectedSynchronizersLookup,
 }
-import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.protocol.{LfContractId, StaticSynchronizerParameters}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.client.TopologySnapshotLoader
 import com.digitalasset.canton.tracing.TraceContext
@@ -21,7 +26,13 @@ import com.digitalasset.canton.version.ProtocolVersion
 import scala.concurrent.ExecutionContext
 
 object RoutingSynchronizerStateFactory {
-  def create(connectedSynchronizers: ConnectedSynchronizersLookup)(implicit
+  type SyncCryptoPureApiLookup =
+    (SynchronizerId, StaticSynchronizerParameters) => Option[SynchronizerCryptoPureApi]
+
+  def create(
+      connectedSynchronizers: ConnectedSynchronizersLookup,
+      syncCryptoPureApiLookup: SyncCryptoPureApiLookup,
+  )(implicit
       traceContext: TraceContext
   ): RoutingSynchronizerStateImpl = {
     val connectedSynchronizersSnapshot = connectedSynchronizers.snapshot.toMap
@@ -34,6 +45,7 @@ object RoutingSynchronizerStateFactory {
     new RoutingSynchronizerStateImpl(
       connectedSynchronizers = connectedSynchronizersSnapshot,
       topologySnapshots = topologySnapshots,
+      syncCryptoPureApiLookup = syncCryptoPureApiLookup,
     )
   }
 }
@@ -41,6 +53,7 @@ object RoutingSynchronizerStateFactory {
 class RoutingSynchronizerStateImpl private[routing] (
     connectedSynchronizers: Map[SynchronizerId, ConnectedSynchronizer],
     val topologySnapshots: Map[SynchronizerId, TopologySnapshotLoader],
+    syncCryptoPureApiLookup: SyncCryptoPureApiLookup,
 ) extends RoutingSynchronizerState {
 
   override def getTopologySnapshotAndPVFor(
@@ -96,4 +109,14 @@ class RoutingSynchronizerStateImpl private[routing] (
     connectedSynchronizers.view.exists { case (_syncId, sync) =>
       sync.ready
     }
+
+  def getSyncCryptoPureApi(
+      synchronizerId: SynchronizerId
+  ): Either[UnableToGetStaticParameters.Failed, Option[SynchronizerCryptoPureApi]] =
+    connectedSynchronizers
+      .get(synchronizerId)
+      .toRight(UnableToGetStaticParameters.Failed(synchronizerId))
+      .map { connectedSynchronizer =>
+        syncCryptoPureApiLookup(synchronizerId, connectedSynchronizer.staticSynchronizerParameters)
+      }
 }
