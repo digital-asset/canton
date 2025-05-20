@@ -59,3 +59,6 @@ addSbtPlugin("org.jetbrains.scala" % "sbt-ide-settings" % "1.1.2")
 
 //For easy tar.gz archiving
 libraryDependencies += "org.apache.commons" % "commons-compress" % "1.27.1"
+
+// For testing openapi mapping
+addSbtPlugin("org.openapitools" % "sbt-openapi-generator" % "7.12.0")

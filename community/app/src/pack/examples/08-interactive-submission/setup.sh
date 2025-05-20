@@ -51,7 +51,7 @@ if [[ -f "$DAML_COMMIT_FILE" ]]; then
 else
     source "$ROOT_PATH/scripts/daml_version_util.sh"
     # When run from the repo, we extract the commit from DamlVersions.scala
-    DAML_COMMIT=$(cd "$ROOT_PATH" && echo $(get_daml_commit))
+    DAML_COMMIT=$(cd "$ROOT_PATH" > /dev/null && echo $(get_daml_commit))
     echo "Using Daml commit $DAML_COMMIT extracted from DamlVersions.scala"
 fi
 

@@ -468,6 +468,24 @@ object TransactionRoutingError extends RoutingErrorGroup {
   }
 
   @Explanation(
+    """This error indicates that static parameters information could not be queried."""
+  )
+  @Resolution(
+    """Check that the participant is connected to the synchronizer."""
+  )
+  object UnableToGetStaticParameters
+      extends ErrorCode(
+        id = "UNABLE_TO_GET_STATIC_PARAMETERS",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Failed(synchronizerId: SynchronizerId)
+        extends TransactionErrorImpl(
+          cause = s"Participant is not connected to synchronizer `$synchronizerId`."
+        )
+        with TransactionRoutingErrorWithSynchronizer
+  }
+
+  @Explanation(
     """This error indicates an internal error in the Canton synchronizer router."""
   )
   @Resolution(

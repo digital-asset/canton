@@ -45,6 +45,7 @@ lazy val `kms-driver-testing-lib` = CommunityProjects.`kms-driver-testing-lib`
 lazy val `mock-kms-driver` = CommunityProjects.`mock-kms-driver`
 lazy val `ledger-api-core` = CommunityProjects.`ledger-api-core`
 lazy val `ledger-json-api` = CommunityProjects.`ledger-json-api`
+lazy val `ledger-json-client` = CommunityProjects.`ledger-json-client`
 lazy val `ledger-api-tools` = CommunityProjects.`ledger-api-tools`
 lazy val `ledger-api-string-interning-benchmark` =
   CommunityProjects.`ledger-api-string-interning-benchmark`
