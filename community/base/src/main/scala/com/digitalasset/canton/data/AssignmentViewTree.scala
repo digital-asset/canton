@@ -4,7 +4,6 @@
 package com.digitalasset.canton.data
 
 import cats.syntax.either.*
-import cats.syntax.functor.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.{InvariantViolation, OtherError}
 import com.digitalasset.canton.ReassignmentCounter
@@ -415,8 +414,8 @@ final case class FullAssignmentTree(tree: AssignmentViewTree)
 
   // Synchronizers
   override def sourceSynchronizer: Source[SynchronizerId] = reassignmentId.sourceSynchronizer
-  override def targetSynchronizer: Target[SynchronizerId] =
-    commonData.targetSynchronizerId.map(_.logical)
+  override def targetSynchronizer: Target[PhysicalSynchronizerId] =
+    commonData.targetSynchronizerId
 
   override def synchronizerId: PhysicalSynchronizerId = commonData.targetSynchronizerId.unwrap
   override def mediator: MediatorGroupRecipient = commonData.targetMediatorGroup

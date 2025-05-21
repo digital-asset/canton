@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.synchronizer
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, ErrorGroup, Explanation, Resolution}
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader.SequencerInfoLoaderError
+import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.error.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -398,5 +399,7 @@ trait SynchronizerHandle extends AutoCloseable {
   def syncPersistentState: SyncPersistentState
 
   def topologyFactory: TopologyComponentFactory
+
+  def syncCrypto: SynchronizerCryptoClient
 
 }

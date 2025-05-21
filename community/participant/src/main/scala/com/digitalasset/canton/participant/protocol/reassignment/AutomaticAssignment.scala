@@ -64,7 +64,7 @@ private[participant] object AutomaticAssignment {
       for {
         targetIps <- reassignmentCoordination
           .getTimeProofAndSnapshot(
-            targetSynchronizer.map(_.logical),
+            targetSynchronizer,
             targetStaticSynchronizerParameters,
           )
           .map(_._2)

@@ -257,6 +257,7 @@ class AssignmentProcessingStepsTest
       Some(signature),
       None,
       isFreshOwnTimelyRequest = true,
+      areContractsUnknown = false,
       Seq.empty,
       targetMediator,
       cryptoSnapshot,

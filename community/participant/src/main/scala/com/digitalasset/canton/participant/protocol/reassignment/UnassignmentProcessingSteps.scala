@@ -116,7 +116,6 @@ class UnassignmentProcessingSteps(
       submitterMetadata,
       contractIds,
       targetSynchronizer,
-      targetProtocolVersion,
     ) = submissionParam
     val pureCrypto = sourceRecentSnapshot.pureCrypto
 
@@ -127,7 +126,7 @@ class UnassignmentProcessingSteps(
 
     for {
       _ <- condUnitET[FutureUnlessShutdown](
-        targetSynchronizer.unwrap != synchronizerId.unwrap.logical,
+        targetSynchronizer.unwrap != synchronizerId.unwrap,
         TargetSynchronizerIsSourceSynchronizer(synchronizerId.unwrap.logical, contractIds),
       )
 
@@ -193,7 +192,6 @@ class UnassignmentProcessingSteps(
           protocolVersion,
           mediator,
           targetSynchronizer,
-          targetProtocolVersion,
           Source(sourceRecentSnapshot.ipsSnapshot),
           targetCrypto.map(_.ipsSnapshot),
         )
@@ -345,11 +343,18 @@ class UnassignmentProcessingSteps(
     // TODO(i12926): Send a rejection if malformedPayloads is non-empty
     if (parsedRequest.fullViewTree.synchronizerId == synchronizerId.unwrap) {
       val contractIdS = parsedRequest.fullViewTree.contracts.contractIds.toSet
+      // Either check contracts for activeness and lock them normally or lock them knowing the
+      // contracts may not be known to the participant (e.g. due to party onboarding).
+      val (checkActiveAndLock, lockMaybeUnknown) =
+        if (parsedRequest.areContractsUnknown) {
+          (Set.empty[LfContractId], contractIdS.forgetNE)
+        } else (contractIdS.forgetNE, Set.empty[LfContractId])
       val contractsCheck = ActivenessCheck.tryCreate(
         checkFresh = Set.empty,
         checkFree = Set.empty,
-        checkActive = contractIdS,
-        lock = contractIdS,
+        checkActive = checkActiveAndLock,
+        lock = checkActiveAndLock,
+        lockMaybeUnknown = lockMaybeUnknown,
         needPriorState = contractIdS,
       )
       val activenessSet = ActivenessSet(
@@ -366,6 +371,19 @@ class UnassignmentProcessingSteps(
           ),
           synchronizerId.unwrap,
         )
+      )
+
+  protected override def contractsMaybeUnknown(
+      fullView: FullView,
+      snapshot: SynchronizerSnapshotSyncCryptoApi,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Boolean] =
+    snapshot.ipsSnapshot
+      .hostedOn(fullView.contracts.stakeholders.all, participantId)
+      // unassigned contracts may not be known if all the hosted stakeholders are onboarding
+      .map(hostedStakeholders =>
+        hostedStakeholders.nonEmpty && hostedStakeholders.values.forall(_.onboarding)
       )
 
   /** Wait until the participant has received and processed all topology transactions on the target
@@ -392,7 +410,7 @@ class UnassignmentProcessingSteps(
     */
   // TODO(i12926): Prevent deadlocks. Detect non-sensible timestamps. Verify sequencer signature on time proof.
   private def getTopologySnapshotAtTimestamp(
-      synchronizerId: Target[SynchronizerId],
+      synchronizerId: Target[PhysicalSynchronizerId],
       timestamp: CantonTimestamp,
   )(implicit
       traceContext: TraceContext,
@@ -623,9 +641,7 @@ class UnassignmentProcessingSteps(
       automaticAssignment <- AutomaticAssignment
         .perform(
           pendingRequestData.unassignmentValidationResult.reassignmentId,
-          targetSynchronizer.map(
-            PhysicalSynchronizerId(_, targetStaticSynchronizerParameters.unwrap)
-          ),
+          targetSynchronizer,
           targetStaticSynchronizerParameters,
           reassignmentCoordination,
           pendingRequestData.unassignmentValidationResult.stakeholders,
@@ -686,8 +702,7 @@ object UnassignmentProcessingSteps {
   final case class SubmissionParam(
       submitterMetadata: ReassignmentSubmitterMetadata,
       contractIds: Seq[LfContractId],
-      targetSynchronizer: Target[SynchronizerId],
-      targetProtocolVersion: Target[ProtocolVersion],
+      targetSynchronizer: Target[PhysicalSynchronizerId],
   ) {
     val submittingParty: LfPartyId = submitterMetadata.submitter
   }

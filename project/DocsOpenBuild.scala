@@ -16,6 +16,7 @@ import sbt.FileInfo
 import sbt.util.ChangeReport
 
 import scala.util.matching.Regex
+import scala.sys.process.*
 
 object DocsOpenBuild {
 
@@ -42,21 +43,41 @@ object DocsOpenBuild {
   lazy val rebuildGeneratedIncludes =
     taskKey[Unit]("Re-generates include content and replaces include directives with it")
 
+  lazy val pythonCommand: SettingKey[String] =
+    settingKey[String]("The python command to use (python or python3)")
+
+  def findPythonCommand(): Def.Initialize[String] = Def.setting {
+    val log = sLog.value
+
+    if (isCommandAvailable("python3", log)) {
+      log.debug("Using 'python3' as the Python command")
+      "python3"
+    } else if (isCommandAvailable("python", log)) {
+      log.debug("Using 'python' as the Python command")
+      "python"
+    } else {
+      val errorMessage = "Neither 'python3' nor 'python' command was found or is executable"
+      log.error(errorMessage)
+      sys.error(errorMessage)
+    }
+  }
+
   def runPythonTests(): Def.Initialize[Task[String]] = Def.task {
     val log: ManagedLogger = streams.value.log
     val logPrefix = "[docs-open|test][runPythonTests]"
 
     log.info(s"$logPrefix Run python tests ...")
 
+    val python = pythonCommand.value
     val pythonScriptsDirectory = (Compile / resourceDirectory).value
-    runCommand(s"python -m unittest discover -v -s $pythonScriptsDirectory", log)
+    runCommand(s"$python -m unittest discover -v -s $pythonScriptsDirectory", log)
   }
 
   def resetGeneratedSnippets(): Def.Initialize[Task[Unit]] = Def.task {
     val log: ManagedLogger = streams.value.log
     val logPrefix = "[docs-open|reset][resetGeneratedSnippets]"
 
-    val snippetJsonSource = target.value / "pre"
+    val snippetJsonSource = target.value / "snippet_json_data"
     IO.delete(snippetJsonSource)
 
     log.info(s"$logPrefix Cleaned snippet JSON sources output directory $snippetJsonSource")
@@ -210,8 +231,10 @@ object DocsOpenBuild {
 
       log.info(s"$logPrefix Using the reference JSON to preprocess the RST files ...")
 
+      val python = pythonCommand.value
       val scriptPath = (Compile / resourceDirectory).value / "include_generator.py"
-      runCommand(s"python $scriptPath ${generateReferenceJson.value} ${target.value}", log)
+
+      runCommand(s"$python $scriptPath ${generateReferenceJson.value} ${target.value}", log)
     }
 
   lazy val embed_reference_json =
@@ -390,6 +413,33 @@ object DocsOpenBuild {
     changedFiles
   }
 
+  /** Updates the modification timestamp of RST files that include generated content.
+    *
+    * This forces SBT's [[DocsOpenBuild.syncSphinxSources()]] task ([[DocsOpenBuild.syncSources()]])
+    * to recognize these RST files as modified, triggering Sphinx's incremental build process for
+    * only the affected files.
+    *
+    * This step is necessary because changes to the source of the generated content occur within the
+    * Canton source code, not directly in the RST files themselves.
+    */
+  def touchGeneratedIncludeRstFiles(): Def.Initialize[Task[Unit]] = Def.task {
+    val log: ManagedLogger = streams.value.log
+    val logPrefix = "[docs-open|refresh][touchGeneratedIncludeRstFiles]"
+
+    val source = sourceDirectory.value / "sphinx"
+
+    val sourceRstFiles = incToRstRelativePathMapping.values.map(source / _).toSet
+    log.debug(
+      s"$logPrefix RST files defined by mapping: ${sourceRstFiles.mkString("\n\t", "\n\t", "")}"
+    )
+
+    IO.touch(sourceRstFiles)
+
+    log.info(
+      s"$logPrefix Touched ${sourceRstFiles.size} RST files referring to a generated include in $source"
+    )
+  }
+
   /** Replaces `.. snippet::` directives in RST files with their generated content.
     *
     * It executes an external Python script (`snippet_directive_replace.py`) to perform the
@@ -409,11 +459,12 @@ object DocsOpenBuild {
 
       val rstFiles = rstFilesTask.value
       if (rstFiles.nonEmpty) {
+        val python = pythonCommand.value
         val scriptPath = (Compile / resourceDirectory).value / "snippet_directive_replace.py"
         val snippetJsonSource = target.value / "snippet_json_data"
         val rstFilePaths: Seq[String] = rstFiles.map(_.getAbsolutePath)
         val command: Seq[String] =
-          Seq("python", scriptPath.toString, snippetJsonSource.toString) ++ rstFilePaths
+          Seq(python, scriptPath.toString, snippetJsonSource.toString) ++ rstFilePaths
 
         log.info(s"$logPrefix Replacing `.. snippet::` directives with RST code blocks ...")
         runCommand(command.mkString(" "), log)
@@ -439,11 +490,12 @@ object DocsOpenBuild {
 
     val rstFiles = rstFilesTask.value
     if (rstFiles.nonEmpty) {
+      val python = pythonCommand.value
       val scriptPath = (Compile / resourceDirectory).value / "literalinclude_directive_replace.py"
       val repoRoot: File = (ThisBuild / baseDirectory).value
       val rstFilePaths: Seq[String] = rstFiles.map(_.getAbsolutePath)
       val command: Seq[String] =
-        Seq("python", scriptPath.toString, repoRoot.toString) ++ rstFilePaths
+        Seq(python, scriptPath.toString, repoRoot.toString) ++ rstFilePaths
 
       log.info(s"$logPrefix Replacing `.. literalinclude::` directives with RST code blocks ...")
       runCommand(command.mkString(" "), log)
@@ -451,6 +503,18 @@ object DocsOpenBuild {
       "No literal include resolution required"
     }
   }
+
+  // Defines which .rst files can be processed by this task, needs to be in-sync with what
+  // the generateIncludes task produces
+  private val incToRstRelativePathMapping = Map(
+    "versioning.rst.inc" -> "participant/reference/versioning.rst",
+    "topology_versioning.rst.inc" -> "sdk/tutorials/app-dev/external_signing_topology_transaction.rst",
+    "monitoring.rst.sequencer_metrics.inc" -> "participant/howtos/observe/monitoring.rst",
+    "monitoring.rst.mediator_metrics.inc" -> "participant/howtos/observe/monitoring.rst",
+    "monitoring.rst.participant_metrics.inc" -> "participant/howtos/observe/monitoring.rst",
+    "error_codes.rst.inc" -> "participant/reference/error_codes.rst",
+    "console.rst.inc" -> "participant/reference/console.rst",
+  )
 
   /** Replaces `.. include::` for Canton generated content in RST files.
     *
@@ -468,18 +532,6 @@ object DocsOpenBuild {
       val rstFiles = rstFilesTask.value
       val generated = target.value / "generated"
       val preprocessed = target.value / "preprocessed-sphinx"
-
-      // Defines which .rst files can be processed by this task, needs to be in-sync with what
-      // the generateIncludes task produces
-      val incToRstRelativePathMapping = Map(
-        "versioning.rst.inc" -> "participant/reference/versioning.rst",
-        "topology_versioning.rst.inc" -> "sdk/tutorials/app-dev/external_signing_topology_transaction.rst",
-        "monitoring.rst.sequencer_metrics.inc" -> "participant/howtos/observe/monitoring.rst",
-        "monitoring.rst.mediator_metrics.inc" -> "participant/howtos/observe/monitoring.rst",
-        "monitoring.rst.participant_metrics.inc" -> "participant/howtos/observe/monitoring.rst",
-        "error_codes.rst.inc" -> "participant/reference/error_codes.rst",
-        "console.rst.inc" -> "participant/reference/console.rst",
-      )
 
       val expectedRstFiles = incToRstRelativePathMapping.values.map(preprocessed / _).toSet
       log.debug(
@@ -535,8 +587,6 @@ object DocsOpenBuild {
     }
 
   def resolveLedgerApiProtoDocs(): Def.Initialize[Task[Unit]] = Def.task {
-    import scala.sys.process._
-
     val log: ManagedLogger = streams.value.log
     val logPrefix = "[docs-open|resolve][resolveLedgerApiProtoDocs]"
 
@@ -566,12 +616,10 @@ object DocsOpenBuild {
       log: Logger,
       extraEnv: (String, String)*
   ): String = {
-    import scala.sys.process.{Process, ProcessLogger}
-
     val appPath = (packPath / "bin" / "canton").getPath
     val stdOut = mutable.MutableList[String]()
     val stdErr = mutable.MutableList[String]()
-    val exitCode = Process(Seq(appPath) ++ args, cwd, extraEnv: _*) ! ProcessLogger(
+    val exitCode = Process(Seq(appPath) ++ args, cwd, extraEnv*) ! ProcessLogger(
       line => stdOut += line,
       line => {
         log.info(s"Error detected: $line")
@@ -616,5 +664,15 @@ object DocsOpenBuild {
 
     LogManager.withLoggers(backed = _ => appender)
   }
+
+  def isCommandAvailable(command: String, log: Logger): Boolean =
+    try {
+      val process = Process(Seq(command, "--version"))
+      process.!(ProcessLogger(_ => ())) == 0 // Discard output, check exit code
+    } catch {
+      case _: Throwable =>
+        log.warn(s"Error checking for command: $command")
+        false
+    }
 
 }

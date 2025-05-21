@@ -73,7 +73,7 @@ object AvailabilityAck {
         .finish()
     )(
       metricsContext.withExtraLabels(
-        metrics.performance.orderingStageLatency.labels.stages.Key -> "availability-hash-batchId"
+        metrics.performance.orderingStageLatency.labels.stage.Key -> "availability-hash-batchId"
       )
     )
 }

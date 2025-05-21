@@ -660,7 +660,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
             snapshot
               .isHostedByAtLeastOneParticipantF(
                 declaredConfirmingParties.toSet,
-                (_, attr) => attr.permission.canConfirm,
+                (_, attr) => attr.canConfirm,
               )
           )
 

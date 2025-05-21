@@ -10,7 +10,11 @@ import com.digitalasset.canton.*
 import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.{FutureSupervisor, HasFutureSupervision}
 import com.digitalasset.canton.config.{CryptoConfig, ProcessingTimeout, TestingConfigInternal}
-import com.digitalasset.canton.crypto.{CryptoHandshakeValidator, SyncCryptoApiParticipantProvider}
+import com.digitalasset.canton.crypto.{
+  CryptoHandshakeValidator,
+  SyncCryptoApiParticipantProvider,
+  SynchronizerCryptoClient,
+}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
@@ -92,6 +96,7 @@ class GrpcSynchronizerRegistry(
       override val topologyClient: SynchronizerTopologyClientWithInit,
       override val topologyFactory: TopologyComponentFactory,
       override val syncPersistentState: SyncPersistentState,
+      override val syncCrypto: SynchronizerCryptoClient,
       override protected val timeouts: ProcessingTimeout,
   ) extends SynchronizerHandle
       with FlagCloseableAsync
@@ -103,10 +108,14 @@ class GrpcSynchronizerRegistry(
     override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
       import TraceContext.Implicits.Empty.*
       List[AsyncOrSyncCloseable](
+        // Close the synchronizer crypto client first to stop waiting for snapshots that may block the sequencer subscription
+        SyncCloseable("SyncCryptoClient", syncCrypto.close()),
         SyncCloseable(
           "topologyOutbox",
           topologyDispatcher.synchronizerDisconnected(synchronizerAlias),
         ),
+        // Close the sequencer client so that the processors won't receive or handle events when
+        // their shutdown is initiated.
         SyncCloseable("sequencerClient", sequencerClient.close()),
         SyncCloseable("sequencerChannelClient", sequencerChannelClientO.foreach(_.close())),
       )
@@ -193,6 +202,7 @@ class GrpcSynchronizerRegistry(
         synchronizerHandle.topologyClient,
         synchronizerHandle.topologyFactory,
         synchronizerHandle.persistentState,
+        synchronizerHandle.syncCryptoApi,
         synchronizerHandle.timeouts,
       )
       (grpcHandle, updatedConfig)

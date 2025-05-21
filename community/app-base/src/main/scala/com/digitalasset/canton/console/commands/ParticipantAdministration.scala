@@ -43,7 +43,7 @@ import com.digitalasset.canton.console.{
   SequencerReference,
 }
 import com.digitalasset.canton.crypto.SyncCryptoApiParticipantProvider
-import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
+import com.digitalasset.canton.data.{BufferedAcsCommitment, CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.grpc.ByteStringStreamObserver
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
@@ -769,7 +769,7 @@ class LocalCommitmentsAdministrationGroup(
   def buffered(
       synchronizerAlias: SynchronizerAlias,
       endAtOrBefore: Instant,
-  ): Iterable[AcsCommitment] =
+  ): Iterable[BufferedAcsCommitment] =
     access { node =>
       node.sync.stateInspection.bufferedCommitments(
         synchronizerAlias,

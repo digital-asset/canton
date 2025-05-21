@@ -62,6 +62,7 @@ class SynchronizerAliasManager private (
   override def synchronizerIdForAlias(alias: SynchronizerAlias): Option[SynchronizerId] = Option(
     synchronizerAliasToId.get().get(alias)
   )
+
   override def aliasForSynchronizerId(id: SynchronizerId): Option[SynchronizerAlias] = Option(
     synchronizerAliasToId.get().inverse().get(id)
   )

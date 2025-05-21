@@ -320,6 +320,7 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
     signatureO,
     None,
     isFreshOwnTimelyRequest = true,
+    areContractsUnknown = false,
     Seq.empty,
     sourceMediator,
     cryptoSnapshot,

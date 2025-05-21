@@ -59,7 +59,7 @@ trait FullReassignmentViewTree extends ViewTree {
     ViewPosition.root // Use a dummy value, as there is only one view.
 
   def sourceSynchronizer: Source[SynchronizerId]
-  def targetSynchronizer: Target[SynchronizerId]
+  def targetSynchronizer: Target[PhysicalSynchronizerId]
 
   // Submissions
   def submitterMetadata: ReassignmentSubmitterMetadata = commonData.submitterMetadata

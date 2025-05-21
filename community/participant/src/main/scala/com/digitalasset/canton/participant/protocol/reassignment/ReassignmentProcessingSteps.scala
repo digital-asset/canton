@@ -238,7 +238,7 @@ trait ReassignmentProcessingSteps[
 
     val (WithRecipients(viewTree, recipients), signature) = rootViewsWithMetadata.head1
 
-    FutureUnlessShutdown.pure(
+    contractsMaybeUnknown(viewTree, snapshot).map(contractsMaybeUnknown =>
       ParsedReassignmentRequest(
         rc,
         ts,
@@ -248,6 +248,7 @@ trait ReassignmentProcessingSteps[
         signature,
         submitterMetadataO,
         isFreshOwnTimelyRequest,
+        contractsMaybeUnknown,
         malformedPayloads,
         mediator,
         snapshot,
@@ -255,6 +256,13 @@ trait ReassignmentProcessingSteps[
       )
     )
   }
+
+  protected def contractsMaybeUnknown(
+      fullView: FullView,
+      snapshot: SynchronizerSnapshotSyncCryptoApi,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Boolean]
 
   override def constructResponsesForMalformedPayloads(
       requestId: RequestId,
@@ -498,6 +506,7 @@ object ReassignmentProcessingSteps {
       signatureO: Option[Signature],
       override val submitterMetadataO: Option[ReassignmentSubmitterMetadata],
       override val isFreshOwnTimelyRequest: Boolean,
+      areContractsUnknown: Boolean,
       override val malformedPayloads: Seq[MalformedPayload],
       override val mediator: MediatorGroupRecipient,
       override val snapshot: SynchronizerSnapshotSyncCryptoApi,

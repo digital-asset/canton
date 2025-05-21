@@ -73,6 +73,16 @@ class SyncCryptoApiParticipantProvider(
   private val synchronizerCryptoClientCache: TrieMap[SynchronizerId, SynchronizerCryptoClient] =
     TrieMap.empty
 
+  def remove(synchronizerId: SynchronizerId): Unit = {
+    synchronizerCryptoClientCache.remove(synchronizerId).discard
+    ips.remove(synchronizerId).discard
+  }
+
+  def removeAndClose(synchronizerId: SynchronizerId): Unit = {
+    synchronizerCryptoClientCache.remove(synchronizerId).foreach(_.close())
+    ips.remove(synchronizerId).foreach(_.close())
+  }
+
   private def createSynchronizerCryptoClient(
       synchronizerId: SynchronizerId,
       staticSynchronizerParameters: StaticSynchronizerParameters,
@@ -89,14 +99,13 @@ class SyncCryptoApiParticipantProvider(
       timeouts,
       futureSupervisor,
       loggerFactory.append("synchronizerId", synchronizerId.toString),
-      synchronizerCryptoClientCache,
     )
 
-  private def createOrUpdateCache(
+  private def getOrUpdate(
       synchronizerId: SynchronizerId,
       staticSynchronizerParameters: StaticSynchronizerParameters,
       synchronizerTopologyClient: SynchronizerTopologyClient,
-  ) =
+  ): SynchronizerCryptoClient =
     synchronizerCryptoClientCache.getOrElseUpdate(
       synchronizerId,
       createSynchronizerCryptoClient(
@@ -110,7 +119,7 @@ class SyncCryptoApiParticipantProvider(
       synchronizerId: SynchronizerId,
       staticSynchronizerParameters: StaticSynchronizerParameters,
   ): SynchronizerCryptoClient =
-    createOrUpdateCache(
+    getOrUpdate(
       synchronizerId,
       staticSynchronizerParameters,
       ips.tryForSynchronizer(synchronizerId),
@@ -120,12 +129,8 @@ class SyncCryptoApiParticipantProvider(
       synchronizerId: SynchronizerId,
       staticSynchronizerParameters: StaticSynchronizerParameters,
   ): Option[SynchronizerCryptoClient] =
-    ips.forSynchronizer(synchronizerId).map { domainTopologyClient =>
-      createOrUpdateCache(
-        synchronizerId,
-        staticSynchronizerParameters,
-        domainTopologyClient,
-      )
+    ips.forSynchronizer(synchronizerId).map { topologyClient =>
+      getOrUpdate(synchronizerId, staticSynchronizerParameters, topologyClient)
     }
 
 }
@@ -307,7 +312,6 @@ object SyncCryptoClient {
 class SynchronizerCryptoClient private (
     val member: Member,
     val physicalSynchronizerId: PhysicalSynchronizerId,
-    val synchronizerCryptoClientCache: TrieMap[SynchronizerId, SynchronizerCryptoClient],
     val ips: SynchronizerTopologyClient,
     val crypto: SynchronizerCrypto,
     val syncCryptoSigner: SyncCryptoSigner,
@@ -386,10 +390,8 @@ class SynchronizerCryptoClient private (
 
   override def approximateTimestamp: CantonTimestamp = ips.approximateTimestamp
 
-  override def onClosed(): Unit = {
-    synchronizerCryptoClientCache.remove(synchronizerId).discard
+  override def onClosed(): Unit =
     LifeCycle.close(ips)(logger)
-  }
 
   override def awaitMaxTimestamp(sequencedTime: SequencedTime)(implicit
       traceContext: TraceContext
@@ -420,7 +422,6 @@ object SynchronizerCryptoClient {
     new SynchronizerCryptoClient(
       member,
       PhysicalSynchronizerId(synchronizerId, staticSynchronizerParameters),
-      TrieMap.empty,
       ips,
       synchronizerCrypto,
       syncCryptoSignerWithLongTermKeys,
@@ -451,8 +452,6 @@ object SynchronizerCryptoClient {
       timeouts: ProcessingTimeout,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
-      synchronizerCryptoClientCache: TrieMap[SynchronizerId, SynchronizerCryptoClient] =
-        TrieMap.empty,
   )(implicit
       executionContext: ExecutionContext
   ): SynchronizerCryptoClient = {
@@ -462,12 +461,13 @@ object SynchronizerCryptoClient {
       member,
       synchronizerCrypto,
       sessionSigningKeysConfig,
+      futureSupervisor,
+      timeouts,
       loggerFactory,
     )
     new SynchronizerCryptoClient(
       member,
       PhysicalSynchronizerId(synchronizerId, staticSynchronizerParameters),
-      synchronizerCryptoClientCache,
       ips,
       synchronizerCrypto,
       syncCryptoSignerWithSessionKeys,

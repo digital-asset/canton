@@ -270,7 +270,7 @@ trait ParticipantStateChangeIntegrationTest
     // everything works before we test
     assertPingSucceeds(participant1, participant2)
     def submit() =
-      participant1.ledger_api.javaapi.commands.submit_flat(
+      participant1.ledger_api.javaapi.commands.submit(
         Seq(alice),
         Seq(
           IouSyntax
@@ -294,7 +294,7 @@ trait ParticipantStateChangeIntegrationTest
     )
 
     // p2 can not exercise a choice as p1 can not confirm
-    def call() = participant2.ledger_api.javaapi.commands.submit_flat(
+    def call() = participant2.ledger_api.javaapi.commands.submit(
       Seq(bob),
       Seq(cid.id.exerciseCall().commands().loneElement),
     )

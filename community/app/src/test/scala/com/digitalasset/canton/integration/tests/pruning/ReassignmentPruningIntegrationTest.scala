@@ -166,7 +166,12 @@ sealed trait ReassignmentPruningIntegrationTest
     val unassignmentId = unassignment.unassignId
 
     val unassignOffsetP1 = participant1.ledger_api.updates
-      .trees(Set(alice), 1, ledgerEndP1BeforeUnassign)
+      .reassignments(
+        partyIds = Set(alice),
+        filterTemplates = Seq.empty,
+        completeAfter = 1,
+        beginOffsetExclusive = ledgerEndP1BeforeUnassign,
+      )
       .collectFirst { case wrapper: UpdateService.ReassignmentWrapper =>
         wrapper.reassignment.offset
       }
@@ -187,7 +192,12 @@ sealed trait ReassignmentPruningIntegrationTest
     val assignOffsetP1 = res.reassignment.offset
 
     val assignOffsetP2 = participant2.ledger_api.updates
-      .trees(Set(bank), 1, ledgerEndP2BeforeAssign)
+      .reassignments(
+        partyIds = Set(bank),
+        filterTemplates = Seq.empty,
+        completeAfter = 1,
+        beginOffsetExclusive = ledgerEndP2BeforeAssign,
+      )
       .collectFirst { case wrapper: UpdateService.ReassignmentWrapper =>
         wrapper.reassignment.offset
       }

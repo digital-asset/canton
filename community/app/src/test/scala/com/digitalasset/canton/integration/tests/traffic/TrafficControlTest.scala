@@ -811,7 +811,7 @@ trait TrafficControlTest
       readAs = Seq(alice),
     )
 
-    val contractId = created.eventsById.values
+    val contractId = created.events
       .map(_.getCreated.contractId)
       .headOption
       .value

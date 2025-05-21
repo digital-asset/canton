@@ -369,7 +369,7 @@ class TestingIdentityFactory(
       upToInclusive: CantonTimestamp,
       currentSnapshotApproximationTimestamp: CantonTimestamp,
   ): IdentityProvidingServiceClient = {
-    val ips = new IdentityProvidingServiceClient()
+    val ips = new IdentityProvidingServiceClient(loggerFactory)
     synchronizers.foreach(dId =>
       ips.add(new SynchronizerTopologyClient() with HasFutureSupervision with NamedLogging {
 
@@ -462,7 +462,7 @@ class TestingIdentityFactory(
             traceContext: TraceContext
         ): FutureUnlessShutdown[Option[(SequencedTime, EffectiveTime)]] =
           FutureUnlessShutdown.pure(None)
-      })
+      })(TraceContext.empty)
     )
     ips
   }

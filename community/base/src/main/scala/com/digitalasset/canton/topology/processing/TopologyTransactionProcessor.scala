@@ -519,7 +519,6 @@ object TopologyTransactionProcessor {
 
   def createProcessorAndClientForSynchronizer(
       topologyStore: TopologyStore[TopologyStoreId.SynchronizerStore],
-      ips: IdentityProvidingServiceClient,
       synchronizerId: PhysicalSynchronizerId,
       pureCrypto: SynchronizerCryptoPureApi,
       parameters: CantonNodeParameters,
@@ -551,7 +550,6 @@ object TopologyTransactionProcessor {
       synchronizerId,
       topologyStore,
       StoreBasedSynchronizerTopologyClient.NoPackageDependencies,
-      ips,
       parameters.cachingConfigs,
       parameters.batchingConfig,
       parameters.processingTimeouts,

@@ -7,7 +7,12 @@ import cats.syntax.either.*
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.ProtoDeserializationError.CryptoDeserializationError
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
-import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
+import com.digitalasset.canton.data.{
+  AcsCommitmentData,
+  BufferedAcsCommitment,
+  CantonTimestamp,
+  CantonTimestampSecond,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.v30
@@ -27,6 +32,7 @@ import com.digitalasset.canton.version.{
   VersioningCompanionMemoization,
 }
 import com.google.protobuf.ByteString
+import io.scalaland.chimney.dsl.*
 import slick.jdbc.{GetResult, GetTupleResult, SetParameter}
 
 import scala.math.Ordering.Implicits.*
@@ -123,6 +129,7 @@ abstract sealed case class AcsCommitment private (
     override val representativeProtocolVersion: RepresentativeProtocolVersion[AcsCommitment.type],
     override val deserializedFrom: Option[ByteString],
 ) extends HasProtocolVersionedWrapper[AcsCommitment]
+    with AcsCommitmentData
     with SignedProtocolMessageContent
     with NoCopy {
 
@@ -157,6 +164,11 @@ abstract sealed case class AcsCommitment private (
       param("period", _.period),
       param("commitment", _.commitment),
     )
+
+  def toQueuedAcsCommitment: BufferedAcsCommitment = this
+    .into[BufferedAcsCommitment]
+    .withFieldComputed(_.synchronizerId, _.synchronizerId.logical)
+    .transform
 }
 
 object AcsCommitment extends VersioningCompanionMemoization[AcsCommitment] {
@@ -255,28 +267,4 @@ object AcsCommitment extends VersioningCompanionMemoization[AcsCommitment] {
       case m: AcsCommitment => Some(m)
       case _ => None
     }
-
-  def getAcsCommitmentResultReader(
-      synchronizerId: SynchronizerId,
-      protocolVersion: ProtocolVersion,
-  ): GetResult[AcsCommitment] =
-    new GetTupleResult[(ParticipantId, ParticipantId, CommitmentPeriod, HashedCommitmentType)](
-      GetResult[ParticipantId],
-      GetResult[ParticipantId],
-      GetResult[CommitmentPeriod],
-      GetResult[Hash],
-    ).andThen { case (sender, counterParticipant, period, commitment) =>
-      // TODO(#25502) Return a lighter version in the CommitmentQueue
-      new AcsCommitment(
-        PhysicalSynchronizerId(synchronizerId, protocolVersion),
-        sender,
-        counterParticipant,
-        period,
-        commitment,
-      )(
-        protocolVersionRepresentativeFor(protocolVersion),
-        None,
-      ) {}
-    }
-
 }

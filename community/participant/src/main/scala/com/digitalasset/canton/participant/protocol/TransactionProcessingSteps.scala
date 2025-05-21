@@ -657,7 +657,7 @@ class TransactionProcessingSteps(
             .foreach { case ViewHashAndKey(subviewHash, subviewKey) =>
               randomnessMap.get(subviewHash) match {
                 case Some(promise) =>
-                  promise.outcome(addRandomnessToMap(subviewHash, subviewKey))
+                  promise.outcome_(addRandomnessToMap(subviewHash, subviewKey))
                 case None =>
                   // TODO(i12911): make sure to not approve the request
                   SyncServiceAlarm

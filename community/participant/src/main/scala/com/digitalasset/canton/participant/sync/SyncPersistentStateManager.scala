@@ -28,7 +28,6 @@ import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.store.{IndexedStringStore, IndexedSynchronizer}
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.topology.client.IdentityProvidingServiceClient
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.StampedLockWithHandle
@@ -56,7 +55,6 @@ class SyncPersistentStateManager(
     storage: Storage,
     val indexedStringStore: IndexedStringStore,
     acsCounterParticipantConfigStore: AcsCounterParticipantConfigStore,
-    ips: IdentityProvidingServiceClient,
     parameters: ParticipantNodeParameters,
     synchronizerCryptoFactory: StaticSynchronizerParameters => SynchronizerCrypto,
     clock: Clock,
@@ -253,7 +251,6 @@ class SyncPersistentStateManager(
         protocolVersion,
         synchronizerCryptoFactory(state.staticSynchronizerParameters),
         clock,
-        ips,
         parameters.processingTimeouts,
         futureSupervisor,
         parameters.cachingConfigs,

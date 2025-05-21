@@ -35,7 +35,6 @@ class TopologyComponentFactory(
     protocolVersion: ProtocolVersion,
     crypto: SynchronizerCrypto,
     clock: Clock,
-    ips: IdentityProvidingServiceClient,
     timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     caching: CachingConfigs,
@@ -71,7 +70,7 @@ class TopologyComponentFactory(
         topologyStore,
         recordOrderPublisher.initTimestamp,
         participantId,
-        unsafeOnlinePartyReplication.exists(_.pauseSynchronizerIndexingDuringPartyReplication),
+        pauseSynchronizerIndexingDuringPartyReplication = unsafeOnlinePartyReplication.nonEmpty,
         loggerFactory,
       )
       val terminateTopologyProcessingFUS =
@@ -130,7 +129,6 @@ class TopologyComponentFactory(
       psid,
       topologyStore,
       packageDependencyResolver,
-      new IdentityProvidingServiceClient(),
       timeouts,
       futureSupervisor,
       loggerFactory,
@@ -147,7 +145,6 @@ class TopologyComponentFactory(
       psid,
       topologyStore,
       packageDependencyResolver,
-      ips,
       caching,
       batching,
       timeouts,

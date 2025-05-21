@@ -55,8 +55,9 @@ class InMemoryReassignmentStore(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentStoreError, Unit] = {
     ErrorUtil.requireArgument(
-      unassignmentData.targetSynchronizer == synchronizer,
-      s"Synchronizer $synchronizer: Reassignment store cannot store reassignment for synchronizer ${unassignmentData.targetSynchronizer}",
+      unassignmentData.targetSynchronizer.map(_.logical) == synchronizer,
+      s"Synchronizer $synchronizer: Reassignment store cannot store reassignment for synchronizer ${unassignmentData.targetSynchronizer
+          .map(_.logical)}",
     )
 
     logger.debug(s"Add reassignment request in the store: ${unassignmentData.reassignmentId}")

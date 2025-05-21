@@ -142,6 +142,7 @@ class AssignmentValidationTest
       signature,
       None,
       isFreshOwnTimelyRequest = true,
+      areContractsUnknown = false,
       Seq.empty,
       targetMediator,
       cryptoSnapshot,

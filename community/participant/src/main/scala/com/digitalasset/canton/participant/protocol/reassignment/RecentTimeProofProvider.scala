@@ -40,26 +40,24 @@ private[reassignment] class RecentTimeProofProvider(
       exclusivityTimeout / reassignmentTimeProofFreshnessProportion
 
   def get(
-      targetSynchronizerId: Target[SynchronizerId],
+      targetSynchronizerId: Target[PhysicalSynchronizerId],
       staticSynchronizerParameters: Target[StaticSynchronizerParameters],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, TimeProof] = {
     val synchronizer = targetSynchronizerId.unwrap
-    val physicalId =
-      PhysicalSynchronizerId(targetSynchronizerId.unwrap, staticSynchronizerParameters.unwrap)
 
     for {
       handle <- EitherT.fromEither[FutureUnlessShutdown](
-        submissionHandles(synchronizer).toRight(
-          NoTimeProofFromSynchronizer(physicalId, "unknown synchronizer")
+        submissionHandles(synchronizer.logical).toRight(
+          NoTimeProofFromSynchronizer(synchronizer, "unknown synchronizer")
         )
       )
 
       crypto <- EitherT.fromEither[FutureUnlessShutdown](
         syncCryptoApi
-          .forSynchronizer(synchronizer, staticSynchronizerParameters.value)
-          .toRight(NoTimeProofFromSynchronizer(physicalId, "getting the crypto client"))
+          .forSynchronizer(synchronizer.logical, staticSynchronizerParameters.value)
+          .toRight(NoTimeProofFromSynchronizer(synchronizer, "getting the crypto client"))
       )
 
       parameters <- EitherT(
@@ -68,7 +66,7 @@ private[reassignment] class RecentTimeProofProvider(
           .map(
             _.leftMap(err =>
               NoTimeProofFromSynchronizer(
-                physicalId,
+                synchronizer,
                 s"unable to find synchronizer parameters: $err",
               )
             )

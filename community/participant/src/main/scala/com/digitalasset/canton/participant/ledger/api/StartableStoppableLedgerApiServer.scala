@@ -344,6 +344,7 @@ class StartableStoppableLedgerApiServer(
         tls = config.serverConfig.tls,
         address = Some(config.serverConfig.address),
         maxInboundMessageSize = config.serverConfig.maxInboundMessageSize.unwrap,
+        maxInboundMetadataSize = config.serverConfig.maxInboundMetadataSize.unwrap,
         port = config.serverConfig.port,
         seeding = config.cantonParameterConfig.ledgerApiServerParameters.contractIdSeeding,
         syncService = timedSyncService,

@@ -9,8 +9,11 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeNumeric, Positive
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssConsensusModuleMetrics.emitNonCompliance
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.validation.RetransmissionMessageValidator
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.validation.RetransmissionMessageValidator.RetransmissionResponseValidationError
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.validation.{
+  IssConsensusSignatureVerifier,
+  RetransmissionMessageValidator,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.{
   BftNodeRateLimiter,
   EpochState,
@@ -25,7 +28,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.CommitCertificate
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.EpochInfo
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
+  Membership,
+  OrderingTopologyInfo,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.RetransmissionsMessage.RetransmissionsNetworkMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Consensus,
@@ -62,6 +68,8 @@ class RetransmissionsManager[E <: Env[E]](
     override val loggerFactory: NamedLoggerFactory,
 )(implicit synchronizerProtocolVersion: ProtocolVersion, mc: MetricsContext)
     extends NamedLogging {
+  private val signatureVerifier = new IssConsensusSignatureVerifier[E](metrics)
+
   private var currentEpoch: Option[EpochState[E]] = None
   private var validator: Option[RetransmissionMessageValidator] = None
 
@@ -157,7 +165,7 @@ class RetransmissionsManager[E <: Env[E]](
   }
 
   def handleMessage(
-      activeCryptoProvider: CryptoProvider[E],
+      topologyInfo: OrderingTopologyInfo[E],
       message: Consensus.RetransmissionsMessage,
   )(implicit
       context: E#ActorContextT[Consensus.Message[E]],
@@ -169,10 +177,7 @@ class RetransmissionsManager[E <: Env[E]](
         case Left(error) => logger.info(error)
         case Right(()) =>
           context.pipeToSelf(
-            activeCryptoProvider.verifySignedMessage(
-              message,
-              AuthenticatedMessageType.BftSignedRetransmissionMessage,
-            )
+            signatureVerifier.verifyRetransmissionMessage(message, topologyInfo)
           ) {
             case Failure(exception) =>
               logger.error(
@@ -212,7 +217,7 @@ class RetransmissionsManager[E <: Env[E]](
                     s"Retransmitting ${commitCertsToRetransmit.size} commit certificates to ${epochStatus.from}"
                   )
                   retransmitCommitCertificates(
-                    activeCryptoProvider,
+                    topologyInfo.currentCryptoProvider,
                     epochStatus.from,
                     commitCertsToRetransmit,
                   )
@@ -258,7 +263,7 @@ class RetransmissionsManager[E <: Env[E]](
           // after gathering the segment status from all segments,
           // we can send our whole epoch status
           // and effectively request retransmissions of missing messages
-          sendStatus(activeCryptoProvider, epochStatus, e.epoch.currentMembership)
+          sendStatus(topologyInfo.currentCryptoProvider, epochStatus, e.epoch.currentMembership)
         }
 
         epochStatusBuilder = None
