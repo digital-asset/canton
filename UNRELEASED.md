@@ -18,11 +18,16 @@ Wednesday after your change.
 ## Until 2025-05-14 (Exclusive)
 - JSON - changes in openapi (`Any` renamed as `ProtoAny`, `Event1` renamed to `TopologyEvent` and fixed, fixed `Field`, `FieldMask`,`JsReassignmentEvent` mappings.
 
-## Until 2025-05-14 (Exclusive)
 - SynchronizerConnectivityService.GetSynchronizerIdResponse.synchronizer_id changed to physical_synchronizer_id
 - SequencerConnectService.GetSynchronizerIdResponse.synchronizer_id changed to physical_synchronizer_id
 - MediatorStatusService.MediatorStatusResponse.MediatorStatusResponseStatus.synchronizer_id changed to physical_synchronizer_id
 - SequencerStatusService.SequencerStatusResponse.SequencerStatusResponseStatus.synchronizer_id changed to physical_synchronizer_id
+
+- Submission time is now called preparation time:
+    - The field `submission_time` for interactive submissions is now called `preparation_time`.
+    - The dynamic domain parameter `submission_time_record_time_tolerance` is now called `preparation_time_record_time_tolerance`.
+    - The error codes `LOCAL_VERDICT_SUBMISSION_TIME_OUT_OF_BOUND` and `TOPOLOGY_INCREASE_OF_SUBMISSION_TIME_TOLERANCE` are now called `LOCAL_VERDICT_PREPARATION_TIME_OUT_OF_BOUND` and `TOPOLOGY_INCREASE_OF_PREPARATION_TIME_TOLERANCE`.
+    - The console commands `set_submission_time_record_time_tolerance` is now called `set_preparation_time_record_time_tolerance`.
 
 ## Until 2025-05-07 (Exclusive)
 - The VettedPackage validFrom and validUntil fields have been renamed to validFromInclusive and validFromExclusive.

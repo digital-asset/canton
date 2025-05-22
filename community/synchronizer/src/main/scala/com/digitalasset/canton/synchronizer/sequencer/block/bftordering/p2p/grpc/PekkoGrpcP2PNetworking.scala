@@ -175,7 +175,7 @@ object PekkoGrpcP2PNetworking {
         case _ =>
           logger.info(
             s"Connection-managing actor for endpoint in server role $endpointId " +
-              s"couldn't obtain connection yet, retrying in $SendRetryDelay"
+              s"couldn't obtain connection yet for send operation, retrying it in $SendRetryDelay"
           )
           // Retrying after a delay due to not being connected:
           //  record the send instant and delay to emit the actor queue latency when processing the message
