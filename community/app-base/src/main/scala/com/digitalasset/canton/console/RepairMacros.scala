@@ -29,6 +29,7 @@ import com.digitalasset.canton.topology.store.{
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, TextFileUtil}
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.annotation.tailrec
 import scala.util.control.NonFatal
@@ -71,6 +72,7 @@ class RepairMacros(override val loggerFactory: NamedLoggerFactory)
     def download(
         node: LocalInstanceReference,
         synchronizerId: SynchronizerId,
+        protocolVersion: ProtocolVersion,
         targetPath: String,
     ): Unit =
       TraceContext.withNewTraceContext { implicit traceContext =>
@@ -125,7 +127,8 @@ class RepairMacros(override val loggerFactory: NamedLoggerFactory)
 
         val authorizedFile = File(targetDir, TOPOLOGY_AUTHORIZED)
         StoredTopologyTransactions(transactionsFromAuthorizedStore).writeToFile(
-          authorizedFile.pathAsString
+          authorizedFile.pathAsString,
+          protocolVersion,
         )
 
         if (node.id.member.code == SequencerId.Code) { // The sequencer needs to know more than just its own identity
@@ -149,7 +152,8 @@ class RepairMacros(override val loggerFactory: NamedLoggerFactory)
                 .mkString("\n")}"
           )
           StoredTopologyTransactions(synchronizerGenesisTransactions).writeToFile(
-            synchronizerFile.pathAsString
+            synchronizerFile.pathAsString,
+            protocolVersion,
           )
         }
       }

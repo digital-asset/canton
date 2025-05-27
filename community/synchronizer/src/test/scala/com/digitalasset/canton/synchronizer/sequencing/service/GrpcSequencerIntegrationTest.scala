@@ -8,7 +8,6 @@ import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.config.{
@@ -30,6 +29,7 @@ import com.digitalasset.canton.lifecycle.{
   SyncCloseable,
 }
 import com.digitalasset.canton.logging.{
+  LogEntry,
   NamedLoggerFactory,
   NamedLogging,
   SuppressingLogger,
@@ -50,7 +50,10 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencer.api.v30.SequencerAuthenticationServiceGrpc.SequencerAuthenticationService
 import com.digitalasset.canton.sequencing.*
-import com.digitalasset.canton.sequencing.authentication.AuthenticationToken
+import com.digitalasset.canton.sequencing.authentication.{
+  AuthenticationToken,
+  AuthenticationTokenManagerConfig,
+}
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
@@ -73,8 +76,9 @@ import com.digitalasset.canton.version.{
   ReleaseVersion,
   RepresentativeProtocolVersion,
 }
-import io.grpc.Server
+import com.digitalasset.canton.{config, *}
 import io.grpc.netty.NettyServerBuilder
+import io.grpc.{Server, StatusRuntimeException}
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.NotUsed
 import org.apache.pekko.actor.ActorSystem
@@ -86,7 +90,7 @@ import org.slf4j.event.Level
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.concurrent.*
 
-final case class Env(loggerFactory: SuppressingLogger)(implicit
+class Env(override val loggerFactory: SuppressingLogger)(implicit
     ec: ExecutionContextExecutor,
     tracer: Tracer,
     traceContext: TraceContext,
@@ -213,7 +217,7 @@ final case class Env(loggerFactory: SuppressingLogger)(implicit
   )
   private val connectService = makeConnectService(sequencerId)
 
-  private val authService = new SequencerAuthenticationService {
+  lazy val authService = new SequencerAuthenticationService {
     override def challenge(
         request: v30.SequencerAuthentication.ChallengeRequest
     ): Future[v30.SequencerAuthentication.ChallengeResponse] =
@@ -278,11 +282,13 @@ final case class Env(loggerFactory: SuppressingLogger)(implicit
   private val expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]] =
     NonEmpty.mk(Set, SequencerAlias.Default -> sequencerId).toMap
 
+  lazy val authConfig = AuthenticationTokenManagerConfig()
+
   val clientFactory = SequencerClientFactory(
     synchronizerId,
     cryptoApi,
     cryptoApi.crypto,
-    SequencerClientConfig(),
+    SequencerClientConfig(authToken = authConfig),
     TracingConfig.Propagation.Disabled,
     TestingConfigInternal(),
     BaseTest.defaultStaticSynchronizerParameters,
@@ -394,7 +400,7 @@ class GrpcSequencerIntegrationTest
   override type FixtureParam = Env
 
   override def withFixture(test: OneArgTest): Outcome = {
-    val env = Env(loggerFactory)
+    val env = new Env(loggerFactory)
     try super.withFixture(test.toNoArgTest(env))
     finally env.close()
   }
@@ -549,5 +555,68 @@ class GrpcSequencerIntegrationTest
 
     override def toProtoSomeEnvelopeContentV30: protocolV30.EnvelopeContent.SomeEnvelopeContent =
       protocolV30.EnvelopeContent.SomeEnvelopeContent.Empty
+  }
+}
+
+final class EnvWithFailingTokenRefresh(override val loggerFactory: SuppressingLogger)(implicit
+    ec: ExecutionContextExecutor,
+    tracer: Tracer,
+    traceContext: TraceContext,
+) extends Env(loggerFactory) {
+  override lazy val authConfig =
+    AuthenticationTokenManagerConfig(pauseRetries = config.NonNegativeFiniteDuration.ofMillis(10))
+
+  override lazy val authService = new SequencerAuthenticationService {
+    override def challenge(
+        request: v30.SequencerAuthentication.ChallengeRequest
+    ): Future[v30.SequencerAuthentication.ChallengeResponse] =
+      Future.failed(new StatusRuntimeException(io.grpc.Status.UNAVAILABLE.withDescription("test")))
+
+    override def authenticate(
+        request: v30.SequencerAuthentication.AuthenticateRequest
+    ): Future[v30.SequencerAuthentication.AuthenticateResponse] =
+      Future.failed(new StatusRuntimeException(io.grpc.Status.UNAVAILABLE.withDescription("test")))
+
+    override def logout(
+        request: v30.SequencerAuthentication.LogoutRequest
+    ): Future[v30.SequencerAuthentication.LogoutResponse] =
+      Future.failed(new StatusRuntimeException(io.grpc.Status.UNAVAILABLE.withDescription("test")))
+  }
+}
+
+class GrpcSequencerIntegrationWithFailingTokenRefreshTest
+    extends FixtureAnyWordSpec
+    with BaseTest
+    with HasExecutionContext {
+  override type FixtureParam = EnvWithFailingTokenRefresh
+
+  override def withFixture(test: OneArgTest): Outcome = {
+    val env = new EnvWithFailingTokenRefresh(loggerFactory)
+    try super.withFixture(test.toNoArgTest(env))
+    finally env.close()
+  }
+
+  "the sequencer client's downloadTopologyStateForInit" when {
+    "the token refresh fails" should {
+      "handle it gracefully" in { env =>
+        val client = env.makeDefaultClient.futureValueUS.value
+
+        loggerFactory.assertLoggedWarningsAndErrorsSeq(
+          inside(client.downloadTopologyStateForInit().value.futureValue) { case Left(message) =>
+            message shouldBe
+              "Status{code=UNAVAILABLE, description=Authentication token refresh error: test, cause=null}"
+          },
+          LogEntry.assertLogSeq(
+            Seq(
+              (
+                _.warningMessage shouldBe
+                  "Token refresh encountered error: Status{code=UNAVAILABLE, description=test, cause=null}",
+                "Failing token refresh",
+              )
+            )
+          ),
+        )
+      }
+    }
   }
 }

@@ -652,10 +652,13 @@ class TopologyAdministrationGroup(
 
     @Help.Summary(
       """Creates and returns proposals of topology transactions to bootstrap a synchronizer, specifically
-        |SynchronizerParametersState, SequencerSynchronizerState, and MediatorSynchronizerState.""".stripMargin
+        |SynchronizerParametersState, SequencerSynchronizerState, and MediatorSynchronizerState.
+        |
+        |protocolVersion: protocol version of the synchronizer""".stripMargin
     )
     def generate_genesis_topology(
         synchronizerId: SynchronizerId,
+        protocolVersion: ProtocolVersion,
         synchronizerOwners: Seq[Member],
         sequencers: Seq[SequencerId],
         mediators: Seq[MediatorId],
@@ -682,7 +685,7 @@ class TopologyAdministrationGroup(
               ConsoleDynamicSynchronizerParameters
                 .initialValues(
                   consoleEnvironment.environment.clock,
-                  ProtocolVersion.latest,
+                  protocolVersion,
                 ),
               signedBy = None,
               store = Some(store),
@@ -723,10 +726,14 @@ class TopologyAdministrationGroup(
     @Help.Summary(
       """Creates and returns proposals of topology transactions to bootstrap a synchronizer, specifically
         |SynchronizerParametersState, SequencerSynchronizerState, and MediatorSynchronizerState,
-        |and stores the result in a file which can be loaded using `node.topology.transactions.load_multiple_from_file`""".stripMargin
+        |and stores the result in a file which can be loaded using `node.topology.transactions.load_multiple_from_file`
+        |
+        |protocolVersion: protocol version of the synchronizer
+        |""".stripMargin
     )
     def download_genesis_topology(
         synchronizerId: SynchronizerId,
+        protocolVersion: ProtocolVersion,
         synchronizerOwners: Seq[Member],
         sequencers: Seq[SequencerId],
         mediators: Seq[MediatorId],
@@ -737,13 +744,14 @@ class TopologyAdministrationGroup(
       val transactions =
         generate_genesis_topology(
           synchronizerId,
+          protocolVersion,
           synchronizerOwners,
           sequencers,
           mediators,
           store,
         )
 
-      SignedTopologyTransactions(transactions, ProtocolVersion.latest).writeToFile(outputFile)
+      SignedTopologyTransactions(transactions, protocolVersion).writeToFile(outputFile)
     }
   }
 

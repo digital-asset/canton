@@ -147,6 +147,7 @@ trait SynchronizerBootstrapWithSeparateConsolesIntegrationTest
           // generate the synchronizer bootstrap transactions with the mediator's signature
           mediator1.topology.synchronizer_bootstrap.download_genesis_topology(
             synchronizerId,
+            testedProtocolVersion,
             synchronizerOwners = Seq(mediatorId, sequencerId),
             sequencers = Seq(sequencerId),
             mediators = Seq(mediatorId),
@@ -180,6 +181,7 @@ trait SynchronizerBootstrapWithSeparateConsolesIntegrationTest
           // bootstrap transactions with the sequencer's signature
           sequencer1.topology.synchronizer_bootstrap.generate_genesis_topology(
             synchronizerId,
+            testedProtocolVersion,
             synchronizerOwners = Seq(mediatorId, sequencerId),
             sequencers = Seq(sequencerId),
             mediators = Seq(mediatorId),
@@ -199,7 +201,7 @@ trait SynchronizerBootstrapWithSeparateConsolesIntegrationTest
           // share the sequencer connection via sequencerConnectionFile
           SequencerConnections
             .single(sequencer1.sequencerConnection)
-            .writeToFile(sequencerConnectionFile)
+            .writeToFile(sequencerConnectionFile, testedProtocolVersion)
         }
 
         // Mediator's console:
