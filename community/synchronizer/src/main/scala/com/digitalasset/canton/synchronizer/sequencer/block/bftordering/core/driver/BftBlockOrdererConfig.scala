@@ -152,7 +152,7 @@ object BftBlockOrdererConfig {
       CantonConfigValidatorDerivation[P2PNetworkAuthenticationConfig]
   }
 
-  /** If [[externalAddress]], [[externalPort]] and [[externalTlsConfig]] must be configured
+  /** The [[externalAddress]], [[externalPort]] and [[externalTlsConfig]] must be configured
     * correctly for the client to correctly authenticate the server, as the client tells the server
     * its endpoint for authentication based on this information.
     */
@@ -213,10 +213,10 @@ object BftBlockOrdererConfig {
   )
 
   final case class PruningConfig(
-      enabled: Boolean,
-      retentionPeriod: FiniteDuration,
-      minNumberOfBlocksToKeep: Int,
-      pruningFrequency: FiniteDuration,
+      enabled: Boolean = DefaultPruningConfig.enabled,
+      retentionPeriod: FiniteDuration = DefaultPruningConfig.retentionPeriod,
+      minNumberOfBlocksToKeep: Int = DefaultPruningConfig.minNumberOfBlocksToKeep,
+      pruningFrequency: FiniteDuration = DefaultPruningConfig.pruningFrequency,
   ) extends UniformCantonConfigValidation
   object PruningConfig {
     implicit val pruningConfigCantonConfigValidator: CantonConfigValidator[PruningConfig] =
