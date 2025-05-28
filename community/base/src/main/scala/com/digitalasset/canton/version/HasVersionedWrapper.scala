@@ -69,7 +69,7 @@ trait HasVersionedWrapper[ValueClass] extends HasVersionedToByteString {
     */
   def writeToFile(
       outputFile: String,
-      version: ProtocolVersion = ProtocolVersion.latest,
+      version: ProtocolVersion,
   ): Unit = {
     val bytes = toByteString(version)
     BinaryFileUtil.writeByteStringToFile(outputFile, bytes)

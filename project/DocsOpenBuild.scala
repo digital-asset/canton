@@ -428,7 +428,7 @@ object DocsOpenBuild {
 
     val source = sourceDirectory.value / "sphinx"
 
-    val sourceRstFiles = incToRstRelativePathMapping.values.map(source / _).toSet
+    val sourceRstFiles = incToRstRelativePathMapping.values.flatten.map(source / _).toSet
     log.debug(
       s"$logPrefix RST files defined by mapping: ${sourceRstFiles.mkString("\n\t", "\n\t", "")}"
     )
@@ -504,17 +504,77 @@ object DocsOpenBuild {
     }
   }
 
-  // Defines which .rst files can be processed by this task, needs to be in-sync with what
-  // the generateIncludes task produces
-  private val incToRstRelativePathMapping = Map(
-    "versioning.rst.inc" -> "participant/reference/versioning.rst",
-    "topology_versioning.rst.inc" -> "sdk/tutorials/app-dev/external_signing_topology_transaction.rst",
-    "monitoring.rst.sequencer_metrics.inc" -> "participant/howtos/observe/monitoring.rst",
-    "monitoring.rst.mediator_metrics.inc" -> "participant/howtos/observe/monitoring.rst",
-    "monitoring.rst.participant_metrics.inc" -> "participant/howtos/observe/monitoring.rst",
-    "error_codes.rst.inc" -> "participant/reference/error_codes.rst",
-    "console.rst.inc" -> "participant/reference/console.rst",
+  /** Defines which .rst files need to replace the `.. generatedinclude::` directive with the
+    * content of a generated include file. That content here needs to be in-sync with what the
+    * `generateIncludes` task produces.
+    */
+  private val incToRstRelativePathMapping: Map[String, Seq[String]] = Map(
+    "versioning.rst.inc" -> Seq("participant/reference/versioning.rst"),
+    "topology_versioning.rst.inc" -> Seq(
+      "sdk/tutorials/app-dev/external_signing_topology_transaction.rst"
+    ),
+    "monitoring.rst.sequencer_metrics.inc" -> Seq(
+      "participant/howtos/observe/monitoring.rst"
+    ),
+    "monitoring.rst.mediator_metrics.inc" -> Seq(
+      "participant/howtos/observe/monitoring.rst"
+    ),
+    "monitoring.rst.participant_metrics.inc" -> Seq(
+      "participant/howtos/observe/monitoring.rst"
+    ),
+    "error_codes.rst.inc" -> Seq("participant/reference/error_codes.rst"),
+    "console.rst.inc" -> Seq("participant/reference/console.rst"),
   )
+
+  /** Verifies existence and type of mapped RST files in
+    * [[DocsOpenBuild.incToRstRelativePathMapping]].
+    *
+    * Returns a set of full paths to valid RST files, throws otherwise.
+    */
+  private def verifyMappedRstFiles(
+      log: sbt.util.Logger,
+      preprocessed: File,
+      actualIncToRstMap: Map[String, Seq[String]],
+      logPrefix: String,
+  ): Set[File] = {
+    log.debug(s"$logPrefix Verifying RST files defined in `incToRstRelativePathMapping` ...")
+
+    val mappedRstFullPaths = actualIncToRstMap.values.flatten.toSet.map(preprocessed / _)
+
+    if (mappedRstFullPaths.isEmpty) {
+      throw new sbt.MessageOnlyException(s"$logPrefix No RST files with generated include mappings")
+    } else {
+      val invalidFiles = mappedRstFullPaths.filterNot(f => f.exists() && f.isFile)
+
+      if (invalidFiles.nonEmpty) {
+        val errorDetails = invalidFiles
+          .map { file =>
+            val reason = if (!file.exists()) "does not exist" else "is not a regular file"
+            val includeFile = actualIncToRstMap
+              .collect {
+                case (incKey, rstPathList)
+                    if rstPathList
+                      .exists(singleRstPath => (preprocessed / singleRstPath) == file) =>
+                  s"'$incKey'"
+              }
+              .mkString(", ")
+            s"  - Path: $file ($reason). Expected to include key(s): $includeFile"
+          }
+          .mkString("\n")
+
+        val message =
+          s"""$logPrefix Found ${invalidFiles.size} mapped RST path(s) that are either missing or not regular files:
+             |$errorDetails
+             |Ensure all RST files specified in `incToRstRelativePathMapping` exist and are regular files""".stripMargin
+        throw new sbt.MessageOnlyException(message)
+      } else {
+        log.debug(
+          s"$logPrefix All ${mappedRstFullPaths.size} mapped target RST files appear valid (exist and are files)."
+        )
+        mappedRstFullPaths
+      }
+    }
+  }
 
   /** Replaces `.. include::` for Canton generated content in RST files.
     *
@@ -533,7 +593,9 @@ object DocsOpenBuild {
       val generated = target.value / "generated"
       val preprocessed = target.value / "preprocessed-sphinx"
 
-      val expectedRstFiles = incToRstRelativePathMapping.values.map(preprocessed / _).toSet
+      val expectedRstFiles =
+        verifyMappedRstFiles(log, preprocessed, incToRstRelativePathMapping, logPrefix)
+
       log.debug(
         s"$logPrefix RST files defined by mapping: ${expectedRstFiles.mkString("\n\t", "\n\t", "")}"
       )
@@ -541,13 +603,17 @@ object DocsOpenBuild {
       val rstFilesWithIncludes = rstFiles.filter(expectedRstFiles.contains)
 
       if (rstFilesWithIncludes.nonEmpty) {
-        log.info(s"$logPrefix Replacing `.. include::` directives with RST content ...")
+        log.info(s"$logPrefix Replacing `.. generatedinclude::` directives with RST content ...")
 
-        val rstToIncMapping = incToRstRelativePathMapping
-          .groupBy { case (_, rstPath) =>
-            preprocessed / rstPath
+        val rstToIncMapping = incToRstRelativePathMapping.toSeq
+          .flatMap { case (incFile, rstFiles) =>
+            rstFiles.map(rstFile => (preprocessed / rstFile, incFile))
           }
-          .mapValues(_.keys.toSeq)
+          .groupBy { case (rstFile, _) => rstFile }
+          .map { case (rstFile, groupedPairs) =>
+            val incs = groupedPairs.map { case (_, incFile) => incFile }.distinct
+            rstFile -> incs
+          }
 
         rstFilesWithIncludes.foreach { rstFile =>
           log.debug(s"$logPrefix Preprocessing RST file: $rstFile")
@@ -559,7 +625,8 @@ object DocsOpenBuild {
               require(incFile.exists(), s"$logPrefix Missing include file: $incFile")
 
               val incContent = IO.read(incFile, StandardCharsets.UTF_8)
-              val incMarker = s"..\n    Dynamically generated content:\n.. include:: $incFileName"
+              val incMarker =
+                s"..\n    Dynamically generated content:\n.. generatedinclude:: $incFileName"
 
               require(
                 content.contains(incMarker),
@@ -638,6 +705,8 @@ object DocsOpenBuild {
     stdOut.mkString("\n")
   }
 
+  private val sphinxLogPath = "log/docs-open.sphinx.log"
+
   // sbt-site is very skimpy with the Sphinx output in case of Sphinx errors
   // The useful output is logged at debug level
   // Here, we change the logging for the docs-open project to log all log messages to a file,
@@ -651,7 +720,7 @@ object DocsOpenBuild {
 
     import java.io.*
 
-    val outFile = new File("log/docs-open.sphinx.log")
+    val outFile = file(sphinxLogPath)
     IO.touch(outFile)
     val writer =
       new BufferedWriter(new OutputStreamWriter(new FileOutputStream(outFile, append), IO.utf8))
@@ -663,6 +732,47 @@ object DocsOpenBuild {
     )
 
     LogManager.withLoggers(backed = _ => appender)
+  }
+
+  lazy val checkDocErrors =
+    taskKey[Unit]("Check docs-open.sphinx.log for errors and fail if there is one")
+
+  def findSphinxLogIssues(): Def.Initialize[Task[Unit]] = Def.task {
+    import scala.sys.process.*
+
+    val log = streams.value.log
+    val sphinxLogFile = file(sphinxLogPath)
+
+    if (sphinxLogFile.exists() && sphinxLogFile.length() > 0) {
+      log.info(s"Checking $sphinxLogPath for issues ...")
+
+      // Matches the literal string "[warn]"
+      val warnPattern = "\\[warn\\]"
+      // Matches critical errors in .rst files like "file.rst:123: CRITICAL"
+      val criticalRstPattern = "\\.rst:[0-9]+:\\s*CRITICAL"
+
+      val checkCmd = List("rg", "-e", warnPattern, "-e", criticalRstPattern, sphinxLogPath)
+
+      val checkRes = Process(checkCmd, None).!
+
+      // rg exit codes:
+      // 0: One or more lines selected (match found)
+      // 1: No lines selected (no match)
+      // >1: Error occurred during execution
+      if (checkRes != 1) {
+        if (checkRes == 0) {
+          val matchingLines = Process(checkCmd).!! // `!!` captures the output as a string
+          log.error(s"Found matches running '${checkCmd.mkString(" ")}':\n$matchingLines")
+        }
+        throw new IllegalStateException(
+          s"Please check the log: $sphinxLogPath contains issues, or the rg command failed (exit code: $checkRes)"
+        )
+      } else {
+        log.debug(s"Found no issues with: ${checkCmd.mkString(" ")}")
+      }
+    } else {
+      log.warn(s"Sphinx log file $sphinxLogPath not found or is empty")
+    }
   }
 
   def isCommandAvailable(command: String, log: Logger): Boolean =

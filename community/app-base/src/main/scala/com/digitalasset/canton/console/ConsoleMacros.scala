@@ -808,6 +808,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
       val synchronizerGenesisTxs = synchronizerOwners.flatMap(
         _.topology.synchronizer_bootstrap.generate_genesis_topology(
           synchronizerId,
+          staticSynchronizerParameters.protocolVersion,
           synchronizerOwners.map(_.id.member),
           sequencers.map(_.id),
           mediators.map(_.id),
