@@ -40,19 +40,6 @@ object UpdatePackageMetadataView {
     implicit val loggingContext: LoggingContextWithTrace =
       LoggingContextWithTrace.empty
     implicit val ec: ExecutionContext = computationExecutionContext
-    val fullPackageStateValidator = new PackageUpgradeValidator(
-      // Note: It is fine to use an empty package map here, as validation is expected to run on a self-contained set of packages in this class.
-      //       If the packages are not self-contained and the package-map is provided non-empty, ensure it contains only references to LF 1.17+ packages.
-      getPackageMap = _ => Map.empty,
-      getLfArchive = _ =>
-        _ =>
-          Future.failed(
-            new IllegalArgumentException(
-              "No call expected to getLfArchive as the provided packages in validateUpgrade must be self-contained"
-            )
-          ),
-      loggerFactory = loggerFactory,
-    )
 
     logger.debug("Package Metadata View initialization has been started.")
     val startedTime = System.nanoTime()
@@ -108,8 +95,8 @@ object UpdatePackageMetadataView {
       } else {
         logger.debug("Checking loaded packages for upgrade compatibility.")
         val upgradeCompatibilityCheckStartTime = System.nanoTime()
-        fullPackageStateValidator
-          .validateUpgrade(loadedPackages.toList)
+        PackageUpgradeValidator
+          .validateSelfContainedPackageListUpgrade(loggerFactory, loadedPackages.toList)
           .map { _ =>
             val upgradeCompatibilityCheckDuration =
               System.nanoTime() - upgradeCompatibilityCheckStartTime

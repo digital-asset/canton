@@ -1,8 +1,8 @@
-sdk-version: 2.10.1-snapshot.20250523.13179.0.v7cd2f5cf
+sdk-version: 2.10.1
 name: doctor
 source: Doctor.daml
 init-script: Doctor:setup
-version: 2.10.1
+version: 2.10.2
 dependencies: 
 - daml-prim
 - daml-stdlib
