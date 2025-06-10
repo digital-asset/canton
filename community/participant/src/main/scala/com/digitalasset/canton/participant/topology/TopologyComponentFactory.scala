@@ -51,6 +51,7 @@ class TopologyComponentFactory(
   def createTopologyProcessorFactory(
       partyNotifier: LedgerServerPartyNotifier,
       missingKeysAlerter: MissingKeysAlerter,
+      sequencerConnectionSuccessorListener: SequencerConnectionSuccessorListener,
       topologyClient: SynchronizerTopologyClientWithInit,
       recordOrderPublisher: RecordOrderPublisher,
       sequencedEventStore: SequencedEventStore,
@@ -104,6 +105,7 @@ class TopologyComponentFactory(
         // subscribe party notifier to topology processor
         processor.subscribe(partyNotifier.attachToTopologyProcessor())
         processor.subscribe(missingKeysAlerter.attachToTopologyProcessor())
+        processor.subscribe(sequencerConnectionSuccessorListener)
         processor.subscribe(topologyClient)
         processor
       }

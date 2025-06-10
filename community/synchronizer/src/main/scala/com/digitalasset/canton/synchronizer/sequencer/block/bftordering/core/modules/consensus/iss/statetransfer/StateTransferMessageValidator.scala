@@ -22,7 +22,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.top
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
-  BlockNumber,
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
@@ -64,7 +63,7 @@ final class StateTransferMessageValidator[E <: Env[E]](
           validateBlockTransferRequest(request) match {
             case Left(error) =>
               val reqError = s"State transfer: invalid BlockTransferRequest: $error, dropping..."
-              InvalidResult(reqError, request.from, Some(request.epoch), None)
+              InvalidResult(reqError, request.from)
             case Right(()) => ValidResult
           }
         case response: StateTransferMessage.BlockTransferResponse =>
@@ -75,12 +74,9 @@ final class StateTransferMessageValidator[E <: Env[E]](
           ) match {
             case Left(error) =>
               val respError = s"State transfer: invalid BlockTransferResponse: $error, dropping..."
-              val blockMetadata = response.commitCertificate.map(_.prePrepare.message.blockMetadata)
               InvalidResult(
                 respError,
                 response.from,
-                blockMetadata.map(_.epochNumber),
-                blockMetadata.map(_.blockNumber),
               )
             case Right(()) => ValidResult
           }
@@ -93,13 +89,10 @@ final class StateTransferMessageValidator[E <: Env[E]](
           orderingTopologyInfo.currentMembership,
           orderingTopologyInfo.currentCryptoProvider,
         )
-      case InvalidResult(error, from, epoch, block) =>
+      case InvalidResult(error, from) =>
         logger.warn(error)
         emitNonCompliance(metrics)(
           from,
-          epoch,
-          view = None,
-          block,
           metrics.security.noncompliant.labels.violationType.values.StateTransferInvalidMessage,
         )
     }
@@ -195,9 +188,6 @@ final class StateTransferMessageValidator[E <: Env[E]](
               )
               emitNonCompliance(metrics)(
                 from,
-                epoch = None,
-                view = None,
-                block = None,
                 metrics.security.noncompliant.labels.violationType.values.StateTransferInvalidMessage,
               )
               None
@@ -230,9 +220,6 @@ final class StateTransferMessageValidator[E <: Env[E]](
         )
         emitNonCompliance(metrics)(
           from,
-          Some(blockMetadata.epochNumber),
-          view = None,
-          Some(blockMetadata.blockNumber),
           metrics.security.noncompliant.labels.violationType.values.StateTransferInvalidMessage,
         )
         None
@@ -252,8 +239,6 @@ object StateTransferMessageValidator {
     final case class InvalidResult(
         error: String,
         from: BftNodeId,
-        epoch: Option[EpochNumber],
-        block: Option[BlockNumber],
     ) extends StateTransferValidationResult
   }
 }

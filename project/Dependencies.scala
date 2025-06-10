@@ -21,9 +21,12 @@ object Dependencies {
   lazy val scala_version = "2.13.16"
   lazy val scala_version_short = "2.13"
 
-  lazy val pekko_version = "1.1.2"
   // TODO(#10617) We have cloned pekko's BroadcastHub implementation in community/lib/pekko/src/main/scala/pekko/stream/scaladsl/BroadcastHub.scala
-  //  When updating pekko, make sure to update the clone as well, including the tests in community/lib/pekko/src/main/scala/pekko
+  //  The changes from the clone have been upstreamed in https://github.com/apache/pekko/pull/1841.
+  //  When updating pekko, check whether the update includes the above fix (probably only in 1.2.x)
+  //  If it is included, remove the clone. Otherwise, make sure to update the clone as well,
+  //  including the tests in community/lib/pekko/src/main/scala/pekko
+  lazy val pekko_version = "1.1.2"
   lazy val pekko_http_version = "1.1.0"
   lazy val ammonite_version = "3.0.1"
   lazy val apispec_version = "0.11.7"

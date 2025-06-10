@@ -8,6 +8,9 @@ below should all be Wednesdays to align with the weekly release
 schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
+## Until 2025-06-11 (Exclusive)
+- JSON Ledger API added `authenticated-user` endpoint to get the current user.
+
 ## Until 2025-05-21 (Exclusive)
 - The `PartyToParticipant` topology mapping's `HostingParticipant` now has an optional, empty `Onboarding` message
   for use with Online Party Replication and the `PartyManagementService.AddPartyAsync` endpoint.

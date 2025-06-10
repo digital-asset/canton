@@ -553,7 +553,6 @@ class TransactionProcessingSteps(
           optRandomness: Option[SecureRandomness],
       ): EitherT[FutureUnlessShutdown, EncryptedViewMessageError, LightTransactionViewTree] =
         EncryptedViewMessage.decryptFor(
-          staticSynchronizerParameters,
           snapshot,
           sessionKeyStore,
           vt,
@@ -616,7 +615,6 @@ class TransactionProcessingSteps(
           val message = transactionViewEnvelope.protocolMessage
           val randomnessF = EncryptedViewMessage
             .decryptRandomness(
-              staticSynchronizerParameters.requiredEncryptionSpecs,
               snapshot,
               sessionKeyStore,
               message,

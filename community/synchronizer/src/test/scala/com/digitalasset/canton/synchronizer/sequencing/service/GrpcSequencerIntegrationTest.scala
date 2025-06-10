@@ -16,6 +16,8 @@ import com.digitalasset.canton.config.{
   ProcessingTimeout,
   TestingConfigInternal,
 }
+import com.digitalasset.canton.connection.GrpcApiInfoService
+import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{HashPurpose, Nonce, SigningKeyUsage, SyncCryptoApi}
 import com.digitalasset.canton.data.CantonTimestamp
@@ -38,6 +40,7 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.metrics.CommonMockMetrics
 import com.digitalasset.canton.networking.Endpoint
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.protocol.SynchronizerParametersLookup.SequencerSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.UnsignedProtocolMessage
 import com.digitalasset.canton.protocol.{
@@ -50,6 +53,8 @@ import com.digitalasset.canton.protocol.{
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencer.api.v30.SequencerAuthenticationServiceGrpc.SequencerAuthenticationService
 import com.digitalasset.canton.sequencing.*
+import com.digitalasset.canton.sequencing.ConnectionX.ConnectionXConfig
+import com.digitalasset.canton.sequencing.SequencerConnectionXPool.SequencerConnectionXPoolConfig
 import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationToken,
   AuthenticationTokenManagerConfig,
@@ -244,6 +249,9 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
     ): Future[v30.SequencerAuthentication.LogoutResponse] =
       Future.successful(v30.SequencerAuthentication.LogoutResponse())
   }
+
+  private val apiInfoService = new GrpcApiInfoService(CantonGrpcUtil.ApiName.SequencerPublicApi)
+
   private val serverPort = UniquePortGenerator.next
   logger.debug(s"Using port $serverPort for integration test")
 
@@ -257,6 +265,7 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
       .addService(v30.SequencerConnectServiceGrpc.bindService(connectService, ec))
       .addService(v30.SequencerServiceGrpc.bindService(service, ec))
       .addService(v30.SequencerAuthenticationServiceGrpc.bindService(authService, ec))
+      .addService(ApiInfoServiceGrpc.bindService(apiInfoService, ec))
       .build()
       .start()
     servers.updateAndGet(server +: _)
@@ -282,69 +291,107 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
   private val expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]] =
     NonEmpty.mk(Set, SequencerAlias.Default -> sequencerId).toMap
 
-  lazy val authConfig = AuthenticationTokenManagerConfig()
-
-  val clientFactory = SequencerClientFactory(
-    synchronizerId,
-    cryptoApi,
-    cryptoApi.crypto,
-    SequencerClientConfig(authToken = authConfig),
-    TracingConfig.Propagation.Disabled,
-    TestingConfigInternal(),
-    BaseTest.defaultStaticSynchronizerParameters,
-    DefaultProcessingTimeouts.testing,
-    clock,
-    topologyClient,
-    futureSupervisor,
-    _ => None,
-    _ => None,
-    CommonMockMetrics.sequencerClient,
-    LoggingConfig(),
-    exitOnFatalErrors = false,
-    loggerFactory,
-    ProtocolVersionCompatibility.supportedProtocols(
-      includeAlphaVersions = BaseTest.testedProtocolVersion.isAlpha,
-      includeBetaVersions = BaseTest.testedProtocolVersion.isBeta,
-      release = ReleaseVersion.current,
+  private val poolConfig = SequencerConnectionXPoolConfig(
+    connections = NonEmpty(
+      Seq,
+      ConnectionXConfig(
+        name = SequencerAlias.Default.toString,
+        endpoint = Endpoint("localhost", serverPort),
+        transportSecurity = false,
+        customTrustCertificates = None,
+        tracePropagation = TracingConfig.Propagation.Disabled,
+      ),
     ),
+    trustThreshold = PositiveInt.one,
   )
+  val connectionPoolFactory = new GrpcSequencerConnectionXPoolFactory(
+    clientProtocolVersions = NonEmpty(Seq, BaseTest.testedProtocolVersion),
+    minimumProtocolVersion = None,
+    authConfig = new AuthenticationTokenManagerConfig(),
+    member = participant,
+    clock = clock,
+    crypto = cryptoApi.crypto.crypto,
+    seedForRandomnessO = None,
+    futureSupervisor = futureSupervisor,
+    timeouts = timeouts,
+    loggerFactory = loggerFactory,
+  )
+
+  lazy val authConfig = AuthenticationTokenManagerConfig()
 
   private val clients = new AtomicReference[Seq[SequencerClient]](Seq.empty)
 
   def makeClient(
       connections: SequencerConnections,
       expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
-  ): EitherT[FutureUnlessShutdown, String, RichSequencerClient] =
-    clientFactory
-      .create(
-        participant,
-        sequencedEventStore,
-        sendTrackerStore,
-        new RequestSigner {
-          override def signRequest[A <: HasCryptographicEvidence](
-              request: A,
-              hashPurpose: HashPurpose,
-              snapshot: Option[SyncCryptoApi],
-          )(implicit
-              ec: ExecutionContext,
-              traceContext: TraceContext,
-          ): EitherT[FutureUnlessShutdown, String, SignedContent[A]] =
-            EitherT.rightT(
-              SignedContent(
-                request,
-                SymbolicCrypto.emptySignature,
-                None,
-                BaseTest.testedProtocolVersion,
-              )
-            )
-        },
-        connections,
-        expectedSequencers,
+      useNewConnectionPool: Boolean = BaseTest.testedProtocolVersion >= ProtocolVersion.dev,
+  ): EitherT[FutureUnlessShutdown, String, RichSequencerClient] = {
+    val clientFactory = SequencerClientFactory(
+      synchronizerId,
+      cryptoApi,
+      cryptoApi.crypto,
+      SequencerClientConfig(authToken = authConfig, useNewConnectionPool = useNewConnectionPool),
+      TracingConfig.Propagation.Disabled,
+      TestingConfigInternal(),
+      BaseTest.defaultStaticSynchronizerParameters,
+      DefaultProcessingTimeouts.testing,
+      clock,
+      topologyClient,
+      futureSupervisor,
+      _ => None,
+      _ => None,
+      CommonMockMetrics.sequencerClient,
+      LoggingConfig(),
+      exitOnFatalErrors = false,
+      loggerFactory,
+      ProtocolVersionCompatibility.supportedProtocols(
+        includeAlphaVersions = BaseTest.testedProtocolVersion.isAlpha,
+        includeBetaVersions = BaseTest.testedProtocolVersion.isBeta,
+        release = ReleaseVersion.current,
+      ),
+    )
+
+    for {
+      connectionPool <- EitherT.fromEither[FutureUnlessShutdown](
+        connectionPoolFactory.create(poolConfig).leftMap(error => error.toString)
       )
-      .map { newClient =>
-        clients.updateAndGet(newClient +: _)
-        newClient
-      }
+      _ <-
+        if (useNewConnectionPool)
+          connectionPool.start().leftMap(error => error.toString)
+        else EitherTUtil.unitUS
+      client <- clientFactory
+        .create(
+          participant,
+          sequencedEventStore,
+          sendTrackerStore,
+          new RequestSigner {
+            override def signRequest[A <: HasCryptographicEvidence](
+                request: A,
+                hashPurpose: HashPurpose,
+                snapshot: Option[SyncCryptoApi],
+            )(implicit
+                ec: ExecutionContext,
+                traceContext: TraceContext,
+            ): EitherT[FutureUnlessShutdown, String, SignedContent[A]] =
+              EitherT.rightT(
+                SignedContent(
+                  request,
+                  SymbolicCrypto.emptySignature,
+                  None,
+                  BaseTest.testedProtocolVersion,
+                )
+              )
+          },
+          connections,
+          expectedSequencers,
+          connectionPool = connectionPool,
+        )
+    } yield {
+      clients.updateAndGet(client +: _)
+      client
+    }
+  }
+
   def makeDefaultClient = makeClient(connections, expectedSequencers)
 
   override def close(): Unit =
@@ -531,6 +578,7 @@ class GrpcSequencerIntegrationTest
           expectedSequencers = NonEmpty
             .mk(Set, SequencerAlias.Default -> sequencerId, sequencerAlias2 -> sequencerId2)
             .toMap,
+          useNewConnectionPool = false, // Assertions become more complicated otherwise
         ).futureValueUS,
         assertions = _.infoMessage should include(
           "Cannot reach threshold for Retrieving traffic state from synchronizer"
