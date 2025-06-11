@@ -28,6 +28,32 @@ import scala.math.Ordering.Implicits.infixOrderingOps
 
 object PackageUpgradeValidator {
   type PackageMap = Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)]
+
+  /** Validate that the provided packages pass the upgrade validation checks, provided they are closed under dependency.
+    *
+    * @throws java.lang.IllegalArgumentException if the provided packages are not self-contained.
+    */
+  def validateSelfContainedPackageListUpgrade(
+      loggerFactory: NamedLoggerFactory,
+      upgradingPackages: List[(Ref.PackageId, Ast.Package)],
+  )(implicit
+      executionContext: ExecutionContext,
+      loggingContext: LoggingContextWithTrace,
+  ): EitherT[Future, DamlError, Unit] =
+    new PackageUpgradeValidator(
+      // Note: It is fine to use an empty package map here, as validation is expected to run on a self-contained set of
+      //     packages in this class. If the packages were not self-contained and the package-map was provided non-empty,
+      //     we'd need to ensure it contains only references to LF 1.17+ packages.
+      getPackageMap = _ => Map.empty,
+      getLfArchive = _ =>
+        _ =>
+          Future.failed(
+            new IllegalArgumentException(
+              "No call expected to getLfArchive as the provided packages in validateUpgrade must be self-contained"
+            )
+          ),
+      loggerFactory = loggerFactory,
+    ).validateUpgrade(upgradingPackages)
 }
 
 class PackageUpgradeValidator(
