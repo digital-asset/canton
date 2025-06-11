@@ -1966,9 +1966,9 @@ object AcsCommitmentProcessor extends HasLoggerName {
   ) extends PrettyPrinting {
     override protected def pretty: Pretty[CommitmentSnapshot] = prettyOfClass(
       param("record time", _.recordTime),
-      param("active", _.active),
-      param("delta (parties)", _.delta.keySet),
-      param("deleted", _.deleted),
+      param("active", _.active, _.active.sizeCompare(20) < 0),
+      param("delta (parties)", _.delta.keySet, _.delta.sizeCompare(20) < 0),
+      param("deleted", _.deleted, _.deleted.sizeCompare(20) < 0),
     )
   }
 
