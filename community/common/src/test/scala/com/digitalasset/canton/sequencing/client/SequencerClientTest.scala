@@ -1591,7 +1591,6 @@ class SequencerClientTest
       )
         .thenReturn(FutureUnlessShutdown.pure(TestSynchronizerParameters.defaultDynamic))
       SynchronizerParametersLookup.forSequencerSynchronizerParameters(
-        BaseTest.defaultStaticSynchronizerParameters,
         None,
         topologyClient,
         loggerFactory,

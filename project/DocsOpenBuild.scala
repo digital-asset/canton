@@ -514,13 +514,16 @@ object DocsOpenBuild {
       "sdk/tutorials/app-dev/external_signing_topology_transaction.rst"
     ),
     "monitoring.rst.sequencer_metrics.inc" -> Seq(
-      "participant/howtos/observe/monitoring.rst"
+      "participant/howtos/observe/monitoring.rst",
+      "participant/reference/metrics.rst",
     ),
     "monitoring.rst.mediator_metrics.inc" -> Seq(
-      "participant/howtos/observe/monitoring.rst"
+      "participant/howtos/observe/monitoring.rst",
+      "participant/reference/metrics.rst",
     ),
     "monitoring.rst.participant_metrics.inc" -> Seq(
-      "participant/howtos/observe/monitoring.rst"
+      "participant/howtos/observe/monitoring.rst",
+      "participant/reference/metrics.rst",
     ),
     "error_codes.rst.inc" -> Seq("participant/reference/error_codes.rst"),
     "console.rst.inc" -> Seq("participant/reference/console.rst"),

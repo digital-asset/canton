@@ -122,7 +122,10 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
           }
         } else EitherTUtil.unitUS[SynchronizerRegistryError]
 
-      indexedSynchronizerId <- EitherT
+      physicalSynchronizerIdx <- EitherT
+        .right(syncPersistentStateManager.getPhysicalSynchronizerIdx(synchronizerId))
+
+      synchronizerIdx <- EitherT
         .right(syncPersistentStateManager.getSynchronizerIdx(synchronizerId.logical))
 
       _ <- EitherT
@@ -133,7 +136,8 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       persistentState <- syncPersistentStateManager
         .lookupOrCreatePersistentState(
           config.synchronizerAlias,
-          indexedSynchronizerId,
+          physicalSynchronizerIdx,
+          synchronizerIdx,
           sequencerAggregatedInfo.staticSynchronizerParameters,
         )
 
@@ -144,14 +148,11 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
 
       synchronizerLoggerFactory = loggerFactory.append(
         "synchronizerId",
-        indexedSynchronizerId.synchronizerId.toString,
+        physicalSynchronizerIdx.synchronizerId.toString,
       )
 
       topologyFactory <- syncPersistentStateManager
-        .topologyFactoryFor(
-          synchronizerId.logical,
-          sequencerAggregatedInfo.staticSynchronizerParameters.protocolVersion,
-        )
+        .topologyFactoryFor(synchronizerId)
         .toRight(
           SynchronizerRegistryError.SynchronizerRegistryInternalError
             .InvalidState(
@@ -161,7 +162,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
         .toEitherT[FutureUnlessShutdown]
 
       topologyClient <- EitherT.right(
-        performUnlessClosingUSF("create caching client")(
+        synchronizeWithClosing("create caching client")(
           topologyFactory.createCachingTopologyClient(
             packageDependencyResolver
           )
@@ -368,9 +369,9 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       ec: ExecutionContextExecutor,
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, Unit] =
-    performUnlessClosingEitherUSF("check-for-synchronizer-topology-initialization")(
+    synchronizeWithClosing("check-for-synchronizer-topology-initialization")(
       syncPersistentStateManager.synchronizerTopologyStateInitFor(
-        synchronizerId.logical,
+        synchronizerId,
         participantId,
       )
     ).flatMap {

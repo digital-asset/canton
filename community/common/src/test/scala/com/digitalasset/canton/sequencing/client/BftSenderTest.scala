@@ -48,15 +48,13 @@ class BftSenderTest extends FixtureAnyWordSpec with BaseTest with HasExecutionCo
 
   private def mkRequest(threshold: PositiveInt)(implicit env: Env) = {
     import env.*
-    BftSender.makeRequest[String, String, MockTransport, Int, Int](
+    BftSender.makeRequest(
       "test",
       futureSupervisor,
       logger,
       transports,
       threshold,
-      _.performRequest,
-      identity,
-    )
+    )(_.performRequest)(identity)
   }
 
   "BftSender" should {
@@ -107,15 +105,13 @@ class BftSenderTest extends FixtureAnyWordSpec with BaseTest with HasExecutionCo
 
       loggerFactory.assertEventuallyLogsSeq(SuppressionRule.Level(Level.ERROR))(
         {
-          val result = BftSender.makeRequest[String, String, MockTransport, Int, Int](
+          val result = BftSender.makeRequest(
             "test",
             futureSupervisor,
             logger,
             transports,
             threshold,
-            _.performRequest,
-            identity,
-          )
+          )(_.performRequest)(identity)
 
           val exception = new RuntimeException("BOOM")
 

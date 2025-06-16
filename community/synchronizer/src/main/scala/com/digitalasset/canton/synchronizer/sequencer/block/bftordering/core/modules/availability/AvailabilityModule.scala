@@ -294,12 +294,15 @@ final class AvailabilityModule[E <: Env[E]](
       traceContext: TraceContext,
   ): Unit =
     pipeToSelf(
-      context.sequenceFuture(batches.map { case (batchId, batch) =>
-        activeCryptoProvider.signHash(
-          AvailabilityAck.hashFor(batchId, batch.epochNumber, activeMembership.myId, metrics),
-          "availability-sign-local-batchId",
-        )
-      })
+      context.sequenceFuture(
+        batches.map { case (batchId, batch) =>
+          activeCryptoProvider.signHash(
+            AvailabilityAck.hashFor(batchId, batch.epochNumber, activeMembership.myId, metrics),
+            "availability-sign-local-batchId",
+          )
+        },
+        orderingStage = Some("availability-sign-local-batches"),
+      )
     ) {
       case Failure(exception) =>
         abort("Failed to sign local batches", exception)
@@ -864,7 +867,7 @@ final class AvailabilityModule[E <: Env[E]](
               }
             }
           case None =>
-            logger.info(
+            logger.debug(
               s"$messageType: got a remote ack for batch $batchId from $from " +
                 "but the batch is unknown (potentially already proposed), ignoring"
             )
@@ -956,7 +959,7 @@ final class AvailabilityModule[E <: Env[E]](
       case Availability.LocalOutputFetch.FetchedBatchStored(batchId) =>
         outputFetchProtocolState.localOutputMissingBatches.get(batchId) match {
           case Some(_) =>
-            logger.info(s"$messageType: $batchId was missing and is now persisted")
+            logger.debug(s"$messageType: $batchId was missing and is now persisted")
             outputFetchProtocolState.localOutputMissingBatches.remove(batchId).discard
             updateOutputFetchStatus(batchId)
           case None =>

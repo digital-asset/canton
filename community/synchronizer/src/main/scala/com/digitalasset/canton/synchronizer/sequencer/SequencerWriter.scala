@@ -231,7 +231,7 @@ class SequencerWriter(
       initialSnapshot: Option[SequencerInitialState] = None,
       resetWatermarkTo: => ResetWatermark,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, WriterStartupError, Unit] =
-    performUnlessClosingEitherUSF[WriterStartupError, Unit](functionFullName) {
+    synchronizeWithClosing(functionFullName) {
       def createStoreAndRunCrashRecovery()
           : EitherT[FutureUnlessShutdown, WriterStartupError, SequencerWriterStore] = {
         // only retry errors that are flagged as retryable
@@ -314,7 +314,7 @@ class SequencerWriter(
       )(_.send(submission))
 
     EitherT(
-      performUnlessClosingUSF(functionFullName)(sendET.value)
+      synchronizeWithClosing(functionFullName)(sendET.value)
     )
   }
 
@@ -331,7 +331,7 @@ class SequencerWriter(
           )
           .leftWiden[SequencerDeliverError]
       )(_.blockSequencerWrite(outcome))
-    EitherT(performUnlessClosingUSF(functionFullName)(sendET.value))
+    EitherT(synchronizeWithClosing(functionFullName)(sendET.value))
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
@@ -413,7 +413,7 @@ class SequencerWriter(
   private def setupWriterRecovery(doneF: Future[Unit]): Unit =
     doneF.onComplete { result =>
       withNewTraceContext { implicit traceContext =>
-        performUnlessClosing(functionFullName) { // close will take care of shutting down a running writer if close is invoked
+        synchronizeWithClosingSync(functionFullName) { // close will take care of shutting down a running writer if close is invoked
           // close the running writer and reset the reference
           val closed = runningWriterRef
             .getAndSet(None)
@@ -518,6 +518,7 @@ object SequencerWriter {
       protocolVersion: ProtocolVersion,
       loggerFactory: NamedLoggerFactory,
       blockSequencerMode: Boolean,
+      minimumSequencingTime: CantonTimestamp,
       metrics: SequencerMetrics,
   )(implicit materializer: Materializer, executionContext: ExecutionContext): SequencerWriter = {
     implicit val loggingContext: ErrorLoggingContext = ErrorLoggingContext(
@@ -541,6 +542,7 @@ object SequencerWriter {
           protocolVersion,
           metrics,
           blockSequencerMode,
+          minimumSequencingTime,
         )
           .toMat(Sink.ignore)(Keep.both)
           .mapMaterializedValue(m => new RunningSequencerWriterFlow(m._1, m._2.void))

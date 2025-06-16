@@ -1221,7 +1221,7 @@ abstract class SequencerReference(
 
     @Help.Summary("Get peer network status")
     def get_peer_network_status(
-        endpoints: Option[Iterable[BftBlockOrdererConfig.EndpointId]]
+        endpoints: Option[Iterable[BftBlockOrdererConfig.EndpointId]] = None
     ): PeerNetworkStatus =
       consoleEnvironment.run {
         runner.adminCommand(
@@ -1233,6 +1233,18 @@ abstract class SequencerReference(
     def get_ordering_topology(): OrderingTopology =
       consoleEnvironment.run {
         runner.adminCommand(SequencerBftAdminCommands.GetOrderingTopology())
+      }
+
+    @Help.Summary("Enable BFT ordering performance metrics")
+    def enable_performance_metrics(): Unit =
+      consoleEnvironment.run {
+        runner.adminCommand(SequencerBftAdminCommands.SetPerformanceMetricsEnabled(true))
+      }
+
+    @Help.Summary("Disable BFT ordering performance metrics")
+    def disable_performance_metrics(): Unit =
+      consoleEnvironment.run {
+        runner.adminCommand(SequencerBftAdminCommands.SetPerformanceMetricsEnabled(false))
       }
 
     private def toInternal(endpoint: BftBlockOrdererConfig.EndpointId): P2PEndpoint.Id =

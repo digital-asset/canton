@@ -484,7 +484,7 @@ class SequencerNodeBootstrap(
 
       addCloseable(synchronizerOutboxFactory)
 
-      performUnlessClosingEitherUSF("starting up runtime") {
+      synchronizeWithClosing("starting up runtime") {
         val indexedStringStore = IndexedStringStore.create(
           storage,
           parameters.cachingConfigs.indexedStrings,
@@ -663,7 +663,6 @@ class SequencerNodeBootstrap(
 
           synchronizerParamsLookup = SynchronizerParametersLookup
             .forSequencerSynchronizerParameters(
-              staticSynchronizerParameters,
               config.publicApi.overrideMaxRequestSize,
               topologyClient,
               loggerFactory,
@@ -679,7 +678,6 @@ class SequencerNodeBootstrap(
             SequencerSynchronizerParameters
           ] =
             SynchronizerParametersLookup.forSequencerSynchronizerParameters(
-              staticSynchronizerParameters,
               config.publicApi.overrideMaxRequestSize,
               topologyClient,
               loggerFactory,
@@ -746,6 +744,7 @@ class SequencerNodeBootstrap(
                 syncCryptoWithOptionalSessionKeys,
                 futureSupervisor,
                 config.trafficConfig,
+                config.parameters.minimumSequencingTime,
                 runtimeReadyPromise.futureUS,
                 topologyAndSequencerSnapshot.flatMap { case (_, sequencerSnapshot) =>
                   sequencerSnapshot

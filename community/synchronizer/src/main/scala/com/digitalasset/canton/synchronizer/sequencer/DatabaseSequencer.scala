@@ -69,6 +69,7 @@ object DatabaseSequencer {
       timeouts: ProcessingTimeout,
       storage: Storage,
       sequencerStore: SequencerStore,
+      minimumSequencingTime: CantonTimestamp,
       clock: Clock,
       synchronizerId: PhysicalSynchronizerId,
       topologyClientMember: Member,
@@ -113,6 +114,7 @@ object DatabaseSequencer {
       metrics,
       loggerFactory,
       blockSequencerMode = false,
+      minimumSequencingTime = minimumSequencingTime,
       rateLimitManagerO = None,
     )
   }
@@ -139,6 +141,7 @@ class DatabaseSequencer(
     metrics: SequencerMetrics,
     loggerFactory: NamedLoggerFactory,
     blockSequencerMode: Boolean,
+    minimumSequencingTime: CantonTimestamp,
     rateLimitManagerO: Option[SequencerRateLimitManager],
 )(implicit ec: ExecutionContext, tracer: Tracer, materializer: Materializer)
     extends BaseSequencer(
@@ -168,6 +171,7 @@ class DatabaseSequencer(
     protocolVersion,
     loggerFactory,
     blockSequencerMode,
+    minimumSequencingTime,
     metrics,
   )
 
@@ -226,7 +230,7 @@ class DatabaseSequencer(
 
     def markOffline(): Unit = withNewTraceContext { implicit traceContext =>
       doNotAwait(
-        performUnlessClosingUSF(functionFullName)(markOfflineF().thereafter { _ =>
+        synchronizeWithClosing(functionFullName)(markOfflineF().thereafter { _ =>
           // schedule next marking sequencers as offline regardless of outcome
           schedule()
         }).onShutdown {

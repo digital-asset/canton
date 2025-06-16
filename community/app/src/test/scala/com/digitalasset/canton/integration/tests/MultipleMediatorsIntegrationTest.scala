@@ -48,7 +48,11 @@ import com.digitalasset.canton.synchronizer.sequencer.{
 }
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
-import com.digitalasset.canton.topology.transaction.{NamespaceDelegation, OwnerToKeyMapping}
+import com.digitalasset.canton.topology.transaction.{
+  NamespaceDelegation,
+  OwnerToKeyMapping,
+  TopologyChangeOp,
+}
 import com.digitalasset.canton.topology.{ForceFlag, MediatorId}
 import org.scalatest.Assertion
 
@@ -94,6 +98,7 @@ trait MultipleMediatorsBaseTest { this: BaseTest & HasProgrammableSequencer =>
   protected def switchMediatorDuringSubmission[T](
       sequencer: LocalSequencerReference,
       oldMediatorGroup: NonNegativeInt,
+      oldMediator: LocalMediatorReference,
       newMediatorGroup: NonNegativeInt,
       newMediator: MediatorReference,
       participant: LocalParticipantReference,
@@ -128,12 +133,7 @@ trait MultipleMediatorsBaseTest { this: BaseTest & HasProgrammableSequencer =>
         )
         .cause
 
-      val errorUnknownSender = SequencerErrors
-        .SenderUnknown(
-          s"(Eligible) Senders are unknown: MED::"
-        )
-        .cause
-
+      val errorUnknownSender = "(Eligible) Senders are unknown: MED::"
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
         submit(),
         LogEntry.assertLogSeq(
@@ -158,6 +158,9 @@ trait MultipleMediatorsBaseTest { this: BaseTest & HasProgrammableSequencer =>
 
       logger.debug("Remove the old mediator group")
       sequencer.topology.mediators.remove_group(synchronizerId, oldMediatorGroup)
+
+      // Note: we stop the old mediator that can trigger time requests and produce warnings that flake the tests
+      oldMediator.stop()
 
       logger.debug("Switched out the mediator")
       promiseNewMediatorActive.success(())
@@ -359,6 +362,7 @@ class MultipleMediatorsIntegrationTest
         val submissionF = switchMediatorDuringSubmission(
           sequencer = sequencer1,
           oldMediatorGroup = NonNegativeInt.zero,
+          oldMediator = mediator1,
           newMediatorGroup = NonNegativeInt.one,
           newMediator = mediator2,
           participant = participant1,
@@ -375,6 +379,17 @@ class MultipleMediatorsIntegrationTest
         logger.debug(
           "Make sure that the participant receives another timestamp that triggers the rejection"
         )
+
+        eventually() {
+          // The participant should see the removed mediator group,
+          // otherwise the next command can be flaky
+          participant1.topology.mediators
+            .list(
+              synchronizerId = daId,
+              group = Some(NonNegativeInt.zero),
+              operation = Some(TopologyChangeOp.Remove),
+            ) should not be empty
+        }
 
         // A plain fetch_synchronizer_time isn't enough because the SynchronizerTimeTracker may use the delayed submission
         // as the witness for the time

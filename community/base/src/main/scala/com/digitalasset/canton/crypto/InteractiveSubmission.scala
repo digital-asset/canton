@@ -19,11 +19,17 @@ import com.digitalasset.canton.protocol.hash.{
   TransactionMetadataHashBuilder,
 }
 import com.digitalasset.canton.protocol.{LfContractId, LfHash, SerializableContract}
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.daml.lf.data.{Bytes, Ref, Time}
-import com.digitalasset.daml.lf.transaction.{FatContractInstance, NodeId, VersionedTransaction}
+import com.digitalasset.daml.lf.transaction.{
+  CreationTime,
+  FatContractInstance,
+  NodeId,
+  VersionedTransaction,
+}
 import com.digitalasset.daml.lf.value.Value.ContractId
 
 import java.util.UUID
@@ -89,7 +95,7 @@ object InteractiveSubmission {
         .map { case (contractId, serializedNode) =>
           contractId -> FatContractInstance.fromCreateNode(
             serializedNode.toLf,
-            serializedNode.ledgerCreateTime.toLf,
+            CreationTime.CreatedAt(serializedNode.ledgerCreateTime.toLf),
             saltFromSerializedContract(serializedNode),
           )
         }
@@ -195,7 +201,8 @@ object InteractiveSubmission {
   def verifySignatures(
       hash: Hash,
       signatures: Map[PartyId, Seq[Signature]],
-      cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
+      cryptoPureApi: CryptoPureApi,
+      topologySnapshot: TopologySnapshot,
       actAs: Set[LfPartyId],
       logger: TracedLogger,
   )(implicit
@@ -231,7 +238,8 @@ object InteractiveSubmission {
       verifySignatures(
         hash,
         signaturesFromActAsParties,
-        cryptoSnapshot,
+        cryptoPureApi,
+        topologySnapshot,
         logger,
       )
     }
@@ -243,7 +251,8 @@ object InteractiveSubmission {
   private def verifySignatures(
       hash: Hash,
       signatures: Map[PartyId, Seq[Signature]],
-      cryptoSnapshot: SynchronizerSnapshotSyncCryptoApi,
+      cryptoPureApi: CryptoPureApi,
+      topologySnapshot: TopologySnapshot,
       logger: TracedLogger,
   )(implicit
       traceContext: TraceContext,
@@ -253,7 +262,7 @@ object InteractiveSubmission {
       .parTraverse_ { case (party, signatures) =>
         for {
           authInfo <- EitherT(
-            cryptoSnapshot.ipsSnapshot
+            topologySnapshot
               .partyAuthorization(party)
               .map(
                 _.toRight(s"Could not find party signing keys for $party.")
@@ -265,7 +274,7 @@ object InteractiveSubmission {
               .find(_.fingerprint == signature.signedBy)
               .toRight(s"Signing key ${signature.signedBy} is not a valid key for $party")
               .flatMap(key =>
-                cryptoSnapshot.pureCrypto
+                cryptoPureApi
                   .verifySignature(hash.unwrap, key, signature, SigningKeyUsage.ProtocolOnly)
                   .map(_ => key.fingerprint)
                   .leftMap(_.toString)
