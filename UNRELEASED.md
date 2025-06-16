@@ -18,6 +18,10 @@ Wednesday after your change.
   the server to accept larger JWT tokens.
 `canton.participants.participant.ledger-api.max-inbound-metadata-size=10240`
 
+## Until 2025-06-04 (Exclusive)
+- **Breaking** The console command `connect_local_bft` takes now a list of `SequencerReference` instead of a `NonEmpty[Map[SequencerAlias, SequencerReference]]`
+- Console command - A new console command `connect_bft` has been added to connect by url to Decentralized Sequencers
+-
 ## Until 2025-05-14 (Exclusive)
 - JSON - changes in openapi (`Any` renamed as `ProtoAny`, `Event1` renamed to `TopologyEvent` and fixed, fixed `Field`, `FieldMask`,`JsReassignmentEvent` mappings.
 

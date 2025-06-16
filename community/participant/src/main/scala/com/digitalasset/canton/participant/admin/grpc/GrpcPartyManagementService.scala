@@ -179,7 +179,7 @@ class GrpcPartyManagementService(
       request: v30.ExportAcsRequest,
       out: OutputStream,
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    val allSynchronizerIds = sync.syncPersistentStateManager.getAll.keySet
+    val allLogicalSynchronizerIds = sync.syncPersistentStateManager.getAllLatest.keySet
 
     val ledgerEnd = sync.participantNodePersistentState.value.ledgerApiStore.ledgerEndCache
       .apply()
@@ -191,7 +191,7 @@ class GrpcPartyManagementService(
         PartyManagementServiceError.InternalError.Error("No ledger end found"),
       )
       validRequest <- EitherT.fromEither[FutureUnlessShutdown](
-        validateExportAcsAtOffsetRequest(request, ledgerEnd, allSynchronizerIds)
+        validateExportAcsAtOffsetRequest(request, ledgerEnd, allLogicalSynchronizerIds)
       )
       snapshotResult <- createAcsSnapshot(validRequest, out)
     } yield snapshotResult
@@ -354,7 +354,7 @@ class GrpcPartyManagementService(
         topologyTxEffectiveTime,
       )
 
-    val allSynchronizerIds = sync.syncPersistentStateManager.getAll.keySet
+    val allSynchronizerIds = sync.syncPersistentStateManager.allKnownLSIds
 
     for {
       parsedRequest <- EitherT.fromEither[FutureUnlessShutdown](

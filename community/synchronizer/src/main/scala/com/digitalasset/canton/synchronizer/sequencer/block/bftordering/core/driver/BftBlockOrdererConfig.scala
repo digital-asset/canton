@@ -97,6 +97,8 @@ final case class BftBlockOrdererConfig(
       DefaultHowManyCanWeBlacklist,
     leaderSelectionPolicy: LeaderSelectionPolicyConfig = DefaultLeaderSelectionPolicy,
     storage: Option[StorageConfig] = None,
+    // We may want to flip the default once we're satisfied with initial performance
+    enablePerformanceMetrics: Boolean = true,
 ) extends UniformCantonConfigValidation {
   // The below parameters are not yet dynamically configurable.
   private val EmptyBlockCreationIntervalMultiplayer = 3L
@@ -241,10 +243,10 @@ object BftBlockOrdererConfig {
   )
 
   final case class PruningConfig(
-      enabled: Boolean,
-      retentionPeriod: FiniteDuration,
-      minNumberOfBlocksToKeep: Int,
-      pruningFrequency: FiniteDuration,
+      enabled: Boolean = DefaultPruningConfig.enabled,
+      retentionPeriod: FiniteDuration = DefaultPruningConfig.retentionPeriod,
+      minNumberOfBlocksToKeep: Int = DefaultPruningConfig.minNumberOfBlocksToKeep,
+      pruningFrequency: FiniteDuration = DefaultPruningConfig.pruningFrequency,
   ) extends UniformCantonConfigValidation
   object PruningConfig {
     implicit val pruningConfigCantonConfigValidator: CantonConfigValidator[PruningConfig] =

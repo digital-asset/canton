@@ -2995,7 +2995,7 @@ class TopologyAdministrationGroup(
     }
   }
 
-  object synchronizer_migration extends Helpful {
+  object synchronizer_upgrade extends Helpful {
 
     @Help.Summary("Inspect synchronizer migration announcements")
     @Help.Group("Synchronizer Migration Announcement")
@@ -3007,9 +3007,9 @@ class TopologyAdministrationGroup(
           operation: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
           filterSynchronizer: String = "",
           filterSigningKey: String = "",
-      ): Seq[ListSynchronizerMigrationAnnouncementResult] = consoleEnvironment.run {
+      ): Seq[ListSynchronizerUpgradeAnnouncementResult] = consoleEnvironment.run {
         adminCommand(
-          TopologyAdminCommands.Read.ListSynchronizerMigrationAnnouncement(
+          TopologyAdminCommands.Read.ListSynchronizerUpgradeAnnouncement(
             BaseQuery(
               store,
               proposals,
@@ -3055,11 +3055,11 @@ class TopologyAdministrationGroup(
           synchronize: Option[config.NonNegativeDuration] = Some(
             consoleEnvironment.commandTimeouts.unbounded
           ),
-      ): SignedTopologyTransaction[TopologyChangeOp, SynchronizerMigrationAnnouncement] =
+      ): SignedTopologyTransaction[TopologyChangeOp, SynchronizerUpgradeAnnouncement] =
         consoleEnvironment.run {
           adminCommand(
             TopologyAdminCommands.Write.Propose(
-              mapping = SynchronizerMigrationAnnouncement(
+              mapping = SynchronizerUpgradeAnnouncement(
                 physicalSynchronizerId,
                 successorPhysicalSynchronizerId,
               ),
@@ -3106,11 +3106,11 @@ class TopologyAdministrationGroup(
           synchronize: Option[config.NonNegativeDuration] = Some(
             consoleEnvironment.commandTimeouts.unbounded
           ),
-      ): SignedTopologyTransaction[TopologyChangeOp, SynchronizerMigrationAnnouncement] =
+      ): SignedTopologyTransaction[TopologyChangeOp, SynchronizerUpgradeAnnouncement] =
         consoleEnvironment.run {
           adminCommand(
             TopologyAdminCommands.Write.Propose(
-              mapping = SynchronizerMigrationAnnouncement(
+              mapping = SynchronizerUpgradeAnnouncement(
                 physicalSynchronizerId,
                 successorPhysicalSynchronizerId,
               ),

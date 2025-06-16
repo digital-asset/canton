@@ -85,7 +85,7 @@ import com.digitalasset.canton.util.PekkoUtil.{CombinedKillSwitch, WithKillSwitc
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.TryUtil.*
 import com.digitalasset.canton.util.collection.IterableUtil
-import com.digitalasset.canton.util.retry.AllExceptionRetryPolicy
+import com.digitalasset.canton.util.retry.{AllExceptionRetryPolicy, NoExceptionRetryPolicy}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, SequencerCounter, time}
 import com.google.common.annotations.VisibleForTesting
@@ -177,9 +177,9 @@ trait SequencerClient extends SequencerClientSend with FlagCloseable {
   ): EitherT[FutureUnlessShutdown, String, Boolean]
 
   /** Download the topology state for initializing the member */
-  def downloadTopologyStateForInit()(implicit
+  def downloadTopologyStateForInit(maxRetries: Int, retryLogLevel: Option[Level])(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, GenericStoredTopologyTransactions]
+  ): EitherT[FutureUnlessShutdown, String, GenericStoredTopologyTransactions]
 
   def protocolVersion: ProtocolVersion
 }
@@ -669,7 +669,7 @@ abstract class SequencerClientImpl(
 
       linkDetailsO match {
         case Some(LinkDetails(sequencerAlias, sequencerId, transportOrPoolConnection)) =>
-          performUnlessClosingEitherUSF(s"sending message $messageId to sequencer $sequencerId") {
+          synchronizeWithClosing(s"sending message $messageId to sequencer $sequencerId") {
             NonEmpty.from(previousSequencers) match {
               case None =>
                 logger.debug(s"Sending message ID $messageId to sequencer $sequencerId")
@@ -858,13 +858,42 @@ abstract class SequencerClientImpl(
     } yield result
   }
 
-  override def downloadTopologyStateForInit()(implicit
+  override def downloadTopologyStateForInit(maxRetries: Int, retryLogLevel: Option[Level])(implicit
       traceContext: TraceContext
-  ): EitherT[Future, String, GenericStoredTopologyTransactions] =
-    // TODO(i12076): Download topology state from one of the sequencers based on the health
-    sequencersTransportState.transport
-      .downloadTopologyStateForInit(TopologyStateForInitRequest(member, protocolVersion))
-      .map(_.topologyTransactions.value)
+  ): EitherT[FutureUnlessShutdown, String, GenericStoredTopologyTransactions] = {
+    val triedSequencersRef = new AtomicReference[Set[SequencerId]](Set.empty)
+
+    def downloadSnapshot
+        : EitherT[FutureUnlessShutdown, String, GenericStoredTopologyTransactions] = {
+      val triedSequencers = triedSequencersRef.get
+
+      // We ignore the amplification part
+      val (_, sequencerId, transport, _) =
+        sequencersTransportState.nextAmplifiedTransport(triedSequencers.toSeq)
+      triedSequencersRef.updateAndGet(_ + sequencerId).discard
+
+      logger.debug(
+        s"Attempting to download topology state for init from $sequencerId (already tried: $triedSequencers)"
+      )
+      transport
+        .downloadTopologyStateForInit(TopologyStateForInitRequest(member, protocolVersion))
+        .map(_.topologyTransactions.value)
+        .mapK(FutureUnlessShutdown.outcomeK)
+    }
+
+    val resultFUS = retry
+      .Pause(
+        logger = logger,
+        hasSynchronizeWithClosing = closeContext.context,
+        maxRetries = maxRetries,
+        delay = 1.second,
+        operationName = "Download topology state for init",
+        retryLogLevel = retryLogLevel,
+      )
+      .unlessShutdown(downloadSnapshot.value, NoExceptionRetryPolicy)
+
+    EitherT(resultFUS)
+  }
 
   protected val periodicAcknowledgementsRef =
     new AtomicReference[Option[PeriodicAcknowledgements]](None)
@@ -1002,7 +1031,7 @@ class RichSequencerClientImpl(
       nonThrottledEventHandler,
       metrics,
     )
-    val subscriptionF = performUnlessClosingUSF(functionFullName) {
+    val subscriptionF = synchronizeWithClosing(functionFullName) {
       for {
         initialPriorEventO <-
           sequencedEventStore
@@ -1265,7 +1294,7 @@ class RichSequencerClientImpl(
           )
           (for {
             _ <- EitherT.right(
-              performUnlessClosingF("processing-delay")(processingDelay.delay(serializedEvent))
+              synchronizeWithClosingF("processing-delay")(processingDelay.delay(serializedEvent))
             )
             _ = logger.debug(s"Processing delay $processingDelay completed successfully")
             _ <- eventValidator
@@ -1317,7 +1346,7 @@ class RichSequencerClientImpl(
     //  instances with equivalent parameters in case of BFT subscriptions.
     private def signalHandler(
         eventHandler: SequencedApplicationHandler[ClosedEnvelope]
-    )(implicit traceContext: TraceContext): Unit = performUnlessClosing(functionFullName) {
+    )(implicit traceContext: TraceContext): Unit = synchronizeWithClosingSync(functionFullName) {
       val isIdle = blocking {
         handlerIdleLock.synchronized {
           val oldPromise = handlerIdle.getAndUpdate(p => if (p.isCompleted) Promise() else p)
@@ -1666,7 +1695,7 @@ class SequencerClientImplPekko[E: Pretty](
       nonThrottledEventHandler,
       metrics,
     )
-    val subscriptionF = performUnlessClosingUSF(functionFullName) {
+    val subscriptionF = synchronizeWithClosing(functionFullName) {
       for {
         initialPriorEventO <-
           sequencedEventStore

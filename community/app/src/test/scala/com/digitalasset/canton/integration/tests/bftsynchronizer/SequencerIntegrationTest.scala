@@ -90,9 +90,9 @@ trait SequencerIntegrationTest
   "Onboard a new sequencer" in { implicit env =>
     import env.*
     onboardNewSequencer(
-      synchronizerId,
-      newSequencer = sequencer2,
-      existingSequencer = sequencer1,
+      synchronizerId.logical,
+      newSequencerReference = sequencer2,
+      existingSequencerReference = sequencer1,
       synchronizerOwners = synchronizerOwners.toSet,
     )
   }
