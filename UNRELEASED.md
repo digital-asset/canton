@@ -9,6 +9,9 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## Until 2025-06-11 (Exclusive)
+- Dead parameter `canton.participants.<participant>.http-ledger-api.allow-insecure-tokens` has been removed.
+
 ## Until 2025-06-04 (Exclusive)
 - **Breaking** The console command `connect_local_bft` takes now a list of `SequencerReference` instead of a `NonEmpty[Map[SequencerAlias, SequencerReference]]`
 - Console command - A new console command `connect_bft` has been added to connect by url to Decentralized Sequencers

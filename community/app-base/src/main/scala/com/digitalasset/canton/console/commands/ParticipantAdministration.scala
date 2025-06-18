@@ -163,6 +163,7 @@ private[console] object ParticipantCommands {
         sequencers: Seq[SequencerReference],
         synchronizerAlias: SynchronizerAlias,
         manualConnect: Boolean = false,
+        synchronizerId: Option[SynchronizerId] = None,
         maxRetryDelay: Option[NonNegativeFiniteDuration] = None,
         priority: Int = 0,
         sequencerTrustThreshold: PositiveInt = PositiveInt.one,
@@ -179,7 +180,7 @@ private[console] object ParticipantCommands {
           submissionRequestAmplification,
         ),
         manualConnect = manualConnect,
-        None,
+        synchronizerId,
         priority,
         None,
         maxRetryDelay,
@@ -1758,6 +1759,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           sequencer - A local sequencer reference
           alias - The name you will be using to refer to this synchronizer. Can not be changed anymore.
           manualConnect - Whether this connection should be handled manually and also excluded from automatic re-connect.
+          synchronizerId - An optional Synchronizer Id to ensure the connection is made to the correct synchronizer.
           maxRetryDelayMillis - Maximal amount of time (in milliseconds) between two connection attempts.
           priority - The priority of the synchronizer. The higher the more likely a synchronizer will be used.
           synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
@@ -1767,6 +1769,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         sequencer: SequencerReference,
         alias: SynchronizerAlias,
         manualConnect: Boolean = false,
+        synchronizerId: Option[SynchronizerId] = None,
         maxRetryDelayMillis: Option[Long] = None,
         priority: Int = 0,
         synchronize: Option[NonNegativeDuration] = Some(
@@ -1778,6 +1781,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         Seq(sequencer),
         alias,
         manualConnect,
+        synchronizerId,
         maxRetryDelayMillis.map(NonNegativeFiniteDuration.tryOfMillis),
         priority,
       )
@@ -1793,6 +1797,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           alias - The name you will be using to refer to this synchronizer. Cannot be changed anymore.
           performHandshake - If true (default), will perform a handshake with the synchronizer. If no, will only store the configuration without any query to the synchronizer.
           manualConnect - Whether this connection should be handled manually and also excluded from automatic re-connect.
+          synchronizerId - An optional Synchronizer Id to ensure the connection is made to the correct synchronizer.
           maxRetryDelayMillis - Maximal amount of time (in milliseconds) between two connection attempts.
           priority - The priority of the synchronizer. The higher the more likely a synchronizer will be used.
           synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
@@ -1803,6 +1808,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         alias: SynchronizerAlias,
         performHandshake: Boolean = true,
         manualConnect: Boolean = false,
+        synchronizerId: Option[SynchronizerId] = None,
         maxRetryDelayMillis: Option[Long] = None,
         priority: Int = 0,
         synchronize: Option[NonNegativeDuration] = Some(
@@ -1811,11 +1817,12 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         validation: SequencerConnectionValidation = SequencerConnectionValidation.All,
     ): Unit = {
       val config = ParticipantCommands.synchronizers.reference_to_config(
-        Seq(sequencer),
-        alias,
+        sequencers = Seq(sequencer),
+        synchronizerAlias = alias,
         manualConnect = manualConnect,
-        maxRetryDelayMillis.map(NonNegativeFiniteDuration.tryOfMillis),
-        priority,
+        synchronizerId = synchronizerId,
+        maxRetryDelay = maxRetryDelayMillis.map(NonNegativeFiniteDuration.tryOfMillis),
+        priority = priority,
       )
       register_by_config(config, performHandshake = performHandshake, validation, synchronize)
     }
@@ -1864,6 +1871,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           synchronizerAlias - The name you will be using to refer to this synchronizer. Cannot be changed anymore.
           sequencers - The list of sequencer references to connect to.
           manualConnect - Whether this connection should be handled manually and also excluded from automatic re-connect.
+          synchronizerId - An optional Synchronizer Id to ensure the connection is made to the correct synchronizer.
           priority - The priority of the synchronizer. The higher the more likely a synchronizer will be used.
           synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
           sequencerTrustThreshold - Set the minimum number of sequencers that must agree before a message is considered valid.
@@ -1874,6 +1882,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         sequencers: Seq[SequencerReference],
         synchronizerAlias: SynchronizerAlias,
         manualConnect: Boolean = false,
+        synchronizerId: Option[SynchronizerId] = None,
         maxRetryDelayMillis: Option[Long] = None,
         priority: Int = 0,
         synchronize: Option[NonNegativeDuration] = Some(
@@ -1885,13 +1894,14 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         validation: SequencerConnectionValidation = SequencerConnectionValidation.All,
     ): Unit = {
       val config = ParticipantCommands.synchronizers.reference_to_config(
-        sequencers,
-        synchronizerAlias,
-        manualConnect,
-        maxRetryDelayMillis.map(NonNegativeFiniteDuration.tryOfMillis),
-        priority,
-        sequencerTrustThreshold,
-        submissionRequestAmplification,
+        sequencers = sequencers,
+        synchronizerAlias = synchronizerAlias,
+        manualConnect = manualConnect,
+        synchronizerId = synchronizerId,
+        maxRetryDelay = maxRetryDelayMillis.map(NonNegativeFiniteDuration.tryOfMillis),
+        priority = priority,
+        sequencerTrustThreshold = sequencerTrustThreshold,
+        submissionRequestAmplification = submissionRequestAmplification,
       )
       connect_by_config(config, validation, synchronize)
     }
@@ -1904,6 +1914,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           synchronizerAlias - The name you will be using to refer to this synchronizer. Cannot be changed anymore.
           connections - The list of sequencer connections, can be defined by urls.
           manualConnect - Whether this connection should be handled manually and also excluded from automatic re-connect.
+          synchronizerId - An optional Synchronizer Id to ensure the connection is made to the correct synchronizer.
           priority - The priority of the synchronizer. The higher the more likely a synchronizer will be used.
           synchronize - A timeout duration indicating how long to wait for all topology changes to have been effected on all local nodes.
           sequencerTrustThreshold - Set the minimum number of sequencers that must agree before a message is considered valid.
@@ -1913,6 +1924,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
     def connect_bft(
         connections: Seq[SequencerConnection],
         synchronizerAlias: SynchronizerAlias,
+        synchronizerId: Option[SynchronizerId] = None,
         manualConnect: Boolean = false,
         priority: Int = 0,
         synchronize: Option[NonNegativeDuration] = Some(
@@ -1927,7 +1939,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         synchronizerAlias,
         connections,
         manualConnect,
-        synchronizerId = None,
+        synchronizerId = synchronizerId,
         priority,
         sequencerTrustThreshold = sequencerTrustThreshold,
         submissionRequestAmplification = submissionRequestAmplification,
