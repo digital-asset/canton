@@ -7,7 +7,6 @@ import com.daml.test.evidence.scalatest.OperabilityTestHelpers
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.console.ConsoleEnvironment.Implicits.*
 import com.digitalasset.canton.console.{
   CommandFailure,
   LocalMediatorReference,
@@ -47,7 +46,6 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SendPolicy,
 }
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
-import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.{
   NamespaceDelegation,
   OwnerToKeyMapping,
@@ -86,7 +84,7 @@ trait MultipleMediatorsBaseTest { this: BaseTest & HasProgrammableSequencer =>
     eventually() {
       sequencer.topology.transactions
         .list(
-          store = TopologyStoreId.Synchronizer(sequencer.synchronizer_id),
+          store = sequencer.physical_synchronizer_id,
           filterNamespace = mediator.namespace.filterString,
         )
         .result

@@ -8,12 +8,30 @@ below should all be Wednesdays to align with the weekly release
 schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
+
+## Until 2025-06-18 (Exclusive)
+- Changed the protobuf definition of the admin API `StoreId.Synchronizer` from just having a `string id` field to the following:
+```
+    message Synchronizer {
+      oneof kind {
+        string logical = 1;
+        string physical = 2;
+      }
+    }
+```
+- Some console commands now take `TopologyStoreId.Synchronizer` instead of `SynchronizerId` as parameter.
+  This should be non-breaking,because there are implicit conversions from `SynchronizerId` and `PhysicalSynchronizerId` to `TopologyStoreId.Synchronizer`.
+
 ## Until 2025-06-11 (Exclusive)
 - JSON Ledger API added `authenticated-user` endpoint to get the current user.
 
 ## Until 2025-05-21 (Exclusive)
 - The `PartyToParticipant` topology mapping's `HostingParticipant` now has an optional, empty `Onboarding` message
   for use with Online Party Replication and the `PartyManagementService.AddPartyAsync` endpoint.
+- Configuring session signing keys (`SessionSigningKeysConfig`) is now only possible through `KmsConfig`,
+  as this feature is supported exclusively by KMS providers
+  (`canton.participants.<participant>.crypto.kms.session-signing-keys`). Session signing keys are now enabled by
+  default.
 - Add configuration for the size of the inbound metadata on the Ledger API. Changing this value allows
   the server to accept larger JWT tokens.
 `canton.participants.participant.ledger-api.max-inbound-metadata-size=10240`
