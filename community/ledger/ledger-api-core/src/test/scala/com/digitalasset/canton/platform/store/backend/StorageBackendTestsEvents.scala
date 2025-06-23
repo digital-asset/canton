@@ -701,7 +701,7 @@ private[backend] trait StorageBackendTestsEvents
           executeSql(
             backend.event.firstSynchronizerOffsetAfterOrAt(
               synchronizerId = synchronizerId,
-              afterOrAtRecordTimeInclusive = afterOrAtRecordTimeInclusive,
+              afterOrAtRecordTime = afterOrAtRecordTimeInclusive,
             )
           ) shouldBe expectation
         }
@@ -900,7 +900,7 @@ private[backend] trait StorageBackendTestsEvents
           executeSql(
             backend.event.lastSynchronizerOffsetBeforeOrAt(
               synchronizerIdO = synchronizerIdO,
-              beforeOrAtOffsetInclusive = beforeOrAtOffsetInclusive,
+              beforeOrAtOffset = beforeOrAtOffsetInclusive,
             )
           ) shouldBe expectation
         }
@@ -984,7 +984,7 @@ private[backend] trait StorageBackendTestsEvents
       ) {
         executeSql(
           backend.event.firstSynchronizerOffsetAfterOrAtPublicationTime(
-            afterOrAtPublicationTimeInclusive = afterOrAtPublicationTimeInclusive
+            afterOrAtPublicationTime = afterOrAtPublicationTimeInclusive
           )
         ) shouldBe expectation
       }
@@ -1043,11 +1043,74 @@ private[backend] trait StorageBackendTestsEvents
       ),
     ).zipWithIndex.foreach { case ((beforeOrAtPublicationTimeInclusive, expectation), index) =>
       withClue(
-        s"test $index lastSynchronizerOffsetBeforerOrAtPublicationTime($beforeOrAtPublicationTimeInclusive)"
+        s"test $index lastSynchronizerOffsetBeforeOrAtPublicationTime($beforeOrAtPublicationTimeInclusive)"
       ) {
         executeSql(
           backend.event.lastSynchronizerOffsetBeforeOrAtPublicationTime(
-            beforeOrAtPublicationTimeInclusive = beforeOrAtPublicationTimeInclusive
+            beforeOrAtPublicationTime = beforeOrAtPublicationTimeInclusive
+          )
+        ) shouldBe expectation
+      }
+    }
+    Vector(
+      startRecordTimeSynchronizer2 -> None,
+      startRecordTimeSynchronizer2.addMicros(499) -> None,
+      startRecordTimeSynchronizer2.addMicros(500) -> Some(
+        SynchronizerOffset(
+          offset = offset(3),
+          synchronizerId = someSynchronizerId2,
+          recordTime = startRecordTimeSynchronizer2.addMicros(500),
+          publicationTime = startPublicationTime.addMicros(500),
+        )
+      ),
+      startRecordTimeSynchronizer2.addMicros(501) -> Some(
+        SynchronizerOffset(
+          offset = offset(3),
+          synchronizerId = someSynchronizerId2,
+          recordTime = startRecordTimeSynchronizer2.addMicros(500),
+          publicationTime = startPublicationTime.addMicros(500),
+        )
+      ),
+      startRecordTimeSynchronizer2.addMicros(2000) -> Some(
+        SynchronizerOffset(
+          offset = offset(11),
+          synchronizerId = someSynchronizerId2,
+          recordTime = startRecordTimeSynchronizer2.addMicros(2000),
+          publicationTime = startPublicationTime.addMicros(1000),
+        )
+      ),
+      startRecordTimeSynchronizer2.addMicros(2001) -> Some(
+        SynchronizerOffset(
+          offset = offset(11),
+          synchronizerId = someSynchronizerId2,
+          recordTime = startRecordTimeSynchronizer2.addMicros(2000),
+          publicationTime = startPublicationTime.addMicros(1000),
+        )
+      ),
+      startRecordTimeSynchronizer2.addMicros(2000) -> Some(
+        SynchronizerOffset(
+          offset = offset(11),
+          synchronizerId = someSynchronizerId2,
+          recordTime = startRecordTimeSynchronizer2.addMicros(2000),
+          publicationTime = startPublicationTime.addMicros(1000),
+        )
+      ),
+      startRecordTimeSynchronizer2.addMicros(4000) -> Some(
+        SynchronizerOffset(
+          offset = offset(15),
+          synchronizerId = someSynchronizerId2,
+          recordTime = startRecordTimeSynchronizer2.addMicros(3000),
+          publicationTime = startPublicationTime.addMicros(2000),
+        )
+      ),
+    ).zipWithIndex.foreach { case ((beforeOrAtRecordTime, expectation), index) =>
+      withClue(
+        s"test $index lastSynchronizerOffsetBeforeOrAtRecordTime($beforeOrAtRecordTime)"
+      ) {
+        executeSql(
+          backend.event.lastSynchronizerOffsetBeforeOrAtRecordTime(
+            synchronizerId = someSynchronizerId2,
+            beforeOrAtRecordTime = beforeOrAtRecordTime,
           )
         ) shouldBe expectation
       }

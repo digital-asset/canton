@@ -12,6 +12,7 @@ import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
@@ -23,6 +24,7 @@ import com.digitalasset.canton.participant.admin.party.{
   PartyReplicationAdminWorkflow,
 }
 import com.digitalasset.canton.participant.sync.CantonSyncService
+import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SynchronizerOffset
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId, UniqueIdentifier}
@@ -374,6 +376,105 @@ class GrpcPartyManagementService(
       Map.empty,
     )
   }
+
+  override def getHighestOffsetByTimestamp(
+      request: v30.GetHighestOffsetByTimestampRequest
+  ): Future[v30.GetHighestOffsetByTimestampResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    val allSynchronizerIds = sync.syncPersistentStateManager.getAll.keySet
+
+    val res = for {
+      synchronizerId <- EitherT.fromEither[FutureUnlessShutdown](
+        SynchronizerId
+          .fromProtoPrimitive(
+            request.synchronizerId,
+            "synchronizer_id",
+          )
+          .leftMap(error => PartyManagementServiceError.InvalidArgument.Error(error.message))
+      )
+      _ <- EitherT.fromEither[FutureUnlessShutdown](
+        Either.cond(
+          allSynchronizerIds.contains(synchronizerId),
+          (),
+          PartyManagementServiceError.InvalidArgument.Error(
+            s"Synchronizer id ${synchronizerId.uid} is unknown"
+          ),
+        )
+      )
+      timestamp <- EitherT.fromEither[FutureUnlessShutdown](
+        ProtoConverter
+          .parseRequired(
+            CantonTimestamp.fromProtoTimestamp,
+            "timestamp",
+            request.timestamp,
+          )
+          .leftMap(error => PartyManagementServiceError.InvalidArgument.Error(error.message))
+      )
+      forceFlag = request.force
+      synchronizerIndex <- EitherT
+        .fromOptionF[FutureUnlessShutdown, PartyManagementServiceError, SynchronizerIndex](
+          sync.participantNodePersistentState.value.ledgerApiStore
+            .cleanSynchronizerIndex(synchronizerId),
+          PartyManagementServiceError.InvalidTimestamp
+            .Error(
+              synchronizerId,
+              timestamp,
+              forceFlag,
+              "Cannot use clean synchronizer index because it is empty",
+            ),
+        )
+      _ <- EitherT.fromEither[FutureUnlessShutdown](
+        Either.cond(
+          forceFlag || timestamp <= synchronizerIndex.recordTime,
+          timestamp,
+          PartyManagementServiceError.InvalidTimestamp.Error(
+            synchronizerId,
+            timestamp,
+            forceFlag,
+            s"Not all events have been processed fully and/or published to the Ledger API DB until the requested timestamp: $timestamp",
+          ),
+        )
+      )
+      synchronizerOffset <- EitherT
+        .fromOptionF[FutureUnlessShutdown, PartyManagementServiceError, SynchronizerOffset](
+          sync.participantNodePersistentState.value.ledgerApiStore
+            .lastSynchronizerOffsetBeforeOrAtRecordTime(
+              synchronizerId,
+              timestamp,
+            ),
+          PartyManagementServiceError.InvalidTimestamp
+            .Error(
+              synchronizerId,
+              timestamp,
+              forceFlag,
+              s"The participant does not yet have a ledger offset at or above the requested timestamp: $timestamp",
+            ),
+        )
+      ledgerEnd <- EitherT.fromOption[FutureUnlessShutdown](
+        sync.participantNodePersistentState.value.ledgerApiStore.ledgerEndCache
+          .apply()
+          .map(_.lastOffset),
+        PartyManagementServiceError.InvalidTimestamp
+          .Error(
+            synchronizerId,
+            timestamp,
+            forceFlag,
+            "Cannot find the ledger end",
+          ),
+      )
+      offset <- EitherT.pure[FutureUnlessShutdown, PartyManagementServiceError]({
+        if (request.force) {
+          ledgerEnd.unwrap
+        } else {
+          synchronizerOffset.offset.unwrap
+        }
+      })
+
+    } yield v30.GetHighestOffsetByTimestampResponse(offset)
+    mapErrNewEUS(res.leftMap(_.toCantonRpcError))
+  }
+
 }
 
 private final case class ValidExportAcsRequest(
