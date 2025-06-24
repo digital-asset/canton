@@ -8,7 +8,14 @@ below should all be Wednesdays to align with the weekly release
 schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
+## Until 2025-06-25 (Exclusive)
+- JSON Ledger API: `prefetchContractKeys` added to `JsCommands` and `JsPrepareSubmissionRequest`
+- JSON Ledger API: fixed openapi documentation for: `Completion/Completion1` (status property), `ParticipantAuthorizationAdded`, `ParticipantAuthorizationChanged`,`ParticipantAuthorizationRevoked`
+- Ledger API: the existing `InteractiveSubmissionService.GetPreferredPackageVersion` (gRPC) or `interactive-submission/preferred-package-version` (JSON) functionality is superseeded by a new endpoint pair:
+  - gRPC: `InteractiveSubmissionService.GetPackagePreferences`
+  - JSON: `interactive-submission/package-preferences`
 
+  The existing endpoints are deprecated but preserved for backwards compatibility.
 ## Until 2025-06-18 (Exclusive)
 - Changed the protobuf definition of the admin API `StoreId.Synchronizer` from just having a `string id` field to the following:
 ```
@@ -23,7 +30,7 @@ Wednesday after your change.
   This should be non-breaking,because there are implicit conversions from `SynchronizerId` and `PhysicalSynchronizerId` to `TopologyStoreId.Synchronizer`.
 
 ## Until 2025-06-11 (Exclusive)
-- JSON Ledger API added `authenticated-user` endpoint to get the current user.
+- JSON Ledger API: added `authenticated-user` endpoint to get the current user.
 
 ## Until 2025-05-21 (Exclusive)
 - The `PartyToParticipant` topology mapping's `HostingParticipant` now has an optional, empty `Onboarding` message

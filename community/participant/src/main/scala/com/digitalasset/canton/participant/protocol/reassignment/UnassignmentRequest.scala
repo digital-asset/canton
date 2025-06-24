@@ -4,17 +4,18 @@
 package com.digitalasset.canton.participant.protocol.reassignment
 
 import cats.data.EitherT
+import cats.syntax.functor.*
 import com.digitalasset.canton.crypto.{HashOps, HmacOps, Salt, SaltSeed}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentValidationError.PackageIdUnknownOrUnvetted
 import com.digitalasset.canton.participant.protocol.submission.UsableSynchronizers
+import com.digitalasset.canton.protocol.{ReassignmentId, UnassignId}
 import com.digitalasset.canton.sequencing.protocol.{MediatorGroupRecipient, TimeProof}
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.version.ProtocolVersion
 
 import java.util.UUID
 import scala.concurrent.ExecutionContext
@@ -32,11 +33,21 @@ final case class UnassignmentRequest(
     reassigningParticipants: Set[ParticipantId],
     contracts: ContractsReassignmentBatch,
     sourceSynchronizer: Source[PhysicalSynchronizerId],
-    sourceProtocolVersion: Source[ProtocolVersion],
     sourceMediator: MediatorGroupRecipient,
     targetSynchronizer: Target[PhysicalSynchronizerId],
     targetTimeProof: TimeProof,
 ) {
+  private val sourceProtocolVersion = sourceSynchronizer.map(_.protocolVersion)
+
+  def mkReassignmentId(unassignmentTs: CantonTimestamp) = ReassignmentId(
+    sourceSynchronizer.map(_.logical),
+    UnassignId(
+      sourceSynchronizer.map(_.logical),
+      targetSynchronizer.map(_.logical),
+      unassignmentTs,
+      contracts.contractIdCounters,
+    ),
+  )
 
   def toFullUnassignmentTree(
       hashOps: HashOps,
@@ -79,12 +90,9 @@ object UnassignmentRequest {
       timeProof: TimeProof,
       contracts: ContractsReassignmentBatch,
       submitterMetadata: ReassignmentSubmitterMetadata,
-      sourceSynchronizer: Source[PhysicalSynchronizerId],
-      sourceProtocolVersion: Source[
-        ProtocolVersion
-      ], // TODO(#25482) Reduce duplication in parameters
+      sourcePSId: Source[PhysicalSynchronizerId],
       sourceMediator: MediatorGroupRecipient,
-      targetSynchronizer: Target[PhysicalSynchronizerId],
+      targetPSId: Target[PhysicalSynchronizerId],
       sourceTopology: Source[TopologySnapshot],
       targetTopology: Target[TopologySnapshot],
   )(implicit
@@ -125,7 +133,7 @@ object UnassignmentRequest {
 
       _ <- UsableSynchronizers
         .checkPackagesVetted(
-          targetSynchronizer.unwrap,
+          targetPSId.unwrap,
           targetTopology.unwrap,
           stakeholders.all.view.map(_ -> packageIds).toMap,
           targetTopology.unwrap.referenceTime,
@@ -138,10 +146,9 @@ object UnassignmentRequest {
         submitterMetadata,
         reassigningParticipants,
         contracts,
-        sourceSynchronizer,
-        sourceProtocolVersion,
+        sourcePSId,
         sourceMediator,
-        targetSynchronizer,
+        targetPSId,
         timeProof,
       )
 

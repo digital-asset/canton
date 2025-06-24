@@ -69,6 +69,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
+import java.time.Instant
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.{Failure, Random, Success}
 
@@ -141,6 +142,9 @@ final class IssConsensusModule[E <: Env[E]](
   private var epochState = initialState.epochState
   @VisibleForTesting
   private[bftordering] def getEpochState: EpochState[E] = epochState
+
+  private var consensusWaitingForEpochCompletionSince: Option[Instant] = None
+  private var consensusWaitingForEpochStartSince: Option[Instant] = None
 
   // TODO(#16761) resend locally-led ordered blocks (PrePrepare) in activeEpoch in case my node crashed
   override def ready(self: ModuleRef[Consensus.Message[E]]): Unit = ()
@@ -282,6 +286,7 @@ final class IssConsensusModule[E <: Env[E]](
             s"Received NewEpochTopology event for epoch $newEpochNumber, but the epoch has already started; ignoring it"
           )
         } else if (currentEpochNumber == newEpochNumber - 1) {
+          emitEpochStartLatency()
           startNewEpochUnlessOffboarded(
             currentEpochInfo,
             newEpochInfo,
@@ -386,10 +391,7 @@ final class IssConsensusModule[E <: Env[E]](
   private def handleLocalAvailabilityMessage(
       localAvailabilityMessage: Consensus.LocalAvailability
   )(implicit traceContext: TraceContext): Unit =
-    localAvailabilityMessage match {
-      case Consensus.LocalAvailability.ProposalCreated(orderingBlock, epochNumber) =>
-        epochState.proposalCreated(orderingBlock, epochNumber)
-    }
+    epochState.localAvailabilityMessageReceived(localAvailabilityMessage)
 
   private def handleConsensusMessage(
       consensusMessage: Consensus.ConsensusMessage
@@ -452,13 +454,19 @@ final class IssConsensusModule[E <: Env[E]](
       case Consensus.ConsensusMessage.BlockOrdered(
             orderedBlock: OrderedBlock,
             commitCertificate: CommitCertificate,
+            hasCompletedLedSegment,
           ) =>
-        emitConsensusLatencyStats(metrics, logger)
+        emitConsensusLatencyStats(metrics)
+
+        if (hasCompletedLedSegment)
+          consensusWaitingForEpochCompletionSince = Some(Instant.now())
 
         epochState.confirmBlockCompleted(orderedBlock.metadata, commitCertificate)
 
         epochState.epochCompletionStatus match {
           case EpochState.Complete(commitCertificates) =>
+            emitEpochCompletionWaitLatency()
+            consensusWaitingForEpochStartSince = Some(Instant.now())
             storeEpochCompletion(commitCertificates).discard
           case _ => ()
         }
@@ -498,8 +506,8 @@ final class IssConsensusModule[E <: Env[E]](
       actingOnMessageType: Option[String] = None,
       initInProgress: Boolean = false,
   )(implicit context: E#ActorContextT[Consensus.Message[E]], traceContext: TraceContext): Unit = {
-    val prefix = actingOnMessageType.map(mt => s"$mt: ").getOrElse("")
     val completeEpochNumber = completeEpochSnapshot.info.number
+    val prefix = actingOnMessageType.map(mt => s"$mt: ").getOrElse("")
     logger.debug(s"${prefix}stored w/ epoch = $completeEpochNumber")
     val currentEpochStateNumber = epochState.epoch.info.number
 
@@ -526,6 +534,7 @@ final class IssConsensusModule[E <: Env[E]](
 
       newEpochTopology match {
         case Some(Consensus.NewEpochTopology(newEpochNumber, newMembership, cryptoProvider)) =>
+          emitEpochStartLatency()
           val currentEpochInfo = epochState.epoch.info
           val newEpochInfo = currentEpochInfo.next(
             epochLength,
@@ -772,6 +781,7 @@ final class IssConsensusModule[E <: Env[E]](
       minimumEndEpochNumber: Option[EpochNumber],
   )(implicit context: E#ActorContextT[Consensus.Message[E]], traceContext: TraceContext): Unit = {
     logger.info(s"Starting $stateTransferType state transfer from epoch $startEpochNumber")
+    resetConsensusWaitingForEpochCompletion()
     val newBehavior = new StateTransferBehavior(
       epochLength,
       StateTransferBehavior.InitialState[E](
@@ -823,6 +833,30 @@ final class IssConsensusModule[E <: Env[E]](
     }
     epochSnapshot
   }
+
+  private def emitEpochCompletionWaitLatency(): Unit = {
+    import metrics.performance.orderingStageLatency.*
+    emitOrderingStageLatency(
+      labels.stage.values.consensus.EpochCompletionWait,
+      consensusWaitingForEpochCompletionSince,
+      cleanup = () => resetConsensusWaitingForEpochCompletion(),
+    )
+  }
+
+  private def resetConsensusWaitingForEpochCompletion(): Unit =
+    consensusWaitingForEpochCompletionSince = None
+
+  private def emitEpochStartLatency(): Unit = {
+    import metrics.performance.orderingStageLatency.*
+    emitOrderingStageLatency(
+      labels.stage.values.consensus.EpochStartWait,
+      consensusWaitingForEpochStartSince,
+      cleanup = () => resetConsensusWaitingForEpochStart(),
+    )
+  }
+
+  private def resetConsensusWaitingForEpochStart(): Unit =
+    consensusWaitingForEpochStartSince = None
 }
 
 object IssConsensusModule {

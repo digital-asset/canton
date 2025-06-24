@@ -39,10 +39,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.PekkoBlockSubscription
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.OutputMetadataStore
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.networking.GrpcNetworking
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.networking.GrpcNetworking.P2PEndpoint
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.networking.authentication.ServerAuthenticatingServerFilter
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.networking.data.P2PEndpointsStore
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.data.P2PEndpointsStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.OrderingTopologyProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.{
   BftOrderingModuleSystemInitializer,
@@ -69,8 +66,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   PekkoEnv,
   PekkoFutureUnlessShutdown,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.p2p.grpc.{
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.integration.p2p.grpc.GrpcNetworking.P2PEndpoint
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.integration.p2p.grpc.authentication.ServerAuthenticatingServerFilter
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.integration.p2p.grpc.{
   GrpcBftOrderingService,
+  GrpcNetworking,
   PekkoGrpcP2PNetworking,
 }
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
@@ -99,9 +99,8 @@ import scala.util.Random
 final class BftBlockOrderer(
     config: BftBlockOrdererConfig,
     sharedLocalStorage: Storage,
-    synchronizerId: PhysicalSynchronizerId,
+    psid: PhysicalSynchronizerId,
     sequencerId: SequencerId,
-    protocolVersion: ProtocolVersion, // TODO(#25482) Reduce duplication in parameters
     clock: Clock,
     orderingTopologyProvider: OrderingTopologyProvider[PekkoEnv],
     authenticationServicesO: Option[
@@ -122,7 +121,7 @@ final class BftBlockOrderer(
 
   import BftBlockOrderer.*
 
-  private implicit val synchronizerProtocolVersion: ProtocolVersion = protocolVersion
+  private implicit val protocolVersion: ProtocolVersion = psid.protocolVersion
 
   require(
     sequencerSubscriptionInitialHeight >= BlockNumber.First,
@@ -200,7 +199,7 @@ final class BftBlockOrderer(
   private val maybeServerAuthenticatingFilter =
     maybeAuthenticationServices.map { authenticationServices =>
       new ServerAuthenticatingServerFilter(
-        synchronizerId,
+        psid,
         sequencerId,
         authenticationServices.syncCryptoForAuthentication.crypto,
         Seq(protocolVersion),
@@ -214,8 +213,7 @@ final class BftBlockOrderer(
     val maybeGrpcNetworkingAuthenticationInitialState =
       maybeAuthenticationServices.map { authenticationServices =>
         GrpcNetworking.AuthenticationInitialState(
-          protocolVersion,
-          synchronizerId,
+          psid,
           sequencerId,
           authenticationServices,
           authenticationTokenManagerConfig,

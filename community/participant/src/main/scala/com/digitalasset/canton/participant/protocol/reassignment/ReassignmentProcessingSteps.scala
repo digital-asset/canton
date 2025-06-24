@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.protocol.reassignment
 import cats.data.{EitherT, OptionT}
 import cats.syntax.either.*
 import cats.syntax.foldable.*
+import cats.syntax.functor.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
@@ -59,7 +60,7 @@ import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ErrorUtil, ReassignmentTag}
+import com.digitalasset.canton.util.ReassignmentTag
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
 
@@ -82,6 +83,8 @@ trait ReassignmentProcessingSteps[
   val participantId: ParticipantId
 
   val synchronizerId: ReassignmentTag[PhysicalSynchronizerId]
+
+  val protocolVersion: ReassignmentTag[ProtocolVersion]
 
   protected def contractAuthenticator: ContractAuthenticator
 
@@ -160,18 +163,21 @@ trait ReassignmentProcessingSteps[
       reassignmentRef: ReassignmentRef,
       submitterLf: LfPartyId,
       rootHash: RootHash,
-  ): EitherT[Future, ReassignmentProcessorError, PendingReassignmentSubmission] = {
-    val pendingSubmission = PendingReassignmentSubmission()
+      mkReassignmentId: CantonTimestamp => ReassignmentId,
+  ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, PendingReassignmentSubmission] = {
+    val pendingSubmission = PendingReassignmentSubmission(mkReassignmentId)
     val existing = pendingSubmissionMap.putIfAbsent(rootHash, pendingSubmission)
-    EitherT.cond[Future](
-      existing.isEmpty,
-      pendingSubmission,
-      DuplicateReassignmentTreeHash(
-        reassignmentRef,
-        submitterLf,
-        rootHash,
-      ): ReassignmentProcessorError,
-    )
+    EitherT
+      .cond[Future](
+        existing.isEmpty,
+        pendingSubmission,
+        DuplicateReassignmentTreeHash(
+          reassignmentRef,
+          submitterLf,
+          rootHash,
+        ): ReassignmentProcessorError,
+      )
+      .mapK(FutureUnlessShutdown.outcomeK)
   }
 
   protected def decryptTree(
@@ -269,11 +275,13 @@ trait ReassignmentProcessingSteps[
       rootHash: RootHash,
       malformedPayloads: Seq[MalformedPayload],
   )(implicit traceContext: TraceContext): Option[ConfirmationResponses] =
-    // TODO(i12926) This will crash the ConnectedSynchronizer
-    ErrorUtil.internalError(
-      new UnsupportedOperationException(
-        s"Received a unassignment/assignment request with id $requestId with all payloads being malformed. Crashing..."
-      )
+    ProcessingSteps.constructResponsesForMalformedPayloads(
+      requestId = requestId,
+      rootHash = rootHash,
+      malformedPayloads = malformedPayloads,
+      synchronizerId = synchronizerId.unwrap,
+      participantId = participantId,
+      protocolVersion = protocolVersion.unwrap,
     )
 
   override def eventAndSubmissionIdForRejectedCommand(
@@ -368,6 +376,7 @@ trait ReassignmentProcessingSteps[
 
   protected def createConfirmationResponses(
       requestId: RequestId,
+      malformedPayloads: Seq[MalformedPayload],
       topologySnapshot: TopologySnapshot,
       protocolVersion: ProtocolVersion,
       confirmingParties: Set[LfPartyId],
@@ -375,6 +384,34 @@ trait ReassignmentProcessingSteps[
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[ConfirmationResponses]] =
+    if (malformedPayloads.nonEmpty) {
+      FutureUnlessShutdown.pure(
+        ProcessingSteps.constructResponsesForMalformedPayloads(
+          requestId = requestId,
+          rootHash = validationResult.rootHash,
+          malformedPayloads = malformedPayloads,
+          synchronizerId = synchronizerId.unwrap,
+          participantId = participantId,
+          protocolVersion = protocolVersion,
+        )
+      )
+    } else {
+      responsesForWellformedPayloads(
+        requestId,
+        topologySnapshot,
+        protocolVersion,
+        confirmingParties,
+        validationResult,
+      )
+    }
+
+  private def responsesForWellformedPayloads(
+      requestId: RequestId,
+      topologySnapshot: TopologySnapshot,
+      protocolVersion: ProtocolVersion,
+      confirmingParties: Set[LfPartyId],
+      validationResult: ReassignmentValidationResult,
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[ConfirmationResponses]] =
     for {
       hostedConfirmingParties <-
         if (validationResult.isReassigningParticipant)
@@ -493,8 +530,9 @@ trait ReassignmentProcessingSteps[
 object ReassignmentProcessingSteps {
 
   final case class PendingReassignmentSubmission(
+      mkReassignmentId: CantonTimestamp => ReassignmentId,
       reassignmentCompletion: Promise[com.google.rpc.status.Status] =
-        Promise[com.google.rpc.status.Status]()
+        Promise[com.google.rpc.status.Status](),
   )
 
   final case class ParsedReassignmentRequest[VT <: FullReassignmentViewTree](
@@ -513,6 +551,16 @@ object ReassignmentProcessingSteps {
       override val synchronizerParameters: DynamicSynchronizerParametersWithValidity,
   ) extends ParsedRequest[ReassignmentSubmitterMetadata] {
     override def rootHash: RootHash = fullViewTree.rootHash
+
+    val reassignmentId = {
+      val unassignId = UnassignId(
+        fullViewTree.sourceSynchronizer,
+        fullViewTree.targetSynchronizer.map(_.logical),
+        requestTimestamp,
+        fullViewTree.contracts.contractIdCounters,
+      )
+      ReassignmentId(fullViewTree.sourceSynchronizer, unassignId)
+    }
   }
 
   trait PendingReassignment extends PendingRequestData with Product with Serializable {

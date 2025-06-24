@@ -36,7 +36,7 @@ import com.digitalasset.canton.participant.protocol.{
   ProcessingSteps,
 }
 import com.digitalasset.canton.participant.store.*
-import com.digitalasset.canton.participant.sync.{SyncEphemeralState, SyncEphemeralStateLookup}
+import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
@@ -60,7 +60,7 @@ private[reassignment] class AssignmentProcessingSteps(
     seedGenerator: SeedGenerator,
     override protected val contractAuthenticator: ContractAuthenticator,
     staticSynchronizerParameters: Target[StaticSynchronizerParameters],
-    targetProtocolVersion: Target[ProtocolVersion],
+    val protocolVersion: Target[ProtocolVersion],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val ec: ExecutionContext)
     extends ReassignmentProcessingSteps[
@@ -79,8 +79,6 @@ private[reassignment] class AssignmentProcessingSteps(
     s"Submitter ${param.submitterMetadata.submitter}, reassignmentId ${param.reassignmentId}"
 
   override def explicitMediatorGroup(param: SubmissionParam): Option[MediatorGroupIndex] = None
-
-  override type SubmissionResultArgs = PendingReassignmentSubmission
 
   override type RequestType = ProcessingSteps.RequestType.Assignment
   override val requestType = ProcessingSteps.RequestType.Assignment
@@ -103,11 +101,15 @@ private[reassignment] class AssignmentProcessingSteps(
   override def createSubmission(
       submissionParam: SubmissionParam,
       mediator: MediatorGroupRecipient,
-      ephemeralState: SyncEphemeralStateLookup,
+      ephemeralState: SyncEphemeralState,
       recentSnapshot: SynchronizerSnapshotSyncCryptoApi,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, Submission] = {
+  ): EitherT[
+    FutureUnlessShutdown,
+    ReassignmentProcessorError,
+    (Submission, PendingSubmissionData),
+  ] = {
 
     val SubmissionParam(
       submitterMetadata,
@@ -169,7 +171,7 @@ private[reassignment] class AssignmentProcessingSteps(
           targetSynchronizer,
           mediator,
           assignmentUuid,
-          targetProtocolVersion,
+          protocolVersion,
           unassignmentData.unassignmentRequest.reassigningParticipants,
         )
       )
@@ -208,23 +210,21 @@ private[reassignment] class AssignmentProcessingSteps(
           fullTree,
           (viewKey, viewKeyMap),
           recentSnapshot,
-          targetProtocolVersion.unwrap,
+          protocolVersion.unwrap,
         )
         .leftMap[ReassignmentProcessorError](
           EncryptionError(contractIds, _)
         )
-    } yield {
-      val rootHashMessage =
+      rootHashMessage =
         RootHashMessage(
           rootHash,
           synchronizerId.unwrap,
-          targetProtocolVersion.unwrap,
           ViewType.AssignmentViewType,
           recentSnapshot.ipsSnapshot.timestamp,
           EmptyRootHashMessagePayload,
         )
       // Each member gets a message sent to itself and to the mediator
-      val rootHashRecipients =
+      rootHashRecipients =
         Recipients.recipientGroups(
           checked(
             NonEmptyUtil.fromUnsafe(
@@ -234,30 +234,28 @@ private[reassignment] class AssignmentProcessingSteps(
             )
           )
         )
-      val messages = Seq[(ProtocolMessage, Recipients)](
+      messages = Seq[(ProtocolMessage, Recipients)](
         mediatorMessage -> Recipients.cc(mediator),
         viewMessage -> recipients,
         rootHashMessage -> rootHashRecipients,
       )
-      ReassignmentsSubmission(Batch.of(targetProtocolVersion.unwrap, messages*), rootHash)
-    }
-  }
-
-  override def updatePendingSubmissions(
-      pendingSubmissionMap: PendingSubmissions,
-      submissionParam: SubmissionParam,
-      submissionId: PendingSubmissionId,
-  ): EitherT[Future, ReassignmentProcessorError, SubmissionResultArgs] =
-    performPendingSubmissionMapUpdate(
-      pendingSubmissionMap,
-      ReassignmentRef(submissionParam.reassignmentId),
-      submissionParam.submitterLf,
-      submissionId,
+      pendingSubmission <-
+        performPendingSubmissionMapUpdate(
+          pendingSubmissions(ephemeralState),
+          ReassignmentRef(submissionParam.reassignmentId),
+          submissionParam.submitterLf,
+          rootHash,
+          _ => reassignmentId,
+        )
+    } yield (
+      ReassignmentsSubmission(Batch.of(protocolVersion.unwrap, messages*), rootHash),
+      pendingSubmission,
     )
+  }
 
   override def createSubmissionResult(
       deliver: Deliver[Envelope[_]],
-      pendingSubmission: SubmissionResultArgs,
+      pendingSubmission: PendingSubmissionData,
   ): SubmissionResult =
     SubmissionResult(pendingSubmission.reassignmentCompletion.future)
 
@@ -281,7 +279,7 @@ private[reassignment] class AssignmentProcessingSteps(
         participantId,
       ) { bytes =>
         FullAssignmentTree
-          .fromByteString(snapshot.pureCrypto, targetProtocolVersion)(bytes)
+          .fromByteString(snapshot.pureCrypto, protocolVersion)(bytes)
           .leftMap(e => DefaultDeserializationError(e.toString))
       }
       .map(fullTree =>
@@ -296,7 +294,6 @@ private[reassignment] class AssignmentProcessingSteps(
   )(implicit
       traceContext: TraceContext
   ): Either[ReassignmentProcessorError, ActivenessSet] =
-    // TODO(i12926): Send a rejection if malformedPayloads is non-empty
     if (Target(parsedRequest.fullViewTree.synchronizerId) == synchronizerId) {
       val contractIds = parsedRequest.fullViewTree.contracts.contractIds.toSet
       val contractCheck = ActivenessCheck.tryCreate(
@@ -366,8 +363,9 @@ private[reassignment] class AssignmentProcessingSteps(
         if (!assignmentValidationResult.validationResult.isUnassignmentDataNotFound)
           createConfirmationResponses(
             parsedRequest.requestId,
+            parsedRequest.malformedPayloads,
             parsedRequest.snapshot.ipsSnapshot,
-            targetProtocolVersion.unwrap,
+            protocolVersion.unwrap,
             parsedRequest.fullViewTree.confirmingParties,
             assignmentValidationResult,
           ).map(_.map((_, Recipients.cc(parsedRequest.mediator))))
@@ -412,7 +410,7 @@ private[reassignment] class AssignmentProcessingSteps(
           entry,
           LocalRejectError.TimeRejects.LocalTimeout
             .Reject()
-            .toLocalReject(targetProtocolVersion.unwrap),
+            .toLocalReject(protocolVersion.unwrap),
         ),
       )
     }
@@ -591,7 +589,6 @@ object AssignmentProcessingSteps {
         stakeholders = stakeholders,
         uuid = assignmentUuid,
         submitterMetadata,
-        targetProtocolVersion,
         reassigningParticipants,
       )
 
