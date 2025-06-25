@@ -15,9 +15,13 @@ import com.digitalasset.canton.participant.protocol.TransactionProcessor.Transac
 import com.digitalasset.canton.participant.protocol.submission.TransactionConfirmationRequestFactory
 import com.digitalasset.canton.participant.protocol.validation.*
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
-import com.digitalasset.canton.protocol.{ContractMetadata, LfContractId, SerializableContract}
+import com.digitalasset.canton.protocol.{
+  ContractMetadata,
+  LfContractId,
+  LfFatContractInst,
+  SerializableContract,
+}
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId, UniqueIdentifier}
-import com.digitalasset.daml.lf.transaction.FatContractInstance
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -30,7 +34,7 @@ class TransactionProcessingStepsTest extends AsyncWordSpec with BaseTest {
   private def buildTestInstance(
       behaviors: Map[SerializableContract, Either[String, Unit]]
   ) = new TransactionProcessingSteps(
-    synchronizerId = synchronizerId,
+    psid = synchronizerId,
     participantId = participantId,
     confirmationRequestFactory = mock[TransactionConfirmationRequestFactory],
     confirmationResponsesFactory = mock[TransactionConfirmationResponsesFactory],
@@ -44,7 +48,7 @@ class TransactionProcessingStepsTest extends AsyncWordSpec with BaseTest {
           contract,
           fail(s"authenticateSerializable did not find ${contract.contractId}"),
         )
-      override def authenticateFat(contract: FatContractInstance): Either[String, Unit] = fail(
+      override def authenticateFat(contract: LfFatContractInst): Either[String, Unit] = fail(
         "unexpected"
       )
       override def verifyMetadata(

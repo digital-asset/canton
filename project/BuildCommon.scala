@@ -228,6 +228,18 @@ object BuildCommon {
       }
   }
 
+  private def packOpenapiFiles(BaseFile: BetterFile, target: String): Seq[(File, String)] = {
+    val path = BaseFile / "src" / "test" / "resources" / "json-api-docs"
+    val pathJ = path.toJava
+    (pathJ ** "*").get
+      .filter { f =>
+        f.isFile && !f.isHidden
+      }
+      .map { f =>
+        (f, Seq("openapi", target, IO.relativize(pathJ, f).get).mkString(s"${Path.sep}"))
+      }
+  }
+
   // Originally https://tanin.nanakorn.com/technical/2018/09/10/parallelise-tests-in-sbt-on-circle-ci.html
   lazy val printTestTask = {
     val destination = "test-full-class-names.log"
@@ -365,6 +377,11 @@ object BuildCommon {
         "synchronizer",
       )
 
+      val communityJsonApiOpenapi: Seq[(File, String)] = packOpenapiFiles(
+        "community" / "ledger" / "ledger-json-api",
+        "json-ledger-api",
+      )
+
       val commonGoogleProtosRoot =
         (DamlProjects.`google-common-protos-scala` / target).value / "protobuf_external"
       val scalapbProto: Seq[(File, String)] = packProtobufDependencyFiles(
@@ -383,14 +400,14 @@ object BuildCommon {
         "ledger-api",
       )
 
-      val protoFiles =
+      val apiFiles =
         ledgerApiProto ++ communityBaseProto ++ communityParticipantProto ++ communityAdminProto ++ communitySynchronizerProto ++
-          scalapbProto ++ googleRpcProtos ++ ledgerApiValueProto
+          scalapbProto ++ googleRpcProtos ++ ledgerApiValueProto ++ communityJsonApiOpenapi
 
       log.info("Invoking bundle generator")
       // add license to package
       val renames =
-        releaseNotes ++ licenseFiles ++ demoSource ++ demoDars ++ demoJars ++ demoArtefacts ++ damlSampleSource ++ damlSampleDars ++ protoFiles
+        releaseNotes ++ licenseFiles ++ demoSource ++ demoDars ++ demoJars ++ demoArtefacts ++ damlSampleSource ++ damlSampleDars ++ apiFiles
       val args =
         bundlePack.value ++ renames.flatMap(x => Seq("-r", x._1.toString, x._2))
       // build the canton fat-jar

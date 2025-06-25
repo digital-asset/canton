@@ -12,6 +12,7 @@ import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod, ViewT
 import com.digitalasset.canton.error.TransactionError
 import com.digitalasset.canton.ledger.participant.state.SequencedUpdate
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
@@ -34,16 +35,18 @@ import com.digitalasset.canton.participant.protocol.submission.{
 }
 import com.digitalasset.canton.participant.protocol.validation.PendingTransaction
 import com.digitalasset.canton.participant.store.ReassignmentLookup
-import com.digitalasset.canton.participant.sync.{SyncEphemeralState, SyncEphemeralStateLookup}
+import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.{ConfirmationRequestSessionKeyStore, SessionKeyStore}
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.Target
-import com.digitalasset.canton.{LedgerSubmissionId, RequestCounter, SequencerCounter}
+import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{LedgerSubmissionId, RequestCounter, SequencerCounter, checked}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -82,16 +85,13 @@ trait ProcessingSteps[
   /** A store of data on submissions that have been sent out, if any */
   type PendingSubmissions
 
-  /** The data stored for submissions that have been sent out, if any */
+  /** The data stored for submissions that have been sent out, if any. It is created by
+    * [[createSubmission]] and passed to [[createSubmissionResult]]
+    */
   type PendingSubmissionData
 
   /** The type used for look-ups into the [[PendingSubmissions]] */
   type PendingSubmissionId
-
-  /** The type of data needed to generate the submission result in [[createSubmissionResult]]. The
-    * data is created by [[updatePendingSubmissions]].
-    */
-  type SubmissionResultArgs
 
   /** The type of decrypted view trees */
   type DecryptedView = RequestViewType#View
@@ -144,6 +144,9 @@ trait ProcessingSteps[
 
   /** Phase 1, step 1:
     *
+    * Creates the data that controls submission handling, and records the pending submission for
+    * protocols such as reassignment that return an UntrackedSubmission.
+    *
     * @param submissionParam
     *   The parameter object encapsulating the parameters of the submit method
     * @param mediator
@@ -156,9 +159,11 @@ trait ProcessingSteps[
   def createSubmission(
       submissionParam: SubmissionParam,
       mediator: MediatorGroupRecipient,
-      ephemeralState: SyncEphemeralStateLookup,
+      ephemeralState: SyncEphemeralState,
       recentSnapshot: SynchronizerSnapshotSyncCryptoApi,
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SubmissionError, Submission]
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, SubmissionError, (Submission, PendingSubmissionData)]
 
   def embedNoMediatorError(error: NoMediatorError): SubmissionError
 
@@ -301,28 +306,13 @@ trait ProcessingSteps[
   }
 
   /** Phase 1, step 2:
-    *
-    * @param pendingSubmissions
-    *   Stateful store to be updated with data on the pending submission
-    * @param submissionParam
-    *   Implementation-specific details on the submission, used for logging
-    * @param pendingSubmissionId
-    *   The key used for updates to the [[pendingSubmissions]]
-    */
-  def updatePendingSubmissions(
-      pendingSubmissions: PendingSubmissions,
-      submissionParam: SubmissionParam,
-      pendingSubmissionId: PendingSubmissionId,
-  ): EitherT[Future, SubmissionSendError, SubmissionResultArgs]
-
-  /** Phase 1, step 3:
     */
   def createSubmissionResult(
       deliver: Deliver[Envelope[?]],
-      submissionResultArgs: SubmissionResultArgs,
+      submissionResultArgs: PendingSubmissionData,
   ): SubmissionResult
 
-  /** Phase 1, step 4; and Phase 7, step 1:
+  /** Phase 1, step 3; and Phase 7, step 1:
     *
     * Remove the pending submission from the pending submissions. Called when sending the submission
     * failed or did not lead to a result in time or a result has arrived for the request.
@@ -615,6 +605,49 @@ object ProcessingSteps {
         synchronizerParameters.decisionTimeFor(ts)
       )
     } yield decisionTime
+
+  def constructResponsesForMalformedPayloads(
+      requestId: RequestId,
+      rootHash: RootHash,
+      malformedPayloads: Seq[MalformedPayload],
+      synchronizerId: PhysicalSynchronizerId,
+      participantId: ParticipantId,
+      protocolVersion: ProtocolVersion,
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Option[ConfirmationResponses] = {
+    val rejectError = LocalRejectError.MalformedRejects.Payloads.Reject(malformedPayloads.toString)
+
+    val dueToTopologyChange = malformedPayloads.forall {
+      case WrongRecipientsDueToTopologyChange(_) => true
+      case _ => false
+    }
+    if (!dueToTopologyChange) rejectError.logWithContext(Map("requestId" -> requestId.toString))
+
+    checked(
+      Some(
+        ConfirmationResponses
+          .tryCreate(
+            requestId,
+            rootHash,
+            synchronizerId,
+            participantId,
+            NonEmpty.mk(
+              Seq,
+              ConfirmationResponse.tryCreate(
+                // We don't have to specify a viewPosition.
+                // The mediator will interpret this as a rejection
+                // for all views and on behalf of all declared confirming parties hosted by the participant.
+                None,
+                rejectError.toLocalReject(protocolVersion),
+                Set.empty,
+              ),
+            ),
+            protocolVersion,
+          )
+      )
+    )
+  }
 
   trait RequestType {
     type PendingRequestData <: ProcessingSteps.PendingRequestData

@@ -16,6 +16,7 @@ import com.digitalasset.canton.metrics.{
   DbStorageMetrics,
   DeclarativeApiMetrics,
 }
+import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics.updateTimer
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
   Env,
@@ -244,6 +245,15 @@ class BftOrderingMetrics private[metrics] (
               }
             }
 
+            object consensus {
+              // Time waited for a block proposal from availability
+              val BlockProposalWait = "consensus-block-proposal-wait"
+              // Time waited for a new epoch to complete
+              val EpochCompletionWait = "consensus-epoch-completion-wait"
+              // Time waited for a new epoch to start
+              val EpochStartWait = "consensus-epoch-start-wait"
+            }
+
             object output {
               val Fetch = "output-block-fetch-batches"
               val Inspection = "output-block-inspection"
@@ -295,7 +305,7 @@ class BftOrderingMetrics private[metrics] (
             Duration
               .between(sendInstant, Instant.now)
               .minus(maybeDelay.fold(Duration.ZERO)(_.toJava))
-          timer.update(latency)(
+          updateTimer(timer, latency)(
             metricsContext.withExtraLabels(labels.stage.Key -> s"module-queue-$moduleName")
           )
         }
@@ -318,15 +328,20 @@ class BftOrderingMetrics private[metrics] (
 
       def emitOrderingStageLatency(
           stage: String,
-          startInstant: Instant,
-          endInstant: Instant,
+          startInstant: Option[Instant],
+          endInstant: Instant = Instant.now(),
+          cleanup: () => Unit = () => (),
       )(implicit
           mc: MetricsContext
-      ): Unit =
-        emitOrderingStageLatency(
-          stage,
-          Duration.between(startInstant, endInstant),
+      ): Unit = {
+        startInstant.foreach(start =>
+          emitOrderingStageLatency(
+            stage,
+            Duration.between(start, endInstant),
+          )
         )
+        cleanup()
+      }
 
       def emitOrderingStageLatency(
           stage: String,
@@ -335,13 +350,12 @@ class BftOrderingMetrics private[metrics] (
           mc: MetricsContext
       ): Unit =
         if (enabled)
-          performance.orderingStageLatency.timer
-            .update(duration)(
-              mc.withExtraLabels(
-                performance.orderingStageLatency.labels.stage.Key ->
-                  stage
-              )
+          updateTimer(performance.orderingStageLatency.timer, duration)(
+            mc.withExtraLabels(
+              performance.orderingStageLatency.labels.stage.Key ->
+                stage
             )
+          )
     }
     val orderingStageLatency = new OrderingStageLatencyMetrics
   }
@@ -393,6 +407,7 @@ class BftOrderingMetrics private[metrics] (
           case object Success extends OutcomeValue
           case object QueueFull extends OutcomeValue
           case object RequestTooBig extends OutcomeValue
+          case object InvalidTag extends OutcomeValue
         }
       }
     }
@@ -605,6 +620,16 @@ class BftOrderingMetrics private[metrics] (
         summary = "Epoch length",
         description = "Length of the current epoch in number of blocks.",
         qualification = MetricQualification.Traffic,
+      ),
+      0,
+    )
+
+    val epochViewChanges: Gauge[Long] = openTelemetryMetricsFactory.gauge(
+      MetricInfo(
+        prefix :+ "epoch-view-changes",
+        summary = "Number of view changes occurred",
+        description = "Number of view changes occurred.",
+        qualification = MetricQualification.Latency,
       ),
       0,
     )
@@ -942,5 +967,17 @@ class BftOrderingMetrics private[metrics] (
 }
 
 object BftOrderingMetrics {
+
   val Prefix: MetricName = MetricName("bftordering")
+
+  def updateTimer(
+      timer: Timer,
+      duration: Duration,
+  )(implicit mc: MetricsContext): Unit =
+    // Java's `Instant` does not have to provide monotonically increasing times
+    //  (see the documentation for details: https://docs.oracle.com/javase/8/docs/api/java/time/Instant.html)
+    //  and emitting negative durations is generally disallowed by metrics infrastructure, as it can
+    //  result in warnings/errors and/or unexpected behavior.
+    if (!duration.isNegative)
+      timer.update(duration)
 }

@@ -42,7 +42,7 @@ object Dependencies {
   lazy val circe_version = "0.14.2"
   lazy val circe_yaml_version = "1.15.0" // added to override snakeYaml vulnerability
   lazy val dropwizard_version = "4.1.33"
-  lazy val flyway_version = "10.15.0"
+  lazy val flyway_version = "10.22.0"
   lazy val gcp_kms_version = "2.55.0"
   lazy val gson_version = "2.9.1"
   lazy val gson_fire_version = "1.9.0"

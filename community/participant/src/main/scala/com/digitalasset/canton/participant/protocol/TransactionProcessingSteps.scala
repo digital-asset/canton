@@ -105,7 +105,6 @@ import com.google.protobuf.ByteString
 import monocle.PLens
 
 import java.util.concurrent.ConcurrentHashMap
-import scala.annotation.nowarn
 import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
@@ -116,9 +115,8 @@ import scala.util.{Failure, Success}
   * @param participantId
   *   The participant id hosting the transaction processor.
   */
-@nowarn("msg=dead code following this construct")
 class TransactionProcessingSteps(
-    synchronizerId: PhysicalSynchronizerId,
+    psid: PhysicalSynchronizerId,
     participantId: ParticipantId,
     confirmationRequestFactory: TransactionConfirmationRequestFactory,
     confirmationResponsesFactory: TransactionConfirmationResponsesFactory,
@@ -147,9 +145,7 @@ class TransactionProcessingSteps(
   override type SubmissionSendError = TransactionProcessor.SubmissionErrors.SequencerRequest.Error
   override type PendingSubmissions = Unit
   override type PendingSubmissionId = Unit
-  override type PendingSubmissionData = Nothing
-
-  override type SubmissionResultArgs = Unit
+  override type PendingSubmissionData = Unit
 
   override type ParsedRequestType = ParsedTransactionRequest
 
@@ -181,11 +177,15 @@ class TransactionProcessingSteps(
   override def createSubmission(
       submissionParam: SubmissionParam,
       mediator: MediatorGroupRecipient,
-      ephemeralState: SyncEphemeralStateLookup,
+      ephemeralState: SyncEphemeralState,
       recentSnapshot: SynchronizerSnapshotSyncCryptoApi,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TransactionSubmissionError, Submission] = {
+  ): EitherT[
+    FutureUnlessShutdown,
+    TransactionSubmissionError,
+    (Submission, PendingSubmissionData),
+  ] = {
     val SubmissionParam(
       submitterInfo,
       transactionMeta,
@@ -205,11 +205,11 @@ class TransactionProcessingSteps(
       disclosedContracts,
     )
 
-    EitherT.rightT[FutureUnlessShutdown, TransactionSubmissionError](tracked)
+    EitherT.rightT[FutureUnlessShutdown, TransactionSubmissionError]((tracked, ()))
   }
 
   override def embedNoMediatorError(error: NoMediatorError): TransactionSubmissionError =
-    SynchronizerWithoutMediatorError.Error(error.topologySnapshotTimestamp, synchronizerId.logical)
+    SynchronizerWithoutMediatorError.Error(error.topologySnapshotTimestamp, psid.logical)
 
   override def getSubmitterInformation(
       views: Seq[DecryptedView]
@@ -290,8 +290,7 @@ class TransactionProcessingSteps(
       TransactionSubmissionTrackingData(
         completionInfo,
         TransactionSubmissionTrackingData.CauseWithTemplate(error),
-        synchronizerId,
-        protocolVersion,
+        psid,
       )
 
     override def submissionId: Option[LedgerSubmissionId] = submitterInfo.submissionId
@@ -405,8 +404,7 @@ class TransactionProcessingSteps(
         val trackingData = TransactionSubmissionTrackingData(
           submitterInfoWithDedupPeriod.toCompletionInfo,
           rejectionCause,
-          synchronizerId,
-          protocolVersion,
+          psid,
         )
         Success(Outcome(Left(trackingData)))
       }
@@ -436,8 +434,7 @@ class TransactionProcessingSteps(
       TransactionSubmissionTrackingData(
         submitterInfo.toCompletionInfo.copy(optDeduplicationPeriod = None),
         TransactionSubmissionTrackingData.TimeoutCause,
-        synchronizerId,
-        protocolVersion,
+        psid,
       )
 
     override def embedInFlightSubmissionTrackerError(
@@ -506,18 +503,10 @@ class TransactionProcessingSteps(
       TransactionSubmissionTrackingData(
         completionInfo,
         rejectionCause,
-        synchronizerId,
-        protocolVersion,
+        psid,
       )
     }
   }
-
-  override def updatePendingSubmissions(
-      pendingSubmissionMap: Unit,
-      submissionParam: SubmissionParam,
-      pendingSubmissionId: PendingSubmissionId,
-  ): EitherT[Future, SubmissionSendError, SubmissionResultArgs] =
-    EitherT.pure(())
 
   override def createSubmissionResult(
       deliver: Deliver[Envelope[?]],
@@ -850,7 +839,7 @@ class TransactionProcessingSteps(
         authenticationResult <- AuthenticationValidator.verifyViewSignatures(
           parsedRequest,
           reInterpretedTopLevelViews,
-          synchronizerId,
+          psid,
           protocolVersion,
           transactionEnricher,
           createNodeEnricher,
@@ -1049,12 +1038,14 @@ class TransactionProcessingSteps(
       malformedPayloads: Seq[MalformedPayload],
   )(implicit
       traceContext: TraceContext
-  ): Option[ConfirmationResponses] =
-    confirmationResponsesFactory.createConfirmationResponsesForMalformedPayloads(
-      requestId,
-      rootHash,
-      malformedPayloads,
-    )
+  ): Option[ConfirmationResponses] = ProcessingSteps.constructResponsesForMalformedPayloads(
+    requestId = requestId,
+    rootHash = rootHash,
+    malformedPayloads = malformedPayloads,
+    synchronizerId = psid,
+    participantId = participantId,
+    protocolVersion = protocolVersion,
+  )
 
   override def eventAndSubmissionIdForRejectedCommand(
       ts: CantonTimestamp,
@@ -1072,7 +1063,7 @@ class TransactionProcessingSteps(
         Update.SequencedCommandRejected(
           completionInfo,
           rejection,
-          synchronizerId.logical,
+          psid.logical,
           ts,
         )
     } -> None // Transaction processing doesn't use pending submissions
@@ -1080,7 +1071,7 @@ class TransactionProcessingSteps(
 
   override def postProcessSubmissionRejectedCommand(
       error: TransactionError,
-      pendingSubmission: Nothing,
+      pendingSubmission: Unit,
   )(implicit
       traceContext: TraceContext
   ): Unit = ()
@@ -1113,7 +1104,7 @@ class TransactionProcessingSteps(
       Update.SequencedCommandRejected(
         info,
         rejection,
-        synchronizerId.logical,
+        psid.logical,
         requestTime,
       )
     )
@@ -1264,7 +1255,7 @@ class TransactionProcessingSteps(
           transaction = LfCommittedTransaction(lfTx.unwrap),
           updateId = lfTxId,
           contractMetadata = contractMetadata,
-          synchronizerId = synchronizerId.logical,
+          synchronizerId = psid.logical,
           recordTime = requestTime,
         )
     } yield CommitAndStoreContractsAndPublishEvent(
@@ -1447,7 +1438,7 @@ class TransactionProcessingSteps(
 
       maxDecisionTime <- ProcessingSteps
         .getDecisionTime(topologySnapshot, pendingRequestData.requestTime)
-        .leftMap(SynchronizerParametersError(synchronizerId, _))
+        .leftMap(SynchronizerParametersError(psid, _))
 
       _ <-
         (if (ts <= maxDecisionTime) EitherT.pure[Future, TransactionProcessorError](())
@@ -1483,7 +1474,7 @@ class TransactionProcessingSteps(
     } yield res
   }
 
-  override def postProcessResult(verdict: Verdict, pendingSubmission: Nothing)(implicit
+  override def postProcessResult(verdict: Verdict, pendingSubmission: Unit)(implicit
       traceContext: TraceContext
   ): Unit = ()
 
