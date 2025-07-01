@@ -67,7 +67,7 @@ import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, che
 import scala.collection.concurrent
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
-trait ReassignmentProcessingSteps[
+private[reassignment] trait ReassignmentProcessingSteps[
     SubmissionParam,
     SubmissionResult,
     RequestViewType <: ReassignmentViewType,
@@ -109,6 +109,11 @@ trait ReassignmentProcessingSteps[
 
   override type FullView <: FullReassignmentViewTree
   override type ParsedRequestType = ParsedReassignmentRequest[FullView]
+
+  protected def reassignmentId(
+      fullViewTree: FullView,
+      requestTimestamp: CantonTimestamp,
+  ): ReassignmentId
 
   override def embedNoMediatorError(error: NoMediatorError): ReassignmentProcessorError =
     GenericStepsError(error)
@@ -259,6 +264,7 @@ trait ReassignmentProcessingSteps[
         mediator,
         snapshot,
         synchronizerParameters,
+        reassignmentId(viewTree, ts),
       )
     )
   }
@@ -423,13 +429,15 @@ trait ReassignmentProcessingSteps[
           FutureUnlessShutdown.pure(Set.empty[LfPartyId])
 
       contractAuthenticationResult <-
-        if (hostedConfirmingParties.nonEmpty) validationResult.contractAuthenticationResultF.value
+        if (hostedConfirmingParties.nonEmpty)
+          validationResult.commonValidationResult.contractAuthenticationResultF.value
         else
           FutureUnlessShutdown.pure(Right(()))
     } yield {
       if (hostedConfirmingParties.isEmpty) None
       else {
-        val authenticationErrorO = validationResult.participantSignatureVerificationResult
+        val authenticationErrorO =
+          validationResult.commonValidationResult.participantSignatureVerificationResult
 
         val authenticationRejection = authenticationErrorO.map(err =>
           LocalRejectError.MalformedRejects.MalformedRequest
@@ -440,20 +448,21 @@ trait ReassignmentProcessingSteps[
           LocalRejectError.MalformedRejects.ModelConformance.Reject(err.toString)
         )
 
-        val submitterCheckRejection = validationResult.submitterCheckResult.map(err =>
-          LocalRejectError.ReassignmentRejects.ValidationFailed.Reject(err.message)
-        )
-
-        val failedValidationRejection =
-          validationResult.reassigningParticipantValidationResult.map(err =>
+        val submitterCheckRejection =
+          validationResult.commonValidationResult.submitterCheckResult.map(err =>
             LocalRejectError.ReassignmentRejects.ValidationFailed.Reject(err.message)
           )
 
-        val activnessRejection =
+        val failedValidationRejection =
+          validationResult.reassigningParticipantValidationResult.errors.map(err =>
+            LocalRejectError.ReassignmentRejects.ValidationFailed.Reject(err.message)
+          )
+
+        val activenessRejection =
           localRejectFromActivenessCheck(requestId, validationResult)
 
         val localRejections =
-          (modelConformanceRejection ++ activnessRejection.toList ++
+          (modelConformanceRejection ++ activenessRejection.toList ++
             authenticationRejection.toList ++ submitterCheckRejection ++ failedValidationRejection)
             .map { err =>
               err.logWithContext()
@@ -503,7 +512,7 @@ trait ReassignmentProcessingSteps[
   def checkPhase7Validations(
       reassignmentValidationResult: ReassignmentValidationResult
   ): FutureUnlessShutdown[Option[TransactionRejection]] =
-    reassignmentValidationResult.contractAuthenticationResultF.value.map {
+    reassignmentValidationResult.commonValidationResult.contractAuthenticationResultF.value.map {
       contractAuthenticationResult =>
         val modelConformanceRejection =
           contractAuthenticationResult
@@ -514,15 +523,18 @@ trait ReassignmentProcessingSteps[
             .toOption
 
         val authenticationRejection =
-          reassignmentValidationResult.participantSignatureVerificationResult.map(err =>
-            LocalRejectError.MalformedRejects.MalformedRequest
-              .Reject(err.message)
+          reassignmentValidationResult.commonValidationResult.participantSignatureVerificationResult
+            .map(err =>
+              LocalRejectError.MalformedRejects.MalformedRequest
+                .Reject(err.message)
+            )
+
+        val submitterCheckRejection =
+          reassignmentValidationResult.commonValidationResult.submitterCheckResult.map(err =>
+            LocalRejectError.ReassignmentRejects.ValidationFailed.Reject(err.message)
           )
 
-        val submitterCheckRejection = reassignmentValidationResult.submitterCheckResult.map(err =>
-          LocalRejectError.ReassignmentRejects.ValidationFailed.Reject(err.message)
-        )
-        (modelConformanceRejection.toList ++ authenticationRejection.toList ++ submitterCheckRejection.toList).headOption
+        modelConformanceRejection.orElse(authenticationRejection).orElse(submitterCheckRejection)
     }
 
 }
@@ -549,18 +561,9 @@ object ReassignmentProcessingSteps {
       override val mediator: MediatorGroupRecipient,
       override val snapshot: SynchronizerSnapshotSyncCryptoApi,
       override val synchronizerParameters: DynamicSynchronizerParametersWithValidity,
+      reassignmentId: ReassignmentId,
   ) extends ParsedRequest[ReassignmentSubmitterMetadata] {
     override def rootHash: RootHash = fullViewTree.rootHash
-
-    val reassignmentId = {
-      val unassignId = UnassignId(
-        fullViewTree.sourceSynchronizer,
-        fullViewTree.targetSynchronizer.map(_.logical),
-        requestTimestamp,
-        fullViewTree.contracts.contractIdCounters,
-      )
-      ReassignmentId(fullViewTree.sourceSynchronizer, unassignId)
-    }
   }
 
   trait PendingReassignment extends PendingRequestData with Product with Serializable {
@@ -608,9 +611,17 @@ object ReassignmentProcessingSteps {
 
   final case class ContractError(message: String) extends ReassignmentProcessorError
 
-  // TODO(#26219): should be physical
-  final case class UnknownSynchronizer(synchronizerId: SynchronizerId, context: String)
-      extends ReassignmentProcessorError {
+  final case class UnknownPhysicalSynchronizer(
+      physicalSynchronizerId: PhysicalSynchronizerId,
+      context: String,
+  ) extends ReassignmentProcessorError {
+    override def message: String = s"Unknown synchronizer $physicalSynchronizerId when $context"
+  }
+
+  final case class UnknownSynchronizer(
+      synchronizerId: SynchronizerId,
+      context: String,
+  ) extends ReassignmentProcessorError {
     override def message: String = s"Unknown synchronizer $synchronizerId when $context"
   }
 

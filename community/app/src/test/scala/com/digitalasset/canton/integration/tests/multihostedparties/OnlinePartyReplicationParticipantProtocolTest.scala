@@ -95,12 +95,10 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
       )
       .withSetup { implicit env =>
         import env.*
-        // Before performing OPR, disable ACS commitments by having a large reconciliation interval
-        // because the target participant does not have the onboarding party's active contracts.
-        // TODO(#23670): Proper ACS commitment checking during/after OPR
+        // More frequent ACS commitments by configuring a smaller reconciliation interval.
         sequencer1.topology.synchronizer_parameters.propose_update(
           synchronizerId = daId,
-          _.update(reconciliationInterval = config.PositiveDurationSeconds.ofDays(365)),
+          _.update(reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(10)),
         )
 
         participants.local.foreach(_.start())
@@ -209,7 +207,6 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
         noOpProgressAndCompletionCallback,
         noOpProgressAndCompletionCallback,
         noOpProgressAndCompletionCallback,
-        testedProtocolVersion,
         timeouts,
         loggerFactory,
       )
@@ -219,7 +216,6 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
       // A promise blocks OnPR temporarily until the transactions have been run concurrently to OnPR.
       val promiseWhenConcurrentTransactionsSubmitted = PromiseUnlessShutdown.unsupervised[Unit]()
       val targetProcessor = PartyReplicationTargetParticipantProcessor(
-        daId,
         alice,
         partyToTargetParticipantEffectiveAt,
         noOpProgressAndCompletionCallback,
@@ -242,7 +238,6 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
         },
         targetParticipant.underlying.value.sync.participantNodePersistentState,
         connectedSynchronizer,
-        testedProtocolVersion,
         timeouts,
         loggerFactory,
       )
@@ -296,7 +291,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
             acmeId,
             timeout = None, // don't wait for response from TP
           )
-          .unassignId
+          .reassignmentId
       }
 
       // Create a few contracts to buffer and flush without timeout as the TP will not

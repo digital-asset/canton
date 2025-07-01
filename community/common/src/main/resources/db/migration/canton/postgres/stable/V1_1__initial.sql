@@ -72,17 +72,10 @@ create table common_crypto_public_keys (
 -- Stores the immutable contracts, however a creation of a contract can be rolled back.
 create table par_contracts (
   contract_id bytea not null,
-  -- The contract is serialized using the LF contract proto serializer.
+  -- The contract is a serialized LfFatContractInst using the LF contract proto serializer.
   instance bytea not null,
-  -- Metadata: signatories, stakeholders, keys
-  -- Stored as a Protobuf blob as H2 will only support typed arrays in 1.4.201
-  metadata bytea not null,
-  -- The ledger time when the contract was created.
-  ledger_create_time varchar collate "C" not null,
-  -- We store metadata of the contract instance for inspection
   package_id varchar collate "C" not null,
   template_id varchar collate "C" not null,
-  contract_salt bytea not null,
   primary key (contract_id)
 );
 
@@ -230,6 +223,9 @@ create table par_synchronizer_connection_configs(
   synchronizer_predecessor bytea -- the protobuf-serialized versioned predecessor (if existing and applicable)
 );
 
+create unique index idx_par_synchronizer_connection_configs_active_per_alias on par_synchronizer_connection_configs (synchronizer_alias)
+where status = 'A';
+
 -- used to register all synchronizers that a participant connects to
 create table par_registered_synchronizers(
   physical_synchronizer_id varchar collate "C" not null primary key,
@@ -240,9 +236,9 @@ create table par_reassignments (
   -- reassignment id
   target_synchronizer_idx integer not null,
   source_synchronizer_idx integer not null,
-  unassign_id varchar collate "C" not null,
+  reassignment_id varchar collate "C" not null,
 
-  primary key (target_synchronizer_idx, source_synchronizer_idx, unassign_id),
+  primary key (target_synchronizer_idx, source_synchronizer_idx, reassignment_id),
 
   unassignment_global_offset bigint,
   assignment_global_offset bigint,

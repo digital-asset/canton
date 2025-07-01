@@ -154,6 +154,8 @@ rm -f "${RELEASE}.tar.gz"
 rm -f "${RELEASE}.zip"
 tar -zcf "${RELEASE}.tar.gz" $RELEASE &
 zip -rq "${RELEASE}.zip" $RELEASE/* &
+tar -zcf "${RELEASE}-protobuf.tar.gz" $RELEASE/protobuf &
+zip -rq "${RELEASE}-protobuf.zip" $RELEASE/protobuf/* &
 wait
 
 # finally, add a stable link to the directory

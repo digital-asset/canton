@@ -8,7 +8,14 @@ below should all be Wednesdays to align with the weekly release
 schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
+
+## Until 2025-07-02 (Exclusive)
+- Adds new gRPC endpoint `GetHighestOffsetByTimestamp` (and console command `find_highest_offset_by_timestamp`) that
+  for a given timestamp, finds the highest ledger offset among all events that have record time <= timestamp. This is a
+  backward-compatible change, because it's an addition only. It's useful for party replication / major upgrade.
+
 ## Until 2025-06-25 (Exclusive)
+- [Breaking Change] Updated the `key-validity-duration`, `cut-off-duration`, and `key-eviction-period` parameters in the `crypto.kms.session-signing-keys` configuration to accept only positive durations (e.g., 30m, 5s).
 - JSON Ledger API: `prefetchContractKeys` added to `JsCommands` and `JsPrepareSubmissionRequest`
 - JSON Ledger API: fixed openapi documentation for: `Completion/Completion1` (status property), `ParticipantAuthorizationAdded`, `ParticipantAuthorizationChanged`,`ParticipantAuthorizationRevoked`
 - Ledger API: the existing `InteractiveSubmissionService.GetPreferredPackageVersion` (gRPC) or `interactive-submission/preferred-package-version` (JSON) functionality is superseeded by a new endpoint pair:
@@ -16,6 +23,10 @@ Wednesday after your change.
   - JSON: `interactive-submission/package-preferences`
 
   The existing endpoints are deprecated but preserved for backwards compatibility.
+- Contract arguments for Created events are now always populated for both LedgerEffects and AcsDelta shaped events if
+    - there is a party in the filter that is in the witness parties of the event or
+    - a party-wildcard filter is defined.
+
 ## Until 2025-06-18 (Exclusive)
 - Changed the protobuf definition of the admin API `StoreId.Synchronizer` from just having a `string id` field to the following:
 ```
@@ -114,6 +125,7 @@ The authorized store can still be used to store `PartyToParticipant` topology tr
   - ledger_api.updates.subscribe_updates
   - ledger_api.javaapi.updates.transactions
   - ledger_api.javaapi.updates.transactions_with_tx_format
+- For more info on how to migrate follow the migration guide (console-commands-migration-guide.rst)
 
 ## Until 2025-04-23 (Exclusive)
 - The error code `ABORTED_DUE_TO_SHUTDOWN` is now used instead of the (duplicate) error code `SERVER_IS_SHUTTING_DOWN` that was previously used.

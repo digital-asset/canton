@@ -482,6 +482,11 @@ final class GeneratorsData(
   private val sourceProtocolVersion = Source(protocolVersion)
   private val targetProtocolVersion = Target(protocolVersion)
 
+  implicit val reassignmentIdArb: Arbitrary[ReassignmentId] = Arbitrary {
+    val hexChars: Seq[Char] = "0123456789abcdefABCDEF".toIndexedSeq
+    Gen.stringOfN(32, Gen.oneOf(hexChars)).map(ReassignmentId.tryCreate)
+  }
+
   implicit val reassignmentSubmitterMetadataArb: Arbitrary[ReassignmentSubmitterMetadata] =
     Arbitrary(
       for {
@@ -505,6 +510,7 @@ final class GeneratorsData(
   implicit val assignmentCommonDataArb: Arbitrary[AssignmentCommonData] = Arbitrary(
     for {
       salt <- Arbitrary.arbitrary[Salt]
+      sourcePSId <- Arbitrary.arbitrary[Source[PhysicalSynchronizerId]]
       targetPSId <- Arbitrary.arbitrary[Target[PhysicalSynchronizerId]]
 
       targetMediator <- Arbitrary.arbitrary[MediatorGroupRecipient]
@@ -521,6 +527,7 @@ final class GeneratorsData(
     } yield AssignmentCommonData
       .create(hashOps)(
         salt,
+        sourcePSId,
         targetPSId,
         targetMediator,
         stakeholders,

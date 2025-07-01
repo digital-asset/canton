@@ -145,8 +145,6 @@ sealed trait AcsCommitmentProcessorBaseTest
   protected def toc(timestamp: Long): TimeOfChange =
     TimeOfChange(ts(timestamp).forgetRefinement)
 
-  protected def unassignId(i: Int) = UnassignId(TestHash.digest(i))
-
   protected def mkChangeIdHash(index: Int) = ChangeIdHash(DefaultDamlValues.lfhash(index))
 
   private lazy val indexedStringStore = new InMemoryIndexedStringStore(minIndex = 1, maxIndex = 1)
@@ -544,7 +542,8 @@ sealed trait AcsCommitmentProcessorBaseTest
       unassignments = Map.empty[LfContractId, UnassignmentCommit],
       assignments = Map[LfContractId, AssignmentCommit](
         coid(1, 0) -> AssignmentCommit(
-          ReassignmentId(Source(synchronizerId), unassignId(4)),
+          Source(synchronizerId),
+          ReassignmentId.tryCreate("4"),
           ContractMetadata.tryCreate(Set.empty, Set(alice, bob), None),
           reassignmentCounter2,
         )
@@ -606,7 +605,8 @@ sealed trait AcsCommitmentProcessorBaseTest
       unassignments = Map.empty[LfContractId, UnassignmentCommit],
       assignments = Map[LfContractId, AssignmentCommit](
         coid(2, 0) -> AssignmentCommit(
-          ReassignmentId(Source(synchronizerId), unassignId(8)),
+          Source(synchronizerId),
+          ReassignmentId.tryCreate("8"),
           ContractMetadata.tryCreate(Set.empty, Set(alice, bob, carol), None),
           reassignmentCounter2,
         )
@@ -1938,7 +1938,8 @@ class AcsCommitmentProcessorTest
         ),
         assignments = Map[LfContractId, AssignmentCommit](
           cid3.leftSide -> CommitSet.AssignmentCommit(
-            ReassignmentId(Source(synchronizerId), unassignId(0)),
+            Source(synchronizerId),
+            ReassignmentId.tryCreate("0"),
             ContractMetadata.tryCreate(Set.empty, Set(bob), None),
             reassignmentCounter1,
           )

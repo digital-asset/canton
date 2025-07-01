@@ -188,11 +188,8 @@ create or replace view debug.par_contracts as
   select
     lower(encode(contract_id, 'hex')) as contract_id,
     instance,
-    metadata,
-    ledger_create_time,
     package_id,
-    template_id,
-    contract_salt
+    template_id
   from par_contracts;
 
 create or replace view debug.common_node_id as
@@ -283,7 +280,7 @@ create or replace view debug.par_reassignments as
   select
     debug.resolve_common_static_string(target_synchronizer_idx) as target_synchronizer_idx,
     debug.resolve_common_static_string(source_synchronizer_idx) as source_synchronizer_idx,
-    unassign_id,
+    reassignment_id,
     unassignment_global_offset,
     assignment_global_offset,
     debug.canton_timestamp(unassignment_timestamp) as unassignment_timestamp,
