@@ -1549,7 +1549,7 @@ abstract class EventStorageBackendTemplate(
           WHERE
             synchronizer_id = ${stringInterning.synchronizerId.internalize(synchronizerId)} AND
             record_time >= ${afterOrAtRecordTime.micros}
-          ORDER BY synchronizer_id ASC, record_time ASC
+          ORDER BY synchronizer_id ASC, record_time ASC, completion_offset ASC
           ${QueryStrategy.limitClause(Some(1))}
           """.asSingleOpt(completionSynchronizerOffsetParser(stringInterning))(connection),
       SQL"""
@@ -1558,7 +1558,7 @@ abstract class EventStorageBackendTemplate(
           WHERE
             synchronizer_id = ${stringInterning.synchronizerId.internalize(synchronizerId)} AND
             record_time >= ${afterOrAtRecordTime.micros}
-          ORDER BY synchronizer_id ASC, record_time ASC
+          ORDER BY synchronizer_id ASC, record_time ASC, event_offset ASC
           ${QueryStrategy.limitClause(Some(1))}
           """.asSingleOpt(metaSynchronizerOffsetParser(stringInterning))(connection),
     ).flatten

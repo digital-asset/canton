@@ -258,7 +258,7 @@ final private class OfflinePartyReplicationWithSilentSynchronizerIntegrationTest
       assertAcsAndContinuedOperation(participant3)
   }
 
-  "Find ledger offset by timestamp can be forced to return the ledger end offset" in {
+  "Find ledger offset by timestamp can be forced, but not return a larger ledger offset with subsequent transactions" in {
     implicit env =>
       import env.*
 
@@ -285,12 +285,11 @@ final private class OfflinePartyReplicationWithSilentSynchronizerIntegrationTest
         participant1.parties
           .find_highest_offset_by_timestamp(daId, requestedTimestamp, force = true)
           .value
-      val finalLedgerEndOffset = participant1.ledger_api.state.end()
 
-      startLedgerEndOffset should be < finalLedgerEndOffset
-      forcedFoundOffset shouldBe finalLedgerEndOffset
+      // The following cannot check for equality because find_highest_offset_by_timestamp skips over unpersisted
+      // SequencerIndexMoved updates.
+      forcedFoundOffset should be <= startLedgerEndOffset
       foundOffset should be < startLedgerEndOffset
-      foundOffset should be < forcedFoundOffset
+      foundOffset shouldBe forcedFoundOffset
   }
-
 }

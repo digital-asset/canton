@@ -592,7 +592,8 @@ class ParticipantPartiesAdministrationGroup(
       |The arguments are:
       |- synchronizerId: Restricts the query to a particular synchronizer.
       |- timestamp: A point in time.
-      |- force: Defaults to false. If true, returns the ledger end offset.
+      |- force: Defaults to false. If true, returns the highest currently known ledger offset
+      |  with a record time before or at the given timestamp.
       |"""
   )
   def find_highest_offset_by_timestamp(
