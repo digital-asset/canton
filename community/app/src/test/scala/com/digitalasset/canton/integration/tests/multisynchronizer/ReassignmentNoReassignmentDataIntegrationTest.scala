@@ -46,7 +46,6 @@ import com.digitalasset.canton.synchronizer.sequencer.{
 }
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ParticipantId, PartyId}
-import com.digitalasset.canton.util.ReassignmentTag.Source
 import com.digitalasset.canton.{BaseTest, config}
 import org.scalatest.Assertion
 
@@ -193,7 +192,7 @@ sealed trait ReassignmentNoReassignmentDataIntegrationTest
       else
         3 // p1, p2, p3
 
-    val unassignId =
+    val reassignmentId =
       participant2.ledger_api.commands
         .submit_unassign(
           bob,
@@ -201,14 +200,14 @@ sealed trait ReassignmentNoReassignmentDataIntegrationTest
           daId,
           acmeId,
         )
-        .unassignId
+        .reassignmentId
 
     val reassignmentStore = participant1.underlying.value.sync.syncPersistentStateManager
       .get(acmeId)
       .value
       .reassignmentStore
 
-    val reassignmendId = ReassignmentId.tryCreate(Source(daId), unassignId)
+    val reassignmendId = ReassignmentId.tryCreate(reassignmentId)
 
     reassignmentStore
       .findReassignmentEntry(reassignmendId)
@@ -251,7 +250,7 @@ sealed trait ReassignmentNoReassignmentDataIntegrationTest
 
     val assignmentCompletion1F = Future {
       failingAssignment(
-        unassignId = unassignId,
+        reassignmentId = reassignmentId,
         source = daId,
         target = acmeId,
         submittingParty = bob.toLf,

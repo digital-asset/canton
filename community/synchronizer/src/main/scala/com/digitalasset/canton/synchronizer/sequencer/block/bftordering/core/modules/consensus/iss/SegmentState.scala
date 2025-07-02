@@ -9,12 +9,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.collection.FairBoundedQueue
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.collection.FairBoundedQueue.{
-  DeduplicationStrategy,
-  EnqueueResult,
-}
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftBlockOrdererConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState.{
   Epoch,
   Segment,
@@ -37,6 +32,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.FairBoundedQueue
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.FairBoundedQueue.{
+  DeduplicationStrategy,
+  EnqueueResult,
+}
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.collection.BoundedQueue.DropStrategy
@@ -87,7 +87,16 @@ class SegmentState(
       // Drop newest to preserve continuity of messages
       DropStrategy.DropNewest,
       // We need to deduplicate to protect against nodes spamming with others' messages
-      DeduplicationStrategy.PerNode,
+      DeduplicationStrategy.PerNode(
+        Some(metrics.consensus.postponedViewMessagesQueueDuplicatesMeter)
+      ),
+      maxSizeGauge = Some(metrics.consensus.postponedViewMessagesQueueMaxSize),
+      metrics = Some(metrics),
+      sizeGauge = Some(metrics.consensus.postponedViewMessagesQueueSize),
+      dropMeter = Some(metrics.consensus.postponedViewMessagesQueueDropMeter),
+      orderingStageLatencyLabel = Some(
+        metrics.performance.orderingStageLatency.labels.stage.values.consensus.PostponedViewMessagesQueueLatency
+      ),
     )
   private val viewChangeState = new mutable.HashMap[ViewNumber, PbftViewChangeState]
   private var discardedViewMessagesCount = 0
@@ -115,7 +124,7 @@ class SegmentState(
     }
 
   @VisibleForTesting
-  private[bftordering] def getViewChangeState =
+  private[iss] def getViewChangeState =
     viewChangeState.toMap
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))

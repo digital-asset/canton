@@ -99,7 +99,7 @@ class FirstUnsafeOffsetComputation(
         Pruning.LedgerPruningOffsetAfterLedgerEnd: LedgerPruningError,
       )
       allActiveSynchronizers <- EitherT.fromEither[FutureUnlessShutdown](allActiveSynchronizersE)
-      // TODO(#25483) Do we need the synchronizer id in the tuple knowing it is in the persistent state?
+      // TODO(#26490) Do we need the synchronizer id in the tuple knowing it is in the persistent state?
       affectedSynchronizerOffsets <- EitherT
         .right[LedgerPruningError](allActiveSynchronizers.parFilterA {
           case (synchronizerId, _persistent) =>
@@ -175,8 +175,8 @@ class FirstUnsafeOffsetComputation(
             EitherT.right(
               persistent.topologyStore
                 .findEffectiveStateChanges(
-                  fromEffectiveInclusive =
-                    recordTime, // as if we would crash at current SynchronizerIndex
+                  // as if we would crash at current SynchronizerIndex
+                  fromEffectiveInclusive = recordTime,
                   onlyAtEffective = false,
                 ) // using the same query as in topology crash recovery
                 .map(_.view.map(_.sequencedTime).minOption.map(_.value))
@@ -268,7 +268,7 @@ class FirstUnsafeOffsetComputation(
               unsafeOffsetForReassignments.offset,
               unsafeOffsetForReassignments.synchronizerId,
               CantonTimestamp(unsafeOffsetForReassignments.recordTime),
-              s"incomplete reassignment from ${earliestIncompleteReassignmentId.sourceSynchronizer} to $targetSynchronizerId (reassignmentId $earliestIncompleteReassignmentId)",
+              s"incomplete reassignment from $synchronizerId to $targetSynchronizerId (reassignmentId $earliestIncompleteReassignmentId)",
             )
           )
 

@@ -14,7 +14,13 @@ import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds}
 import com.digitalasset.canton.topology.transaction.ParticipantSynchronizerLimits
-import com.digitalasset.canton.topology.{GeneratorsTopology, ParticipantId, PartyId, SynchronizerId}
+import com.digitalasset.canton.topology.{
+  GeneratorsTopology,
+  ParticipantId,
+  PartyId,
+  PhysicalSynchronizerId,
+  SynchronizerId,
+}
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.canton.{GeneratorsLf, LfPartyId, ReassignmentCounter}
 import com.digitalasset.daml.lf.transaction.{CreationTime, Versioned}
@@ -45,6 +51,7 @@ final class GeneratorsProtocol(
       requiredHashAlgorithms <- nonEmptySetGen[HashAlgorithm]
       requiredCryptoKeyFormats <- nonEmptySetGen[CryptoKeyFormat]
       requiredSignatureFormats <- nonEmptySetGen[SignatureFormat]
+      serial <- Arbitrary.arbitrary[NonNegativeInt]
 
       parameters = StaticSynchronizerParameters(
         RequiredSigningSpecs(requiredSigningAlgorithmSpecs, requiredSigningKeySpecs),
@@ -54,6 +61,7 @@ final class GeneratorsProtocol(
         requiredCryptoKeyFormats,
         requiredSignatureFormats,
         protocolVersion,
+        serial,
       )
 
     } yield parameters)
@@ -188,14 +196,14 @@ final class GeneratorsProtocol(
         rawContractInstance <- Arbitrary.arbitrary[SerializableRawContractInstance]
         ledgerCreateTime <- Arbitrary.arbitrary[CreationTime.CreatedAt]
 
-        synchronizerId <- Arbitrary.arbitrary[SynchronizerId]
+        psid <- Arbitrary.arbitrary[PhysicalSynchronizerId]
         mediatorGroup <- Arbitrary.arbitrary[MediatorGroupRecipient]
 
         saltIndex <- Gen.choose(Int.MinValue, Int.MaxValue)
         transactionUUID <- Gen.uuid
 
         (computedSalt, unicum) = unicumGenerator.generateSaltAndUnicum(
-          synchronizerId = synchronizerId,
+          psid = psid,
           mediator = mediatorGroup,
           transactionUuid = transactionUUID,
           viewPosition = ViewPosition(List.empty),

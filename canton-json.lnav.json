@@ -1,54 +1,78 @@
 {
-    "$schema": "https://lnav.org/schemas/format-v1.schema.json",
-    "canton_logstash_json": {
-        "title": "Canton JSON Log",
-        "url": "https://github.com/logstash/logstash-logback-encoder",
-        "description": "Canton JSON log files written using logstash.",
-        "json": true,
-        "hide-extra": false,
-        "file-pattern": "\\.clog.*",
-        "line-format": [ { "field" : "@timestamp" }, " [", { "field" : "thread_name", "max-width" : 20 },"] ", { "field": "level" }, " - ", { "field": "logger_name" }, " (", { "field" : "trace-id", "default-value" : "" }, ") - ", { "field" : "message" },
-            " ",
-            { "field" : "stack_trace", "default-value" : "" }
-        ],
-        "timestamp-field" : "@timestamp",
-        "body-field" : "message",
-        "level-field" : "level",
-        "level" : {
-            "trace" : "TRACE",
-            "debug" : "DEBUG",
-            "info" : "INFO",
-            "error" : "ERROR",
-            "warning" : "WARN"
-        },
-        "opid-field" : "trace-id",
-        "value" : {
-            "logger_name" : {
-                "kind" : "string",
-                "identifier" : true
-            },
-            "ipaddress" : {
-                "kind" : "string",
-                "identifier" : true
-            },
-            "level_value" : {
-                "hidden": true
-            },
-            "stack_trace" : {
-                "kind" : "string"
-            },
-            "trace-id" : {
-                "kind" : "string",
-                "identifier" : true
-            },
-            "thread_name" : {
-                "kind" : "string",
-                "identifier" : true,
-                "hidden" : true
-            },
-            "@version" : {
-                "hidden" : true
+  "$schema": "https://lnav.org/schemas/format-v1.schema.json",
+  "canton_logstash_json": {
+    "title": "Canton JSON Log",
+    "url": "https://github.com/logstash/logstash-logback-encoder",
+    "description": "Canton JSON log files written using logstash.",
+    "json": true,
+    "hide-extra": false,
+    "file-pattern": "\\.clog.*",
+    "line-format": [ { "field" : "@timestamp" }, " [", { "field" : "thread_name", "max-width" : 20 },"] ", { "field": "level" }, " - ", { "field": "logger_name" }, " (", { "field" : "trace-id", "default-value" : "" }, "-", { "field" : "span-name", "default-value" : "" }, "-", { "field" : "span-parent-id", "default-value" : "" }, "-", { "field" : "span-id", "default-value" : "" }, ") - ", { "field" : "message" },
+      " ",
+      { "field" : "stack_trace", "default-value" : "" }
+    ],
+    "timestamp-field" : "@timestamp",
+    "body-field" : "message",
+    "level-field" : "level",
+    "level" : {
+      "trace" : "TRACE",
+      "debug" : "DEBUG",
+      "info" : "INFO",
+      "error" : "ERROR",
+      "warning" : "WARN"
+    },
+    "opid-field" : "trace-id",
+    "opid": {
+      "subid": "span-id",
+      "sub-description": {
+        "span-name": {
+          "format": [
+            {
+              "field": "span-name"
             }
+          ]
         }
+      }
+    },
+    "value" : {
+      "logger_name" : {
+        "kind" : "string",
+        "identifier" : true
+      },
+      "ipaddress" : {
+        "kind" : "string",
+        "identifier" : true
+      },
+      "level_value" : {
+        "hidden": true
+      },
+      "stack_trace" : {
+        "kind" : "string"
+      },
+      "trace-id" : {
+        "kind" : "string",
+        "identifier" : true
+      },
+      "span-id" : {
+        "kind" : "string",
+        "identifier" : true
+      },
+      "span-name" : {
+        "kind" : "string",
+        "identifier" : true
+      },
+      "span-parent-id" : {
+        "kind" : "string",
+        "identifier" : true
+      },
+      "thread_name" : {
+        "kind" : "string",
+        "identifier" : true,
+        "hidden" : true
+      },
+      "@version" : {
+        "hidden" : true
+      }
     }
+  }
 }

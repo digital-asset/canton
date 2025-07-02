@@ -576,7 +576,7 @@ class LocalSecretKeyAdministration(
       protocolVersion: ProtocolVersion = ProtocolVersion.latest,
       password: Option[String] = None,
   ): ByteString =
-    TraceContext.withNewTraceContext { implicit traceContext =>
+    TraceContext.withNewTraceContext("download_key_pair") { implicit traceContext =>
       val cmd = for {
         cryptoPrivateStore <- crypto.cryptoPrivateStore.toExtended
           .toRight(
@@ -593,9 +593,9 @@ class LocalSecretKeyAdministration(
           .toRight(s"Error retrieving public key [$fingerprint]: no public key found")
         keyPair: CryptoKeyPair[PublicKey, PrivateKey] = (publicKey, privateKey) match {
           case (pub: SigningPublicKey, pkey: SigningPrivateKey) =>
-            new SigningKeyPair(pub, pkey)
+            SigningKeyPair.create(pub, pkey)
           case (pub: EncryptionPublicKey, pkey: EncryptionPrivateKey) =>
-            new EncryptionKeyPair(pub, pkey)
+            EncryptionKeyPair.create(pub, pkey)
           case _ => sys.error("public and private keys must have same purpose")
         }
 

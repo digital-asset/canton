@@ -817,6 +817,58 @@ class GrpcTopologyManagerReadService(
     CantonGrpcUtil.mapErrNewEUS(res)
   }
 
+  override def logicalUpgradeState(
+      request: LogicalUpgradeStateRequest,
+      responseObserver: StreamObserver[LogicalUpgradeStateResponse],
+  ): Unit = GrpcStreamingUtils.streamToClient(
+    (out: OutputStream) => getLogicalUpgradeState(out),
+    responseObserver,
+    byteString => LogicalUpgradeStateResponse(byteString),
+    processingTimeout.unbounded.duration,
+  )
+
+  private def getLogicalUpgradeState(
+      out: OutputStream
+  ): Future[Unit] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
+    val res: EitherT[FutureUnlessShutdown, RpcError, Unit] =
+      for {
+        synchronizerTopologyStore <- collectSynchronizerStore(None)
+
+        topologyClient <- EitherT.fromEither[FutureUnlessShutdown](
+          topologyClientLookup(synchronizerTopologyStore.storeId).toRight(
+            TopologyManagerError.TopologyStoreUnknown.Failure(synchronizerTopologyStore.storeId)
+          )
+        )
+
+        topologySnapshot = topologyClient.currentSnapshotApproximation
+        _ <- EitherT.fromOptionF(
+          fopt = topologySnapshot.isSynchronizerUpgradeOngoing(),
+          ifNone = TopologyManagerError.NoOngoingSynchronizerUpgrade.Failure(),
+        )
+
+        topologySnapshot <- EitherT.right[RpcError](
+          synchronizerTopologyStore.findEssentialStateAtSequencedTime(
+            SequencedTime(topologySnapshot.timestamp),
+            includeRejected = false,
+          )
+        )
+        nonLogicalUpgradeMappings = topologySnapshot.filter { stored =>
+          val isNonLSU =
+            !TopologyMapping.Code.logicalSynchronizerUpgradeMappings.contains(stored.mapping.code)
+          val isFullyAuthorizedOrNotExpiredProposal =
+            !stored.transaction.isProposal || stored.validUntil.isEmpty
+
+          isNonLSU && isFullyAuthorizedOrNotExpiredProposal
+        }
+
+      } yield {
+        nonLogicalUpgradeMappings.toByteString(ProtocolVersion.latest).writeTo(out)
+      }
+    CantonGrpcUtil.mapErrNewEUS(res)
+  }
+
   override def listPurgeTopologyTransaction(
       request: ListPurgeTopologyTransactionRequest
   ): Future[ListPurgeTopologyTransactionResponse] = {

@@ -8,7 +8,6 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
-import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.data.CantonTimestamp.{Epoch, ofEpochMilli}
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, UnlessShutdown}
@@ -47,12 +46,7 @@ import com.digitalasset.canton.participant.store.memory.{
   ReassignmentCacheTest,
 }
 import com.digitalasset.canton.participant.util.{StateChange, TimeOfChange, TimeOfRequest}
-import com.digitalasset.canton.protocol.{
-  ExampleTransactionFactory,
-  LfContractId,
-  ReassignmentId,
-  UnassignId,
-}
+import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfContractId, ReassignmentId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ReassignmentTag.Target
 import com.digitalasset.canton.util.{Checked, CheckedT}
@@ -92,10 +86,8 @@ class ConflictDetectorTest
   private val coid21: LfContractId = ExampleTransactionFactory.suffixedId(2, 1)
   private val coid22: LfContractId = ExampleTransactionFactory.suffixedId(2, 2)
 
-  private val unassignedId = UnassignId(TestHash.digest(0))
-
-  private val reassignment1 = ReassignmentId(sourceSynchronizer1, unassignedId)
-  private val reassignment2 = ReassignmentId(sourceSynchronizer2, unassignedId)
+  private val reassignment1 = ReassignmentId.tryCreate("1")
+  private val reassignment2 = ReassignmentId.tryCreate("2")
 
   private val initialReassignmentCounter: ReassignmentCounter = ReassignmentCounter.Genesis
   private val reassignmentCounter1 = initialReassignmentCounter + 1
@@ -821,8 +813,8 @@ class ConflictDetectorTest
       for {
         acs <- mkAcs((coid00, tor0, active))
         reassignmentCache <- mkReassignmentCache(loggerFactory)(
-          reassignment1 -> mediator1,
-          reassignment2 -> mediator2,
+          (reassignment1, sourceSynchronizer1, mediator1),
+          (reassignment2, sourceSynchronizer2, mediator2),
         )
         cd = mkCd(acs, reassignmentCache)
 
@@ -843,7 +835,12 @@ class ConflictDetectorTest
             assign = Set(coid01),
             reassignmentIds = Set(reassignment1, reassignment2),
           ),
-          mkCommitSet(assign = Map(coid00 -> reassignment1, coid01 -> reassignment2)),
+          mkCommitSet(assign =
+            Map(
+              coid00 -> (sourceSynchronizer1, reassignment1),
+              coid01 -> (sourceSynchronizer2, reassignment2),
+            )
+          ),
         )("Assigned contract not locked.")
 
         _ <- checkInvalidCommitSet(cd, RequestCounter(4), ofEpochMilli(4))(
@@ -1171,8 +1168,8 @@ class ConflictDetectorTest
       for {
         acs <- mkAcs()
         reassignmentCache <- mkReassignmentCache(loggerFactory)(
-          reassignment1 -> mediator1,
-          reassignment2 -> mediator2,
+          (reassignment1, sourceSynchronizer1, mediator1),
+          (reassignment2, sourceSynchronizer2, mediator2),
         )
         cd = mkCd(acs, reassignmentCache)
         ts = ofEpochMilli(1)
@@ -1185,7 +1182,12 @@ class ConflictDetectorTest
         _ = Seq(coid00, coid01, coid10).foreach { coid =>
           checkContractState(cd, coid00, 0, 1, 0)(s"Contract $coid is locked for activation.")
         }
-        commitSet = mkCommitSet(assign = Map(coid00 -> reassignment1, coid01 -> reassignment2))
+        commitSet = mkCommitSet(assign =
+          Map(
+            coid00 -> (sourceSynchronizer1, reassignment1),
+            coid01 -> (sourceSynchronizer2, reassignment2),
+          )
+        )
         tor = TimeOfRequest(RequestCounter(0), ts)
         finTxIn <- cd.finalizeRequest(commitSet, tor).flatten
         _ = assert(finTxIn == Either.unit)
@@ -1226,7 +1228,7 @@ class ConflictDetectorTest
           (coid01, tor0, ReassignedAway(targetSynchronizer1, initialReassignmentCounter)),
         )
         reassignmentCache <- mkReassignmentCache(loggerFactory)(
-          reassignment1 -> mediator1
+          (reassignment1, sourceSynchronizer1, mediator1)
         ) // Omit reassignment2 to mimic a non-reassigning participant
         cd = mkCd(acs, reassignmentCache)
         ts = ofEpochMilli(1)
@@ -1236,7 +1238,12 @@ class ConflictDetectorTest
           reassignmentIds = Set(reassignment1),
           prior = Set(coid00, coid01),
         )
-        commitSet = mkCommitSet(assign = Map(coid00 -> reassignment1, coid01 -> reassignment2))
+        commitSet = mkCommitSet(assign =
+          Map(
+            coid00 -> (sourceSynchronizer1, reassignment1),
+            coid01 -> (sourceSynchronizer2, reassignment2),
+          )
+        )
         actRes <- prefetchAndCheck(cd, RequestCounter(1), actSet)
         fin <- cd.finalizeRequest(commitSet, tor1).flatten
         fetch00 <- acs.fetchState(coid00)
@@ -1328,7 +1335,9 @@ class ConflictDetectorTest
           .assignContract(coid01, tor0, sourceSynchronizer1, reassignmentCounter1)
           .value
 
-        reassignmentCache <- mkReassignmentCache(loggerFactory)(reassignment2 -> mediator2)
+        reassignmentCache <- mkReassignmentCache(loggerFactory)(
+          (reassignment2, sourceSynchronizer2, mediator2)
+        )
         cd = mkCd(acs, reassignmentCache)
         activenessSet = mkActivenessSet(
           deact = Set(coid00, coid01),
@@ -1348,7 +1357,7 @@ class ConflictDetectorTest
         commitSet = mkCommitSet(
           arch = Set(coid00),
           unassign = Map(coid01 -> (synchronizer1 -> reassignmentCounter2)),
-          assign = Map(coid20 -> reassignment2),
+          assign = Map(coid20 -> (sourceSynchronizer2, reassignment2)),
           create = Set(coid10),
         )
         _ <- singleCRwithTR(cd, tor.rc, activenessSet, actRes, commitSet, tor.timestamp)
@@ -1397,14 +1406,19 @@ class ConflictDetectorTest
       val tor = TimeOfRequest(RequestCounter(0), Epoch)
       for {
         acs <- mkAcs()
-        reassignmentCache <- mkReassignmentCache(loggerFactory)(reassignment1 -> mediator1)
+        reassignmentCache <- mkReassignmentCache(loggerFactory)(
+          (reassignment1, sourceSynchronizer1, mediator1)
+        )
         cd = mkCd(acs, reassignmentCache)
         activenessSet = mkActivenessSet(
           create = Set(coid00),
           assign = Set(coid01),
           reassignmentIds = Set(reassignment1),
         )
-        commitSet = mkCommitSet(create = Set(coid01), assign = Map(coid00 -> reassignment1))
+        commitSet = mkCommitSet(
+          create = Set(coid01),
+          assign = Map(coid00 -> (sourceSynchronizer1, reassignment1)),
+        )
         _ <- singleCRwithTR(
           cd,
           tor.rc,
@@ -1432,8 +1446,8 @@ class ConflictDetectorTest
       for {
         acs <- mkAcs()
         reassignmentCache <- mkReassignmentCache(loggerFactory)(
-          reassignment1 -> mediator1,
-          reassignment2 -> mediator2,
+          (reassignment1, sourceSynchronizer1, mediator1),
+          (reassignment2, sourceSynchronizer2, mediator2),
         )
         cd = mkCd(acs, reassignmentCache)
         activenessSet = mkActivenessSet(
@@ -1443,7 +1457,10 @@ class ConflictDetectorTest
         )
         commitSet = mkCommitSet(
           create = Set(coid20),
-          assign = Map(coid10 -> reassignment2, coid11 -> reassignment1),
+          assign = Map(
+            coid10 -> (sourceSynchronizer2, reassignment2),
+            coid11 -> (sourceSynchronizer1, reassignment1),
+          ),
           unassign = Map(
             coid20 -> (synchronizer1 -> reassignmentCounter1),
             coid11 -> (synchronizer2 -> reassignmentCounter2),
@@ -1530,14 +1547,14 @@ class ConflictDetectorTest
       for {
         acs <- mkAcs()
         reassignmentCache <- mkReassignmentCache(loggerFactory)(
-          reassignment1 -> mediator1,
-          reassignment2 -> mediator2,
+          (reassignment1, sourceSynchronizer1, mediator1),
+          (reassignment2, sourceSynchronizer2, mediator2),
         )
         cd = mkCd(acs, reassignmentCache)
         actSet1 = mkActivenessSet(assign = Set(coid00), reassignmentIds = Set(reassignment1))
         actSet2 = mkActivenessSet(assign = Set(coid00), reassignmentIds = Set(reassignment2))
-        commitSet1 = mkCommitSet(assign = Map(coid00 -> reassignment1))
-        commitSet2 = mkCommitSet(assign = Map(coid00 -> reassignment2))
+        commitSet1 = mkCommitSet(assign = Map(coid00 -> (sourceSynchronizer1, reassignment1)))
+        commitSet2 = mkCommitSet(assign = Map(coid00 -> (sourceSynchronizer2, reassignment2)))
         _ <- singleCRwithTR(
           cd,
           RequestCounter(0),
@@ -1566,7 +1583,9 @@ class ConflictDetectorTest
       val tor0 = TimeOfRequest(RequestCounter(0), Epoch)
       for {
         acs <- mkAcs((coid00, tor0, active), (coid01, tor0, active))
-        reassignmentCache <- mkReassignmentCache(loggerFactory)(reassignment2 -> mediator2)
+        reassignmentCache <- mkReassignmentCache(loggerFactory)(
+          (reassignment2, sourceSynchronizer2, mediator2)
+        )
         cd = mkCd(acs, reassignmentCache)
         actSet1 = mkActivenessSet(create = Set(coid10), deact = Set(coid00, coid01))
         commitSet1 = mkCommitSet(
@@ -1580,7 +1599,7 @@ class ConflictDetectorTest
           reassignmentIds = Set(reassignment2),
         )
         commitSet2 = mkCommitSet(
-          assign = Map(coid10 -> reassignment2),
+          assign = Map(coid10 -> (sourceSynchronizer2, reassignment2)),
           unassign = Map(
             coid00 -> (synchronizer2 -> reassignmentCounter1),
             coid01 -> (synchronizer2 -> reassignmentCounter2),
@@ -1610,8 +1629,8 @@ class ConflictDetectorTest
     "detect contract conflicts between assignments" inUS {
       for {
         reassignmentCache <- mkReassignmentCache(loggerFactory)(
-          reassignment1 -> mediator1,
-          reassignment2 -> mediator2,
+          (reassignment1, sourceSynchronizer1, mediator1),
+          (reassignment2, sourceSynchronizer2, mediator2),
         )
         cd = mkCd(reassignmentCache = reassignmentCache)
         actRes1 <- prefetchAndCheck(
@@ -1634,8 +1653,8 @@ class ConflictDetectorTest
     "detect conflicts between assignments and creates" inUS {
       for {
         reassignmentCache <- mkReassignmentCache(loggerFactory)(
-          reassignment1 -> mediator1,
-          reassignment2 -> mediator2,
+          (reassignment1, sourceSynchronizer1, mediator1),
+          (reassignment2, sourceSynchronizer2, mediator2),
         )
         cd = mkCd(reassignmentCache = reassignmentCache)
         actSet1 = mkActivenessSet(
@@ -1665,12 +1684,12 @@ class ConflictDetectorTest
       val hookedStore = new ReassignmentCacheTest.HookReassignmentStore(reassignmentStore)
       for {
         reassignmentCache <- mkReassignmentCache(loggerFactory, hookedStore)(
-          reassignment1 -> mediator1
+          (reassignment1, sourceSynchronizer1, mediator1)
         )
         cd = mkCd(reassignmentCache = reassignmentCache)
         actSet = mkActivenessSet(assign = Set(coid00), reassignmentIds = Set(reassignment1))
         _actRes <- prefetchAndCheck(cd, RequestCounter(0), actSet)
-        commitSet = mkCommitSet(assign = Map(coid00 -> reassignment1))
+        commitSet = mkCommitSet(assign = Map(coid00 -> (sourceSynchronizer1, reassignment1)))
         tor = TimeOfRequest(RequestCounter(0), ofEpochMilli(1))
         tor2 = TimeOfRequest(RequestCounter(2), ofEpochMilli(3))
         promise = Promise[Either[NonEmptyChain[RequestTracker.RequestTrackerStoreError], Unit]]()

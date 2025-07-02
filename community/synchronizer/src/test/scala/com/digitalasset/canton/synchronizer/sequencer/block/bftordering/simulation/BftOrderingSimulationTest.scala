@@ -11,21 +11,22 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, Traced
 import com.digitalasset.canton.sequencing.protocol.MaxRequestSizeToDeserialize
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.GrpcNetworking.{
+  P2PEndpoint,
+  PlainTextP2PEndpoint,
+}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.DefaultEpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftOrderingModuleSystemInitializer.BftOrderingStores
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftBlockOrdererConfig
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftBlockOrdererConfig.DefaultEpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.memory.SimulationAvailabilityStore
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssSegmentModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.memory.SimulationEpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.EpochChecker
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.OutputModule.RequestInspector
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.memory.SimulationOutputMetadataStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.data.memory.SimulationP2PEndpointsStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.{
+  BftBlockOrdererConfig,
   BftOrderingModuleSystemInitializer,
-  BftSequencerBaseTest,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.endpointToTestBftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.SimulationBlockSubscription
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
@@ -38,10 +39,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.SimulationModuleSystem.{
   SimulationEnv,
   SimulationInitializer,
-}
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.integration.p2p.grpc.GrpcNetworking.{
-  P2PEndpoint,
-  PlainTextP2PEndpoint,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.BftOrderingSimulationTest.SimulationTestStageSettings
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.bftordering.{
@@ -56,6 +53,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulati
   SequencerSnapshotOnboardingManager,
   SimulationOrderingTopologyProvider,
   SimulationTopologyHelpers,
+}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
+  BftSequencerBaseTest,
+  endpointToTestBftNodeId,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.BftOrderingServiceReceiveRequest
 import com.digitalasset.canton.time.{Clock, SimClock}
@@ -461,54 +462,6 @@ object BftOrderingSimulationTest {
   )
 }
 
-/*
-// TODO(#25531) currently consensus overwrites the previous crypto provider with the current on startup
-class TestKeyRotations extends BftOrderingSimulationTest {
-  override def numberOfRuns: Int = 10
-  override def numberOfInitialNodes: Int = 2
-
-  private val random = new Random(4)
-
-  override def generateStages(): Seq[SimulationTestStageSettings] = Seq(
-    SimulationTestStageSettings(
-      SimulationSettings(
-        LocalSettings(random.nextLong()),
-        NetworkSettings(random.nextLong()),
-        TopologySettings(
-          random.nextLong(),
-          shouldDoKeyRotations = true,
-        ),
-        1 minute,
-        nodeOnboardingDelays = Seq(
-          35 seconds
-        ),
-      )
-    )
-  )
-}
- */
-
-/*
-// TODO(#25531) currently consensus overwrites the previous crypto provider with the current on startup
-class consensusOverwritesOnStartupTheTopologyInfo extends BftOrderingSimulationTest {
-  override def numberOfRuns: Int = 1
-  override def numberOfInitialNodes: Int = 2
-
-  override def generateStages(): Seq[SimulationTestStageSettings] = Seq(
-    SimulationTestStageSettings(
-      SimulationSettings(
-        localSettings = LocalSettings(-4969378402838085704L),
-        networkSettings = NetworkSettings(-1499461942424923123L),
-        topologySettings = TopologySettings(-1501433639903096045L, shouldDoKeyRotations = true),
-        durationOfFirstPhaseWithFaults = 1 minute,
-        nodeOnboardingDelays = List(35 seconds),
-      )
-    )
-  )
-}
-
- */
-
 class BftOrderingSimulationTest1NodeNoFaults extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 10
   override val numberOfInitialNodes = 1
@@ -641,6 +594,34 @@ class BftOrderingSimulationTestWithConcurrentOnboardingsNoFaults extends BftOrde
   )
 }
 
+class BftOrderingSimulationTestWithOnboardingAndKeyRotationsNoFaults
+    extends BftOrderingSimulationTest {
+  override def numberOfRuns: Int = 5
+  override def numberOfInitialNodes: Int = 2
+
+  private val random = new Random(4)
+  private val durationOfFirstPhaseWithFaults = 1.minute
+
+  override def generateStages(): NonEmpty[Seq[SimulationTestStageSettings]] =
+    NonEmpty(
+      Seq,
+      SimulationTestStageSettings(
+        SimulationSettings(
+          LocalSettings(random.nextLong()),
+          NetworkSettings(random.nextLong()),
+          TopologySettings(
+            random.nextLong(),
+            shouldDoKeyRotations = true,
+          ),
+          durationOfFirstPhaseWithFaults,
+          nodeOnboardingDelays =
+            Seq(generateNodeOnboardingDelay(durationOfFirstPhaseWithFaults, random)),
+        )
+      ),
+    )
+
+}
+
 // Allows catch-up state transfer testing without requiring CFT.
 class BftOrderingSimulationTestWithPartitions extends BftOrderingSimulationTest {
   override val numberOfRuns: Int = 4
@@ -701,7 +682,6 @@ class BftOrderingSimulationTest2NodesBootstrap extends BftOrderingSimulationTest
 
 // Simulation test about empty blocks, needed to pass the liveness check.
 class BftOrderingEmptyBlocksSimulationTest extends BftOrderingSimulationTest {
-  // At the moment of writing, the test requires 12 runs to fail on the liveness check when there's no "silent network detection".
   override val numberOfRuns: Int = 15
   override val numberOfInitialNodes: Int = 2
 
@@ -726,13 +706,6 @@ class BftOrderingEmptyBlocksSimulationTest extends BftOrderingSimulationTest {
         // This will result in empty blocks only.
         clientRequestInterval = None,
         clientRequestApproximateByteSize = None,
-        // This value is lower than the default to prevent view changes from ensuring liveness (as we want empty blocks to ensure it).
-        // When the simulation becomes "healthy", we don't know when the last crash (resetting the view change timeout)
-        // or view change happened. Similarly, we don't know how "advanced" the empty block creation at that moment is.
-        // Since the simulation is deterministic and runs multiple times, we can base this value on the empty block creation
-        // interval to get the desired test coverage.
-        livenessCheckInterval =
-          IssSegmentModule.EmptyBlockCreationTimeout + 1.second, // TODO(#24283)  This value can't be too low, so adding an extra second
       ),
       // The purpose of this test is to make sure we progress time by making empty blocks. As such we don't want view
       // changes to happen (since they would also make the network do progress). So we need to explicitly check that

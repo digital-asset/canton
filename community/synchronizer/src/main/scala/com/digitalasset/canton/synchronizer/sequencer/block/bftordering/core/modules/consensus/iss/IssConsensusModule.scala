@@ -10,8 +10,8 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.collection.FairBoundedQueue
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftBlockOrdererConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.BootstrapDetector.BootstrapKind
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState.Epoch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssConsensusModule.InitialState
@@ -32,7 +32,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   HasDelayedInit,
   shortType,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.topology.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   EpochLength,
@@ -62,6 +61,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Output,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{Env, ModuleRef}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.FairBoundedQueue
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
@@ -137,14 +137,17 @@ final class IssConsensusModule[E <: Env[E]](
 
   private var latestCompletedEpoch: EpochStore.Epoch = initialState.latestCompletedEpoch
   @VisibleForTesting
-  private[bftordering] def getLatestCompletedEpoch: EpochStore.Epoch = latestCompletedEpoch
+  private[iss] def getLatestCompletedEpoch: EpochStore.Epoch = latestCompletedEpoch
 
   private var epochState = initialState.epochState
   @VisibleForTesting
-  private[bftordering] def getEpochState: EpochState[E] = epochState
+  private[iss] def getEpochState: EpochState[E] = epochState
 
   private var consensusWaitingForEpochCompletionSince: Option[Instant] = None
   private var consensusWaitingForEpochStartSince: Option[Instant] = None
+
+  @VisibleForTesting
+  private[iss] def getActiveTopologyInfo: OrderingTopologyInfo[E] = activeTopologyInfo
 
   // TODO(#16761) resend locally-led ordered blocks (PrePrepare) in activeEpoch in case my node crashed
   override def ready(self: ModuleRef[Consensus.Message[E]]): Unit = ()
@@ -183,11 +186,7 @@ final class IssConsensusModule[E <: Env[E]](
               latestCompletedEpoch.info.copy(number = EpochNumber(startEpochInfo.number - 1))
             )
             // TODO(#22894) consider a separate epoch state class for state transfer
-            setNewEpochState(
-              startEpochInfo,
-              activeTopologyInfo.currentMembership,
-              activeTopologyInfo.currentCryptoProvider,
-            )
+            setNewEpochState(startEpochInfo, maybeNewMembershipAndCryptoProvider = None)
             startStateTransfer(
               startEpochInfo.number,
               StateTransferType.Onboarding,
@@ -217,8 +216,7 @@ final class IssConsensusModule[E <: Env[E]](
         //  in case catch-up needs to be triggered again due to being behind enough.
         setNewEpochState(
           newEpochInfo,
-          newEpochTopologyMessage.membership,
-          newEpochTopologyMessage.cryptoProvider,
+          Some(newEpochTopologyMessage.membership -> newEpochTopologyMessage.cryptoProvider),
         )
         // Complete init early to avoid re-queueing messages.
         initCompleted(receiveInternal(_))
@@ -254,7 +252,7 @@ final class IssConsensusModule[E <: Env[E]](
           // Reset any topology remembered while waiting for the previous (completed) epoch to be stored.
           newEpochTopology = None
 
-          setNewEpochState(newEpochInfo, newMembership, newCryptoProvider)
+          setNewEpochState(newEpochInfo, Some(newMembership -> newCryptoProvider))
 
           startConsensusForCurrentEpoch()
           logger.debug(
@@ -625,8 +623,7 @@ final class IssConsensusModule[E <: Env[E]](
 
   private def setNewEpochState(
       newEpochInfo: EpochInfo,
-      newMembership: Membership,
-      newCryptoProvider: CryptoProvider[E],
+      maybeNewMembershipAndCryptoProvider: Option[(Membership, CryptoProvider[E])],
   )(implicit context: E#ActorContextT[Consensus.Message[E]], traceContext: TraceContext): Unit = {
     val currentEpochInfo = epochState.epoch.info
     if (currentEpochInfo == newEpochInfo) {
@@ -635,7 +632,9 @@ final class IssConsensusModule[E <: Env[E]](
     } else if (
       newEpochInfo.number == currentEpochInfo.number + 1 || currentEpochInfo == GenesisEpochInfo
     ) {
-      activeTopologyInfo = activeTopologyInfo.updateMembership(newMembership, newCryptoProvider)
+      maybeNewMembershipAndCryptoProvider.foreach { case (newMembership, newCryptoProvider) =>
+        activeTopologyInfo = activeTopologyInfo.updateMembership(newMembership, newCryptoProvider)
+      }
 
       val currentMembership = activeTopologyInfo.currentMembership
       catchupDetector.updateMembership(currentMembership)
@@ -963,7 +962,7 @@ object IssConsensusModule {
     }
 
   @VisibleForTesting
-  private[bftordering] def unapply(issConsensusModule: IssConsensusModule[?]): Option[
+  private[iss] def unapply(issConsensusModule: IssConsensusModule[?]): Option[
     (
         EpochLength,
         Option[SequencerSnapshotAdditionalInfo],

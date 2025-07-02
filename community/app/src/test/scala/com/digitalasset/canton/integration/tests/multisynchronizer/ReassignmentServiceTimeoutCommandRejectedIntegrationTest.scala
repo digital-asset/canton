@@ -41,7 +41,7 @@ import com.digitalasset.canton.participant.protocol.reassignment.UnassignmentDat
 import com.digitalasset.canton.participant.store.ReassignmentStore
 import com.digitalasset.canton.participant.store.ReassignmentStore.UnknownReassignmentId
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
-import com.digitalasset.canton.protocol.{ReassignmentId, TestSynchronizerParameters, UnassignId}
+import com.digitalasset.canton.protocol.{ReassignmentId, TestSynchronizerParameters}
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
   ProgrammableSequencer,
@@ -186,12 +186,9 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
 
           val reassignmentId = ReassignmentId(
             Source(daId),
-            UnassignId(
-              Source(daId),
-              Target(acmeId),
-              unassignmentTs,
-              Seq(cid -> ReassignmentCounter(0)),
-            ),
+            Target(acmeId),
+            unassignmentTs,
+            Seq(cid -> ReassignmentCounter(0)),
           )
 
           // Entry is deleted upon timeout
@@ -272,7 +269,7 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
       loggerFactory.assertLoggedWarningsAndErrorsSeq(
         {
           val failedAssignmentCompletion = failingAssignment(
-            unassignId = unassignedEvent.unassignId,
+            reassignmentId = unassignedEvent.reassignmentId,
             source = daId,
             target = acmeId,
             submittingParty = signatory.toLf,
@@ -296,7 +293,7 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
           )
 
           assign(
-            unassignId = unassignedEvent.unassignId,
+            reassignmentId = unassignedEvent.reassignmentId,
             source = daId,
             target = acmeId,
             submittingParty = signatory.toLf,
