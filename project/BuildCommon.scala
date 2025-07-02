@@ -473,8 +473,15 @@ object BuildCommon {
 
   lazy val cantonWarts = {
     val prefix = "com.digitalasset.canton."
-
     Seq(
+      wartremover.WartRemover.dependsOnLocalProjectWarts(CommunityProjects.`wartremover-extension`),
+      // wartremover-extension needs to load the mirrors of those deps at compile-time.
+      // They are flagged as provided because the target project may not need them at all.
+      libraryDependencies ++= Seq(
+        cats % Provided,
+        grpc_stub % Provided,
+        scalapb_runtime_grpc % Provided,
+      ),
       // DirectGrpcServiceInvocation prevents direct invocation of gRPC services through a stub, but this is often useful in tests
       Compile / compile / wartremoverErrors += Wart.custom(
         s"${prefix}DirectGrpcServiceInvocation"
@@ -491,7 +498,6 @@ object BuildCommon {
       Compile / compile / wartremoverErrors += Wart.custom(s"${prefix}ProtobufToByteString"),
       wartremoverErrors += Wart.custom(s"${prefix}SynchronizedFuture"),
       wartremoverErrors += Wart.custom(s"${prefix}TryFailed"),
-      wartremover.WartRemover.dependsOnLocalProjectWarts(CommunityProjects.`wartremover-extension`),
     ).flatMap(_.settings)
   }
 
@@ -591,6 +597,7 @@ object BuildCommon {
       blake2b,
       `slick-fork`,
       `wartremover-extension`,
+      `wartremover-annotations`,
       `pekko-fork`,
       `magnolify-addon`,
       `scalatest-addon`,
@@ -618,7 +625,7 @@ object BuildCommon {
       .in(file("base/util-external"))
       .dependsOn(
         `base-errors`,
-        `wartremover-extension` % "compile->compile;test->test",
+        `wartremover-annotations`,
       )
       .settings(
         sharedCantonSettingsExternal,
@@ -865,8 +872,9 @@ object BuildCommon {
         blake2b,
         `pekko-fork` % "compile->compile;test->test",
         `community-base`,
+        `wartremover-annotations`,
         `community-testing` % "test->test",
-        `wartremover-extension` % "compile->compile;test->test",
+        `wartremover-extension` % "test->test",
         DamlProjects.`bindings-java`,
       )
       .settings(
@@ -1113,11 +1121,10 @@ object BuildCommon {
 
     lazy val `kms-driver-api` = project
       .in(file("community/kms-driver-api"))
-      .dependsOn(
-        `wartremover-extension` % "compile->compile;test->test"
-      )
+      // Disable wart-remover to not pull it in as a dependency. This project only provides API specs, no implementations.
+      .disablePlugins(WartRemover)
       .settings(
-        sharedCantonCommunitySettings,
+        sharedCommunitySettings,
         libraryDependencies ++= Seq(
           pureconfig_core,
           slf4j_api,
@@ -1263,6 +1270,7 @@ object BuildCommon {
 
     lazy val `wartremover-extension` = project
       .in(file("community/lib/wartremover"))
+      .dependsOn(`wartremover-annotations`)
       .settings(
         sharedSettings,
         libraryDependencies ++= Seq(
@@ -1275,6 +1283,10 @@ object BuildCommon {
           wartremover_dep,
         ),
       )
+
+    lazy val `wartremover-annotations` = project
+      .in(file("community/lib/wartremover-annotations"))
+      .settings(sharedSettings)
 
     // TODO(#10617) remove when no longer needed
     lazy val `pekko-fork` = project
@@ -1364,11 +1376,12 @@ object BuildCommon {
       .in(file("base/errors"))
       .dependsOn(
         DamlProjects.`google-common-protos-scala`,
-        `wartremover-extension` % "compile->compile;test->test",
+        `wartremover-annotations`,
       )
       .settings(
         sharedCommunitySettings ++ cantonWarts,
         libraryDependencies ++= Seq(
+          cats,
           slf4j_api,
           grpc_api,
           reflections,
@@ -1383,7 +1396,7 @@ object BuildCommon {
       .in(file("base/daml-tls"))
       .dependsOn(
         `util-external` % "test->compile",
-        `wartremover-extension` % "compile->compile;test->test",
+        `wartremover-annotations`,
       )
       .settings(
         sharedCommunitySettings ++ cantonWarts,

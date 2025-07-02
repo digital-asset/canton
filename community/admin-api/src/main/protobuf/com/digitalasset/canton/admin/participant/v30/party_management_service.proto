@@ -235,8 +235,8 @@ message GetHighestOffsetByTimestampRequest {
   // Required
   google.protobuf.Timestamp timestamp = 2;
 
-  // If true, the ledger end offset is requested instead of the highest ledger offset among events
-  // with a record time at or before the requested `timestamp`.
+  // If true, return the highest known ledger offset with a record time before or at the specified `timestamp`
+  // even if higher offsets with a record time before or at `timestamp` can be created in the future.
   // Required, defaults to false.
   bool force = 3;
 }
