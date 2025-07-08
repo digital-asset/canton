@@ -1936,6 +1936,7 @@ object BuildCommon {
       .settings(
         sharedCommunitySettings,
         compileOrder := CompileOrder.JavaThenScala,
+        scalacOptions ++= removeCompileFlagsForDaml,
         crossPaths := false, // Without this, the Java tests are not executed
         libraryDependencies ++= Seq(
           fasterjackson_core,

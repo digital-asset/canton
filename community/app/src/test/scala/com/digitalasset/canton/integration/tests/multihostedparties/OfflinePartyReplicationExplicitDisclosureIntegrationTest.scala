@@ -28,6 +28,7 @@ import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission as PP
 
 import java.util.Collections
+import scala.annotation.nowarn
 
 sealed trait OfflinePartyReplicationExplicitDisclosureIntegrationTest
     extends UseSilentSynchronizerInTest
@@ -171,6 +172,7 @@ sealed trait OfflinePartyReplicationExplicitDisclosureIntegrationTest
     )
   }
 
+  @nowarn("cat=deprecation")
   private def filter(f: (PartyId, Identifier)): TransactionFilter = {
     import scala.jdk.CollectionConverters.MapHasAsJava
     import scala.jdk.OptionConverters.RichOption
