@@ -10,6 +10,7 @@ lazy val `community-domain` = CommunityProjects.`community-domain`
 lazy val `community-participant` = CommunityProjects.`community-participant`
 lazy val `community-testing` = CommunityProjects.`community-testing`
 lazy val `community-integration-testing` = CommunityProjects.`community-integration-testing`
+lazy val `community-integration-testing-lib` = CommunityProjects.`community-integration-testing-lib`
 lazy val demo = CommunityProjects.demo
 lazy val blake2b = CommunityProjects.blake2b
 lazy val `slick-fork` = CommunityProjects.`slick-fork`
