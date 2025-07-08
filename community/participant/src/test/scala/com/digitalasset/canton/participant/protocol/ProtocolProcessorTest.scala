@@ -219,7 +219,7 @@ class ProtocolProcessorTest
     new AsymmetricEncrypted[SecureRandomness](
       ByteString.EMPTY,
       // this is only a placeholder, the data is not encrypted
-      crypto.pureCrypto.defaultEncryptionAlgorithmSpec,
+      crypto.pureCrypto.encryptionAlgorithmSpecs.default,
       Fingerprint.tryFromString("dummy"),
     ),
   )
@@ -303,8 +303,9 @@ class ProtocolProcessorTest
     when(ledgerApiIndexer.onlyForTestingTransactionInMemoryStore).thenAnswer(None)
 
     val timeTracker = mock[SynchronizerTimeTracker]
-    val recordOrderPublisher = new RecordOrderPublisher(
-      synchronizerId = psid,
+    val recordOrderPublisher = RecordOrderPublisher(
+      psid = psid,
+      synchronizerSuccessor = None,
       initSc = SequencerCounter.Genesis,
       initTimestamp = CantonTimestamp.MinValue,
       ledgerApiIndexer = ledgerApiIndexer,

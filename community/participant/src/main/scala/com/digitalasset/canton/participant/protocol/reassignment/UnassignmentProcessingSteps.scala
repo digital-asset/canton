@@ -162,9 +162,6 @@ private[reassignment] class UnassignmentProcessingSteps(
         for {
           contract <- ephemeralState.contractLookup
             .lookup(contractId)
-            .map(
-              _.serializable
-            ) // TODO(#26348) - use fat contract downstream
             .toRight[ReassignmentProcessorError](
               UnassignmentProcessorError.UnknownContract(contractId)
             )
@@ -471,16 +468,14 @@ private[reassignment] class UnassignmentProcessingSteps(
         createConfirmationResponses(
           parsedRequest.requestId,
           parsedRequest.malformedPayloads,
-          parsedRequest.snapshot.ipsSnapshot,
           protocolVersion.unwrap,
-          fullTree.confirmingParties,
           unassignmentValidationResult,
         ).map(_.map((_, Recipients.cc(parsedRequest.mediator))))
 
-      // We consider that we rejected if at least one of the responses is not "approve"
+      // We consider that we rejected if at least one of the responses is a "reject"
       val locallyRejectedF = responseF.map(
         _.exists { case (confirmation, _) =>
-          confirmation.responses.exists(response => !response.localVerdict.isApprove)
+          confirmation.responses.exists(_.localVerdict.isReject)
         }
       )
 
