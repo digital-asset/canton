@@ -66,12 +66,10 @@ object Dependencies {
   lazy val netty_boring_ssl_version = "2.0.65.Final"
   lazy val netty_version = "4.1.110.Final"
 
-  lazy val oracle_version = "19.18.0.0"
   lazy val pekko_http_backend_version = "3.9.0"
   lazy val protostuff_version = "3.1.40"
   lazy val postgres_version = "42.7.3"
   lazy val pprint_version = "0.8.1"
-  lazy val prometheus_version = "0.16.0"
   lazy val protoc_gen_doc_version = "1.5.1"
   lazy val pureconfig_version = "0.14.0"
   lazy val reflections_version = "0.10.2"
@@ -87,6 +85,7 @@ object Dependencies {
   lazy val scopt_version = "4.1.0"
   lazy val shapeless_version = "2.3.7"
   lazy val slf4j_version = "2.0.6"
+
   // if you update the slick version, please also update our forked code in community/lib/slick and community/base/slick/util
   lazy val slick_version = "3.5.2"
   lazy val sttp_version = "3.8.16"

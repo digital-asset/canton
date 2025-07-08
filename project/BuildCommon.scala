@@ -1178,6 +1178,7 @@ object BuildCommon {
         `kms-driver-api`,
         `community-base`, // Required for JCE crypto
         `kms-driver-testing` % Test,
+        `community-testing` % "test->test", // Required for logback-test.xml
       )
       .settings(
         sharedCantonCommunitySettings

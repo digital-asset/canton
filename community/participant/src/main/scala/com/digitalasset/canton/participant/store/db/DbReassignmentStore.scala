@@ -31,7 +31,7 @@ import com.digitalasset.canton.participant.store.db.DbReassignmentStore.{
   DbContracts,
   ReassignmentEntryRaw,
 }
-import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId, SerializableContract}
+import com.digitalasset.canton.protocol.{ContractInstance, LfContractId, ReassignmentId}
 import com.digitalasset.canton.resource.DbStorage.{DbAction, Profile}
 import com.digitalasset.canton.resource.{DbParameterUtils, DbStorage, DbStore}
 import com.digitalasset.canton.store.db.DbDeserializationException
@@ -41,7 +41,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.SingletonTraverse.syntax.SingletonTraverseOps
-import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
+import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.google.protobuf.ByteString
 import slick.jdbc.GetResult.GetInt
 import slick.jdbc.canton.SQLActionBuilder
@@ -54,7 +54,6 @@ class DbReassignmentStore(
     override protected val storage: DbStorage,
     indexedTargetSynchronizer: Target[IndexedSynchronizer],
     indexedStringStore: IndexedStringStore,
-    targetSynchronizerProtocolVersion: Target[ProtocolVersion],
     cryptoApi: CryptoPureApi,
     futureSupervisor: FutureSupervisor,
     exitOnFatalFailures: Boolean,
@@ -141,16 +140,16 @@ class DbReassignmentStore(
     DbParameterUtils.setArrayBytesParameterDb(
       storageProfile = storage.profile,
       items = value.contracts.toArray.sortBy(_.contractId.toString),
-      serialize = DbContracts.serializeOne(targetSynchronizerProtocolVersion.unwrap),
+      serialize = DbContracts.serializeOne,
       pp = pp,
     )
   }
 
   private implicit val getDbContracts: GetResult[DbContracts] =
     DbParameterUtils
-      .getDataBytesArrayResultsDb[SerializableContract](deserialize = DbContracts.tryDeserializeOne)
+      .getDataBytesArrayResultsDb[ContractInstance](deserialize = DbContracts.tryDeserializeOne)
       .andThen { arr =>
-        val contracts: NonEmpty[Seq[SerializableContract]] = NonEmpty
+        val contracts: NonEmpty[Seq[ContractInstance]] = NonEmpty
           .from(ArraySeq.unsafeWrapArray(arr))
           .getOrElse(throw new DbDeserializationException(s"Found empty contract array"))
         DbContracts(contracts)
@@ -210,12 +209,12 @@ class DbReassignmentStore(
           ${unassignmentData.unassignmentRequest},
           ${DbContracts(unassignmentData.contracts.contracts.map(_.contract))}
         )
-        on conflict (target_synchronizer_idx, source_synchronizer_idx, reassignment_id) do update set unassignment_request = ${unassignmentData.unassignmentRequest}
-        where r.target_synchronizer_idx=$indexedTargetSynchronizer and r.source_synchronizer_idx=$indexedSourceSynchronizer and r.reassignment_id=${unassignmentData.reassignmentId} and r.unassignment_request IS NULL;
+        on conflict (target_synchronizer_idx, reassignment_id) do update set unassignment_request = ${unassignmentData.unassignmentRequest}
+        where r.target_synchronizer_idx=$indexedTargetSynchronizer and r.reassignment_id=${unassignmentData.reassignmentId} and r.unassignment_request IS NULL;
       """
         case _: Profile.H2 =>
           sqlu"""MERGE INTO par_reassignments using dual
-                 on (target_synchronizer_idx=$indexedTargetSynchronizer and source_synchronizer_idx=$indexedSourceSynchronizer and reassignment_id=${unassignmentData.reassignmentId})
+                 on (target_synchronizer_idx=$indexedTargetSynchronizer and reassignment_id=${unassignmentData.reassignmentId})
                  when matched and unassignment_request IS NULL then
                    update set unassignment_request = ${unassignmentData.unassignmentRequest}
                  when not matched then
@@ -347,13 +346,13 @@ class DbReassignmentStore(
         .toActionBuilder
 
       val query =
-        sql"""select source_synchronizer_idx, reassignment_id, unassignment_global_offset, assignment_global_offset
+        sql"""select reassignment_id, unassignment_global_offset, assignment_global_offset
            from par_reassignments
            where
-              target_synchronizer_idx=$indexedTargetSynchronizer and (""" ++ reassignmentIdsFilter ++ sql")"
+            target_synchronizer_idx=$indexedTargetSynchronizer and (""" ++ reassignmentIdsFilter ++ sql")"
 
       storage.query(
-        query.as[(Int, ReassignmentId, Option[Offset], Option[Offset])],
+        query.as[(ReassignmentId, Option[Offset], Option[Offset])],
         functionFullName,
       )
     }
@@ -361,14 +360,13 @@ class DbReassignmentStore(
     val updateQuery =
       """update par_reassignments
        set unassignment_global_offset = ?, assignment_global_offset = ?
-       where target_synchronizer_idx = ? and source_synchronizer_idx = ? and reassignment_id = ?
+       where target_synchronizer_idx = ? and reassignment_id = ?
     """
 
     lazy val task = for {
       selected <- EitherT.right(select(offsets.map(_._1)))
-      retrievedItems = selected.map {
-        case (sourceSynchronizerIndex, reassignmentId, unassignmentOffset, assignmentOffset) =>
-          reassignmentId -> (unassignmentOffset, assignmentOffset, sourceSynchronizerIndex)
+      retrievedItems = selected.map { case (reassignmentId, unassignmentOffset, assignmentOffset) =>
+        reassignmentId -> (unassignmentOffset, assignmentOffset)
       }.toMap
 
       mergedGlobalOffsets <- EitherT.fromEither[FutureUnlessShutdown](offsets.forgetNE.traverse {
@@ -376,32 +374,29 @@ class DbReassignmentStore(
           retrievedItems
             .get(reassignmentId)
             .toRight(UnknownReassignmentId(reassignmentId))
-            .map { case (offsetOutO, offsetInO, sourceSynchronizerIndex) =>
-              sourceSynchronizerIndex -> ReassignmentGlobalOffset
+            .map { case (offsetOutO, offsetInO) =>
+              ReassignmentGlobalOffset
                 .create(offsetOutO, offsetInO)
                 .valueOr(err => throw new DbDeserializationException(err))
             }
-            .flatMap { case (sourceSynchronizerIndex, globalOffsetO) =>
+            .flatMap { case globalOffsetO =>
               globalOffsetO
                 .fold[Either[String, ReassignmentGlobalOffset]](Right(newOffsets))(
                   _.merge(newOffsets)
                 )
                 .leftMap(ReassignmentGlobalOffsetsMerge(reassignmentId, _))
-                .map((sourceSynchronizerIndex, reassignmentId, _))
+                .map((reassignmentId, _))
             }
       })
 
-      batchUpdate = DbStorage.bulkOperation_(updateQuery, mergedGlobalOffsets, storage.profile) {
-        pp => mergedGlobalOffsetWithId =>
-          val (sourceSynchronizerIndex, reassignmentId, mergedGlobalOffset) =
-            mergedGlobalOffsetWithId
-
+      batchUpdate = DbStorage.bulkOperation_(updateQuery, mergedGlobalOffsets, storage.profile)(
+        pp => { case (reassignmentId, mergedGlobalOffset) =>
           pp >> mergedGlobalOffset.unassignment
           pp >> mergedGlobalOffset.assignment
           pp >> indexedTargetSynchronizer
-          pp >> sourceSynchronizerIndex
           pp >> reassignmentId
-      }
+        }
+      )
 
       _ <- EitherT.right[ReassignmentStoreError](
         storage.queryAndUpdate(batchUpdate, functionFullName)
@@ -680,10 +675,9 @@ class DbReassignmentStore(
       queryResult <- storage
         .query(
           sql"""
-                  select min(coalesce(assignment_global_offset, unassignment_global_offset)), reassignment_id
+                  select coalesce(assignment_global_offset, unassignment_global_offset), reassignment_id
                   from par_reassignments
                   where target_synchronizer_idx=$indexedTargetSynchronizer and ((unassignment_global_offset is null) != (assignment_global_offset is null))
-                  group by source_synchronizer_idx, reassignment_id
                   """
             .as[(Offset, ReassignmentId)],
           functionFullName,
@@ -739,7 +733,8 @@ class DbReassignmentStore(
           .toActionBuilder
 
       query =
-        sql"select reassignment_id, unassignment_request from par_reassignments where 1=1 and (" ++ filter ++ sql")"
+        sql"""select reassignment_id, unassignment_request from par_reassignments
+          where target_synchronizer_idx=$indexedTargetSynchronizer and (""" ++ filter ++ sql")"
 
       res <- storage
         .query(
@@ -795,7 +790,7 @@ object DbReassignmentStore {
       sourceSynchronizerIndex: Int,
       reassignmentId: ReassignmentId,
       unassignmentTs: CantonTimestamp,
-      contracts: NonEmpty[Seq[SerializableContract]],
+      contracts: NonEmpty[Seq[ContractInstance]],
       unassignmentRequest: Option[FullUnassignmentTree],
       reassignmentGlobalOffset: Option[ReassignmentGlobalOffset],
       assignmentTs: Option[CantonTimestamp],
@@ -816,17 +811,19 @@ object DbReassignmentStore {
   // We tend to use 1000 to limit queries
   private val dbQueryLimit = 1000
 
-  // Used for encoding and decoding the par_reassignments.contracts column, which is an array type.
-  private[db] final case class DbContracts(contracts: NonEmpty[Seq[SerializableContract]])
-  private[db] object DbContracts {
-    def serializeOne(protocolVersion: ProtocolVersion)(
-        contract: SerializableContract
-    ): Array[Byte] =
-      contract.toByteArray(protocolVersion)
+  import com.google.protobuf.ByteString
 
-    def tryDeserializeOne(bytes: Array[Byte]): SerializableContract =
-      SerializableContract
-        .fromTrustedByteArray(bytes)
+  // Used for encoding and decoding the par_reassignments.contracts column, which is an array type.
+  private[db] final case class DbContracts(contracts: NonEmpty[Seq[ContractInstance]])
+  private[db] object DbContracts {
+    def serializeOne(
+        contract: ContractInstance
+    ): Array[Byte] =
+      contract.encoded.toByteArray
+
+    def tryDeserializeOne(bytes: Array[Byte]): ContractInstance =
+      ContractInstance
+        .decode(ByteString.copyFrom(bytes))
         .valueOr(err =>
           throw new DbDeserializationException(s"Failed to deserialize contract: $err")
         )

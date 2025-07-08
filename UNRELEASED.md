@@ -9,7 +9,19 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## Until 2025-07-09 (Exclusive)
+
+- Added new limits for the number of open streams. This allows to limit the number of
+  open streams on the API
+  ```
+  canton.sequencers.sequencer.parameters.sequencer-api-limits = {
+    "com.digitalasset.canton.sequencer.api.v30.SequencerService/DownloadTopologyStateForInit" : 10,
+    "com.digitalasset.canton.sequencer.api.v30.SequencerService/SubscribeV2" : 1000,
+  }
+  ```
+
 ## Until 2025-07-02 (Exclusive)
+
 - Adds new gRPC endpoint `GetHighestOffsetByTimestamp` (and console command `find_highest_offset_by_timestamp`) that
   for a given timestamp, finds the highest ledger offset among all events that have record time <= timestamp. This is a
   backward-compatible change, because it's an addition only. It's useful for party replication / major upgrade.

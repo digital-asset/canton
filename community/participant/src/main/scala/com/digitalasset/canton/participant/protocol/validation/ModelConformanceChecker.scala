@@ -5,12 +5,10 @@ package com.digitalasset.canton.participant.protocol.validation
 
 import cats.Eval
 import cats.data.EitherT
-import cats.implicits.toTraverseOps
 import cats.syntax.alternative.*
 import cats.syntax.bifunctor.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.crypto.InteractiveSubmission.TransactionMetadataForHashing.saltFromSerializedContract
 import com.digitalasset.canton.crypto.{Hash, InteractiveSubmission}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ViewParticipantData.RootAction
@@ -92,7 +90,7 @@ class ModelConformanceChecker(
       topologySnapshot: TopologySnapshot,
       commonData: CommonData,
       getEngineAbortStatus: GetEngineAbortStatus,
-      reInterpretedTopLevelViews: LazyAsyncReInterpretation,
+      reInterpretedTopLevelViews: LazyAsyncReInterpretationMap,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ErrorWithSubTransaction, Result] = {
@@ -202,12 +200,12 @@ class ModelConformanceChecker(
       getEngineAbortStatus: GetEngineAbortStatus,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, Error, Map[LfContractId, SerializableContract]] =
+  ): EitherT[FutureUnlessShutdown, Error, Map[LfContractId, ContractInstance]] =
     view.tryFlattenToParticipantViews
       .flatMap(_.viewParticipantData.coreInputs)
       .parTraverse { case (cid, InputContract(contract, _)) =>
-        val templateId = contract.rawContractInstance.contractInstance.unversioned.template
-        validateContract(contract, getEngineAbortStatus, traceContext)
+        val templateId = contract.templateId
+        validateContract(contract.serializable, getEngineAbortStatus, traceContext)
           .leftMap {
             case DAMLeFailure(error) =>
               DAMLeError(error, view.viewHash): Error
@@ -261,16 +259,7 @@ class ModelConformanceChecker(
 
     val seed = viewParticipantData.actionDescription.seedOption
     for {
-      viewInputSerializableContracts <- validateInputContracts(view, getEngineAbortStatus)
-
-      viewInputContracts <- EitherT.fromEither[FutureUnlessShutdown](
-        viewInputSerializableContracts.toList
-          .traverse { case (cid, sc) =>
-            ContractInstance(sc).map(c => cid -> c)
-          }
-          .map(_.toMap)
-          .leftMap(e => FailedToConvertContract(e))
-      )
+      viewInputContracts <- validateInputContracts(view, getEngineAbortStatus)
 
       contractLookupAndVerification =
         new ExtendedContractLookup(
@@ -298,7 +287,7 @@ class ModelConformanceChecker(
     } yield ConformanceReInterpretationResult(
       lfTxAndMetadata,
       contractLookupAndVerification,
-      viewInputSerializableContracts,
+      viewInputContracts,
     )
   }
 
@@ -313,7 +302,7 @@ class ModelConformanceChecker(
       submitterMetadataO: Option[SubmitterMetadata],
       topologySnapshot: TopologySnapshot,
       getEngineAbortStatus: GetEngineAbortStatus,
-      reInterpretedTopLevelViewsET: LazyAsyncReInterpretation,
+      reInterpretedTopLevelViewsET: LazyAsyncReInterpretationMap,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, WithRollbackScope[
@@ -444,18 +433,16 @@ object ModelConformanceChecker {
 
   // Type alias for a temporary caching of re-interpreted top views to be used both for authentication of externally
   // signed transaction and model conformance checker
-  type LazyAsyncReInterpretation = Map[
-    ViewHash,
-    Eval[EitherT[
-      FutureUnlessShutdown,
-      ModelConformanceChecker.Error,
-      ModelConformanceChecker.ConformanceReInterpretationResult,
-    ]],
-  ]
+  type LazyAsyncReInterpretation = Eval[EitherT[
+    FutureUnlessShutdown,
+    ModelConformanceChecker.Error,
+    ModelConformanceChecker.ConformanceReInterpretationResult,
+  ]]
+  type LazyAsyncReInterpretationMap = Map[ViewHash, LazyAsyncReInterpretation]
   private[protocol] final case class ConformanceReInterpretationResult(
       reInterpretationResult: ReInterpretationResult,
       contractLookup: ExtendedContractLookup,
-      viewInputContracts: Map[LfContractId, SerializableContract],
+      viewInputContracts: Map[LfContractId, ContractInstance],
   ) {
 
     /** Compute the hash of a re-interpreted transaction to validate external signatures. Note that
@@ -488,8 +475,8 @@ object ModelConformanceChecker {
             createNodeEnricher(storedContract.toLf)(traceContext).map { enrichedNode =>
               cid -> FatContractInstance.fromCreateNode(
                 enrichedNode,
-                storedContract.ledgerCreateTime,
-                saltFromSerializedContract(storedContract),
+                storedContract.inst.createdAt,
+                storedContract.inst.cantonData,
               )
             }
           }
