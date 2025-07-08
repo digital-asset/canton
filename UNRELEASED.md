@@ -19,6 +19,10 @@ Wednesday after your change.
     "com.digitalasset.canton.sequencer.api.v30.SequencerService/SubscribeV2" : 1000,
   }
   ```
+- Authorization of the calls made by the IDP Admins has been tightened. It is no longer possible for them to grant
+  rights to parties which are in other IDPs or in no IDP. This effectively enforces keeping the IDP Admins within
+  their respective IDP boxes. Participant Admins can still grant the rights that cross the IDP box boundaries e.g.
+  A User in IDP A can be given right to a party IDP B.
 
 ## Until 2025-07-02 (Exclusive)
 
