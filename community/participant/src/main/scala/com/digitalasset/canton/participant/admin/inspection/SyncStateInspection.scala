@@ -179,7 +179,7 @@ final class SyncStateInspection(
       filterPackage: Option[String],
       filterTemplate: Option[String],
       limit: Int,
-  )(implicit traceContext: TraceContext): List[(Boolean, SerializableContract)] =
+  )(implicit traceContext: TraceContext): List[(Boolean, ContractInstance)] =
     getOrFail(
       timeouts.inspection.await("findContracts") {
         syncPersistentStateManager
@@ -195,14 +195,14 @@ final class SyncStateInspection(
       contractIds: Seq[LfContractId],
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[LfContractId, SerializableContract]] = {
+  ): FutureUnlessShutdown[Map[LfContractId, ContractInstance]] = {
     val synchronizerAlias = syncPersistentStateManager
       .aliasForSynchronizerId(synchronizerId)
       .getOrElse(throw new IllegalArgumentException(s"no such synchronizer [$synchronizerId]"))
 
     NonEmpty.from(contractIds) match {
       case None =>
-        FutureUnlessShutdown.pure(Map.empty[LfContractId, SerializableContract])
+        FutureUnlessShutdown.pure(Map.empty[LfContractId, ContractInstance])
       case Some(neCids) =>
         val synchronizerAcsInspection =
           getOrFail(
@@ -310,22 +310,24 @@ final class SyncStateInspection(
                   parties,
                   timeOfSnapshotO,
                   skipCleanTocCheck = skipCleanTimestampCheck,
-                ) { case (contract, reassignmentCounter) =>
-                  val activeContract =
-                    ActiveContractOld.create(
-                      synchronizerIdForExport,
-                      contract,
-                      reassignmentCounter,
-                    )(
-                      protocolVersion
-                    )
-
-                  activeContract.writeDelimitedTo(outputStream) match {
+                ) { case (contractInst, reassignmentCounter) =>
+                  (for {
+                    contract <- SerializableContract.fromLfFatContractInst(contractInst.inst)
+                    activeContract =
+                      ActiveContractOld.create(
+                        synchronizerIdForExport,
+                        contract,
+                        reassignmentCounter,
+                      )(
+                        protocolVersion
+                      )
+                    _ <- activeContract.writeDelimitedTo(outputStream)
+                  } yield ()) match {
                     case Left(errorMessage) =>
                       Left(
                         AcsInspectionError.SerializationIssue(
                           synchronizerId.logical,
-                          contract.contractId,
+                          contractInst.contractId,
                           errorMessage,
                         )
                       )
