@@ -435,6 +435,11 @@ object BuildCommon {
     scalacOptions += "-Wconf:src=src_managed/.*:silent",
   )
 
+  lazy val sharedCantonCommunitySettings = Def.settings(
+    sharedCantonSettings,
+    JvmRulesPlugin.damlRepoHeaderSettings,
+  )
+
   // On circle-ci, between machine executors and dockers, some plugins have different paths
   // ex: -Xplugin:/root/.cache vs -Xplugin:/home/********/.cache/
   // which makes the cache invalid. To fix this, we ignore the scalacOptions that starts with -Xplugin:.* when
@@ -965,6 +970,33 @@ object BuildCommon {
         // applied to `test` scope are used here. This can be reviewed in the future.
         scalacOptions --= JvmRulesPlugin.scalacOptionsToDisableForTests,
         Compile / compile / wartremoverErrors := JvmRulesPlugin.wartremoverErrorsForTestScope,
+        // TODO(i12761): package individual libraries instead of uber JARs for external consumption
+        UberLibrary.assemblySettings("community-integration-testing-lib"),
+        // when building the fat jar, we need to properly merge our artefacts
+        assembly / assemblyMergeStrategy := mergeStrategy((assembly / assemblyMergeStrategy).value),
+      )
+
+    // TODO(i12761): package individual libraries instead of uber JARs for external consumption
+    lazy val `community-integration-testing-lib` = project
+      .settings(sharedCantonCommunitySettings)
+      .settings(UberLibrary.of(`community-integration-testing`))
+      .settings(
+        Compile / packageDoc := {
+          // TODO(i12766): producing an empty file because there are errors in running the `doc` task
+          val destination = (Compile / packageDoc / artifactPath).value
+          IO.touch(destination)
+          destination
+        },
+
+        // TODO(i12761): package individual libraries instead of uber JARs for external consumption
+        UberLibrary.assemblySettings("community-integration-testing"),
+        // when building the fat jar, we need to properly merge our artefacts
+        assembly / assemblyMergeStrategy := mergeStrategy((assembly / assemblyMergeStrategy).value),
+        // The dependency override is needed because `community-testing` depends transitively on
+        // `scalatest` and `community-app-base` depends transitively on `ammonite`, which in turn
+        // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
+        // runtime errors while testing and none have been found so far, so this should be fine for now
+        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.0.1",
       )
 
     // Project for specifying the sequencer driver API

@@ -34,6 +34,7 @@ object UberLibrary {
       destination
     }
 
+  // Use this method to produce a fat-jar otherwise the POM file will list sub-projects as dependencies, which cannot be resolved.
   def of(project: Project): Seq[Def.Setting[?]] =
     Seq(
       projectDependencies := externalDependenciesOf(project).value,
