@@ -35,7 +35,7 @@ import com.digitalasset.canton.ledger.client.services.transactions.TransactionCl
 import com.digitalasset.canton.ledger.client.services.version.VersionClient
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import io.grpc.Channel
-import io.grpc.netty.NettyChannelBuilder
+import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder
 import io.grpc.stub.AbstractStub
 
 import java.io.Closeable
@@ -160,7 +160,7 @@ object LedgerClient {
       loggerFactory,
     )
 
-  /** Takes a [[io.grpc.netty.NettyChannelBuilder]], possibly set up with some relevant extra options
+  /** Takes a [[io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder]], possibly set up with some relevant extra options
     * that cannot be specified though the [[com.digitalasset.canton.ledger.client.configuration.LedgerClientConfiguration]] (e.g. a set of
     * default [[io.grpc.CallCredentials]] to be used with all calls unless explicitly
     * set on a per-call basis), sets the relevant options specified by the configuration
