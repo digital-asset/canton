@@ -52,12 +52,9 @@ object Dependencies {
   lazy val magnolifyShared_version = "0.6.2"
   lazy val mockito_scala_version = "1.16.3"
   lazy val monocle_version = "3.2.0"
-  // pick the version of boring ssl and netty native from this table: https://github.com/grpc/grpc-java/blob/master/SECURITY.md#netty
   // required for ALPN (which is required for TLS+HTTP/2) when running on Java 8. JSSE will be used on Java 9+.
 
   lazy val grpc_version = grpc_protobuf.revision
-  lazy val netty_boring_ssl_version = netty_boring_ssl.revision
-  lazy val netty_version = netty_handler.revision
   lazy val opentelemetry_instrumentation_grpc_version = s"$opentelemetry_version-alpha"
   lazy val opentelemetry_instrumentation_runtime_metrics_version = s"$opentelemetry_version-alpha"
   lazy val opentelemetry_proto_version = "1.7.1-alpha"
@@ -138,13 +135,8 @@ object Dependencies {
     "javax.annotation" % "javax.annotation-api" % javax_annotations_version
 
   lazy val grpc_protobuf = damlDependency("io.grpc", "grpc-protobuf")
-  lazy val grpc_netty = "io.grpc" % "grpc-netty" % grpc_version
   lazy val grpc_netty_shaded = "io.grpc" % "grpc-netty-shaded" % grpc_version
 
-  lazy val netty_boring_ssl = damlDependency("io.netty", "netty-tcnative-boringssl-static")
-  lazy val netty_handler = damlDependency("io.netty", "netty-handler")
-  lazy val netty_native =
-    "io.netty" % "netty-transport-native-epoll" % netty_version classifier "linux-x86_64" classifier "linux-aarch_64"
   lazy val grpc_stub = "io.grpc" % "grpc-stub" % grpc_version
   lazy val grpc_services = "io.grpc" % "grpc-services" % grpc_version
   lazy val grpc_api = "io.grpc" % "grpc-api" % grpc_version
