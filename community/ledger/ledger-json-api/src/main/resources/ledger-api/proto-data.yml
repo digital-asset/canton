@@ -737,9 +737,10 @@ messages:
       comments: Exercise a choice on an existing contract.
       fieldComments:
         template_id: |-
-          The template of contract the client wants to exercise.
+          The template or interface of the contract the client wants to exercise.
           Both package-name and package-id reference identifier formats for the template-id are supported.
           Note: The package-id reference identifier format is deprecated. We plan to end support for this format in version 3.4.
+          To exercise a choice on an interface, specify the interface identifier in the template_id field.
 
           Required
         contract_id: |-
@@ -889,10 +890,10 @@ messages:
           template or wildcard filter means additional events that will match the query.
           The impact of include_interface_view and include_created_event_blob fields in the filters will
           also be accumulated.
+          At least one cumulative filter MUST be specified.
           A template or an interface SHOULD NOT appear twice in the accumulative field.
           A wildcard filter SHOULD NOT be defined more than once in the accumulative field.
-          Optional, if no ``CumulativeFilter`` defined, the default of a single ``WildcardFilter`` with
-          include_created_event_blob unset is used.
+          Optional
   GetActiveContractsRequest:
     message:
       comments: |-
@@ -1190,6 +1191,12 @@ messages:
         package_references: |-
           The package references of the preferred packages.
           Must contain one package reference for each requested package-name.
+
+          If you build command submissions whose content depends on the returned
+          preferred packages, then we recommend submitting the preferred package-ids
+          in the ``package_id_selection_preference`` of the command submission to
+          avoid race conditions with concurrent changes of the on-ledger package vetting state.
+
           Required
         synchronizer_id: |-
           The synchronizer for which the package preferences are computed.

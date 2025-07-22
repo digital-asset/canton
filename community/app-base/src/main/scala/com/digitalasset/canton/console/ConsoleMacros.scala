@@ -762,6 +762,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         sequencers: Seq[SequencerReference],
         mediatorsToSequencers: Map[MediatorReference, (Seq[SequencerReference], PositiveInt)],
         mediatorRequestAmplification: SubmissionRequestAmplification,
+        mediatorThreshold: PositiveInt,
     )(implicit consoleEnvironment: ConsoleEnvironment): SynchronizerId = {
       val synchronizerNamespace =
         DecentralizedNamespaceDefinition.computeNamespace(synchronizerOwners.map(_.namespace).toSet)
@@ -808,6 +809,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           sequencers.map(_.id),
           mediators.map(_.id),
           store = tempStoreForBootstrap,
+          mediatorThreshold,
         )
       )
 
@@ -840,14 +842,14 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
 
       mediatorsToSequencers
         .filter(!_._1.health.initialized())
-        .foreach { case (mediator, (mediatorSequencers, threshold)) =>
+        .foreach { case (mediator, (mediatorSequencers, sequencerTrustThreshold)) =>
           mediator.setup.assign(
             synchronizerId,
             SequencerConnections.tryMany(
               mediatorSequencers
                 .map(s => s.sequencerConnection.withAlias(SequencerAlias.tryCreate(s.name))),
-              threshold,
-              mediatorRequestAmplification,
+              sequencerTrustThreshold = sequencerTrustThreshold,
+              submissionRequestAmplification = mediatorRequestAmplification,
             ),
             // if we run bootstrap ourselves, we should have been able to reach the nodes
             // so we don't want the bootstrapping to fail spuriously here in the middle of
@@ -880,6 +882,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         staticSynchronizerParameters: data.StaticSynchronizerParameters,
         mediatorRequestAmplification: SubmissionRequestAmplification =
           SubmissionRequestAmplification.NoAmplification,
+        mediatorThreshold: PositiveInt = PositiveInt.one,
     )(implicit consoleEnvironment: ConsoleEnvironment): SynchronizerId =
       synchronizer(
         synchronizerName,
@@ -889,6 +892,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         synchronizerThreshold,
         staticSynchronizerParameters,
         mediatorRequestAmplification,
+        mediatorThreshold,
       )
 
     @Help.Summary(
@@ -897,6 +901,10 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
     @Help.Description(
       """Bootstraps a new synchronizer with the given static synchronizer parameters and members.
         |Any participants as synchronizer owners must still manually connect to the synchronizer afterwards.
+        |
+        |Parameters:
+        |  mediatorsToSequencers: map of mediator reference to a tuple of a sequence of sequencer references and
+        |                         the sequencer trust threshold for the given mediator.
         """
     )
     def synchronizer(
@@ -907,6 +915,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         synchronizerThreshold: PositiveInt,
         staticSynchronizerParameters: data.StaticSynchronizerParameters,
         mediatorRequestAmplification: SubmissionRequestAmplification,
+        mediatorThreshold: PositiveInt,
     )(implicit consoleEnvironment: ConsoleEnvironment): SynchronizerId = {
       // skip over HA sequencers
       val uniqueSequencers =
@@ -935,6 +944,7 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
             uniqueSequencers,
             mediatorsToSequencers,
             mediatorRequestAmplification,
+            mediatorThreshold,
           )
         case Left(error) =>
           consoleEnvironment.raiseError(s"The synchronizer cannot be bootstrapped: $error")

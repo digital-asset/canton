@@ -9,6 +9,13 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2025-07-23 (Exclusive)
+- Bugfix: Corrected HTTP method for the JSON Ledger API endpoint `interactive-submission/preferred-packages` from GET to POST.
+
+## Until 2025-07-16 (Exclusive)
+- **Breaking**  The console command `parties.update` has been removed. You can now use the Ledger API command `ledger_api.parties.update` instead.
+- **Breaking** Renamed mediator scan to mediator inspection for both the commands and the admin API service. Renamed the inspection service gRPC of the participant into ParticipantInspectionService to differentiate from the mediator one.
+
 ## Until 2025-06-27 (Exclusive)
 - Added new limits for the number of open streams. This allows to limit the number of
   open streams on the API

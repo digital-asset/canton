@@ -21,7 +21,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   AddPartyStatus,
   ListConnectedSynchronizersResult,
   ListPartiesResult,
-  PartyDetails,
 }
 import com.digitalasset.canton.admin.participant.v30.{
   ExportAcsAtTimestampResponse,
@@ -342,22 +341,6 @@ class ParticipantPartiesAdministrationGroup(
         forceFlags = forceFlags,
       )
       .discard
-
-  @Help.Summary("Update participant-local party details")
-  @Help.Description(
-    """Currently you can update only the annotations.
-           |You cannot update other user attributes.
-          party: party to be updated,
-          modifier: a function to modify the party details, e.g.: `partyDetails => { partyDetails.copy(annotations = partyDetails.annotations.updated("a", "b").removed("c")) }`"""
-  )
-  def update(
-      party: PartyId,
-      modifier: PartyDetails => PartyDetails,
-  ): PartyDetails =
-    reference.ledger_api.parties.update(
-      party = party,
-      modifier = modifier,
-    )
 
   @Help.Summary("Add a previously existing party to the local participant", FeatureFlag.Preview)
   @Help.Description(
