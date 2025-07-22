@@ -153,7 +153,7 @@ private[reassignment] class AssignmentProcessingSteps(
           s"Assignment $reassignmentId: Reassignment data for ${unassignmentData.targetSynchronizer} found on wrong synchronizer $synchronizerId"
         )
 
-      stakeholders = unassignmentData.unassignmentRequest.stakeholders
+      stakeholders = unassignmentData.stakeholders
       _ <- ReassignmentValidation
         .checkSubmitter(
           ReassignmentRef(reassignmentId),
@@ -164,23 +164,6 @@ private[reassignment] class AssignmentProcessingSteps(
         )
         .leftMap(_.toSubmissionValidationError)
 
-      exclusivityTimeoutErrorO <- AssignmentValidation
-        .checkExclusivityTimeout(
-          reassignmentCoordination,
-          synchronizerId,
-          staticSynchronizerParameters,
-          unassignmentData,
-          topologySnapshot.unwrap.timestamp,
-          submitter,
-          reassignmentId,
-        )
-
-      _ <- EitherT.fromEither[FutureUnlessShutdown](
-        exclusivityTimeoutErrorO
-          .toLeft(())
-          .leftMap(_.toSubmissionValidationError)
-      )
-
       assignmentUuid = seedGenerator.generateUuid()
       seed = seedGenerator.generateSaltSeed()
 
@@ -190,13 +173,13 @@ private[reassignment] class AssignmentProcessingSteps(
           seed,
           reassignmentId,
           submitterMetadata,
-          unassignmentData.contracts,
+          unassignmentData.contractsBatch,
           sourceSynchronizer,
           targetSynchronizer,
           mediator,
           assignmentUuid,
           protocolVersion,
-          unassignmentData.unassignmentRequest.reassigningParticipants,
+          unassignmentData.reassigningParticipants,
         )
       )
 
@@ -209,7 +192,7 @@ private[reassignment] class AssignmentProcessingSteps(
         staticSynchronizerParameters.map(_.protocolVersion),
       )
       recipientsSet <- activeParticipantsOfParty(stakeholders.all.toSeq)
-      contractIds = unassignmentData.contracts.contractIds.toSeq
+      contractIds = unassignmentData.contractsBatch.contractIds.toSeq
       recipients <- EitherT.fromEither[FutureUnlessShutdown](
         Recipients
           .ofSet(recipientsSet)
@@ -463,7 +446,7 @@ private[reassignment] class AssignmentProcessingSteps(
     }
   }
 
-  override def getCommitSetAndContractsToBeStoredAndEvent(
+  override def getCommitSetAndContractsToBeStoredAndEventFactory(
       event: WithOpeningErrors[SignedContent[Deliver[DefaultOpenEnvelope]]],
       verdict: Verdict,
       pendingRequestData: PendingAssignment,
@@ -496,7 +479,11 @@ private[reassignment] class AssignmentProcessingSteps(
     ] = {
       val commit = for {
         eventO <- createRejectionEvent(RejectionArgs(pendingRequestData, reason))
-      } yield CommitAndStoreContractsAndPublishEvent(None, Seq.empty, eventO)
+      } yield CommitAndStoreContractsAndPublishEvent(
+        None,
+        Seq.empty,
+        eventO.map(event => _ => event),
+      )
       EitherT.fromEither[FutureUnlessShutdown](commit)
     }
 

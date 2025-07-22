@@ -67,6 +67,7 @@ import org.scalatest.wordspec.FixtureAsyncWordSpec
 import org.scalatest.{Assertion, FutureOutcome}
 import org.slf4j.event
 
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.Success
 
@@ -572,8 +573,8 @@ class GrpcSequencerServiceTest
     "return error if called with observer not capable of observing server calls" in { env =>
       val observer = new MockStreamObserver[v30.SubscriptionResponse]()
       loggerFactory.suppressWarningsAndErrors {
-        env.service.subscribeV2(
-          v30.SubscriptionRequestV2(
+        env.service.subscribe(
+          v30.SubscriptionRequest(
             member = "",
             timestamp = Some(CantonTimestamp.Epoch.toProtoPrimitive),
           ),
@@ -590,8 +591,8 @@ class GrpcSequencerServiceTest
 
     "return error if request cannot be deserialized" in { env =>
       val observer = new MockServerStreamObserver[v30.SubscriptionResponse]()
-      env.service.subscribeV2(
-        v30.SubscriptionRequestV2(
+      env.service.subscribe(
+        v30.SubscriptionRequest(
           member = "",
           timestamp = Some(CantonTimestamp.Epoch.toProtoPrimitive),
         ),
@@ -609,7 +610,7 @@ class GrpcSequencerServiceTest
     "return error if pool registration fails" in { env =>
       val observer = new MockServerStreamObserver[v30.SubscriptionResponse]()
       val requestP =
-        SubscriptionRequestV2(
+        SubscriptionRequest(
           participant,
           timestamp = None,
           testedProtocolVersion,
@@ -624,7 +625,7 @@ class GrpcSequencerServiceTest
         )
         .thenReturn(EitherT.leftT(PoolClosed))
 
-      env.service.subscribeV2(requestP, observer)
+      env.service.subscribe(requestP, observer)
 
       eventually() {
         inside(observer.items.loneElement) { case StreamError(ex: StatusException) =>
@@ -637,14 +638,14 @@ class GrpcSequencerServiceTest
     "return error if sending request with member that is not authenticated" in { env =>
       val observer = new MockServerStreamObserver[v30.SubscriptionResponse]()
       val requestP =
-        SubscriptionRequestV2(
+        SubscriptionRequest(
           ParticipantId("Wrong participant"),
           timestamp = Some(CantonTimestamp.Epoch),
           testedProtocolVersion,
         ).toProtoV30
 
       loggerFactory.suppressWarningsAndErrors {
-        env.service.subscribeV2(requestP, observer)
+        env.service.subscribe(requestP, observer)
         eventually() {
           observer.items.toSeq should matchPattern {
             case Seq(StreamError(err: StatusException))
@@ -652,6 +653,69 @@ class GrpcSequencerServiceTest
           }
         }
       }
+    }
+
+    "close subscription if canceled before fully created" in { env =>
+      val observer = mock[MockServerStreamObserver[v30.SubscriptionResponse]]
+      val cancelHandler = new AtomicReference[Option[Runnable]](None)
+      val subscriptionClosed = new AtomicBoolean(false)
+
+      // Subscription augmented to let us know when it is closed.
+      val subscription =
+        new GrpcManagedSubscription(
+          _ => ???,
+          observer,
+          participant,
+          None,
+          timeouts,
+          loggerFactory,
+          _ => ???,
+        ) {
+          override def onClosed(): Unit = {
+            super.onClosed()
+            subscriptionClosed.set(true)
+          }
+        }
+
+      // Remember the cancel handler once set, so we can simulate a grpc context cancel.
+      Mockito
+        .when(observer.setOnCancelHandler(ArgumentMatchers.any[Runnable]()))
+        .thenAnswer(mockInvocation =>
+          cancelHandler.set(Some(mockInvocation.getArgument[Runnable](0)))
+        )
+
+      // Slow down the subscription pool to improve our chances of canceling before the
+      // subscription is fully created.
+      Mockito
+        .when(
+          env.subscriptionPool.create(
+            ArgumentMatchers.any[() => FutureUnlessShutdown[Subscription]](),
+            ArgumentMatchers.any[Member](),
+          )(anyTraceContext)
+        )
+        .thenReturn {
+          EitherT.right(Future {
+            logger.info("Test slowing down subscription creation")
+            // Simulate a delay in subscription creation to let us cancel the GRPC call
+            // before the subscription is fully created.
+            Threading.sleep(1000)
+            logger.info("Test done slowing down subscription creation")
+            subscription
+          })
+        }
+
+      // Initiate creating a subscription asynchronously.
+      val requestP =
+        SubscriptionRequest(participant, timestamp = None, testedProtocolVersion).toProtoV30
+      env.service.subscribe(requestP, observer)
+
+      // Cancel the grpc subscription once the cancel handler is known.
+      eventually()(cancelHandler.get().nonEmpty shouldBe true)
+      logger.info("Test canceling grpc request")
+      cancelHandler.get().foreach(_.run())
+
+      // The point of this test: Make sure the subscription is closed.
+      eventually()(subscriptionClosed.get() shouldBe true)
     }
   }
 

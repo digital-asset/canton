@@ -8,7 +8,7 @@ import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.GrpcNetworking.{
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.{
   P2PEndpoint,
   PlainTextP2PEndpoint,
 }
@@ -55,12 +55,13 @@ final case class PingHelper[E <: Env[E]](
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
 ) extends Module[E, String] {
+  private implicit val metricsContext: MetricsContext = MetricsContext.Empty
 
   override protected def receiveInternal(
       message: String
   )(implicit context: E#ActorContextT[String], traceContext: TraceContext): Unit = message match {
     case "tick" =>
-      ping.asyncSend("tick-ack")(MetricsContext.Empty)
+      ping.asyncSend("tick-ack")
       context.stop()
       recorder.pingHelperActorStopped = true
     case _ => sys.error(s"Unexpected message: $message")
@@ -232,11 +233,13 @@ object TestSystem {
       timeout: ProcessingTimeout,
   ): SimulationClient.Initializer[E, Unit, String] =
     new SimulationClient.Initializer[E, Unit, String] {
+      private implicit val metricsContext: MetricsContext = MetricsContext.Empty
+
       override def createClient(systemRef: ModuleRef[String]): Module[E, Unit] =
         PingerClient(systemRef, loggerFactory, timeout)
 
       override def init(context: E#ActorContextT[Unit]): Unit =
-        context.delayedEvent(0.seconds, ())(MetricsContext.Empty)
+        context.delayedEventNoTrace(0.seconds, ())
     }
 }
 

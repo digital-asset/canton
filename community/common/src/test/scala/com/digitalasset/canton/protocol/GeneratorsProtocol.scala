@@ -243,16 +243,16 @@ final class GeneratorsProtocol(
     } yield contract
   )
 
-  def contractInstanceArb(
+  def contractInstanceArb[Time <: CreationTime](
       canHaveEmptyKey: Boolean,
+      genTime: Gen[Time],
       overrideContractId: Option[LfContractId] = None,
-  ): Arbitrary[ContractInstance] = Arbitrary(
+  ): Arbitrary[GenContractInstance { type InstCreatedAtTime <: Time }] = Arbitrary(
     for {
-      templateId <- Arbitrary.arbitrary[LfTemplateId]
       metadata <- contractMetadataArb(canHaveEmptyKey).arbitrary
-      createdAt <- Arbitrary.arbitrary[CreationTime.CreatedAt]
-    } yield ExampleContractFactory.build(
-      createdAt = createdAt.time,
+      createdAt <- genTime
+    } yield ExampleContractFactory.build[Time](
+      createdAt = createdAt,
       signatories = metadata.signatories,
       stakeholders = metadata.stakeholders,
       keyOpt = metadata.maybeKeyWithMaintainers,
@@ -266,7 +266,7 @@ final class GeneratorsProtocol(
     for {
       createdAt <- Arbitrary.arbitrary[CreationTime.CreatedAt]
     } yield ExampleContractFactory.build(
-      createdAt = createdAt.time,
+      createdAt = createdAt,
       signatories = metadata.signatories,
       stakeholders = metadata.stakeholders,
       keyOpt = metadata.maybeKeyWithMaintainers,
@@ -276,13 +276,11 @@ final class GeneratorsProtocol(
   implicit val globalKeyWithMaintainersArb: Arbitrary[Versioned[LfGlobalKeyWithMaintainers]] =
     Arbitrary(
       for {
-        // TODO(#26348) - Use single maintainer until we take a daml snapshot
-        // that includes https://github.com/digital-asset/daml/pull/21433
-        maintainer <- Arbitrary.arbitrary[LfPartyId]
+        maintainers <- nonEmptySetGen[LfPartyId]
         key <- Arbitrary.arbitrary[LfGlobalKey]
       } yield ExampleTransactionFactory.globalKeyWithMaintainers(
         key,
-        Set(maintainer),
+        maintainers,
       )
     )
 
@@ -324,16 +322,13 @@ final class GeneratorsProtocol(
 
   implicit val createdContractArb: Arbitrary[CreatedContract] = Arbitrary(
     for {
-      contract <- contractInstanceArb(canHaveEmptyKey = true).arbitrary
+      contract <- contractInstanceArb(
+        canHaveEmptyKey = true,
+        genTime = Arbitrary.arbitrary[CreationTime.CreatedAt],
+      ).arbitrary
       consumedInCore <- Gen.oneOf(true, false)
       rolledBack <- Gen.oneOf(true, false)
-    } yield CreatedContract
-      .create(
-        contract,
-        consumedInCore,
-        rolledBack,
-      )
-      .value
+    } yield CreatedContract.create(contract, consumedInCore, rolledBack).value
   )
 
   implicit val contractReassignmentBatch: Arbitrary[ContractsReassignmentBatch] = Arbitrary(
@@ -368,5 +363,4 @@ final class GeneratorsProtocol(
         key <- Arbitrary.arbitrary[SymmetricKey]
       } yield ProtocolSymmetricKey(key, protocolVersion)
     )
-
 }

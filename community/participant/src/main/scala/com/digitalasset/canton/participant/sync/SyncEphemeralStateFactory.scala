@@ -143,7 +143,7 @@ class SyncEphemeralStateFactoryImpl(
         exitOnFatalFailures = exitOnFatalFailures,
         sessionKeyCacheConfig,
         timeouts,
-        persistentState.loggerFactory,
+        loggerFactory.append("synchronizerId", persistentState.psid.toString),
         futureSupervisor,
         clock,
       )
@@ -193,7 +193,7 @@ object SyncEphemeralStateFactory {
 
       isAcrossUpgrade = (synchronizerIndexO, synchronizerPredecessor).tupled.exists {
         case (synchronizerIndex, synchronizerPredecessor) =>
-          isSequencedEventStoreEmpty && synchronizerIndex.recordTime < synchronizerPredecessor.upgradeTime
+          isSequencedEventStoreEmpty && synchronizerIndex.recordTime == synchronizerPredecessor.upgradeTime
       }
 
       messageProcessingStartingPoint <-

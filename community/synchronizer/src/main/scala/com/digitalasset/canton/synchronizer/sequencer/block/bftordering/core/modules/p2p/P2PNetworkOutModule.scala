@@ -15,7 +15,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.Se
   PeerEndpointStatus,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology.SequencerNodeId
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.GrpcNetworking.P2PEndpoint
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.AvailabilityModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssConsensusModule.DefaultDatabaseReadTimeout
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.P2PMetrics.{
@@ -141,17 +141,17 @@ final class P2PNetworkOutModule[
 
   override def ready(self: ModuleRef[P2PNetworkOut.Message]): Unit = {
     maybeSelf = Some(self)
-    self.asyncSend(P2PNetworkOut.Start)
+    self.asyncSendNoTrace(P2PNetworkOut.Start)
   }
 
   override def onSequencerId(endpointId: P2PEndpoint.Id, nodeId: BftNodeId): Unit =
-    maybeSelf.foreach(_.asyncSend(P2PNetworkOut.Network.Authenticated(endpointId, nodeId)))
+    maybeSelf.foreach(_.asyncSendNoTrace(P2PNetworkOut.Network.Authenticated(endpointId, nodeId)))
 
   override def onConnect(endpointId: P2PEndpoint.Id): Unit =
-    maybeSelf.foreach(_.asyncSend(P2PNetworkOut.Network.Connected(endpointId)))
+    maybeSelf.foreach(_.asyncSendNoTrace(P2PNetworkOut.Network.Connected(endpointId)))
 
   override def onDisconnect(endpointId: P2PEndpoint.Id): Unit =
-    maybeSelf.foreach(_.asyncSend(P2PNetworkOut.Network.Disconnected(endpointId)))
+    maybeSelf.foreach(_.asyncSendNoTrace(P2PNetworkOut.Network.Disconnected(endpointId)))
 
   import state.*
 

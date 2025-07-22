@@ -293,10 +293,7 @@ class SequencerNodeBootstrap(
                   clock,
                   SynchronizerCrypto(crypto, existing.synchronizerParameters),
                   existing.synchronizerParameters,
-                  store = createSynchronizerTopologyStore(
-                    existing.synchronizerId,
-                    existing.synchronizerParameters.protocolVersion,
-                  ),
+                  store = createSynchronizerTopologyStore(existing.synchronizerId),
                   outboxQueue = new SynchronizerOutboxQueue(loggerFactory),
                   exitOnFatalFailures = parameters.exitOnFatalFailures,
                   timeouts,
@@ -330,14 +327,13 @@ class SequencerNodeBootstrap(
     }
 
     private def createSynchronizerTopologyStore(
-        synchronizerId: PhysicalSynchronizerId,
-        protocolVersion: ProtocolVersion,
+        synchronizerId: PhysicalSynchronizerId
     ): TopologyStore[SynchronizerStore] = {
       val store =
         TopologyStore(
           SynchronizerStore(synchronizerId),
           storage,
-          protocolVersion,
+          synchronizerId.protocolVersion,
           timeouts,
           loggerFactory,
         )
@@ -410,8 +406,7 @@ class SequencerNodeBootstrap(
               )
             )
             store = createSynchronizerTopologyStore(
-              PhysicalSynchronizerId(synchronizerId, request.synchronizerParameters),
-              request.synchronizerParameters.protocolVersion,
+              PhysicalSynchronizerId(synchronizerId, request.synchronizerParameters)
             )
             outboxQueue = new SynchronizerOutboxQueue(loggerFactory)
             topologyManager = new SynchronizerTopologyManager(
@@ -637,6 +632,7 @@ class SequencerNodeBootstrap(
               crypto,
               cryptoConfig,
               parameters.batchingConfig.parallelism,
+              parameters.cachingConfigs.publicKeyConversionCache,
               parameters.processingTimeouts,
               futureSupervisor,
               loggerFactory,
@@ -654,6 +650,7 @@ class SequencerNodeBootstrap(
             staticSynchronizerParameters,
             crypto,
             parameters.batchingConfig.parallelism,
+            parameters.cachingConfigs.publicKeyConversionCache,
             parameters.processingTimeouts,
             futureSupervisor,
             loggerFactory,
@@ -674,7 +671,7 @@ class SequencerNodeBootstrap(
           topologyStateForInitializationService =
             new StoreBasedTopologyStateForInitializationService(
               synchronizerTopologyStore,
-              config.parameters.minimumSequencingTime,
+              config.parameters.sequencingTimeLowerBoundExclusive,
               synchronizerLoggerFactory,
             )
 
@@ -747,7 +744,7 @@ class SequencerNodeBootstrap(
                 syncCryptoWithOptionalSessionKeys,
                 futureSupervisor,
                 config.trafficConfig,
-                config.parameters.minimumSequencingTime,
+                config.parameters.sequencingTimeLowerBoundExclusive,
                 runtimeReadyPromise.futureUS,
                 topologyAndSequencerSnapshot.flatMap { case (_, sequencerSnapshot) =>
                   sequencerSnapshot

@@ -6,7 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulat
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.GrpcNetworking.P2PEndpoint
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftOrderingModuleSystemInitializer.BftOrderingStores
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.ModuleRef
@@ -171,7 +171,7 @@ class SequencerSnapshotOnboardingManager(
         Output.SequencerSnapshotMessage.GetAdditionalInfo(
           sequencerActivationTime.value,
           new ModuleRef[SequencerNode.SnapshotMessage] {
-            override def asyncSendTraced(msg: SequencerNode.SnapshotMessage)(implicit
+            override def asyncSend(msg: SequencerNode.SnapshotMessage)(implicit
                 traceContext: TraceContext,
                 metricsContext: MetricsContext,
             ): Unit =

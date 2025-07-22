@@ -130,7 +130,7 @@ class SequencerReader(
   private val psid = syncCryptoApi.psid
   private val protocolVersion: ProtocolVersion = psid.protocolVersion
 
-  def readV2(member: Member, requestedTimestampInclusive: Option[CantonTimestamp])(implicit
+  def read(member: Member, requestedTimestampInclusive: Option[CantonTimestamp])(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CreateSubscriptionError, Sequencer.SequencedEventSource] =
     synchronizeWithClosing(functionFullName)(for {
@@ -532,7 +532,6 @@ class SequencerReader(
               psid,
               unvalidatedEvent.event.messageId,
               error,
-              protocolVersion,
               trafficReceiptForNonSequencerSender(
                 unvalidatedEvent.event.sender,
                 unvalidatedEvent.event.trafficReceiptO,
@@ -546,7 +545,6 @@ class SequencerReader(
               None,
               emptyBatch,
               None,
-              protocolVersion,
               None,
             )
           }
@@ -782,7 +780,6 @@ class SequencerReader(
               messageIdO,
               filteredBatch,
               topologyTimestampO,
-              protocolVersion,
               // deliver events should only retain the traffic state for the sender's subscription
               trafficReceiptForNonSequencerSender(sender, trafficReceiptO),
             )
@@ -801,7 +798,6 @@ class SequencerReader(
                 None,
                 emptyBatch,
                 None,
-                protocolVersion,
                 None,
               )
             }
@@ -822,7 +818,6 @@ class SequencerReader(
               Some(messageId),
               emptyBatch,
               topologyTimestampO,
-              protocolVersion,
               trafficReceiptForNonSequencerSender(sender, trafficReceiptO),
             )
           )
@@ -837,7 +832,6 @@ class SequencerReader(
               psid,
               messageId,
               status,
-              protocolVersion,
               trafficReceiptForNonSequencerSender(sender, trafficReceiptO),
             )
           )

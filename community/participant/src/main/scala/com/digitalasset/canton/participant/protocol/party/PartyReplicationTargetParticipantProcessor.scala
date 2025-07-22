@@ -21,6 +21,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.data.ActiveContractOld
 import com.digitalasset.canton.participant.admin.party.PartyReplicationTestInterceptor
+import com.digitalasset.canton.participant.event.AcsChangeSupport
 import com.digitalasset.canton.participant.protocol.conflictdetection.CommitSet
 import com.digitalasset.canton.participant.store.ParticipantNodePersistentState
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer
@@ -63,8 +64,9 @@ import scala.util.chaining.scalaUtilChainingOps
 final class PartyReplicationTargetParticipantProcessor(
     partyId: PartyId,
     partyToParticipantEffectiveAt: CantonTimestamp,
-    onComplete: TraceContext => Unit,
-    onError: String => Unit,
+    protected val onComplete: TraceContext => Unit,
+    protected val onError: String => Unit,
+    protected val onDisconnect: (String, TraceContext) => Unit,
     participantNodePersistentState: Eval[ParticipantNodePersistentState],
     connectedSynchronizer: ConnectedSynchronizer,
     protected val futureSupervisor: FutureSupervisor,
@@ -174,7 +176,6 @@ final class PartyReplicationTargetParticipantProcessor(
     } yield ()).bimap(
       _.tap { error =>
         logger.warn(s"Error while processing payload: $error")
-        isChannelClosed.set(true)
         onError(error)
       },
       _ => progressPartyReplication(),
@@ -182,18 +183,18 @@ final class PartyReplicationTargetParticipantProcessor(
   }
 
   override def progressPartyReplication()(implicit traceContext: TraceContext): Unit =
-    if (
-      !isChannelClosed.get() &&
-      // Skip progress check if another task is already queued that performs this same progress check or
-      // is going to schedule a progress check.
-      executionQueue.queueSize <= 1 &&
-      testOnlyInterceptor.onTargetParticipantProgress(
-        processorStore
-      ) == PartyReplicationTestInterceptor.Proceed
-    ) {
-      executeAsync(
-        s"Respond to source participant if needed"
-      )(EitherTUtil.ifThenET(isSourceParticipantReady.get())(respondToSourceParticipant()))
+    // Skip progress check if more than one other task is already queued that performs this same progress check or
+    // is going to schedule a progress check.
+    if (executionQueue.isAtMostOneTaskScheduled) {
+      executeAsync(s"Respond to source participant if needed")(
+        EitherTUtil.ifThenET(
+          isChannelOpenForCommunication &&
+            testOnlyInterceptor.onTargetParticipantProgress(
+              processorStore
+            ) == PartyReplicationTestInterceptor.Proceed &&
+            isSourceParticipantReady.get()
+        )(respondToSourceParticipant())
+      )
     }
 
   private def respondToSourceParticipant()(implicit
@@ -206,12 +207,11 @@ final class PartyReplicationTargetParticipantProcessor(
         .lift(
           recordOrderPublisher.publishBufferedEvents()
         )
-        .flatMap { _ =>
-          isChannelClosed.set(true)
+        .flatMap(_ =>
           sendCompleted(
             "completing in response to source participant notification of end of data"
           ).value
-        }
+        )
     )
   } else if (processedContractsCount.get() == requestedContractsCount.get()) {
     logger.debug(
@@ -247,7 +247,7 @@ final class PartyReplicationTargetParticipantProcessor(
       activeContracts: NonEmpty[Seq[ContractReassignment]],
   )(
       timestamp: CantonTimestamp
-  )(implicit traceContext: TraceContext): Update.RepairReassignmentAccepted = {
+  )(implicit traceContext: TraceContext): Update.OnPRReassignmentAccepted = {
     val uniqueUpdateId = {
       // Add the repairCounter and contract-id to the hash to arrive at unique per-OPR updateIds.
       val hash = activeContracts
@@ -287,7 +287,8 @@ final class PartyReplicationTargetParticipantProcessor(
       activeContracts,
       artificialReassignmentInfo.sourceSynchronizer,
     )
-    Update.RepairReassignmentAccepted(
+    val acsChangeFactory = AcsChangeSupport.fromCommitSet(commitSet)
+    Update.OnPRReassignmentAccepted(
       workflowId = None,
       updateId = uniqueUpdateId,
       reassignmentInfo = artificialReassignmentInfo,
@@ -307,13 +308,9 @@ final class PartyReplicationTargetParticipantProcessor(
       repairCounter = repairCounter,
       recordTime = timestamp,
       synchronizerId = psid.logical,
-      commitSetO = Some(commitSet),
+      acsChangeFactory = acsChangeFactory,
     )
   }
-
-  override def onDisconnected(status: Either[String, Unit])(implicit
-      traceContext: TraceContext
-  ): Unit = ()
 }
 
 object PartyReplicationTargetParticipantProcessor {
@@ -323,6 +320,7 @@ object PartyReplicationTargetParticipantProcessor {
       partyToParticipantEffectiveAt: CantonTimestamp,
       onComplete: TraceContext => Unit,
       onError: String => Unit,
+      onDisconnect: (String, TraceContext) => Unit,
       participantNodePersistentState: Eval[ParticipantNodePersistentState],
       connectedSynchronizer: ConnectedSynchronizer,
       futureSupervisor: FutureSupervisor,
@@ -337,6 +335,7 @@ object PartyReplicationTargetParticipantProcessor {
       partyToParticipantEffectiveAt,
       onComplete,
       onError,
+      onDisconnect,
       participantNodePersistentState,
       connectedSynchronizer,
       futureSupervisor,

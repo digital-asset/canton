@@ -20,7 +20,7 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.TransactionError
-import com.digitalasset.canton.ledger.participant.state.{CommitSetSequencedUpdate, SequencedUpdate}
+import com.digitalasset.canton.ledger.participant.state.SequencedUpdate
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   PromiseUnlessShutdownFactory,
@@ -28,6 +28,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.participant.event.AcsChangeSupport
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
 import com.digitalasset.canton.participant.protocol.Phase37Synchronizer.RequestOutcome
 import com.digitalasset.canton.participant.protocol.ProcessingSteps.{
@@ -1282,12 +1283,20 @@ abstract class ProtocolProcessor[
     val snapshotTs = requestId.unwrap
 
     for {
-      snapshot <- EitherT.right(
+      // Check against future-dated request IDs to prevent a deadlock due to waiting for a topology snapshot in the future.
+      _ <- EitherT.cond[FutureUnlessShutdown](
+        requestId.unwrap < resultTs,
+        (),
+        steps.embedResultError(
+          FutureRequestId(requestId, resultTs)
+        ),
+      )
+      requestSnapshot <- EitherT.right(
         crypto.ips.awaitSnapshotUSSupervised(s"await crypto snapshot $snapshotTs")(snapshotTs)
       )
 
       synchronizerParameters <- EitherT(
-        snapshot
+        requestSnapshot
           .findDynamicSynchronizerParameters()
           .map(
             _.leftMap(_ =>
@@ -1503,11 +1512,11 @@ abstract class ProtocolProcessor[
       locallyRejected <- EitherT.right(locallyRejectedF)
       _ = checkContradictoryMediatorApprove(locallyRejected, verdict)
 
-      commitAndEvent <- pendingRequestDataOrReplayData match {
+      commitAndEventFactory <- pendingRequestDataOrReplayData match {
         case Wrapped(pendingRequestData) =>
           for {
-            commitSetAndContractsAndEvent <- steps
-              .getCommitSetAndContractsToBeStoredAndEvent(
+            commitSetAndContractsAndEventFactory <- steps
+              .getCommitSetAndContractsToBeStoredAndEventFactory(
                 event,
                 verdict,
                 pendingRequestData,
@@ -1519,7 +1528,7 @@ abstract class ProtocolProcessor[
               commitSetOF,
               contractsToBeStored,
               eventO,
-            ) = commitSetAndContractsAndEvent
+            ) = commitSetAndContractsAndEventFactory
 
             val isApproval = verdict.isApprove
 
@@ -1531,13 +1540,13 @@ abstract class ProtocolProcessor[
         case _: CleanReplayData =>
           val commitSetOF =
             Option.when(verdict.isApprove)(FutureUnlessShutdown.pure(CommitSet.empty))
-          val eventO = None
+          val eventFactoryO = None
 
           EitherT.pure[FutureUnlessShutdown, steps.ResultError](
-            (commitSetOF, Seq.empty, eventO)
+            (commitSetOF, Seq.empty, eventFactoryO)
           )
       }
-      (commitSetOF, contractsToBeStored, eventO) = commitAndEvent
+      (commitSetOF, contractsToBeStored, eventFactoryO) = commitAndEventFactory
 
       commitTime = resultTs
       commitSetF <- signalResultToRequestTracker(
@@ -1554,17 +1563,12 @@ abstract class ProtocolProcessor[
 
       _ <- ifThenET(!cleanReplay) {
         logger.info(
-          show"Finalizing ${steps.requestKind.unquoted} request=${requestId.unwrap} with event $eventO."
+          show"Finalizing ${steps.requestKind.unquoted} request=${requestId.unwrap}."
         )
         for {
           commitSet <- EitherT.right[steps.ResultError](commitSetF)
-          eventWithCommitSetO = eventO.map {
-            case commitSetUpdate: CommitSetSequencedUpdate =>
-              commitSetUpdate.withCommitSet(commitSet)
-
-            case u: SequencedUpdate => u
-          }
-          _ = logger.info(show"About to wrap up request $requestId")
+          eventO = eventFactoryO.map(_(AcsChangeSupport.fromCommitSet(commitSet)))
+          _ = logger.info(show"About to wrap up request $requestId with event $eventO")
           requestTimestamp = requestId.unwrap
           _unit <- EitherT.right[steps.ResultError](
             terminateRequest(
@@ -1572,7 +1576,7 @@ abstract class ProtocolProcessor[
               requestSequencerCounter,
               requestTimestamp,
               commitTime,
-              eventWithCommitSetO,
+              eventO,
             )
           )
         } yield pendingSubmissionDataO.foreach(steps.postProcessResult(verdict, _))
@@ -1928,6 +1932,14 @@ object ProtocolProcessor {
   final case class TimeoutResultTooEarly(requestId: RequestId) extends ResultProcessingError {
     override protected def pretty: Pretty[TimeoutResultTooEarly] = prettyOfClass(
       unnamedParam(_.requestId)
+    )
+  }
+
+  final case class FutureRequestId(requestId: RequestId, resultTs: CantonTimestamp)
+      extends ResultProcessingError {
+    override protected def pretty: Pretty[FutureRequestId] = prettyOfClass(
+      param("request id", _.requestId),
+      param("result timestamp", _.resultTs),
     )
   }
 

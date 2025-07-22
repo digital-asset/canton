@@ -334,7 +334,7 @@ object TestingTimeServiceConfig {
   *   Disable the package upgrade verification on DAR upload
   * @param packageMetadataView
   *   Initialization parameters for the package metadata in-memory store.
-  * @param automaticallyConnectToUpgradedSynchronizer
+  * @param automaticallyPerformLogicalSynchronizerUpgrade
   *   Whether the participant automatically performs a handshake with the upgraded synchronizer
   *   after receiving enough sequencer connections, and whether the participants automatically
   *   connects to the synchronizer after the upgrade time.
@@ -364,12 +364,13 @@ final case class ParticipantNodeParameterConfig(
     journalGarbageCollectionDelay: config.NonNegativeFiniteDuration =
       config.NonNegativeFiniteDuration.ofSeconds(0),
     disableUpgradeValidation: Boolean = false,
+    enableStrictDarValidation: Boolean = false,
     watchdog: Option[WatchdogConfig] = None,
     packageMetadataView: PackageMetadataViewConfig = PackageMetadataViewConfig(),
     commandProgressTracker: CommandProgressTrackerConfig = CommandProgressTrackerConfig(),
     unsafeOnlinePartyReplication: Option[UnsafeOnlinePartyReplicationConfig] = None,
     // TODO(#25344): check whether this should be removed
-    automaticallyConnectToUpgradedSynchronizer: Boolean = true,
+    automaticallyPerformLogicalSynchronizerUpgrade: Boolean = true,
 ) extends LocalNodeParametersConfig
     with UniformCantonConfigValidation
 

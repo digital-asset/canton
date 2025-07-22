@@ -6,19 +6,12 @@ package com.digitalasset.canton.networking.grpc
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.metrics.grpc.{GrpcMetricsServerInterceptor, GrpcServerMetrics}
 import com.daml.tracing.Telemetry
-import com.digitalasset.canton.auth.{
-  AdminAuthorizer,
-  AuthInterceptor,
-  AuthServiceWildcard,
-  CantonAdminToken,
-  CantonAdminTokenAuthService,
-}
-import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.auth.CantonAdminToken
 import com.digitalasset.canton.config.{ApiLoggingConfig, AuthServiceConfig}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.tracing.{TraceContextGrpc, TracingConfig}
 import io.grpc.ServerInterceptors.intercept
-import io.grpc.ServerServiceDefinition
+import io.grpc.{ServerInterceptor, ServerServiceDefinition}
 
 import scala.util.chaining.*
 
@@ -38,6 +31,7 @@ class CantonCommunityServerInterceptors(
     adminToken: Option[CantonAdminToken],
     jwtTimestampLeeway: Option[JwtTimestampLeeway],
     telemetry: Telemetry,
+    additionalInterceptors: Seq[ServerInterceptor] = Seq.empty,
 ) extends CantonServerInterceptors {
   private def interceptForLogging(
       service: ServerServiceDefinition,
@@ -65,26 +59,16 @@ class CantonCommunityServerInterceptors(
 
   private def addAuthInterceptor(
       service: ServerServiceDefinition
-  ): ServerServiceDefinition = {
-    val authServices = new CantonAdminTokenAuthService(adminToken) +:
-      (if (authServiceConfigs.isEmpty)
-         List(AuthServiceWildcard)
-       else
-         authServiceConfigs.map(
-           _.create(
-             jwtTimestampLeeway,
-             loggerFactory,
-           )
-         ))
-    val interceptor = new AuthInterceptor(
-      authServices,
-      telemetry,
-      loggerFactory,
-      DirectExecutionContext(loggerFactory.getLogger(AuthInterceptor.getClass)),
-      AdminAuthorizer,
-    )
-    intercept(service, interceptor)
-  }
+  ): ServerServiceDefinition =
+    CantonCommunityAuthInterceptorDefinition
+      .addAuthInterceptor(
+        service,
+        loggerFactory,
+        authServiceConfigs,
+        adminToken,
+        jwtTimestampLeeway,
+        telemetry,
+      )
 
   def addAllInterceptors(
       service: ServerServiceDefinition,
@@ -95,4 +79,5 @@ class CantonCommunityServerInterceptors(
       .pipe(addTraceContextInterceptor)
       .pipe(addMetricsInterceptor)
       .pipe(addAuthInterceptor)
+      .pipe(s => additionalInterceptors.foldLeft(s)((acc, i) => intercept(acc, i)))
 }

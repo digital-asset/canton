@@ -294,7 +294,7 @@ object DocsOpenBuild {
       simpleConfig.getPath,
       "-c",
       distributedConfig.getPath,
-      "--log-level-stdout=off",
+      "--log-level-stdout=error",
     )
     // Using the GENERATE_METRICS_FOR_DOCS environment variable as a flag (enabled when set) to explicitly register
     // metrics which usually are registered by the application on-demand only.

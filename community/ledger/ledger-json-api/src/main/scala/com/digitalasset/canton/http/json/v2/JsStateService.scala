@@ -5,6 +5,7 @@ package com.digitalasset.canton.http.json.v2
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2.{reassignment, state_service}
+import com.digitalasset.canton.auth.AuthInterceptor
 import com.digitalasset.canton.http.WebsocketConfig
 import com.digitalasset.canton.http.json.v2.CirceRelaxedCodec.deriveRelaxedCodec
 import com.digitalasset.canton.http.json.v2.Endpoints.{CallerContext, TracedInput}
@@ -41,6 +42,7 @@ class JsStateService(
     val esf: ExecutionSequencerFactory,
     materializer: Materializer,
     wsConfig: WebsocketConfig,
+    val authInterceptor: AuthInterceptor,
 ) extends Endpoints
     with NamedLogging {
 
@@ -73,7 +75,7 @@ class JsStateService(
 
   private def getConnectedSynchronizers(
       callerContext: CallerContext
-  ): TracedInput[(String, Option[String])] => Future[
+  ): TracedInput[(String, Option[String], Option[String])] => Future[
     Either[JsCantonError, state_service.GetConnectedSynchronizersResponse]
   ] = req =>
     stateServiceClient(callerContext.token())(req.traceContext)
@@ -82,6 +84,7 @@ class JsStateService(
           .GetConnectedSynchronizersRequest(
             party = req.in._1,
             participantId = req.in._2.getOrElse(""),
+            identityProviderId = req.in._2.getOrElse(""),
           )
       )
       .resultToRight
@@ -153,6 +156,7 @@ object JsStateService extends DocumentationEndpoints {
     .in(sttp.tapir.stringToPath("connected-synchronizers"))
     .in(query[String]("party"))
     .in(query[Option[String]]("participantId"))
+    .in(query[Option[String]]("identityProviderId"))
     .out(jsonBody[state_service.GetConnectedSynchronizersResponse])
     .description("Get connected synchronizers")
 

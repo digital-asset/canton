@@ -324,7 +324,7 @@ final case class UnassignmentView private (
       salt = Some(salt.toProtoV30),
       targetPhysicalSynchronizerId = targetSynchronizerId.unwrap.toProtoPrimitive,
       targetTimeProof = Some(targetTimeProof.toProtoV30),
-      contracts = contracts.contracts.map { case reassign =>
+      contracts = contracts.contracts.map { reassign =>
         v30.ActiveContract(
           reassign.contract.encoded,
           reassign.counter.toProtoPrimitive,
@@ -390,7 +390,7 @@ object UnassignmentView extends VersioningCompanionContextMemoization[Unassignme
       contracts <- contractsP
         .traverse { case v30.ActiveContract(contractP, reassignmentCounterP) =>
           ContractInstance
-            .decode(contractP)
+            .decodeWithCreatedAt(contractP)
             .leftMap(err => ContractDeserializationError(err))
             .map(_ -> ReassignmentCounter(reassignmentCounterP))
         }
