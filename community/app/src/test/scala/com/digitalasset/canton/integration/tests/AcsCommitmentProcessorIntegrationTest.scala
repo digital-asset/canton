@@ -31,7 +31,7 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.SuppressionRule
-import com.digitalasset.canton.participant.admin.grpc.InspectionServiceError
+import com.digitalasset.canton.participant.admin.grpc.ParticipantInspectionServiceError
 import com.digitalasset.canton.participant.pruning.*
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors.MismatchError.{
   CommitmentsMismatch,
@@ -665,7 +665,7 @@ trait AcsCommitmentProcessorIntegrationTest
             ) and include(
               "because the participant has not computed such a commitment at the given tick timestamp for the given counter participant"
             ))
-            logEntry.shouldBeCantonErrorCode(InspectionServiceError.IllegalArgumentError)
+            logEntry.shouldBeCantonErrorCode(ParticipantInspectionServiceError.IllegalArgumentError)
           },
         )
       }
@@ -689,7 +689,7 @@ trait AcsCommitmentProcessorIntegrationTest
             ) and include(
               "because the participant has not computed such a commitment at the given tick timestamp for the given counter participant"
             ))
-            logEntry.shouldBeCantonErrorCode(InspectionServiceError.IllegalArgumentError)
+            logEntry.shouldBeCantonErrorCode(ParticipantInspectionServiceError.IllegalArgumentError)
           },
         )
       }
@@ -713,7 +713,7 @@ trait AcsCommitmentProcessorIntegrationTest
             ) and include(
               "because the participant has not computed such a commitment at the given tick timestamp for the given counter participant"
             ))
-            logEntry.shouldBeCantonErrorCode(InspectionServiceError.IllegalArgumentError)
+            logEntry.shouldBeCantonErrorCode(ParticipantInspectionServiceError.IllegalArgumentError)
           },
         )
       }
@@ -743,7 +743,7 @@ trait AcsCommitmentProcessorIntegrationTest
             ) and include(
               "is not a valid reconciliation interval tick"
             ))
-            logEntry.shouldBeCantonErrorCode(InspectionServiceError.IllegalArgumentError)
+            logEntry.shouldBeCantonErrorCode(ParticipantInspectionServiceError.IllegalArgumentError)
           },
         )
       }
