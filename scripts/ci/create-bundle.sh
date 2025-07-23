@@ -8,7 +8,7 @@ function adjust_startup_scripts() {
     exit 1
   fi
   REPLACE_PROG_NAME="\"Canton ${TMP}\""
-  REPLACE_VERSION=$(cat version.sbt | sed -E 's/.*= \"(.*)\"/\1/')
+  REPLACE_VERSION=$(cut -d\" -f4 < version.sbt)
   REPLACE_REVISION=$(git rev-parse HEAD)
   REPLACE_JVM_OPTS="-XX:+CrashOnOutOfMemoryError"
   REPLACE_JAR="lib\/$RELEASE.jar"

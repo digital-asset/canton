@@ -5,11 +5,13 @@ package com.digitalasset.canton.http.json.v2
 
 import com.daml.ledger.api.v2.interactive.interactive_submission_service
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
+  ExecuteSubmissionResponse,
   GetPreferredPackageVersionRequest,
   InteractiveSubmissionServiceGrpc,
   MinLedgerTime,
 }
 import com.daml.ledger.api.v2.package_reference
+import com.digitalasset.canton.auth.AuthInterceptor
 import com.digitalasset.canton.http.json.v2.CirceRelaxedCodec.deriveRelaxedCodec
 import com.digitalasset.canton.http.json.v2.Endpoints.{CallerContext, TracedInput, v2Endpoint}
 import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
@@ -26,9 +28,10 @@ import com.google.protobuf
 import io.circe.*
 import io.circe.generic.extras.semiauto.deriveConfiguredCodec
 import io.circe.generic.semiauto.deriveCodec
+import sttp.model.StatusCode
 import sttp.tapir.generic.auto.*
 import sttp.tapir.json.circe.*
-import sttp.tapir.{AnyEndpoint, Schema, stringToPath}
+import sttp.tapir.{AnyEndpoint, Endpoint, Schema, stringToPath}
 
 import java.time.Instant
 import scala.concurrent.{ExecutionContext, Future}
@@ -38,7 +41,8 @@ class JsInteractiveSubmissionService(
     protocolConverters: ProtocolConverters,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
-    val executionContext: ExecutionContext
+    val executionContext: ExecutionContext,
+    val authInterceptor: AuthInterceptor,
 ) extends Endpoints
     with NamedLogging {
 
@@ -172,13 +176,25 @@ object JsInteractiveSubmissionService extends DocumentationEndpoints {
   private lazy val preferredPackages =
     interactiveSubmission.in(sttp.tapir.stringToPath("preferred-packages"))
 
-  val prepareEndpoint = interactiveSubmission.post
+  val prepareEndpoint: Endpoint[
+    CallerContext,
+    JsPrepareSubmissionRequest,
+    (StatusCode, JsCantonError),
+    JsPrepareSubmissionResponse,
+    Any,
+  ] = interactiveSubmission.post
     .in(stringToPath("prepare"))
     .in(jsonBody[JsPrepareSubmissionRequest])
     .out(jsonBody[JsPrepareSubmissionResponse])
     .description("Prepare commands for signing")
 
-  val executeEndpoint = interactiveSubmission.post
+  val executeEndpoint: Endpoint[
+    CallerContext,
+    JsExecuteSubmissionRequest,
+    (StatusCode, JsCantonError),
+    ExecuteSubmissionResponse,
+    Any,
+  ] = interactiveSubmission.post
     .in(stringToPath("execute"))
     .in(jsonBody[JsExecuteSubmissionRequest])
     .out(jsonBody[interactive_submission_service.ExecuteSubmissionResponse])
@@ -196,7 +212,7 @@ object JsInteractiveSubmissionService extends DocumentationEndpoints {
       )
 
   val preferredPackagesEndpoint =
-    preferredPackages.get
+    preferredPackages.post
       .in(jsonBody[interactive_submission_service.GetPreferredPackagesRequest])
       .out(jsonBody[interactive_submission_service.GetPreferredPackagesResponse])
       .description(

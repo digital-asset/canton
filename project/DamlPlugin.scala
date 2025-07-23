@@ -1,14 +1,14 @@
 import java.io.{File, FileReader, FileWriter, IOException}
-import java.util.{Map => JMap}
-
+import java.util.Map as JMap
 import com.esotericsoftware.yamlbeans.{YamlReader, YamlWriter}
-import sbt.Keys._
+import sbt.Keys.*
+import sbt.librarymanagement.DependencyResolution
 import sbt.util.CacheStoreFactory
 import sbt.util.FileFunction.UpdateFunction
-import sbt.{Def, _}
+import sbt.{Def, *}
 
 import scala.collection.mutable
-import scala.sys.process._
+import scala.sys.process.*
 import scala.util.{Failure, Success, Try}
 
 object DamlPlugin extends AutoPlugin {
@@ -90,6 +90,7 @@ object DamlPlugin extends AutoPlugin {
         val cacheDirectory = streams.value.cacheDirectory
         val log = streams.value.log
         val enableJavaCodegen = damlEnableJavaCodegen.value
+        val depResolution = dependencyResolution.value
 
         val cache = FileFunction.cached(cacheDirectory, FileInfo.hash) { input =>
           val codegens =
@@ -107,6 +108,8 @@ object DamlPlugin extends AutoPlugin {
                   outputDirectory,
                   damlCompilerVersion.value,
                   useCustomDamlVersion.value,
+                  csrCacheDirectory.value,
+                  depResolution,
                 )
               }
           }.toSet
@@ -556,6 +559,8 @@ object DamlPlugin extends AutoPlugin {
       managedSourceDir: File,
       damlVersion: String,
       useCustomDamlVersion: Boolean,
+      cacheDirectory: File,
+      dependencyResolution: DependencyResolution,
   ): Seq[File] = {
     require(
       damlProjectDirectory.exists,
@@ -567,22 +572,24 @@ object DamlPlugin extends AutoPlugin {
         s"Codegen asked to generate code from nonexistent file: $darFile"
       )
 
-    val (url, artifact, packageName, suffix, extraArgs) = language match {
+    val (packageName, suffix, extraArgs) = language match {
       case Codegen.Java =>
         (
-          s"https://repo.maven.apache.org/maven2/com/daml/codegen-jvm-main/$damlVersion/",
-          s"codegen-jvm-main-$damlVersion.jar",
           basePackageName + (if (!basePackageName.contains("java")) ".java" else ""),
           "java",
           Seq("java"),
         )
     }
 
-    val codegenJarPath = ensureArtifactAvailable(
-      url = url,
-      artifactFilename = artifact,
-      damlVersion = damlVersion,
-      damlHeadPath = Seq(
+    val codegenModule = ModuleID(
+      "com.daml",
+      "codegen-jvm-main",
+      damlVersion,
+    )
+
+    val codegenJarPath = if (useCustomDamlVersion) {
+      // Custom daml versions are already expected to exist locally in the specified daml head path
+      val damlHeadPath = Seq(
         ".m2",
         "repository",
         "com",
@@ -590,9 +597,27 @@ object DamlPlugin extends AutoPlugin {
         "codegen-jvm-main",
         damlVersion,
         s"codegen-jvm-main-$damlVersion.jar",
-      ),
-      useCustomDamlVersion = useCustomDamlVersion,
-    ).getAbsolutePath
+      )
+      damlHeadPath.foldLeft(better.files.File(System.getProperty("user.home")))(_ / _).toJava
+    } else {
+      dependencyResolution
+        .retrieve(codegenModule, None, cacheDirectory, log)
+        .fold(
+          err => {
+            throw new MessageOnlyException(
+              s"Failed to resolve codegen jar for $codegenModule: $err"
+            )
+          },
+          files => {
+            if (files.isEmpty) {
+              throw new MessageOnlyException(
+                s"Failed to resolve codegen jar for $codegenModule: no files found"
+              )
+            }
+            files.head
+          },
+        )
+    }
 
     log.debug(s"Running $language-codegen for $darFile into $managedSourceDir")
 
@@ -600,7 +625,7 @@ object DamlPlugin extends AutoPlugin {
 
     // run the daml process using the working directory of the daml.yaml project file
     val result = Process(
-      "java" +: "-jar" +: codegenJarPath +: (extraArgs ++ Seq(
+      "java" +: "-jar" +: codegenJarPath.getAbsolutePath.toString +: (extraArgs ++ Seq(
         s"${darFile.getAbsolutePath}=$packageName",
         s"--output-directory=${managedSourceDir.getAbsolutePath}",
       )),

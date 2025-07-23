@@ -47,12 +47,12 @@ final class GeneratorsProtocol(
   import generatorsMessages.*
 
   implicit val recipientsArb: Arbitrary[Recipients] = {
-    val protocolVersionDependentRecipientGen = Arbitrary.arbitrary[Recipient]
+    val protocolVersionDependentRecipientArb = genArbitrary[Recipient]
 
     Arbitrary(for {
       depths <- nonEmptyListGen(Arbitrary(Gen.choose(0, 3)))
       trees <- Gen.sequence[List[RecipientsTree], RecipientsTree](
-        depths.forgetNE.map(recipientsTreeGen(Arbitrary(protocolVersionDependentRecipientGen)))
+        depths.forgetNE.map(recipientsTreeGen(protocolVersionDependentRecipientArb)(_))
       )
     } yield Recipients(NonEmptyUtil.fromUnsafe(trees)))
   }
@@ -136,11 +136,11 @@ final class GeneratorsProtocol(
     } yield TopologyStateForInitRequest(member, protocolVersion)
   )
 
-  implicit val subscriptionRequestV2Arb: Arbitrary[SubscriptionRequestV2] = Arbitrary(
+  implicit val subscriptionRequestV2Arb: Arbitrary[SubscriptionRequest] = Arbitrary(
     for {
       member <- Arbitrary.arbitrary[Member]
       timestamp <- Arbitrary.arbitrary[Option[CantonTimestamp]]
-    } yield SubscriptionRequestV2.apply(member, timestamp, protocolVersion)
+    } yield SubscriptionRequest.apply(member, timestamp, protocolVersion)
   )
 
   implicit val sequencerChannelMetadataArb: Arbitrary[SequencerChannelMetadata] =
@@ -230,7 +230,6 @@ final class GeneratorsProtocol(
       synchronizerId = synchronizerId,
       messageId,
       error,
-      protocolVersion,
       Option.empty[TrafficReceipt],
     )
   )
@@ -238,7 +237,7 @@ final class GeneratorsProtocol(
     for {
       synchronizerId <- Arbitrary.arbitrary[PhysicalSynchronizerId]
       batch <- batchArb.arbitrary
-      deliver <- Arbitrary(deliverGen(synchronizerId, batch, protocolVersion)).arbitrary
+      deliver <- Arbitrary(deliverGen(synchronizerId, batch)).arbitrary
     } yield deliver
   )
 
@@ -290,7 +289,6 @@ final class GeneratorsProtocol(
   def deliverGen[Env <: Envelope[?]](
       synchronizerId: PhysicalSynchronizerId,
       batch: Batch[Env],
-      protocolVersion: ProtocolVersion,
   ): Gen[Deliver[Env]] = for {
     previousTimestamp <- Arbitrary.arbitrary[Option[CantonTimestamp]]
     timestamp <- Arbitrary.arbitrary[CantonTimestamp]
@@ -304,7 +302,6 @@ final class GeneratorsProtocol(
     messageIdO,
     batch,
     topologyTimestampO,
-    protocolVersion,
     trafficReceipt,
   )
 }

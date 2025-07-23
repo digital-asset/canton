@@ -14,7 +14,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.Se
   PeerEndpointStatus,
   PeerNetworkStatus,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.GrpcNetworking.{
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.{
   P2PEndpoint,
   PlainTextP2PEndpoint,
 }
@@ -80,9 +80,10 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
           consensusStarted shouldBe false
           verify(availabilitySpy, never).asyncSend(
             any[Availability.Message[ProgrammableUnitTestEnv]]
-          )(any[MetricsContext])
+          )(any[TraceContext], any[MetricsContext])
           verify(consensusSpy, never).asyncSend(any[Consensus.Message[ProgrammableUnitTestEnv]])(
-            any[MetricsContext]
+            any[TraceContext],
+            any[MetricsContext],
           )
 
           // One more node authenticates -> weak quorum reached
@@ -417,7 +418,7 @@ class P2PNetworkOutModuleTest extends AnyWordSpec with BftSequencerBaseTest {
         consensusStarted shouldBe false
         verify(availabilitySpy, never).asyncSend(
           any[Availability.Message[ProgrammableUnitTestEnv]]
-        )(any[MetricsContext])
+        )(any[TraceContext], any[MetricsContext])
       }
     }
 

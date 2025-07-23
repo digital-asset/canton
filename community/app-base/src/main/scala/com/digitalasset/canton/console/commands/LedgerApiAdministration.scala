@@ -1466,6 +1466,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
     @Help.Group("Party Management")
     object parties extends Helpful {
 
+      // TODO(i26846): document the userId parameter here and in the parties.rst documentation.
       @Help.Summary("Allocate a new party", FeatureFlag.Testing)
       @Help.Description(
         """Allocates a new party on the ledger.
@@ -1480,7 +1481,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           party: String,
           annotations: Map[String, String] = Map.empty,
           identityProviderId: String = "",
-          synchronizerId: String = "",
+          synchronizerId: Option[SynchronizerId] = None,
           userId: String = "",
       ): PartyDetails = {
         val proto = check(FeatureFlag.Testing)(consoleEnvironment.run {
@@ -2526,7 +2527,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               result
                 .get()
                 .toRight(
-                  s"Failed to find contract of type ${companion.getTemplateIdWithPackageId} after $timeout"
+                  s"Failed to find contract of type ${companion.TEMPLATE_ID} after $timeout"
                 )
             }
           })
@@ -2549,12 +2550,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               predicate: TC => Boolean = (_: TC) => true,
               synchronizerFilter: Option[SynchronizerId] = None,
           ): Seq[TC] = check(FeatureFlag.Testing) {
-            val javaTemplateId = templateCompanion.getTemplateIdWithPackageId
-            val templateId = TemplateId(
-              templateCompanion.PACKAGE.id,
-              javaTemplateId.getModuleName,
-              javaTemplateId.getEntityName,
-            )
+            val templateId = TemplateId.fromJavaIdentifier(templateCompanion.TEMPLATE_ID)
 
             def synchronizerPredicate(entry: WrappedContractEntry) =
               synchronizerFilter match {

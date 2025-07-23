@@ -5,6 +5,7 @@ import sbt.{io as _, *}
 import scala.util.chaining.scalaUtilChainingOps
 
 object Dependencies {
+
   val daml_libraries_version = metabuild.BuildInfo.daml_libraries_version
   val daml_language_versions = metabuild.BuildInfo.daml_language_versions
   val daml_compiler_version = metabuild.BuildInfo.daml_compiler_version
@@ -447,7 +448,7 @@ object Dependencies {
   lazy val google_protobuf_java_util =
     "com.google.protobuf" % "protobuf-java-util" % protobuf_version
 
-  // version depends actually on scalapb
+  // Version depends actually on scalapb
   lazy val google_common_protos =
     resolveDependency("com.google.api.grpc", "proto-google-common-protos")
 

@@ -3,9 +3,12 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.leaders
 
+import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.BlacklistLeaderSelectionPolicyConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.OutputMetadataStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
@@ -24,12 +27,15 @@ import com.digitalasset.canton.version.ProtocolVersion
 class BlacklistLeaderSelectionInitializer[E <: Env[E]](
     thisNode: BftNodeId,
     config: BftBlockOrdererConfig,
+    blacklistLeaderSelectionPolicyConfig: BlacklistLeaderSelectionPolicyConfig,
     protocolVersion: ProtocolVersion,
     store: OutputMetadataStore[E],
     timeouts: ProcessingTimeout,
     failBootstrap: String => TraceContext => Nothing,
+    metrics: BftOrderingMetrics,
     override val loggerFactory: NamedLoggerFactory,
-) extends LeaderSelectionInitializer[E]
+)(implicit metricsContext: MetricsContext)
+    extends LeaderSelectionInitializer[E]
     with NamedLogging {
 
   def stateForInitial(
@@ -50,7 +56,7 @@ class BlacklistLeaderSelectionInitializer[E <: Env[E]](
       orderingTopology: OrderingTopology,
   ): Seq[BftNodeId] = state.computeLeaders(
     orderingTopology,
-    config.blacklistLeaderSelectionPolicyConfig,
+    blacklistLeaderSelectionPolicyConfig,
   )
 
   def leaderSelectionPolicy(
@@ -59,8 +65,10 @@ class BlacklistLeaderSelectionInitializer[E <: Env[E]](
   ): LeaderSelectionPolicy[E] = BlacklistLeaderSelectionPolicy.create(
     blacklistLeaderSelectionPolicyState,
     config,
+    blacklistLeaderSelectionPolicyConfig,
     orderingTopology,
     store,
+    metrics,
     loggerFactory,
   )
 

@@ -657,7 +657,7 @@ final class RepairService(
         contractIdsData <- EitherT.fromEither[FutureUnlessShutdown](
           ChangeAssignation.Data
             .from[Seq[(LfContractId, Option[ReassignmentCounter])]](
-              reassignmentData.contracts.contractIds.map(_ -> None).toSeq,
+              reassignmentData.contractsBatch.contractIds.map(_ -> None).toSeq,
               changeAssignationBack,
             )
             .incrementRepairCounter
@@ -1251,11 +1251,7 @@ final class RepairService(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, B] = {
     logger.info(s"Queuing $description")
-    EitherT(
-      executionQueue
-        .executeEUS(code, description)
-        .value
-    )
+    executionQueue.executeEUS(code, description)
   }
 
   private def log(message: String)(implicit traceContext: TraceContext): String = {
@@ -1297,6 +1293,11 @@ object RepairService {
     /** Check whether the participant is currently connected to the given physical synchronizer.
       */
     def isConnected(synchronizerId: PhysicalSynchronizerId): Boolean
+
+    /** Check whether the participant is currently connected to one instance of the given logical
+      * synchronizer.
+      */
+    def isConnected(synchronizerId: SynchronizerId): Boolean
 
     def isConnectedToAnySynchronizer: Boolean
 

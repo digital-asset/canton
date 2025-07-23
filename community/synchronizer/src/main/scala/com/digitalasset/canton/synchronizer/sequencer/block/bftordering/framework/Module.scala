@@ -10,14 +10,14 @@ import com.digitalasset.canton.DoNotDiscardLikeFuture
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, UnlessShutdown}
 import com.digitalasset.canton.logging.NamedLogging
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.GrpcNetworking.P2PEndpoint
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Consensus,
   Output,
   P2PNetworkOut,
 }
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
 import org.apache.pekko.dispatch.ControlMessage
 
 import java.time.Instant
@@ -166,20 +166,16 @@ trait Module[E <: Env[E], MessageT] extends NamedLogging with FlagCloseable {
   */
 trait ModuleRef[-AcceptedMessageT] {
 
-  // TODO(#23345): review tracing when messaging
-
-  /** The module reference's asynchronous send operation.
+  /** Send operation that is also providing the current TraceContext
     */
   def asyncSend(
       msg: AcceptedMessageT
-  )(implicit metricsContext: MetricsContext): Unit =
-    asyncSendTraced(msg)(TraceContext.empty, metricsContext)
-
-  /** Send operation that is also providing the current TraceContext
-    */
-  def asyncSendTraced(
-      msg: AcceptedMessageT
   )(implicit traceContext: TraceContext, metricsContext: MetricsContext): Unit
+
+  def asyncSendNoTrace(
+      msg: AcceptedMessageT
+  )(implicit metricsContext: MetricsContext): Unit =
+    asyncSend(msg)(traceContext = TraceContext.empty, metricsContext = metricsContext)
 }
 
 /** An abstraction of the network for deterministic simulation testing purposes.
@@ -299,21 +295,23 @@ trait ModuleContext[E <: Env[E], MessageT] extends NamedLogging with FutureConte
 
   def self: E#ModuleRefT[MessageT]
 
-  // TODO(#23345): review tracing when messaging
-
-  def delayedEvent(delay: FiniteDuration, message: MessageT)(implicit
-      metricsContext: MetricsContext
-  ): CancellableEvent =
-    delayedEventTraced(delay, message)(TraceContext.empty, metricsContext)
-
-  def delayedEventTraced(delay: FiniteDuration, messageT: MessageT)(implicit
+  def delayedEvent(delay: FiniteDuration, messageT: MessageT)(implicit
       traceContext: TraceContext,
       metricsContext: MetricsContext,
   ): CancellableEvent
 
+  def delayedEventNoTrace(delay: FiniteDuration, messageT: MessageT)(implicit
+      metricsContext: MetricsContext
+  ): CancellableEvent = delayedEvent(delay, messageT)(
+    traceContext = TraceContext.empty,
+    metricsContext = metricsContext,
+  )
+
   /** Similar to TraceContext.withNewTraceContext but can be deterministically simulated
     */
   def withNewTraceContext[A](fn: TraceContext => A): A
+
+  def traceContextOfBatch(items: IterableOnce[HasTraceContext]): TraceContext
 
   def futureContext: FutureContext[E]
 

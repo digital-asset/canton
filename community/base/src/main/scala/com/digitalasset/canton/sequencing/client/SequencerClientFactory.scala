@@ -284,7 +284,6 @@ object SequencerClientFactory {
               } else {
                 new SequencedEventValidatorImpl(
                   psid,
-                  synchronizerParameters.protocolVersion,
                   syncCryptoApi,
                   loggerFactory,
                   processingTimeout,
@@ -322,7 +321,7 @@ object SequencerClientFactory {
           connection: SequencerConnection,
           member: Member,
           requestSigner: RequestSigner,
-          allowReplay: Boolean = true,
+          allowReplay: Boolean,
       )(implicit
           executionContext: ExecutionContextExecutor,
           executionSequencerFactory: ExecutionSequencerFactory,

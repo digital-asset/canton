@@ -756,8 +756,8 @@ final class SequencerClientTest
 
             expectedAcknowledgedTimestamps =
               if (usePredecessor) {
-                // The predecessor is not acknowledged because it is before the upgraded (so belongs to old synchronizer)
-                Set(upgradeTime, upgradeTime.immediateSuccessor)
+                // The predecessor and upgradeTime are not acknowledged because it is before the upgraded (so belongs to old synchronizer)
+                Set(upgradeTime.immediateSuccessor)
               } else
                 Set(upgradeTime.immediatePredecessor, upgradeTime, upgradeTime.immediateSuccessor)
 
@@ -765,6 +765,7 @@ final class SequencerClientTest
               .get() ++ env.pool.acknowledgedTimestamps.get()
 
             _ = acknowledgedTimestamps shouldBe expectedAcknowledgedTimestamps
+
           } yield ()
 
           res.futureValueUS
@@ -1216,7 +1217,7 @@ final class SequencerClientTest
   }
 
   private sealed trait Subscriber[E] {
-    def request: SubscriptionRequestV2
+    def request: SubscriptionRequest
     def subscription: MockSubscription[E]
     def sendToHandler(event: SequencedSerializedEvent): FutureUnlessShutdown[Unit]
 
@@ -1225,7 +1226,7 @@ final class SequencerClientTest
   }
 
   private case class OldStyleSubscriber[E](
-      override val request: SubscriptionRequestV2,
+      override val request: SubscriptionRequest,
       private val handler: SequencedEventHandler[E],
       override val subscription: MockSubscription[E],
   ) extends Subscriber[E] {
@@ -1244,7 +1245,7 @@ final class SequencerClientTest
   }
 
   private case class SubscriberPekko[E](
-      override val request: SubscriptionRequestV2,
+      override val request: SubscriptionRequest,
       private val queue: BoundedSourceQueue[SequencedSerializedEvent],
       override val subscription: MockSubscription[E],
   ) extends Subscriber[E] {
@@ -1417,7 +1418,7 @@ final class SequencerClientTest
     ): EitherT[FutureUnlessShutdown, SendAsyncClientResponseError, Unit] =
       sendAsync(request.content).mapK(FutureUnlessShutdown.outcomeK)
 
-    override def subscribe[E](request: SubscriptionRequestV2, handler: SequencedEventHandler[E])(
+    override def subscribe[E](request: SubscriptionRequest, handler: SequencedEventHandler[E])(
         implicit traceContext: TraceContext
     ): SequencerSubscription[E] = {
       val subscription = new MockSubscription[E]
@@ -1443,7 +1444,7 @@ final class SequencerClientTest
 
     override type SubscriptionError = Uninhabited
 
-    override def subscribe(request: SubscriptionRequestV2)(implicit
+    override def subscribe(request: SubscriptionRequest)(implicit
         traceContext: TraceContext
     ): SequencerSubscriptionPekko[SubscriptionError] = {
       // Choose a sufficiently large queue size so that we can test throttling
@@ -1527,7 +1528,7 @@ final class SequencerClientTest
     ): EitherT[FutureUnlessShutdown, String, TopologyStateForInitResponse] = ???
 
     override def subscribe[E](
-        request: SubscriptionRequestV2,
+        request: SubscriptionRequest,
         handler: SequencedEventHandler[E],
         timeout: Duration,
     )(implicit traceContext: TraceContext): SequencerSubscription[E] = ???

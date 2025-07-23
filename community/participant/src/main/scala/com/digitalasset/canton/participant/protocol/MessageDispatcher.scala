@@ -620,7 +620,6 @@ trait MessageDispatcher { this: NamedLogging =>
         ts,
         s"Received messages with wrong synchronizer ids ${wrongMsgs.map(_.protocolMessage.synchronizerId)}. Discarding them.",
       ).discard
-      ()
     }
 
   protected def alarm(sc: SequencerCounter, ts: CantonTimestamp, msg: String)(implicit
@@ -630,9 +629,7 @@ trait MessageDispatcher { this: NamedLogging =>
   protected def logTimeProof(sc: SequencerCounter, ts: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): Unit =
-    logger.debug(
-      show"Processing time-proof at sc=$sc, ts=$ts"
-    )
+    logger.info(show"Processing time-proof at sc=$sc, ts=$ts")
 
   private def withMsgId(msgId: Option[MessageId]): String = msgId match {
     case Some(id) => s", messageId=$id"

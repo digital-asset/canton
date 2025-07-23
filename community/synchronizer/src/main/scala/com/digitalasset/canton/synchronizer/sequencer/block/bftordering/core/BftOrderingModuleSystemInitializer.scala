@@ -16,11 +16,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.int
   OrderingTopologyProvider,
   TopologyActivationTime,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.AvailabilityModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.{
-  AvailabilityModule,
-  AvailabilityModuleConfig,
-}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.{
   EpochStore,
   EpochStoreReader,
@@ -131,6 +128,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
       stores.outputStore,
       timeouts,
       msg => implicit context => failBootstrap(msg),
+      metrics,
       loggerFactory,
     )
     val (initialEpoch, bootstrapTopologyInfo, blacklistLeaderSelectionState) =
@@ -223,11 +221,6 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
           (p2PNetworkOutModule, p2PNetworkOutModule.p2pNetworkRefFactory)
         },
         availability = (mempoolRef, networkOutRef, consensusRef, outputRef) => {
-          val cfg = AvailabilityModuleConfig(
-            config.maxRequestsInBatch,
-            config.maxBatchesPerBlockProposal,
-            config.outputFetchTimeout,
-          )
           val dependencies = AvailabilityModuleDependencies[E](
             mempoolRef,
             networkOutRef,
@@ -239,7 +232,6 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
             initialEpoch,
             bootstrapTopologyInfo.currentCryptoProvider,
             stores.availabilityStore,
-            cfg,
             clock,
             random,
             metrics,
@@ -295,7 +287,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
           ),
         pruning = () =>
           new PruningModule(
-            config.pruningConfig,
+            config.pruning,
             stores,
             loggerFactory,
             timeouts,

@@ -9,6 +9,38 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2025-07-23 (Exclusive)
+- OTLP trace export configuration has been extended with several new parameters allowing connection to OTLP servers,
+  which require more elaborate set-up:
+    - `trustCollectionPath` should point to a valid CA certificate file. When selected a TLS connection
+      is created instead of an open-text one.
+    - `additionalHeaders` allows specifying key-value pairs that are added to the HTTP2 headers on all trace exporting
+      calls to the OTLP server.
+    - `timeout` sets the maximum time to wait for the collector to process an exported batch of spans.
+      If unset, defaults to 10s.
+    - `connectTimeout` sets the maximum time to wait for new connections to be established. If unset, defaults to 10s.
+- Bugfix: Corrected HTTP method for the JSON Ledger API endpoint `interactive-submission/preferred-packages` from GET to POST.
+- GetConnectedSynchronizers command now can be accessed either with ReadAs or Admin or IDP admin permissions. As a
+  result, the proto command also now has an identityProviderId field.
+
+## until 2025-07-16 (Exclusive)
+- **Breaking** The `ledger_api.parties.allocate` console command expect the SynchronizerId as an `Option[SynchhronizerId]` instead of a `String`.
+- **Breaking** The `synchronizers.id_of` console command returns now the `SynchronizerId` instead of a `PhysicalSynchronizerId`. Another command `synchronizers.physical_id_of` has been added to return the `PhysicalSynchronizerId`.
+
+- The package dependency resolver, which is used in various topology state checks and transaction processing is improved as follows:
+    - The underlying cache is now configurable via `canton.parameters.general.caching.package-dependency-cache`.
+      By default, the cache is size-bounded at 10000 entries and a 15-minutes expiry-after-access eviction policy.
+    - The parallelism of the DB package fetch loader used in the package dependency cache
+      is bounded by the `canton.parameters.general.batching.parallelism` config parameter, which defaults to 8.
+- **Breaking** Renamed mediator scan to mediator inspection for both the commands and the admin API service. Renamed the inspection service gRPC of the participant into ParticipantInspectionService to differentiate from the mediator one.
+
+## Until 2025-07-09 (Exclusive)
+- Sequencer API endpoint `SequencerService.SubscribeV2` has been renamed to `SequencerService.Subscribe`.
+- The limit in the config option `canton.sequencers.sequencer.parameters.sequencer-api-limits` has been renamed accordingly:
+  `"com.digitalasset.canton.sequencer.api.v30.SequencerService/Subscribe" : 1000`
+
+
+
 ## Until 2025-07-09 (Exclusive)
 
 - Added new limits for the number of open streams. This allows to limit the number of

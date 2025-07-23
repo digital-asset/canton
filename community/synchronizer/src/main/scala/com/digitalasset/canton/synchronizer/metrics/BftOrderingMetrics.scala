@@ -24,6 +24,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 
 import java.time.{Duration, Instant}
+import java.util.concurrent.ConcurrentHashMap
 import scala.collection.mutable
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{Future, blocking}
@@ -191,7 +192,7 @@ class BftOrderingMetrics private[metrics] (
     override val healthMetrics: HealthMetrics,
 ) extends BaseMetrics {
 
-  private implicit val mc: MetricsContext = MetricsContext.Empty
+  private implicit val metricsContext: MetricsContext = MetricsContext.Empty
 
   val dbStorage: DbStorageMetrics =
     new DbStorageMetrics(histograms.dbStorage, openTelemetryMetricsFactory)
@@ -280,11 +281,31 @@ class BftOrderingMetrics private[metrics] (
       private val timer: Timer =
         openTelemetryMetricsFactory.timer(histograms.performance.orderingStageLatency.info)
 
-      def time[T](call: => T)(implicit
-          context: MetricsContext = MetricsContext.Empty
-      ): T =
+      private val queueSizeGauges = new ConcurrentHashMap[String, Gauge[Int]]()
+
+      private def queueSize(
+          moduleName: String
+      )(implicit metricsContext: MetricsContext): Gauge[Int] =
+        queueSizeGauges
+          .computeIfAbsent(
+            moduleName,
+            _ =>
+              openTelemetryMetricsFactory.gauge(
+                MetricInfo(
+                  histograms.performance.prefix :+ "moduleQueueSize" :+ moduleName,
+                  summary = s"Module queue size for $moduleName",
+                  description = s"Size of the module queue for $moduleName.",
+                  qualification = MetricQualification.Latency,
+                ),
+                0,
+              ),
+          )
+
+      def time[T](
+          call: => T
+      )(implicit metricsContext: MetricsContext = MetricsContext.Empty): T =
         if (enabled)
-          timer.time(call)(context)
+          timer.time(call)(metricsContext)
         else
           call
 
@@ -325,12 +346,18 @@ class BftOrderingMetrics private[metrics] (
           )
         }
 
+      def emitModuleQueueSize(
+          moduleName: String,
+          size: Int,
+      )(implicit metricsContext: MetricsContext): Unit =
+        if (enabled) {
+          queueSize(moduleName).updateValue(size)
+        }
+
       def emitOrderingStageLatency[R](
           stage: String,
           op: () => R,
-      )(implicit
-          mc: MetricsContext
-      ): R =
+      )(implicit metricsContext: MetricsContext): R =
         if (enabled) {
           val startInstant = Instant.now()
           val result = op()
@@ -346,14 +373,12 @@ class BftOrderingMetrics private[metrics] (
           startInstant: Option[Instant],
           endInstant: Instant = Instant.now(),
           cleanup: () => Unit = () => (),
-      )(implicit
-          mc: MetricsContext
-      ): Unit = {
+      )(implicit metricsContext: MetricsContext): Unit = {
         startInstant.foreach(start =>
           emitOrderingStageLatency(
             stage,
             Duration.between(start, endInstant),
-          )
+          )(metricsContext)
         )
         cleanup()
       }
@@ -361,12 +386,10 @@ class BftOrderingMetrics private[metrics] (
       def emitOrderingStageLatency(
           stage: String,
           duration: Duration,
-      )(implicit
-          mc: MetricsContext
-      ): Unit =
+      )(implicit metricsContext: MetricsContext): Unit =
         if (enabled)
           updateTimer(performance.orderingStageLatency.timer, duration)(
-            mc.withExtraLabels(
+            metricsContext.withExtraLabels(
               performance.orderingStageLatency.labels.stage.Key ->
                 stage
             )
@@ -808,11 +831,11 @@ class BftOrderingMetrics private[metrics] (
           summary: String,
           description: String,
       ): Gauge[Double] = {
-        val mc1 = mc.withExtraLabels(labels.VotingSequencer -> node)
+        val mc1 = metricsContext.withExtraLabels(labels.VotingSequencer -> node)
         blocking {
           synchronized {
             locally {
-              implicit val mc: MetricsContext = mc1
+              implicit val metricsContext: MetricsContext = mc1
               gauges.getOrElseUpdate(
                 node,
                 openTelemetryMetricsFactory.gauge(
@@ -938,6 +961,50 @@ class BftOrderingMetrics private[metrics] (
   val topology = new TopologyMetrics
 
   // Private constructor to avoid being instantiated multiple times by accident
+  final class BlacklistLeaderSelectionPolicyMetrics private[BftOrderingMetrics] {
+    object labels {
+      val blacklistNode: String = "blacklist-sequencer"
+    }
+
+    private val blacklistGauges = mutable.Map[BftNodeId, Gauge[Long]]()
+
+    def blacklist(node: BftNodeId): Gauge[Long] = {
+      val mc1 = metricsContext.withExtraLabels(labels.blacklistNode -> node)
+      blocking {
+        synchronized {
+          locally {
+            implicit val metricsContext: MetricsContext = mc1
+            blacklistGauges.getOrElseUpdate(
+              node,
+              openTelemetryMetricsFactory.gauge(
+                MetricInfo(
+                  prefix :+ "blacklist-sequencer",
+                  "Amount of epochs the node is blacklisted for",
+                  MetricQualification.Traffic,
+                  "The amount of epochs an BFT sequencer is blacklisted from being a leader",
+                ),
+                0,
+              ),
+            )
+          }
+        }
+      }
+    }
+
+    def cleanupBlacklistGauges(keepOnly: Set[BftNodeId]): Unit =
+      blocking {
+        synchronized {
+          blacklistGauges.view.filterKeys(!keepOnly.contains(_)).foreach { case (id, gauge) =>
+            gauge.close()
+            blacklistGauges.remove(id).discard
+          }
+        }
+      }
+
+  }
+  val blacklistLeaderSelectionPolicyMetrics = new BlacklistLeaderSelectionPolicyMetrics
+
+  // Private constructor to avoid being instantiated multiple times by accident
   final class P2PMetrics private[BftOrderingMetrics] {
     private val p2pPrefix = histograms.p2p.p2pPrefix
 
@@ -1036,6 +1103,7 @@ class BftOrderingMetrics private[metrics] (
             sealed trait SourceValue extends PrettyNameOnlyCase
             case object SourceParsingFailed extends SourceValue
             case class Empty(from: BftNodeId) extends SourceValue
+            case class ConnectionOpener(from: BftNodeId) extends SourceValue
             case class Availability(from: BftNodeId) extends SourceValue
             case class Consensus(from: BftNodeId) extends SourceValue
             case class Retransmissions(from: BftNodeId) extends SourceValue
@@ -1077,7 +1145,7 @@ object BftOrderingMetrics {
   def updateTimer(
       timer: Timer,
       duration: Duration,
-  )(implicit mc: MetricsContext): Unit =
+  )(implicit metricsContext: MetricsContext): Unit =
     // Java's `Instant` does not have to provide monotonically increasing times
     //  (see the documentation for details: https://docs.oracle.com/javase/8/docs/api/java/time/Instant.html)
     //  and emitting negative durations is generally disallowed by metrics infrastructure, as it can

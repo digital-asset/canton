@@ -678,6 +678,7 @@ object BuildCommon {
       .settings(
         sharedCommunitySettings ++ cantonWarts,
         libraryDependencies ++= Seq(
+          better_files,
           daml_lf_data,
           daml_libs_scala_contextualized_logging,
           daml_metrics,
@@ -808,7 +809,6 @@ object BuildCommon {
       .enablePlugins(BuildInfoPlugin)
       .dependsOn(
         DamlProjects.`daml-jwt`,
-        DamlProjects.`ledger-api`, // trace-context
         `daml-tls`,
         `util-observability`,
         `community-admin-api`,

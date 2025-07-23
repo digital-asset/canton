@@ -199,7 +199,7 @@ final class IssConsensusModule[E <: Env[E]](
               s"(Re)starting node from epoch ${initialState.epochState.epoch.info.number}"
             )
             startConsensusForCurrentEpoch()
-            initCompleted(receiveInternal(_))
+            initCompleted(context.self.asyncSend)
         }
 
       case stateTransferCompletion: Consensus.StateTransferCompleted[E] =>
@@ -219,7 +219,7 @@ final class IssConsensusModule[E <: Env[E]](
           Some(newEpochTopologyMessage.membership -> newEpochTopologyMessage.cryptoProvider),
         )
         // Complete init early to avoid re-queueing messages.
-        initCompleted(receiveInternal(_))
+        initCompleted(context.self.asyncSend)
         processNewEpochTopology(newEpochTopologyMessage, currentEpochInfo, newEpochInfo)
         // Try to process messages that potentially triggered a catch-up (should do nothing for onboarding).
         processQueuedPbftMessages()
@@ -361,7 +361,7 @@ final class IssConsensusModule[E <: Env[E]](
 
       case Consensus.RetransmissionsMessage.VerifiedNetworkMessage(
             Consensus.RetransmissionsMessage.RetransmissionRequest(
-              EpochStatus(from, epochNumber, _)
+              SignedMessage(EpochStatus(from, epochNumber, _), _)
             )
           )
           if startCatchupIfNeeded(
@@ -926,21 +926,19 @@ object IssConsensusModule {
       }): ParsingResult[ConsensusSegment.ConsensusMessage.PbftNetworkMessage]
     } yield result
 
-  def parseRetransmissionMessage(from: BftNodeId, message: v30.RetransmissionMessage)(
-      originalByteString: ByteString
-  ): ParsingResult[Consensus.RetransmissionsMessage.RetransmissionsNetworkMessage] =
-    message.message match {
+  def parseRetransmissionMessage(
+      from: BftNodeId,
+      message: v30.RetransmissionMessage,
+  ): ParsingResult[Consensus.RetransmissionsMessage] =
+    (message.message match {
       case v30.RetransmissionMessage.Message.RetransmissionRequest(value) =>
-        Consensus.RetransmissionsMessage.RetransmissionRequest.fromProto(from, value)(
-          originalByteString
-        )
+        Consensus.RetransmissionsMessage.RetransmissionRequest.fromProto(from, value)
       case v30.RetransmissionMessage.Message.RetransmissionResponse(value) =>
-        Consensus.RetransmissionsMessage.RetransmissionResponse.fromProto(from, value)(
-          originalByteString
-        )
+        Consensus.RetransmissionsMessage.RetransmissionResponse.fromProto(from, value)
       case v30.RetransmissionMessage.Message.Empty =>
         Left(ProtoDeserializationError.OtherError("Empty Received"))
-    }
+    })
+      .map(Consensus.RetransmissionsMessage.UnverifiedNetworkMessage.apply)
 
   def parseStateTransferMessage(
       from: BftNodeId,

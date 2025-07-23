@@ -23,6 +23,7 @@ import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.collection.SeqUtil
 import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
 import com.digitalasset.canton.{GeneratorsLf, LfInterfaceId, LfPackageId, LfPartyId, LfVersioned}
+import com.digitalasset.daml.lf.transaction.CreationTime
 import com.digitalasset.daml.lf.value.Value.ValueInt64
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
@@ -261,6 +262,7 @@ final class GeneratorsData(
                 generatorsProtocol
                   .contractInstanceArb(
                     canHaveEmptyKey = false,
+                    genTime = Arbitrary.arbitrary[CreationTime.CreatedAt],
                     overrideContractId = Some(ex.inputContractId),
                   )
                   .arbitrary,
@@ -270,7 +272,12 @@ final class GeneratorsData(
 
             others <- boundedListGen(
               Gen.zip(
-                generatorsProtocol.contractInstanceArb(canHaveEmptyKey = false).arbitrary,
+                generatorsProtocol
+                  .contractInstanceArb(
+                    canHaveEmptyKey = false,
+                    genTime = Arbitrary.arbitrary[CreationTime.CreatedAt],
+                  )
+                  .arbitrary,
                 Gen.oneOf(true, false),
               )
             )
@@ -283,6 +290,7 @@ final class GeneratorsData(
           generatorsProtocol
             .contractInstanceArb(
               canHaveEmptyKey = false,
+              genTime = Arbitrary.arbitrary[CreationTime.CreatedAt],
               overrideContractId = Some(fetch.inputContractId),
             )
             .arbitrary
@@ -297,6 +305,7 @@ final class GeneratorsData(
               generatorsProtocol
                 .contractInstanceArb(
                   canHaveEmptyKey = false,
+                  genTime = Arbitrary.arbitrary[CreationTime.CreatedAt],
                   overrideContractId = Some(created.contractId),
                 )
                 .arbitrary,
@@ -315,7 +324,12 @@ final class GeneratorsData(
         case _: ExerciseActionDescription =>
           boundedListGen(
             Gen.zip(
-              generatorsProtocol.contractInstanceArb(canHaveEmptyKey = false).arbitrary,
+              generatorsProtocol
+                .contractInstanceArb(
+                  canHaveEmptyKey = false,
+                  genTime = Arbitrary.arbitrary[CreationTime.CreatedAt],
+                )
+                .arbitrary,
               Gen.oneOf(true, false),
               Gen.oneOf(true, false),
             )
@@ -581,7 +595,7 @@ final class GeneratorsData(
       .value
   )
 
-  private def timeProofArb(protocolVersion: ProtocolVersion): Arbitrary[TimeProof] = Arbitrary(
+  private val timeProofArb: Arbitrary[TimeProof] = Arbitrary(
     for {
       timestamp <- Arbitrary.arbitrary[CantonTimestamp]
       previousEventTimestamp <- Arbitrary.arbitrary[Option[CantonTimestamp]]
@@ -592,7 +606,6 @@ final class GeneratorsData(
       previousEventTimestamp,
       counter,
       targetSynchronizerId,
-      protocolVersion,
     )
   )
 
@@ -605,7 +618,7 @@ final class GeneratorsData(
       targetSynchronizerId <- Arbitrary
         .arbitrary[Target[PhysicalSynchronizerId]]
         .map(_.map(_.copy(protocolVersion = protocolVersion)))
-      timeProof <- timeProofArb(protocolVersion).arbitrary
+      timeProof <- timeProofArb.arbitrary
 
       hashOps = TestHash // Not used for serialization
 
@@ -642,6 +655,26 @@ final class GeneratorsData(
       unassignmentView.blindFully,
       Source(protocolVersion),
       hash,
+    )
+  )
+
+  implicit val unassignmentDataArb: Arbitrary[UnassignmentData] = Arbitrary(
+    for {
+      submitterMetadata <- Arbitrary.arbitrary[ReassignmentSubmitterMetadata]
+      contracts <- Arbitrary.arbitrary[ContractsReassignmentBatch]
+      reassigningParticipants <- boundedSetGen[ParticipantId]
+      sourceSynchronizer <- Arbitrary.arbitrary[PhysicalSynchronizerId].map(Source(_))
+      targetSynchronizer <- Arbitrary.arbitrary[PhysicalSynchronizerId].map(Target(_))
+      targetTimestamp <- Arbitrary.arbitrary[CantonTimestamp]
+      unassignmentTs <- Arbitrary.arbitrary[CantonTimestamp]
+    } yield UnassignmentData(
+      submitterMetadata,
+      contracts,
+      reassigningParticipants,
+      sourceSynchronizer,
+      targetSynchronizer,
+      targetTimestamp,
+      unassignmentTs,
     )
   )
 

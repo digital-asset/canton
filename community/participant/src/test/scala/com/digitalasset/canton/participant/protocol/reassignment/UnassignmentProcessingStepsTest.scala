@@ -58,8 +58,11 @@ import com.digitalasset.canton.participant.protocol.{
   EngineController,
   ProcessingStartingPoints,
 }
-import com.digitalasset.canton.participant.store.AcsCounterParticipantConfigStore
 import com.digitalasset.canton.participant.store.memory.*
+import com.digitalasset.canton.participant.store.{
+  AcsCounterParticipantConfigStore,
+  SyncPersistentState,
+}
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.*
@@ -160,25 +163,33 @@ final class UnassignmentProcessingStepsTest
 
   private lazy val clock = new WallClock(timeouts, loggerFactory)
   private lazy val indexedStringStore = new InMemoryIndexedStringStore(minIndex = 1, maxIndex = 1)
-  private lazy val persistentState =
-    new InMemorySyncPersistentState(
-      submittingParticipant,
-      clock,
-      SynchronizerCrypto(crypto, defaultStaticSynchronizerParameters),
-      IndexedPhysicalSynchronizer.tryCreate(sourceSynchronizer.unwrap, 1),
+  private lazy val logicalPersistentState =
+    new InMemoryLogicalSyncPersistentState(
       IndexedSynchronizer.tryCreate(sourceSynchronizer.unwrap, 1),
-      defaultStaticSynchronizerParameters,
       enableAdditionalConsistencyChecks = true,
       indexedStringStore = indexedStringStore,
       contractStore = contractStore,
       acsCounterParticipantConfigStore = mock[AcsCounterParticipantConfigStore],
-      exitOnFatalFailures = true,
-      packageDependencyResolver = mock[PackageDependencyResolver],
       Eval.now(mock[LedgerApiStore]),
       loggerFactory,
-      timeouts,
-      futureSupervisor,
     )
+  private lazy val physicalSyncPersistentState = new InMemoryPhysicalSyncPersistentState(
+    submittingParticipant,
+    clock,
+    SynchronizerCrypto(crypto, defaultStaticSynchronizerParameters),
+    IndexedPhysicalSynchronizer.tryCreate(sourceSynchronizer.unwrap, 1),
+    defaultStaticSynchronizerParameters,
+    exitOnFatalFailures = true,
+    packageDependencyResolver = mock[PackageDependencyResolver],
+    Eval.now(mock[LedgerApiStore]),
+    logicalPersistentState,
+    loggerFactory,
+    timeouts,
+    futureSupervisor,
+  )
+
+  val persistentState =
+    new SyncPersistentState(logicalPersistentState, physicalSyncPersistentState, loggerFactory)
 
   private def mkState: SyncEphemeralState =
     new SyncEphemeralState(
@@ -826,7 +837,6 @@ final class UnassignmentProcessingStepsTest
 
   "get commit set and contracts to be stored and event" should {
     val state = mkState
-    val reassignmentId = ReassignmentId.tryCreate("00")
     val rootHash = TestHash.dummyRootHash
     val reassignmentResult =
       ConfirmationResultMessage.create(
@@ -859,7 +869,6 @@ final class UnassignmentProcessingStepsTest
         Some(MessageId.tryCreate("msg-0")),
         batch,
         None,
-        testedProtocolVersion,
         Option.empty[TrafficReceipt],
       )
     }
@@ -876,8 +885,8 @@ final class UnassignmentProcessingStepsTest
     val fullUnassignmentTree = makeFullUnassignmentTree(unassignmentRequest)
 
     val unassignmentValidationResult = UnassignmentValidationResult(
-      fullTree = fullUnassignmentTree,
-      reassignmentId = reassignmentId,
+      unassignmentData = UnassignmentData(fullUnassignmentTree, CantonTimestamp.Epoch),
+      rootHash = fullUnassignmentTree.rootHash,
       assignmentExclusivity = Some(Target(assignmentExclusivity)),
       hostedConfirmingReassigningParties = Set(party1),
       commonValidationResult = CommonValidationResult(
@@ -887,7 +896,6 @@ final class UnassignmentProcessingStepsTest
         submitterCheckResult = None,
       ),
       reassigningParticipantValidationResult = ReassigningParticipantValidationResult(errors = Nil),
-      unassignmentTs = CantonTimestamp.Epoch,
     )
 
     val pendingUnassignment = PendingUnassignment(
@@ -905,7 +913,7 @@ final class UnassignmentProcessingStepsTest
       for {
         _ <- valueOrFail(
           unassignmentProcessingSteps
-            .getCommitSetAndContractsToBeStoredAndEvent(
+            .getCommitSetAndContractsToBeStoredAndEventFactory(
               NoOpeningErrors(signedContent),
               reassignmentResult.verdict,
               pendingUnassignment,
@@ -922,7 +930,7 @@ final class UnassignmentProcessingStepsTest
         _ <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
           valueOrFail(
             unassignmentProcessingSteps
-              .getCommitSetAndContractsToBeStoredAndEvent(
+              .getCommitSetAndContractsToBeStoredAndEventFactory(
                 NoOpeningErrors(signedContent),
                 reassignmentResult.verdict,
                 // request used MediatorGroupIndex.zero
