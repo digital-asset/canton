@@ -563,6 +563,7 @@ object BuildCommon {
         sharedSettings ++ cantonWarts,
         scalacOptions += "-Wconf:src=src_managed/.*:silent",
         libraryDependencies ++= Seq(
+          better_files,
           logback_classic,
           logback_core,
           scala_logging,
