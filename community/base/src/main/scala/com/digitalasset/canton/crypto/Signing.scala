@@ -278,7 +278,7 @@ final case class Signature private (
 object Signature
     extends HasVersionedMessageCompanion[Signature]
     with HasVersionedMessageCompanionDbHelpers[Signature] {
-  val noSignature =
+  val noSignature: Signature =
     Signature.create(
       SignatureFormat.Symbolic,
       ByteString.EMPTY,
