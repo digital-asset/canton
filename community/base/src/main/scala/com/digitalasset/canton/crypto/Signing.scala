@@ -295,7 +295,7 @@ final case class Signature private (
 object Signature
     extends HasVersionedMessageCompanion[Signature]
     with HasVersionedMessageCompanionDbHelpers[Signature] {
-  val noSignature =
+  val noSignature: Signature =
     Signature.create(
       SignatureFormat.Symbolic,
       ByteString.EMPTY,
@@ -1652,6 +1652,12 @@ object SigningError {
       param("signingKeySpec", _.signingKeySpec),
       param("algorithmSpec", _.algorithmSpec),
       param("supportedKeySpecsByAlgo", _.supportedKeySpecsByAlgo),
+    )
+  }
+
+  final case class NoMatchingAlgorithmSpec(message: String) extends SigningError {
+    override protected def pretty: Pretty[NoMatchingAlgorithmSpec] = prettyOfClass(
+      unnamedParam(_.message.unquoted)
     )
   }
 

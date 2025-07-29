@@ -9,6 +9,53 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2025-07-30 (Exclusive)
+
+- Message `Synchronizer` in `com.digitalasset.canton.topology.admin.v30.common.proto` moved from `StoreId` to top level
+- **Breaking** The configuration for the admin-token based authorization has changed.
+
+  Previously, the setting of the admin token string was possible through Ledger API or Admin API configuration like so:
+
+  ```
+  -C canton.participants.<participant-id>.ledger-api.admin-token="<your-token>"
+  or
+  -C canton.participants.<participant-id>.admin-api.admin-token="<your-token>"
+  ```
+
+  Now, it is set through
+
+  ```
+  -C canton.participants.<participant-id>.ledger-api.admin-token-config.fixed-admin-token="<your-token>"
+  or
+  -C canton.participants.<participant-id>.admin-api.admin-token-config.fixed-admin-token="<your-token>"
+  ```
+
+  Other parameters of the admin token can also be set through the `AdminTokenConfig` configuration case class as seen below:
+
+  ```
+  final case class AdminTokenConfig(
+    fixedAdminToken: Option[String] = None,
+    adminTokenDuration: PositiveFiniteDuration = AdminTokenConfig.DefaultAdminTokenDuration,
+    actAsAnyPartyClaim: Boolean = true,
+    adminClaim: Boolean = true,
+  )
+  ```
+
+  The `fixedAdminToken` as `adminToken` did before, defines a token that is valid throughout the entire canton process
+  lifespan. It is only meant for testing purposes and should not be used in production.
+
+  Other admin-tokens will be generated and rotated periodically for internal usage (e.g. in the console).
+  They are invisible from the outside. Each admin-token of these is valid for the defined `adminTokenDuration`.
+  The half of the token duration is used as the rotation interval, after which a new admin-token is generated
+  (if needed) and used. The default value for the token duration is 5 minutes.
+
+  Setting the `actAsAnyPartyClaim` to `true` allows usage of the admin-token to authorize acting-as and reading-as
+  any party in the participant. Similarly, setting the `adminClaim` to `true` allows usage of the admin-token to
+  authorize any admin level operation in the participant. As setting these parameters to `true` is consistent with
+  the past system behavior, it is the default value for now. We are planning to change them both to `false` in the
+  3.4 release to increase default system security. When that happens, the admin-token by default will only be strong
+  enough to issue pings.
+
 ## until 2025-07-23 (Exclusive)
 - OTLP trace export configuration has been extended with several new parameters allowing connection to OTLP servers,
   which require more elaborate set-up:

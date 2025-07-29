@@ -55,7 +55,7 @@ object Dependencies {
   lazy val log4j_version = "2.23.1"
   lazy val logback_version = "1.5.3"
   lazy val logstash_version = "6.6"
-  lazy val magnolia_version = "1.1.3"
+  lazy val magnolia_version = "1.1.10"
   lazy val magnolifyScalacheck_version = "0.6.2"
   lazy val magnolifyShared_version = "0.6.2"
   lazy val mockito_scala_version = "1.16.3"
@@ -448,7 +448,7 @@ object Dependencies {
   lazy val google_protobuf_java_util =
     "com.google.protobuf" % "protobuf-java-util" % protobuf_version
 
-  // Version depends actually on scalapb
+  // Version depends actually on scalapb.
   lazy val google_common_protos =
     resolveDependency("com.google.api.grpc", "proto-google-common-protos")
 
