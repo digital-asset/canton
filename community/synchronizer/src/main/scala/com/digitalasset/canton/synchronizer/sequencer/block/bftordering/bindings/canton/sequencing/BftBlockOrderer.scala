@@ -32,7 +32,10 @@ import com.digitalasset.canton.synchronizer.sequencer.Sequencer.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockOrderer
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.BftOrderingSequencerAdminService
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.{
+  BftOrderingSequencerAdminService,
+  BftOrderingSequencerPruningAdminService,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology.SequencerNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.PekkoP2PGrpcNetworking.PekkoP2PGrpcNetworkRefFactory
@@ -443,7 +446,7 @@ final class BftBlockOrderer(
         CantonServerBuilder
           .forConfig(
             config = serverConfig,
-            adminToken = None,
+            adminTokenDispenser = None,
             executor = p2pServerGrpcExecutor,
             loggerFactory = loggerFactory,
             apiLoggingConfig = nodeParameters.loggingConfig.api,
@@ -560,7 +563,15 @@ final class BftBlockOrderer(
           loggerFactory,
         ),
         executionContext,
-      )
+      ),
+      v30.SequencerBftPruningAdministrationServiceGrpc.bindService(
+        new BftOrderingSequencerPruningAdminService(initResult.pruningModuleRef, loggerFactory)(
+          executionContext,
+          metricsContext,
+          TraceContext.empty,
+        ),
+        executionContext,
+      ),
     )
 
   override def sequencerSnapshotAdditionalInfo(

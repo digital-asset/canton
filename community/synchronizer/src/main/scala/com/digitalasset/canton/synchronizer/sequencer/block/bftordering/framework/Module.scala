@@ -16,6 +16,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Consensus,
   Output,
   P2PNetworkOut,
+  Pruning,
 }
 import com.digitalasset.canton.tracing.{HasTraceContext, TraceContext}
 import org.apache.pekko.dispatch.ControlMessage
@@ -218,7 +219,7 @@ trait CancellableEvent {
   /** @return
     *   True if the cancellation was successful.
     */
-  def cancel(): Boolean
+  def cancel()(implicit metricsContext: MetricsContext): Boolean
 }
 
 /** FutureContext contains functions for creating and combining E#FutureUnlessShutdown that will be
@@ -495,6 +496,7 @@ object Module {
       p2pNetworkOutAdminModuleRef: ModuleRef[P2PNetworkOut.Admin],
       consensusAdminModuleRef: ModuleRef[Consensus.Admin],
       outputModuleRef: ModuleRef[Output.SequencerSnapshotMessage],
+      pruningModuleRef: ModuleRef[Pruning.Message],
       p2pNetworkRefFactory: P2PNetworkRefFactoryT,
   )
 }
