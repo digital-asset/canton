@@ -62,27 +62,26 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       : GetResult[GenericSignedTopologyTransaction] =
     SignedTopologyTransaction.createGetResultSynchronizerTopologyTransaction
 
-  protected val transactionStoreIdName: LengthLimitedString = storeId.dbString
+  private val transactionStoreIdName: LengthLimitedString = storeId.dbString
 
-  def findTransactionsAndProposalsByTxHash(asOfExclusive: EffectiveTime, hashes: Set[TxHash])(
-      implicit traceContext: TraceContext
+  def findLatestTransactionsAndProposalsByTxHash(hashes: Set[TxHash])(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] =
     if (hashes.isEmpty) FutureUnlessShutdown.pure(Seq.empty)
     else {
-      logger.debug(s"Querying transactions for tx hashes $hashes as of $asOfExclusive")
+      logger.debug(s"Querying transactions for tx hashes $hashes")
 
       toStoredTopologyTransactions(
         storage.query(
-          buildFindAsOfExclusiveQuery(
-            asOfExclusive,
+          buildQueryForTransactions(
             sql" AND (" ++ hashes
               .map(txHash => sql"tx_hash = ${txHash.hash.toLengthLimitedHexString}")
               .toList
-              .intercalate(sql" OR ") ++ sql")",
+              .intercalate(sql" OR ") ++ sql")"
           ),
           operationName = "transactionsByTxHash",
         )
-      ).map(_.result.map(_.transaction))
+      ).map(_.collectLatestByTxHash.result.map(_.transaction))
     }
 
   override def findProposalsByTxHash(
@@ -771,7 +770,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
     )
   }
 
-  type QueryResult = (
+  private type QueryResult = (
       GenericSignedTopologyTransaction,
       CantonTimestamp,
       CantonTimestamp,
@@ -779,7 +778,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       Option[String300],
   )
 
-  type QueryAction = DbAction.ReadTransactional[Vector[QueryResult]]
+  private type QueryAction = DbAction.ReadTransactional[Vector[QueryResult]]
   private def buildQueryForTransactions(
       subQuery: SQLActionBuilder,
       limit: String = "",
@@ -941,13 +940,3 @@ private[db] final case class TransactionEntry(
     signedTx: GenericSignedTopologyTransaction,
     rejectionReason: Option[String300] = None,
 )
-
-private[db] object TransactionEntry {
-  def fromStoredTx(stx: GenericStoredTopologyTransaction): TransactionEntry = TransactionEntry(
-    stx.sequenced,
-    stx.validFrom,
-    stx.validUntil,
-    stx.transaction,
-    rejectionReason = stx.rejectionReason,
-  )
-}
