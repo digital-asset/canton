@@ -150,19 +150,6 @@ class SequencerReader(
         registeredMember.enabled,
         CreateSubscriptionError.MemberDisabled(member): CreateSubscriptionError,
       )
-      // We use the sequencing time of the topology transaction that registered the member on the synchronizer
-      // as the latestTopologyClientRecipientTimestamp
-      memberOnboardingTxSequencingTime <- EitherT.right(
-        syncCryptoApi.headSnapshot.ipsSnapshot
-          .memberFirstKnownAt(member)
-          .map {
-            case Some((sequencedTime, _)) => sequencedTime.value
-            case None =>
-              ErrorUtil.invalidState(
-                s"Member $member unexpectedly not known to the topology client"
-              )
-          }
-      )
 
       _ = logger.debug(
         s"Topology processor at: ${syncCryptoApi.approximateTimestamp}"
@@ -186,19 +173,22 @@ class SequencerReader(
         } else {
           requestedTimestampInclusive
         }
-
-      latestTopologyClientRecipientTimestamp <- EitherT.right(
-        readFromTimestampInclusive
-          .flatTraverse { timestamp =>
-            store.latestTopologyClientRecipientTimestamp(
-              member = member,
-              timestampExclusive =
-                timestamp, // this is correct as we query for latest timestamp before `timestampInclusive`
-            )
-          }
+      lowerBoundExclusiveO <- EitherT.right(store.fetchLowerBound())
+      latestTopologyClientRecipientTimestampO <- EitherT.right(
+        store
+          .latestTopologyClientRecipientTimestamp(
+            member = topologyClientMember,
+            timestampExclusive =
+              readFromTimestampInclusive // this is correct as we query for latest timestamp before `timestampInclusive`
+                .filter(_ >= registeredMember.registeredFrom)
+                .getOrElse(registeredMember.registeredFrom),
+          )
           .map(
-            _.getOrElse(
-              memberOnboardingTxSequencingTime
+            _.orElse(
+              // Fall back to the lower bound's topology client addressed timestamp
+              lowerBoundExclusiveO.flatMap { case (_, lowerBoundTopologyClientAddressedTimestamp) =>
+                lowerBoundTopologyClientAddressedTimestamp
+              }
             )
           )
       )
@@ -214,11 +204,10 @@ class SequencerReader(
       )
       _ = logger.debug(
         s"New subscription for $member will start with previous event timestamp = $previousEventTimestamp " +
-          s"and latest topology client timestamp = $latestTopologyClientRecipientTimestamp"
+          s"and latest topology client timestamp = $latestTopologyClientRecipientTimestampO"
       )
 
       // validate we are in the bounds of the data that this sequencer can serve
-      lowerBoundExclusiveO <- EitherT.right(store.fetchLowerBound())
       _ <- EitherT
         .cond[FutureUnlessShutdown](
           (requestedTimestampInclusive, lowerBoundExclusiveO) match {
@@ -266,21 +255,22 @@ class SequencerReader(
         registeredTopologyClientMember.memberId,
         loggerFactoryForMember,
       )
+      val initialReadState = ReadState(
+        member,
+        registeredMember.memberId,
+        // This is a "reading watermark" meaning that "we have read up to and including this timestamp",
+        // so if we want to grab the event exactly at timestampInclusive, we do -1 here
+        nextReadTimestamp = readFromTimestampInclusive
+          .getOrElse(
+            registeredMember.registeredFrom
+          )
+          .immediatePredecessor,
+        nextPreviousEventTimestamp = previousEventTimestamp,
+        latestTopologyClientRecipientTimestamp = latestTopologyClientRecipientTimestampO,
+      )
       reader.from(
         event => requestedTimestampInclusive.exists(event.unvalidatedEvent.timestamp < _),
-        ReadState(
-          member,
-          registeredMember.memberId,
-          // This is a "reading watermark" meaning that "we have read up to and including this timestamp",
-          // so if we want to grab the event exactly at timestampInclusive, we do -1 here
-          nextReadTimestamp = readFromTimestampInclusive
-            .map(_.immediatePredecessor)
-            .getOrElse(
-              memberOnboardingTxSequencingTime
-            ),
-          nextPreviousEventTimestamp = previousEventTimestamp,
-          latestTopologyClientRecipientTimestamp = latestTopologyClientRecipientTimestamp.some,
-        ),
+        initialReadState,
       )
     })
 
