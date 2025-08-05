@@ -44,6 +44,7 @@ trait ParticipantNodeBootstrapFactory {
     enableLfBeta = arguments.parameterConfig.betaVersionSupport,
     enableStackTraces = arguments.parameterConfig.engine.enableEngineStackTraces,
     profileDir = arguments.config.features.profileDir,
+    snapshotDir = arguments.config.features.snapshotDir,
     iterationsBetweenInterruptions =
       arguments.parameterConfig.engine.iterationsBetweenInterruptions,
     paranoidMode = arguments.parameterConfig.engine.enableAdditionalConsistencyChecks,
@@ -133,7 +134,6 @@ object CommunityParticipantNodeBootstrapFactory extends ParticipantNodeBootstrap
           CommunityKmsFactory,
           arguments.config.parameters.caching.kmsMetadataCache,
           arguments.config.crypto.privateKeyStore,
-          arguments.parameters.nonStandardConfig,
           arguments.futureSupervisor,
           arguments.clock,
           arguments.executionContext,
@@ -144,6 +144,7 @@ object CommunityParticipantNodeBootstrapFactory extends ParticipantNodeBootstrap
         val engine = createEngine(arguments)
         createNode(
           arguments,
+          engine,
           createLedgerApiServerFactory(
             arguments,
             engine,
@@ -154,6 +155,7 @@ object CommunityParticipantNodeBootstrapFactory extends ParticipantNodeBootstrap
 
   private def createNode(
       arguments: Arguments,
+      engine: Engine,
       ledgerApiServerFactory: CantonLedgerApiServerFactory,
   )(implicit
       executionContext: ExecutionContextIdlenessExecutorService,
@@ -163,7 +165,7 @@ object CommunityParticipantNodeBootstrapFactory extends ParticipantNodeBootstrap
   ): ParticipantNodeBootstrap =
     new ParticipantNodeBootstrap(
       arguments,
-      createEngine(arguments),
+      engine,
       CantonSyncService.DefaultFactory,
       createResourceService(arguments),
       _ => createReplicationServiceFactory(arguments),

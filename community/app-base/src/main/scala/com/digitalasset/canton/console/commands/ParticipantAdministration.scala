@@ -386,7 +386,7 @@ class ParticipantTestingGroup(
   ): Unit =
     check(FeatureFlag.Testing) {
       participantRef.synchronizers.list_connected().foreach { item =>
-        fetch_synchronizer_time(item.synchronizerId, timeout).discard[CantonTimestamp]
+        fetch_synchronizer_time(item.physicalSynchronizerId, timeout).discard[CantonTimestamp]
       }
     }
 
@@ -965,8 +965,10 @@ class CommitmentsAdministrationGroup(
     )
 
   @Help.Summary(
-    "List the counter-participants of a participant and the ACS commitments that the participant computed and sent to" +
-      "them, together with the commitment state."
+    "List the counter-participants of a participant and the ACS commitments that the participant computed and sent to " +
+      "them. Specifically, the command returns a map from synchronizer IDs to tuples of sent commitment data, " +
+      "specifying the period, target counter-participant, the commitment state, and additional data according to " +
+      "verbose mode."
   )
   @Help.Description(
     """Optional filtering through the arguments:
@@ -980,14 +982,14 @@ class CommitmentsAdministrationGroup(
           |  is not a counter-participant on some synchronizer, no commitments appear in the reply for that counter-participant
           |  on that synchronizer.
           |commitmentState: Lists sent commitments that are in one of the given states. By default considers all states:
-          |   - MATCH: the local commitment matches the remote commitment
-          |   - MISMATCH: the local commitment does not match the remote commitment
-          |   - NOT_COMPARED: the local commitment has been computed and sent but no corresponding remote commitment has
-          |     been received
-          |verboseMode: If false, the reply does not contain the commitment bytes. If true, the reply contains:
+          |   - MATCH: The local commitment matches the remote commitment
+          |   - MISMATCH: The local commitment does not match the remote commitment
+          |   - NOT_COMPARED: The local commitment has been computed and sent but no corresponding remote commitment has
+          |     been received, which essentially indicates that a counter-participant is running behind
+          |verboseMode: If true, the reply contains the commitment bytes, as follows:
           |   - In case of a mismatch, the reply contains both the received and the locally computed commitment that
           |     do not match.
-          |   - In all other cases (match and not compared), the reply contains the sent commitment.
+          |   - In all other cases (MATCH and NOT_COMPARED), the reply contains the sent commitment bytes.
            """
   )
   def lookup_sent_acs_commitments(
@@ -1747,20 +1749,20 @@ trait ParticipantAdministration extends FeatureFlagFilter {
       list_connected().exists { r =>
         r.synchronizerAlias == synchronizerAlias &&
         r.healthy &&
-        participantIsActiveOnSynchronizer(r.synchronizerId.logical, id)
+        participantIsActiveOnSynchronizer(r.synchronizerId, id)
       }
 
     @Help.Summary(
       "Test whether a participant is connected to a synchronizer"
     )
     def is_connected(synchronizerId: SynchronizerId): Boolean =
-      list_connected().exists(_.synchronizerId.logical == synchronizerId)
+      list_connected().exists(_.synchronizerId == synchronizerId)
 
     @Help.Summary(
       "Test whether a participant is connected to physical a synchronizer"
     )
     def is_connected(synchronizerId: PhysicalSynchronizerId): Boolean =
-      list_connected().exists(_.synchronizerId == synchronizerId)
+      list_connected().exists(_.physicalSynchronizerId == synchronizerId)
 
     @Help.Summary(
       "Test whether a participant is connected to a synchronizer"

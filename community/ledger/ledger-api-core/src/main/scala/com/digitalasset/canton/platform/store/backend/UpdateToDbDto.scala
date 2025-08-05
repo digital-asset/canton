@@ -26,7 +26,9 @@ import com.digitalasset.canton.platform.store.dao.JdbcLedgerDao
 import com.digitalasset.canton.platform.store.dao.events.*
 import com.digitalasset.canton.tracing.SerializableTraceContext
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
+import com.digitalasset.daml.lf.data.Ref.PackageRef
 import com.digitalasset.daml.lf.data.{Ref, Time}
+import com.digitalasset.daml.lf.transaction.Node.Action
 import io.grpc.Status
 
 import java.util.UUID
@@ -317,6 +319,12 @@ object UpdateToDbDto {
     events ++ completions ++ Seq(transactionMeta)
   }
 
+  def templateIdWithPackageName(node: Action): String =
+    node.templateId.copy(pkg = PackageRef.Name(node.packageName)).toString
+
+  def templateIdWithPackageName(reassignment: Reassignment): String =
+    reassignment.templateId.copy(pkg = PackageRef.Name(reassignment.packageName)).toString
+
   private def createNodeToDbDto(
       compressionStrategy: CompressionStrategy,
       translation: LfValueSerialization,
@@ -326,7 +334,7 @@ object UpdateToDbDto {
       nodeId: NodeId,
       create: Create,
   ): Iterator[DbDto] = {
-    val templateId = create.templateId.toString
+    val templateId = templateIdWithPackageName(create)
     val flatWitnesses: Set[String] =
       if (transactionAccepted.isAcsDelta(create.coid))
         create.stakeholders.map(_.toString)
@@ -348,7 +356,7 @@ object UpdateToDbDto {
         node_id = nodeId.index,
         contract_id = create.coid.toBytes.toByteArray,
         template_id = templateId,
-        package_name = create.packageName,
+        package_id = create.templateId.packageId.toString,
         flat_event_witnesses = flatWitnesses,
         tree_event_witnesses = treeWitnesses,
         create_argument = compressionStrategy.createArgumentCompression.compress(createArgument),
@@ -362,11 +370,13 @@ object UpdateToDbDto {
         create_key_value_compression =
           compressionStrategy.createKeyValueCompression.id.filter(_ => createKeyValue.isDefined),
         event_sequential_id = 0, // this is filled later
-        driver_metadata = transactionAccepted.contractMetadata
+        authentication_data = transactionAccepted.contractAuthenticationData
           .get(create.coid)
           .map(_.toByteArray)
           .getOrElse(
-            throw new IllegalStateException(s"missing driver metadata for contract ${create.coid}")
+            throw new IllegalStateException(
+              s"missing authentication data for contract ${create.coid}"
+            )
           ),
         synchronizer_id = transactionAccepted.synchronizerId.toProtoPrimitive,
         trace_context = serializedTraceContext,
@@ -410,7 +420,7 @@ object UpdateToDbDto {
       else
         Set.empty[String]
     val treeWitnessesWithoutFlatWitnesses = treeWitnesses.diff(flatWitnesses)
-    val templateId = exercise.templateId.toString
+    val templateId = templateIdWithPackageName(exercise)
     Iterator(
       DbDto.EventExercise(
         consuming = exercise.consuming,
@@ -424,7 +434,7 @@ object UpdateToDbDto {
         node_id = nodeId.index,
         contract_id = exercise.targetCoid.toBytes.toByteArray,
         template_id = templateId,
-        package_name = exercise.packageName,
+        package_id = exercise.templateId.packageId.toString,
         flat_event_witnesses = flatWitnesses,
         tree_event_witnesses = treeWitnesses,
         create_key_value = createKeyValue
@@ -560,8 +570,8 @@ object UpdateToDbDto {
         submitter = reassignmentAccepted.reassignmentInfo.submitter,
         node_id = unassign.nodeId,
         contract_id = unassign.contractId.toBytes.toByteArray,
-        template_id = unassign.templateId.toString,
-        package_name = unassign.packageName,
+        template_id = templateIdWithPackageName(unassign),
+        package_id = unassign.templateId.packageId.toString,
         flat_event_witnesses = flatEventWitnesses.toSet,
         event_sequential_id = 0L, // this is filled later
         source_synchronizer_id =
@@ -577,7 +587,7 @@ object UpdateToDbDto {
     ) ++ flatEventWitnesses.map(party =>
       DbDto.IdFilterUnassignStakeholder(
         0L, // this is filled later
-        unassign.templateId.toString,
+        templateIdWithPackageName(unassign),
         party,
       )
     )
@@ -592,7 +602,7 @@ object UpdateToDbDto {
       assign: Reassignment.Assign,
   ): Iterator[DbDto] = {
     val (createArgument, createKeyValue) = translation.serialize(assign.createNode)
-    val templateId = assign.createNode.templateId.toString
+    val templateId = templateIdWithPackageName(assign)
     val flatEventWitnesses = assign.createNode.stakeholders.map(_.toString)
     Iterator(
       DbDto.EventAssign(
@@ -604,7 +614,7 @@ object UpdateToDbDto {
         node_id = assign.nodeId,
         contract_id = assign.createNode.coid.toBytes.toByteArray,
         template_id = templateId,
-        package_name = assign.createNode.packageName,
+        package_id = assign.createNode.templateId.packageId.toString,
         flat_event_witnesses = flatEventWitnesses,
         create_argument = createArgument,
         create_signatories = assign.createNode.signatories.map(_.toString),
@@ -620,7 +630,7 @@ object UpdateToDbDto {
           compressionStrategy.createKeyValueCompression.id.filter(_ => createKeyValue.isDefined),
         event_sequential_id = 0L, // this is filled later
         ledger_effective_time = assign.ledgerEffectiveTime.micros,
-        driver_metadata = assign.contractMetadata.toByteArray,
+        authentication_data = assign.contractAuthenticationData.toByteArray,
         source_synchronizer_id =
           reassignmentAccepted.reassignmentInfo.sourceSynchronizer.unwrap.toProtoPrimitive,
         target_synchronizer_id =

@@ -639,6 +639,7 @@ object BuildCommon {
         sharedCantonSettingsExternal,
         libraryDependencies ++= Seq(
           cats,
+          daml_non_empty,
           jul_to_slf4j % Test,
           mockito_scala % Test,
           monocle_macro, // Include it here, even if unused, so that it can be used everywhere

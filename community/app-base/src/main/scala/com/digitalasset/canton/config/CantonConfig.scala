@@ -998,9 +998,6 @@ object CantonConfig {
     lazy implicit val bftBlockOrdererP2PNetworkConfigReader
         : ConfigReader[BftBlockOrdererConfig.P2PNetworkConfig] =
       deriveReader[BftBlockOrdererConfig.P2PNetworkConfig]
-    lazy implicit val bftBlockOrdererPruningConfigReader
-        : ConfigReader[BftBlockOrdererConfig.PruningConfig] =
-      deriveReader[BftBlockOrdererConfig.PruningConfig]
     lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistConfigReader
         : ConfigReader[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.HowLongToBlacklist] =
       deriveEnumerationReader[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.HowLongToBlacklist]
@@ -1274,9 +1271,8 @@ object CantonConfig {
 
     implicit val participantReplicationConfigReader: ConfigReader[ReplicationConfig] =
       deriveReader[ReplicationConfig]
-    implicit val participantEnterpriseFeaturesConfigReader
-        : ConfigReader[EnterpriseParticipantFeaturesConfig] =
-      deriveReader[EnterpriseParticipantFeaturesConfig]
+    implicit val participantFeaturesConfigReader: ConfigReader[ParticipantFeaturesConfig] =
+      deriveReader[ParticipantFeaturesConfig]
 
     implicit val localParticipantConfigReader: ConfigReader[ParticipantNodeConfig] = {
       import DeclarativeParticipantConfig.Readers.*
@@ -1634,9 +1630,6 @@ object CantonConfig {
     lazy implicit val bftBlockOrdererBftP2PNetworkConfigWriter
         : ConfigWriter[BftBlockOrdererConfig.P2PNetworkConfig] =
       deriveWriter[BftBlockOrdererConfig.P2PNetworkConfig]
-    lazy implicit val bftBlockOrdererPruningConfigWriter
-        : ConfigWriter[BftBlockOrdererConfig.PruningConfig] =
-      deriveWriter[BftBlockOrdererConfig.PruningConfig]
     lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistConfigWriter
         : ConfigWriter[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.HowLongToBlacklist] =
       deriveEnumerationWriter[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.HowLongToBlacklist]
@@ -1889,9 +1882,8 @@ object CantonConfig {
 
     implicit val participantReplicationConfigWriter: ConfigWriter[ReplicationConfig] =
       deriveWriter[ReplicationConfig]
-    implicit val participantEnterpriseFeaturesConfigWriter
-        : ConfigWriter[EnterpriseParticipantFeaturesConfig] =
-      deriveWriter[EnterpriseParticipantFeaturesConfig]
+    implicit val participantFeaturesConfigWriter: ConfigWriter[ParticipantFeaturesConfig] =
+      deriveWriter[ParticipantFeaturesConfig]
 
     implicit val localParticipantConfigWriter: ConfigWriter[ParticipantNodeConfig] = {
       val writers = new DeclarativeParticipantConfig.ConfigWriters(confidential)

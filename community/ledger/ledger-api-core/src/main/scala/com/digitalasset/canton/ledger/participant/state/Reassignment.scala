@@ -14,6 +14,7 @@ import com.digitalasset.daml.lf.value.Value
 
 sealed trait Reassignment {
   def templateId: Ref.Identifier
+  def packageName: Ref.PackageName
   def stakeholders: Set[Ref.Party]
   def nodeId: Int
 }
@@ -66,19 +67,20 @@ object Reassignment {
     *   The ledger time of the creation of the underlying contract.
     * @param createNode
     *   The details of the creation of the underlying contract.
-    * @param contractMetadata
-    *   The metadata provided at creation of the underlying contract.
+    * @param contractAuthenticationData
+    *   The authentication data provided at creation of the underlying contract.
     * @param reassignmentCounter
     *   The reassignment counter of the underlying contract.
     */
   final case class Assign(
       ledgerEffectiveTime: Timestamp,
       createNode: Node.Create,
-      contractMetadata: Bytes,
+      contractAuthenticationData: Bytes,
       reassignmentCounter: Long,
       nodeId: Int,
   ) extends Reassignment {
     def templateId: Ref.Identifier = createNode.templateId
+    def packageName: Ref.PackageName = createNode.packageName
     def stakeholders: Set[Ref.Party] = createNode.stakeholders
   }
 }

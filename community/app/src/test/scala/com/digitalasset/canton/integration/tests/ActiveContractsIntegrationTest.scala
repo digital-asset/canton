@@ -207,6 +207,8 @@ class ActiveContractsIntegrationTest
       suffixedContractInstance = contractInst.unversioned,
       cantonContractIdVersion,
     )
+    val authenticationData =
+      ContractAuthenticationDataV1(contractSalt.unwrap)(cantonContractIdVersion)
 
     lazy val contractId = cantonContractIdVersion.fromDiscriminator(
       ExampleTransactionFactory.lfHash(1337),
@@ -224,17 +226,11 @@ class ActiveContractsIntegrationTest
 
     val repairContract = RepairContract(
       psid,
-      contract = SerializableContract(
-        contractId = contractId,
-        contractInstance = createNode.versionedCoinst,
-        metadata = ContractMetadata.tryCreate(
-          signatories = Set(signatory.toLf),
-          stakeholders = Set(signatory.toLf, observer.toLf),
-          maybeKeyWithMaintainersVersioned = None,
-        ),
-        ledgerTime = ledgerCreateTime,
-        contractSalt = contractSalt.unwrap,
-      ).getOrElse(throw new IllegalStateException),
+      contract = LfFatContractInst.fromCreateNode(
+        createNode,
+        CreationTime.CreatedAt(ledgerCreateTime.toLf),
+        authenticationData.toLfBytes,
+      ),
       ReassignmentCounter(0),
     )
 
@@ -706,12 +702,7 @@ class ActiveContractsIntegrationTest
 
       val contractTemplate = TemplateId.fromJavaProtoIdentifier(Iou.TEMPLATE_ID.toProto)
       // LAPI server throws if the template is not found, so we just get an unused but valid template ID here
-      val otherTemplate = TemplateId(
-        packageId = GetCash.PACKAGE_ID,
-        moduleName = GetCash.TEMPLATE_ID.getModuleName,
-        entityName = GetCash.TEMPLATE_ID.getEntityName,
-      )
-
+      val otherTemplate = TemplateId.fromJavaProtoIdentifier(GetCash.TEMPLATE_ID.toProto)
       val (out, _) = unassign(
         cid = contract.cid,
         source = daId,
