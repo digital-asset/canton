@@ -9,6 +9,22 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2025-08-06 (Exclusive)
+
+- **Breaking** Online Party Replication protocol messages in `com.digitalasset.canton.participant.protocol.v30.party_replication.proto`
+  modified:
+
+  Under `PartyReplicationSourceParticipantMessage`, `SourceParticipantIsReady` removed and `data_or_status`
+  proto ordinals changed.
+
+  Under `PartyReplicationTargetParticipantMessage`, `Initialize` added, `SendAcsSnapshotUpTo` renamed to `SendAcsUpTo`,
+  and `instruction` proto ordinals changed.
+
+- ListConnectedSynchronizersResult.synchronizerId renamed to physicalSynchronizerId
+
+- Add non-standard configuration for `canton.participants.<participant-id>.features.snapshot-dir`. This determines the
+  directory for storing snapshotting data.
+
 ## until 2025-07-30 (Exclusive)
 
 - Message `Synchronizer` in `com.digitalasset.canton.topology.admin.v30.common.proto` moved from `StoreId` to top level
@@ -55,6 +71,12 @@ Wednesday after your change.
   the past system behavior, it is the default value for now. We are planning to change them both to `false` in the
   3.4 release to increase default system security. When that happens, the admin-token by default will only be strong
   enough to issue pings.
+- Previously, ledger API queries using filters allowed interface or template identifiers to be defined in either
+  `package-name` or `package-id` format within the event format (specifically, via the `package_id` field in the `Identifier`
+  message of `InterfaceFilter` and `TemplateFilter` in `CumulativeFilter`).
+  However, the `package-id` format is now deprecated and will be removed in future releases. A warning message will be
+  logged if it is used, as the system internally converts it to the corresponding `package-name` format and resolves
+  the query by `package-name` and not by `package-id`.
 
 ## until 2025-07-23 (Exclusive)
 - OTLP trace export configuration has been extended with several new parameters allowing connection to OTLP servers,

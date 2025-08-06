@@ -111,6 +111,7 @@ object TransactionLogUpdate {
     def witnesses(transactionShape: TransactionShape): Set[Party]
     def submitters: Set[Party]
     def templateId: Identifier
+    def packageName: PackageName
     def contractId: ContractId
   }
 
@@ -136,7 +137,7 @@ object TransactionLogUpdate {
       createKeyHash: Option[Hash],
       createKey: Option[GlobalKey],
       createKeyMaintainers: Option[Set[Party]],
-      driverMetadata: Bytes,
+      authenticationData: Bytes,
   ) extends Event {
     def witnesses(transactionShape: TransactionShape): Set[Party] =
       transactionShape match {

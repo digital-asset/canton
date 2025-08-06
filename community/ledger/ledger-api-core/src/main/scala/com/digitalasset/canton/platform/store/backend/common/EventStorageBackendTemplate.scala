@@ -6,7 +6,9 @@ package com.digitalasset.canton.platform.store.backend.common
 import anorm.SqlParser.*
 import anorm.{Row, RowParser, SimpleSql, ~}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.ledger.api.Ref2.{NameTypeConRef, NameTypeConRefConverter}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.platform.Party
 import com.digitalasset.canton.platform.store.backend.Conversions.{
   authorizationEventParser,
   contractId,
@@ -36,7 +38,6 @@ import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.{
 import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.*
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.interning.StringInterning
-import com.digitalasset.canton.platform.{Identifier, Party}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.crypto.Hash
@@ -61,7 +62,7 @@ object EventStorageBackendTemplate {
       "workflow_id",
       "contract_id",
       "template_id",
-      "package_name",
+      "package_id",
       "create_argument",
       "create_argument_compression",
       "create_signatories",
@@ -71,7 +72,7 @@ object EventStorageBackendTemplate {
       "create_key_value_compression",
       "create_key_maintainers",
       "submitters",
-      "driver_metadata",
+      "authentication_data",
       "synchronizer_id",
       "trace_context",
       "record_time",
@@ -88,7 +89,7 @@ object EventStorageBackendTemplate {
       "workflow_id",
       "contract_id",
       "template_id",
-      "package_name",
+      "package_id",
       "NULL as create_argument",
       "NULL as create_argument_compression",
       "NULL as create_signatories",
@@ -98,7 +99,7 @@ object EventStorageBackendTemplate {
       "create_key_value_compression",
       "NULL as create_key_maintainers",
       "submitters",
-      "NULL as driver_metadata",
+      "NULL as authentication_data",
       "synchronizer_id",
       "trace_context",
       "record_time",
@@ -124,7 +125,7 @@ object EventStorageBackendTemplate {
       contractId("contract_id") ~
       timestampFromMicros("ledger_effective_time") ~
       int("template_id") ~
-      int("package_name") ~
+      int("package_id") ~
       str("command_id").? ~
       str("workflow_id").? ~
       array[Int]("event_witnesses") ~
@@ -149,7 +150,7 @@ object EventStorageBackendTemplate {
       hashFromHexString("create_key_hash").? ~
       int("create_key_value_compression").? ~
       array[Int]("create_key_maintainers").? ~
-      byteArray("driver_metadata")
+      byteArray("authentication_data")
 
   private type ExercisedEventRow =
     SharedRow ~ Boolean ~ String ~ Array[Byte] ~ Option[Int] ~ Option[Array[Byte]] ~ Option[Int] ~
@@ -184,7 +185,7 @@ object EventStorageBackendTemplate {
           contractId ~
           ledgerEffectiveTime ~
           templateId ~
-          packageName ~
+          packageId ~
           commandId ~
           workflowId ~
 
@@ -202,7 +203,7 @@ object EventStorageBackendTemplate {
           createKeyHash ~
           createKeyValueCompression ~
           createKeyMaintainers ~
-          driverMetadata =>
+          authenticationData =>
         Entry(
           offset = offset,
           updateId = updateId,
@@ -215,8 +216,9 @@ object EventStorageBackendTemplate {
             offset = offset,
             nodeId = nodeId,
             contractId = contractId,
-            templateId = stringInterning.templateId.externalize(templateId),
-            packageName = stringInterning.packageName.externalize(packageName),
+            templateId = stringInterning.templateId
+              .externalize(templateId)
+              .toFullIdentifier(stringInterning.packageId.externalize(packageId)),
             witnessParties = filterAndExternalizeWitnesses(
               allQueryingPartiesO,
               eventWitnesses,
@@ -234,7 +236,7 @@ object EventStorageBackendTemplate {
               .getOrElse(Set.empty),
             ledgerEffectiveTime = ledgerEffectiveTime,
             createKeyHash = createKeyHash,
-            driverMetadata = driverMetadata,
+            authenticationData = authenticationData,
           ),
           synchronizerId =
             stringInterning.synchronizerId.unsafe.externalize(internedSynchronizerId),
@@ -256,7 +258,7 @@ object EventStorageBackendTemplate {
           contractId ~
           ledgerEffectiveTime ~
           templateId ~
-          packageName ~
+          packageId ~
           commandId ~
           workflowId ~
           flatEventWitnesses ~
@@ -282,8 +284,9 @@ object EventStorageBackendTemplate {
             offset = eventOffset,
             nodeId = nodeId,
             contractId = contractId,
-            templateId = stringInterning.templateId.externalize(templateId),
-            packageName = stringInterning.packageName.externalize(packageName),
+            templateId = stringInterning.templateId
+              .externalize(templateId)
+              .toFullIdentifier(stringInterning.packageId.externalize(packageId)),
             witnessParties = filterAndExternalizeWitnesses(
               allQueryingPartiesO,
               flatEventWitnesses,
@@ -312,7 +315,7 @@ object EventStorageBackendTemplate {
           contractId ~
           ledgerEffectiveTime ~
           templateId ~
-          packageName ~
+          packageId ~
           commandId ~
           workflowId ~
           treeEventWitnesses ~
@@ -346,8 +349,9 @@ object EventStorageBackendTemplate {
             offset = eventOffset,
             nodeId = nodeId,
             contractId = contractId,
-            templateId = stringInterning.templateId.externalize(templateId),
-            packageName = stringInterning.packageName.externalize(packageName),
+            templateId = stringInterning.templateId
+              .externalize(templateId)
+              .toFullIdentifier(stringInterning.packageId.externalize(packageId)),
             exerciseConsuming = exerciseConsuming,
             exerciseChoice = choice,
             exerciseArgument = exerciseArgument,
@@ -381,7 +385,7 @@ object EventStorageBackendTemplate {
     "contract_id",
     "ledger_effective_time",
     "template_id",
-    "package_name",
+    "package_id",
     "workflow_id",
     "create_argument",
     "create_argument_compression",
@@ -399,7 +403,7 @@ object EventStorageBackendTemplate {
     "NULL as exercise_actors",
     "NULL as exercise_last_descendant_node_id",
     "submitters",
-    "driver_metadata",
+    "authentication_data",
     "synchronizer_id",
     "trace_context",
     "record_time",
@@ -414,7 +418,7 @@ object EventStorageBackendTemplate {
     "contract_id",
     "ledger_effective_time",
     "template_id",
-    "package_name",
+    "package_id",
     "workflow_id",
     "NULL as create_argument",
     "NULL as create_argument_compression",
@@ -432,7 +436,7 @@ object EventStorageBackendTemplate {
     "exercise_actors",
     "exercise_last_descendant_node_id",
     "submitters",
-    "NULL as driver_metadata",
+    "NULL as authentication_data",
     "synchronizer_id",
     "trace_context",
     "record_time",
@@ -493,7 +497,7 @@ object EventStorageBackendTemplate {
       str("update_id") ~
       contractId("contract_id") ~
       int("template_id") ~
-      int("package_name") ~
+      int("package_id") ~
       array[Int]("flat_event_witnesses") ~
       array[Int]("create_signatories") ~
       array[Int]("create_observers") ~
@@ -504,7 +508,7 @@ object EventStorageBackendTemplate {
       array[Int]("create_key_maintainers").? ~
       timestampFromMicros("ledger_effective_time") ~
       hashFromHexString("create_key_hash").? ~
-      byteArray("driver_metadata") ~
+      byteArray("authentication_data") ~
       byteArray("trace_context").? ~
       timestampFromMicros("record_time") ~
       long("event_sequential_id") ~
@@ -526,7 +530,7 @@ object EventStorageBackendTemplate {
           updateId ~
           contractId ~
           templateId ~
-          packageName ~
+          packageId ~
           flatEventWitnesses ~
           createSignatories ~
           createObservers ~
@@ -537,7 +541,7 @@ object EventStorageBackendTemplate {
           createKeyMaintainers ~
           ledgerEffectiveTime ~
           createKeyHash ~
-          driverMetadata ~
+          authenticationData ~
           traceContext ~
           recordTime ~
           eventSequentialId ~
@@ -566,8 +570,9 @@ object EventStorageBackendTemplate {
               offset = offset,
               nodeId = nodeId,
               contractId = contractId,
-              templateId = stringInterning.templateId.externalize(templateId),
-              packageName = stringInterning.packageName.externalize(packageName),
+              templateId = stringInterning.templateId
+                .externalize(templateId)
+                .toFullIdentifier(stringInterning.packageId.externalize(packageId)),
               witnessParties = filterAndExternalizeWitnesses(
                 allQueryingPartiesO,
                 flatEventWitnesses,
@@ -585,7 +590,7 @@ object EventStorageBackendTemplate {
               createKeyValueCompression = createKeyValueCompression,
               ledgerEffectiveTime = ledgerEffectiveTime,
               createKeyHash = createKeyHash,
-              driverMetadata = driverMetadata,
+              authenticationData = authenticationData,
             ),
           ),
           // TODO(i26562) Assignments are not externally signed
@@ -605,7 +610,7 @@ object EventStorageBackendTemplate {
       str("update_id") ~
       contractId("contract_id") ~
       int("template_id") ~
-      int("package_name") ~
+      int("package_id") ~
       array[Int]("flat_event_witnesses") ~
       timestampFromMicros("assignment_exclusivity").? ~
       byteArray("trace_context").? ~
@@ -629,7 +634,7 @@ object EventStorageBackendTemplate {
           updateId ~
           contractId ~
           templateId ~
-          packageName ~
+          packageId ~
           flatEventWitnesses ~
           assignmentExclusivity ~
           traceContext ~
@@ -656,8 +661,9 @@ object EventStorageBackendTemplate {
             submitter = submitter.map(stringInterning.party.unsafe.externalize),
             reassignmentCounter = reassignmentCounter,
             contractId = contractId,
-            templateId = stringInterning.templateId.externalize(templateId),
-            packageName = stringInterning.packageName.externalize(packageName),
+            templateId = stringInterning.templateId
+              .externalize(templateId)
+              .toFullIdentifier(stringInterning.packageId.externalize(packageId)),
             witnessParties = filterAndExternalizeWitnesses(
               allQueryingPartiesO,
               flatEventWitnesses,
@@ -688,7 +694,7 @@ object EventStorageBackendTemplate {
       long("event_offset") ~
       contractId("contract_id") ~
       int("template_id") ~
-      int("package_name") ~
+      int("package_id") ~
       array[Int]("flat_event_witnesses") ~
       array[Int]("create_signatories") ~
       array[Int]("create_observers") ~
@@ -699,7 +705,7 @@ object EventStorageBackendTemplate {
       array[Int]("create_key_maintainers").? ~
       timestampFromMicros("ledger_effective_time") ~
       hashFromHexString("create_key_hash").? ~
-      byteArray("driver_metadata") ~
+      byteArray("authentication_data") ~
       long("event_sequential_id") ~
       int("node_id")
 
@@ -715,7 +721,7 @@ object EventStorageBackendTemplate {
           offset ~
           contractId ~
           templateId ~
-          packageName ~
+          packageId ~
           flatEventWitnesses ~
           createSignatories ~
           createObservers ~
@@ -726,7 +732,7 @@ object EventStorageBackendTemplate {
           createKeyMaintainers ~
           ledgerEffectiveTime ~
           createKeyHash ~
-          driverMetadata ~
+          authenticationData ~
           eventSequentialId ~
           nodeId =>
         RawActiveContract(
@@ -738,8 +744,9 @@ object EventStorageBackendTemplate {
             offset = offset,
             nodeId = nodeId,
             contractId = contractId,
-            templateId = stringInterning.templateId.externalize(templateId),
-            packageName = stringInterning.packageName.externalize(packageName),
+            templateId = stringInterning.templateId
+              .externalize(templateId)
+              .toFullIdentifier(stringInterning.packageId.externalize(packageId)),
             witnessParties = filterAndExternalizeWitnesses(
               allQueryingPartiesO,
               flatEventWitnesses,
@@ -757,7 +764,7 @@ object EventStorageBackendTemplate {
               .getOrElse(Set.empty),
             ledgerEffectiveTime = ledgerEffectiveTime,
             createKeyHash = createKeyHash,
-            driverMetadata = driverMetadata,
+            authenticationData = authenticationData,
           ),
           eventSequentialId = eventSequentialId,
         )
@@ -770,7 +777,7 @@ object EventStorageBackendTemplate {
       long("event_offset") ~
       contractId("contract_id") ~
       int("template_id") ~
-      int("package_name") ~
+      int("package_id") ~
       array[Int]("flat_event_witnesses") ~
       array[Int]("create_signatories") ~
       array[Int]("create_observers") ~
@@ -781,7 +788,7 @@ object EventStorageBackendTemplate {
       array[Int]("create_key_maintainers").? ~
       timestampFromMicros("ledger_effective_time") ~
       hashFromHexString("create_key_hash").? ~
-      byteArray("driver_metadata") ~
+      byteArray("authentication_data") ~
       long("event_sequential_id") ~
       int("node_id")
 
@@ -796,7 +803,7 @@ object EventStorageBackendTemplate {
           offset ~
           contractId ~
           templateId ~
-          packageName ~
+          packageId ~
           flatEventWitnesses ~
           createSignatories ~
           createObservers ~
@@ -807,7 +814,7 @@ object EventStorageBackendTemplate {
           createKeyMaintainers ~
           ledgerEffectiveTime ~
           createKeyHash ~
-          driverMetadata ~
+          authenticationData ~
           eventSequentialId ~
           nodeId =>
         RawActiveContract(
@@ -819,8 +826,9 @@ object EventStorageBackendTemplate {
             offset = offset,
             nodeId = nodeId,
             contractId = contractId,
-            templateId = stringInterning.templateId.externalize(templateId),
-            packageName = stringInterning.packageName.externalize(packageName),
+            templateId = stringInterning.templateId
+              .externalize(templateId)
+              .toFullIdentifier(stringInterning.packageId.externalize(packageId)),
             witnessParties = filterAndExternalizeWitnesses(
               allQueryingPartiesO,
               flatEventWitnesses,
@@ -838,7 +846,7 @@ object EventStorageBackendTemplate {
             createKeyValueCompression = createKeyValueCompression,
             ledgerEffectiveTime = ledgerEffectiveTime,
             createKeyHash = createKeyHash,
-            driverMetadata = driverMetadata,
+            authenticationData = authenticationData,
           ),
           eventSequentialId = eventSequentialId,
         )
@@ -1461,7 +1469,7 @@ abstract class EventStorageBackendTemplate(
 
   override def fetchAssignEventIdsForStakeholder(
       stakeholderO: Option[Party],
-      templateId: Option[Identifier],
+      templateId: Option[NameTypeConRef],
       startExclusive: Long,
       endInclusive: Long,
       limit: Int,
@@ -1478,7 +1486,7 @@ abstract class EventStorageBackendTemplate(
 
   override def fetchUnassignEventIdsForStakeholder(
       stakeholderO: Option[Party],
-      templateId: Option[Identifier],
+      templateId: Option[NameTypeConRef],
       startExclusive: Long,
       endInclusive: Long,
       limit: Int,

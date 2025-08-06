@@ -128,7 +128,7 @@ CREATE TABLE lapi_events_create (
     -- * shared event information
     contract_id BINARY VARYING NOT NULL,
     template_id INTEGER NOT NULL,
-    package_name INTEGER NOT NULL,
+    package_id INTEGER NOT NULL,
     flat_event_witnesses INTEGER ARRAY NOT NULL DEFAULT ARRAY[], -- stakeholders
     tree_event_witnesses INTEGER ARRAY NOT NULL DEFAULT ARRAY[], -- informees
 
@@ -144,8 +144,8 @@ CREATE TABLE lapi_events_create (
     create_argument_compression SMALLINT,
     create_key_value_compression SMALLINT,
 
-    -- * contract driver metadata
-    driver_metadata BINARY LARGE OBJECT NOT NULL,
+    -- * contract authentication data
+    authentication_data BINARY LARGE OBJECT NOT NULL,
 
     synchronizer_id INTEGER NOT NULL,
     trace_context BINARY LARGE OBJECT,
@@ -189,7 +189,7 @@ CREATE TABLE lapi_events_consuming_exercise (
     -- * shared event information
     contract_id BINARY VARYING NOT NULL,
     template_id INTEGER NOT NULL,
-    package_name INTEGER NOT NULL,
+    package_id INTEGER NOT NULL,
     flat_event_witnesses INTEGER ARRAY NOT NULL DEFAULT ARRAY[], -- stakeholders
     tree_event_witnesses INTEGER ARRAY NOT NULL DEFAULT ARRAY[], -- informees
 
@@ -247,7 +247,7 @@ CREATE TABLE lapi_events_non_consuming_exercise (
     -- * shared event information
     contract_id BINARY VARYING NOT NULL,
     template_id INTEGER NOT NULL,
-    package_name INTEGER NOT NULL,
+    package_id INTEGER NOT NULL,
     tree_event_witnesses INTEGER ARRAY NOT NULL DEFAULT ARRAY[], -- informees
 
     -- * information about the corresponding create event
@@ -305,7 +305,7 @@ CREATE TABLE lapi_events_unassign (
     -- * shared event information
     contract_id BINARY VARYING NOT NULL,
     template_id INTEGER NOT NULL,
-    package_name INTEGER NOT NULL,
+    package_id INTEGER NOT NULL,
     flat_event_witnesses INTEGER ARRAY NOT NULL DEFAULT ARRAY[], -- stakeholders
 
     -- * common reassignment
@@ -353,7 +353,7 @@ CREATE TABLE lapi_events_assign (
     -- * shared event information
     contract_id BINARY VARYING NOT NULL,
     template_id INTEGER NOT NULL,
-    package_name INTEGER NOT NULL,
+    package_id INTEGER NOT NULL,
     flat_event_witnesses INTEGER ARRAY NOT NULL DEFAULT ARRAY[], -- stakeholders
 
     -- * common reassignment
@@ -372,7 +372,7 @@ CREATE TABLE lapi_events_assign (
     create_argument_compression SMALLINT,
     create_key_value_compression SMALLINT,
     ledger_effective_time BIGINT NOT NULL,
-    driver_metadata BINARY LARGE OBJECT NOT NULL,
+    authentication_data BINARY LARGE OBJECT NOT NULL,
 
     trace_context BINARY LARGE OBJECT,
     record_time BIGINT NOT NULL
