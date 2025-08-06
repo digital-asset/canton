@@ -529,7 +529,7 @@ class ConnectedSynchronizer(
         clock,
         logger,
         parameters.delayLoggingThreshold,
-        metrics.sequencerClient.handler.delay,
+        metrics.sequencerClient.handler.sequencingTimeMetrics,
       )
 
       def firstUnpersistedEventScF: FutureUnlessShutdown[SequencerCounter] =
