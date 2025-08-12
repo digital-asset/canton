@@ -754,7 +754,6 @@ abstract class ProtocolProcessor[
             ts,
             submissionTopologyTimestamp,
             crypto,
-            logger,
           )
         )
 
