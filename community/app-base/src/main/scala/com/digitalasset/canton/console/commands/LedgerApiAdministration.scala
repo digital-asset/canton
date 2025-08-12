@@ -6,7 +6,7 @@ package com.digitalasset.canton.console.commands
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
-import com.daml.jwt.{AuthServiceJWTCodec, Jwt, JwtDecoder, StandardJWTPayload}
+import com.daml.jwt.{AuthServiceJWTCodec, JwksUrl, Jwt, JwtDecoder, StandardJWTPayload}
 import com.daml.ledger.api.v2.admin.command_inspection_service.CommandState
 import com.daml.ledger.api.v2.admin.package_management_service.PackageDetails
 import com.daml.ledger.api.v2.admin.party_management_service.PartyDetails as ProtoPartyDetails
@@ -15,6 +15,7 @@ import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.api.v2.event.CreatedEvent
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
+  ExecuteSubmissionAndWaitResponse as ExecuteAndWaitResponseProto,
   ExecuteSubmissionResponse as ExecuteResponseProto,
   GetPreferredPackagesResponse,
   HashingSchemeVersion,
@@ -81,7 +82,7 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
-import com.digitalasset.canton.ledger.api.{IdentityProviderConfig, IdentityProviderId, JwksUrl}
+import com.digitalasset.canton.ledger.api.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.ledger.client.services.admin.IdentityProviderConfigClient
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.networking.grpc.{GrpcError, RecordingStreamObserver}
@@ -666,6 +667,40 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         consoleEnvironment.run {
           ledgerApiCommand(
             LedgerApiCommands.InteractiveSubmissionService.ExecuteCommand(
+              preparedTransaction,
+              transactionSignatures,
+              submissionId = submissionId,
+              userId = userId,
+              deduplicationPeriod = deduplicationPeriod,
+              minLedgerTimeAbs = minLedgerTimeAbs,
+              hashingSchemeVersion = hashingSchemeVersion,
+            )
+          )
+        }
+
+      @Help.Summary(
+        "Execute a prepared submission and wait for it to complete (successfully or not)"
+      )
+      @Help.Description(
+        """
+          Similar to execute, except it will wait for the command to be completed before returning.
+          Equivalent of "submitAndWait" in the CommandService.
+          IMPORTANT: this command assumes that the executing participant is trusted to return a valid command completion.
+          A dishonest executing participant could incorrectly respond that the command failed even though it succeeded.
+          """
+      )
+      def executeAndWait(
+          preparedTransaction: PreparedTransaction,
+          transactionSignatures: Map[PartyId, Seq[Signature]],
+          submissionId: String,
+          hashingSchemeVersion: HashingSchemeVersion,
+          userId: String = userId,
+          deduplicationPeriod: Option[DeduplicationPeriod] = None,
+          minLedgerTimeAbs: Option[Instant] = None,
+      ): ExecuteAndWaitResponseProto =
+        consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.InteractiveSubmissionService.ExecuteAndWaitCommand(
               preparedTransaction,
               transactionSignatures,
               submissionId = submissionId,

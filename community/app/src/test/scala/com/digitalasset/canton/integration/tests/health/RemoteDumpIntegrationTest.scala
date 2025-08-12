@@ -40,7 +40,7 @@ import monocle.macros.syntax.lens.*
 import java.nio.charset.Charset
 import scala.concurrent.duration.DurationInt
 
-class RemoteDumpIntegrationTest
+final class RemoteDumpIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with HasExecutionContext
@@ -69,6 +69,21 @@ class RemoteDumpIntegrationTest
         )
 
         nodes.remote.foreach(_.health.wait_for_initialized())
+
+        // We add a parameter change to observe it in the health dump
+        Seq[InstanceReference](rs(sequencer1Name), rm(mediator1Name)).foreach { owner =>
+          owner.topology.synchronizer_parameters.propose_update(
+            rs(sequencer1Name).physical_synchronizer_id,
+            _.update(confirmationRequestsMaxRate = NonNegativeInt.tryCreate(2000000)),
+          )
+        }
+        utils.synchronize_topology()
+
+        rp(participant1Name).synchronizers.connect(
+          rs(sequencer1Name),
+          daName,
+        )
+        rp(participant1Name).health.ping(rp(participant1Name).id)
       }
 
   private val participant1Name = "participant1"
@@ -98,6 +113,7 @@ class RemoteDumpIntegrationTest
       val sequencerZip = dir.glob("remote-sequencer1-*").nextOption().value
       val mediatorZip = dir.glob("remote-mediator1-*").nextOption().value
       val participant1Zip = dir.glob("remote-participant1-*").nextOption().value
+      val synchronizerId = env.rs(sequencer1Name).physical_synchronizer_id
 
       // Check that the local zip contains the correct files
       File.usingTemporaryDirectory() { localUnzip =>
@@ -139,6 +155,37 @@ class RemoteDumpIntegrationTest
           Some(testedProtocolVersion.toString)
         )
 
+      def assertSynchronizerParameters(json: Option[Map[String, Json]], nodeName: String) = {
+        val parameters = json.valueOrFail("synchronizerParameters were empty")
+        parameters should have size 1
+        val (nodeNameFromTheDump, nodeParameters) = parameters.headOption.value
+        nodeNameFromTheDump shouldBe nodeName
+        val synchronizerKeys = nodeParameters.asObject.value.keys.toSeq
+        synchronizerKeys should have size 1
+        synchronizerKeys.headOption.value shouldBe synchronizerId.toString
+
+        val parameterChanges =
+          nodeParameters.asObject.value.apply(synchronizerId.toString).value.asArray.value
+        parameterChanges should have size 1
+
+        val confirmationRequestsMaxRateValue = parameterChanges.headOption.value.asObject.value
+          .apply("parameters")
+          .value
+          .asObject
+          .value
+          .apply("participantSynchronizerLimits")
+          .value
+          .asObject
+          .value
+          .apply("confirmationRequestsMaxRate")
+          .value
+          .asNumber
+          .value
+          .toInt
+          .value
+        confirmationRequestsMaxRateValue shouldBe 2000000
+      }
+
       // Check that the sequencer zip contains the correct files
       File.usingTemporaryDirectory() { daUnzip =>
         sequencerZip.unzipTo(daUnzip)
@@ -152,9 +199,10 @@ class RemoteDumpIntegrationTest
         sequencerJson shouldBe defined
         assertNodeVersion(sequencerJson)
         assertSynchronizerProtocolVersion(sequencerJson)
+        assertSynchronizerParameters(parsed.synchronizerParameters, sequencer1Name)
       }
 
-      // Check that the sequencer zip contains the correct files
+      // Check that the mediator zip contains the correct files
       File.usingTemporaryDirectory() { daUnzip =>
         mediatorZip.unzipTo(daUnzip)
         (daUnzip / external
@@ -167,6 +215,7 @@ class RemoteDumpIntegrationTest
         mediatorJson shouldBe defined
         assertNodeVersion(mediatorJson)
         assertSynchronizerProtocolVersion(mediatorJson)
+        assertSynchronizerParameters(parsed.synchronizerParameters, mediator1Name)
       }
 
       // Check that the participant1 zip contains the correct files
@@ -188,13 +237,13 @@ class RemoteDumpIntegrationTest
         participant1Json shouldBe defined
         assertNodeVersion(participant1Json)
         assertParticipantSupportedProtocolVersions(participant1Json)
-
+        assertSynchronizerParameters(parsed.synchronizerParameters, participant1Name)
       }
     }
 
   "get a remote health dump" in { implicit env =>
     File.usingTemporaryFile() { f =>
-      val dumpFile = File(env.health.dump(outputFile = f))
+      val dumpFile = File(env.health.dump(outputFile = f.canonicalPath))
       dumpFile.pathAsString shouldBe f.pathAsString
       verifyHealthDumpContent(dumpFile, env)
     }
@@ -202,7 +251,7 @@ class RemoteDumpIntegrationTest
 
   "stream health dump in multiple chunks" in { implicit env =>
     File.usingTemporaryFile() { f =>
-      val dumpFile = File(env.health.dump(outputFile = f, chunkSize = Option(10000)))
+      val dumpFile = File(env.health.dump(outputFile = f.canonicalPath, chunkSize = Option(10000)))
       dumpFile.size > 10000 shouldBe true // Make sure the file was actually larger than 10000 bytes
       verifyHealthDumpContent(dumpFile, env)
     }
@@ -213,7 +262,7 @@ class RemoteDumpIntegrationTest
       val p1LogFile = File(external.logFile(participant1Name))
       p1LogFile.parent.createChild(p1LogFile.name + ".1.gz")
 
-      val dumpFile = File(env.health.dump(outputFile = f, chunkSize = Option(10000)))
+      val dumpFile = File(env.health.dump(outputFile = f.canonicalPath, chunkSize = Option(10000)))
       dumpFile.size > 10000 shouldBe true // Make sure the file was actually larger than 10000 bytes
       verifyHealthDumpContent(dumpFile, env, withRollingFile = true)
     }
@@ -236,7 +285,7 @@ class RemoteDumpIntegrationTest
 
     loggerFactory.assertLoggedWarningsAndErrorsSeq(
       File.usingTemporaryFile() { f =>
-        val dumpFile = File(env.health.dump(outputFile = f))
+        val dumpFile = File(env.health.dump(outputFile = f.canonicalPath))
         dumpFile.pathAsString shouldBe f.pathAsString
         verifyHealthDumpContent(dumpFile, env)
       },
@@ -245,7 +294,10 @@ class RemoteDumpIntegrationTest
   }
 
   // Class to parse only the status part of the dump to be able to do some validation on the content
-  case class JsonDump(status: Map[String, JsonObject])
+  case class JsonDump(
+      status: Map[String, JsonObject],
+      synchronizerParameters: Option[Map[String, Json]],
+  )
 
 }
 
@@ -280,7 +332,7 @@ class NegativeRemoteDumpIntegrationTest
         override def createHealthDumpGenerator(
             commandRunner: GrpcAdminCommandRunner
         ): HealthDumpGenerator =
-          new HealthDumpGenerator(this, commandRunner) {
+          new HealthDumpGenerator(this, commandRunner, this.loggerFactory) {
             override def generateHealthDump(
                 outputFile: File,
                 extraFilesToZip: Seq[File],
@@ -310,7 +362,7 @@ class NegativeRemoteDumpIntegrationTest
         a[CommandFailure] shouldBe thrownBy {
           // Returns as soon as the first call (future) fails (times out)
           env.health.dump(
-            outputFile = f,
+            outputFile = f.canonicalPath,
             timeout = config.NonNegativeDuration(
               dumpDelay / 100 // Timeout much lower than the artificial delay to make sure it triggers
             ),

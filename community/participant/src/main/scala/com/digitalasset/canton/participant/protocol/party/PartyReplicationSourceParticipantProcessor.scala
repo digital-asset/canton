@@ -52,7 +52,7 @@ import scala.concurrent.ExecutionContext
   *   replicated. Used to skip over shared contracts already hosted on TP.
   * @param acsInspection
   *   Interface to inspect the ACS.
-  * @param onComplete
+  * @param onAcsFullyReplicated
   *   Callback notification that the source participant has sent the entire ACS.
   * @param onError
   *   Callback notification that the source participant has encountered an error.
@@ -69,7 +69,7 @@ final class PartyReplicationSourceParticipantProcessor private (
     //  as the set of other parties would change dynamically.
     otherPartiesHostedByTargetParticipant: Set[LfPartyId],
     acsInspection: AcsInspection, // TODO(#24326): Stream the ACS via the Ledger Api instead.
-    protected val onComplete: TraceContext => Unit,
+    protected val onAcsFullyReplicated: TraceContext => Unit,
     protected val onError: String => Unit,
     protected val onDisconnect: (String, TraceContext) => Unit,
     protected val futureSupervisor: FutureSupervisor,
@@ -119,7 +119,7 @@ final class PartyReplicationSourceParticipantProcessor private (
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
     logger.debug(
-      s"Source participant has received instruction to send up to contract $maxContractOrdinalInclusive"
+      s"Source participant has received instruction to send up to contract ordinal $maxContractOrdinalInclusive"
     )
     for {
       // Check that the target participant has initialized this SP.
@@ -152,8 +152,9 @@ final class PartyReplicationSourceParticipantProcessor private (
     val previousO = processorStore.getAndSetInitialContractOrdinalInclusive(
       initialContractOrdinalInclusive
     )
-    // Reset the contract ordinal to clear what might have been requested in a previous connection.
+    // Reset the contract count and ordinal to clear what might have been requested in a previous connection.
     processorStore.setContractOrdinalToSendUpToExclusive(initialContractOrdinalInclusive)
+    processorStore.resetContractsCount(initialContractOrdinalInclusive)
     EitherT.cond[FutureUnlessShutdown](
       previousO.isEmpty,
       (),
@@ -188,9 +189,7 @@ final class PartyReplicationSourceParticipantProcessor private (
     notifyCounterParticipantAndPartyReplicatorOnError {
       val fromInclusive = processorStore.sentContractsCount
       val toInclusive: NonNegativeInt = processorStore.contractOrdinalToSendUpToExclusive.map(_ - 1)
-      logger.debug(
-        s"Source participant has received instruction to send up to contract ordinal ${toInclusive.unwrap}"
-      )
+      logger.debug(s"Source participant about to send up to contract ordinal ${toInclusive.unwrap}")
       for {
         contracts <- readContracts(fromInclusive, toInclusive)
         numContractsSending = contracts.flatten.size
@@ -202,7 +201,7 @@ final class PartyReplicationSourceParticipantProcessor private (
         _ <- EitherTUtil.ifThenET(numSentInTotal < toInclusive) {
           sendEndOfAcs(s"End of ACS after $numSentInTotal contracts").map(_ =>
             // Let the PartyReplicator know the SP is done, but let the TP, the channel owner, close the channel.
-            onComplete(traceContext)
+            onAcsFullyReplicated(traceContext)
           )
         }
       } yield ()
@@ -324,7 +323,7 @@ object PartyReplicationSourceParticipantProcessor {
       activeAt: CantonTimestamp,
       partiesHostedByTargetParticipant: Set[LfPartyId],
       acsInspection: AcsInspection,
-      onComplete: TraceContext => Unit,
+      onAcsFullyReplicated: TraceContext => Unit,
       onError: String => Unit,
       onDisconnect: (String, TraceContext) => Unit,
       futureSupervisor: FutureSupervisor,
@@ -340,7 +339,7 @@ object PartyReplicationSourceParticipantProcessor {
       activeAt,
       partiesHostedByTargetParticipant,
       acsInspection,
-      onComplete,
+      onAcsFullyReplicated,
       onError,
       onDisconnect,
       futureSupervisor,

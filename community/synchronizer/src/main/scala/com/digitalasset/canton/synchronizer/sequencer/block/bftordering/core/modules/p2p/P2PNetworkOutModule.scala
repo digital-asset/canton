@@ -10,9 +10,9 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData.{
+  PeerConnectionStatus,
   PeerEndpointHealth,
   PeerEndpointHealthStatus,
-  PeerEndpointStatus,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.topology.SequencerNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
@@ -42,8 +42,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   P2PNetworkRefFactory,
 }
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.{
+  BftOrderingMessage,
   BftOrderingMessageBody,
-  BftOrderingServiceReceiveRequest,
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
@@ -58,7 +58,7 @@ private[p2p] class KnownEndpointsAndNodes {
   private val endpointIdToNetworkRef =
     mutable.Map.empty[
       P2PEndpoint.Id,
-      (P2PEndpoint, P2PNetworkRef[BftOrderingServiceReceiveRequest]),
+      (P2PEndpoint, P2PNetworkRef[BftOrderingMessage]),
     ]
   private val connectedEndpointIds = mutable.Set.empty[P2PEndpoint.Id]
   private val endpointIdToNodeId = mutable.Map.empty[P2PEndpoint.Id, BftNodeId]
@@ -74,7 +74,7 @@ private[p2p] class KnownEndpointsAndNodes {
       node: BftNodeId,
       ifEmpty: => Unit,
   )(
-      action: P2PNetworkRef[BftOrderingServiceReceiveRequest] => Unit
+      action: P2PNetworkRef[BftOrderingMessage] => Unit
   ): Unit =
     nodeIdToEndpointId
       .get(node)
@@ -82,7 +82,7 @@ private[p2p] class KnownEndpointsAndNodes {
 
   def add(
       endpoint: P2PEndpoint,
-      ref: P2PNetworkRef[BftOrderingServiceReceiveRequest],
+      ref: P2PNetworkRef[BftOrderingMessage],
   ): Unit =
     endpointIdToNetworkRef.addOne(endpoint.id -> (endpoint, ref))
 
@@ -119,7 +119,7 @@ private[p2p] class KnownEndpointsAndNodes {
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
 final class P2PNetworkOutModule[
     E <: Env[E],
-    P2PNetworkRefFactoryT <: P2PNetworkRefFactory[E, BftOrderingServiceReceiveRequest],
+    P2PNetworkRefFactoryT <: P2PNetworkRefFactory[E, BftOrderingMessage],
 ](
     thisNode: BftNodeId,
     @VisibleForTesting private[bftordering] val p2pEndpointsStore: P2PEndpointsStore[E],
@@ -313,7 +313,7 @@ final class P2PNetworkOutModule[
           val defined = known.isDefined(endpointId)
           val connected = known.isConnected(endpointId)
           val maybeNodeId = known.getNode(endpointId)
-          PeerEndpointStatus(
+          PeerConnectionStatus.PeerEndpointIdStatus(
             endpointId,
             health = (defined, connected, maybeNodeId) match {
               case (false, _, _) =>
@@ -379,7 +379,7 @@ final class P2PNetworkOutModule[
   }
 
   private def networkSend(
-      ref: P2PNetworkRef[BftOrderingServiceReceiveRequest],
+      ref: P2PNetworkRef[BftOrderingMessage],
       message: BftOrderingMessageBody,
   )(implicit traceContext: TraceContext, mc: MetricsContext): Unit =
     ref.asyncP2PSend(maybeNetworkSendInstant => messageToSend(message, maybeNetworkSendInstant))
@@ -387,8 +387,8 @@ final class P2PNetworkOutModule[
   private def messageToSend(
       message: BftOrderingMessageBody,
       maybeNetworkSendInstant: Option[Instant],
-  )(implicit traceContext: TraceContext): BftOrderingServiceReceiveRequest =
-    BftOrderingServiceReceiveRequest(
+  )(implicit traceContext: TraceContext): BftOrderingMessage =
+    BftOrderingMessage(
       traceContext.asW3CTraceContext.map(_.parent).getOrElse(""),
       Some(message),
       thisNode,
@@ -411,7 +411,7 @@ final class P2PNetworkOutModule[
   )(implicit
       context: E#ActorContextT[P2PNetworkOut.Message],
       traceContext: TraceContext,
-  ): P2PNetworkRef[BftOrderingServiceReceiveRequest] = {
+  ): P2PNetworkRef[BftOrderingMessage] = {
     logger.debug(
       s"Connecting new node at ${endpoint.id}"
     )

@@ -12,13 +12,14 @@ import com.digitalasset.base.error.{ErrorCategory, ErrorCode, Explanation, Resol
 import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.manual.CantonConfigValidatorDerivation
 import com.digitalasset.canton.config.{CantonConfigValidator, UniformCantonConfigValidation}
+import com.digitalasset.canton.crypto.provider.jce.JcePrivateCrypto
 import com.digitalasset.canton.crypto.store.{CryptoPrivateStoreError, CryptoPrivateStoreExtended}
 import com.digitalasset.canton.error.{CantonBaseError, CantonErrorGroups}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{
-  DefaultDeserializationError,
+  CryptoParseAndValidationError,
   DeserializationError,
   ProtoConverter,
 }
@@ -29,7 +30,6 @@ import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import slick.jdbc.GetResult
 
-import java.math.BigInteger
 import scala.annotation.nowarn
 import scala.concurrent.ExecutionContext
 
@@ -79,16 +79,7 @@ trait EncryptionOps {
   /** Decrypts a message encrypted using `encryptWith` */
   def decryptWith[M](encrypted: AsymmetricEncrypted[M], privateKey: EncryptionPrivateKey)(
       deserialize: ByteString => Either[DeserializationError, M]
-  ): Either[DecryptionError, M] = for {
-    _ <- Either.cond(
-      encrypted.encryptedFor == privateKey.id,
-      (),
-      DecryptionError.InvalidEncryptionKey(
-        s"Private key ${privateKey.id} does not match the used encryption key ${encrypted.encryptedFor}"
-      ),
-    )
-    message <- decryptWithInternal(encrypted, privateKey)(deserialize)
-  } yield message
+  ): Either[DecryptionError, M] = decryptWithInternal(encrypted, privateKey)(deserialize)
 
   /** Encrypts the bytes of the serialized message using the given symmetric key. Where the message
     * embedded protocol version determines the message serialization.
@@ -274,7 +265,6 @@ object EncryptionKeySpec {
     override val name: String = "RSA-2048"
     // the key size in bits for RSA2048
     val keySizeInBits: Int = 2048
-    val exponent: BigInteger = BigInteger.valueOf(65537)
     override def toProtoEnum: v30.EncryptionKeySpec =
       v30.EncryptionKeySpec.ENCRYPTION_KEY_SPEC_RSA_2048
   }
@@ -506,14 +496,21 @@ object SymmetricKeyScheme {
     }
 }
 
-final case class SymmetricKey(
+final case class SymmetricKey private (
     format: CryptoKeyFormat,
     protected[crypto] val key: ByteString,
     scheme: SymmetricKeyScheme,
 ) extends CryptoKey
-    with HasVersionedWrapper[SymmetricKey]
-    with NoCopy {
+    with HasVersionedWrapper[SymmetricKey] {
   override protected def companionObj: SymmetricKey.type = SymmetricKey
+
+  protected def validated: Either[EncryptionKeyCreationError, this.type] =
+    CryptoKeyValidation
+      .validateSymmetricKey(
+        this,
+        errMsg => EncryptionKeyCreationError.KeyParseAndValidateError(errMsg),
+      )
+      .map(_ => this)
 
   def toProtoV30: v30.SymmetricKey =
     v30.SymmetricKey(format = format.toProtoEnum, key = key, scheme = scheme.toProtoEnum)
@@ -530,11 +527,25 @@ object SymmetricKey extends HasVersionedMessageCompanion[SymmetricKey] {
     )
   )
 
+  def create(
+      format: CryptoKeyFormat,
+      key: ByteString,
+      keyScheme: SymmetricKeyScheme,
+  ): Either[EncryptionKeyCreationError, SymmetricKey] =
+    SymmetricKey(format, key, keyScheme).validated
+
   def fromProtoV30(keyP: v30.SymmetricKey): ParsingResult[SymmetricKey] =
     for {
       format <- CryptoKeyFormat.fromProtoEnum("format", keyP.format)
       scheme <- SymmetricKeyScheme.fromProtoEnum("scheme", keyP.scheme)
-    } yield new SymmetricKey(format, keyP.key, scheme)
+      key <- SymmetricKey
+        .create(format, keyP.key, scheme)
+        .leftMap(err =>
+          ProtoDeserializationError.CryptoDeserializationError(
+            CryptoParseAndValidationError(err.show)
+          )
+        )
+    } yield key
 }
 
 final case class EncryptionKeyPair private (
@@ -548,7 +559,7 @@ final case class EncryptionKeyPair private (
   )
 
   def toProtoV30: v30.EncryptionKeyPair =
-    v30.EncryptionKeyPair(Some(publicKey.toProtoV30), Some(privateKey.toProtoV30))
+    v30.EncryptionKeyPair(Some(privateKey.toProtoV30))
 
   protected def toProtoCryptoKeyPairPairV30: v30.CryptoKeyPair.Pair =
     v30.CryptoKeyPair.Pair.EncryptionKeyPair(toProtoV30)
@@ -562,37 +573,54 @@ object EncryptionKeyPair {
       privateFormat: CryptoKeyFormat,
       privateKeyBytes: ByteString,
       keySpec: EncryptionKeySpec,
-  ): EncryptionKeyPair = {
-    val publicKey = EncryptionPublicKey
-      .create(publicFormat, publicKeyBytes, keySpec)
-      .valueOr(err =>
-        throw new IllegalStateException(s"Failed to create public encryption key: $err")
-      )
-    val privateKey =
-      EncryptionPrivateKey.create(publicKey.id, privateFormat, privateKeyBytes, keySpec)
-    new EncryptionKeyPair(publicKey, privateKey)
-  }
+  ): Either[EncryptionKeyCreationError, EncryptionKeyPair] =
+    for {
+      publicKey <- EncryptionPublicKey
+        .create(publicFormat, publicKeyBytes, keySpec)
+      privateKey <- EncryptionPrivateKey
+        .create(publicKey.id, privateFormat, privateKeyBytes, keySpec)
+    } yield EncryptionKeyPair.create(publicKey, privateKey)
+
+  def create(
+      privateKey: EncryptionPrivateKey
+  ): Either[EncryptionKeyCreationError, EncryptionKeyPair] =
+    JcePrivateCrypto
+      .derivePublicKey(privateKey)
+      .leftMap(EncryptionKeyCreationError.DerivePublicKeyError.apply)
+      .flatMap {
+        case publicKey: EncryptionPublicKey =>
+          // The ID in the private key might not match the ID of the derived public key,
+          // so we regenerate the private key with the correct ID. This can only happen if a malicious operator
+          // tampers with the imported private key and assigns it an incorrect ID.
+          EncryptionPrivateKey
+            .create(publicKey.id, privateKey.format, privateKey.key, privateKey.keySpec)
+            .map(EncryptionKeyPair.create(publicKey, _))
+        case _ =>
+          Left(
+            EncryptionKeyCreationError.DerivePublicKeyError(
+              "Expected an encryption public key but got a signing public key"
+            )
+          )
+      }
 
   def create(
       publicKey: EncryptionPublicKey,
       privateKey: EncryptionPrivateKey,
-  ): EncryptionKeyPair = new EncryptionKeyPair(publicKey, privateKey)
+  ): EncryptionKeyPair = EncryptionKeyPair(publicKey, privateKey)
 
   def fromProtoV30(
       encryptionKeyPairP: v30.EncryptionKeyPair
   ): ParsingResult[EncryptionKeyPair] =
     for {
-      publicKey <- ProtoConverter.parseRequired(
-        EncryptionPublicKey.fromProtoV30,
-        "public_key",
-        encryptionKeyPairP.publicKey,
-      )
       privateKey <- ProtoConverter.parseRequired(
         EncryptionPrivateKey.fromProtoV30,
         "private_key",
         encryptionKeyPairP.privateKey,
       )
-    } yield EncryptionKeyPair.create(publicKey, privateKey)
+      keyPair <- EncryptionKeyPair
+        .create(privateKey)
+        .leftMap(err => ProtoDeserializationError.CryptoParseAndValidationError(err.toString))
+    } yield keyPair
 }
 
 final case class EncryptionPublicKey private (
@@ -611,13 +639,11 @@ final case class EncryptionPublicKey private (
 
   protected override val dataForFingerprintO: Option[ByteString] = None
 
-  // TODO(#15649): Make EncryptionPublicKey object invariant
-  protected def validated: Either[ProtoDeserializationError.CryptoDeserializationError, this.type] =
+  protected def validated: Either[EncryptionKeyCreationError.KeyParseAndValidateError, this.type] =
     CryptoKeyValidation
       .parseAndValidatePublicKey(
         this,
-        errMsg =>
-          ProtoDeserializationError.CryptoDeserializationError(DefaultDeserializationError(errMsg)),
+        errMsg => EncryptionKeyCreationError.KeyParseAndValidateError(errMsg),
       )
       .map(_ => this)
 
@@ -690,7 +716,7 @@ object EncryptionPublicKey
       format: CryptoKeyFormat,
       key: ByteString,
       keySpec: EncryptionKeySpec,
-  ): Either[ProtoDeserializationError.CryptoDeserializationError, EncryptionPublicKey] = {
+  ): Either[EncryptionKeyCreationError, EncryptionPublicKey] = {
     val keyBeforeMigration = EncryptionPublicKey(format, key, keySpec)()
     val keyAfterMigration = keyBeforeMigration.migrate().getOrElse(keyBeforeMigration)
 
@@ -707,11 +733,17 @@ object EncryptionPublicKey
         publicKeyP.keySpec,
         publicKeyP.scheme,
       )
-      encryptionPublicKey <- EncryptionPublicKey.create(
-        format,
-        publicKeyP.publicKey,
-        keySpec,
-      )
+      encryptionPublicKey <- EncryptionPublicKey
+        .create(
+          format,
+          publicKeyP.publicKey,
+          keySpec,
+        )
+        .leftMap(err =>
+          ProtoDeserializationError.CryptoDeserializationError(
+            CryptoParseAndValidationError(err.show)
+          )
+        )
     } yield encryptionPublicKey
 }
 
@@ -746,14 +778,21 @@ final case class EncryptionPrivateKey private (
 )(
     override val migrated: Boolean = false
 ) extends PrivateKey
-    with HasVersionedWrapper[EncryptionPrivateKey]
-    with NoCopy {
+    with HasVersionedWrapper[EncryptionPrivateKey] {
 
   override type K = EncryptionPrivateKey
 
   override protected def companionObj: EncryptionPrivateKey.type = EncryptionPrivateKey
 
   override def purpose: KeyPurpose = KeyPurpose.Encryption
+
+  protected def validated: Either[EncryptionKeyCreationError.KeyParseAndValidateError, this.type] =
+    CryptoKeyValidation
+      .parseAndValidatePrivateKey(
+        this,
+        errMsg => EncryptionKeyCreationError.KeyParseAndValidateError(errMsg),
+      )
+      .map(_ => this)
 
   def toProtoV30: v30.EncryptionPrivateKey =
     v30.EncryptionPrivateKey(
@@ -790,6 +829,11 @@ final case class EncryptionPrivateKey private (
 
       case _ => None
     }
+
+  @VisibleForTesting
+  private[crypto] def replaceFormat(format: CryptoKeyFormat): EncryptionPrivateKey =
+    EncryptionPrivateKey(this.id, format, this.key, this.keySpec)(migrated)
+
 }
 
 object EncryptionPrivateKey extends HasVersionedMessageCompanion[EncryptionPrivateKey] {
@@ -808,11 +852,10 @@ object EncryptionPrivateKey extends HasVersionedMessageCompanion[EncryptionPriva
       format: CryptoKeyFormat,
       key: ByteString,
       keySpec: EncryptionKeySpec,
-  ): EncryptionPrivateKey = {
+  ): Either[EncryptionKeyCreationError, EncryptionPrivateKey] = {
     val keyBeforeMigration = EncryptionPrivateKey(id, format, key, keySpec)()
     val keyAfterMigration = keyBeforeMigration.migrate().getOrElse(keyBeforeMigration)
-
-    keyAfterMigration
+    keyAfterMigration.validated
   }
 
   @nowarn("cat=deprecation")
@@ -826,7 +869,14 @@ object EncryptionPrivateKey extends HasVersionedMessageCompanion[EncryptionPriva
         privateKeyP.keySpec,
         privateKeyP.scheme,
       )
-    } yield EncryptionPrivateKey.create(id, format, privateKeyP.privateKey, keySpec)
+      epk <- EncryptionPrivateKey
+        .create(id, format, privateKeyP.privateKey, keySpec)
+        .leftMap(err =>
+          ProtoDeserializationError.CryptoDeserializationError(
+            CryptoParseAndValidationError(err.show)
+          )
+        )
+    } yield epk
 }
 
 sealed trait EncryptionError extends Product with Serializable with PrettyPrinting
@@ -952,6 +1002,11 @@ object DecryptionError {
       param("keyId", _.keyId)
     )
   }
+  final case class DecryptionWithWrongKey(error: String) extends DecryptionError {
+    override protected def pretty: Pretty[DecryptionWithWrongKey] = prettyOfClass(
+      unnamedParam(_.error.unquoted)
+    )
+  }
   final case class FailedToDeserialize(error: DeserializationError) extends DecryptionError {
     override protected def pretty: Pretty[FailedToDeserialize] = prettyOfClass(
       unnamedParam(_.error)
@@ -964,6 +1019,11 @@ object DecryptionError {
   }
 }
 
+/** Errors that happen when generating new encryption keys.
+  *
+  * This means creating key material from scratch. Different from errors that happen when creating
+  * keys from existing key material.
+  */
 sealed trait EncryptionKeyGenerationError extends Product with Serializable with PrettyPrinting
 object EncryptionKeyGenerationError extends CantonErrorGroups.CommandErrorGroup {
 
@@ -988,9 +1048,10 @@ object EncryptionKeyGenerationError extends CantonErrorGroups.CommandErrorGroup 
     )
   }
 
-  final case class NameInvalidError(error: String) extends EncryptionKeyGenerationError {
-    override protected def pretty: Pretty[NameInvalidError] = prettyOfClass(
-      unnamedParam(_.error.unquoted)
+  final case class KeyCreationError(error: EncryptionKeyCreationError)
+      extends EncryptionKeyGenerationError {
+    override protected def pretty: Pretty[KeyCreationError] = prettyOfParam(
+      _.error
     )
   }
 
@@ -1019,15 +1080,36 @@ object EncryptionKeyGenerationError extends CantonErrorGroups.CommandErrorGroup 
 
 }
 
+/** Errors that happen when creating encryption keys from existing key material.
+  *
+  * This includes parsing, validating, or checking the key data. Different from errors that happen
+  * during key generation (creating new key material).
+  */
 sealed trait EncryptionKeyCreationError extends Product with Serializable with PrettyPrinting
-object EncryptionKeyCreationError {
+object EncryptionKeyCreationError extends CantonErrorGroups.CommandErrorGroup {
 
-  final case class InvalidRandomnessLength(randomnessLength: Int, expectedKeyLength: Int)
-      extends EncryptionKeyCreationError {
-    override protected def pretty: Pretty[InvalidRandomnessLength] = prettyOfClass(
-      param("provided randomness length", _.randomnessLength),
-      param("expected key length", _.expectedKeyLength),
-    )
+  @Explanation("This error indicates that an encryption key could not be created.")
+  @Resolution("Inspect the error details")
+  object ErrorCode
+      extends ErrorCode(
+        id = "ENCRYPTION_KEY_CREATION_ERROR",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Wrap(reason: EncryptionKeyCreationError)
+        extends CantonBaseError.Impl(cause = "An error occurred during encryption key creation")
+
+    final case class WrapStr(reason: String)
+        extends CantonBaseError.Impl(cause = "An error occurred during encryption key creation")
   }
 
+  final case class KeyParseAndValidateError(error: String) extends EncryptionKeyCreationError {
+    override protected def pretty: Pretty[KeyParseAndValidateError] = prettyOfClass(
+      unnamedParam(_.error.unquoted)
+    )
+  }
+  final case class DerivePublicKeyError(error: String) extends EncryptionKeyCreationError {
+    override protected def pretty: Pretty[DerivePublicKeyError] = prettyOfClass(
+      unnamedParam(_.error.unquoted)
+    )
+  }
 }

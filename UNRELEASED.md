@@ -9,6 +9,20 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2025-08-13 (Exclusive)
+
+- **Breaking** In `com/digitalasset/canton/admin/participant/v30/party_management_service.proto` used by Online Party Replication,
+  the `GetAddPartyStatusResponse.Status` enum has been extended with a new value, `FullyReplicatedAcs` shifting the
+  Protobuf ordinals for some existing status enum values.
+
+- **Breaking** Transactions with transient events for which there was an intersection between submitters
+  and querying parties were previously exposed as transactions with empty events in AcsDelta shape. Those transactions
+  will no longer be exposed at all in the AcsDelta shape. As before, they will still be exposed in the LedgerEffects
+  shape.
+
+- **Breaking** Participant divulgence (i.e. if there is a party divulgence, and none of the stakeholders of the divulged contracts
+  are hosted on the participant) is no longer performed in Active Contracts Service and AcsDelta transaction shapes.
+
 ## until 2025-08-06 (Exclusive)
 
 - **Breaking** Online Party Replication protocol messages in `com.digitalasset.canton.participant.protocol.v30.party_replication.proto`
@@ -24,6 +38,15 @@ Wednesday after your change.
 
 - Add non-standard configuration for `canton.participants.<participant-id>.features.snapshot-dir`. This determines the
   directory for storing snapshotting data.
+
+- Created and exercised events in AcsDelta transactions now include a flag indicating
+  whether this event would be part of the respective ACS_DELTA shaped stream, and should therefore be considered
+  when tracking contract activeness on the client-side. This way clients with LedgerEffects subscriptions are enabled
+  to track contract lifecycle. The Java bindings and the JSON api messages have been extended accordingly.
+
+- Default postgres version is now 17 (instead of 14)
+- Default Java version to run the tests is 21 (instead of 17).
+  Compilation target is still 17 to continue running on JRE 17.
 
 ## until 2025-07-30 (Exclusive)
 
