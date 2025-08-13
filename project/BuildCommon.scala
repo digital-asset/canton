@@ -77,6 +77,12 @@ object BuildCommon {
         // TODO (i20606) We should find versions of libraries that do not need this workaround
         libraryDependencySchemes += "io.circe" %% "circe-parser" % VersionScheme.Always,
         libraryDependencySchemes += "io.circe" %% "circe-yaml" % VersionScheme.Always,
+        /*
+        The default JDK is the latest stable (21 in August 2025) but we target the previous LTS
+        for backwards compatibility (see `contributing/runtime-versions.md`).
+         */
+        javacOptions ++= Seq("--release", "17"),
+        javacOptions ++= Seq("-proc:full"),
       )
     )
 
@@ -1444,6 +1450,7 @@ object BuildCommon {
       .in(file("community/ledger/ledger-common"))
       .dependsOn(
         DamlProjects.`ledger-api`,
+        DamlProjects.`daml-jwt`,
         DamlProjects.`bindings-java` % "test->test",
         `util-observability` % "compile->compile;test->test",
         `ledger-common-dars-lf-v2-1` % "test",
@@ -1598,10 +1605,12 @@ object BuildCommon {
           flyway_postgres,
           grpc_inprocess,
           anorm,
+          daml_http_test_utils % Test,
           daml_lf_encoder % Test,
           daml_libs_scala_grpc_test_utils % Test,
           daml_observability_tracing_test_lib % Test,
           daml_rs_grpc_testing_utils % Test,
+          daml_test_evidence_generator_scalatest % Test,
           scalapb_json4s % Test,
         ),
         Test / parallelExecution := true,
@@ -1801,9 +1810,7 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           auth0_java,
           auth0_jwks,
-          daml_http_test_utils % Test,
           daml_libs_struct_spray_json,
-          daml_test_evidence_generator_scalatest % Test,
           scalatest % Test,
           scalaz_core,
           slf4j_api,

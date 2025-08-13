@@ -5,6 +5,7 @@ package com.digitalasset.canton.admin.api.client.commands
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
+import com.daml.jwt.JwksUrl
 import com.daml.ledger.api.v2.admin.command_inspection_service.CommandInspectionServiceGrpc.CommandInspectionServiceStub
 import com.daml.ledger.api.v2.admin.command_inspection_service.{
   CommandInspectionServiceGrpc,
@@ -78,6 +79,8 @@ import com.daml.ledger.api.v2.event_query_service.{
 }
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.InteractiveSubmissionServiceGrpc.InteractiveSubmissionServiceStub
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
+  ExecuteSubmissionAndWaitRequest,
+  ExecuteSubmissionAndWaitResponse,
   ExecuteSubmissionRequest,
   ExecuteSubmissionResponse,
   GetPreferredPackageVersionRequest,
@@ -166,7 +169,6 @@ import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.ledger.api.{
   IdentityProviderConfig as ApiIdentityProviderConfig,
   IdentityProviderId,
-  JwksUrl,
 }
 import com.digitalasset.canton.ledger.client.services.admin.IdentityProviderConfigClient
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -182,6 +184,7 @@ import com.google.protobuf.empty.Empty
 import com.google.protobuf.field_mask.FieldMask
 import io.grpc.*
 import io.grpc.stub.StreamObserver
+import io.scalaland.chimney.dsl.*
 
 import java.time.Instant
 import java.util.UUID
@@ -1564,6 +1567,46 @@ object LedgerApiCommands {
       override protected def handleResponse(
           response: ExecuteSubmissionResponse
       ): Either[String, ExecuteSubmissionResponse] =
+        Right(response)
+
+      override def timeoutType: TimeoutType = DefaultUnboundedTimeout
+    }
+
+    final case class ExecuteAndWaitCommand(
+        preparedTransaction: PreparedTransaction,
+        transactionSignatures: Map[PartyId, Seq[Signature]],
+        submissionId: String,
+        userId: String,
+        minLedgerTimeAbs: Option[Instant],
+        deduplicationPeriod: Option[DeduplicationPeriod],
+        hashingSchemeVersion: HashingSchemeVersion,
+    ) extends BaseCommand[
+          ExecuteSubmissionAndWaitRequest,
+          ExecuteSubmissionAndWaitResponse,
+          ExecuteSubmissionAndWaitResponse,
+        ] {
+
+      override protected def createRequest(): Either[String, ExecuteSubmissionAndWaitRequest] =
+        ExecuteCommand(
+          preparedTransaction = preparedTransaction,
+          transactionSignatures = transactionSignatures,
+          submissionId = submissionId,
+          userId = userId,
+          deduplicationPeriod = deduplicationPeriod,
+          hashingSchemeVersion = hashingSchemeVersion,
+          minLedgerTimeAbs = minLedgerTimeAbs,
+        ).createRequestInternal()
+          .map(_.transformInto[ExecuteSubmissionAndWaitRequest])
+
+      override protected def submitRequest(
+          service: InteractiveSubmissionServiceStub,
+          request: ExecuteSubmissionAndWaitRequest,
+      ): Future[ExecuteSubmissionAndWaitResponse] =
+        service.executeSubmissionAndWait(request)
+
+      override protected def handleResponse(
+          response: ExecuteSubmissionAndWaitResponse
+      ): Either[String, ExecuteSubmissionAndWaitResponse] =
         Right(response)
 
       override def timeoutType: TimeoutType = DefaultUnboundedTimeout
