@@ -2180,7 +2180,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       filterOutParticipantIds: Seq[ParticipantId] = Seq.empty,
   )(implicit
       ec: ExecutionContext,
-      traceContext: TraceContext,
+      loggingContext: ErrorLoggingContext,
   ): FutureUnlessShutdown[Map[ParticipantId, AcsCommitment.CommitmentType]] = {
     val commitmentTimer = pruningMetrics.map(_.compute.startAsync())
 
@@ -2224,10 +2224,11 @@ object AcsCommitmentProcessor extends HasLoggerName {
       parallelism: PositiveNumeric[Int],
   )(implicit
       ec: ExecutionContext,
-      traceContext: TraceContext,
+      loggingContext: ErrorLoggingContext,
   ): FutureUnlessShutdown[
     Map[ParticipantId, Map[SortedSet[LfPartyId], AcsCommitment.CommitmentType]]
-  ] =
+  ] = {
+    implicit val traceContext = loggingContext.traceContext
     for {
       ipsSnapshot <- synchronizerCrypto.awaitIpsSnapshot("acs-stakeholder-commitments")(
         timestamp.forgetRefinement
@@ -2278,6 +2279,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
     } yield {
       byParticipant
     }
+  }
 
   @VisibleForTesting
   private[pruning] def computeCommitmentsPerParticipant(

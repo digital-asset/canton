@@ -578,7 +578,7 @@ class TestingIdentityFactory(
       serial: PositiveInt = PositiveInt.one,
       isProposal: Boolean = false,
   ): SignedTopologyTransaction[TopologyChangeOp.Replace, TopologyMapping] =
-    SignedTopologyTransaction.create(
+    SignedTopologyTransaction.tryCreate(
       TopologyTransaction(
         TopologyChangeOp.Replace,
         serial,

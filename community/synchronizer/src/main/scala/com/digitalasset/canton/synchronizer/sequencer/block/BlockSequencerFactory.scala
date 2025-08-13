@@ -88,6 +88,7 @@ abstract class BlockSequencerFactory(
     storage,
     nodeParameters.processingTimeouts,
     loggerFactory,
+    nodeParameters.batchingConfig,
   )
 
   protected val name: String
