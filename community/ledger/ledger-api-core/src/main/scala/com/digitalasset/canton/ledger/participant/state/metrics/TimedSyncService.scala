@@ -102,8 +102,8 @@ final class TimedSyncService(delegate: SyncService, metrics: LedgerApiServerMetr
       submissionId: Ref.SubmissionId,
   )(implicit
       traceContext: TraceContext
-  ): CompletionStage[SubmissionResult] =
-    Timed.completionStage(
+  ): FutureUnlessShutdown[SubmissionResult] =
+    Timed.future(
       metrics.services.write.allocateParty,
       delegate.allocateParty(hint, submissionId),
     )

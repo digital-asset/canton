@@ -676,7 +676,7 @@ class CantonSyncService(
       rawSubmissionId: LedgerSubmissionId,
   )(implicit
       traceContext: TraceContext
-  ): CompletionStage[SubmissionResult] =
+  ): FutureUnlessShutdown[SubmissionResult] =
     partyAllocation.allocate(hint, rawSubmissionId)
 
   override def uploadDar(dars: Seq[ByteString], submissionId: Ref.SubmissionId)(implicit

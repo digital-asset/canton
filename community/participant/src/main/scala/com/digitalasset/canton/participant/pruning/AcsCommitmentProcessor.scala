@@ -1590,7 +1590,7 @@ class AcsCommitmentProcessor private (
             }
             batch = Batch.of(protocolVersion, batchForm*)
             _ <- sequencerClient
-              .sendAsync(
+              .send(
                 batch,
                 None,
                 // ACS commitments are "best effort", so no need to amplify them

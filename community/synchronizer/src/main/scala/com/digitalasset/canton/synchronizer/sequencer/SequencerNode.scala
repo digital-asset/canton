@@ -797,7 +797,7 @@ class SequencerNodeBootstrap(
             sequencedEventStore,
             new SendTracker(
               Map(),
-              SendTrackerStore(storage),
+              SendTrackerStore(),
               arguments.metrics.sequencerClient,
               loggerFactory,
               timeouts,

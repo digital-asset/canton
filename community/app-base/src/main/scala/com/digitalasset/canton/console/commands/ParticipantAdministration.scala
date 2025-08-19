@@ -197,6 +197,7 @@ private[console] object ParticipantCommands {
         initialRetryDelay: Option[NonNegativeFiniteDuration] = None,
         maxRetryDelay: Option[NonNegativeFiniteDuration] = None,
         timeTrackerConfig: SynchronizerTimeTrackerConfig = SynchronizerTimeTrackerConfig(),
+        sequencerAlias: SequencerAlias = SequencerAlias.Default,
     ): SynchronizerConnectionConfig = {
       // architecture-handbook-entry-begin: OnboardParticipantToConfig
       val certificates = OptionUtil.emptyStringAsNone(certificatesPath).map { path =>
@@ -207,6 +208,7 @@ private[console] object ParticipantCommands {
       }
       SynchronizerConnectionConfig.tryGrpcSingleConnection(
         synchronizerAlias,
+        sequencerAlias,
         connection,
         manualConnect,
         synchronizerId,
@@ -2035,6 +2037,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
           consoleEnvironment.commandTimeouts.bounded
         ),
         validation: SequencerConnectionValidation = SequencerConnectionValidation.All,
+        sequencerAlias: SequencerAlias = SequencerAlias.Default,
     ): SynchronizerConnectionConfig = {
       val config = ParticipantCommands.synchronizers.to_config(
         synchronizerAlias,
@@ -2044,6 +2047,7 @@ trait ParticipantAdministration extends FeatureFlagFilter {
         certificatesPath,
         priority,
         timeTrackerConfig = timeTrackerConfig,
+        sequencerAlias = sequencerAlias,
       )
       connect_by_config(config, validation, synchronize)
       config

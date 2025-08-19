@@ -23,9 +23,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LedgerSubmissionId, LfPartyId}
 import io.opentelemetry.api.trace.Tracer
 
-import java.util.concurrent.CompletionStage
-import scala.concurrent.{ExecutionContext, Future}
-import scala.jdk.FutureConverters.*
+import scala.concurrent.ExecutionContext
 import scala.util.chaining.*
 
 private[sync] class PartyAllocation(
@@ -42,17 +40,17 @@ private[sync] class PartyAllocation(
   def allocate(
       hint: LfPartyId,
       rawSubmissionId: LedgerSubmissionId,
-  )(implicit traceContext: TraceContext): CompletionStage[SubmissionResult] =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[SubmissionResult] =
     withSpan("CantonSyncService.allocateParty") { implicit traceContext => span =>
       span.setAttribute("submission_id", rawSubmissionId)
 
       allocateInternal(hint, rawSubmissionId)
-    }.asJava
+    }
 
   private def allocateInternal(
       partyName: LfPartyId,
       rawSubmissionId: LedgerSubmissionId,
-  )(implicit traceContext: TraceContext): Future[SubmissionResult] = {
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[SubmissionResult] = {
     import com.google.rpc.status.Status
     import io.grpc.Status.Code
 
@@ -149,5 +147,5 @@ private[sync] class PartyAllocation(
         logger.debug(s"Allocated party $partyName::${participantId.namespace}")
       },
     )
-  }.failOnShutdownToAbortException("Party Allocation")
+  }
 }
