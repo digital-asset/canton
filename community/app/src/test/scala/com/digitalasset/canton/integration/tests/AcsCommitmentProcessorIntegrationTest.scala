@@ -30,7 +30,10 @@ import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors
   CommitmentsMismatch,
   NoSharedContracts,
 }
-import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceSynchronizerDisabledUs
+import com.digitalasset.canton.participant.sync.SyncServiceError.{
+  SyncServiceSynchronizerDisabledUs,
+  SyncServiceSynchronizerDisconnect,
+}
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.MemberAccessDisabled
 import com.digitalasset.canton.sequencing.protocol.{MemberRecipient, SubmissionRequest}
@@ -634,6 +637,19 @@ sealed trait AcsCommitmentProcessorIntegrationTest
           fromP2ToP3Only.get() shouldBe 1
           fromP3ToP2Only.get() shouldBe 1
         }
+
+        // When sequencer1 processes the removal of participant1's trust certificate, it will close participant1's
+        // subscription. participant1 will try to reconnect, but as sequencer1 answers with `CLIENT_AUTHENTICATION_REJECTED`,
+        // participant1 will eventually disconnect from this synchronizer.
+        // Wait for this disconnection to happen.
+        eventually() {
+          // The sequencer connection pool internal mechanisms to restart connections rely on the clock time advancing.
+          simClock.advance(JDuration.ofSeconds(1))
+
+          participant1.synchronizers.is_connected(
+            initializedSynchronizers(daName).synchronizerId
+          ) shouldBe false
+        }
       },
       forEvery(_) { entry =>
         entry.message should (include(
@@ -649,7 +665,8 @@ sealed trait AcsCommitmentProcessorIntegrationTest
           // because the sequencer may cut the participant's connection before delivering the topology broadcast
           or include regex ("Waiting for transaction .* to be observed")
           or include("Unknown recipients: PAR::participant1")
-          or include("(Eligible) Senders are unknown: PAR::participant1"))
+          or include("(Eligible) Senders are unknown: PAR::participant1")
+          or include("UNAVAILABLE/Channel shutdownNow invoked"))
       },
     )
   }
@@ -690,6 +707,9 @@ sealed trait AcsCommitmentProcessorIntegrationTest
           change = TopologyChangeOp.Remove,
         )
         eventually() {
+          // The sequencer connection pool internal mechanisms to restart connections rely on the clock time advancing.
+          simClock.advance(JDuration.ofSeconds(1))
+
           participant2.synchronizers.is_connected(
             initializedSynchronizers(acmeName).synchronizerId
           ) shouldBe false
@@ -746,7 +766,9 @@ sealed trait AcsCommitmentProcessorIntegrationTest
           // is processed by the sequencer after the participant is disabled
           include(
             "Health-check service responded NOT_SERVING for"
-          ))
+          )
+          // Added due to pool not propagating the "disabled us" error
+          or include(SyncServiceSynchronizerDisconnect.id))
       },
     )
   }

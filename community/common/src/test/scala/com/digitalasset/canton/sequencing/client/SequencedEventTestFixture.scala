@@ -21,6 +21,7 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.sequencing.{
   OrdinarySerializedEvent,
+  PostAggregationHandler,
   SequencedSerializedEvent,
   SequencerAggregator,
   SequencerTestUtils,
@@ -37,7 +38,7 @@ import org.scalatest.Assertions.fail
 import org.scalatest.concurrent.{PatienceConfiguration, ScalaFutures}
 import org.scalatest.time.{Seconds, Span}
 
-import scala.concurrent.ExecutionContext
+import scala.concurrent.{ExecutionContext, Future}
 
 class SequencedEventTestFixture(
     loggerFactory: NamedLoggerFactory,
@@ -121,15 +122,29 @@ class SequencedEventTestFixture(
         NonEmptyUtil.fromUnsafe(Set(sequencerAlice)),
         PositiveInt.tryCreate(1),
       )
-  ) =
-    new SequencerAggregator(
+  ) = {
+    val useNewConnectionPool = testedProtocolVersion >= ProtocolVersion.dev
+
+    val aggregator = new SequencerAggregator(
       cryptoPureApi = subscriberCryptoApi.pureCrypto,
       eventInboxSize = PositiveInt.tryCreate(2),
       loggerFactory = loggerFactory,
       initialConfig = config,
+      updateSendTracker = _ => (),
       timeouts = timeouts,
       futureSupervisor = futureSupervisor,
+      useNewConnectionPool = useNewConnectionPool,
     )
+
+    if (useNewConnectionPool) {
+      aggregator.setPostAggregationHandler(new PostAggregationHandler {
+        override def handlerIsIdleF: Future[Unit] = Future.unit
+        override def signalHandler()(implicit traceContext: TraceContext): Unit = ()
+      })
+    }
+
+    aggregator
+  }
 
   def config(
       expectedSequencers: Set[SequencerId] = Set(sequencerAlice),
@@ -166,7 +181,7 @@ class SequencedEventTestFixture(
     }
     val envelope = ClosedEnvelope.create(
       serializedOverride.getOrElse(
-        EnvelopeContent.tryCreate(message, testedProtocolVersion).toByteString
+        EnvelopeContent(message, testedProtocolVersion).toByteString
       ),
       Recipients.cc(subscriberId),
       Seq.empty,

@@ -9,11 +9,19 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2025-08-21 (Exclusive)
+
+- **Breaking** In verbose mode reporting, record values will no longer contain trailing Optional fields that
+  have a value of [None](https://docs.daml.com/daml/stdlib/Prelude.html#type-da-internal-prelude-optional-37153).
+  The reason for this is so that the same structural representation is produced independently of the
+  package version that was used to enrich it.
+
 ## until 2025-08-13 (Exclusive)
 
 - **Breaking** In `com/digitalasset/canton/admin/participant/v30/party_management_service.proto` used by Online Party Replication,
   the `GetAddPartyStatusResponse.Status` enum has been extended with a new value, `FullyReplicatedAcs` shifting the
   Protobuf ordinals for some existing status enum values.
+- Endpoints and console commands LocatePruningTimestamp are renamed to FindPruningTimestamp.
 
 - **Breaking** Transactions with transient events for which there was an intersection between submitters
   and querying parties were previously exposed as transactions with empty events in AcsDelta shape. Those transactions
