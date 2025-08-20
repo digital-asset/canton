@@ -469,7 +469,7 @@ abstract class ProtocolProcessor[
         futureSupervisor,
       )
       _ <- sequencerClient
-        .sendAsync(
+        .send(
           batch,
           callback = res => sendResultP.trySuccess(res).discard,
           maxSequencingTime = maxSequencingTime,

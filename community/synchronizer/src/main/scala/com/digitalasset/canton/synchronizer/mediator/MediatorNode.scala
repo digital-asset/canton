@@ -546,7 +546,7 @@ class MediatorNodeBootstrap(
         timeouts,
         synchronizerLoggerFactory,
       )
-      sendTrackerStore = SendTrackerStore(storage)
+      sendTrackerStore = SendTrackerStore()
       sequencerCounterTrackerStore = SequencerCounterTrackerStore(
         storage,
         indexedSynchronizerId,

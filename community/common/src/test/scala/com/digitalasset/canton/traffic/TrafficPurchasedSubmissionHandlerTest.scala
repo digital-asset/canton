@@ -86,7 +86,7 @@ class TrafficPurchasedSubmissionHandlerTest
     val callbackCapture: ArgumentCaptor[SendCallback] =
       ArgumentCaptor.forClass(classOf[SendCallback])
     when(
-      sequencerClient.sendAsync(
+      sequencerClient.send(
         batchCapture.capture(),
         any[Option[CantonTimestamp]],
         maxSequencingTimeCapture.capture(),
@@ -168,7 +168,7 @@ class TrafficPurchasedSubmissionHandlerTest
     clock.advanceTo(newTime)
 
     when(
-      sequencerClient.sendAsync(
+      sequencerClient.send(
         any[Batch[DefaultOpenEnvelope]],
         any[Option[CantonTimestamp]],
         maxSequencingTimeCapture.capture(),
@@ -223,7 +223,7 @@ class TrafficPurchasedSubmissionHandlerTest
 
   "catch sequencer client failures" in {
     when(
-      sequencerClient.sendAsync(
+      sequencerClient.send(
         any[Batch[DefaultOpenEnvelope]],
         any[Option[CantonTimestamp]],
         any[CantonTimestamp],
@@ -259,7 +259,7 @@ class TrafficPurchasedSubmissionHandlerTest
     val callbackCapture: ArgumentCaptor[SendCallback] =
       ArgumentCaptor.forClass(classOf[SendCallback])
     when(
-      sequencerClient.sendAsync(
+      sequencerClient.send(
         any[Batch[DefaultOpenEnvelope]],
         any[Option[CantonTimestamp]],
         any[CantonTimestamp],
@@ -322,7 +322,7 @@ class TrafficPurchasedSubmissionHandlerTest
     val callbackCapture: ArgumentCaptor[SendCallback] =
       ArgumentCaptor.forClass(classOf[SendCallback])
     when(
-      sequencerClient.sendAsync(
+      sequencerClient.send(
         any[Batch[DefaultOpenEnvelope]],
         any[Option[CantonTimestamp]],
         any[CantonTimestamp],

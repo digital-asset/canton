@@ -104,7 +104,7 @@ class SequencerBasedRegisterTopologyTransactionHandle(
     )
     logger.debug(s"Broadcasting topology transaction: ${request.transactions}")
     EitherTUtil.logOnErrorU(
-      sequencerClient.sendAsync(
+      sequencerClient.send(
         Batch.of(protocolVersion, (request, Recipients.cc(TopologyBroadcastAddress.recipient))),
         maxSequencingTime = maxSequencingTime,
         callback = sendCallback,

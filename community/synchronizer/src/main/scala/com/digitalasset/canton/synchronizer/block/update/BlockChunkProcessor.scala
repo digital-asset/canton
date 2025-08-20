@@ -12,7 +12,12 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.base.error.BaseAlarm
 import com.digitalasset.canton.SequencerCounter
-import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoClient, SynchronizerCryptoClient}
+import com.digitalasset.canton.crypto.{
+  HashPurpose,
+  SyncCryptoApi,
+  SyncCryptoClient,
+  SynchronizerCryptoClient,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
@@ -41,7 +46,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import scala.collection.mutable
 import scala.concurrent.{ExecutionContext, Future}
 
-import BlockUpdateGeneratorImpl.{SequencedSubmission, State}
+import BlockUpdateGeneratorImpl.{SequencedValidatedSubmission, State}
 import SequencedSubmissionsValidator.SequencedSubmissionsValidationResult
 
 /** Processes a chunk of events in a block, yielding a [[ChunkUpdate]].
@@ -58,14 +63,20 @@ final class BlockChunkProcessor(
 )(implicit closeContext: CloseContext)
     extends NamedLogging {
 
-  private val sequencedSubmissionsValidator =
-    new SequencedSubmissionsValidator(
+  private val submissionRequestValidator =
+    new SubmissionRequestValidator(
       synchronizerSyncCryptoApi,
       sequencerId,
       rateLimitManager,
       loggerFactory,
       metrics,
       memberValidator = memberValidator,
+    )
+
+  private val sequencedSubmissionsValidator =
+    new SequencedSubmissionsValidator(
+      loggerFactory,
+      submissionRequestValidator = submissionRequestValidator,
     )
 
   def processDataChunk(
@@ -93,24 +104,55 @@ final class BlockChunkProcessor(
       "submission metric updating failed",
     )
 
-    for {
-      sequencedSubmissionsWithSnapshots <-
-        addSnapshots(
-          state.latestSequencerEventTimestamp,
-          sequencersSequencerCounter = None,
-          height,
-          index,
-          orderingRequests,
-        )
+    def validateSubmission(
+        sequencingTimestamp: CantonTimestamp,
+        signedOrderingRequest: SignedOrderingRequest,
+        topologyOrSequencingSnapshot: SyncCryptoApi,
+        topologyTimestampError: Option[SequencerDeliverError],
+        traceContext: TraceContext,
+    ): FutureUnlessShutdown[SequencedValidatedSubmission] =
+      submissionRequestValidator
+        .performIndependentValidations(
+          sequencingTimestamp,
+          signedOrderingRequest.signedSubmissionRequest,
+          topologyOrSequencingSnapshot,
+          topologyTimestampError,
+        )(traceContext, ec)
+        .value
+        .run
+        .map { case (trafficConsumption, errorOrResolvedGroups) =>
+          SequencedValidatedSubmission(
+            sequencingTimestamp,
+            signedOrderingRequest,
+            topologyOrSequencingSnapshot,
+            topologyTimestampError,
+            trafficConsumption,
+            errorOrResolvedGroups,
+          )(traceContext)
+        }
 
-      acksValidationResult <- processAcknowledgements(state, fixedTsChanges)
+    // Note: this runs for every submission in parallel using parTraverse
+    val validatedSequencedSubmissionsF = addSnapshotsAndValidateSubmissions(
+      state.latestSequencerEventTimestamp,
+      sequencersSequencerCounter = None,
+      height,
+      index,
+      orderingRequests,
+      validateSubmission,
+    )
+
+    val acksValidationResultF = processAcknowledgements(state, fixedTsChanges)
+
+    for {
+      validatedSequencedSubmissions <- validatedSequencedSubmissionsF
+      acksValidationResult <- acksValidationResultF
       (acksByMember, invalidAcks) = acksValidationResult
 
       validationResult <-
-        sequencedSubmissionsValidator.validateSequencedSubmissions(
+        sequencedSubmissionsValidator.sequentialApplySubmissionsAndEmitOutcomes(
           state,
           height,
-          sequencedSubmissionsWithSnapshots,
+          validatedSequencedSubmissions,
         )
       SequencedSubmissionsValidationResult(
         finalInFlightAggregations,
@@ -344,13 +386,22 @@ final class BlockChunkProcessor(
     }
   }
 
-  private def addSnapshots(
+  private def addSnapshotsAndValidateSubmissions(
       latestSequencerEventTimestamp: Option[CantonTimestamp],
       sequencersSequencerCounter: Option[SequencerCounter],
       height: Long,
       index: Int,
       submissionRequests: Seq[(CantonTimestamp, Traced[SignedOrderingRequest])],
-  )(implicit executionContext: ExecutionContext): FutureUnlessShutdown[Seq[SequencedSubmission]] =
+      validateSubmission: (
+          CantonTimestamp,
+          SignedOrderingRequest,
+          SyncCryptoApi,
+          Option[SequencerDeliverError],
+          TraceContext,
+      ) => FutureUnlessShutdown[SequencedValidatedSubmission],
+  )(implicit
+      executionContext: ExecutionContext
+  ): FutureUnlessShutdown[Seq[SequencedValidatedSubmission]] =
     submissionRequests.zipWithIndex.parTraverse {
       case ((sequencingTimestamp, tracedSubmissionRequest), requestIndex) =>
         tracedSubmissionRequest.withTraceContext { implicit traceContext => orderingRequest =>
@@ -416,12 +467,14 @@ final class BlockChunkProcessor(
                     snapshot
                   }
             }
-          } yield SequencedSubmission(
-            sequencingTimestamp,
-            orderingRequest,
-            topologyOrSequencingSnapshot,
-            topologySnapshotOrErrO.mapFilter(_.swap.toOption),
-          )(traceContext)
+            sequencedValidatedSubmission <- validateSubmission(
+              sequencingTimestamp,
+              orderingRequest,
+              topologyOrSequencingSnapshot,
+              topologySnapshotOrErrO.mapFilter(_.swap.toOption),
+              traceContext,
+            )
+          } yield sequencedValidatedSubmission
         }
     }
 
