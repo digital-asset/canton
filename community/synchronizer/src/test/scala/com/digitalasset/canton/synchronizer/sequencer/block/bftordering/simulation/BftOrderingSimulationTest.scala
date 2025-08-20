@@ -11,6 +11,7 @@ import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, NamedLoggi
 import com.digitalasset.canton.sequencing.protocol.MaxRequestSizeToDeserialize
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcConnectionState
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.{
   P2PEndpoint,
   PlainTextP2PEndpoint,
@@ -22,6 +23,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.EpochChecker
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.OutputModule.RequestInspector
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.memory.SimulationOutputMetadataStore
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.P2PNetworkOutModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.data.memory.SimulationP2PEndpointsStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.data.memory.SimulationBftOrdererPruningSchedulerStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.{
@@ -40,7 +42,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.SimulationModuleSystem.{
   SimulationEnv,
   SimulationInitializer,
-  SimulationP2PNetworkRefFactory,
+  SimulationP2PNetworkManager,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.bftordering.{
   BftOrderingVerifier,
@@ -375,13 +377,15 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
 
     val logger = loggerFactory.append("endpoint", s"${endpoint.address}")
 
-    val thisNode = endpointToTestBftNodeId(endpoint)
+    val thisBftNodeId = endpointToTestBftNodeId(endpoint)
     val orderingTopologyProvider =
       new SimulationOrderingTopologyProvider(
-        thisNode,
+        thisBftNodeId,
         getAllEndpointsToTopologyData,
         loggerFactory,
       )
+
+    val p2pGrpcConnectionState = new P2PGrpcConnectionState(loggerFactory)
 
     SimulationInitializer(
       {
@@ -399,10 +403,10 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
             )(implicit synchronizerProtocolVersion: ProtocolVersion): Boolean = true
           }
 
-          new BftOrderingModuleSystemInitializer[SimulationEnv, SimulationP2PNetworkRefFactory[
+          new BftOrderingModuleSystemInitializer[SimulationEnv, SimulationP2PNetworkManager[
             BftOrderingMessage
           ]](
-            thisNode,
+            thisBftNodeId,
             BftBlockOrdererConfig(
               availabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning = 100
             ),
@@ -410,8 +414,9 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
             DefaultEpochLength,
             stores,
             orderingTopologyProvider,
-            new SimulationBlockSubscription(thisNode, sendQueue),
+            new SimulationBlockSubscription(thisBftNodeId, sendQueue),
             sequencerSnapshotAdditionalInfo,
+            new P2PNetworkOutModule.State(p2pGrpcConnectionState),
             clock,
             availabilityRandom,
             noopMetrics,
@@ -421,7 +426,8 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
             epochChecker,
           )
       },
-      IssClient.initializer(simSettings, thisNode, logger, timeouts),
+      IssClient.initializer(simSettings, thisBftNodeId, logger, timeouts),
+      p2pGrpcConnectionState,
       initializeImmediately,
     )
   }

@@ -163,7 +163,7 @@ object SequencerClientFactory {
           for {
             connections <- EitherT.fromEither[FutureUnlessShutdown](
               NonEmpty
-                .from(connectionPool.getOneConnectionPerSequencer())
+                .from(connectionPool.getOneConnectionPerSequencer("get-traffic-state"))
                 .toRight(
                   s"No connection available to retrieve traffic state from synchronizer for $member"
                 )
@@ -252,8 +252,7 @@ object SequencerClientFactory {
 
           // fetch the initial set of pending sends to initialize the client with.
           // as it owns the client that should be writing to this store it should not be racy.
-          initialPendingSends <- EitherT
-            .right(sendTrackerStore.fetchPendingSends)
+          initialPendingSends = sendTrackerStore.fetchPendingSends
           trafficStateController = new TrafficStateController(
             member,
             loggerFactory,

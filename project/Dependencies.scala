@@ -61,7 +61,7 @@ object Dependencies {
   lazy val mockito_scala_version = "1.16.3"
   lazy val monocle_version = "3.2.0"
   lazy val munit_version = "0.7.26"
-  // pick the version of boring ssl and netty native from this table: https://github.com/grpc/grpc-java/blob/master/SECURITY.md#netty
+  // Pick the version of boring ssl and netty native from this table: https://github.com/grpc/grpc-java/blob/master/SECURITY.md#netty
   // required for ALPN (which is required for TLS+HTTP/2) when running on Java 8. JSSE will be used on Java 9+.
   lazy val grpc_version = "1.67.1"
   lazy val netty_boring_ssl_version = "2.0.65.Final"

@@ -779,6 +779,31 @@ object BuildCommon {
             (Test / damlDarOutput).value / "CantonLfV21-3.4.0.dar",
             "com.digitalasset.canton.lfv21",
           ),
+          (
+            (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "Account",
+            (Test / damlDarOutput).value / "Account-3.4.0.dar",
+            "com.digitalasset.canton.http.json.tests.account",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "CIou",
+            (Test / damlDarOutput).value / "CIou-3.4.0.dar",
+            "com.digitalasset.canton.http.json.tests.ciou",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "User",
+            (Test / damlDarOutput).value / "User-3.4.0.dar",
+            "com.digitalasset.canton.http.json.tests.user",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "Upgrades" / "V1",
+            (Test / damlDarOutput).value / "foo-0.0.1.dar",
+            "com.digitalasset.canton.http.json.tests.upgrades.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "Upgrades" / "V2",
+            (Test / damlDarOutput).value / "foo-0.0.2.dar",
+            "com.digitalasset.canton.http.json.tests.upgrades.v2",
+          ),
         ),
         Test / useVersionedDarName := true,
         Test / damlEnableProjectVersionOverride := false,
@@ -1783,9 +1808,15 @@ object BuildCommon {
           libraryDependencies ++= Seq(
             daml_lf_language,
             "com.lihaoyi" %% "ujson" % "4.0.2",
+            scalatest % Test,
+            daml_lf_archive_reader % Test,
           ),
         )
-        .dependsOn(DamlProjects.`ledger-api`)
+        .dependsOn(
+          DamlProjects.`ledger-api`,
+          `community-testing` % Test,
+          `community-common` % Test,
+        )
   }
 
   object DamlProjects {
