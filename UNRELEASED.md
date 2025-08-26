@@ -9,6 +9,11 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2025-08-25 (Exclusive)
+- The HTTP connection timeout is configurable in the Ledger JSON API via
+  `canton.participants.<participant-id>.http-ledger-api.server.request-timeout=<duration>`. Configure this value to allow
+  more complex Ledger API requests to complete (e.g. `/state/active-contracts`). The default value is 20 seconds.
+
 ## until 2025-07-23 (Exclusive)
 - Bugfix: Corrected HTTP method for the JSON Ledger API endpoint `interactive-submission/preferred-packages` from GET to POST.
 

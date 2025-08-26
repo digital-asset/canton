@@ -952,6 +952,9 @@ object CantonConfig {
       deriveReader[SequencerHighAvailabilityConfig]
     lazy implicit final val sequencerConfigDatabaseReader: ConfigReader[SequencerConfig.Database] =
       deriveReader[SequencerConfig.Database]
+    lazy implicit val blockSequencerStreamInstrumentationConfigReader
+        : ConfigReader[BlockSequencerStreamInstrumentationConfig] =
+      deriveReader[BlockSequencerStreamInstrumentationConfig]
     lazy implicit final val blockSequencerConfigReader: ConfigReader[BlockSequencerConfig] =
       deriveReader[BlockSequencerConfig]
     lazy implicit final val sequencerWriterCommitModeConfigReader: ConfigReader[CommitMode] =
@@ -1554,6 +1557,9 @@ object CantonConfig {
       deriveWriter[SequencerHighAvailabilityConfig]
     lazy implicit final val sequencerConfigDatabaseWriter: ConfigWriter[SequencerConfig.Database] =
       deriveWriter[SequencerConfig.Database]
+    lazy implicit val blockSequencerStreamInstrumentationConfigWriter
+        : ConfigWriter[BlockSequencerStreamInstrumentationConfig] =
+      deriveWriter[BlockSequencerStreamInstrumentationConfig]
     lazy implicit final val blockSequencerConfigWriter: ConfigWriter[BlockSequencerConfig] =
       deriveWriter[BlockSequencerConfig]
     lazy implicit final val sequencerReaderConfigWriter: ConfigWriter[SequencerReaderConfig] =

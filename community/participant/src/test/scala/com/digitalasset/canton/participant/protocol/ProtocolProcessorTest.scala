@@ -301,6 +301,8 @@ class ProtocolProcessorTest
     when(ledgerApiIndexer.onlyForTestingTransactionInMemoryStore).thenAnswer(None)
 
     val timeTracker = mock[SynchronizerTimeTracker]
+    when(timeTracker.requestTick(any[CantonTimestamp], any[Boolean])(any[TraceContext]))
+      .thenReturn(SynchronizerTimeTracker.DummyTickRequest)
     val recordOrderPublisher = new RecordOrderPublisher(
       synchronizerId = synchronizer,
       initSc = SequencerCounter.Genesis,

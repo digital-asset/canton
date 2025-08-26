@@ -435,7 +435,6 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with Fa
 
           for {
             _ <- new InitialTopologySnapshotValidator(
-              protocolVersion = testedProtocolVersion,
               pureCrypto = new SynchronizerCryptoPureApi(
                 defaultStaticSynchronizerParameters,
                 testData.factory.cryptoApi.crypto.pureCrypto,
@@ -579,7 +578,6 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with Fa
 
           for {
             _ <- new InitialTopologySnapshotValidator(
-              testedProtocolVersion,
               new SynchronizerCryptoPureApi(
                 defaultStaticSynchronizerParameters,
                 factory.cryptoApi.crypto.pureCrypto,
@@ -627,7 +625,6 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with Fa
 
           for {
             _ <- new InitialTopologySnapshotValidator(
-              testedProtocolVersion,
               new SynchronizerCryptoPureApi(
                 defaultStaticSynchronizerParameters,
                 factory.cryptoApi.crypto.pureCrypto,
