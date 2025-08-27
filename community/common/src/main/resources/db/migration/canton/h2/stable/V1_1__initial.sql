@@ -328,6 +328,16 @@ create table par_commitment_snapshot_time (
     primary key (synchronizer_idx)
 );
 
+-- Stores commitment reinitialization status (start, end)
+create table par_commitment_reinitialization (
+    synchronizer_idx integer not null,
+    -- UTC timestamp in microseconds relative to EPOCH indicating whether a repair is ongoing for a timestamp
+    ts_reinit_ongoing bigint,
+    -- UTC timestamp in microseconds relative to EPOCH indicating the timestamp of the last completed reinitialization
+    ts_reinit_completed bigint,
+    primary key (synchronizer_idx)
+);
+
 -- Remote commitments that were received but could not yet be checked because the local participant is lagging behind
 create table par_commitment_queue (
     synchronizer_idx integer not null,
@@ -784,6 +794,8 @@ create table ord_availability_batch(
     primary key (id)
 );
 
+create index idx_ord_availability_batch_prune on ord_availability_batch(epoch_number);
+
 -- messages stored during the progress of a block possibly across different pbft views
 create table ord_pbft_messages_in_progress(
     -- global sequence number of the ordered block
@@ -810,6 +822,8 @@ create table ord_pbft_messages_in_progress(
     primary key (block_number, view_number, from_sequencer_id, discriminator)
 );
 
+create index idx_ord_pbft_messages_in_progress_prune on ord_pbft_messages_in_progress(epoch_number);
+
 -- final pbft messages stored only once for each block when it completes
 -- currently only commit messages and the pre-prepare used for that block
 -- overwrite attempts with different commit sets can happen during catch-up for already completed blocks and are ignored
@@ -835,6 +849,8 @@ create table ord_pbft_messages_completed(
     primary key (block_number, epoch_number, from_sequencer_id, discriminator)
 );
 
+create index idx_ord_pbft_messages_completed_prune on ord_pbft_messages_completed(epoch_number);
+
 -- Stores metadata for blocks that have been assigned timestamps in the output module
 create table ord_metadata_output_blocks (
     epoch_number bigint not null,
@@ -842,6 +858,8 @@ create table ord_metadata_output_blocks (
     bft_ts bigint not null,
     primary key (block_number)
 );
+
+create index idx_ord_metadata_output_blocks_prune on ord_metadata_output_blocks(epoch_number);
 
 -- Stores output metadata for epochs
 create table ord_metadata_output_epochs (

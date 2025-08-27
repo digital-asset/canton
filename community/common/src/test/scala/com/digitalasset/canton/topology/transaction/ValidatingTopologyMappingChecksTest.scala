@@ -110,6 +110,37 @@ class ValidatingTopologyMappingChecksTest
         )
       }
 
+      "reject only REPLACE transactions with the highest possible serial" in {
+        import factory.SigningKeys.key1
+        val (checks, _) = mk()
+
+        val maxSerialReplace = factory.mkAdd(
+          NamespaceDelegation.tryCreate(Namespace(key1.fingerprint), key1, CanSignAllMappings),
+          serial = PositiveInt.MaxValue,
+        )
+        checkTransaction(checks, maxSerialReplace) shouldBe Left(
+          TopologyTransactionRejection.InvalidTopologyMapping(
+            s"The serial for a REPLACE must be less than ${PositiveInt.MaxValue}."
+          )
+        )
+
+        val maxSerialMinsOneReplace = factory.mkAdd(
+          NamespaceDelegation.tryCreate(Namespace(key1.fingerprint), key1, CanSignAllMappings),
+          serial = PositiveInt.tryCreate(PositiveInt.MaxValue.value - 1),
+        )
+        val maxSerialRemove = factory.mkRemove(
+          NamespaceDelegation.tryCreate(Namespace(key1.fingerprint), key1, CanSignAllMappings),
+          serial = PositiveInt.MaxValue,
+        )
+
+        checkTransaction(checks, toValidate = maxSerialMinsOneReplace) shouldBe Right(())
+        checkTransaction(
+          checks,
+          toValidate = maxSerialRemove,
+          inStore = Some(maxSerialMinsOneReplace),
+        ) shouldBe Right(())
+      }
+
       "reject if removal also changes the content" in {
         import factory.SigningKeys.{key1, key2}
         val (checks, _) = mk()
@@ -239,7 +270,7 @@ class ValidatingTopologyMappingChecksTest
             EffectiveTime(ts.immediateSuccessor),
             codes = Set(Code.NamespaceDelegation),
             pendingChangesLookup = Map(nsd3Replace_1.mapping.uniqueKey -> nsd3Replace_1),
-            filterNamespace = Some(Seq(ns2, ns3)),
+            filterNamespace = Some(NonEmpty(Seq, ns2, ns3)),
           )
           .futureValueUS
           .value should contain theSameElementsAs Seq(nsd2Replace_1, nsd3Replace_1)
@@ -454,10 +485,10 @@ class ValidatingTopologyMappingChecksTest
       "reject when participants don't have a valid encryption or signing key" in {
         val (checks, store) = mk()
         val p2MissingEncKey = factory.mkAdd(
-          OwnerToKeyMapping(participant2, NonEmpty(Seq, factory.SigningKeys.key1))
+          OwnerToKeyMapping.tryCreate(participant2, NonEmpty(Seq, factory.SigningKeys.key1))
         )
         val p3MissingSigningKey = factory.mkAdd(
-          OwnerToKeyMapping(participant3, NonEmpty(Seq, factory.EncryptionKeys.key1))
+          OwnerToKeyMapping.tryCreate(participant3, NonEmpty(Seq, factory.EncryptionKeys.key1))
         )
 
         addToStore(store, p1_dtc, p2_dtc, p3_dtc, p2MissingEncKey, p3MissingSigningKey)
@@ -1000,15 +1031,15 @@ class ValidatingTopologyMappingChecksTest
       "report no errors for valid mappings" in {
         val (checks, _) = mk()
         val okm_sequencer = factory.mkAddMultiKey(
-          OwnerToKeyMapping(sequencerId, NonEmpty(Seq, factory.SigningKeys.key1)),
+          OwnerToKeyMapping.tryCreate(sequencerId, NonEmpty(Seq, factory.SigningKeys.key1)),
           NonEmpty(Set, factory.SigningKeys.key1),
         )
         val okm_mediator = factory.mkAddMultiKey(
-          OwnerToKeyMapping(mediatorId, NonEmpty(Seq, factory.SigningKeys.key1)),
+          OwnerToKeyMapping.tryCreate(mediatorId, NonEmpty(Seq, factory.SigningKeys.key1)),
           NonEmpty(Set, factory.SigningKeys.key1),
         )
         val okm_participant = factory.mkAddMultiKey(
-          OwnerToKeyMapping(
+          OwnerToKeyMapping.tryCreate(
             participant1,
             NonEmpty(Seq, factory.EncryptionKeys.key1, factory.SigningKeys.key1),
           ),
@@ -1022,19 +1053,19 @@ class ValidatingTopologyMappingChecksTest
       "reject minimum key violations" in {
         val (checks, _) = mk()
         val okm_sequencerNoSigningKey = factory.mkAddMultiKey(
-          OwnerToKeyMapping(sequencerId, NonEmpty(Seq, factory.EncryptionKeys.key1)),
+          OwnerToKeyMapping.tryCreate(sequencerId, NonEmpty(Seq, factory.EncryptionKeys.key1)),
           NonEmpty(Set, factory.SigningKeys.key1),
         )
         val okm_mediatorNoSigningKey = factory.mkAddMultiKey(
-          OwnerToKeyMapping(mediatorId, NonEmpty(Seq, factory.EncryptionKeys.key1)),
+          OwnerToKeyMapping.tryCreate(mediatorId, NonEmpty(Seq, factory.EncryptionKeys.key1)),
           NonEmpty(Set, factory.SigningKeys.key1),
         )
         val okm_participantNoSigningKey = factory.mkAddMultiKey(
-          OwnerToKeyMapping(participant1, NonEmpty(Seq, factory.EncryptionKeys.key1)),
+          OwnerToKeyMapping.tryCreate(participant1, NonEmpty(Seq, factory.EncryptionKeys.key1)),
           NonEmpty(Set, factory.SigningKeys.key1),
         )
         val okm_participantNoEncryptionKey = factory.mkAddMultiKey(
-          OwnerToKeyMapping(participant1, NonEmpty(Seq, factory.SigningKeys.key1)),
+          OwnerToKeyMapping.tryCreate(participant1, NonEmpty(Seq, factory.SigningKeys.key1)),
           NonEmpty(Set, factory.SigningKeys.key1),
         )
 
@@ -1072,7 +1103,7 @@ class ValidatingTopologyMappingChecksTest
           NamespaceDelegation.tryCreate(member.namespace, key, CanSignAllMappings),
           key,
         ),
-        factory.mkAdd(OwnerToKeyMapping(member, NonEmpty(Seq, key)), key),
+        factory.mkAdd(OwnerToKeyMapping.tryCreate(member, NonEmpty(Seq, key)), key),
       )
     }.unzip
 

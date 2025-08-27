@@ -57,6 +57,7 @@ import com.digitalasset.canton.protocol.messages.Verdict.{
 }
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
+import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, ReassignmentTag}
@@ -95,7 +96,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
 
   override type PendingSubmissions = concurrent.Map[RootHash, PendingReassignmentSubmission]
 
-  override type PendingSubmissionData = PendingReassignmentSubmission
+  override type PendingSubmissionData = Some[PendingReassignmentSubmission]
 
   override type RequestError = ReassignmentProcessorError
 
@@ -120,18 +121,27 @@ private[reassignment] trait ReassignmentProcessingSteps[
   override def removePendingSubmission(
       pendingSubmissions: concurrent.Map[RootHash, PendingReassignmentSubmission],
       pendingSubmissionId: RootHash,
-  ): Option[PendingReassignmentSubmission] =
-    pendingSubmissions.remove(pendingSubmissionId)
+  ): Option[Some[PendingReassignmentSubmission]] =
+    pendingSubmissions.remove(pendingSubmissionId).map { pending =>
+      pending.decisionTimeTickRequestTracker.cancel()
+      Some(pending)
+    }
+
+  override def setDecisionTimeTickRequest(
+      pendingSubmissionData: Some[PendingReassignmentSubmission],
+      requestedTick: SynchronizerTimeTracker.TickRequest,
+  ): Unit =
+    pendingSubmissionData.value.decisionTimeTickRequestTracker.setRequest(requestedTick)
 
   override def postProcessSubmissionRejectedCommand(
       error: TransactionError,
-      pendingSubmission: PendingReassignmentSubmission,
+      pendingSubmission: Some[PendingReassignmentSubmission],
   )(implicit traceContext: TraceContext): Unit =
-    pendingSubmission.reassignmentCompletion.success(error.rpcStatus())
+    pendingSubmission.value.reassignmentCompletion.success(error.rpcStatus())
 
   override def postProcessResult(
       verdict: Verdict,
-      pendingSubmission: PendingReassignmentSubmission,
+      pendingSubmission: Some[PendingReassignmentSubmission],
   )(implicit traceContext: TraceContext): Unit = {
     val status = verdict match {
       case _: Approve =>
@@ -139,9 +149,9 @@ private[reassignment] trait ReassignmentProcessingSteps[
       case reject: MediatorReject =>
         reject.reason
       case reasons: ParticipantReject =>
-        reasons.keyEvent.reason()
+        reasons.keyErrorDetails.reason
     }
-    pendingSubmission.reassignmentCompletion.success(status)
+    pendingSubmission.value.reassignmentCompletion.success(status)
   }
 
   def localRejectFromActivenessCheck(
@@ -167,17 +177,15 @@ private[reassignment] trait ReassignmentProcessingSteps[
   ): EitherT[FutureUnlessShutdown, ReassignmentProcessorError, PendingReassignmentSubmission] = {
     val pendingSubmission = PendingReassignmentSubmission(mkReassignmentId)
     val existing = pendingSubmissionMap.putIfAbsent(rootHash, pendingSubmission)
-    EitherT
-      .cond[Future](
-        existing.isEmpty,
-        pendingSubmission,
-        DuplicateReassignmentTreeHash(
-          reassignmentRef,
-          submitterLf,
-          rootHash,
-        ): ReassignmentProcessorError,
-      )
-      .mapK(FutureUnlessShutdown.outcomeK)
+    EitherT.cond[FutureUnlessShutdown](
+      existing.isEmpty,
+      pendingSubmission,
+      DuplicateReassignmentTreeHash(
+        reassignmentRef,
+        submitterLf,
+        rootHash,
+      ): ReassignmentProcessorError,
+    )
   }
 
   protected def decryptTree(
@@ -320,7 +328,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
       traceContext: TraceContext
   ): Either[ReassignmentProcessorError, Option[SequencedUpdate]] = {
 
-    val RejectionArgs(pendingReassignment, rejectionReason) = rejectionArgs
+    val RejectionArgs(pendingReassignment, errorDetails) = rejectionArgs
     val isSubmittingParticipant =
       pendingReassignment.submitterMetadata.submittingParticipant == participantId
 
@@ -333,9 +341,8 @@ private[reassignment] trait ReassignmentProcessingSteps[
         submissionId = pendingReassignment.submitterMetadata.submissionId,
       )
     )
-
-    rejectionReason.logRejection(Map("requestId" -> pendingReassignment.requestId.toString))
-    val rejection = Update.CommandRejected.FinalReason(rejectionReason.reason())
+    errorDetails.logRejection(Map("requestId" -> pendingReassignment.requestId.toString))
+    val rejection = Update.CommandRejected.FinalReason(errorDetails.reason)
     val updateO = completionInfoO.map(info =>
       Update.SequencedCommandRejected(
         info,
@@ -427,6 +434,11 @@ private[reassignment] trait ReassignmentProcessingSteps[
           val submitterCheckRejection = validationResult.commonValidationResult.submitterCheckResult
             .map(err => LocalRejectError.ReassignmentRejects.ValidationFailed.Reject(err.message))
 
+          val reassignmentIdRejection = validationResult.commonValidationResult.reassignmentIdResult
+            .map(err =>
+              LocalRejectError.ReassignmentRejects.InconsistentReassignmentId.Reject(err.message)
+            )
+
           val failedValidationRejection =
             validationResult.reassigningParticipantValidationResult.errors
               .map(err => LocalRejectError.ReassignmentRejects.ValidationFailed.Reject(err.message))
@@ -436,7 +448,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
 
           val localRejections =
             (modelConformanceRejection ++ activenessRejection.toList ++
-              authenticationRejection.toList ++ submitterCheckRejection ++ failedValidationRejection)
+              authenticationRejection.toList ++ submitterCheckRejection ++ reassignmentIdRejection ++ failedValidationRejection)
               .map { err =>
                 err.logWithContext()
                 err.toLocalReject(protocolVersion)
@@ -481,10 +493,11 @@ private[reassignment] trait ReassignmentProcessingSteps[
     *   - Checks related to the submitter party:
     *     - Is the submitter a stakeholder?
     *     - Is the submitter hosted on the participant?
+    *   - Is the reassignment id consistent with the reassignment data?
     */
   def checkPhase7Validations(
       reassignmentValidationResult: ReassignmentValidationResult
-  ): FutureUnlessShutdown[Option[TransactionRejection]] =
+  ): FutureUnlessShutdown[Option[LocalRejectError]] =
     reassignmentValidationResult.commonValidationResult.contractAuthenticationResultF.value.map {
       contractAuthenticationResult =>
         val modelConformanceRejection =
@@ -507,7 +520,15 @@ private[reassignment] trait ReassignmentProcessingSteps[
             LocalRejectError.ReassignmentRejects.ValidationFailed.Reject(err.message)
           )
 
-        modelConformanceRejection.orElse(authenticationRejection).orElse(submitterCheckRejection)
+        val reassignmentIdResult =
+          reassignmentValidationResult.commonValidationResult.reassignmentIdResult.map(err =>
+            LocalRejectError.ReassignmentRejects.InconsistentReassignmentId.Reject(err.message)
+          )
+
+        modelConformanceRejection
+          .orElse(authenticationRejection)
+          .orElse(submitterCheckRejection)
+          .orElse(reassignmentIdResult)
     }
 
 }
@@ -518,6 +539,8 @@ object ReassignmentProcessingSteps {
       mkReassignmentId: CantonTimestamp => ReassignmentId,
       reassignmentCompletion: Promise[com.google.rpc.status.Status] =
         Promise[com.google.rpc.status.Status](),
+      private[ReassignmentProcessingSteps] val decisionTimeTickRequestTracker: SynchronizerTimeTracker.TickRequestTracker =
+        new SynchronizerTimeTracker.TickRequestTracker(),
   )
 
   final case class ParsedReassignmentRequest[VT <: FullReassignmentViewTree](
@@ -553,7 +576,7 @@ object ReassignmentProcessingSteps {
 
   final case class RejectionArgs[T <: PendingReassignment](
       pendingReassignment: T,
-      error: TransactionRejection,
+      errorDetails: ErrorDetails,
   )
 
   trait ReassignmentProcessorError

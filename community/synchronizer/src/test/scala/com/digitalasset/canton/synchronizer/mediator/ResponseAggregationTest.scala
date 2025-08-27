@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.mediator
 
-import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -34,7 +34,6 @@ import scala.language.existentials
 import MediatorVerdict.MediatorApprove
 import ResponseAggregation.{ConsortiumVotingState, ViewState}
 
-//TODO(i26453): Add more coverage to local abstain verdict.
 class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
   private implicit val ec: ExecutionContext = directExecutionContext
@@ -194,6 +193,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           requestId.unwrap.plusSeconds(300),
           requestId.unwrap.plusSeconds(600),
           topologySnapshot,
+          participantResponseDeadlineTick = None,
         )
         .futureValueUS
 
@@ -275,10 +275,10 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               changeTs1,
               Left(
                 MediatorVerdict.ParticipantReject(
-                  NonEmpty(List, Set(alice) -> testReject())
+                  NonEmpty(List, (Set(alice), solo, testReject()))
                 )
               ),
-            )(TraceContext.empty)
+            )(TraceContext.empty, None)
           }
         }
 
@@ -296,10 +296,12 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                   view1Position -> ViewState(
                     Map(
                       alice -> ConsortiumVotingState.withDefaultValues(),
-                      bob -> ConsortiumVotingState.withDefaultValues(rejections = Set(solo)),
+                      bob -> ConsortiumVotingState.withDefaultValues(rejections =
+                        List(solo -> testReject())
+                      ),
                     ),
                     Seq(Quorum(aliceCp, NonNegativeInt.three)),
-                    List(Set(bob) -> testReject()),
+                    List((Set(bob), solo, testReject())),
                   ),
                   view2Position -> ViewState(
                     Map(bob -> ConsortiumVotingState.withDefaultValues()),
@@ -325,7 +327,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
             val rejection =
               MediatorVerdict.ParticipantReject(
-                NonEmpty(List, Set(alice) -> testReject(), Set(bob) -> testReject())
+                NonEmpty(List, (Set(alice), solo, testReject()), (Set(bob), solo, testReject()))
               )
             it("rejects the transaction") {
               rejected2 shouldBe ResponseAggregation[ViewPosition](
@@ -335,7 +337,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 requestId.unwrap.plusSeconds(600),
                 changeTs2,
                 Left(rejection),
-              )(TraceContext.empty)
+              )(TraceContext.empty, None)
             }
 
             describe("further rejection") {
@@ -430,7 +432,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               requestId.unwrap.plusSeconds(600),
               changeTs,
               Left(MediatorApprove),
-            )(TraceContext.empty)
+            )(TraceContext.empty, None)
           }
 
           describe("further rejection") {
@@ -495,7 +497,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                   bob -> ConsortiumVotingState.withDefaultValues(abstains = Set(solo)),
                 ),
                 Seq(Quorum(aliceCp, NonNegativeInt.three)),
-                List(Set(bob) -> localAbstain),
+                List((Set(bob), solo, localAbstain)),
               ),
               view2Position -> ViewState(
                 Map(bob -> ConsortiumVotingState.withDefaultValues()),
@@ -523,10 +525,10 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             t2,
             Left(
               MediatorVerdict.ParticipantReject(
-                NonEmpty(List, Set(alice) -> localAbstain)
+                NonEmpty(List, (Set(alice), solo, localAbstain))
               )
             ),
-          )(TraceContext.empty)
+          )(TraceContext.empty, None)
         }
       }
     }
@@ -622,6 +624,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           requestId.unwrap.plusSeconds(300),
           requestId.unwrap.plusSeconds(600),
           topologySnapshot,
+          participantResponseDeadlineTick = None,
         )
         .futureValueUS
       lazy val changeTs = requestId.unwrap.plusSeconds(1)
@@ -656,10 +659,12 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             view1Position -> ViewState(
               Map(
                 alice -> ConsortiumVotingState.withDefaultValues(),
-                bob -> ConsortiumVotingState.withDefaultValues(rejections = Set(solo)),
+                bob -> ConsortiumVotingState.withDefaultValues(rejections =
+                  List(solo -> testReject("malformed view"))
+                ),
               ),
               Seq(Quorum(aliceCp, NonNegativeInt.three)),
-              List(Set(bob) -> testReject("malformed view")),
+              List((Set(bob), solo, testReject("malformed view"))),
             ),
             view2Position -> ViewState(
               Map(
@@ -700,19 +705,25 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               view1Position -> ViewState(
                 Map(
                   alice -> ConsortiumVotingState.withDefaultValues(),
-                  bob -> ConsortiumVotingState.withDefaultValues(rejections = Set(solo)),
+                  bob -> ConsortiumVotingState.withDefaultValues(rejections =
+                    List(solo -> testReject(rejectMsg))
+                  ),
                 ),
                 Seq(Quorum(aliceCp, NonNegativeInt.three)),
-                List(Set(bob) -> testReject(rejectMsg)),
+                List((Set(bob), solo, testReject(rejectMsg))),
               ),
               view2Position -> ViewState(
                 Map(
                   alice -> ConsortiumVotingState.withDefaultValues(),
-                  bob -> ConsortiumVotingState.withDefaultValues(rejections = Set(solo)),
-                  dave -> ConsortiumVotingState.withDefaultValues(rejections = Set(solo)),
+                  bob -> ConsortiumVotingState.withDefaultValues(rejections =
+                    List(solo -> testReject(rejectMsg))
+                  ),
+                  dave -> ConsortiumVotingState.withDefaultValues(rejections =
+                    List(solo -> testReject(rejectMsg))
+                  ),
                 ),
                 Seq(Quorum(aliceCp, NonNegativeInt.three)),
-                List(Set(bob, dave) -> testReject(rejectMsg)),
+                List((Set(bob, dave), solo, testReject(rejectMsg))),
               ),
             )
           )
@@ -721,11 +732,18 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
     }
 
     describe("consortium state") {
+      val reject = LocalRejectError.MalformedRejects.Payloads
+        .Reject("reason")
+        .toLocalReject(testedProtocolVersion)
       it("should work for threshold = 1") {
         ConsortiumVotingState.withDefaultValues(approvals = Set(solo)).isApproved shouldBe true
         ConsortiumVotingState.withDefaultValues(approvals = Set(solo)).isRejected shouldBe false
-        ConsortiumVotingState.withDefaultValues(rejections = Set(solo)).isApproved shouldBe false
-        ConsortiumVotingState.withDefaultValues(rejections = Set(solo)).isRejected shouldBe true
+        ConsortiumVotingState
+          .withDefaultValues(rejections = List(solo -> reject))
+          .isApproved shouldBe false
+        ConsortiumVotingState
+          .withDefaultValues(rejections = List(solo -> reject))
+          .isRejected shouldBe true
         ConsortiumVotingState.withDefaultValues(abstains = Set(solo)).isApproved shouldBe false
         ConsortiumVotingState.withDefaultValues(abstains = Set(solo)).isRejected shouldBe true
       }
@@ -745,41 +763,56 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             PositiveInt.two,
             Some(PositiveInt.three),
             approvals = Set(one, two),
-            rejections = Set(three),
+            rejections = List(three -> reject),
           )
           .isApproved shouldBe true
         ConsortiumVotingState
           .withDefaultValues(
             PositiveInt.tryCreate(4),
             Some(PositiveInt.tryCreate(5)),
-            rejections = Set(one, two),
+            rejections = List(one -> reject, two -> reject),
           )
           .isRejected shouldBe true
         ConsortiumVotingState
-          .withDefaultValues(PositiveInt.two, approvals = Set(one), rejections = Set(two, three))
+          .withDefaultValues(
+            PositiveInt.two,
+            approvals = Set(one),
+            rejections = List(two -> reject, three -> reject),
+          )
           .isApproved shouldBe false
         ConsortiumVotingState
           .withDefaultValues(
             PositiveInt.two,
             Some(PositiveInt.three),
             approvals = Set(one),
-            rejections = Set(two, three),
+            rejections = List(two -> reject, three -> reject),
           )
           .isRejected shouldBe true
         ConsortiumVotingState
-          .withDefaultValues(PositiveInt.three, approvals = Set(one), rejections = Set(two, three))
+          .withDefaultValues(
+            PositiveInt.three,
+            approvals = Set(one),
+            rejections = List(two -> reject, three -> reject),
+          )
           .isApproved shouldBe false
         ConsortiumVotingState
-          .withDefaultValues(PositiveInt.three, approvals = Set(one), rejections = Set(two, three))
+          .withDefaultValues(
+            PositiveInt.three,
+            approvals = Set(one),
+            rejections = List(two -> reject, three -> reject),
+          )
           .isRejected shouldBe true
         ConsortiumVotingState
           .withDefaultValues(PositiveInt.three, approvals = Set(one, two, three))
           .isApproved shouldBe true
         ConsortiumVotingState
-          .withDefaultValues(PositiveInt.three, rejections = Set(one))
+          .withDefaultValues(PositiveInt.three, rejections = List(one -> reject))
           .isRejected shouldBe true
         ConsortiumVotingState
-          .withDefaultValues(PositiveInt.three, rejections = Set(one, two, three))
+          .withDefaultValues(
+            PositiveInt.three,
+            rejections = List(one -> reject, two -> reject, three -> reject),
+          )
           .isRejected shouldBe true
 
         ConsortiumVotingState
@@ -810,7 +843,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           .withDefaultValues(
             PositiveInt.two,
             numberOfHostingParticipants = Some(PositiveInt.three),
-            rejections = Set(one, two),
+            rejections = List(one -> reject, two -> reject),
             abstains = Set(three),
           )
           .isRejected shouldBe true
@@ -819,7 +852,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           .withDefaultValues(
             PositiveInt.two,
             numberOfHostingParticipants = Some(PositiveInt.three),
-            rejections = Set(one),
+            rejections = List(one -> reject),
             abstains = Set(three),
           )
           .isRejected shouldBe true
@@ -841,7 +874,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           PositiveInt.two,
           numberOfHostingParticipants = Some(PositiveInt.three),
           approvals = Set(one),
-          rejections = Set(two),
+          rejections = List(two -> localReject),
           abstains = Set(three),
         )
 
@@ -860,7 +893,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
     }
 
     describe("consortium voting") {
-      def testReject() =
+      val testReject =
         LocalRejectError.ConsistencyRejections.LockedContracts
           .Reject(Seq())
           .toLocalReject(testedProtocolVersion)
@@ -916,6 +949,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
           requestId.unwrap.plusSeconds(300),
           requestId.unwrap.plusSeconds(600),
           topologySnapshot,
+          participantResponseDeadlineTick = None,
         )
         .futureValueUS
 
@@ -962,21 +996,21 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
 
           val response1a = mkResponse(
             view1Position,
-            testReject(),
+            testReject,
             Set(bob),
             rootHash,
             one,
           )
           val response1b = mkResponse(
             view1Position,
-            testReject(),
+            testReject,
             Set(bob),
             rootHash,
             one,
           )
           val response1c = mkResponse(
             view1Position,
-            testReject(),
+            testReject,
             Set(bob),
             rootHash,
             one,
@@ -1001,7 +1035,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                       bob -> ConsortiumVotingState.withDefaultValues(
                         PositiveInt.three,
                         Some(PositiveInt.tryCreate(5)),
-                        rejections = Set(one),
+                        rejections = List(one -> testReject),
                       ),
                     ),
                     Seq(Quorum(aliceCp ++ bobCp, NonNegativeInt.three)),
@@ -1094,7 +1128,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             val response1a =
               mkResponse(
                 view1Position,
-                testReject(),
+                testReject,
                 Set(alice),
                 rootHash,
                 one,
@@ -1102,7 +1136,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             val response1b =
               mkResponse(
                 view1Position,
-                testReject(),
+                testReject,
                 Set(alice),
                 rootHash,
                 two,
@@ -1122,7 +1156,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                     alice -> ConsortiumVotingState.withDefaultValues(
                       PositiveInt.two,
                       Some(PositiveInt.tryCreate(3)),
-                      rejections = Set(one),
+                      rejections = List(one -> testReject),
                     ),
                     bob -> ConsortiumVotingState
                       .withDefaultValues(PositiveInt.three, Some(PositiveInt.tryCreate(5))),
@@ -1149,31 +1183,31 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               changeTs2,
               Left(
                 MediatorVerdict.ParticipantReject(
-                  NonEmpty(List, Set(alice) -> testReject())
+                  NonEmpty(List, (Set(alice), two, testReject))
                 )
               ),
-            )(TraceContext.empty)
+            )(TraceContext.empty, None)
           }
         }
 
         describe("by Bob with 3 votes") {
           val response1a = mkResponse(
             view1Position,
-            testReject(),
+            testReject,
             Set(bob),
             rootHash,
             one,
           )
           val response1b = mkResponse(
             view1Position,
-            testReject(),
+            testReject,
             Set(bob),
             rootHash,
             two,
           )
           val response1c = mkResponse(
             view1Position,
-            testReject(),
+            testReject,
             Set(bob),
             rootHash,
             three,
@@ -1198,11 +1232,11 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                       bob -> ConsortiumVotingState.withDefaultValues(
                         PositiveInt.three,
                         Some(PositiveInt.tryCreate(5)),
-                        rejections = Set(one, two, three),
+                        rejections = List(three -> testReject, two -> testReject, one -> testReject),
                       ),
                     ),
                     Seq(Quorum(aliceCp, NonNegativeInt.three)),
-                    List(Set(bob) -> testReject()),
+                    List((Set(bob), three, testReject)),
                   ),
                   view2Position -> ViewState(
                     Map(
@@ -1222,7 +1256,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             val response2a =
               mkResponse(
                 view1Position,
-                testReject(),
+                testReject,
                 Set(alice),
                 rootHash,
                 one,
@@ -1230,7 +1264,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
             val response2b =
               mkResponse(
                 view1Position,
-                testReject(),
+                testReject,
                 Set(alice),
                 rootHash,
                 two,
@@ -1246,7 +1280,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               } yield p2).value
             val rejection =
               MediatorVerdict.ParticipantReject(
-                NonEmpty(List, Set(alice) -> testReject(), Set(bob) -> testReject())
+                NonEmpty(List, (Set(alice), two, testReject), (Set(bob), three, testReject))
               )
             it("rejects the transaction") {
               rejected2 shouldBe ResponseAggregation[ViewPosition](
@@ -1256,14 +1290,14 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
                 requestId.unwrap.plusSeconds(600),
                 changeTs5,
                 Left(rejection),
-              )(TraceContext.empty)
+              )(TraceContext.empty, None)
             }
 
             describe("further rejection") {
               val changeTs6 = changeTs5.plusSeconds(1)
               val response3 = mkResponse(
                 view1Position,
-                testReject(),
+                testReject,
                 Set(bob),
                 rootHash,
               )
@@ -1289,6 +1323,176 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               }
             }
           }
+        }
+      }
+
+      describe("correct rejection reason when receiving abstains and rejections") {
+        lazy val changeTs1 = requestId.unwrap.plusSeconds(1)
+        lazy val changeTs2 = requestId.unwrap.plusSeconds(2)
+        lazy val changeTs3 = requestId.unwrap.plusSeconds(3)
+        val reject1 = LocalRejectError.ConsistencyRejections.LockedContracts
+          .Reject(Seq())
+          .toLocalReject(testedProtocolVersion)
+        val reject2 = LocalRejectError.ConsistencyRejections.InactiveContracts
+          .Reject(Seq())
+          .toLocalReject(testedProtocolVersion)
+        val abstain1 = LocalAbstainError.CannotPerformAllValidations
+          .Abstain("abstain 1")
+          .toLocalAbstain(testedProtocolVersion)
+        val abstain2 = LocalAbstainError.CannotPerformAllValidations
+          .Abstain("abstain 2")
+          .toLocalAbstain(testedProtocolVersion)
+
+        val Seq(response1a, response1b, response1c) =
+          Seq(reject1 -> one, reject2 -> two, abstain1 -> three).map { case (reject, participant) =>
+            mkResponse(
+              view1Position,
+              reject,
+              Set(bob),
+              rootHash,
+              participant,
+            )
+          }: @unchecked
+        lazy val result =
+          (for {
+            p1 <- sut.validateAndProgress(changeTs1, response1a, topologySnapshot).futureValueUS
+            p2 <- p1.validateAndProgress(changeTs2, response1b, topologySnapshot).futureValueUS
+            p3 <- p2.validateAndProgress(changeTs3, response1c, topologySnapshot).futureValueUS
+          } yield p3).value
+
+        it("should report the last reject for bob and not the abstain") {
+          result.state.value shouldBe
+            Map(
+              view1Position -> ViewState(
+                Map(
+                  alice -> ConsortiumVotingState
+                    .withDefaultValues(PositiveInt.two, Some(PositiveInt.tryCreate(3))),
+                  bob -> ConsortiumVotingState.withDefaultValues(
+                    PositiveInt.three,
+                    Some(PositiveInt.tryCreate(5)),
+                    rejections = List(two -> reject2, one -> reject1),
+                    abstains = Set(three),
+                  ),
+                ),
+                Seq(Quorum(aliceCp, NonNegativeInt.three)),
+                // bob's last rejection is reported instead of abstain
+                List((Set(bob), two, reject2)),
+              ),
+              view2Position -> ViewState(
+                Map(
+                  bob -> ConsortiumVotingState
+                    .withDefaultValues(PositiveInt.three, Some(PositiveInt.tryCreate(5)))
+                ),
+                Seq(Quorum(bobCp, NonNegativeInt.two)),
+                Nil,
+              ),
+            )
+        }
+        it("should report the last abstain if there is no better rejection reason") {
+          val Seq(response2a, response2b) =
+            Seq(abstain1 -> one, abstain2 -> two).map { case (reject, participant) =>
+              mkResponse(
+                view1Position,
+                reject,
+                Set(alice),
+                rootHash,
+                participant,
+              )
+            }: @unchecked
+
+          val result2 =
+            (for {
+              // starting from the previous result
+              p1 <- result
+                .validateAndProgress(changeTs3, response2a, topologySnapshot)
+                .futureValueUS
+              p2 <- p1.validateAndProgress(changeTs3, response2b, topologySnapshot).futureValueUS
+            } yield p2).value
+
+          result2.state shouldBe
+            Left(
+              MediatorVerdict.ParticipantReject(
+                NonEmpty(List, (Set(alice), two, abstain2), (Set(bob), two, reject2))
+              )
+            )
+        }
+
+        it(
+          "report correctly the best rejection reason for each party when receiving response with multiple confirming parties"
+        ) {
+          val response1a = mkResponse(
+            view1Position,
+            abstain1,
+            Set(bob, alice),
+            rootHash,
+            one,
+          )
+          val response1b = mkResponse(
+            view1Position,
+            reject1,
+            Set(bob),
+            rootHash,
+            two,
+          )
+          val response1c = mkResponse(
+            view1Position,
+            abstain2,
+            Set(bob, alice),
+            rootHash,
+            three,
+          )
+          val result =
+            (for {
+              p1 <- sut.validateAndProgress(changeTs1, response1a, topologySnapshot).futureValueUS
+              p2 <- p1.validateAndProgress(changeTs2, response1b, topologySnapshot).futureValueUS
+              p3 <- p2.validateAndProgress(changeTs3, response1c, topologySnapshot).futureValueUS
+            } yield p3).value
+
+          result.state shouldBe
+            Left(
+              MediatorVerdict.ParticipantReject(
+                NonEmptyUtil.fromUnsafe(
+                  List((Set(alice), three, abstain2), (Set(bob), two, reject1))
+                )
+              )
+            )
+        }
+
+        it("report the common abstain when there is no better rejection reason") {
+          val response1a = mkResponse(
+            view1Position,
+            abstain1,
+            Set(bob, alice),
+            rootHash,
+            one,
+          )
+          val response1b = mkResponse(
+            view1Position,
+            abstain1,
+            Set(bob),
+            rootHash,
+            two,
+          )
+          val response1c = mkResponse(
+            view1Position,
+            abstain2,
+            Set(bob, alice),
+            rootHash,
+            three,
+          )
+          lazy val result =
+            (for {
+              p1 <- sut.validateAndProgress(changeTs1, response1a, topologySnapshot).futureValueUS
+              p2 <- p1.validateAndProgress(changeTs2, response1b, topologySnapshot).futureValueUS
+              p3 <- p2.validateAndProgress(changeTs3, response1c, topologySnapshot).futureValueUS
+            } yield p3).value
+
+          result.state shouldBe
+            Left(
+              MediatorVerdict.ParticipantReject(
+                NonEmptyUtil.fromUnsafe(List((Set(alice, bob), three, abstain2)))
+              )
+            )
         }
       }
 
@@ -1411,7 +1615,7 @@ class ResponseAggregationTest extends PathAnyFunSpec with BaseTest {
               requestId.unwrap.plusSeconds(600),
               changeTs2,
               Left(MediatorApprove),
-            )(TraceContext.empty)
+            )(TraceContext.empty, None)
           }
 
           describe("further rejection") {

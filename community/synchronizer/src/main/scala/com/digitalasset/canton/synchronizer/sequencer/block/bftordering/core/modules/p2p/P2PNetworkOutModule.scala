@@ -37,6 +37,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
   Env,
   ModuleRef,
+  P2PAddress,
   P2PConnectionEventListener,
   P2PNetworkManager,
   P2PNetworkRef,
@@ -59,6 +60,8 @@ final class P2PNetworkOutModule[
     P2PNetworkManagerT <: P2PNetworkManager[E, BftOrderingMessage],
 ](
     thisBftNodeId: BftNodeId,
+    isGenesis: Boolean,
+    bootstrapTopologySize: Int,
     state: P2PNetworkOutModule.State,
     @VisibleForTesting private[bftordering] val p2pEndpointsStore: P2PEndpointsStore[E],
     metrics: BftOrderingMetrics,
@@ -72,9 +75,7 @@ final class P2PNetworkOutModule[
   private val connectedP2PEndpointIds = mutable.Set.empty[P2PEndpoint.Id]
 
   val p2pNetworkManager: P2PNetworkManagerT =
-    dependencies.createP2PNetworkManager(this)
-
-  private var initialP2PEndpointsCount = 1
+    dependencies.createP2PNetworkManager(this, dependencies.p2pNetworkIn)
 
   private var maybeSelf: Option[ModuleRef[P2PNetworkOut.Message]] = None
 
@@ -105,7 +106,6 @@ final class P2PNetworkOutModule[
       case P2PNetworkOut.Start =>
         val p2pEndpoints =
           context.blockingAwait(p2pEndpointsStore.listEndpoints, DefaultDatabaseReadTimeout)
-        initialP2PEndpointsCount = p2pEndpoints.size + 1
         connectInitialNodes(p2pEndpoints)
         startModulesIfNeeded()
 
@@ -215,8 +215,7 @@ final class P2PNetworkOutModule[
           droppedAsUnauthenticated = false,
         )
       locally {
-        logger.debug(s"Sending network message to $destinationBftNodeId")
-        logger.trace(s"Message to $destinationBftNodeId is: $message")
+        logger.trace(s"Sending network message to $destinationBftNodeId: $message")
         implicit val mc: MetricsContext = mc1
         networkSend(ref, serializedMessage)
         emitSendStats(metrics, serializedMessage)
@@ -271,7 +270,7 @@ final class P2PNetworkOutModule[
     SequencerBftAdminData.PeerNetworkStatus(
       p2pEndpointIds
         .getOrElse(
-          p2pConnectionState.getP2PEndpoints
+          p2pConnectionState.connections
             .map(_.id)
             .sorted // Sorted for output determinism and easier testing
         )
@@ -305,11 +304,10 @@ final class P2PNetworkOutModule[
     )
 
   private lazy val p2pEndpointThresholdForAvailabilityStart =
-    AvailabilityModule.quorum(initialP2PEndpointsCount)
+    AvailabilityModule.quorum(bootstrapTopologySize)
 
-  private lazy val p2pEndpointThresholdForConsensusStart = strongQuorumSize(
-    initialP2PEndpointsCount
-  )
+  private lazy val p2pEndpointThresholdForConsensusStart =
+    strongQuorumSize(bootstrapTopologySize)
 
   private def startModulesIfNeeded()(implicit traceContext: TraceContext): Unit = {
     if (!mempoolStarted) {
@@ -319,7 +317,9 @@ final class P2PNetworkOutModule[
     }
     // Waiting for just a quorum (minus self) of nodes to be authenticated assumes that they are not faulty
     if (!availabilityStarted) {
-      if (maxNodesContemporarilyAuthenticated >= p2pEndpointThresholdForAvailabilityStart) {
+      if (
+        !isGenesis || maxNodesContemporarilyAuthenticated >= p2pEndpointThresholdForAvailabilityStart
+      ) {
         logger.debug(
           s"Threshold $p2pEndpointThresholdForAvailabilityStart reached: starting availability"
         )
@@ -328,7 +328,9 @@ final class P2PNetworkOutModule[
       }
     }
     if (!consensusStarted) {
-      if (maxNodesContemporarilyAuthenticated >= p2pEndpointThresholdForConsensusStart) {
+      if (
+        !isGenesis || maxNodesContemporarilyAuthenticated >= p2pEndpointThresholdForConsensusStart
+      ) {
         logger.debug(
           s"Threshold $p2pEndpointThresholdForConsensusStart reached: starting consensus"
         )
@@ -386,7 +388,7 @@ final class P2PNetworkOutModule[
       s"Connecting new node at ${p2pEndpoint.id}"
     )
     val networkRef =
-      p2pNetworkManager.createNetworkRef(context, p2pEndpoint)
+      p2pNetworkManager.createNetworkRef(context, P2PAddress.Endpoint(p2pEndpoint))
     p2pConnectionState.addNetworkRef(p2pEndpoint, networkRef)
     emitConnectedCount(metrics, connectedCount)
     logEndpointsStatus()

@@ -342,6 +342,16 @@ create table par_commitment_snapshot_time (
   primary key (synchronizer_idx)
 );
 
+-- Stores commitment reinitialization status (start, end)
+create table par_commitment_reinitialization (
+    synchronizer_idx integer not null,
+    -- UTC timestamp in microseconds relative to EPOCH indicating whether a repair is ongoing for a timestamp
+    ts_reinit_ongoing bigint,
+    -- UTC timestamp in microseconds relative to EPOCH indicating the timestamp of the last completed reinitialization
+    ts_reinit_completed bigint,
+    primary key (synchronizer_idx)
+);
+
 -- Remote commitments that were received but could not yet be checked because the local participant is lagging behind
 create table par_commitment_queue (
   synchronizer_idx integer not null,
@@ -781,6 +791,17 @@ create table ord_epochs (
   in_progress bool not null
 );
 
+-- Auto vacuum/analyze settings for large BFT orderer tables: these are defaults set based on testing of CN CILR test deployment
+alter table ord_epochs
+    set (
+        autovacuum_vacuum_scale_factor = 0.0,
+        autovacuum_vacuum_threshold = 10000,
+        autovacuum_vacuum_cost_limit = 2000,
+        autovacuum_vacuum_cost_delay = 5,
+        autovacuum_vacuum_insert_scale_factor = 0.0,
+        autovacuum_vacuum_insert_threshold = 100000
+        );
+
 create table ord_availability_batch (
   id varchar collate "C" not null,
   batch bytea not null,
@@ -788,6 +809,19 @@ create table ord_availability_batch (
   epoch_number bigint not null,
   primary key (id)
 );
+
+create index idx_ord_availability_batch_prune on ord_availability_batch(epoch_number);
+
+-- Auto vacuum/analyze settings for large BFT orderer tables: these are defaults set based on testing of CN CILR test deployment
+alter table ord_availability_batch
+    set (
+        autovacuum_vacuum_scale_factor = 0.0,
+        autovacuum_vacuum_threshold = 10000,
+        autovacuum_vacuum_cost_limit = 2000,
+        autovacuum_vacuum_cost_delay = 5,
+        autovacuum_vacuum_insert_scale_factor = 0.0,
+        autovacuum_vacuum_insert_threshold = 100000
+        );
 
 -- messages stored during the progress of a block possibly across different pbft views
 create table ord_pbft_messages_in_progress(
@@ -812,6 +846,8 @@ create table ord_pbft_messages_in_progress(
   -- for each block number, we only expect one message of each kind for the same sender and view number.
   primary key (block_number, view_number, from_sequencer_id, discriminator)
 );
+
+create index idx_ord_pbft_messages_in_progress_prune on ord_pbft_messages_in_progress(epoch_number);
 
 -- final pbft messages stored only once for each block when it completes
 -- currently only commit messages and the pre-prepare used for that block
@@ -838,6 +874,19 @@ create table ord_pbft_messages_completed(
   primary key (block_number, epoch_number, from_sequencer_id, discriminator)
 );
 
+create index idx_ord_pbft_messages_completed_prune on ord_pbft_messages_completed(epoch_number);
+
+-- Auto vacuum/analyze settings for large BFT orderer tables: these are defaults set based on testing of CN CILR test deployment
+alter table ord_pbft_messages_completed
+    set (
+        autovacuum_vacuum_scale_factor = 0.0,
+        autovacuum_vacuum_threshold = 10000,
+        autovacuum_vacuum_cost_limit = 2000,
+        autovacuum_vacuum_cost_delay = 5,
+        autovacuum_vacuum_insert_scale_factor = 0.0,
+        autovacuum_vacuum_insert_threshold = 100000
+        );
+
 -- Stores metadata for blocks that have been assigned timestamps in the output module
 create table ord_metadata_output_blocks (
   epoch_number bigint not null,
@@ -845,11 +894,35 @@ create table ord_metadata_output_blocks (
   bft_ts bigint not null
 );
 
+create index idx_ord_metadata_output_blocks_prune on ord_metadata_output_blocks(epoch_number);
+
+-- Auto vacuum/analyze settings for large BFT orderer tables: these are defaults set based on testing of CN CILR test deployment
+alter table ord_metadata_output_blocks
+    set (
+        autovacuum_vacuum_scale_factor = 0.0,
+        autovacuum_vacuum_threshold = 10000,
+        autovacuum_vacuum_cost_limit = 2000,
+        autovacuum_vacuum_cost_delay = 5,
+        autovacuum_vacuum_insert_scale_factor = 0.0,
+        autovacuum_vacuum_insert_threshold = 100000
+        );
+
 -- Stores output metadata for epochs
 create table ord_metadata_output_epochs (
   epoch_number bigint not null primary key,
   could_alter_ordering_topology bool not null
 );
+
+-- Auto vacuum/analyze settings for large BFT orderer tables: these are defaults set based on testing of CN CILR test deployment
+alter table ord_metadata_output_epochs
+    set (
+        autovacuum_vacuum_scale_factor = 0.0,
+        autovacuum_vacuum_threshold = 10000,
+        autovacuum_vacuum_cost_limit = 2000,
+        autovacuum_vacuum_cost_delay = 5,
+        autovacuum_vacuum_insert_scale_factor = 0.0,
+        autovacuum_vacuum_insert_threshold = 100000
+        );
 
 -- inclusive lower bound of when blocks can be read.
 -- if empty it means all blocks can be read.
