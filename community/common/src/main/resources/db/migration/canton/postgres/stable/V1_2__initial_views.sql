@@ -16,6 +16,15 @@ $$
   immutable
   returns null on null input;
 
+-- convert canton logs timestamp string to the bigint representation used in the tables
+create or replace function debug.to_canton_timestamp(text) returns bigint as
+$$
+select (extract(epoch from $1::timestamptz) * 1000000)::bigint;
+$$
+    language sql
+    immutable
+    returns null on null input;
+
 -- convert the integer representation to the name of the topology mapping
 create or replace function debug.topology_mapping(integer) returns char as
 $$
@@ -35,7 +44,7 @@ select
     when $1 = 12 then 'MediatorSynchronizerState'
     when $1 = 13 then 'SequencerSynchronizerState'
     -- 14 was OffboardParticipant
-    when $1 = 15 then 'PurgeTopologyTransaction'
+    -- 15 was PurgeTopologyTransaction
     -- 16 was TrafficControlState
     when $1 = 17 then 'DynamicSequencingParametersState'
     when $1 = 18 then 'PartyToKeyMapping'
@@ -51,8 +60,8 @@ create or replace function debug.topology_change_op(integer) returns varchar as
 $$
 select
   case
-    when $1 = 1 then 'Remove'
-    when $1 = 2 then 'Replace'
+    when $1 = 1 then 'Replace'
+    when $1 = 2 then 'Remove'
     else $1::text
   end;
 $$
@@ -347,6 +356,14 @@ create or replace view debug.par_commitment_snapshot_time as
     debug.canton_timestamp(ts) as ts,
     tie_breaker
   from par_commitment_snapshot_time;
+
+
+create or replace view debug.par_commitment_reinitialization as
+  select
+    debug.resolve_common_static_string(synchronizer_idx) as synchronizer_idx,
+    debug.canton_timestamp(ts_reinit_ongoing) as ts_reinit_ongoing,
+    debug.canton_timestamp(ts_reinit_completed) as ts_reinit_completed
+  from par_commitment_reinitialization;
 
 create or replace view debug.par_commitment_queue as
   select

@@ -24,9 +24,10 @@ import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TracingConfig
 import io.grpc.ServerInterceptor
-import io.netty.handler.ssl.{ClientAuth, SslContext}
+import io.grpc.netty.shaded.io.netty.handler.ssl.{ClientAuth, SslContext}
 import org.slf4j.LoggerFactory
 
+import scala.concurrent.duration.Duration
 import scala.math.Ordering.Implicits.infixOrderingOps
 
 /** Configuration for hosting a server api */
@@ -87,6 +88,9 @@ trait ServerConfig extends Product with Serializable {
   /** maximum inbound message size in bytes on the ledger api and the admin api */
   def maxInboundMessageSize: NonNegativeInt
 
+  /** maximum expiration time accepted for tokens */
+  def maxTokenLifetime: NonNegativeDuration
+
   /** Use the configuration to instantiate the interceptors for this server */
   def instantiateServerInterceptors(
       tracingConfig: TracingConfig,
@@ -133,6 +137,7 @@ final case class AdminServerConfig(
     override val maxInboundMessageSize: NonNegativeInt = ServerConfig.defaultMaxInboundMessageSize,
     override val authServices: Seq[AuthServiceConfig] = Seq.empty,
     override val adminTokenConfig: AdminTokenConfig = AdminTokenConfig(),
+    override val maxTokenLifetime: NonNegativeDuration = NonNegativeDuration(Duration.Inf),
 ) extends ServerConfig
     with UniformCantonConfigValidation {
   def clientConfig: FullClientConfig =
@@ -423,22 +428,24 @@ object TlsServerConfig {
     )
     val logger = LoggerFactory.getLogger(TlsServerConfig.getClass)
     val filtered = candidates.filter { x =>
-      io.netty.handler.ssl.OpenSsl.availableOpenSslCipherSuites().contains(x) ||
-      io.netty.handler.ssl.OpenSsl.availableJavaCipherSuites().contains(x)
+      io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl
+        .availableOpenSslCipherSuites()
+        .contains(x) ||
+      io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl.availableJavaCipherSuites().contains(x)
     }
     if (filtered.isEmpty) {
-      val len = io.netty.handler.ssl.OpenSsl
+      val len = io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl
         .availableOpenSslCipherSuites()
-        .size() + io.netty.handler.ssl.OpenSsl
+        .size() + io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl
         .availableJavaCipherSuites()
         .size()
       logger.warn(
         s"All of Canton's default TLS ciphers are unsupported by your JVM (netty reports $len ciphers). Defaulting to JVM settings."
       )
-      if (!io.netty.handler.ssl.OpenSsl.isAvailable) {
+      if (!io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl.isAvailable) {
         logger.info(
           "Netty OpenSSL is not available because of an issue",
-          io.netty.handler.ssl.OpenSsl.unavailabilityCause(),
+          io.grpc.netty.shaded.io.netty.handler.ssl.OpenSsl.unavailabilityCause(),
         )
       }
       None

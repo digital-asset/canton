@@ -6,8 +6,8 @@ package com.digitalasset.canton.integration.tests
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.{DbConfig, SynchronizerTimeTrackerConfig}
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
@@ -34,7 +34,9 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
   SyncServiceSynchronizerDisabledUs,
   SyncServiceSynchronizerDisconnect,
 }
+import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
+import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.MemberAccessDisabled
 import com.digitalasset.canton.sequencing.protocol.{MemberRecipient, SubmissionRequest}
 import com.digitalasset.canton.synchronizer.sequencer.{
@@ -101,14 +103,16 @@ sealed trait AcsCommitmentProcessorIntegrationTest
             participant: ParticipantReference,
             minObservationDuration: NonNegativeFiniteDuration,
         ): Unit = {
-          // Connect and disconnect so that we can modify the synchronizer connection config afterwards
-          participant.synchronizers.connect_local(sequencer1, alias = daName)
-          participant.synchronizers.disconnect_local(daName)
-          val daConfig = participant.synchronizers.config(daName).value
+          val daSequencerConnection =
+            SequencerConnections.single(sequencer1.sequencerConnection.withAlias(daName.toString))
           participant.synchronizers.connect_by_config(
-            daConfig
-              .focus(_.timeTracker.minObservationDuration)
-              .replace(minObservationDuration.toConfig)
+            SynchronizerConnectionConfig(
+              synchronizerAlias = daName,
+              sequencerConnections = daSequencerConnection,
+              timeTracker = SynchronizerTimeTrackerConfig(minObservationDuration =
+                minObservationDuration.toConfig
+              ),
+            )
           )
         }
 
@@ -389,7 +393,7 @@ sealed trait AcsCommitmentProcessorIntegrationTest
           participant1.commitments
             .received(
               daName,
-              lastCommTick.toInstant,
+              lastCommTick.toInstant.minusMillis(1),
               lastCommTick.toInstant,
               Some(participant2),
             )
@@ -400,7 +404,7 @@ sealed trait AcsCommitmentProcessorIntegrationTest
           participant2.commitments
             .received(
               daName,
-              lastCommTick.toInstant,
+              lastCommTick.toInstant.minusMillis(1),
               lastCommTick.toInstant,
               Some(participant1),
             )
@@ -491,7 +495,12 @@ sealed trait AcsCommitmentProcessorIntegrationTest
     logger.info(
       s"After the min observation duration, participant1 should request a time proof and compute a new round of commitments"
     )
-    simClock.advance(minObservationDuration1.duration)
+    simClock.advance(
+      minObservationDuration1.duration
+        // Allow some margin as the sim clock advancement doesn't take into account the unique timestamps
+        // that have already been issued after sim clock "now".
+        .plusMillis(1)
+    )
     val end = simClock.now.toInstant
     eventually() {
       participant2.commitments.received(
@@ -575,7 +584,12 @@ sealed trait AcsCommitmentProcessorIntegrationTest
                 Some(c),
               )
             val received =
-              p.commitments.received(daName, periodBegin.toInstant, periodBegin.toInstant, Some(c))
+              p.commitments.received(
+                daName,
+                periodBegin.toInstant.minusMillis(1),
+                periodBegin.toInstant,
+                Some(c),
+              )
             (c, computed.size, received.size)
           }
         )

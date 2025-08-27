@@ -1446,10 +1446,7 @@ object BuildCommon {
         sharedCommunitySettings ++ cantonWarts,
         libraryDependencies ++= Seq(
           commons_io,
-          grpc_netty,
-          netty_handler,
-          netty_native,
-          netty_boring_ssl, // This should be a Runtime dep, but needs to be declared at Compile scope due to https://github.com/sbt/sbt/issues/5568
+          grpc_netty_shaded,
           scalatest % Test,
           scalacheck % Test,
           scalatestScalacheck % Test,
@@ -1499,7 +1496,7 @@ object BuildCommon {
           daml_ledger_api_value_java,
           slf4j_api,
           grpc_api,
-          grpc_netty,
+          grpc_netty_shaded,
           scalapb_runtime,
           daml_libs_scala_ports % Test,
           scalatest % Test,

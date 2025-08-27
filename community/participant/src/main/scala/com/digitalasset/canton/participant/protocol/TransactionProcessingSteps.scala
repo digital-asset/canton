@@ -86,6 +86,7 @@ import com.digitalasset.canton.sequencing.client.SendAsyncClientError
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.store.{ConfirmationRequestSessionKeyStore, SessionKeyStore}
+import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
@@ -107,6 +108,7 @@ import com.google.protobuf.ByteString
 import monocle.PLens
 
 import java.util.concurrent.ConcurrentHashMap
+import scala.None
 import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
@@ -147,7 +149,7 @@ class TransactionProcessingSteps(
   override type SubmissionSendError = TransactionProcessor.SubmissionErrors.SequencerRequest.Error
   override type PendingSubmissions = Unit
   override type PendingSubmissionId = Unit
-  override type PendingSubmissionData = Unit
+  override type PendingSubmissionData = None.type
 
   override type ParsedRequestType = ParsedTransactionRequest
 
@@ -175,6 +177,11 @@ class TransactionProcessingSteps(
       pendingSubmissions: Unit,
       pendingSubmissionId: Unit,
   ): Option[Nothing] = None
+
+  override def setDecisionTimeTickRequest(
+      pendingSubmissionData: None.type,
+      requestedTick: SynchronizerTimeTracker.TickRequest,
+  ): Unit = ()
 
   override def createSubmission(
       submissionParam: SubmissionParam,
@@ -207,7 +214,7 @@ class TransactionProcessingSteps(
       disclosedContracts,
     )
 
-    EitherT.rightT[FutureUnlessShutdown, TransactionSubmissionError]((tracked, ()))
+    EitherT.rightT[FutureUnlessShutdown, TransactionSubmissionError]((tracked, None))
   }
 
   override def embedNoMediatorError(error: NoMediatorError): TransactionSubmissionError =
@@ -512,7 +519,7 @@ class TransactionProcessingSteps(
 
   override def createSubmissionResult(
       deliver: Deliver[Envelope[?]],
-      unit: Unit,
+      pendingSubmissionData: None.type,
   ): TransactionSubmitted =
     TransactionSubmitted
 
@@ -781,6 +788,7 @@ class TransactionProcessingSteps(
       reassignmentLookup: ReassignmentLookup,
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       engineController: EngineController,
+      decisionTimeTickRequest: SynchronizerTimeTracker.TickRequest,
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -865,9 +873,10 @@ class TransactionProcessingSteps(
         timeValidationE = TimeValidator.checkTimestamps(
           commonData,
           requestTimestamp,
-          synchronizerParameters.ledgerTimeRecordTimeTolerance,
-          synchronizerParameters.preparationTimeRecordTimeTolerance,
-          amSubmitter,
+          ledgerTimeRecordTimeTolerance = synchronizerParameters.ledgerTimeRecordTimeTolerance,
+          preparationTimeRecordTimeTolerance =
+            synchronizerParameters.preparationTimeRecordTimeTolerance,
+          amSubmitter = amSubmitter,
           logger,
         )
 
@@ -1022,13 +1031,14 @@ class TransactionProcessingSteps(
             mediator,
             freshOwnTimelyTx,
             engineController,
+            decisionTimeTickRequest,
           )
         StorePendingDataAndSendResponseAndCreateTimeout(
           pendingTransaction,
           EitherT.right(responsesF.map(_.map(_ -> mediatorRecipients))),
           RejectionArgs(
             pendingTransaction,
-            LocalRejectError.TimeRejects.LocalTimeout.Reject(),
+            ErrorDetails.fromLocalError(LocalRejectError.TimeRejects.LocalTimeout.Reject()),
           ),
         )
       }
@@ -1074,7 +1084,7 @@ class TransactionProcessingSteps(
 
   override def postProcessSubmissionRejectedCommand(
       error: TransactionError,
-      pendingSubmission: Unit,
+      pendingSubmission: None.type,
   )(implicit
       traceContext: TraceContext
   ): Unit = ()
@@ -1082,8 +1092,8 @@ class TransactionProcessingSteps(
   override def createRejectionEvent(rejectionArgs: TransactionProcessingSteps.RejectionArgs)(
       implicit traceContext: TraceContext
   ): Either[TransactionProcessorError, Option[SequencedUpdate]] = {
+    val RejectionArgs(pendingTransaction, errorDetails) = rejectionArgs
 
-    val RejectionArgs(pendingTransaction, rejectionReason) = rejectionArgs
     val PendingTransaction(
       freshOwnTimelyTx,
       requestTime,
@@ -1094,14 +1104,16 @@ class TransactionProcessingSteps(
       _locallyRejected,
       _engineController,
       _abortedF,
-    ) =
-      pendingTransaction
+      _decisionTimeTickRequest,
+    ) = pendingTransaction
     val submitterMetaO = transactionValidationResult.submitterMetadataO
     val completionInfoO =
       submitterMetaO.flatMap(completionInfoFromSubmitterMetadataO(_, freshOwnTimelyTx))
 
-    rejectionReason.logRejection(Map("requestId" -> pendingTransaction.requestId.toString))
-    val rejection = Update.CommandRejected.FinalReason(rejectionReason.reason())
+    errorDetails.logRejection(
+      Map("requestId" -> pendingTransaction.requestId.toString)
+    )
+    val rejection = Update.CommandRejected.FinalReason(errorDetails.reason)
 
     val updateO = completionInfoO.map(info =>
       Update.SequencedCommandRejected(
@@ -1124,7 +1136,7 @@ class TransactionProcessingSteps(
       inputContracts.toList
         .traverse_ { case (contractId, contract) =>
           serializableContractAuthenticator
-            .authenticate(contract.inst)
+            .legacyAuthenticate(contract.inst)
             .leftMap(message => ContractAuthenticationFailed.Error(contractId, message).reported())
         }
     )
@@ -1153,6 +1165,7 @@ class TransactionProcessingSteps(
       mediator: MediatorGroupRecipient,
       freshOwnTimelyTx: Boolean,
       engineController: EngineController,
+      decisionTimeTickRequest: SynchronizerTimeTracker.TickRequest,
   )(implicit
       traceContext: TraceContext
   ): PendingTransaction = {
@@ -1167,7 +1180,7 @@ class TransactionProcessingSteps(
       case _ => EngineAbortStatus.notAborted
     }
 
-    validation.PendingTransaction(
+    PendingTransaction(
       freshOwnTimelyTx,
       id.unwrap,
       rc,
@@ -1177,6 +1190,7 @@ class TransactionProcessingSteps(
       locallyRejectedF,
       engineController.abort,
       engineAbortStatusF,
+      decisionTimeTickRequest,
     )
   }
 
@@ -1361,21 +1375,22 @@ class TransactionProcessingSteps(
           //   a negative verdict; we then reject with the verdict, as it is the best information we have
           // - otherwise, we reject with the actual error
           case (reasons: Verdict.ParticipantReject, Left(error)) =>
-            if (error.engineAbortStatus.isAborted)
-              rejected(reasons.keyEvent)
-            else rejectedWithModelConformanceError(error)
+            if (error.engineAbortStatus.isAborted) {
+              val errorDetails = reasons.keyErrorDetails
+              rejected(errorDetails)
+            } else rejectedWithModelConformanceError(error)
 
           case (reject: Verdict.MediatorReject, Left(error)) =>
             if (error.engineAbortStatus.isAborted)
-              rejected(reject)
+              rejected(reject.errorDetails)
             else rejectedWithModelConformanceError(error)
 
           // No model conformance check error: we reject with the verdict
           case (reasons: Verdict.ParticipantReject, _) =>
-            rejected(reasons.keyEvent)
+            rejected(reasons.keyErrorDetails)
 
           case (reject: Verdict.MediatorReject, _) =>
-            rejected(reject)
+            rejected(reject.errorDetails)
 
         }
         result <- resultET.value
@@ -1419,23 +1434,20 @@ class TransactionProcessingSteps(
           ),
       )
 
-    def rejectedWithModelConformanceError(error: ErrorWithSubTransaction) =
-      rejected(
-        LocalRejectError.MalformedRejects.ModelConformance
-          .Reject(error.errors.head1.toString)
-          .toLocalReject(protocolVersion)
-      )
+    def rejectedWithModelConformanceError(error: ErrorWithSubTransaction) = {
+      val localVerdict = LocalRejectError.MalformedRejects.ModelConformance
+        .Reject(error.errors.head1.toString)
+      rejected(ErrorDetails(localVerdict.reason(), localVerdict.isMalformed))
+    }
 
-    def rejected(
-        rejection: TransactionRejection
-    ): EitherT[
+    def rejected(errorDetails: ErrorDetails): EitherT[
       FutureUnlessShutdown,
       TransactionProcessorError,
       CommitAndStoreContractsAndPublishEvent,
     ] =
       (for {
         eventO <- EitherT.fromEither[Future](
-          createRejectionEvent(RejectionArgs(pendingRequestData, rejection))
+          createRejectionEvent(RejectionArgs(pendingRequestData, errorDetails))
         )
       } yield CommitAndStoreContractsAndPublishEvent(
         None,
@@ -1476,18 +1488,16 @@ class TransactionProcessingSteps(
           // Additional validation requested during security audit as DIA-003-013.
           // Activeness of the mediator already gets checked in Phase 3,
           // this additional validation covers the case that the mediator gets deactivated between Phase 3 and Phase 7.
-          rejected(
-            LocalRejectError.MalformedRejects.MalformedRequest
-              .Reject(
-                s"The mediator ${pendingRequestData.mediator} has been deactivated while processing the request. Rolling back."
-              )
-              .toLocalReject(protocolVersion)
-          )
+          val localReject = LocalRejectError.MalformedRejects.MalformedRequest
+            .Reject(
+              s"The mediator ${pendingRequestData.mediator} has been deactivated while processing the request. Rolling back."
+            )
+          rejected(ErrorDetails.fromLocalError(localReject))
         }
     } yield res
   }
 
-  override def postProcessResult(verdict: Verdict, pendingSubmission: Unit)(implicit
+  override def postProcessResult(verdict: Verdict, pendingSubmission: None.type)(implicit
       traceContext: TraceContext
   ): Unit = ()
 
@@ -1565,12 +1575,13 @@ object TransactionProcessingSteps {
       timeValidationResultE: Either[TimeCheckFailure, Unit],
       replayCheckResult: Option[String],
   ) {
-    val authenticationResult = authenticationValidatorResult.viewAuthenticationErrors
+    val authenticationResult: Map[ViewPosition, AuthenticationError] =
+      authenticationValidatorResult.viewAuthenticationErrors
   }
 
   final case class RejectionArgs(
       pendingTransaction: PendingTransaction,
-      error: TransactionRejection,
+      errorDetails: ErrorDetails,
   )
 
   def keyResolverFor(

@@ -47,7 +47,7 @@ import com.digitalasset.canton.participant.admin.inspection.{
   JournalGarbageCollectorControl,
   SyncStateInspection,
 }
-import com.digitalasset.canton.participant.admin.repair.RepairService
+import com.digitalasset.canton.participant.admin.repair.{CommitmentsService, RepairService}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.protocol.ContractAuthenticator
@@ -339,6 +339,14 @@ class CantonSyncService(
       loggerFactory,
     )
 
+  val commitmentsService: CommitmentsService = new CommitmentsService(
+    ledgerApiIndexer.asEval(TraceContext.empty),
+    parameters,
+    syncPersistentStateManager,
+    connectedSynchronizersLookup,
+    loggerFactory,
+  )
+
   val dynamicSynchronizerParameterGetter =
     new CantonDynamicSynchronizerParameterGetter(
       syncCrypto,
@@ -427,7 +435,6 @@ class CantonSyncService(
   override def prune(
       pruneUpToInclusive: Offset,
       submissionId: LedgerSubmissionId,
-      _pruneAllDivulgedContracts: Boolean, // Canton always prunes divulged contracts ignoring this flag
   ): CompletionStage[PruningResult] =
     withNewTrace("CantonSyncService.prune") { implicit traceContext => span =>
       span.setAttribute("submission_id", submissionId)
@@ -1104,7 +1111,7 @@ class CantonSyncService(
         _ = logger.debug(s"Awaiting tick at $tick from $alias for migration")
         _ <- EitherT.right(
           FutureUnlessShutdown.outcomeF(
-            syncService.timeTracker.awaitTick(tick).fold(Future.unit)(_.void)
+            syncService.timeTracker.awaitTick(tick).getOrElse(Future.unit)
           )
         )
         _ <- repairService
@@ -1157,8 +1164,9 @@ class CantonSyncService(
     val instances = Seq(
       migrationService,
       repairService,
+      commitmentsService,
       pruningProcessor,
-    ) ++ syncCrypto.ips.allSynchronizers.toSeq ++ Seq(
+      syncCrypto,
       connectionsManager,
       transactionRoutingProcessor,
       synchronizerRegistry,

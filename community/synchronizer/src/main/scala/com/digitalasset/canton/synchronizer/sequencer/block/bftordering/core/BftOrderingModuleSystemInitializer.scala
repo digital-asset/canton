@@ -18,6 +18,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.int
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.AvailabilityModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis.GenesisEpoch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.{
   EpochStore,
   EpochStoreReader,
@@ -69,6 +70,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
   BlockSubscription,
   Env,
+  ModuleRef,
   ModuleSystem,
   OrderingModuleSystemInitializer,
   P2PConnectionEventListener,
@@ -115,7 +117,10 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
 
   override def initialize(
       moduleSystem: ModuleSystem[E],
-      createP2PNetworkManager: P2PConnectionEventListener => P2PNetworkManagerT,
+      createP2PNetworkManager: (
+          P2PConnectionEventListener,
+          ModuleRef[BftOrderingMessage],
+      ) => P2PNetworkManagerT,
   ): SystemInitializationResult[
     E,
     P2PNetworkManagerT,
@@ -214,6 +219,8 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
           )
           val p2PNetworkOutModule = new P2PNetworkOutModule(
             bootstrapTopologyInfo.thisNode,
+            isGenesis = initialEpoch == GenesisEpoch.info.number,
+            bootstrapTopologySize = bootstrapTopologyInfo.currentMembership.orderingTopology.size,
             p2pNetworkOutModuleState,
             stores.p2pEndpointsStore,
             metrics,

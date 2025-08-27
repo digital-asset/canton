@@ -331,6 +331,8 @@ class AvailabilitySimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
         BftOrderingMessage
       ]](
         thisNode,
+        isGenesis = true, // This test assumes quorum connectivity
+        bootstrapTopologySize = orderingTopology.size,
         new P2PNetworkOutModule.State(p2pGrpcConnectionState),
         new SimulationP2PEndpointsStore(
           config.initialNetwork
@@ -389,7 +391,8 @@ class AvailabilitySimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
         consensusRef,
         loggerFactory,
       )
-    val p2pNetworkManager = createP2PNetworkManager(P2PConnectionEventListener.NoOp)
+    val p2pNetworkManager =
+      createP2PNetworkManager(P2PConnectionEventListener.NoOp, p2pNetworkInRef)
     val pruningSimulationFake =
       new PruningSimulationFake[SimulationEnv](loggerFactory)
 

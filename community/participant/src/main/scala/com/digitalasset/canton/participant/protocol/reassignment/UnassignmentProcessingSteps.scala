@@ -11,6 +11,7 @@ import com.digitalasset.canton.crypto.{
   HashOps,
   Signature,
   SigningKeyUsage,
+  SynchronizerCryptoClient,
   SynchronizerSnapshotSyncCryptoApi,
 }
 import com.digitalasset.canton.data.*
@@ -56,6 +57,7 @@ import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.DefaultDeserializationError
 import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
+import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -72,6 +74,7 @@ private[reassignment] class UnassignmentProcessingSteps(
     val synchronizerId: Source[PhysicalSynchronizerId],
     val participantId: ParticipantId,
     reassignmentCoordination: ReassignmentCoordination,
+    sourceCrypto: SynchronizerCryptoClient,
     seedGenerator: SeedGenerator,
     staticSynchronizerParameters: Source[StaticSynchronizerParameters],
     override protected val contractAuthenticator: ContractAuthenticator,
@@ -292,7 +295,7 @@ private[reassignment] class UnassignmentProcessingSteps(
         )
     } yield (
       ReassignmentsSubmission(Batch.of(protocolVersion.unwrap, messages*), rootHash),
-      pendingSubmission,
+      Some(pendingSubmission),
     )
   }
 
@@ -301,8 +304,8 @@ private[reassignment] class UnassignmentProcessingSteps(
       pendingSubmission: PendingSubmissionData,
   ): SubmissionResult =
     SubmissionResult(
-      pendingSubmission.mkReassignmentId(deliver.timestamp),
-      pendingSubmission.reassignmentCompletion.future,
+      pendingSubmission.value.mkReassignmentId(deliver.timestamp),
+      pendingSubmission.value.reassignmentCompletion.future,
     )
 
   override protected def decryptTree(
@@ -429,6 +432,7 @@ private[reassignment] class UnassignmentProcessingSteps(
       reassignmentLookup: ReassignmentLookup,
       activenessF: FutureUnlessShutdown[ActivenessResult],
       engineController: EngineController,
+      decisionTimeTickRequest: SynchronizerTimeTracker.TickRequest,
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -496,6 +500,7 @@ private[reassignment] class UnassignmentProcessingSteps(
         locallyRejectedF,
         engineController.abort,
         engineAbortStatusF = engineAbortStatusF,
+        decisionTimeTickRequest,
       )
 
       StorePendingDataAndSendResponseAndCreateTimeout(
@@ -503,9 +508,10 @@ private[reassignment] class UnassignmentProcessingSteps(
         EitherT.right(responseF),
         RejectionArgs(
           entry,
-          LocalRejectError.TimeRejects.LocalTimeout
-            .Reject()
-            .toLocalReject(protocolVersion.unwrap),
+          ErrorDetails.fromLocalError(
+            LocalRejectError.TimeRejects.LocalTimeout
+              .Reject()
+          ),
         ),
       )
     }
@@ -533,12 +539,13 @@ private[reassignment] class UnassignmentProcessingSteps(
       _locallyRejected,
       _engineController,
       _abortedF,
+      _decisionTimeTickRequest,
     ) = pendingRequestData
 
     val isReassigningParticipant = unassignmentValidationResult.assignmentExclusivity.isDefined
     val pendingSubmissionData = pendingSubmissionMap.get(unassignmentValidationResult.rootHash)
     def rejected(
-        reason: TransactionRejection
+        errorDetails: ErrorDetails
     ): EitherT[
       FutureUnlessShutdown,
       ReassignmentProcessorError,
@@ -546,7 +553,7 @@ private[reassignment] class UnassignmentProcessingSteps(
     ] =
       for {
         eventO <- EitherT.fromEither[FutureUnlessShutdown](
-          createRejectionEvent(RejectionArgs(pendingRequestData, reason))
+          createRejectionEvent(RejectionArgs(pendingRequestData, errorDetails))
         )
         _ = reassignmentCoordination.completeUnassignment(
           unassignmentValidationResult.reassignmentId,
@@ -559,11 +566,13 @@ private[reassignment] class UnassignmentProcessingSteps(
       )
 
     def mergeRejectionReasons(
-        reason: TransactionRejection,
-        validationError: Option[TransactionRejection],
-    ): TransactionRejection =
+        validationError: Option[LocalRejectError],
+        errorDetails: ErrorDetails,
+    ): ErrorDetails =
       // we reject with the phase 7 rejection, as it is the best information we have
-      validationError.getOrElse(reason)
+      validationError
+        .map(e => ErrorDetails(e.reason(), e.isMalformed))
+        .getOrElse(errorDetails)
 
     for {
       rejectionFromPhase3 <- EitherT.right(
@@ -574,17 +583,14 @@ private[reassignment] class UnassignmentProcessingSteps(
       // Activeness of the mediator already gets checked in Phase 3,
       // this additional validation covers the case that the mediator gets deactivated between Phase 3 and Phase 7.
       resultTs = event.event.content.timestamp
-      topologySnapshotAtTs <-
-        reassignmentCoordination.awaitTimestampAndGetTaggedCryptoSnapshot(
-          synchronizerId,
-          staticSynchronizerParameters = staticSynchronizerParameters,
-          timestamp = resultTs,
-        )
+      topologySnapshotAtTs <- EitherT(
+        sourceCrypto.ips.awaitSnapshot(resultTs).map(snapshot => Either.right(Source(snapshot)))
+      )
 
       mediatorCheckResultO <- EitherT.right(
         ReassignmentValidation
           .ensureMediatorActive(
-            topologySnapshotAtTs.map(_.ipsSnapshot),
+            topologySnapshotAtTs,
             mediator = pendingRequestData.mediator,
             reassignmentId = unassignmentValidationResult.reassignmentId,
           )
@@ -601,7 +607,7 @@ private[reassignment] class UnassignmentProcessingSteps(
 
       commit <- (verdict, rejectionO) match {
         case (_: Verdict.Approve, Some(rejection)) =>
-          rejected(rejection)
+          rejected(ErrorDetails.fromLocalError(rejection))
 
         case (_: Verdict.Approve, _) =>
           val commitSet = unassignmentValidationResult.commitSet
@@ -637,10 +643,13 @@ private[reassignment] class UnassignmentProcessingSteps(
             Some(reassignmentAccepted),
           )
         case (reasons: Verdict.ParticipantReject, rejectionO) =>
-          rejected(mergeRejectionReasons(reasons.keyEvent, rejectionO))
+          val errorDetails = mergeRejectionReasons(rejectionO, reasons.keyErrorDetails)
+          rejected(errorDetails)
 
         case (rejection: MediatorReject, rejectionO) =>
-          rejected(mergeRejectionReasons(rejection, rejectionO))
+          val errorDetails =
+            mergeRejectionReasons(rejectionO, rejection.errorDetails)
+          rejected(errorDetails)
       }
     } yield commit
 
@@ -752,6 +761,7 @@ object UnassignmentProcessingSteps {
       override val locallyRejectedF: FutureUnlessShutdown[Boolean],
       override val abortEngine: String => Unit,
       override val engineAbortStatusF: FutureUnlessShutdown[EngineAbortStatus],
+      decisionTimeTickRequest: SynchronizerTimeTracker.TickRequest,
   ) extends PendingReassignment {
 
     def isReassigningParticipant: Boolean =
@@ -761,5 +771,7 @@ object UnassignmentProcessingSteps {
 
     override def submitterMetadata: ReassignmentSubmitterMetadata =
       unassignmentValidationResult.submitterMetadata
+
+    override def cancelDecisionTimeTickRequest(): Unit = decisionTimeTickRequest.cancel()
   }
 }

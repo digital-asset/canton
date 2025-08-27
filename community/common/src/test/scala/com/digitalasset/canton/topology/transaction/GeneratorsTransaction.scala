@@ -31,6 +31,7 @@ import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.topology.{
   GeneratorsTopology,
   MediatorId,
+  Member,
   Namespace,
   ParticipantId,
   PartyId,
@@ -172,13 +173,6 @@ final class GeneratorsTransaction(
     } yield NamespaceDelegation.tryCreate(namespace, target, delegationRestriction)
   )
 
-  implicit val purgeTopologyTransactionArb: Arbitrary[PurgeTopologyTransaction] = Arbitrary(
-    for {
-      synchronizerId <- Arbitrary.arbitrary[SynchronizerId]
-      mappings <- Arbitrary.arbitrary[NonEmpty[Seq[TopologyMapping]]]
-    } yield PurgeTopologyTransaction.create(synchronizerId, mappings).value
-  )
-
   implicit val partyToParticipantTopologyTransactionArb: Arbitrary[PartyToParticipant] = Arbitrary(
     for {
       partyId <- Arbitrary.arbitrary[PartyId]
@@ -197,6 +191,13 @@ final class GeneratorsTransaction(
       participantId <- Arbitrary.arbitrary[ParticipantId]
       vettedPackages <- boundedListGen[VettedPackage]
     } yield VettedPackages.create(participantId, vettedPackages).value
+  )
+
+  implicit val ownerToKeyTopologyTransactionArb: Arbitrary[OwnerToKeyMapping] = Arbitrary(
+    for {
+      member <- Arbitrary.arbitrary[Member]
+      keys <- Arbitrary.arbitrary[NonEmpty[Seq[PublicKey]]]
+    } yield OwnerToKeyMapping.create(member, keys).value
   )
 
   implicit val partyToKeyTopologyTransactionArb: Arbitrary[PartyToKeyMapping] = Arbitrary(

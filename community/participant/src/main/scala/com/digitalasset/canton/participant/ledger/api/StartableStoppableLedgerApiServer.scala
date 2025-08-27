@@ -220,6 +220,7 @@ class StartableStoppableLedgerApiServer(
             _.create(
               config.serverConfig.jwtTimestampLeeway,
               loggerFactory,
+              config.serverConfig.maxTokenLifetime,
             )
           )
 
@@ -426,7 +427,7 @@ class StartableStoppableLedgerApiServer(
         engineLoggingConfig = config.cantonParameterConfig.engine.submissionPhaseLogging,
         telemetry = telemetry,
         loggerFactory = loggerFactory,
-        authenticateFatContractInstance = contractAuthenticator.authenticate,
+        contractAuthenticator = contractAuthenticator.authenticate,
         dynParamGetter = config.syncService.dynamicSynchronizerParameterGetter,
         interactiveSubmissionServiceConfig = config.serverConfig.interactiveSubmissionService,
         interactiveSubmissionEnricher = interactiveSubmissionEnricher,

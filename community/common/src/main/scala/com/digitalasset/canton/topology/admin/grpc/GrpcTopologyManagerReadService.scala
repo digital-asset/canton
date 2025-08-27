@@ -6,6 +6,7 @@ package com.digitalasset.canton.topology.admin.grpc
 import cats.data.EitherT
 import cats.implicits.catsSyntaxEitherId
 import cats.syntax.bifunctor.*
+import cats.syntax.foldable.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
@@ -717,15 +718,16 @@ class GrpcTopologyManagerReadService(
         }
       ): EitherT[FutureUnlessShutdown, RpcError, Seq[GenericStoredTopologyTransactions]]
     } yield {
-      val res = results.foldLeft(StoredTopologyTransactions.empty) { case (acc, elem) =>
-        StoredTopologyTransactions(
-          acc.result ++ elem.result.filter(
+      val res = StoredTopologyTransactions(
+        results.foldMap(
+          _.result.filter(
             baseQuery.filterSigningKey.isEmpty || _.transaction.signatures.exists(
               _.authorizingLongTermKey.unwrap.startsWith(baseQuery.filterSigningKey)
             )
           )
         )
-      }
+      )
+
       if (logger.underlying.isDebugEnabled()) {
         logger.debug(s"All listed topology transactions: ${res.result}")
       }
@@ -867,31 +869,6 @@ class GrpcTopologyManagerReadService(
         nonLogicalUpgradeMappings.toByteString(ProtocolVersion.latest).writeTo(out)
       }
     CantonGrpcUtil.mapErrNewEUS(res)
-  }
-
-  override def listPurgeTopologyTransaction(
-      request: ListPurgeTopologyTransactionRequest
-  ): Future[ListPurgeTopologyTransactionResponse] = {
-    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val ret = for {
-      res <- collectFromStoresByFilterString(
-        request.baseQuery,
-        PurgeTopologyTransaction.code,
-        request.filterSynchronizerId,
-      )
-    } yield {
-      val results = res
-        .collect { case (result, x: PurgeTopologyTransaction) => (result, x) }
-        .map { case (context, elem) =>
-          new adminProto.ListPurgeTopologyTransactionResponse.Result(
-            context = Some(createBaseResult(context)),
-            item = Some(elem.toProto),
-          )
-        }
-
-      adminProto.ListPurgeTopologyTransactionResponse(results = results)
-    }
-    CantonGrpcUtil.mapErrNewEUS(ret)
   }
 
   override def listSynchronizerUpgradeAnnouncement(

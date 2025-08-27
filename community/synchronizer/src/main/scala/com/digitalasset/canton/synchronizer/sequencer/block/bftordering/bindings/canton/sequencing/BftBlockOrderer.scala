@@ -46,8 +46,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings
   P2PGrpcConnectionState,
   P2PGrpcNetworking,
   P2PGrpcServerManager,
-  P2PGrpcStreamingServerSideReceiver,
-  PekkoP2PGrpcNetworking,
+  P2PGrpcStreamingReceiver,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.{
   PekkoEnv,
@@ -113,7 +112,7 @@ import scala.util.Random
 final class BftBlockOrderer(
     config: BftBlockOrdererConfig,
     sharedLocalStorage: Storage,
-    psid: PhysicalSynchronizerId,
+    psId: PhysicalSynchronizerId,
     sequencerId: SequencerId,
     clock: Clock,
     orderingTopologyProvider: OrderingTopologyProvider[PekkoEnv],
@@ -125,7 +124,7 @@ final class BftBlockOrderer(
     override val orderingTimeFixMode: OrderingTimeFixMode,
     sequencerSnapshotInfo: Option[SequencerSnapshot.ImplementationSpecificInfo],
     metrics: BftOrderingMetrics,
-    namedLoggerFactory: NamedLoggerFactory,
+    override val loggerFactory: NamedLoggerFactory,
     dedicatedStorageSetup: StorageSetup,
     queryCostMonitoring: Option[QueryCostMonitoringConfig] = None,
 )(implicit executionContext: ExecutionContext, materializer: Materializer)
@@ -141,7 +140,7 @@ final class BftBlockOrderer(
     s"The sequencer subscription initial height must be non-negative, but was $sequencerSubscriptionInitialHeight",
   )
 
-  private implicit val protocolVersion: ProtocolVersion = psid.protocolVersion
+  private implicit val protocolVersion: ProtocolVersion = psId.protocolVersion
 
   private val isAuthenticationEnabled =
     config.initialNetwork.exists(_.endpointAuthentication.enabled)
@@ -175,24 +174,6 @@ final class BftBlockOrderer(
 
   override def firstBlockHeight: Long = sequencerSubscriptionInitialHeight
 
-  private val loggedP2PEndpoint = config.initialNetwork
-    .map(endpointConfig =>
-      P2PEndpoint
-        .fromEndpointConfig(
-          endpointConfig.serverEndpoint.serverToClientAuthenticationEndpointConfig
-        )
-        .id
-        .logString
-    )
-    .getOrElse("unknown")
-
-  override protected val loggerFactory: NamedLoggerFactory =
-    namedLoggerFactory
-      .append(
-        "p2pEndpoint",
-        loggedP2PEndpoint,
-      )
-
   checkConfigSecurity()
 
   private val p2pServerGrpcExecutor =
@@ -216,7 +197,7 @@ final class BftBlockOrderer(
   private val maybeServerAuthenticatingFilter =
     maybeAuthenticationServices.map { authenticationServices =>
       new ServerAuthenticatingServerInterceptor(
-        psid,
+        psId,
         sequencerId,
         authenticationServices.syncCryptoForAuthentication.crypto,
         Seq(protocolVersion),
@@ -392,21 +373,25 @@ final class BftBlockOrderer(
     scheduler
   }
 
-  private def createNetworkManager(P2PConnectionEventListener: P2PConnectionEventListener) =
-    new PekkoP2PGrpcNetworking.PekkoP2PGrpcNetworkManager(
-      createConnectionManager(P2PConnectionEventListener),
+  private def createNetworkManager(
+      connectionEventListener: P2PConnectionEventListener,
+      p2pNetworkIn: ModuleRef[BftOrderingMessage],
+  ) =
+    new PekkoP2PGrpcNetworkManager(
+      createConnectionManager(connectionEventListener, p2pNetworkIn),
       timeouts,
       loggerFactory,
       metrics,
     )
 
   private def createConnectionManager(
-      p2pConnectionEventListener: P2PConnectionEventListener
+      p2pConnectionEventListener: P2PConnectionEventListener,
+      p2pNetworkIn: ModuleRef[BftOrderingMessage],
   ) = {
     val maybeGrpcNetworkingAuthenticationInitialState =
       maybeAuthenticationServices.map { authenticationServices =>
         P2PGrpcNetworking.AuthenticationInitialState(
-          psid,
+          psId,
           sequencerId,
           authenticationServices,
           authenticationTokenManagerConfig,
@@ -418,7 +403,9 @@ final class BftBlockOrderer(
       thisNode,
       p2pGrpcConnectionState,
       maybeGrpcNetworkingAuthenticationInitialState,
+      getServerToClientAuthenticationEndpoint(config),
       p2pConnectionEventListener,
+      p2pNetworkIn,
       metrics,
       timeouts,
       loggerFactory,
@@ -430,7 +417,7 @@ final class BftBlockOrderer(
   //  is propagated to the peer as an error.
   private def tryCreatePeerReceiverForIncomingConnection(
       peerSender: StreamObserver[BftOrderingMessage]
-  )(implicit traceContext: TraceContext): P2PGrpcStreamingServerSideReceiver =
+  )(implicit traceContext: TraceContext): P2PGrpcStreamingReceiver =
     p2pNetworkManager.connectionManager.tryCreateServerSidePeerReceiver(
       p2pNetworkInModuleRef,
       peerSender,

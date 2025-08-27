@@ -7,7 +7,7 @@ import cats.Show.Shown
 import cats.data.OptionT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
-import com.daml.nonempty.NonEmpty
+import com.daml.nonempty.NonEmptyUtil
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.data.{
@@ -29,6 +29,7 @@ import com.digitalasset.canton.synchronizer.mediator.ResponseAggregation.{
   ConsortiumVotingState,
   ViewState,
 }
+import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
@@ -59,7 +60,10 @@ final case class ResponseAggregation[VKEY](
     decisionTime: CantonTimestamp,
     override val version: CantonTimestamp,
     state: Either[MediatorVerdict, Map[VKEY, ViewState]],
-)(val requestTraceContext: TraceContext)(implicit val viewKeyOps: ViewKey[VKEY])
+)(
+    val requestTraceContext: TraceContext,
+    val participantResponseDeadlineTick: Option[SynchronizerTimeTracker.TickRequest],
+)(implicit val viewKeyOps: ViewKey[VKEY])
     extends ResponseAggregator
     with PrettyPrinting {
 
@@ -234,12 +238,38 @@ final case class ResponseAggregation[VKEY](
               show"$requestId($keyName $viewKey): Received a ${nonPositiveVerdict.name} for $newlyResponded and reached consortium thresholds for parties: $newRejectionsFullVotes"
             )
 
-            // TODO(i26453): Consider whether we want to keep all rejections or only the latest one.
-            // Right now we only keep the last rejection reason that makes the party reject fully.
-            // It can be either a LocalReject or a LocalAbstain.
+            // We currently keep only the most recent rejection reason that caused the party to reject fully.
+            // This reason can be either a LocalReject or a LocalAbstain.
+            // If it is a LocalAbstain, we check whether a stronger (better) rejection reason already exists.
+            val rejection: List[(Set[LfPartyId], ParticipantId, NonPositiveLocalVerdict)] =
+              nonPositiveVerdict match {
+                case reject: LocalReject => List((newRejectionsFullVotes, sender, reject))
+                case abstain @ LocalAbstain(_) =>
+                  // For each party, try to recover their most recent rejection (if any)
+                  val previous: Map[LfPartyId, (Set[LfPartyId], ParticipantId, LocalReject)] =
+                    newRejectionsFullVotes.flatMap { party =>
+                      consortiumVoting
+                        .get(party)
+                        .flatMap(_.rejections.headOption)
+                        .map { case (prevSender, prevReject) =>
+                          party -> (Set(party), prevSender, prevReject)
+                        }
+                    }.toMap
 
-            val nextRejections =
-              NonEmpty(List, newRejectionsFullVotes -> nonPositiveVerdict, rejections*)
+                  val partiesWithoutPreviousRejection: Set[LfPartyId] =
+                    newRejectionsFullVotes -- previous.keySet
+
+                  val abstainRejection
+                      : List[(Set[LfPartyId], ParticipantId, NonPositiveLocalVerdict)] =
+                    if (partiesWithoutPreviousRejection.nonEmpty)
+                      List((partiesWithoutPreviousRejection, sender, abstain))
+                    else
+                      Nil
+
+                  abstainRejection ++ previous.values.toList
+              }
+            // because newRejectionsFullVotes is nonEmpty, result is nonEmpty
+            val nextRejections = NonEmptyUtil.fromUnsafe(rejection ++ rejections)
 
             val nextViewState = ViewState(
               consortiumVotingUpdated,
@@ -303,7 +333,8 @@ final case class ResponseAggregation[VKEY](
       state: Either[MediatorVerdict, Map[VKEY, ViewState]] = state,
   ): ResponseAggregation[VKEY] =
     ResponseAggregation(requestId, request, timeout, decisionTime, version, state)(
-      requestTraceContext
+      requestTraceContext,
+      participantResponseDeadlineTick,
     )
 
   def withVersion(version: CantonTimestamp): ResponseAggregation[VKEY] =
@@ -355,18 +386,22 @@ object ResponseAggregation {
       threshold: PositiveInt,
       hostingParticipantsCount: PositiveInt,
       approvals: Set[ParticipantId],
-      rejections: Set[ParticipantId],
+      rejections: List[(ParticipantId, LocalReject)],
       abstains: Set[ParticipantId],
   ) extends PrettyPrinting {
 
+    private val rejectedParticipants = rejections.map(_._1).toSet
+
     def responsesOf(participant: ParticipantId): Option[VoteKind] =
       if (approvals.contains(participant)) Some(VoteKind.Approve)
-      else if (rejections.contains(participant)) Some(VoteKind.Reject)
+      else if (rejectedParticipants.contains(participant)) Some(VoteKind.Reject)
       else if (abstains.contains(participant)) Some(VoteKind.Abstain)
       else None
 
     private def hasAlreadyResponded(sender: ParticipantId): Boolean =
-      approvals.contains(sender) || rejections.contains(sender) || abstains.contains(sender)
+      approvals.contains(sender) || rejectedParticipants.contains(sender) || abstains.contains(
+        sender
+      )
 
     // if the sender has already responded, we do not update the state
     def update(localVerdict: LocalVerdict, sender: ParticipantId): ConsortiumVotingState =
@@ -374,7 +409,8 @@ object ResponseAggregation {
       else
         localVerdict match {
           case _: LocalApprove => this.copy(approvals = this.approvals + sender)
-          case _: LocalReject => this.copy(rejections = this.rejections + sender)
+          case localReject: LocalReject =>
+            this.copy(rejections = (sender -> localReject) :: this.rejections)
           case _: LocalAbstain => this.copy(abstains = this.abstains + sender)
         }
 
@@ -408,7 +444,7 @@ object ResponseAggregation {
         threshold,
         numberOfHostingParticipants,
         approvals = Set.empty,
-        rejections = Set.empty,
+        rejections = Nil,
         abstains = Set.empty,
       )
 
@@ -417,7 +453,7 @@ object ResponseAggregation {
         threshold: PositiveInt = PositiveInt.one,
         numberOfHostingParticipants: Option[PositiveInt] = None,
         approvals: Set[ParticipantId] = Set.empty,
-        rejections: Set[ParticipantId] = Set.empty,
+        rejections: List[(ParticipantId, LocalReject)] = Nil,
         abstains: Set[ParticipantId] = Set.empty,
     ): ConsortiumVotingState =
       ConsortiumVotingState(
@@ -458,7 +494,7 @@ object ResponseAggregation {
         ConsortiumVotingState,
       ],
       quorumsState: Seq[Quorum],
-      rejections: List[(Set[LfPartyId], NonPositiveLocalVerdict)],
+      rejections: List[(Set[LfPartyId], ParticipantId, NonPositiveLocalVerdict)],
   ) extends PrettyPrinting {
 
     override protected def pretty: Pretty[ViewState] =
@@ -477,6 +513,7 @@ object ResponseAggregation {
       timeout: CantonTimestamp,
       decisionTime: CantonTimestamp,
       topologySnapshot: TopologySnapshot,
+      participantResponseDeadlineTick: Option[SynchronizerTimeTracker.TickRequest],
   )(implicit
       requestTraceContext: TraceContext,
       ec: ExecutionContext,
@@ -494,7 +531,7 @@ object ResponseAggregation {
         decisionTime,
         requestId.unwrap,
         Right(initialState),
-      )(requestTraceContext = requestTraceContext)
+      )(requestTraceContext, participantResponseDeadlineTick)
     }
 
   private def mkInitialState[K](

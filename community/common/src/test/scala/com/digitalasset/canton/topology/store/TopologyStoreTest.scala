@@ -471,7 +471,6 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with Fa
 
           for {
             _ <- new InitialTopologySnapshotValidator(
-              protocolVersion = testedProtocolVersion,
               pureCrypto = testData.factory.syncCryptoClient.crypto.pureCrypto,
               store = store,
               timeouts = timeouts,
@@ -612,7 +611,6 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with Fa
 
           for {
             _ <- new InitialTopologySnapshotValidator(
-              testedProtocolVersion,
               factory.syncCryptoClient.crypto.pureCrypto,
               store,
               timeouts,
@@ -657,7 +655,6 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with Fa
 
           for {
             _ <- new InitialTopologySnapshotValidator(
-              testedProtocolVersion,
               factory.syncCryptoClient.crypto.pureCrypto,
               store,
               timeouts,
@@ -688,7 +685,8 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with Fa
               store,
               ts6,
               filterUid = Some(
-                Seq(
+                NonEmpty(
+                  Seq,
                   ptp_fred_p1.mapping.partyId.uid,
                   dtc_p2_synchronizer1.mapping.participantId.uid,
                 )
@@ -698,7 +696,7 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with Fa
               store,
               ts6,
               filterNamespace = Some(
-                Seq(dns_p1seq, p2Namespace)
+                NonEmpty(Seq, dns_p1seq, p2Namespace)
               ),
             )
 
@@ -822,11 +820,11 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with Fa
           //    the accepted transaction will not be stored correctly.
 
           val good_otk = makeSignedTx(
-            OwnerToKeyMapping(p1Id, NonEmpty(Seq, factory.SigningKeys.key1))
+            OwnerToKeyMapping.tryCreate(p1Id, NonEmpty(Seq, factory.SigningKeys.key1))
           )(p1Key, factory.SigningKeys.key1)
 
           val bad_otkTx = makeSignedTx(
-            OwnerToKeyMapping(p1Id, NonEmpty(Seq, factory.EncryptionKeys.key2))
+            OwnerToKeyMapping.tryCreate(p1Id, NonEmpty(Seq, factory.EncryptionKeys.key2))
           )(p1Key, factory.SigningKeys.key2)
           val bad_otk = bad_otkTx
             .copy(signatures =
