@@ -116,7 +116,6 @@ class TopologyComponentFactory(
       executionContext: ExecutionContext
   ): InitialTopologySnapshotValidator =
     new InitialTopologySnapshotValidator(
-      protocolVersion,
       new SynchronizerCryptoPureApi(staticSynchronizerParameters, crypto.pureCrypto),
       topologyStore,
       timeouts,

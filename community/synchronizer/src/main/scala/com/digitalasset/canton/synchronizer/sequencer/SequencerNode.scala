@@ -507,7 +507,6 @@ class SequencerNodeBootstrap(
                 EitherT.rightT[FutureUnlessShutdown, String](Set.empty[Member])
               case Some((initialTopologyTransactions, sequencerSnapshot)) =>
                 val topologySnapshotValidator = new InitialTopologySnapshotValidator(
-                  staticSynchronizerParameters.protocolVersion,
                   new SynchronizerCryptoPureApi(staticSynchronizerParameters, crypto.pureCrypto),
                   synchronizerTopologyStore,
                   parameters.processingTimeouts,

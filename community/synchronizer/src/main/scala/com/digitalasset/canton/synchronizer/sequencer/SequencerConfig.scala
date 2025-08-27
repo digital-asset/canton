@@ -17,6 +17,7 @@ import com.digitalasset.canton.config.{
   StorageConfig,
   UniformCantonConfigValidation,
 }
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerStreamInstrumentationConfig.DefaultBufferSize
 import com.digitalasset.canton.synchronizer.sequencer.DatabaseSequencerConfig.{
   SequencerPruningConfig,
   TestingInterceptor,
@@ -220,10 +221,27 @@ object DatabaseSequencerConfig {
   }
 }
 
+final case class BlockSequencerStreamInstrumentationConfig(
+    isEnabled: Boolean = false,
+    bufferSize: PositiveInt = DefaultBufferSize,
+) extends UniformCantonConfigValidation
+
+object BlockSequencerStreamInstrumentationConfig {
+  val DefaultBufferSize = PositiveInt.tryCreate(128)
+
+  implicit val blockSequencerStreamInstrumentationConfigValidator
+      : CantonConfigValidator[BlockSequencerStreamInstrumentationConfig] = {
+    import com.digitalasset.canton.config.CantonConfigValidatorInstances.*
+    CantonConfigValidatorDerivation[BlockSequencerStreamInstrumentationConfig]
+  }
+}
+
 final case class BlockSequencerConfig(
     writer: SequencerWriterConfig = SequencerWriterConfig.HighThroughput(),
     reader: SequencerReaderConfig = SequencerReaderConfig(),
     testingInterceptor: Option[DatabaseSequencerConfig.TestingInterceptor] = None,
+    streamInstrumentation: BlockSequencerStreamInstrumentationConfig =
+      BlockSequencerStreamInstrumentationConfig(),
 ) extends UniformCantonConfigValidation { self =>
   def toDatabaseSequencerConfig: DatabaseSequencerConfig = new DatabaseSequencerConfig {
     override val writer: SequencerWriterConfig = self.writer
