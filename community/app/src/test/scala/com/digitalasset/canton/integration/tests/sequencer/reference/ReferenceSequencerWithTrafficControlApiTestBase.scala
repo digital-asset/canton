@@ -388,6 +388,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
           availableUpToInclusive = availableUpToInclusive,
         ),
         FutureSupervisor.Noop,
+        progressSupervisorO = None,
         SequencerTrafficConfig(),
         runtimeReady = FutureUnlessShutdown.unit,
       )

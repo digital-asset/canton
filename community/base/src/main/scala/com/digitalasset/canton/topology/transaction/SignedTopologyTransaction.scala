@@ -356,6 +356,32 @@ object SignedTopologyTransaction
     )
   }
 
+  def duplicateSigningKeys(
+      signatures: NonEmpty[Set[TopologyTransactionSignature]]
+  ): Set[Fingerprint] = signatures.toSeq
+    .map(_.signedBy)
+    .groupBy1(identity)
+    .filter(_._2.sizeIs > 1)
+    .keySet
+
+  def create[Op <: TopologyChangeOp, M <: TopologyMapping](
+      transaction: TopologyTransaction[Op, M],
+      signatures: NonEmpty[Set[TopologyTransactionSignature]],
+      isProposal: Boolean,
+      protocolVersion: ProtocolVersion,
+  ): Either[String, SignedTopologyTransaction[Op, M]] = {
+    val duplicates = duplicateSigningKeys(signatures)
+    Either.cond(
+      duplicates.isEmpty,
+      SignedTopologyTransaction[Op, M](
+        transaction,
+        signatures,
+        isProposal,
+      )(protocolVersionRepresentativeFor(protocolVersion)),
+      s"Transaction has duplicate signatures: ${duplicates.mkString(", ")}",
+    )
+  }
+
   def asVersion[Op <: TopologyChangeOp, M <: TopologyMapping](
       signedTx: SignedTopologyTransaction[Op, M],
       protocolVersion: ProtocolVersion,

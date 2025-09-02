@@ -9,7 +9,10 @@ import cats.syntax.traverse.*
 import com.daml.jwt.{AuthServiceJWTCodec, Jwt, JwtDecoder, StandardJWTPayload}
 import com.daml.ledger.api.v2.admin.command_inspection_service.CommandState
 import com.daml.ledger.api.v2.admin.package_management_service.PackageDetails
-import com.daml.ledger.api.v2.admin.party_management_service.PartyDetails as ProtoPartyDetails
+import com.daml.ledger.api.v2.admin.party_management_service.{
+  AllocateExternalPartyResponse,
+  PartyDetails as ProtoPartyDetails,
+}
 import com.daml.ledger.api.v2.commands.{Command, DisclosedContract, PrefetchContractKey}
 import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.api.v2.event.CreatedEvent
@@ -89,6 +92,7 @@ import com.digitalasset.canton.networking.grpc.{GrpcError, RecordingStreamObserv
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.platform.apiserver.execution.CommandStatus
 import com.digitalasset.canton.protocol.LfContractId
+import com.digitalasset.canton.topology.transaction.TopologyTransaction.GenericTopologyTransaction
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId}
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.{LfPackageId, LfPackageName, LfPartyId, config}
@@ -686,6 +690,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
           verboseHashing: Boolean = false,
           prefetchContractKeys: Seq[PrefetchContractKey] = Seq.empty,
+          maxRecordTime: Option[CantonTimestamp] = None,
       ): PrepareResponseProto =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -701,6 +706,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               userPackageSelectionPreference,
               verboseHashing,
               prefetchContractKeys,
+              maxRecordTime,
             )
           )
         }
@@ -1229,10 +1235,10 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         })
 
       @Help.Summary("Read the current connected synchronizers for a party", FeatureFlag.Testing)
-      def connected_synchronizers(partyId: PartyId): GetConnectedSynchronizersResponse =
+      def connected_synchronizers(partyId: Option[PartyId]): GetConnectedSynchronizersResponse =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(
-            LedgerApiCommands.StateService.GetConnectedSynchronizers(partyId.toLf)
+            LedgerApiCommands.StateService.GetConnectedSynchronizers(partyId.map(_.toLf))
           )
         })
 
@@ -1578,6 +1584,28 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         })
         PartyDetails.fromProtoPartyDetails(proto)
       }
+
+      @Help.Summary("Allocate a new external party", FeatureFlag.Preview)
+      @Help.Description(
+        """Allocates a new external party on the ledger.
+          synchronizerId: SynchronizerId on which to allocate the party
+          transactions: onboarding transactions and their individual signatures
+          multiSignatures: Signatures over the combined hash of all onboarding transactions"""
+      )
+      def allocate_external(
+          synchronizerId: SynchronizerId,
+          transactions: Seq[(GenericTopologyTransaction, Seq[Signature])],
+          multiSignatures: Seq[Signature],
+      ): AllocateExternalPartyResponse =
+        check(FeatureFlag.Preview)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.PartyManagementService.AllocateExternalParty(
+              synchronizerId = synchronizerId,
+              transactions = transactions,
+              multiHashSignatures = multiSignatures,
+            )
+          )
+        })
 
       @Help.Summary("List parties known by the Ledger API server", FeatureFlag.Testing)
       @Help.Description(
@@ -2211,6 +2239,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
             verboseHashing: Boolean = false,
             prefetchContractKeys: Seq[javab.data.PrefetchContractKey] = Seq.empty,
+            maxRecordTime: Option[CantonTimestamp] = None,
         ): PrepareResponseProto =
           consoleEnvironment.run {
             ledgerApiCommand(
@@ -2226,6 +2255,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 userPackageSelectionPreference,
                 verboseHashing,
                 prefetchContractKeys.map(k => PrefetchContractKey.fromJavaProto(k.toProto)),
+                maxRecordTime,
               )
             )
           }

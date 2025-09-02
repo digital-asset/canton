@@ -29,8 +29,14 @@ import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagem
 import com.digitalasset.canton.platform.apiserver.services.admin.ApiPartyManagementServiceSpec.*
 import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
 import com.digitalasset.canton.platform.apiserver.services.tracking.{InFlight, StreamTracker}
+import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
+  ExternalPartyOnboardingDetails,
+  SynchronizerId,
+}
 import com.digitalasset.canton.tracing.{TestTelemetrySetup, TraceContext}
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref
 import io.grpc.Status.Code
 import io.grpc.StatusRuntimeException
@@ -106,7 +112,7 @@ class ApiPartyManagementServiceSpec
 
     "propagate trace context" in {
       val (
-        mockIndexTransactionsService,
+        _mockIndexTransactionsService,
         mockIdentityProviderExists,
         mockIndexPartyManagementService,
         mockPartyRecordStore,
@@ -118,12 +124,12 @@ class ApiPartyManagementServiceSpec
         mockIdentityProviderExists,
         partiesPageSize,
         mockPartyRecordStore,
-        mockIndexTransactionsService,
         TestPartySyncService(testTelemetrySetup.tracer),
         oneHour,
         ApiPartyManagementService.CreateSubmissionId.fixedForTests(aSubmissionId),
         new DefaultOpenTelemetry(OpenTelemetrySdk.builder().build()),
         partyAllocationTracker,
+        participantId = participantId,
         loggerFactory = loggerFactory,
       )
 
@@ -166,12 +172,12 @@ class ApiPartyManagementServiceSpec
         mockIdentityProviderExists,
         partiesPageSize,
         mockPartyRecordStore,
-        mockIndexTransactionsService,
         TestPartySyncService(testTelemetrySetup.tracer),
         oneHour,
         ApiPartyManagementService.CreateSubmissionId.fixedForTests(aSubmissionId.toString),
         NoOpTelemetry,
         partyAllocationTracker,
+        participantId = participantId,
         loggerFactory = loggerFactory,
       )
 
@@ -265,7 +271,7 @@ class ApiPartyManagementServiceSpec
 
 object ApiPartyManagementServiceSpec {
 
-  val participantId = Ref.ParticipantId.assertFromString("participant1")
+  val participantId = DefaultTestIdentities.participant1.toLf
 
   val partyDetails: IndexerPartyDetails = IndexerPartyDetails(
     party = Ref.Party.assertFromString("Bob"),
@@ -291,6 +297,7 @@ object ApiPartyManagementServiceSpec {
     override def allocateParty(
         hint: Ref.Party,
         submissionId: Ref.SubmissionId,
+        externalPartyOnboardingDetails: Option[ExternalPartyOnboardingDetails],
     )(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[state.SubmissionResult] = {
@@ -301,5 +308,9 @@ object ApiPartyManagementServiceSpec {
       )
       FutureUnlessShutdown.pure(state.SubmissionResult.Acknowledged)
     }
+
+    override def protocolVersionForSynchronizerId(
+        synchronizerId: SynchronizerId
+    ): Option[ProtocolVersion] = Some(BaseTest.testedProtocolVersion)
   }
 }

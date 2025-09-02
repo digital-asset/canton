@@ -137,6 +137,7 @@ final case class JsPrepareSubmissionRequest(
     synchronizerId: String,
     packageIdSelectionPreference: Seq[String],
     verboseHashing: Boolean,
+    maxRecordTime: Option[com.google.protobuf.timestamp.Timestamp],
 )
 
 final case class JsPrepareSubmissionResponse(

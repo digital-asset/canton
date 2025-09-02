@@ -23,7 +23,7 @@ import com.digitalasset.canton.lifecycle.{
   LifeCycle,
   PromiseUnlessShutdown,
 }
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NodeLoggingUtil}
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, CantonMutableHandlerRegistry}
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.SynchronizerParametersLookup.SequencerSynchronizerParameters
@@ -101,13 +101,14 @@ import com.digitalasset.canton.topology.transaction.{
   SynchronizerTrustCertificate,
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{EitherTUtil, SingleUseCell}
+import com.digitalasset.canton.util.{EitherTUtil, SingleUseCell, StackTraceUtil}
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
 import io.grpc.ServerServiceDefinition
 import org.apache.pekko.actor.ActorSystem
+import org.slf4j.event.Level
 
 import java.util.concurrent.ScheduledExecutorService
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 
 object SequencerNodeBootstrap {
 
@@ -226,6 +227,7 @@ class SequencerNodeBootstrap(
         // are not closed properly
         arguments.metrics.trafficControl.purchaseCache.closeAcquired()
         arguments.metrics.trafficControl.consumedCache.closeAcquired()
+        arguments.metrics.eventBuffer.closeAcquired()
       }
     })
 
@@ -732,7 +734,45 @@ class SequencerNodeBootstrap(
               sequencerAuthInterceptor,
             )
           }
-
+          progressSupervisorO = parameters.progressSupervisor.filter(_.enabled).map {
+            supervisorConfig =>
+              logger.info("Progress supervisor enabled for sequencer")
+              val warningState: AtomicBoolean = new AtomicBoolean(false)
+              new ProgressSupervisor(
+                logLevel = Level.DEBUG,
+                logAfter = supervisorConfig.stuckDetectionTimeout.duration,
+                futureSupervisor = futureSupervisor,
+                loggerFactory = loggerFactory,
+                warnAction = {
+                  if (warningState.compareAndSet(false, true)) {
+                    logger.error(
+                      s"Sequencer looks to be stuck, switching logging level from ${NodeLoggingUtil.originalRootLoggerLevel} to DEBUG for ${supervisorConfig.logAtDebugLevelDuration} seconds..."
+                    )
+                    logger.warn(s"Stack traces:\n${StackTraceUtil.formatStackTrace()}")
+                    NodeLoggingUtil.setLevel(level = "DEBUG")
+                    scheduler
+                      .schedule(
+                        (() => {
+                          val levelBefore = Some(NodeLoggingUtil.originalRootLoggerLevel)
+                            .map(_.toString)
+                            .getOrElse("INFO")
+                          NodeLoggingUtil.setLevel(level = levelBefore)
+                          logger.info(
+                            s"Switching logging back to $levelBefore"
+                          )
+                        }): Runnable,
+                        supervisorConfig.logAtDebugLevelDuration.asJava.toSeconds,
+                        java.util.concurrent.TimeUnit.SECONDS,
+                      )
+                      .discard
+                  } else {
+                    logger.debug(
+                      "Not triggering progress monitor again as we are already in warning state"
+                    )
+                  }
+                },
+              )
+          }
           sequencer <- EitherT
             .right[String](
               sequencerFactory.create(
@@ -742,6 +782,7 @@ class SequencerNodeBootstrap(
                 clock,
                 syncCryptoWithOptionalSessionKeys,
                 futureSupervisor,
+                progressSupervisorO,
                 config.trafficConfig,
                 runtimeReadyPromise.futureUS,
                 topologyAndSequencerSnapshot.flatMap { case (_, sequencerSnapshot) =>
@@ -778,6 +819,7 @@ class SequencerNodeBootstrap(
                 parameters.processingTimeouts,
                 loggerFactory,
                 staticSynchronizerParameters.protocolVersion,
+                progressSupervisorO,
               ),
             ),
             parameters.sequencerClient,

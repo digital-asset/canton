@@ -503,6 +503,7 @@ final case class CantonConfig(
           sequencerNodeConfig.parameters.unsafeEnableOnlinePartyReplication,
         sequencerApiLimits = sequencerNodeConfig.parameters.sequencerApiLimits,
         warnOnUndefinedLimits = sequencerNodeConfig.parameters.warnOnUndefinedLimits,
+        progressSupervisor = sequencerNodeConfig.parameters.progressSupervisor,
       )
     }
 
@@ -1240,6 +1241,8 @@ object CantonConfig {
       deriveReader[CantonFeatures]
     lazy implicit final val cantonWatchdogConfigReader: ConfigReader[WatchdogConfig] =
       deriveReader[WatchdogConfig]
+    lazy implicit final val progressSupervisorConfigReader: ConfigReader[ProgressSupervisorConfig] =
+      deriveReader[ProgressSupervisorConfig]
 
     lazy implicit final val reportingLevelReader
         : ConfigReader[StartupMemoryCheckConfig.ReportingLevel] =
@@ -1835,6 +1838,9 @@ object CantonConfig {
       deriveWriter[CantonFeatures]
     lazy implicit final val cantonWatchdogConfigWriter: ConfigWriter[WatchdogConfig] =
       deriveWriter[WatchdogConfig]
+    lazy implicit final val cantonProgressSupervisorConfigWriter
+        : ConfigWriter[ProgressSupervisorConfig] =
+      deriveWriter[ProgressSupervisorConfig]
 
     lazy implicit final val reportingLevelWriter
         : ConfigWriter[StartupMemoryCheckConfig.ReportingLevel] =

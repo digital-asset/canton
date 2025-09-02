@@ -229,6 +229,7 @@ class ParticipantTopologyDispatcher(
           participantId,
           sequencerConnectClient,
           manager.store,
+          topologyConfig,
           timeouts,
           loggerFactory
             .append("synchronizerId", synchronizerId.toString)
@@ -276,7 +277,7 @@ class ParticipantTopologyDispatcher(
               timeouts = timeouts,
               loggerFactory = synchronizerLoggerFactory,
               crypto = crypto,
-              broadcastBatchSize = topologyConfig.broadcastBatchSize,
+              topologyConfig = topologyConfig,
             )
 
             val storeBasedSynchronizerOutbox = new StoreBasedSynchronizerOutbox(
@@ -291,7 +292,7 @@ class ParticipantTopologyDispatcher(
               timeouts = timeouts,
               loggerFactory = loggerFactory,
               crypto = crypto,
-              broadcastBatchSize = topologyConfig.broadcastBatchSize,
+              topologyConfig = topologyConfig,
               futureSupervisor = futureSupervisor,
             )
             ErrorUtil.requireState(
@@ -344,6 +345,7 @@ private class SynchronizerOnboardingOutbox(
     participantId: ParticipantId,
     sequencerConnectClient: SequencerConnectClient,
     val authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
+    override protected val topologyConfig: TopologyConfig,
     val timeouts: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
     override protected val crypto: Crypto,
@@ -441,6 +443,7 @@ object SynchronizerOnboardingOutbox {
       participantId: ParticipantId,
       sequencerConnectClient: SequencerConnectClient,
       authorizedStore: TopologyStore[TopologyStoreId.AuthorizedStore],
+      topologyConfig: TopologyConfig,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
       crypto: Crypto,
@@ -455,6 +458,7 @@ object SynchronizerOnboardingOutbox {
       participantId,
       sequencerConnectClient,
       authorizedStore,
+      topologyConfig,
       timeouts,
       loggerFactory,
       crypto,

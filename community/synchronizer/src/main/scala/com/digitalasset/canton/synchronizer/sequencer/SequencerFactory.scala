@@ -44,6 +44,7 @@ trait SequencerFactory extends FlagCloseable with HasCloseContext {
       driverClock: Clock, // this clock is only used in tests, otherwise can the same clock as above can be passed
       synchronizerSyncCryptoApi: SynchronizerCryptoClient,
       futureSupervisor: FutureSupervisor,
+      progressSupervisorO: Option[ProgressSupervisor],
       trafficConfig: SequencerTrafficConfig,
       runtimeReady: FutureUnlessShutdown[Unit],
       sequencerSnapshot: Option[SequencerSnapshot],
@@ -64,6 +65,7 @@ abstract class DatabaseSequencerFactory(
     protocolVersion: ProtocolVersion,
     sequencerId: SequencerId,
     blockSequencerMode: Boolean,
+    metrics: SequencerMetrics,
 )(implicit ec: ExecutionContext)
     extends SequencerFactory
     with NamedLogging {
@@ -83,6 +85,7 @@ abstract class DatabaseSequencerFactory(
       // Overriding the store's close context with the writers, so that when the writer gets closed, the store
       // stops retrying forever
       overrideCloseContext = Some(this.closeContext),
+      sequencerMetrics = metrics,
     )
 
   override def initialize(
@@ -113,6 +116,7 @@ class CommunityDatabaseSequencerFactory(
       sequencerProtocolVersion,
       sequencerId,
       blockSequencerMode = false,
+      metrics,
     ) {
 
   override def create(
@@ -122,6 +126,7 @@ class CommunityDatabaseSequencerFactory(
       driverClock: Clock,
       synchronizerSyncCryptoApi: SynchronizerCryptoClient,
       futureSupervisor: FutureSupervisor,
+      progressSupervisorO: Option[ProgressSupervisor],
       trafficConfig: SequencerTrafficConfig,
       runtimeReady: FutureUnlessShutdown[Unit],
       sequencerSnapshot: Option[SequencerSnapshot],

@@ -316,13 +316,13 @@ object ApiServices {
         new IdentityProviderExists(identityProviderConfigStore),
         partyManagementServiceConfig.maxPartiesPageSize,
         partyRecordStore,
-        updateService,
         syncService,
         managementServiceTimeout,
         telemetry = telemetry,
         partyAllocationTracker = partyAllocationTracker,
         submissionIdGenerator =
           ApiPartyManagementService.CreateSubmissionId.forParticipant(participantId),
+        participantId = participantId,
         loggerFactory = loggerFactory,
       )
 

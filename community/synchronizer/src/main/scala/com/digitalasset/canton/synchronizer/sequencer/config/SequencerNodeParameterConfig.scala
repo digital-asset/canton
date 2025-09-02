@@ -6,6 +6,7 @@ package com.digitalasset.canton.synchronizer.sequencer.config
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble}
 import com.digitalasset.canton.config.manual.CantonConfigValidatorDerivation
+import com.digitalasset.canton.synchronizer.sequencer.ProgressSupervisorConfig
 
 /** Various parameters for non-standard sequencer settings
   *
@@ -23,6 +24,9 @@ import com.digitalasset.canton.config.manual.CantonConfigValidatorDerivation
   * @param warnOnUndefinedLimits
   *   if true, then this sequencer will emit a warning once if there is no limit configured for a
   *   particular stream
+  * @param progressSupervisor
+  *   if defined, enables the progress supervisor to monitor if the sequencer stops progressing and
+  *   to collect diagnostic data
   */
 final case class SequencerNodeParameterConfig(
     override val sessionSigningKeys: SessionSigningKeysConfig = SessionSigningKeysConfig.disabled,
@@ -33,6 +37,7 @@ final case class SequencerNodeParameterConfig(
     override val batching: BatchingConfig = BatchingConfig(),
     override val caching: CachingConfigs = CachingConfigs(),
     override val watchdog: Option[WatchdogConfig] = None,
+    progressSupervisor: Option[ProgressSupervisorConfig] = None,
     unsafeEnableOnlinePartyReplication: Boolean = false,
     sequencerApiLimits: Map[String, NonNegativeInt] = Map.empty,
     warnOnUndefinedLimits: Boolean = true,
