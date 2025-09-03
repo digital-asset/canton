@@ -305,8 +305,13 @@ class TransactionProcessingSteps(
     override def maxSequencingTimeO: OptionT[FutureUnlessShutdown, CantonTimestamp] = OptionT.liftF(
       recentSnapshot.ipsSnapshot.findDynamicSynchronizerParametersOrDefault(protocolVersion).map {
         synchronizerParameters =>
-          CantonTimestamp(transactionMeta.ledgerEffectiveTime)
+          val maxSequencingTimeFromLET = CantonTimestamp(transactionMeta.ledgerEffectiveTime)
             .add(synchronizerParameters.ledgerTimeRecordTimeTolerance.unwrap)
+          submitterInfo.externallySignedSubmission
+            .flatMap(_.maxRecordTimeO)
+            .map(CantonTimestamp.apply)
+            .map(_.min(maxSequencingTimeFromLET))
+            .getOrElse(maxSequencingTimeFromLET)
       }
     )
 

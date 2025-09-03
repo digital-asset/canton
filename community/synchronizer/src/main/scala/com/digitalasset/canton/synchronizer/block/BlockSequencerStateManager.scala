@@ -27,10 +27,12 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   BlockSequencerStreamInstrumentationConfig,
   DeliverableSubmissionOutcome,
   InFlightAggregations,
+  ProgressSupervisor,
   SequencerIntegration,
+  SubmissionOutcome,
 }
 import com.digitalasset.canton.synchronizer.sequencing.traffic.store.TrafficConsumedStore
-import com.digitalasset.canton.topology.{Member, SynchronizerId}
+import com.digitalasset.canton.topology.{Member, SequencerId, SynchronizerId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.{ErrorUtil, LoggerUtil}
@@ -41,7 +43,6 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.SortedMap
 import scala.concurrent.{ExecutionContext, Future, Promise}
-import scala.util.Success
 
 /** Thrown if the ephemeral state does not match what is expected in the persisted store. This is
   * not expected to be able to occur, but if it does likely means that the ephemeral state is
@@ -86,6 +87,8 @@ class BlockSequencerStateManager(
     headState: AtomicReference[HeadState],
     streamInstrumentationConfig: BlockSequencerStreamInstrumentationConfig,
     blockMetrics: BlockMetrics,
+    progressSupervisorO: Option[ProgressSupervisor],
+    sequencerId: SequencerId,
 )(implicit executionContext: ExecutionContext)
     extends BlockSequencerStateManagerBase
     with NamedLogging {
@@ -194,7 +197,7 @@ class BlockSequencerStateManager(
       dbSequencerIntegration: SequencerIntegration
   ): Flow[Traced[BlockUpdate], Traced[CantonTimestamp], NotUsed] = {
     implicit val traceContext = TraceContext.empty
-    Flow[Traced[BlockUpdate]].statefulMapAsync(getHeadState) { (priorHead, update) =>
+    Flow[Traced[BlockUpdate]].statefulMapAsyncUSAndDrain(getHeadState) { (priorHead, update) =>
       implicit val traceContext = update.traceContext
       val currentBlockNumber = priorHead.block.height + 1
       val fut = update.value match {
@@ -214,7 +217,6 @@ class BlockSequencerStateManager(
       }
       fut
         .map(newHead => newHead -> Traced(newHead.block.lastTs))
-        .failOnShutdownToAbortException("BlockSequencerStateManagerBase.applyBlockUpdate")
     }
   }
 
@@ -300,6 +302,14 @@ class BlockSequencerStateManager(
       _ <- blockSequencerAcknowledgementsFUS
       _ <- inFlightAggregationUpdatesFUS
     } yield {
+      progressSupervisorO.foreach { supervisor =>
+        update.submissionsOutcomes.filter(isAddressingThisSequencer).foreach {
+          case outcome: DeliverableSubmissionOutcome =>
+            supervisor.arm(outcome.sequencingTime)(outcome.submissionTraceContext)
+          case _ =>
+        }
+      }
+
       val newHead = priorHead.copy(chunk = newState)
       updateHeadState(priorHead, newHead)
       update.acknowledgements.foreach { case (member, timestamp) =>
@@ -311,11 +321,7 @@ class BlockSequencerStateManager(
       newHead
     }).valueOr(e =>
       ErrorUtil.internalError(new RuntimeException(s"handleChunkUpdate failed with error: $e"))
-    ).transform {
-      case Success(UnlessShutdown.AbortedDueToShutdown) =>
-        Success(UnlessShutdown.Outcome(priorHead))
-      case other => other
-    }
+    )
   }
 
   private def handleComplete(priorHead: HeadState, newBlock: BlockInfo)(implicit
@@ -432,12 +438,19 @@ class BlockSequencerStateManager(
       blockState: BlockEphemeralState
   )(implicit traceContext: TraceContext): Unit =
     if (enableInvariantCheck) blockState.checkInvariant()
+
+  private def isAddressingThisSequencer(outcome: SubmissionOutcome): Boolean =
+    outcome match {
+      case x: DeliverableSubmissionOutcome => x.deliverToMembers.contains(sequencerId)
+      case _ => false
+    }
 }
 
 object BlockSequencerStateManager {
 
   def create(
       synchronizerId: SynchronizerId,
+      sequencerId: SequencerId,
       store: SequencerBlockStore,
       trafficConsumedStore: TrafficConsumedStore,
       enableInvariantCheck: Boolean,
@@ -445,6 +458,7 @@ object BlockSequencerStateManager {
       loggerFactory: NamedLoggerFactory,
       streamInstrumentationConfig: BlockSequencerStreamInstrumentationConfig,
       blockMetrics: BlockMetrics,
+      progressSupervisorO: Option[ProgressSupervisor],
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
@@ -470,6 +484,8 @@ object BlockSequencerStateManager {
           headState = headState,
           streamInstrumentationConfig = streamInstrumentationConfig,
           blockMetrics = blockMetrics,
+          progressSupervisorO = progressSupervisorO,
+          sequencerId = sequencerId,
         )
       }
   }

@@ -81,6 +81,7 @@ class BftSequencerApiTest extends SequencerApiTest with RateLimitManagerTesting 
         driverClock,
         crypto,
         FutureSupervisor.Noop,
+        progressSupervisorO = None,
         SequencerTrafficConfig(),
         runtimeReady = FutureUnlessShutdown.unit,
       )

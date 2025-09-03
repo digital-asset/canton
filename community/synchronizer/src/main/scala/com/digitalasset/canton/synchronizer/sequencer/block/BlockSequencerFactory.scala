@@ -66,6 +66,7 @@ abstract class BlockSequencerFactory(
       protocolVersion,
       sequencerId,
       blockSequencerMode = true,
+      metrics,
     )
     with NamedLogging {
 
@@ -182,6 +183,7 @@ abstract class BlockSequencerFactory(
       driverClock: Clock,
       synchronizerSyncCryptoApi: SynchronizerCryptoClient,
       futureSupervisor: FutureSupervisor,
+      progressSupervisorO: Option[ProgressSupervisor],
       trafficConfig: SequencerTrafficConfig,
       runtimeReady: FutureUnlessShutdown[Unit],
       sequencerSnapshot: Option[SequencerSnapshot] = None,
@@ -240,6 +242,7 @@ abstract class BlockSequencerFactory(
       stateManager <- FutureUnlessShutdown.lift(
         BlockSequencerStateManager.create(
           synchronizerId,
+          sequencerId,
           store,
           trafficConsumedStore,
           nodeParameters.enableAdditionalConsistencyChecks,
@@ -247,6 +250,7 @@ abstract class BlockSequencerFactory(
           synchronizerLoggerFactory,
           blockSequencerConfig.streamInstrumentation,
           metrics.block,
+          progressSupervisorO,
         )
       )
     } yield {

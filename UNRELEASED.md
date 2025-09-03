@@ -9,6 +9,21 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2025-09-04 (Exclusive)
+- Replace an unbounded timeout with a configurable timeout when waiting to observe the submitted topology tranactions.
+  Additionally, the delay between retries of the topology dispatching loop has been made configurable.
+  ```
+  participants.participant1.topology.topology-transaction-observation-timeout = 30s // default value
+  participants.participant1.topology.broadcast-retry-delay = 10s // default value
+
+  mediators.mediator1.topology.topology-transaction-observation-timeout = 30s // default value
+  mediators.mediator1.topology.broadcast-retry-delay = 10s // default value
+
+  sequencers.sequencer1.topology.topology-transaction-observation-timeout = 30s // default value
+  sequencers.sequencer1.topology.broadcast-retry-delay = 10s // default value
+  ```
+- Topology dispatching errors are now logged at WARN level (instead of ERROR).
+  
 ## until 2025-08-25 (Exclusive)
 - The HTTP connection timeout is configurable in the Ledger JSON API via
   `canton.participants.<participant-id>.http-ledger-api.server.request-timeout=<duration>`. Configure this value to allow

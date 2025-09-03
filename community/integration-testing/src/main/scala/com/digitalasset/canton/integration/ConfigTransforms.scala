@@ -29,7 +29,11 @@ import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
   SequencerHighAvailabilityConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
-import com.digitalasset.canton.synchronizer.sequencer.{BlockSequencerConfig, SequencerConfig}
+import com.digitalasset.canton.synchronizer.sequencer.{
+  BlockSequencerConfig,
+  ProgressSupervisorConfig,
+  SequencerConfig,
+}
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
 import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
 import com.digitalasset.canton.{BaseTest, UniquePortGenerator, config}
@@ -802,7 +806,7 @@ object ConfigTransforms {
       ConfigTransforms.updateAllInitialProtocolVersion(ProtocolVersion.v33)
 
   def setTopologyTransactionRegistrationTimeout(
-      timeout: config.NonNegativeDuration
+      timeout: config.NonNegativeFiniteDuration
   ): Seq[ConfigTransform] = Seq(
     updateAllParticipantConfigs_(
       _.focus(_.topology.topologyTransactionRegistrationTimeout).replace(timeout)
@@ -824,4 +828,9 @@ object ConfigTransforms {
       _.focus(_.parameters.unsafeEnableOnlinePartyReplication).replace(true)
     ),
   )
+
+  def enableSequencerProgressSupervisor: ConfigTransform =
+    updateAllSequencerConfigs_(
+      _.focus(_.parameters.progressSupervisor).replace(Some(ProgressSupervisorConfig()))
+    )
 }

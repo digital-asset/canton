@@ -4,6 +4,7 @@
 package com.digitalasset.canton.http.json.v2
 
 import com.daml.ledger.api.v2.admin.party_management_service
+import com.daml.ledger.api.v2.interactive.interactive_submission_service
 import com.digitalasset.canton.http.json.v2.CirceRelaxedCodec.deriveRelaxedCodec
 import com.digitalasset.canton.http.json.v2.Endpoints.{CallerContext, TracedInput}
 import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
@@ -16,7 +17,7 @@ import io.circe.Codec
 import sttp.tapir.generic.auto.*
 import sttp.tapir.json.circe.jsonBody
 import sttp.tapir.server.ServerEndpoint
-import sttp.tapir.{AnyEndpoint, path, query}
+import sttp.tapir.{AnyEndpoint, Schema, path, query}
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -38,6 +39,10 @@ class JsPartyManagementService(
       withServerLogic(
         allocatePartyEndpoint,
         allocateParty,
+      ),
+      withServerLogic(
+        allocateExternalPartyEndpoint,
+        allocateExternalParty,
       ),
       withServerLogic(
         JsPartyManagementService.getParticipantIdEndpoint,
@@ -100,6 +105,18 @@ class JsPartyManagementService(
           .allocateParty(req.in)
           .resultToRight
 
+  private val allocateExternalParty: CallerContext => TracedInput[
+    party_management_service.AllocateExternalPartyRequest
+  ] => Future[
+    Either[JsCantonError, party_management_service.AllocateExternalPartyResponse]
+  ] =
+    caller =>
+      req =>
+        partyManagementClient
+          .serviceStub(caller.token())(req.traceContext)
+          .allocateExternalParty(req.in)
+          .resultToRight
+
   private val updateParty: CallerContext => TracedInput[
     (String, party_management_service.UpdatePartyDetailsRequest)
   ] => Future[Either[JsCantonError, party_management_service.UpdatePartyDetailsResponse]] =
@@ -134,6 +151,13 @@ object JsPartyManagementService extends DocumentationEndpoints {
     .out(jsonBody[party_management_service.AllocatePartyResponse])
     .description("Allocate a new party to the participant node")
 
+  val allocateExternalPartyEndpoint = parties
+    .in(sttp.tapir.stringToPath("external"))
+    .post
+    .in(jsonBody[party_management_service.AllocateExternalPartyRequest])
+    .out(jsonBody[party_management_service.AllocateExternalPartyResponse])
+    .description("Allocate a new external party")
+
   val listKnownPartiesEndpoint =
     parties.get
       .out(jsonBody[party_management_service.ListKnownPartiesResponse])
@@ -162,6 +186,7 @@ object JsPartyManagementService extends DocumentationEndpoints {
   override def documentation: Seq[AnyEndpoint] = Seq(
     listKnownPartiesEndpoint,
     allocatePartyEndpoint,
+    allocateExternalPartyEndpoint,
     getParticipantIdEndpoint,
     getPartyEndpoint,
     updatePartyEndpoint,
@@ -170,6 +195,13 @@ object JsPartyManagementService extends DocumentationEndpoints {
 
 object JsPartyManagementCodecs {
   import JsSchema.config
+  import JsInteractiveSubmissionServiceCodecs.signatureRW
+
+  implicit val signatureFormatSchema: Schema[interactive_submission_service.SignatureFormat] =
+    Schema.string
+
+  implicit val signingAlgorithmSpec: Schema[interactive_submission_service.SigningAlgorithmSpec] =
+    Schema.string
 
   implicit val partyDetails: Codec[party_management_service.PartyDetails] = deriveRelaxedCodec
   implicit val listKnownPartiesResponse: Codec[party_management_service.ListKnownPartiesResponse] =
@@ -178,6 +210,18 @@ object JsPartyManagementCodecs {
   implicit val allocatePartyRequest: Codec[party_management_service.AllocatePartyRequest] =
     deriveRelaxedCodec
   implicit val allocatePartyResponse: Codec[party_management_service.AllocatePartyResponse] =
+    deriveRelaxedCodec
+
+  implicit val signedTransaction
+      : Codec[party_management_service.AllocateExternalPartyRequest.SignedTransaction] =
+    deriveRelaxedCodec
+
+  implicit val allocateExternalPartyRequest
+      : Codec[party_management_service.AllocateExternalPartyRequest] =
+    deriveRelaxedCodec
+
+  implicit val allocateExternalPartyResponse
+      : Codec[party_management_service.AllocateExternalPartyResponse] =
     deriveRelaxedCodec
 
   implicit val getPartiesRequest: Codec[party_management_service.GetPartiesRequest] =

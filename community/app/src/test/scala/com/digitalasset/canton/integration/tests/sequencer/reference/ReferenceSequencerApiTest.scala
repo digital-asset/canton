@@ -60,6 +60,7 @@ class ReferenceSequencerApiTest extends SequencerApiTest with RateLimitManagerTe
         driverClock,
         crypto,
         FutureSupervisor.Noop,
+        progressSupervisorO = None,
         SequencerTrafficConfig(),
         runtimeReady = FutureUnlessShutdown.unit,
       )

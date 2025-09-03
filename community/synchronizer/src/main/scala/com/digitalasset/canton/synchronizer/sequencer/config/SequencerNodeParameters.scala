@@ -10,6 +10,7 @@ import com.digitalasset.canton.environment.{
   HasGeneralCantonNodeParameters,
   HasProtocolCantonNodeParameters,
 }
+import com.digitalasset.canton.synchronizer.sequencer.ProgressSupervisorConfig
 
 trait SequencerParameters {
   def maxConfirmationRequestsBurstFactor: PositiveDouble
@@ -40,6 +41,7 @@ final case class SequencerNodeParameters(
     unsafeEnableOnlinePartyReplication: Boolean = false,
     sequencerApiLimits: Map[String, NonNegativeInt] = Map.empty,
     warnOnUndefinedLimits: Boolean = true,
+    progressSupervisor: Option[ProgressSupervisorConfig] = None,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters
     with HasProtocolCantonNodeParameters
