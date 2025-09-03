@@ -2,6 +2,7 @@
 version: v1
 directories:
   # All module roots of the directories in which we have Protobuf files whose continuity we want to track
+  # Update `protobufExternalDeps` in build.sbt when adding or removing target/protobuf_external dirs
   - community/admin-api/src/main/protobuf
   - community/base/src/main/protobuf
   - community/synchronizer/src/main/protobuf

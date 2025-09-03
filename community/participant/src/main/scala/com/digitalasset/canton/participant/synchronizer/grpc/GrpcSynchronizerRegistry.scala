@@ -153,7 +153,7 @@ class GrpcSynchronizerRegistry(
         .toEitherT[FutureUnlessShutdown]
 
       _ <- aliasManager
-        .processHandshake(config.synchronizerAlias, info.synchronizerId)
+        .processHandshake(config.synchronizerAlias, info.psid)
         .leftMap(SynchronizerRegistryHelpers.fromSynchronizerAliasManagerError)
 
       updatedConfigE = {
@@ -171,6 +171,7 @@ class GrpcSynchronizerRegistry(
           .many(
             updatedConnections,
             config.sequencerConnections.sequencerTrustThreshold,
+            config.sequencerConnections.sequencerLivenessMargin,
             config.sequencerConnections.submissionRequestAmplification,
           )
           .map(connections => config.copy(sequencerConnections = connections))

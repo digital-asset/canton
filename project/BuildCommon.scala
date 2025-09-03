@@ -929,7 +929,6 @@ object BuildCommon {
           h2,
           opentelemetry_instrumentation_grpc,
           opentelemetry_instrumentation_runtime_metrics,
-          opentelemetry_sdk_autoconfigure,
           pekko_slf4j, // not used at compile time, but required by com.digitalasset.canton.util.PekkoUtil.createActorSystem
           pekko_http, // used for http health service
           slick,
@@ -1529,6 +1528,7 @@ object BuildCommon {
       Compile / damlCodeGeneration := (for (
         name <- Seq(
           "model",
+          "model_iface",
           "semantic",
           "ongoing_stream_package_upload",
           "package_management",
@@ -1571,6 +1571,8 @@ object BuildCommon {
       Compile / damlBuildOrder := Seq(
         // define the packages that have a dependency in the right order
         // packages that are omitted will be compiled after those listed below
+        "model_iface",
+        "model",
         "carbonv1",
         "carbonv2",
         "upgrade_iface",

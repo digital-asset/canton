@@ -86,7 +86,7 @@ final class IssConsensusModule[E <: Env[E]](
     override val dependencies: ConsensusModuleDependencies[E],
     override val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
-    private val futurePbftMessageQueue: FairBoundedQueue[
+    @VisibleForTesting private[iss] val futurePbftMessageQueue: FairBoundedQueue[
       Consensus.ConsensusMessage.PbftUnverifiedNetworkMessage
     ],
     private val postponedConsensusMessageQueue: Option[FairBoundedQueue[Consensus.Message[E]]] =
@@ -128,7 +128,7 @@ final class IssConsensusModule[E <: Env[E]](
 
   private val signatureVerifier = new IssConsensusSignatureVerifier[E](metrics)
 
-  logger.debug(
+  logger.info(
     "Starting with " +
       s"membership = ${initialState.topologyInfo.currentMembership}, " +
       s"latest completed epoch = ${initialState.latestCompletedEpoch.info}, " +
@@ -159,12 +159,12 @@ final class IssConsensusModule[E <: Env[E]](
     message match {
 
       case Consensus.Init =>
-        abortInit(
+        abort(
           s"${PreIssConsensusModule.getClass.getSimpleName} should be the only one receiving ${Consensus.Init.getClass.getSimpleName}"
         )
 
       case Consensus.SegmentCancelledEpoch =>
-        abortInit(
+        abort(
           s"${StateTransferBehavior.getClass.getSimpleName} should be the only one receiving ${Consensus.SegmentCancelledEpoch.getClass.getSimpleName}"
         )
 
@@ -195,7 +195,7 @@ final class IssConsensusModule[E <: Env[E]](
             )
 
           case BootstrapKind.RegularStartup =>
-            logger.debug(
+            logger.info(
               s"(Re)starting node from epoch ${initialState.epochState.epoch.info.number}"
             )
             startConsensusForCurrentEpoch()
@@ -255,9 +255,11 @@ final class IssConsensusModule[E <: Env[E]](
           setNewEpochState(newEpochInfo, Some(newMembership -> newCryptoProvider))
 
           startConsensusForCurrentEpoch()
-          logger.debug(
-            s"New epoch: ${epochState.epoch.info.number} has started with ordering topology ${newMembership.orderingTopology}"
+          logger.info(
+            s"New epoch ${epochState.epoch.info.number} has started with leaders = ${newMembership.leaders}; " +
+              s"ordering topology = ${newMembership.orderingTopology}"
           )
+          metrics.topology.update(newMembership)
 
           processQueuedPbftMessages()
         }
@@ -426,18 +428,18 @@ final class IssConsensusModule[E <: Env[E]](
           // fill up the other node's quota in this queue.
           futurePbftMessageQueue.enqueue(msg.actualSender, msg) match {
             case FairBoundedQueue.EnqueueResult.Success =>
-              logger.debug(
+              logger.trace(
                 s"Queued PBFT message $pbftMessageType from future epoch $epochNumber " +
                   s"as we're still in epoch $thisNodeEpochNumber"
               )
             case FairBoundedQueue.EnqueueResult.TotalCapacityExceeded =>
-              logger.info(
+              logger.trace(
                 s"Dropped PBFT message $pbftMessageType from future epoch $epochNumber " +
                   s"as we're still in epoch $thisNodeEpochNumber and " +
                   s"total capacity for queueing future messages has been reached"
               )
             case FairBoundedQueue.EnqueueResult.PerNodeQuotaExceeded(node) =>
-              logger.info(
+              logger.trace(
                 s"Dropped PBFT message $pbftMessageType from future epoch $epochNumber " +
                   s"as we're still in epoch $thisNodeEpochNumber and " +
                   s"the quota for node $node for queueing future messages has been reached"
@@ -454,6 +456,9 @@ final class IssConsensusModule[E <: Env[E]](
             commitCertificate: CommitCertificate,
             hasCompletedLedSegment,
           ) =>
+        // Note that (hopefully) the below message is the only block-level INFO log in the BFT Orderer.
+        //  We intend to minimize the number of logs on the hot path.
+        logger.info(s"Block ${orderedBlock.metadata} has been ordered")
         emitConsensusLatencyStats(metrics)
 
         if (hasCompletedLedSegment)
