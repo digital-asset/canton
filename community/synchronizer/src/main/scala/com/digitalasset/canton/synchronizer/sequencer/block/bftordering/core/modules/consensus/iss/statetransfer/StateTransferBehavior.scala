@@ -157,13 +157,18 @@ final class StateTransferBehavior[E <: Env[E]](
 
     message match {
       case Consensus.Init =>
+        val epochNumber = initialState.epochState.epoch.info.number
         // Note that for onboarding, segments are created but not started
-        initialState.epochState
-          .notifyEpochCancellationToSegments(initialState.epochState.epoch.info.number)
+        logger.info(s"$messageType: cancelling segment modules for epoch $epochNumber")
+        initialState.epochState.notifyEpochCancellationToSegments(epochNumber)
 
       case Consensus.SegmentCancelledEpoch =>
         cancelledSegments += 1
-        if (initialState.epochState.epoch.segments.sizeIs == cancelledSegments) {
+        val numberOfSegments = initialState.epochState.epoch.segments.size
+        logger.info(
+          s"$messageType: received segment cancellation $cancelledSegments out of $numberOfSegments"
+        )
+        if (numberOfSegments == cancelledSegments) {
           if (stateTransferManager.inStateTransfer) {
             abort(
               s"$messageType: $stateTransferType state transfer cannot be already in progress during another state transfer"
@@ -219,7 +224,8 @@ final class StateTransferBehavior[E <: Env[E]](
           //  either the output module, or the subscribing sequencer runtime, or both are more than one epoch behind
           //  state transfer, because the output module will just reprocess the blocks to be recovered.
           logger.info(
-            s"Received NewEpochTopology for epoch $newEpochNumber, but the latest current epoch is already $currentEpochNumber; ignoring"
+            s"$messageType: received NewEpochTopology for epoch $newEpochNumber, but the latest current epoch " +
+              s"is already $currentEpochNumber; ignoring"
           )
         } else {
           abort(
@@ -268,12 +274,12 @@ final class StateTransferBehavior[E <: Env[E]](
       case _ =>
         postponedConsensusMessages.enqueue(BftNodeId.Empty, message) match {
           case EnqueueResult.PerNodeQuotaExceeded(_) =>
-            logger.info(
+            logger.trace(
               s"Postponed messages without an originating node exceeded their quota on `$messageType` " +
                 s"(likely a late internal message)"
             )
           case EnqueueResult.TotalCapacityExceeded =>
-            logger.info(
+            logger.trace(
               s"Postponed message queue total capacity has been exceeded by a message without an originating node " +
                 s"(`$messageType`, likely a late internal message)"
             )
@@ -381,7 +387,7 @@ final class StateTransferBehavior[E <: Env[E]](
   )(implicit context: E#ActorContextT[Consensus.Message[E]], traceContext: TraceContext): Unit = {
     val currentEpochNumber = currentEpochInfo.number
     val newEpochNumber = newEpochInfo.number
-    logger.debug(
+    logger.info(
       s"$messageType: storing completed epoch $currentEpochNumber and new epoch $newEpochNumber"
     )
     pipeToSelf(
@@ -406,9 +412,9 @@ final class StateTransferBehavior[E <: Env[E]](
   )(implicit context: E#ActorContextT[Consensus.Message[E]], traceContext: TraceContext): Unit =
     postponedConsensusMessages.enqueue(from, message) match {
       case EnqueueResult.PerNodeQuotaExceeded(nodeId) =>
-        logger.info(s"Node `$nodeId` exceeded its postponed message queue quota")
+        logger.trace(s"Node `$nodeId` exceeded its postponed message queue quota")
       case EnqueueResult.TotalCapacityExceeded =>
-        logger.info("Postponed message queue total capacity has been exceeded")
+        logger.trace("Postponed message queue total capacity has been exceeded")
       case EnqueueResult.Success =>
         logger.trace("Successfully postponed a message")
       case FairBoundedQueue.EnqueueResult.Duplicate(_) =>

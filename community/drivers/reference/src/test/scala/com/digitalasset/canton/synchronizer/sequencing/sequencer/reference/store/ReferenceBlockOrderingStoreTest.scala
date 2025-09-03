@@ -19,13 +19,22 @@ import org.scalatest.wordspec.AsyncWordSpec
 trait ReferenceBlockOrderingStoreTest extends AsyncWordSpec with BaseTest with FailOnShutdown {
 
   private val event1 =
-    sequencedSend(payload = ByteString.copyFromUtf8("payload1"), microsecondsSinceEpoch = 0)
+    sequencedSend(
+      payload = ByteString.copyFromUtf8("payload1"),
+      microsecondsSinceEpoch = 0,
+      sequencerId = "aSequencerId",
+    )
   private val event2 =
-    sequencedSend(payload = ByteString.copyFromUtf8("payload2"), microsecondsSinceEpoch = 1)
+    sequencedSend(
+      payload = ByteString.copyFromUtf8("payload2"),
+      microsecondsSinceEpoch = 1,
+      sequencerId = "aSequencerId",
+    )
   private val event3 =
     sequencedAcknowledgement(
       payload = ByteString.copyFromUtf8("acknowledge"),
       microsecondsSinceEpoch = 1,
+      sequencerId = "aSequencerId",
     )
 
   val traceContext1: TraceContext =
@@ -34,6 +43,8 @@ trait ReferenceBlockOrderingStoreTest extends AsyncWordSpec with BaseTest with F
     W3CTraceContext("00-16e9c9f2d11d1a45d13083d423bc7e45-6a5ad6c4f4f2041b-01").toTraceContext
   val traceContext3: TraceContext =
     W3CTraceContext("00-7a5e6a5c6f8d8646adce33d4f0b1c3b1-8546d5a6a5f6c5b6-01").toTraceContext
+
+  private val maxQueryBlockCount = 10
 
   private def block(height: Long, tracedEvent: Traced[BlockFormat.OrderedRequest]) =
     TimestampedBlock(
@@ -64,8 +75,8 @@ trait ReferenceBlockOrderingStoreTest extends AsyncWordSpec with BaseTest with F
         for {
           _ <- sut.insertRequest(event1)(traceContext1)
           _ <- sut.insertRequest(event2)(traceContext2)
-          result0 <- sut.queryBlocks(0)
-          result1 <- sut.queryBlocks(-1)
+          result0 <- sut.queryBlocks(0, maxQueryBlockCount)
+          result1 <- sut.queryBlocks(-1, maxQueryBlockCount)
         } yield {
           result0 should contain theSameElementsInOrderAs Seq(
             block(0L, Traced(event1)(traceContext1)),
@@ -81,8 +92,8 @@ trait ReferenceBlockOrderingStoreTest extends AsyncWordSpec with BaseTest with F
           _ <- sut.insertRequest(event1)(traceContext1)
           _ <- sut.insertRequest(event2)(traceContext2)
           _ <- sut.insertRequest(event3)(traceContext3)
-          result0 <- sut.queryBlocks(1)
-          result1 <- sut.queryBlocks(2)
+          result0 <- sut.queryBlocks(1, maxQueryBlockCount)
+          result1 <- sut.queryBlocks(2, maxQueryBlockCount)
         } yield {
           result0 should contain theSameElementsInOrderAs Seq(
             block(1L, Traced(event2)(traceContext2)),

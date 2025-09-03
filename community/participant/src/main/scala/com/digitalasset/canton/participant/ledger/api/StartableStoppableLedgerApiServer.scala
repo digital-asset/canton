@@ -26,7 +26,7 @@ import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   FutureSupervisor,
 }
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.{NonNegativeDurationConverter, ProcessingTimeout}
 import com.digitalasset.canton.connection.GrpcApiInfoService
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.data.Offset
@@ -201,6 +201,7 @@ class StartableStoppableLedgerApiServer(
 
   private def buildLedgerApiServerOwner(
   )(implicit traceContext: TraceContext) = {
+    import NonNegativeDurationConverter.*
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory, telemetry)
 
@@ -218,6 +219,7 @@ class StartableStoppableLedgerApiServer(
         ) ++
           config.serverConfig.authServices.map(
             _.create(
+              config.serverConfig.jwksCacheConfig,
               config.serverConfig.jwtTimestampLeeway,
               loggerFactory,
               config.serverConfig.maxTokenLifetime,
@@ -226,6 +228,12 @@ class StartableStoppableLedgerApiServer(
 
     val jwtVerifierLoader =
       new CachedJwtVerifierLoader(
+        cacheMaxSize = config.serverConfig.jwksCacheConfig.cacheMaxSize,
+        cacheExpiration = config.serverConfig.jwksCacheConfig.cacheExpiration.underlying,
+        connectionTimeout = config.serverConfig.jwksCacheConfig.connectionTimeout.underlying,
+        readTimeout = config.serverConfig.jwksCacheConfig.readTimeout.underlying,
+        jwtTimestampLeeway = config.serverConfig.jwtTimestampLeeway,
+        maxTokenLife = config.serverConfig.maxTokenLifetime.toMillisOrNone(),
         metrics = Some(config.metrics.identityProviderConfigStore.verifierCache),
         loggerFactory = loggerFactory,
       )
@@ -434,7 +442,7 @@ class StartableStoppableLedgerApiServer(
         keepAlive = config.serverConfig.keepAliveServer,
         packagePreferenceBackend = packagePreferenceBackend,
       )
-      _ <- startHttpApiIfEnabled(timedSyncService, authInterceptor)
+      _ <- startHttpApiIfEnabled(timedSyncService, authInterceptor, packagePreferenceBackend)
       _ <- config.serverConfig.userManagementService.additionalAdminUserId
         .fold(ResourceOwner.unit) { rawUserId =>
           ResourceOwner.forFuture { () =>
@@ -547,6 +555,7 @@ class StartableStoppableLedgerApiServer(
   private def startHttpApiIfEnabled(
       packageSyncService: PackageSyncService,
       authInterceptor: AuthInterceptor,
+      packagePreferenceBackend: PackagePreferenceBackend,
   ): ResourceOwner[Unit] =
     config.jsonApiConfig
       .fold(ResourceOwner.unit) { jsonApiConfig =>
@@ -570,6 +579,7 @@ class StartableStoppableLedgerApiServer(
             packageSyncService,
             loggerFactory,
             authInterceptor,
+            packagePreferenceBackend = packagePreferenceBackend,
           )(
             config.jsonApiMetrics
           ).afterReleased(noTracingLogger.info("JSON-API HTTP Server is released"))

@@ -219,6 +219,7 @@ class SequencerInfoLoader(
       SequencerInfoLoader.aggregateBootstrapInfo(
         logger,
         sequencerTrustThreshold = sequencerConnections.sequencerTrustThreshold,
+        sequencerLivenessMargin = sequencerConnections.sequencerLivenessMargin,
         submissionRequestAmplification = sequencerConnections.submissionRequestAmplification,
         sequencerConnectionValidation = sequencerConnectionValidation,
         expectedSynchronizerId = expectedSynchronizerId,
@@ -464,7 +465,7 @@ object SequencerInfoLoader {
   }
 
   final case class SequencerAggregatedInfo(
-      synchronizerId: PhysicalSynchronizerId,
+      psid: PhysicalSynchronizerId,
       staticSynchronizerParameters: StaticSynchronizerParameters,
       expectedSequencers: NonEmpty[Map[SequencerAlias, SequencerId]],
       sequencerConnections: SequencerConnections,
@@ -630,6 +631,7 @@ object SequencerInfoLoader {
   private[grpc] def aggregateBootstrapInfo(
       logger: TracedLogger,
       sequencerTrustThreshold: PositiveInt,
+      sequencerLivenessMargin: NonNegativeInt,
       submissionRequestAmplification: SubmissionRequestAmplification,
       sequencerConnectionValidation: SequencerConnectionValidation,
       expectedSynchronizerId: Option[PhysicalSynchronizerId],
@@ -670,13 +672,13 @@ object SequencerInfoLoader {
                 valid.connection.withSequencerId(valid.synchronizerClientBootstrapInfo.sequencerId)
               ),
               sequencerTrustThreshold,
+              sequencerLivenessMargin,
               submissionRequestAmplification,
             )
             .leftMap(SequencerInfoLoaderError.FailedToConnectToSequencers.apply)
             .map(connections =>
               SequencerAggregatedInfo(
-                synchronizerId =
-                  validSequencerConnectionsNE.head1.synchronizerClientBootstrapInfo.psid,
+                psid = validSequencerConnectionsNE.head1.synchronizerClientBootstrapInfo.psid,
                 staticSynchronizerParameters =
                   validSequencerConnectionsNE.head1.staticSynchronizerParameters,
                 expectedSequencers = expectedSequencers,

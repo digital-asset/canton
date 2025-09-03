@@ -39,6 +39,7 @@ class DbReferenceBlockOrderingStore(
     val executionContext: ExecutionContext
 ) extends ReferenceBlockOrderingStore
     with DbStore {
+
   import storage.api.*
 
   private val profile = storage.profile
@@ -62,6 +63,7 @@ class DbReferenceBlockOrderingStore(
           traceparent,
           v.value.tag,
           v.value.body,
+          v.value.orderingSequencerId,
           v.value.microsecondsSinceEpoch,
         )
       pp.setBytes(protoRequest.toByteArray)
@@ -137,12 +139,12 @@ class DbReferenceBlockOrderingStore(
   ): FutureUnlessShutdown[Option[Long]] =
     storage.query(sql"""select max(id) from blocks""".as[Option[Long]].head, "max block height")
 
-  override def queryBlocks(initialHeight: Long)(implicit
+  override def queryBlocks(initialHeight: Long, maxQueryBlockCount: Int)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[TimestampedBlock]] =
     storage
       .query(
-        sql"""select id, request, uuid from blocks where id >= $initialHeight order by id"""
+        sql"""select id, request, uuid from blocks where id >= $initialHeight order by id LIMIT $maxQueryBlockCount"""
           .as[(Long, Traced[BlockFormat.OrderedRequest], String)]
           .transactionally
           // Serializable isolation level to prevent skipping over blocks producing gaps
@@ -186,6 +188,7 @@ class DbReferenceBlockOrderingStore(
           )
         }
       }
+
 }
 
 object DbReferenceBlockOrderingStore {
@@ -205,6 +208,7 @@ object DbReferenceBlockOrderingStore {
         protoRequest.microsecondsSinceEpoch,
         protoRequest.tag,
         protoRequest.body,
+        protoRequest.orderingSequencerId,
       )
     val traceContext = W3CTraceContext(protoRequest.traceparent).toTraceContext
     Traced(request)(traceContext)

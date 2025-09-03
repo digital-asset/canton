@@ -888,6 +888,9 @@ object CantonConfig {
     lazy implicit final val jwtTimestampLeewayConfigReader: ConfigReader[JwtTimestampLeeway] =
       deriveReader[JwtTimestampLeeway]
 
+    lazy implicit final val jwksCacheConfigReader: ConfigReader[JwksCacheConfig] =
+      deriveReader[JwksCacheConfig]
+
     lazy implicit final val adminTokenConfigReader: ConfigReader[AdminTokenConfig] =
       deriveReader[AdminTokenConfig]
 
@@ -955,6 +958,12 @@ object CantonConfig {
       deriveReader[SequencerHighAvailabilityConfig]
     lazy implicit final val sequencerConfigDatabaseReader: ConfigReader[SequencerConfig.Database] =
       deriveReader[SequencerConfig.Database]
+    lazy implicit final val individualCircuitBreakerConfigReader
+        : ConfigReader[BlockSequencerConfig.IndividualCircuitBreakerConfig] =
+      deriveReader[BlockSequencerConfig.IndividualCircuitBreakerConfig]
+    lazy implicit final val circuitBreakerByMessageTypeConfigReader
+        : ConfigReader[BlockSequencerConfig.CircuitBreakerByMessageTypeConfig] =
+      deriveReader[BlockSequencerConfig.CircuitBreakerByMessageTypeConfig]
     lazy implicit final val circuitBreakerConfigReader
         : ConfigReader[BlockSequencerConfig.CircuitBreakerConfig] =
       deriveReader[BlockSequencerConfig.CircuitBreakerConfig]
@@ -998,6 +1007,9 @@ object CantonConfig {
     lazy implicit val bftBlockOrdererP2PNetworkAuthenticationConfigReader
         : ConfigReader[BftBlockOrdererConfig.P2PNetworkAuthenticationConfig] =
       deriveReader[BftBlockOrdererConfig.P2PNetworkAuthenticationConfig]
+    lazy implicit val bftBlockOrdererP2PConnectionManagementConfigReader
+        : ConfigReader[BftBlockOrdererConfig.P2PConnectionManagementConfig] =
+      deriveReader[BftBlockOrdererConfig.P2PConnectionManagementConfig]
     lazy implicit val bftBlockOrdererP2PNetworkConfigReader
         : ConfigReader[BftBlockOrdererConfig.P2PNetworkConfig] =
       deriveReader[BftBlockOrdererConfig.P2PNetworkConfig]
@@ -1514,6 +1526,9 @@ object CantonConfig {
     lazy implicit final val jwtTimestampLeewayConfigWriter: ConfigWriter[JwtTimestampLeeway] =
       deriveWriter[JwtTimestampLeeway]
 
+    lazy implicit final val jwksCacheConfigWriter: ConfigWriter[JwksCacheConfig] =
+      deriveWriter[JwksCacheConfig]
+
     lazy implicit final val adminTokenConfigWriter: ConfigWriter[AdminTokenConfig] =
       deriveWriter[AdminTokenConfig]
 
@@ -1583,6 +1598,12 @@ object CantonConfig {
       deriveWriter[SequencerHighAvailabilityConfig]
     lazy implicit final val sequencerConfigDatabaseWriter: ConfigWriter[SequencerConfig.Database] =
       deriveWriter[SequencerConfig.Database]
+    lazy implicit final val individualCircuitBreakerConfigWriter
+        : ConfigWriter[BlockSequencerConfig.IndividualCircuitBreakerConfig] =
+      deriveWriter[BlockSequencerConfig.IndividualCircuitBreakerConfig]
+    lazy implicit final val circuitBreakerByMessageTypeConfigWriter
+        : ConfigWriter[BlockSequencerConfig.CircuitBreakerByMessageTypeConfig] =
+      deriveWriter[BlockSequencerConfig.CircuitBreakerByMessageTypeConfig]
     lazy implicit final val circuitBreakerConfigWriter
         : ConfigWriter[BlockSequencerConfig.CircuitBreakerConfig] =
       deriveWriter[BlockSequencerConfig.CircuitBreakerConfig]
@@ -1636,6 +1657,9 @@ object CantonConfig {
     lazy implicit val bftBlockOrdererBftP2PNetworkConfigWriter
         : ConfigWriter[BftBlockOrdererConfig.P2PNetworkConfig] =
       deriveWriter[BftBlockOrdererConfig.P2PNetworkConfig]
+    lazy implicit val bftBlockOrdererBftP2PConnectionManagementConfigWriter
+        : ConfigWriter[BftBlockOrdererConfig.P2PConnectionManagementConfig] =
+      deriveWriter[BftBlockOrdererConfig.P2PConnectionManagementConfig]
     lazy implicit val bftBlockOrdererLeaderSelectionPolicyHowLongToBlacklistConfigWriter
         : ConfigWriter[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.HowLongToBlacklist] =
       deriveEnumerationWriter[BftBlockOrdererConfig.LeaderSelectionPolicyConfig.HowLongToBlacklist]

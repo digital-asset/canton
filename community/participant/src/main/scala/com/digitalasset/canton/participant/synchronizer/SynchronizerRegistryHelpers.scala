@@ -87,7 +87,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, SynchronizerHandle] = {
-    import sequencerAggregatedInfo.synchronizerId
+    import sequencerAggregatedInfo.psid
 
     val connectionPoolFactory = new GrpcSequencerConnectionXPoolFactory(
       clientProtocolVersions =
@@ -113,10 +113,12 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
         SynchronizerRegistryError.SynchronizerRegistryInternalError.InvalidState(error.toString)
       )
 
+    val useNewConnectionPool = participantNodeParameters.sequencerClient.useNewConnectionPool
+
     val synchronizerHandleET = for {
       connectionPool <- connectionPoolE.toEitherT[FutureUnlessShutdown]
       _ <-
-        if (participantNodeParameters.sequencerClient.useNewConnectionPool) {
+        if (useNewConnectionPool) {
           connectionPool.start().leftMap { error =>
             SynchronizerRegistryError.ConnectionErrors.FailedToConnectToSequencers.Error(
               error.toString
@@ -125,13 +127,13 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
         } else EitherTUtil.unitUS[SynchronizerRegistryError]
 
       physicalSynchronizerIdx <- EitherT
-        .right(syncPersistentStateManager.getPhysicalSynchronizerIdx(synchronizerId))
+        .right(syncPersistentStateManager.getPhysicalSynchronizerIdx(psid))
 
       synchronizerIdx <- EitherT
-        .right(syncPersistentStateManager.getSynchronizerIdx(synchronizerId.logical))
+        .right(syncPersistentStateManager.getSynchronizerIdx(psid.logical))
 
       _ <- EitherT
-        .fromEither[Future](verifySynchronizerId(config, synchronizerId))
+        .fromEither[Future](verifySynchronizerId(config, psid))
         .mapK(FutureUnlessShutdown.outcomeK)
 
       // fetch or create persistent state for the synchronizer
@@ -145,7 +147,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
 
       // check and issue the synchronizer trust certificate
       _ <- EitherTUtil.ifThenET(!config.initializeFromTrustedSynchronizer)(
-        topologyDispatcher.trustSynchronizer(synchronizerId)
+        topologyDispatcher.trustSynchronizer(psid)
       )
 
       synchronizerLoggerFactory = loggerFactory.append(
@@ -154,7 +156,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       )
 
       topologyFactory <- syncPersistentStateManager
-        .topologyFactoryFor(synchronizerId)
+        .topologyFactoryFor(psid)
         .toRight(
           SynchronizerRegistryError.SynchronizerRegistryInternalError
             .InvalidState(
@@ -166,20 +168,21 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
       topologyClient <- EitherT.right(
         synchronizeWithClosing("create caching client")(
           topologyFactory.createCachingTopologyClient(
-            packageDependencyResolver
+            packageDependencyResolver,
+            synchronizerPredecessor,
           )
         )
       )
 
       // If the connection to a synchronizer fails, the topology client and crypto cache are not removed from the cache.
       // This is why we want to clear the topology client and crypto caches before creating the new clients.
-      _ = cryptoApiProvider.removeAndClose(synchronizerId)
+      _ = cryptoApiProvider.removeAndClose(psid)
       _ = cryptoApiProvider.ips.add(topologyClient)
 
       synchronizerCryptoApi <- EitherT.fromEither[FutureUnlessShutdown](
         cryptoApiProvider
           .forSynchronizer(
-            synchronizerId,
+            psid,
             sequencerAggregatedInfo.staticSynchronizerParameters,
           )
           .toRight(
@@ -209,7 +212,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
         // Yields a unique path inside the given directory for record/replay purposes.
         def updateMemberRecordingPath(recordingConfig: RecordingConfig): RecordingConfig = {
           val namePrefix =
-            s"${participantId.show.stripSuffix("...")}-${synchronizerId.toProtoPrimitive}"
+            s"${participantId.show.stripSuffix("...")}-${psid.toProtoPrimitive}"
           recordingConfig.setFilename(namePrefix)
         }
 
@@ -219,7 +222,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
         }
         (
           SequencerClientFactory(
-            synchronizerId,
+            psid,
             synchronizerCryptoApi,
             synchronizerCrypto,
             sequencerClientConfig,
@@ -247,7 +250,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
           participantNodeParameters.unsafeOnlinePartyReplication
             .map(_ =>
               new SequencerChannelClientFactory(
-                synchronizerId,
+                psid,
                 synchronizerCryptoApi,
                 synchronizerCrypto,
                 sequencerClientConfig,
@@ -271,12 +274,12 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
         if (active) EitherT.pure[FutureUnlessShutdown, SynchronizerRegistryError](())
         else {
           logger.debug(
-            s"Participant is not yet active on synchronizer $synchronizerId. Initializing topology"
+            s"Participant is not yet active on synchronizer $psid. Initializing topology"
           )
           val client = sequencerConnectClient(config.synchronizerAlias, sequencerAggregatedInfo)
           for {
             success <- topologyDispatcher.onboardToSynchronizer(
-              synchronizerId,
+              psid,
               config.synchronizerAlias,
               client,
             )
@@ -308,7 +311,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
           ),
           sequencerAggregatedInfo.sequencerConnections,
           synchronizerPredecessor,
-          sequencerAggregatedInfo.expectedSequencers,
+          Option.when(!useNewConnectionPool)(sequencerAggregatedInfo.expectedSequencers),
           connectionPool,
         )
         .leftMap[SynchronizerRegistryError](
@@ -317,7 +320,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
 
       _ <- downloadSynchronizerTopologyStateForInitializationIfNeeded(
         syncPersistentStateManager,
-        synchronizerId,
+        psid,
         topologyFactory.createInitialTopologySnapshotValidator,
         topologyClient,
         sequencerClient,
@@ -349,7 +352,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
         }
       )
     } yield SynchronizerHandle(
-      synchronizerId,
+      psid,
       config.synchronizerAlias,
       sequencerAggregatedInfo.staticSynchronizerParameters,
       sequencerClient,

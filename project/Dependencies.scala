@@ -22,13 +22,18 @@ object Dependencies {
   lazy val scala_version = "2.13.16"
   lazy val scala_version_short = "2.13"
 
-  // TODO(#10617) We have cloned pekko's BroadcastHub implementation in community/lib/pekko/src/main/scala/pekko/stream/scaladsl/BroadcastHub.scala
+  // TODO(#10617) We have cloned pekko's BroadcastHub implementation in
   //  The changes from the clone have been upstreamed in https://github.com/apache/pekko/pull/1841.
   //  When updating pekko, check whether the update includes the above fix (probably only in 1.2.x)
   //  If it is included, remove the clone. Otherwise, make sure to update the clone as well,
   //  including the tests in community/lib/pekko/src/main/scala/pekko
-  lazy val pekko_version = "1.1.2"
-  lazy val pekko_http_version = "1.1.0"
+  lazy val pekko_version = resolveDependency("org.apache.pekko", "pekko-actor").revision
+  assert(
+    pekko_version == "1.1.5",
+    s"check the clone community/lib/pekko/src/main/scala/pekko/stream/scaladsl/BroadcastHub.scala is up-to-date vs https://github.com/apache/pekko/blob/v$pekko_version/stream/src/main/scala/org/apache/pekko/stream/scaladsl/Hub.scala#L396",
+  )
+  lazy val pekko_http_version = resolveDependency("org.apache.pekko", "pekko-http").revision
+
   lazy val ammonite_version = "3.0.1"
   lazy val apispec_version = "0.11.7"
   lazy val awaitility_version = "4.2.0"
@@ -61,7 +66,7 @@ object Dependencies {
   lazy val mockito_scala_version = "1.16.3"
   lazy val monocle_version = "3.2.0"
   lazy val munit_version = "0.7.26"
-  lazy val grpc_version = "1.67.1"
+  lazy val grpc_version = resolveDependency("io.grpc", "grpc-api").revision
 
   lazy val pekko_http_backend_version = "3.9.0"
   lazy val protostuff_version = "3.1.40"
@@ -239,7 +244,7 @@ object Dependencies {
   lazy val opentelemetry_exporter_prometheus =
     resolveDependency("io.opentelemetry", "opentelemetry-exporter-prometheus")
   lazy val opentelemetry_proto =
-    resolveDependency("io.opentelemetry", "opentelemetry-proto")
+    "io.opentelemetry.proto" % "opentelemetry-proto" % "1.7.0-alpha"
 
   lazy val opentelemetry_instrumentation_grpc =
     resolveDependency("io.opentelemetry.instrumentation", "opentelemetry-grpc-1.6")
@@ -345,31 +350,31 @@ object Dependencies {
     import io.circe.*, io.circe.parser.*, io.circe.generic.auto.*, io.circe.syntax.*
     import better.files.*
 
-    lazy val ThisProject = "Canton"
-    lazy val OtherProjects: Set[String] = Set("DamlSDK")
+    lazy val damlDependencyMap = {
+      // This map is build from `maven_install_2.13.json` which is copied from the SDK repo
+      import io.circe._, io.circe.parser._, io.circe.generic.auto._, io.circe.syntax._
+      import better.files._
 
-    case class Dependencies(dependencies: List[Dependency])
-    case class Dependency(org: String, artifacts: Seq[String], version: String, users: Set[String])
+      val deps = decode[Map[String, String]](
+        file"daml_dependencies.json".contentAsString
+      ).valueOr { err =>
+        throw new RuntimeException(s"Failed to parse daml repo maven json file: $err")
+      }
 
-    private val dependenciesForThisProject =
-      decode[Dependencies](file"dependencies.json".contentAsString)
-        .valueOr { err =>
-          throw new RuntimeException(s"Failed to parse dependencies file: $err")
+      deps.flatMap { case (coord, version) =>
+        coord.split(":") match {
+          case Array(org, artifact) =>
+            List((org, artifact) -> (org % artifact % version))
+          case _ =>
+            List.empty
         }
-        .dependencies
-        .flatMap {
-          case Dependency(org, artifacts, version, users) if users contains ThisProject =>
-            artifacts.map(artifact => (org, artifact) -> (org % artifact % version))
-          case dep if dep.users.subsetOf(OtherProjects) => Seq.empty
-          case invalid =>
-            throw new RuntimeException(s"Invalid dependency definition: $invalid")
-        }
-        .toMap
+      }
+    }
 
     def apply(organization: String, artifact: String): ModuleID =
-      dependenciesForThisProject
+      damlDependencyMap
         .get(organization -> artifact)
-        .orElse(dependenciesForThisProject.get(organization -> s"${artifact}_2.13"))
+        .orElse(damlDependencyMap.get(organization -> s"${artifact}_2.13"))
         .getOrElse(
           throw new RuntimeException(s"Unknown dependency: $organization, $artifact")
         )
@@ -430,11 +435,9 @@ object Dependencies {
   lazy val daml_ledger_api_value_scala =
     "com.daml" %% "ledger-api-value-scalapb" % daml_libraries_version
 
-  // daml repo dependencies
   lazy val fasterjackson_core = resolveDependency("com.fasterxml.jackson.core", "jackson-core")
   lazy val google_protobuf_java = resolveDependency("com.google.protobuf", "protobuf-java")
   lazy val protobuf_version = google_protobuf_java.revision
-  // To override 3.19.2 from the daml repo's maven_install_2.13.json
   lazy val google_protobuf_java_util =
     "com.google.protobuf" % "protobuf-java-util" % protobuf_version
 
