@@ -70,7 +70,7 @@
   "com.lihaoyi:ujson-circe_2.13" : "4.0.2",
   "com.lihaoyi:ujson_2.13" : "4.0.2",
   "com.lihaoyi:upack_2.13" : "4.1.0",
-  "com.lihaoyi:upickle-core_2.13" : "4.0.2",
+  "com.lihaoyi:upickle-core_2.13" : "4.1.0",
   "com.lihaoyi:upickle-implicits_2.13" : "4.1.0",
   "com.lihaoyi:upickle_2.13" : "4.1.0",
   "com.oracle.database.jdbc.debug:ojdbc8_g" : "19.18.0.0",
