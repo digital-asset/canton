@@ -63,6 +63,11 @@ final class PartyManagementServiceAuthorization(
   ): Future[UpdatePartyIdentityProviderIdResponse] =
     authorizer.rpc(service.updatePartyIdentityProviderId)(RequiredClaim.Admin())(request)
 
+  override def generateExternalPartyTopology(
+      request: GenerateExternalPartyTopologyRequest
+  ): Future[GenerateExternalPartyTopologyResponse] =
+    authorizer.rpc(service.generateExternalPartyTopology)(RequiredClaim.Public())(request)
+
   override def bindService(): ServerServiceDefinition =
     PartyManagementServiceGrpc.bindService(this, executionContext)
 

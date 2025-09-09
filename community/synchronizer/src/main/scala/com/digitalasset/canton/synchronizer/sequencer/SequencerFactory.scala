@@ -80,6 +80,7 @@ abstract class DatabaseSequencerFactory(
       loggerFactory = loggerFactory,
       sequencerMember = sequencerId,
       blockSequencerMode = blockSequencerMode,
+      useRecipientsTableForReads = config.reader.useRecipientsTableForReads,
       cachingConfigs = cachingConfigs,
       batchingConfig = batchingConfig,
       // Overriding the store's close context with the writers, so that when the writer gets closed, the store

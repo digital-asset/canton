@@ -153,6 +153,7 @@ import com.daml.ledger.api.v2.update_service.{
   GetUpdatesResponse,
   UpdateServiceGrpc,
 }
+import com.digitalasset.canton.admin.api.client
 import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand.{
   DefaultUnboundedTimeout,
   ServerEnforcedTimeout,
@@ -169,8 +170,8 @@ import com.digitalasset.canton.admin.api.client.data.{
   TemplateId,
   UserRights,
 }
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.crypto.Signature
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.crypto.{Signature, SigningPublicKey}
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.ledger.api.{
   IdentityProviderConfig as ApiIdentityProviderConfig,
@@ -185,7 +186,7 @@ import com.digitalasset.canton.platform.apiserver.execution.CommandStatus
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.GenericTopologyTransaction
-import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
+import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId}
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.util.ReassignmentTag.Source
 import com.digitalasset.canton.{LfPackageId, LfPackageName, LfPartyId}
@@ -239,6 +240,59 @@ object LedgerApiCommands {
         response.partyDetails.toRight("Party could not be created")
     }
 
+    final case class GenerateExternalPartyTopology(
+        synchronizerId: SynchronizerId,
+        partyHint: String,
+        publicKey: SigningPublicKey,
+        localParticipantObservationOnly: Boolean,
+        otherConfirmingParticipantIds: Seq[ParticipantId],
+        confirmationThreshold: NonNegativeInt,
+        observingParticipantIds: Seq[ParticipantId],
+    ) extends BaseCommand[
+          GenerateExternalPartyTopologyRequest,
+          GenerateExternalPartyTopologyResponse,
+          client.data.parties.GenerateExternalPartyTopology,
+        ] {
+
+      import com.digitalasset.canton.crypto.LedgerApiCryptoConversions.*
+      import com.daml.ledger.api.v2
+
+      override protected def submitRequest(
+          service: PartyManagementServiceStub,
+          request: GenerateExternalPartyTopologyRequest,
+      ): Future[GenerateExternalPartyTopologyResponse] =
+        service.generateExternalPartyTopology(request)
+
+      override protected def createRequest(): Either[String, GenerateExternalPartyTopologyRequest] =
+        Right(
+          GenerateExternalPartyTopologyRequest(
+            synchronizer = synchronizerId.toProtoPrimitive,
+            partyHint = partyHint,
+            publicKey = Some(
+              publicKey.toProtoV30
+                .into[v2.crypto.SigningPublicKey]
+                .withFieldRenamed(_.publicKey, _.keyData)
+                .transform
+            ),
+            localParticipantObservationOnly = localParticipantObservationOnly,
+            otherConfirmingParticipantUids =
+              otherConfirmingParticipantIds.map(_.uid.toProtoPrimitive),
+            confirmationThreshold = confirmationThreshold.value,
+            observingParticipantUids = observingParticipantIds.map(_.uid.toProtoPrimitive),
+          )
+        )
+
+      override protected def handleResponse(
+          response: GenerateExternalPartyTopologyResponse
+      ): Either[
+        String,
+        client.data.parties.GenerateExternalPartyTopology,
+      ] =
+        client.data.parties.GenerateExternalPartyTopology
+          .fromProto(response)
+          .leftMap(_.message)
+    }
+
     final case class AllocateExternalParty(
         synchronizerId: SynchronizerId,
         transactions: Seq[(GenericTopologyTransaction, Seq[Signature])],
@@ -251,7 +305,7 @@ object LedgerApiCommands {
       override protected def createRequest(): Either[String, AllocateExternalPartyRequest] =
         Right(
           AllocateExternalPartyRequest(
-            synchronizerId = synchronizerId.toProtoPrimitive,
+            synchronizer = synchronizerId.toProtoPrimitive,
             onboardingTransactions = transactions.map { case (transaction, signatures) =>
               AllocateExternalPartyRequest.SignedTransaction(
                 transaction.getCryptographicEvidence,
@@ -390,6 +444,7 @@ object LedgerApiCommands {
       ): Either[String, Unit] = Either.unit
 
     }
+
   }
 
   object PackageManagementService {

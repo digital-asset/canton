@@ -55,6 +55,7 @@ trait DatabaseSequencerSnapshottingTest extends SequencerApiTest with DbTest {
       loggerFactory = loggerFactory,
       sequencerMember = sequencerId,
       blockSequencerMode = false,
+      useRecipientsTableForReads = false,
       cachingConfigs = CachingConfigs(),
       batchingConfig = BatchingConfig(),
       sequencerMetrics = metrics,

@@ -23,7 +23,10 @@ Wednesday after your change.
   sequencers.sequencer1.topology.broadcast-retry-delay = 10s // default value
   ```
 - Topology dispatching errors are now logged at WARN level (instead of ERROR).
-  
+- Party allocation and tx generation is now supported on Ledger API.
+- BREAKING: minor breaking console change: the BaseResult.transactionHash type has been changed
+  from ByteString to TxHash. The Admin API itself remained unchanged.
+
 ## until 2025-08-25 (Exclusive)
 - The HTTP connection timeout is configurable in the Ledger JSON API via
   `canton.participants.<participant-id>.http-ledger-api.server.request-timeout=<duration>`. Configure this value to allow

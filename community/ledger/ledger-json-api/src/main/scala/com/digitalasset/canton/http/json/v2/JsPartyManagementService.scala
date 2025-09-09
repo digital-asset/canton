@@ -4,8 +4,12 @@
 package com.digitalasset.canton.http.json.v2
 
 import com.daml.ledger.api.v2.admin.party_management_service
+import com.daml.ledger.api.v2.admin.party_management_service.GenerateExternalPartyTopologyRequest
 import com.daml.ledger.api.v2.interactive.interactive_submission_service
-import com.digitalasset.canton.http.json.v2.CirceRelaxedCodec.deriveRelaxedCodec
+import com.digitalasset.canton.http.json.v2.CirceRelaxedCodec.{
+  deriveRelaxedCodec,
+  deriveRelaxedCodecWithDefaults,
+}
 import com.digitalasset.canton.http.json.v2.Endpoints.{CallerContext, TracedInput}
 import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
 import com.digitalasset.canton.http.json.v2.JsSchema.JsCantonError
@@ -13,7 +17,7 @@ import com.digitalasset.canton.ledger.client.services.admin.PartyManagementClien
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.InvalidArgument
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.tracing.TraceContext
-import io.circe.Codec
+import io.circe.{Codec, Json}
 import sttp.tapir.generic.auto.*
 import sttp.tapir.json.circe.jsonBody
 import sttp.tapir.server.ServerEndpoint
@@ -52,6 +56,10 @@ class JsPartyManagementService(
       withServerLogic(
         JsPartyManagementService.updatePartyEndpoint,
         updateParty,
+      ),
+      withServerLogic(
+        JsPartyManagementService.externalPartyGenerateTopologyEndpoint,
+        externalPartyGenerateTopology,
       ),
     )
 
@@ -137,13 +145,29 @@ class JsPartyManagementService(
             )
           )
         }
+
+  private val externalPartyGenerateTopology: CallerContext => TracedInput[
+    party_management_service.GenerateExternalPartyTopologyRequest
+  ] => Future[
+    Either[JsCantonError, party_management_service.GenerateExternalPartyTopologyResponse]
+  ] =
+    caller =>
+      request => {
+        partyManagementClient
+          .serviceStub(caller.token())(request.traceContext)
+          .generateExternalPartyTopology(request.in)
+          .resultToRight
+      }
+
 }
 
 object JsPartyManagementService extends DocumentationEndpoints {
   import Endpoints.*
   import JsPartyManagementCodecs.*
+  import JsSchema.Crypto.*
 
   private val parties = v2Endpoint.in(sttp.tapir.stringToPath("parties"))
+  private val external = sttp.tapir.stringToPath("external")
   private val partyPath = "party"
 
   val allocatePartyEndpoint = parties.post
@@ -152,7 +176,7 @@ object JsPartyManagementService extends DocumentationEndpoints {
     .description("Allocate a new party to the participant node")
 
   val allocateExternalPartyEndpoint = parties
-    .in(sttp.tapir.stringToPath("external"))
+    .in(external / sttp.tapir.stringToPath("allocate"))
     .post
     .in(jsonBody[party_management_service.AllocateExternalPartyRequest])
     .out(jsonBody[party_management_service.AllocateExternalPartyResponse])
@@ -183,6 +207,14 @@ object JsPartyManagementService extends DocumentationEndpoints {
     .in(jsonBody[party_management_service.UpdatePartyDetailsRequest])
     .out(jsonBody[party_management_service.UpdatePartyDetailsResponse])
     .description("Allocate a new party to the participant node")
+
+  val externalPartyGenerateTopologyEndpoint = parties
+    .in(external / sttp.tapir.stringToPath("generate-topology"))
+    .post
+    .in(jsonBody[party_management_service.GenerateExternalPartyTopologyRequest])
+    .out(jsonBody[party_management_service.GenerateExternalPartyTopologyResponse])
+    .description("Generate a topology for an external party")
+
   override def documentation: Seq[AnyEndpoint] = Seq(
     listKnownPartiesEndpoint,
     allocatePartyEndpoint,
@@ -190,12 +222,15 @@ object JsPartyManagementService extends DocumentationEndpoints {
     getParticipantIdEndpoint,
     getPartyEndpoint,
     updatePartyEndpoint,
+    externalPartyGenerateTopologyEndpoint,
   )
 }
 
 object JsPartyManagementCodecs {
+
   import JsSchema.config
   import JsInteractiveSubmissionServiceCodecs.signatureRW
+  import JsSchema.Crypto.*
 
   implicit val signatureFormatSchema: Schema[interactive_submission_service.SignatureFormat] =
     Schema.string
@@ -218,7 +253,7 @@ object JsPartyManagementCodecs {
 
   implicit val allocateExternalPartyRequest
       : Codec[party_management_service.AllocateExternalPartyRequest] =
-    deriveRelaxedCodec
+    deriveRelaxedCodecWithDefaults(Map("identityProviderId" -> Json.fromString("")))
 
   implicit val allocateExternalPartyResponse
       : Codec[party_management_service.AllocateExternalPartyResponse] =
@@ -238,4 +273,21 @@ object JsPartyManagementCodecs {
 
   implicit val getParticipantIdResponse: Codec[party_management_service.GetParticipantIdResponse] =
     deriveRelaxedCodec
+
+  implicit val generateExternalPartyTopologyRequest
+      : Codec[party_management_service.GenerateExternalPartyTopologyRequest] = {
+    import io.circe.Json
+    deriveRelaxedCodecWithDefaults[GenerateExternalPartyTopologyRequest](
+      Map(
+        "localParticipantObservationOnly" -> Json.False,
+        "confirmationThreshold" -> Json.fromInt(0),
+      )
+    )
+
+  }
+
+  implicit val generateExternalPartyTopologyResponse
+      : Codec[party_management_service.GenerateExternalPartyTopologyResponse] =
+    deriveRelaxedCodec
+
 }

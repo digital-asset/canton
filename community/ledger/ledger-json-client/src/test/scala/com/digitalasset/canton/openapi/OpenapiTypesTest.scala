@@ -14,6 +14,7 @@ import org.scalatest.Assertion
 import org.scalatest.Inspectors.forAll
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
+import org.slf4j.LoggerFactory
 
 import scala.annotation.nowarn
 import scala.jdk.CollectionConverters.*
@@ -26,11 +27,24 @@ import scala.util.control.NonFatal
   * The reason for this test is that tapir can generate openapi that is not in sync with circe
   * codec, we are trying to detect such cases and fix them.
   *
+  * To recap:
+  *   - Codec = Encoder + Decoder by Circe to translate Scala object to Json and back
+  *   - Schema = Information to Tapir how to represent Scala object in Openapi. The schema is then
+  *     used by tapir to generate the openapi spec (openapi.yaml).
+  *
   * Also existing code generators are often buggy -> we are trying to detect such cases at least for
   * java (here).
   *
   * Test generates multiple samples, unfortunately no seed is used so every time examples will be
   * different. (Introduction of a seed would complicate the code a lot)
+  *
+  * If you have issues:
+  *   - check how the type is represented in openapi.yaml
+  *   - try to serialize an example instance
+  *   - inspect the string.
+  *   - try to deserialize the string with openapi generated class
+  *
+  * Do not forget to regenerate the openapi definitions (openapi.yaml). See GenerateJSONApiDocs.
   */
 @nowarn("cat=deprecation")
 class OpenapiTypesTest extends AnyWordSpec with Matchers {
@@ -39,6 +53,7 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
   // 20 is a modest value to ensure CI is not overloaded
   private val randomSamplesPerMappedClass = 20
   private val allMappingExamples = Mappings.allMappings
+  private val logger = LoggerFactory.getLogger(getClass)
 
   def checkType[T, V](
       fromJson: (String) => V
@@ -50,12 +65,16 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
   ): Assertion = {
 
     val sample = arb.arbitrary.sample
-    val initialCirceJson = sample.map(encoder(_)).map(_.toString()).toRight("-- no sample --")
+    val initialCirceJson = sample.map(encoder(_)).map(x => x.toString()).toRight("-- no sample --")
     val javaObject =
       try {
         initialCirceJson.map(fromJson)
       } catch {
         case NonFatal(error) =>
+          logger.error(
+            s"Parse error detected for class $classTag when attempting to parse the generated json.\n  json-error: $error\n  sample: $sample\n  encoded-json: $initialCirceJson",
+            error,
+          )
           throw new RuntimeException(
             s"parse error, class $classTag json: $error\n $initialCirceJson",
             error,
@@ -75,6 +94,7 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
       fromJson: (String) => V
   )(implicit arb: Arbitrary[T], encoder: Encoder[T], decoder: Decoder[T], classTag: ClassTag[T]) =
     (1 to randomSamplesPerMappedClass).foreach(_ => checkType(fromJson))
+
   "mappings" should {
     "have openapi spec matching used circe serialization " in {
       forAll(allMappingExamples) { mapping =>
@@ -138,12 +158,13 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
     import com.digitalasset.canton.http.json.v2.JsInteractiveSubmissionServiceCodecs.*
     import com.digitalasset.canton.http.json.v2.JsIdentityProviderCodecs.*
     import com.digitalasset.canton.http.json.v2.JsVersionServiceCodecs.*
+    import com.digitalasset.canton.http.json.v2.JsSchema.Crypto.*
 
     import magnolify.scalacheck.auto.*
 
     // as stated above this split is needed to ensure that mappings initialization do not exceed max 64kB method size
     val allMappings =
-      JsMappings.value ++ GrpcMappings1.value ++ GrpcMappings2.value ++ GrpcMappings3.value
+      JsMappings.value ++ GrpcMappings1.value ++ GrpcMappings2.value ++ GrpcMappings3.value ++ GrpcMappings4.value
 
     object GrpcMappings1 {
       val value: Seq[Mapping[_, _]] = Seq(
@@ -762,6 +783,30 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         ),
       )
     }
+
+    object GrpcMappings4 {
+      val value: Seq[Mapping[_, _]] = Seq(
+        Mapping[
+          v2.crypto.SigningPublicKey,
+          openapi.SigningPublicKey,
+        ](
+          openapi.SigningPublicKey.fromJson
+        ),
+        Mapping[
+          v2.admin.party_management_service.GenerateExternalPartyTopologyRequest,
+          openapi.GenerateExternalPartyTopologyRequest,
+        ](
+          openapi.GenerateExternalPartyTopologyRequest.fromJson
+        ),
+        Mapping[
+          v2.admin.party_management_service.GenerateExternalPartyTopologyResponse,
+          openapi.GenerateExternalPartyTopologyResponse,
+        ](
+          openapi.GenerateExternalPartyTopologyResponse.fromJson
+        ),
+      )
+    }
+
     object JsMappings {
       val value: Seq[Mapping[_, _]] = {
         Seq(
