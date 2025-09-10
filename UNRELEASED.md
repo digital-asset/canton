@@ -9,8 +9,26 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2025-09-10 (Exclusive)
+- **Breaking** Moves general, LAPI active contract based, `ExportAcs` endpoint from `party_management_service.proto`
+  to `participant_repair_service.proto`. Note that endpoint does not return retriable error(s) since ACS export is
+  defined by the ledger offset.
+- **Breaking** Removes `ExportAcsAtTimestamp` endpoint from `party_management_service.proto`.
+- Adds a new, party replication focused `ExportPartyAcs` endpoint to `party_management_service.proto`. This endpoint
+  finds the correct ledger offset (party activation on the target participant) and excludes active contracts from the
+  export which have stakeholders that are already hosted on the target participant (contract duplication prevention).
+- Adds the capability to exclude active contracts in the `ExportAcs` and `ImportAcs` endpoints
+  (`participant_repair_service.proto`). Exclusion criterion: Any (active) contract that has one or more of a given
+  set of parties as a stakeholder will be omitted.
+- Add synchronizer_id to Reassignment Ledger API (gRPC and JSON) message. This aligns the Reassignment with the Transaction messages,
+  which also hold this property on top level. This also helps clients to make sense of the record time of this update without
+  looking into the events themselves.
+- **Breaking** Removed the deprecated requesting_parties field from the `GetEventsByContractIdRequest` message in the
+  Ledger API. Clients should use the `event_format` field instead, as described in lapi-migration-guide.
+
 ## until 2025-09-04 (Exclusive)
-- Replace an unbounded timeout with a configurable timeout when waiting to observe the submitted topology tranactions.
+
+- Replace an unbounded timeout with a configurable timeout when waiting to observe the submitted topology transactions.
   Additionally, the delay between retries of the topology dispatching loop has been made configurable.
   ```
   participants.participant1.topology.topology-transaction-observation-timeout = 30s // default value
@@ -23,6 +41,12 @@ Wednesday after your change.
   sequencers.sequencer1.topology.broadcast-retry-delay = 10s // default value
   ```
 
+- **Breaking** Renamed `AuthenticationTokenManagerConfig#pauseRetries` to `minRetryInterval`.
+- **Breaking** Package upgrade validation moved to vetting state change.
+  Thus uploading an upgrade-incompatible DAR with vetting disabled is now possible.
+  Related error codes changed:
+    - `DAR_NOT_VALID_UPGRADE` is renamed `NOT_VALID_UPGRADE_PACKAGE`
+    - `KNOWN_DAR_VERSION` is renamed `KNOWN_PACKAGE_VERSION`
 ## until 2025-08-28 (Exclusive)
 
 - **Breaking** we have removed support for `ecies-hkdf-hmac-sha-256-aes-128-gcm` encryption algorithm specification.

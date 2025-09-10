@@ -71,7 +71,7 @@ object Dependencies {
   lazy val pekko_http_backend_version = "3.9.0"
   lazy val protostuff_version = "3.1.40"
   lazy val postgres_version = "42.7.3"
-  lazy val pprint_version = "0.8.1"
+  lazy val pprint_version = "0.9.3"
   lazy val protoc_gen_doc_version = "1.5.1"
   lazy val pureconfig_version = "0.14.0"
   lazy val reflections_version = "0.10.2"
@@ -138,6 +138,21 @@ object Dependencies {
     "javax.annotation" % "javax.annotation-api" % javax_annotations_version
 
   lazy val grpc_protobuf = "io.grpc" % "grpc-protobuf" % grpc_version
+
+  // As of version 1.75.0 grpc-netty-shaded includes the following shaded netty artifacts
+  // - netty-buffer
+  // - netty-codec
+  // - netty-codec-http
+  // - netty-codec-http2
+  // - netty-codec-socks
+  // - netty-common
+  // - netty-handler
+  // - netty-handler-proxy
+  // - netty-resolver
+  // - netty-tcnative-boringssl-static (linux-aarch_64, linux-x86_64, osx-aarch_64, osx-x86_64, windows-x86_64)
+  // - netty-transport
+  // - netty-transport-native-epoll (linux-x86_64, linux-aarch_64)
+  // - netty-transport-native-unix-common
   lazy val grpc_netty_shaded = "io.grpc" % "grpc-netty-shaded" % grpc_version
 
   lazy val gson = "com.google.code.gson" % "gson" % gson_version
@@ -342,11 +357,12 @@ object Dependencies {
   lazy val ujson_circe =
     "com.lihaoyi" %% "ujson-circe" % upickle_version exclude ("io.circe", "circe-parser_2.13")
 
-  // force override to address issue with transitive unicode lib dependency
+  // Force override to address issue with transitive unicode lib dependency
   lazy val icu4j_version = "com.ibm.icu" % "icu4j" % "63.1"
   lazy val protostuff_parser = "io.protostuff" % "protostuff-parser" % protostuff_version
 
   object resolveDependency {
+
     import io.circe.*, io.circe.parser.*, io.circe.generic.auto.*, io.circe.syntax.*
     import better.files.*
 
