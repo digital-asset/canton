@@ -37,7 +37,7 @@ from com.digitalasset.canton.admin.participant.v30 import (
     participant_status_service_pb2,
     participant_status_service_pb2_grpc,
 )
-from external_party_onboarding import (
+from external_party_onboarding_admin_api import (
     onboard_external_party,
     wait_to_observe_party_to_participant,
 )
@@ -373,7 +373,7 @@ def read_id_from_file(file_path):
    Exemple script demonstrating how to onboard a multi hosted external party, and update the hosting relationships of an existing party.
    ATTENTION: Replicating an existing party to additional hosting nodes requires following a specific procedure.
    Check the offline party replication documentation for more details. This script simply demonstrates how to authorize changes
-   to the PartyToParticipant mapping for an external party.  
+   to the PartyToParticipant mapping for an external party.
 """
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Multi-Hosted external party")

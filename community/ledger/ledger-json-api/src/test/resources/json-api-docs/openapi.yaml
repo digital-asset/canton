@@ -198,7 +198,13 @@ paths:
       - apiKeyAuth: []
   /v2/commands/completions:
     post:
-      description: Query completions list (blocking call)
+      description: |-
+        Query completions list (blocking call)
+        Notice: This endpoint should be used for small results set.
+        When number of results exceeded node configuration limit (`http-list-max-elements-limit`)
+        there will be an error (`413 Content Too Large`) returned.
+        Increasing this limit may lead to performance issues and high memory consumption.
+        Consider using websockets (asyncapi) for better efficiency with larger results.
       operationId: postV2CommandsCompletions
       parameters:
       - name: limit
@@ -509,10 +515,10 @@ paths:
       security:
       - httpAuth: []
       - apiKeyAuth: []
-  /v2/parties/external:
+  /v2/parties/external/allocate:
     post:
       description: Allocate a new external party
-      operationId: postV2PartiesExternal
+      operationId: postV2PartiesExternalAllocate
       requestBody:
         content:
           application/json:
@@ -649,9 +655,52 @@ paths:
       security:
       - httpAuth: []
       - apiKeyAuth: []
+  /v2/parties/external/generate-topology:
+    post:
+      description: Generate a topology for an external party
+      operationId: postV2PartiesExternalGenerate-topology
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateExternalPartyTopologyRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateExternalPartyTopologyResponse'
+        '400':
+          description: 'Invalid value for: body, Invalid value for: headers'
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
   /v2/state/active-contracts:
     post:
-      description: Query active contracts list (blocking call)
+      description: |-
+        Query active contracts list (blocking call).
+        Querying active contracts is an expensive operation and if possible should not be repeated often.
+        Consider querying active contracts initially (for a given offset)
+        and then repeatedly call one of `/v2/updates/...`endpoints  to get subsequent modifications.
+        You can also use websockets to get updates with better performance.
+
+        Notice: This endpoint should be used for small results set.
+        When number of results exceeded node configuration limit (`http-list-max-elements-limit`)
+        there will be an error (`413 Content Too Large`) returned.
+        Increasing this limit may lead to performance issues and high memory consumption.
+        Consider using websockets (asyncapi) for better efficiency with larger results.
       operationId: postV2StateActive-contracts
       parameters:
       - name: limit
@@ -709,7 +758,7 @@ paths:
       parameters:
       - name: party
         in: query
-        required: true
+        required: false
         schema:
           type: string
       - name: participantId
@@ -794,7 +843,13 @@ paths:
       - apiKeyAuth: []
   /v2/updates:
     post:
-      description: Query updates list (blocking call)
+      description: |-
+        Query updates list (blocking call)
+        Notice: This endpoint should be used for small results set.
+        When number of results exceeded node configuration limit (`http-list-max-elements-limit`)
+        there will be an error (`413 Content Too Large`) returned.
+        Increasing this limit may lead to performance issues and high memory consumption.
+        Consider using websockets (asyncapi) for better efficiency with larger results.
       operationId: postV2Updates
       parameters:
       - name: limit
@@ -847,8 +902,13 @@ paths:
       - apiKeyAuth: []
   /v2/updates/flats:
     post:
-      description: 'Query flat transactions update list (blocking call, deprecated:
-        use v2/updates instead)'
+      description: |-
+        Query flat transactions update list (blocking call)
+        Notice: This endpoint should be used for small results set.
+        When number of results exceeded node configuration limit (`http-list-max-elements-limit`)
+        there will be an error (`413 Content Too Large`) returned.
+        Increasing this limit may lead to performance issues and high memory consumption.
+        Consider using websockets (asyncapi) for better efficiency with larger results.
       operationId: postV2UpdatesFlats
       parameters:
       - name: limit
@@ -901,8 +961,13 @@ paths:
       - apiKeyAuth: []
   /v2/updates/trees:
     post:
-      description: 'Query update transactions tree list (blocking call, deprecated:
-        use v2/updates instead)'
+      description: |-
+        Query update transactions tree list (blocking call)
+        Notice: This endpoint should be used for small results set.
+        When number of results exceeded node configuration limit (`http-list-max-elements-limit`)
+        there will be an error (`413 Content Too Large`) returned.
+        Increasing this limit may lead to performance issues and high memory consumption.
+        Consider using websockets (asyncapi) for better efficiency with larger results.
       operationId: postV2UpdatesTrees
       parameters:
       - name: limit
@@ -1794,24 +1859,35 @@ components:
       description: 'Required authorization: ``HasRight(ParticipantAdmin) OR IsAuthenticatedIdentityProviderAdmin(identity_provider_id)``'
       type: object
       required:
-      - synchronizerId
+      - synchronizer
       - identityProviderId
       properties:
-        synchronizerId:
+        synchronizer:
           description: |-
+            TODO(#27670) support synchronizer aliases
             Synchronizer ID on which to onboard the party
             Required
           type: string
         onboardingTransactions:
           description: |-
             TopologyTransactions to onboard the external party
-            Must contain 3 signed transactions: NamespaceDelegation, PartyToKeyMapping, PartyToParticipant
+            Can contain:
+            - A namespace for the party.
+            This can be either a single NamespaceDelegation,
+            or DecentralizedNamespaceDefinition along with its authorized namespace owners in the form of NamespaceDelegations.
+            May be provided, if so it must be fully authorized by the signatures in this request combined with the existing topology state.
+            - A PartyToKeyMapping to register the party's signing keys.
+            May be provided, if so it must be fully authorized by the signatures in this request combined with the existing topology state.
+            - A PartyToParticipant to register the hosting relationship of the party.
+            Must be provided.
             Required
           type: array
           items:
             $ref: '#/components/schemas/SignedTransaction'
         multiHashSignatures:
-          description: Signatures of the combined hash of all onboarding_transactions
+          description: |-
+            Optional signatures of the combined hash of all onboarding_transactions
+            This may be used instead of providing signatures on each individual transaction
           type: array
           items:
             $ref: '#/components/schemas/Signature'
@@ -3060,6 +3136,76 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CumulativeFilter'
+    GenerateExternalPartyTopologyRequest:
+      title: GenerateExternalPartyTopologyRequest
+      type: object
+      required:
+      - synchronizer
+      - partyHint
+      - localParticipantObservationOnly
+      - confirmationThreshold
+      properties:
+        synchronizer:
+          description: |-
+            TODO(#27670) support synchronizer aliases
+            Required: synchronizer-id for which we are building this request.
+          type: string
+        partyHint:
+          description: 'Required: the actual party id will be constructed from this
+            hint and a fingerprint of the public key'
+          type: string
+        publicKey:
+          $ref: '#/components/schemas/SigningPublicKey'
+          description: 'Required: public key'
+        localParticipantObservationOnly:
+          description: 'Optional: if true, then the local participant will only be
+            observing, not confirming. Default false.'
+          type: boolean
+        otherConfirmingParticipantUids:
+          description: 'Optional: other participant ids which should be confirming
+            for this party'
+          type: array
+          items:
+            type: string
+        confirmationThreshold:
+          description: 'Optional: Confirmation threshold >= 1 for the party. Defaults
+            to all available confirmers (or if set to 0).'
+          type: integer
+          format: int32
+        observingParticipantUids:
+          description: 'Optional: other observing participant ids for this party'
+          type: array
+          items:
+            type: string
+    GenerateExternalPartyTopologyResponse:
+      title: GenerateExternalPartyTopologyResponse
+      description: Response message with topology transactions and the multi-hash
+        to be signed.
+      type: object
+      required:
+      - partyId
+      - publicKeyFingerprint
+      - multiHash
+      properties:
+        partyId:
+          description: the generated party id
+          type: string
+        publicKeyFingerprint:
+          description: the fingerprint of the supplied public key
+          type: string
+        topologyTransactions:
+          description: |-
+            The serialized topology transactions which need to be signed and submitted as part of the allocate party process
+            Note that the serialization includes the versioning information. Therefore, the transaction here is serialized
+            as an `UntypedVersionedMessage` which in turn contains the serialized `TopologyTransaction` in the version
+            supported by the synchronizer.
+          type: array
+          items:
+            type: string
+        multiHash:
+          description: the multi-hash which may be signed instead of each individual
+            transaction
+          type: string
     GetActiveContractsRequest:
       title: GetActiveContractsRequest
       description: |-
@@ -5259,6 +5405,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Signature'
+    SigningPublicKey:
+      title: SigningPublicKey
+      type: object
+      required:
+      - format
+      - keyData
+      - keySpec
+      properties:
+        format:
+          description: The serialization format of the public key
+          example: CRYPTO_KEY_FORMAT_DER_X509_SUBJECT_PUBLIC_KEY_INFO
+          type: string
+        keyData:
+          description: Serialized public key in the format specified above
+          type: string
+        keySpec:
+          description: The key specification
+          example: SIGNING_KEY_SPEC_EC_CURVE25519
+          type: string
     SinglePartySignatures:
       title: SinglePartySignatures
       description: Signatures provided by a single party

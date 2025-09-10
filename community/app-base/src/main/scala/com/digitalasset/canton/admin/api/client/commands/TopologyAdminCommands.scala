@@ -336,6 +336,7 @@ object TopologyAdminCommands {
         response.results
           .traverse(ListPartyToParticipantResult.fromProtoV30)
           .leftMap(_.toString)
+
     }
 
     final case class SynchronizerParametersState(

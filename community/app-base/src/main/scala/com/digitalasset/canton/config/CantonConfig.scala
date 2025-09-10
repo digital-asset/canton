@@ -956,6 +956,15 @@ object CantonConfig {
     lazy implicit val blockSequencerStreamInstrumentationConfigReader
         : ConfigReader[BlockSequencerStreamInstrumentationConfig] =
       deriveReader[BlockSequencerStreamInstrumentationConfig]
+    lazy implicit final val individualCircuitBreakerConfigReader
+        : ConfigReader[BlockSequencerConfig.IndividualCircuitBreakerConfig] =
+      deriveReader[BlockSequencerConfig.IndividualCircuitBreakerConfig]
+    lazy implicit final val circuitBreakerByMessageTypeConfigReader
+        : ConfigReader[BlockSequencerConfig.CircuitBreakerByMessageTypeConfig] =
+      deriveReader[BlockSequencerConfig.CircuitBreakerByMessageTypeConfig]
+    lazy implicit final val circuitBreakerConfigReader
+        : ConfigReader[BlockSequencerConfig.CircuitBreakerConfig] =
+      deriveReader[BlockSequencerConfig.CircuitBreakerConfig]
     lazy implicit final val blockSequencerConfigReader: ConfigReader[BlockSequencerConfig] =
       deriveReader[BlockSequencerConfig]
     lazy implicit final val sequencerWriterCommitModeConfigReader: ConfigReader[CommitMode] =
@@ -1563,6 +1572,15 @@ object CantonConfig {
     lazy implicit val blockSequencerStreamInstrumentationConfigWriter
         : ConfigWriter[BlockSequencerStreamInstrumentationConfig] =
       deriveWriter[BlockSequencerStreamInstrumentationConfig]
+    lazy implicit final val individualCircuitBreakerConfigWriter
+        : ConfigWriter[BlockSequencerConfig.IndividualCircuitBreakerConfig] =
+      deriveWriter[BlockSequencerConfig.IndividualCircuitBreakerConfig]
+    lazy implicit final val circuitBreakerByMessageTypeConfigWriter
+        : ConfigWriter[BlockSequencerConfig.CircuitBreakerByMessageTypeConfig] =
+      deriveWriter[BlockSequencerConfig.CircuitBreakerByMessageTypeConfig]
+    lazy implicit final val circuitBreakerConfigWriter
+        : ConfigWriter[BlockSequencerConfig.CircuitBreakerConfig] =
+      deriveWriter[BlockSequencerConfig.CircuitBreakerConfig]
     lazy implicit final val blockSequencerConfigWriter: ConfigWriter[BlockSequencerConfig] =
       deriveWriter[BlockSequencerConfig]
     lazy implicit final val sequencerReaderConfigWriter: ConfigWriter[SequencerReaderConfig] =

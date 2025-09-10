@@ -132,33 +132,53 @@ class PartyOps(
   def allocateExternalParty(
       participantId: ParticipantId,
       externalPartyOnboardingDetails: ExternalPartyOnboardingDetails,
+      protocolVersion: ProtocolVersion,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
   ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] =
     for {
       // Sign the party to participant tx with this participant
-      // Validation that this participant is a hosting should already be done in ExternalPartyOnboardingDetails
+      // Validation that this participant is a hosting node should already be done in ExternalPartyOnboardingDetails
       // If somehow that's not done, authorization will fail in the topology manager
-      partyToParticipantSigned <- topologyManager
-        .extendSignature(
-          externalPartyOnboardingDetails.signedPartyToParticipantTransaction,
-          Seq(participantId.fingerprint),
-          ForceFlags.none,
-        )
-        .leftMap(IdentityManagerParentError(_): ParticipantTopologyManagerError)
-      // Add all 3 transactions at once
+      partyToParticipantSignedO <-
+        externalPartyOnboardingDetails.optionallySignedPartyToParticipant match {
+          // If it's already signed, extend the signature
+          case ExternalPartyOnboardingDetails.SignedPartyToParticipant(signed) =>
+            topologyManager
+              .extendSignature(
+                signed,
+                Seq(participantId.fingerprint),
+                ForceFlags.none,
+              )
+              .map(Some(_))
+              .leftMap(IdentityManagerParentError(_): ParticipantTopologyManagerError)
+          case ExternalPartyOnboardingDetails.UnsignedPartyToParticipant(unsigned) =>
+            // Otherwise add the mapping as a proposal
+            topologyManager
+              .proposeAndAuthorize(
+                op = TopologyChangeOp.Replace,
+                mapping = unsigned.mapping,
+                serial = Some(unsigned.serial),
+                signingKeys = Seq(participantId.fingerprint),
+                protocolVersion = protocolVersion,
+                expectFullAuthorization = false,
+                waitToBecomeEffective = None,
+              )
+              .map(_ => None)
+              .leftMap(IdentityManagerParentError(_): ParticipantTopologyManagerError)
+        }
+      // Add all transactions at once
       _ <-
         topologyManager
           .add(
-            Seq(
-              externalPartyOnboardingDetails.signedNamespaceTransaction.signedTransaction,
+            externalPartyOnboardingDetails.partyNamespace.toList
+              .flatMap(_.signedTransactions) ++ Seq(
               externalPartyOnboardingDetails.signedPartyToKeyMappingTransaction,
-              partyToParticipantSigned,
-            ),
+              partyToParticipantSignedO,
+            ).flatten,
             ForceFlags.none,
-            // Should be fully authorized only if the party is not multi hosted
-            expectFullAuthorization = !externalPartyOnboardingDetails.isMultiHosted,
+            expectFullAuthorization = externalPartyOnboardingDetails.fullyAllocatesParty,
           )
           .leftMap(IdentityManagerParentError(_): ParticipantTopologyManagerError)
     } yield ()

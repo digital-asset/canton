@@ -418,6 +418,18 @@ class TopologyAdministrationGroup(
         )
       }
 
+    @Help.Summary("Authorize a transaction by its hash")
+    def authorize(
+        synchronizerId: SynchronizerId,
+        txHash: TxHash,
+    ): SignedTopologyTransaction[TopologyChangeOp, TopologyMapping] =
+      authorize[TopologyMapping](
+        txHash,
+        mustBeFullyAuthorized = false,
+        TopologyStoreId.Synchronizer(synchronizerId),
+      )
+
+    @Help.Summary("Authorize a transaction by its hash")
     def authorize[M <: TopologyMapping: ClassTag](
         txHash: TxHash,
         mustBeFullyAuthorized: Boolean,
@@ -1672,6 +1684,24 @@ class TopologyAdministrationGroup(
         )
       )
     }
+
+    @Help.Summary("List multi-hosted party proposals")
+    @Help.Description("""Multi-hosted parties require all involved actors to sign the topology transaction.
+         Topology transactions without sufficient signatures are called proposals. They are
+         distributed the same way as fully authorized topology transactions, and signatures
+         are aggregated until the transaction is fully authorized.
+         This method here allows to inspect the pending queue of open hosting proposals.
+         The proposals are returned as seen on the specified synchronizer. They can be approved
+         by the individual participants by invoking node.topology.transactions.authorize(<synchronizer-id>, <tx-hash>).
+        """)
+    def list_hosting_proposals(
+        synchronizerId: SynchronizerId,
+        participantId: ParticipantId,
+    ): Seq[ListMultiHostingProposal] = list(
+      synchronizerId,
+      proposals = true,
+      filterParticipant = participantId.filterString,
+    ).mapFilter(ListMultiHostingProposal.mapFilter(participantId))
 
     /** Check whether the node knows about `party` being hosted on `hostingParticipants` and
       * synchronizer `synchronizerId`, optionally the specified expected permission and threshold.

@@ -123,6 +123,7 @@ class SequencerTest
       loggerFactory = loggerFactory,
       sequencerMember = topologyClientMember,
       blockSequencerMode = false,
+      useRecipientsTableForReads = false,
       cachingConfigs = CachingConfigs(),
       batchingConfig = BatchingConfig(),
       sequencerMetrics = SequencerMetrics.noop("sequencer-test"),

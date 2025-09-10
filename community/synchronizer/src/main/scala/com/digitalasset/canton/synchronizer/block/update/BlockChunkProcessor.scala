@@ -543,12 +543,12 @@ final class BlockChunkProcessor(
     Future {
       value.foreach(_.withTraceContext { implicit traceContext =>
         {
+
           case LedgerBlockEvent.Send(_, signedSubmissionRequest, payloadSize) =>
-            val mc = SequencerMetrics.submissionTypeMetricsContext(
-              signedSubmissionRequest.submissionRequest.batch.allRecipients,
-              signedSubmissionRequest.submissionRequest.sender,
-              logger,
-            )
+            val submissionRequest = signedSubmissionRequest.submissionRequest
+            val sender = submissionRequest.sender
+            val requestType = submissionRequest.requestType
+            val mc = SequencerMetrics.submissionTypeMetricsContext(sender, requestType, logger)
             metrics.block.blockEvents.mark()(mc)
             metrics.block.blockEventBytes.mark(payloadSize.longValue)(mc)
 

@@ -248,8 +248,8 @@ object JsUpdateService extends DocumentationEndpoints {
     updates.post
       .in(jsonBody[update_service.GetUpdatesRequest])
       .out(jsonBody[Seq[JsGetUpdatesResponse]])
-      .inStreamListParams()
       .description("Query updates list (blocking call)")
+      .inStreamListParamsAndDescription()
 
   val getUpdatesFlatEndpoint = updates.get
     .in(sttp.tapir.stringToPath("flats"))
@@ -268,10 +268,8 @@ object JsUpdateService extends DocumentationEndpoints {
       .in(sttp.tapir.stringToPath("flats"))
       .in(jsonBody[update_service.GetUpdatesRequest])
       .out(jsonBody[Seq[JsGetUpdatesResponse]])
-      .inStreamListParams()
-      .description(
-        "Query flat transactions update list (blocking call, deprecated: use v2/updates instead)"
-      )
+      .description("Query flat transactions update list (blocking call)")
+      .inStreamListParamsAndDescription()
 
   val getUpdatesTreeEndpoint = updates.get
     .in(sttp.tapir.stringToPath("trees"))
@@ -290,10 +288,8 @@ object JsUpdateService extends DocumentationEndpoints {
       .in(sttp.tapir.stringToPath("trees"))
       .in(jsonBody[update_service.GetUpdatesRequest])
       .out(jsonBody[Seq[JsGetUpdateTreesResponse]])
-      .inStreamListParams()
-      .description(
-        "Query update transactions tree list (blocking call, deprecated: use v2/updates instead)"
-      )
+      .description("Query update transactions tree list (blocking call)")
+      .inStreamListParamsAndDescription()
 
   val getTransactionTreeByOffsetEndpoint = updates.get
     .in(sttp.tapir.stringToPath("transaction-tree-by-offset"))

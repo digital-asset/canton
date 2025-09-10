@@ -17,7 +17,7 @@ import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
-import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiParticipantProvider}
+import com.digitalasset.canton.crypto.{CryptoPureApi, HashOps, SyncCryptoApiParticipantProvider}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset, ReassignmentSubmitterMetadata}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.*
@@ -2019,6 +2019,8 @@ class CantonSyncService(
         syncCrypto.forSynchronizer(synchronizerId, staticSyncParameters).map(_.pureCrypto)
     RoutingSynchronizerStateFactory.create(connectedSynchronizersLookup, syncCryptoPureApi)
   }
+
+  override def hashOps: HashOps = this.syncCrypto.pureCrypto
 
 }
 

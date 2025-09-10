@@ -17,6 +17,7 @@ import com.digitalasset.canton.config.{
   StorageConfig,
   UniformCantonConfigValidation,
 }
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.CircuitBreakerConfig
 import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerStreamInstrumentationConfig.DefaultBufferSize
 import com.digitalasset.canton.synchronizer.sequencer.DatabaseSequencerConfig.{
   SequencerPruningConfig,
@@ -242,6 +243,7 @@ final case class BlockSequencerConfig(
     testingInterceptor: Option[DatabaseSequencerConfig.TestingInterceptor] = None,
     streamInstrumentation: BlockSequencerStreamInstrumentationConfig =
       BlockSequencerStreamInstrumentationConfig(),
+    circuitBreaker: CircuitBreakerConfig = CircuitBreakerConfig(),
 ) extends UniformCantonConfigValidation { self =>
   def toDatabaseSequencerConfig: DatabaseSequencerConfig = new DatabaseSequencerConfig {
     override val writer: SequencerWriterConfig = self.writer
@@ -261,6 +263,48 @@ object BlockSequencerConfig {
         : CantonConfigValidator[TestingInterceptor] =
       CantonConfigValidator.validateAll
     CantonConfigValidatorDerivation[BlockSequencerConfig]
+  }
+
+  final case class CircuitBreakerConfig(
+      enabled: Boolean = true,
+      messages: CircuitBreakerByMessageTypeConfig = CircuitBreakerByMessageTypeConfig(),
+  ) extends UniformCantonConfigValidation
+  object CircuitBreakerConfig {
+    implicit val circuitBreakerConfigValidator: CantonConfigValidator[CircuitBreakerConfig] =
+      CantonConfigValidatorDerivation[CircuitBreakerConfig]
+  }
+
+  private val default1 = IndividualCircuitBreakerConfig(maxFailures = 10)
+  private val default2 = IndividualCircuitBreakerConfig(maxFailures = 30)
+  private val default3 = IndividualCircuitBreakerConfig(maxFailures = 60)
+
+  final case class CircuitBreakerByMessageTypeConfig(
+      confirmationRequest: IndividualCircuitBreakerConfig = default1,
+      topology: IndividualCircuitBreakerConfig = default1,
+      timeProof: IndividualCircuitBreakerConfig = default2,
+      commitment: IndividualCircuitBreakerConfig = default2,
+      topUp: IndividualCircuitBreakerConfig = default2,
+      confirmationResponse: IndividualCircuitBreakerConfig = default3,
+      verdict: IndividualCircuitBreakerConfig = default3,
+      acknowledgement: IndividualCircuitBreakerConfig = default1,
+  ) extends UniformCantonConfigValidation
+  object CircuitBreakerByMessageTypeConfig {
+    implicit val circuitBreakerByMessageTypeConfigValidator
+        : CantonConfigValidator[CircuitBreakerByMessageTypeConfig] =
+      CantonConfigValidatorDerivation[CircuitBreakerByMessageTypeConfig]
+  }
+
+  final case class IndividualCircuitBreakerConfig(
+      allowedBlockDelay: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(90),
+      maxFailures: Int = 10,
+      resetTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(30),
+      exponentialBackoffFactor: Double = 1.0,
+      maxResetTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofDays(36500),
+  ) extends UniformCantonConfigValidation
+  object IndividualCircuitBreakerConfig {
+    implicit val individualCircuitBreakerConfigValidator
+        : CantonConfigValidator[IndividualCircuitBreakerConfig] =
+      CantonConfigValidatorDerivation[IndividualCircuitBreakerConfig]
   }
 }
 

@@ -84,6 +84,7 @@ final case class SequencerReaderConfig(
       SequencerReaderConfig.defaultPayloadBatchWindow,
     payloadFetchParallelism: Int = SequencerReaderConfig.defaultPayloadFetchParallelism,
     eventGenerationParallelism: Int = SequencerReaderConfig.defaultEventGenerationParallelism,
+    useRecipientsTableForReads: Boolean = SequencerReaderConfig.defaultUseRecipientsTableForReads,
 ) extends CustomCantonConfigValidation {
   override protected def doValidate(edition: CantonEdition): Seq[CantonConfigValidationError] =
     Option
@@ -108,6 +109,7 @@ object SequencerReaderConfig {
     config.NonNegativeFiniteDuration.ofMillis(5)
   val defaultPayloadFetchParallelism: Int = 2
   val defaultEventGenerationParallelism: Int = 4
+  val defaultUseRecipientsTableForReads: Boolean = false
 
   /** The default polling interval if [[SequencerReaderConfig.pollingInterval]] is unset despite
     * high availability being configured.
@@ -584,7 +586,6 @@ class SequencerReader(
                       ),
                     )
                   case payload: BytesPayload => payload.decodeBatchAndTrim(protocolVersion, member)
-                  case batch: FilteredBatch => Batch.trimForMember(batch.batch, member)
                 })
               )
             }

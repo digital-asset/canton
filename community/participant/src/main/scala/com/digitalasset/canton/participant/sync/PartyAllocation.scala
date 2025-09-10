@@ -73,15 +73,18 @@ private[sync] class PartyAllocation(
         _ <- EitherT
           .cond[FutureUnlessShutdown](isActive(), (), SyncServiceError.Synchronous.PassiveNode)
           .leftWiden[SubmissionResult]
-        // External parties have their own namespace, local parties re-use the participant's namespace
-        namespace = externalPartyOnboardingDetails
-          .map(_.namespace)
-          .getOrElse(participantId.uid.namespace)
-        id <- UniqueIdentifier
-          .create(partyName, namespace)
-          .leftMap(SyncServiceError.Synchronous.internalError)
-          .toEitherT[FutureUnlessShutdown]
-        partyId = PartyId(id)
+        // External parties have their own namespace
+        partyId <- externalPartyOnboardingDetails
+          .map(_.partyId)
+          .map(EitherT.pure[FutureUnlessShutdown, SubmissionResult](_))
+          .getOrElse {
+            UniqueIdentifier
+              // local parties re-use the participant's namespace
+              .create(partyName, participantId.uid.namespace)
+              .map(id => PartyId(id))
+              .leftMap(SyncServiceError.Synchronous.internalError)
+              .toEitherT[FutureUnlessShutdown]
+          }
         validatedSubmissionId <- EitherT.fromEither[FutureUnlessShutdown](
           String255
             .fromProtoPrimitive(rawSubmissionId, "LedgerSubmissionId")
@@ -96,19 +99,22 @@ private[sync] class PartyAllocation(
             SyncServiceError.PartyAllocationNoSynchronizerError.Error(rawSubmissionId).rpcStatus()
           ),
         )
-        _ <- partyNotifier
-          .expectPartyAllocationForNodes(
-            partyId,
-            participantId,
-            validatedSubmissionId,
-          )
-          .leftMap[SubmissionResult] { err =>
-            reject(err, Some(Code.ABORTED))
-          }
-          .toEitherT[FutureUnlessShutdown]
+        _ <-
+          if (externalPartyOnboardingDetails.forall(_.fullyAllocatesParty)) {
+            partyNotifier
+              .expectPartyAllocationForNodes(
+                partyId,
+                participantId,
+                validatedSubmissionId,
+              )
+              .leftMap[SubmissionResult] { err =>
+                reject(err, Some(Code.ABORTED))
+              }
+              .toEitherT[FutureUnlessShutdown]
+          } else EitherT.pure[FutureUnlessShutdown, SubmissionResult](())
         _ <- (externalPartyOnboardingDetails match {
           case Some(details) =>
-            partyOps.allocateExternalParty(participantId, details)
+            partyOps.allocateExternalParty(participantId, details, protocolVersion)
           case None => partyOps.allocateParty(partyId, participantId, protocolVersion)
         })
           .leftMap[SubmissionResult] {
@@ -132,18 +138,20 @@ private[sync] class PartyAllocation(
         // TODO(i21341) remove this waiting logic once topology events are published on the ledger api
         // wait for parties to be available on the currently connected synchronizers
         waitingSuccessful <- EitherT
-          .right[SubmissionResult](if (externalPartyOnboardingDetails.forall(!_.isMultiHosted)) {
-            connectedSynchronizersLookup.snapshot.toSeq.parTraverse {
-              case (synchronizerId, connectedSynchronizer) =>
-                connectedSynchronizer.topologyClient
-                  .awaitUS(
-                    _.inspectKnownParties(partyId.filterString, participantId.filterString)
-                      .map(_.nonEmpty),
-                    timeouts.network.duration,
-                  )
-                  .map(synchronizerId -> _)
-            }
-          } else FutureUnlessShutdown.pure(Set.empty))
+          .right[SubmissionResult](
+            if (externalPartyOnboardingDetails.forall(_.fullyAllocatesParty)) {
+              connectedSynchronizersLookup.snapshot.toSeq.parTraverse {
+                case (synchronizerId, connectedSynchronizer) =>
+                  connectedSynchronizer.topologyClient
+                    .awaitUS(
+                      _.inspectKnownParties(partyId.filterString, participantId.filterString)
+                        .map(_.nonEmpty),
+                      timeouts.network.duration,
+                    )
+                    .map(synchronizerId -> _)
+              }
+            } else FutureUnlessShutdown.pure(Seq.empty)
+          )
         _ = waitingSuccessful.foreach { case (synchronizerId, successful) =>
           if (!successful)
             logger.warn(

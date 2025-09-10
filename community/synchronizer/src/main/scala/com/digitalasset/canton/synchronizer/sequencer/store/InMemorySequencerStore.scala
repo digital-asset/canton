@@ -230,7 +230,6 @@ class InMemorySequencerStore(
             .toList
         case payload: BytesPayload =>
           List(payload.id -> payload.decodeBatchAndTrim(protocolVersion, member))
-        case batch: FilteredBatch => List(batch.id -> Batch.trimForMember(batch.batch, member))
       }.toMap
     )
 

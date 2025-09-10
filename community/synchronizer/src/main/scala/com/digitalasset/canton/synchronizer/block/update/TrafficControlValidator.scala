@@ -55,15 +55,14 @@ private[update] class TrafficControlValidator(
   ): FutureUnlessShutdown[SubmissionRequestValidationResult] = {
     lazy val metricsContext = SequencerMetrics
       .submissionTypeMetricsContext(
-        signedOrderingRequest.submissionRequest.batch.allRecipients,
         signedOrderingRequest.submissionRequest.sender,
+        signedOrderingRequest.submissionRequest.requestType,
         logger,
         warnOnUnexpected = false,
       )
       .withExtraLabels(
         "sequencer" -> signedOrderingRequest.content.sequencerId.member.toProtoPrimitive
       )
-
     submissionValidation
       .flatMap {
         // Now we're ready to perform rate limiting if the flag is true and the result should consume traffic

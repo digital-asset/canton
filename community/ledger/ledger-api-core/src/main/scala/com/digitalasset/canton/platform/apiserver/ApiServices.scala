@@ -310,7 +310,6 @@ object ApiServices {
           metrics,
           loggerFactory,
         )
-
       val apiPartyManagementService = ApiPartyManagementService.createApiService(
         partyManagementService,
         new IdentityProviderExists(identityProviderConfigStore),
@@ -322,7 +321,6 @@ object ApiServices {
         partyAllocationTracker = partyAllocationTracker,
         submissionIdGenerator =
           ApiPartyManagementService.CreateSubmissionId.forParticipant(participantId),
-        participantId = participantId,
         loggerFactory = loggerFactory,
       )
 
