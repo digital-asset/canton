@@ -9,6 +9,16 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2025-09-17 (Exclusive)
+- The participant admin workflows have been renamed
+
+  1. from `AdminWorkflows` to `canton-builtin-admin-workflow-ping` as part of which the legacy
+     `AdminWorkflows/Canton/Internal/PartyReplication.daml` has been removed,
+  2. from `PartyReplication` to `canton-builtin-admin-workflow-party-replication-alpha`.
+
+  The README files have been updated to explicitly mandate that updates have to be SCU-compliant
+  and with instructions on how to test modifications for compliance.
+
 ## until 2025-09-10 (Exclusive)
 - **Breaking** Moves general, LAPI active contract based, `ExportAcs` endpoint from `party_management_service.proto`
   to `participant_repair_service.proto`. Note that endpoint does not return retriable error(s) since ACS export is
@@ -25,6 +35,8 @@ Wednesday after your change.
   looking into the events themselves.
 - **Breaking** Removed the deprecated requesting_parties field from the `GetEventsByContractIdRequest` message in the
   Ledger API. Clients should use the `event_format` field instead, as described in lapi-migration-guide.
+- Add `FORCE_FLAG_ALLOW_VET_INCOMPATIBLE_UPGRADES` in topology manager write service. It allows vetting packages
+  that are upgrade incompatible.
 
 ## until 2025-09-04 (Exclusive)
 
