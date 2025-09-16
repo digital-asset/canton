@@ -476,6 +476,7 @@ class MediatorNodeBootstrap(
                   synchronizerTopologyStore,
                   topologyManagerStatus = TopologyManagerStatus
                     .combined(authorizedTopologyManager, synchronizerTopologyManager),
+                  config.topology,
                   synchronizerOutboxFactory,
                 ),
               storage.isActive,
@@ -525,6 +526,7 @@ class MediatorNodeBootstrap(
       staticSynchronizerParameters: StaticSynchronizerParameters,
       synchronizerTopologyStore: TopologyStore[SynchronizerStore],
       topologyManagerStatus: TopologyManagerStatus,
+      topologyConfig: TopologyConfig,
       synchronizerOutboxFactory: SynchronizerOutboxFactory,
   ): EitherT[FutureUnlessShutdown, String, MediatorRuntime] = {
     val synchronizerId = synchronizerConfig.synchronizerId
@@ -678,6 +680,7 @@ class MediatorNodeBootstrap(
             new InitialTopologySnapshotValidator(
               new SynchronizerCryptoPureApi(staticSynchronizerParameters, crypto.pureCrypto),
               synchronizerTopologyStore,
+              validateInitialSnapshot = topologyConfig.validateInitialTopologySnapshot,
               arguments.parameterConfig.processingTimeouts,
               synchronizerLoggerFactory,
             ),

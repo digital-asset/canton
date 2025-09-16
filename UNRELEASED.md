@@ -9,6 +9,23 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2024-09-11 (Exclusive)
+- Added endpoints related to topology snapshots that are less memory intensive for the nodes exporting the topology snapshots:
+  - `TopologyManagerReadService.ExportTopologySnapshotV2`: generic topology snapshot export
+  - `TopologyManagerReadService.GenesisStateV2`: export genesis state for major upgrade 
+  - `TopologyManagerWriteService.ImportTopologySnapshotV2`: generic topology snapshot export
+  - `SequencerAdministrationService.OnboardingStateV2`: export sequencer snapshot for onboarding a new sequencer
+  - `SequencerInitializationService.InitializeSequencerFromGenesisStateV2`: initialize sequencer for a new synchronizer 
+  - `SequencerInitializationService.InitializeSequencerFromOnboardingStateV2`: initialize sequencer from an onboarding snapshot created by `SequencerAdministrationService.OnboardingStateV2`
+
+- Added indices that speeds up various topology related queries as well as the update of the `valid_until` column.
+- Add flag to disable the initial topology snapshot validation
+  ```
+  participants.participant1.topology.validate-initial-topology-snapshot = true // default value
+  mediators.mediator1.topology.validate-initial-topology-snapshot = true // default value
+  sequencers.sequencer1.topology.validate-initial-topology-snapshot = true // default value
+  ```
+
 ## until 2025-09-04 (Exclusive)
 - Replace an unbounded timeout with a configurable timeout when waiting to observe the submitted topology tranactions.
   Additionally, the delay between retries of the topology dispatching loop has been made configurable.

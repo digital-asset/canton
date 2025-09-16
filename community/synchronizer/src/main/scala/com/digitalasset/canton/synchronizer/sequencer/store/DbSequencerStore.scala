@@ -936,27 +936,66 @@ class DbSequencerStore(
 
     def queryEventsViaRecipientsTable(safeWatermarkO: Option[CantonTimestamp]) = {
       val safeWatermark = safeWatermarkO.getOrElse(CantonTimestamp.MaxValue)
-      sql"""
-        select events.ts, events.node_index, events.event_type, events.message_id, events.sender,
-          events.recipients, events.payload_id, events.topology_timestamp,
-          events.trace_context, events.error,
-          events.consumed_cost, events.extra_traffic_consumed, events.base_traffic_remainder
-        from sequencer_event_recipients recipients
-        inner join sequencer_events events
-          on events.node_index = recipients.node_index and events.ts = recipients.ts
-        inner join sequencer_watermarks watermarks
-          on recipients.node_index = watermarks.node_index
-        where recipients.recipient_id = $memberId
-          and (
-            -- inclusive timestamp bound that defaults to MinValue if unset
-            recipients.ts >= $fromTimestampInclusive
-              -- only consider events within the safe watermark
-              and recipients.ts <= $safeWatermark
-              -- if the sequencer that produced the event is offline, only consider up until its offline watermark
-              and (watermarks.sequencer_online = true or recipients.ts <= watermarks.watermark_ts)
-          )
-        order by recipients.ts asc
-        limit $limit""".as[Sequenced[PayloadId]]
+
+      profile match {
+        case _: Postgres =>
+          sql"""
+            with
+              watermarks as (select * from sequencer_watermarks)
+            select events.ts, events.node_index, events.event_type, events.message_id, events.sender,
+              events.recipients, events.payload_id, events.topology_timestamp,
+              events.trace_context, events.error,
+              events.consumed_cost, events.extra_traffic_consumed, events.base_traffic_remainder
+            from
+              watermarks inner join lateral (
+              -- Watermarks contain 1 record for block sequencer, up to hardcoded max of 32 records
+              -- for DB sequencer - both are fine as long as the query is better than the alternative
+              -- (scanning a wrong index or the table itself).
+                select * from sequencer_events
+                where ts in (
+                  select ts
+                  from sequencer_event_recipients recipients
+                  where
+                    recipients.node_index = watermarks.node_index
+                    -- if the sequencer that produced the event is offline, only consider up until its offline watermark
+                    and (watermarks.sequencer_online = true or recipients.ts <= watermarks.watermark_ts)
+                    and recipients.recipient_id = $memberId
+                    -- inclusive timestamp bound that defaults to MinValue if unset
+                    and recipients.ts >= $fromTimestampInclusive
+                    -- only consider events within the safe watermark
+                    and recipients.ts <= $safeWatermark
+                  order by recipients.ts asc
+                  -- We only have limit on the inner query. We can add an extra limit outside (for DB sequencer case),
+                  -- but it doesn't make sense to drop already read events and it seems reasonable to just return them.
+                  limit $limit
+                )
+              ) events
+              on (true)
+            order by events.ts asc""".as[Sequenced[PayloadId]]
+        case _: H2 =>
+          // This is the previous version of the query as H2 doesn't support lateral joins
+          sql"""
+            select events.ts, events.node_index, events.event_type, events.message_id, events.sender,
+              events.recipients, events.payload_id, events.topology_timestamp,
+              events.trace_context, events.error,
+              events.consumed_cost, events.extra_traffic_consumed, events.base_traffic_remainder
+            from sequencer_event_recipients recipients
+            inner join sequencer_events events
+              on events.node_index = recipients.node_index and events.ts = recipients.ts
+            inner join sequencer_watermarks watermarks
+              on recipients.node_index = watermarks.node_index
+            where recipients.recipient_id = $memberId
+              and (
+                -- inclusive timestamp bound that defaults to MinValue if unset
+                recipients.ts >= $fromTimestampInclusive
+                  -- only consider events within the safe watermark
+                  and recipients.ts <= $safeWatermark
+                  -- if the sequencer that produced the event is offline, only consider up until its offline watermark
+                  and (watermarks.sequencer_online = true or recipients.ts <= watermarks.watermark_ts)
+              )
+            order by recipients.ts asc
+            limit $limit""".as[Sequenced[PayloadId]]
+      }
     }
 
     def h2PostgresQueryEvents(
