@@ -4,7 +4,6 @@
 package com.digitalasset.canton.topology.processing
 
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.FailOnShutdown
 import com.digitalasset.canton.config.CantonRequireTypes.String300
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -25,9 +24,11 @@ import com.digitalasset.canton.topology.transaction.{
   SignedTopologyTransaction,
 }
 import com.digitalasset.canton.version.ProtocolVersionValidation
+import com.digitalasset.canton.{FailOnShutdown, HasActorSystem}
 
 abstract class InitialTopologySnapshotValidatorTest
     extends TopologyTransactionHandlingBase
+    with HasActorSystem
     with FailOnShutdown {
 
   import Factory.*
@@ -39,6 +40,7 @@ abstract class InitialTopologySnapshotValidatorTest
     val validator = new InitialTopologySnapshotValidator(
       new SynchronizerCryptoPureApi(defaultStaticSynchronizerParameters, crypto),
       store,
+      validateInitialSnapshot = true,
       DefaultProcessingTimeouts.testing,
       loggerFactory,
     )

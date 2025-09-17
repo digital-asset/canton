@@ -73,6 +73,7 @@ trait DbTopologyStoreTest extends TopologyStoreTest with DbTopologyStoreHelper {
             testData.factory.cryptoApi.crypto.pureCrypto,
           ),
           store,
+          validateInitialSnapshot = true,
           timeouts,
           loggerFactory,
         ).validateAndApplyInitialTopologySnapshot(topologySnapshot)

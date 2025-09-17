@@ -5,11 +5,11 @@ package com.digitalasset.canton.topology.store
 
 import cats.syntax.option.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.FailOnShutdown
 import com.digitalasset.canton.config.CantonRequireTypes.{String255, String300}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
   InitialTopologySnapshotValidator,
@@ -29,10 +29,16 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.{FailOnShutdown, HasActorSystem}
+import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
 
-trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with FailOnShutdown {
+trait TopologyStoreTest
+    extends AsyncWordSpec
+    with TopologyStoreTestBase
+    with FailOnShutdown
+    with HasActorSystem {
 
   val testData = new TopologyStoreTestData(testedProtocolVersion, loggerFactory, executionContext)
   import testData.*
@@ -440,6 +446,7 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with Fa
                 testData.factory.cryptoApi.crypto.pureCrypto,
               ),
               store = store,
+              validateInitialSnapshot = true,
               timeouts = timeouts,
               loggerFactory = loggerFactory,
             ).validateAndApplyInitialTopologySnapshot(bootstrapTransactions)
@@ -583,6 +590,7 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with Fa
                 factory.cryptoApi.crypto.pureCrypto,
               ),
               store,
+              validateInitialSnapshot = true,
               timeouts,
               loggerFactory,
             ).validateAndApplyInitialTopologySnapshot(bootstrapTransactions)
@@ -604,13 +612,17 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with Fa
             _ <- update(store, ts5, add = Seq(dtc_p2_synchronizer1))
             _ <- update(store, ts6, add = Seq(mds_med1_synchronizer1))
 
-            transactionsAtTs6 <- store.findEssentialStateAtSequencedTime(
-              asOfInclusive = SequencedTime(ts6),
-              includeRejected = true,
+            transactionsAtTs6 <- FutureUnlessShutdown.outcomeF(
+              store
+                .findEssentialStateAtSequencedTime(
+                  asOfInclusive = SequencedTime(ts6),
+                  includeRejected = true,
+                )
+                .runWith(Sink.seq)
             )
           } yield {
             expectTransactions(
-              transactionsAtTs6,
+              StoredTopologyTransactions(transactionsAtTs6),
               Seq(
                 otk_p1,
                 dtc_p2_synchronizer1,
@@ -630,6 +642,7 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with Fa
                 factory.cryptoApi.crypto.pureCrypto,
               ),
               store,
+              validateInitialSnapshot = true,
               timeouts,
               loggerFactory,
             ).validateAndApplyInitialTopologySnapshot(bootstrapTransactions)
@@ -672,14 +685,22 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with Fa
               ),
             )
 
-            essentialStateTransactions <- store.findEssentialStateAtSequencedTime(
-              SequencedTime(ts6),
-              includeRejected = false,
+            essentialStateTransactions <- FutureUnlessShutdown.outcomeF(
+              store
+                .findEssentialStateAtSequencedTime(
+                  SequencedTime(ts6),
+                  includeRejected = false,
+                )
+                .runWith(Sink.seq)
             )
 
-            essentialStateTransactionsWithRejections <- store.findEssentialStateAtSequencedTime(
-              SequencedTime(ts6),
-              includeRejected = true,
+            essentialStateTransactionsWithRejections <- FutureUnlessShutdown.outcomeF(
+              store
+                .findEssentialStateAtSequencedTime(
+                  SequencedTime(ts6),
+                  includeRejected = true,
+                )
+                .runWith(Sink.seq)
             )
 
             upcomingTransactions <- store.findUpcomingEffectiveChanges(asOfInclusive = ts4)
@@ -739,7 +760,7 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with Fa
 
             // Essential state currently encompasses all transactions at the specified time
             expectTransactions(
-              essentialStateTransactions,
+              StoredTopologyTransactions(essentialStateTransactions),
               bootstrapTransactions.result
                 .filter(tx => tx.validFrom.value <= ts6 && tx.rejectionReason.isEmpty)
                 .map(_.transaction),
@@ -747,7 +768,7 @@ trait TopologyStoreTest extends AsyncWordSpec with TopologyStoreTestBase with Fa
 
             // Essential state with rejection currently encompasses all transactions at the specified time
             expectTransactions(
-              essentialStateTransactionsWithRejections,
+              StoredTopologyTransactions(essentialStateTransactionsWithRejections),
               bootstrapTransactions.result.map(_.transaction),
             )
 
