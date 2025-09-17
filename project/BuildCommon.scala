@@ -1038,22 +1038,22 @@ object BuildCommon {
         Compile / damlEnableJavaCodegen := true,
         Compile / damlCodeGeneration := Seq(
           (
-            (Compile / sourceDirectory).value / "daml" / "AdminWorkflows",
-            (Compile / damlDarOutput).value / "AdminWorkflows.dar",
+            (Compile / sourceDirectory).value / "daml" / "canton-builtin-admin-workflow-ping",
+            (Compile / damlDarOutput).value / "canton-builtin-admin-workflow-ping.dar",
             "com.digitalasset.canton.participant.admin.workflows",
           ),
           (
-            (Compile / sourceDirectory).value / "daml" / "PartyReplication",
-            (Compile / damlDarOutput).value / "PartyReplication.dar",
+            (Compile / sourceDirectory).value / "daml" / "canton-builtin-admin-workflow-party-replication-alpha",
+            (Compile / damlDarOutput).value / "canton-builtin-admin-workflow-party-replication-alpha.dar",
             "com.digitalasset.canton.participant.admin.workflows",
           ),
         ),
         Compile / damlBuildOrder := Seq(
-          "daml/AdminWorkflows/daml.yaml",
-          "daml/PartyReplication/daml.yaml",
+          "daml/canton-builtin-admin-workflow-ping/daml.yaml",
+          "daml/canton-builtin-admin-workflow-party-replication-alpha/daml.yaml",
         ),
         // TODO(#16168) Before creating the first stable release with backwards compatibility guarantees,
-        //  make "AdminWorkflows.dar" stable again
+        //  pin/fix "canton-builtin-admin-workflow-ping.dar" and "canton-builtin-admin-workflow-party-replication-alpha.dar"
         damlFixedDars := Seq(),
         addProtobufFilesToHeaderCheck(Compile),
         addFilesToHeaderCheck("*.daml", "daml", Compile),
