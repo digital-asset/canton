@@ -23,7 +23,7 @@ import com.digitalasset.canton.damltests.java.test
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.examples.java.paint.OfferToPaintHouseByOwner
-import com.digitalasset.canton.integration.plugins.UseCommunityReferenceBlockSequencer
+import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransform,
@@ -82,7 +82,7 @@ trait LedgerApiParticipantPruningTest
 
   // single participant environment to focus on ledger api server pruning rather than acs canton commitments
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1
+    EnvironmentDefinition.P2_S1M1_TopologyChangeDelay_0
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(transactionTolerance.asJava),
@@ -506,7 +506,7 @@ trait LedgerApiParticipantPruningTest
 }
 
 class LedgerApiParticipantPruningTestDefault extends LedgerApiParticipantPruningTest {
-  registerPlugin(new UseCommunityReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
 }
 
 //class LedgerApiParticipantPruningTestPostgres extends LedgerApiParticipantPruningTest {

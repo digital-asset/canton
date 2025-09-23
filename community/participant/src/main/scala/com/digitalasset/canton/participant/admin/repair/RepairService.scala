@@ -16,6 +16,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SyncCryptoApiParticipantProvider
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageIds
 import com.digitalasset.canton.ledger.participant.state.{RepairUpdate, TransactionMeta, Update}
 import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
@@ -132,7 +133,12 @@ final class RepairService(
           ContractInstance.create(repairContract.contract)
         )
       } yield Option(
-        ContractToAdd(contractInstance, repairContract.reassignmentCounter, reassigningFrom)
+        ContractToAdd(
+          contract = contractInstance,
+          reassignmentCounter = repairContract.reassignmentCounter,
+          reassigningFrom = reassigningFrom,
+          representativePackageId = repairContract.representativePackageId,
+        )
       )
 
     acsState match {
@@ -988,6 +994,8 @@ final class RepairService(
       ),
       updateId = repair.transactionId.tryAsLedgerTransactionId,
       contractAuthenticationData = Map.empty,
+      // No create nodes so no representative package IDs
+      representativePackageIds = RepresentativePackageIds.Empty,
       synchronizerId = repair.synchronizer.psid.logical,
       repairCounter = repair.tryExactlyOneRepairCounter,
       recordTime = repair.timestamp,
@@ -1006,6 +1014,9 @@ final class RepairService(
     val contractAuthenticationData = contractsAdded.view.map { c =>
       c.contract.contractId -> c.authenticationData
     }.toMap
+    val representativePackageIds = contractsAdded.view
+      .map(c => c.contract.contractId -> c.representativePackageId)
+      .toMap
     val nodeIds = LazyList.from(0).map(LfNodeId)
     val txNodes = nodeIds.zip(contractsAdded.map(_.contract.toLf)).toMap
     Update.RepairTransactionAccepted(
@@ -1027,6 +1038,7 @@ final class RepairService(
       ),
       updateId = randomTransactionId(syncCrypto).tryAsLedgerTransactionId,
       contractAuthenticationData = contractAuthenticationData,
+      representativePackageIds = RepresentativePackageIds.from(representativePackageIds),
       synchronizerId = repair.synchronizer.psid.logical,
       repairCounter = repairCounter,
       recordTime = repair.timestamp,
@@ -1268,6 +1280,7 @@ object RepairService {
       contract: ContractInstance,
       reassignmentCounter: ReassignmentCounter,
       reassigningFrom: Option[Source[SynchronizerId]],
+      representativePackageId: LfPackageId,
   ) {
     def cid: LfContractId = contract.contractId
 

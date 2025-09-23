@@ -8,6 +8,7 @@ import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.IdRange
 import com.digitalasset.canton.platform.store.backend.common.EventIdSource
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
+import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.PaginationInput
 import com.digitalasset.daml.lf.data.Ref
 import org.scalatest.Inside
 import org.scalatest.compatible.Assertion
@@ -70,8 +71,18 @@ private[backend] trait StorageBackendTestsInitializeIngestion
     val dtos = Vector(
       // 1: transaction with a create node
       dtoCreate(offset(1), 1L, hashCid("#101"), signatory = signatory),
-      DbDto.IdFilterCreateStakeholder(1L, someTemplateId.toString, someParty),
-      DbDto.IdFilterCreateNonStakeholderInformee(1L, someTemplateId.toString, someParty),
+      DbDto.IdFilterCreateStakeholder(
+        1L,
+        someTemplateId.toString,
+        someParty,
+        first_per_sequential_id = true,
+      ),
+      DbDto.IdFilterCreateNonStakeholderInformee(
+        1L,
+        someTemplateId.toString,
+        someParty,
+        first_per_sequential_id = true,
+      ),
       dtoTransactionMeta(
         offset(1),
         event_sequential_id_first = 1L,
@@ -80,10 +91,25 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       dtoCompletion(offset(41)),
       // 2: transaction with exercise node
       dtoExercise(offset(2), 2L, false, hashCid("#101")),
-      DbDto.IdFilterNonConsumingInformee(2L, someTemplateId.toString, someParty),
+      DbDto.IdFilterNonConsumingInformee(
+        2L,
+        someTemplateId.toString,
+        someParty,
+        first_per_sequential_id = true,
+      ),
       dtoExercise(offset(2), 3L, true, hashCid("#102")),
-      DbDto.IdFilterConsumingStakeholder(3L, someTemplateId.toString, someParty),
-      DbDto.IdFilterConsumingNonStakeholderInformee(3L, someTemplateId.toString, someParty),
+      DbDto.IdFilterConsumingStakeholder(
+        3L,
+        someTemplateId.toString,
+        someParty,
+        first_per_sequential_id = true,
+      ),
+      DbDto.IdFilterConsumingNonStakeholderInformee(
+        3L,
+        someTemplateId.toString,
+        someParty,
+        first_per_sequential_id = true,
+      ),
       dtoTransactionMeta(
         offset(2),
         event_sequential_id_first = 2L,
@@ -96,16 +122,36 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         eventSequentialId = 4,
         contractId = hashCid("#103"),
       ),
-      DbDto.IdFilterAssignStakeholder(4, someTemplateId.toString, someParty),
-      DbDto.IdFilterAssignStakeholder(4, someTemplateId.toString, someParty2),
+      DbDto.IdFilterAssignStakeholder(
+        4,
+        someTemplateId.toString,
+        someParty,
+        first_per_sequential_id = true,
+      ),
+      DbDto.IdFilterAssignStakeholder(
+        4,
+        someTemplateId.toString,
+        someParty2,
+        first_per_sequential_id = false,
+      ),
       // 4: unassign
       dtoUnassign(
         offset(4),
         eventSequentialId = 5,
         contractId = hashCid("#103"),
       ),
-      DbDto.IdFilterUnassignStakeholder(5, someTemplateId.toString, someParty),
-      DbDto.IdFilterUnassignStakeholder(5, someTemplateId.toString, someParty2),
+      DbDto.IdFilterUnassignStakeholder(
+        5,
+        someTemplateId.toString,
+        someParty,
+        first_per_sequential_id = true,
+      ),
+      DbDto.IdFilterUnassignStakeholder(
+        5,
+        someTemplateId.toString,
+        someParty2,
+        first_per_sequential_id = false,
+      ),
       // 5: topology transactions
       dtoPartyToParticipant(
         offset(5),
@@ -125,8 +171,18 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       val dtos2 = Vector(
         // 6: transaction with create node
         dtoCreate(offset(6), 8L, hashCid("#201"), signatory = signatory),
-        DbDto.IdFilterCreateStakeholder(8L, someTemplateId.toString, someParty),
-        DbDto.IdFilterCreateNonStakeholderInformee(8L, someTemplateId.toString, someParty),
+        DbDto.IdFilterCreateStakeholder(
+          8L,
+          someTemplateId.toString,
+          someParty,
+          first_per_sequential_id = true,
+        ),
+        DbDto.IdFilterCreateNonStakeholderInformee(
+          8L,
+          someTemplateId.toString,
+          someParty,
+          first_per_sequential_id = true,
+        ),
         dtoTransactionMeta(
           offset(6),
           event_sequential_id_first = 8L,
@@ -135,10 +191,25 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         dtoCompletion(offset(6)),
         // 7: transaction with exercise node
         dtoExercise(offset(7), 9L, false, hashCid("#201")),
-        DbDto.IdFilterNonConsumingInformee(9L, someTemplateId.toString, someParty),
+        DbDto.IdFilterNonConsumingInformee(
+          9L,
+          someTemplateId.toString,
+          someParty,
+          first_per_sequential_id = true,
+        ),
         dtoExercise(offset(7), 10L, true, hashCid("#202")),
-        DbDto.IdFilterConsumingStakeholder(10L, someTemplateId.toString, someParty),
-        DbDto.IdFilterConsumingNonStakeholderInformee(10L, someTemplateId.toString, someParty),
+        DbDto.IdFilterConsumingStakeholder(
+          10L,
+          someTemplateId.toString,
+          someParty,
+          first_per_sequential_id = true,
+        ),
+        DbDto.IdFilterConsumingNonStakeholderInformee(
+          10L,
+          someTemplateId.toString,
+          someParty,
+          first_per_sequential_id = true,
+        ),
         dtoTransactionMeta(
           offset(7),
           event_sequential_id_first = 9L,
@@ -151,16 +222,36 @@ private[backend] trait StorageBackendTestsInitializeIngestion
           eventSequentialId = 11,
           contractId = hashCid("#203"),
         ),
-        DbDto.IdFilterAssignStakeholder(11, someTemplateId.toString, someParty),
-        DbDto.IdFilterAssignStakeholder(11, someTemplateId.toString, someParty2),
+        DbDto.IdFilterAssignStakeholder(
+          11,
+          someTemplateId.toString,
+          someParty,
+          first_per_sequential_id = true,
+        ),
+        DbDto.IdFilterAssignStakeholder(
+          11,
+          someTemplateId.toString,
+          someParty2,
+          first_per_sequential_id = false,
+        ),
         // 9: unassign
         dtoUnassign(
           offset(9),
           eventSequentialId = 12,
           contractId = hashCid("#203"),
         ),
-        DbDto.IdFilterUnassignStakeholder(12, someTemplateId.toString, someParty),
-        DbDto.IdFilterUnassignStakeholder(12, someTemplateId.toString, someParty2),
+        DbDto.IdFilterUnassignStakeholder(
+          12,
+          someTemplateId.toString,
+          someParty,
+          first_per_sequential_id = true,
+        ),
+        DbDto.IdFilterUnassignStakeholder(
+          12,
+          someTemplateId.toString,
+          someParty2,
+          first_per_sequential_id = false,
+        ),
         // 10: topology transactions
         dtoPartyToParticipant(
           offset(10),
@@ -373,9 +464,12 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       )(
         stakeholderO = Some(someParty),
         templateIdO = None,
-        startExclusive = 0,
-        endInclusive = 1000,
-        limit = 1000,
+      )(_)(
+        PaginationInput(
+          startExclusive = 0,
+          endInclusive = 1000,
+          limit = 1000,
+        )
       )
     )
 
@@ -385,9 +479,12 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         .fetchEventIds(EventIdSource.ConsumingNonStakeholder)(
           stakeholderO = Some(someParty),
           templateIdO = None,
-          startExclusive = 0,
-          endInclusive = 1000,
-          limit = 1000,
+        )(_)(
+          PaginationInput(
+            startExclusive = 0,
+            endInclusive = 1000,
+            limit = 1000,
+          )
         )
     )
 
@@ -397,9 +494,12 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         .fetchEventIds(EventIdSource.ConsumingStakeholder)(
           stakeholderO = Some(someParty),
           templateIdO = None,
-          startExclusive = 0,
-          endInclusive = 1000,
-          limit = 1000,
+        )(_)(
+          PaginationInput(
+            startExclusive = 0,
+            endInclusive = 1000,
+            limit = 1000,
+          )
         )
     )
 
@@ -409,9 +509,12 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         .fetchEventIds(EventIdSource.CreateNonStakeholder)(
           stakeholderO = Some(someParty),
           templateIdO = None,
-          startExclusive = 0,
-          endInclusive = 1000,
-          limit = 1000,
+        )(_)(
+          PaginationInput(
+            startExclusive = 0,
+            endInclusive = 1000,
+            limit = 1000,
+          )
         )
     )
 
@@ -421,9 +524,12 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         .fetchEventIds(EventIdSource.CreateStakeholder)(
           stakeholderO = Some(someParty),
           templateIdO = None,
-          startExclusive = 0,
-          endInclusive = 1000,
-          limit = 1000,
+        )(_)(
+          PaginationInput(
+            startExclusive = 0,
+            endInclusive = 1000,
+            limit = 1000,
+          )
         )
     )
 
@@ -432,9 +538,12 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       backend.event.fetchAssignEventIdsForStakeholder(
         stakeholderO = Some(someParty),
         templateId = None,
-        startExclusive = 0,
-        endInclusive = 1000,
-        limit = 1000,
+      )(_)(
+        PaginationInput(
+          startExclusive = 0,
+          endInclusive = 1000,
+          limit = 1000,
+        )
       )
     )
 
@@ -443,19 +552,25 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       backend.event.fetchUnassignEventIdsForStakeholder(
         stakeholderO = Some(someParty),
         templateId = None,
-        startExclusive = 0,
-        endInclusive = 1000,
-        limit = 1000,
+      )(_)(
+        PaginationInput(
+          startExclusive = 0,
+          endInclusive = 1000,
+          limit = 1000,
+        )
       )
     )
 
   private def fetchTopologyParty(): Vector[Long] =
     executeSql(
       backend.event.fetchTopologyPartyEventIds(
-        party = Some(someParty),
-        startExclusive = 0,
-        endInclusive = 1000,
-        limit = 1000,
+        party = Some(someParty)
+      )(_)(
+        PaginationInput(
+          startExclusive = 0,
+          endInclusive = 1000,
+          limit = 1000,
+        )
       )
     )
 

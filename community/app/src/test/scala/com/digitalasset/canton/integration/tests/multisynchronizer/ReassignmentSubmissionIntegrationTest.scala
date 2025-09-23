@@ -8,11 +8,8 @@ import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{CommandFailure, LocalSequencerReference}
 import com.digitalasset.canton.data.ReassignmentRef
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencerBase.MultiSynchronizer
-import com.digitalasset.canton.integration.plugins.{
-  UseCommunityReferenceBlockSequencer,
-  UsePostgres,
-}
+import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.{
   AcsInspection,
@@ -52,7 +49,7 @@ sealed trait ReassignmentSubmissionIntegrationTest
   private var decentralizedParty: PartyId = _
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1_S1M1
+    EnvironmentDefinition.P2_S1M1_S1M1_TopolopgyChangeDelay_0
       // We want to trigger time out
       .addConfigTransforms(ConfigTransforms.useStaticTime)
       .addConfigTransform(
@@ -60,7 +57,7 @@ sealed trait ReassignmentSubmissionIntegrationTest
           // Make sure that unassignment picks a recent target synchronizer topology snapshot
           // TODO(#25110): Remove this configuration once the correct snapshot is used in computing
           //               the vetting checks for the target synchronizer
-          _.focus(_.parameters.reassignmentTimeProofFreshnessProportion)
+          _.focus(_.parameters.reassignmentsConfig.timeProofFreshnessProportion)
             .replace(NonNegativeInt.zero)
         )
       )
@@ -236,7 +233,7 @@ sealed trait ReassignmentSubmissionIntegrationTest
 class ReassignmentSubmissionIntegrationTestPostgres extends ReassignmentSubmissionIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
-    new UseCommunityReferenceBlockSequencer[DbConfig.Postgres](
+    new UseReferenceBlockSequencer[DbConfig.Postgres](
       loggerFactory,
       sequencerGroups = MultiSynchronizer(
         Seq(Set("sequencer1"), Set("sequencer2")).map(_.map(InstanceName.tryCreate))

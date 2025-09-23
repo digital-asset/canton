@@ -10,11 +10,11 @@ import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencerBase.SingleSynchronizer
+import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.SingleSynchronizer
 import com.digitalasset.canton.integration.plugins.{
-  UseCommunityReferenceBlockSequencer,
   UsePostgres,
   UseProgrammableSequencer,
+  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
@@ -41,7 +41,7 @@ class UpgradeTimeOldSynchronizerIntegrationTest
 
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
-    new UseCommunityReferenceBlockSequencer[DbConfig.Postgres](
+    new UseReferenceBlockSequencer[DbConfig.Postgres](
       loggerFactory,
       sequencerGroups = SingleSynchronizer,
     )
@@ -51,7 +51,7 @@ class UpgradeTimeOldSynchronizerIntegrationTest
   private val upgradeTime = CantonTimestamp.Epoch.plusSeconds(60)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1_S1M1
+    EnvironmentDefinition.P1_S1M1_TopologyChangeDelay_0
       .addConfigTransforms(ConfigTransforms.useStaticTime)
       .addConfigTransform(
         ConfigTransforms.updateAllParticipantConfigs_(

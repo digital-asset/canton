@@ -17,8 +17,8 @@ import com.digitalasset.canton.crypto.store.CryptoPrivateStoreExtended
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
-  UseCommunityReferenceBlockSequencer,
   UsePostgres,
+  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
@@ -281,7 +281,7 @@ sealed trait KeyManagementIntegrationTest
   // TODO(test-coverage): disable participant / roll keys while the affected nodes are busy
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1
+    EnvironmentDefinition.P2_S1M1_TopologyChangeDelay_0
       .addConfigTransforms(
         ConfigTransforms.enableRemoteMediators("mediator1", "remoteMediator1"),
         // Disable ACS commitment processing, so that the sequencer is idle when keys get deleted
@@ -673,7 +673,7 @@ sealed trait KeyManagementIntegrationTest
 
 class KeyManagementReferenceIntegrationTestPostgres extends KeyManagementIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseCommunityReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
 }
 
 class KeyManagementBftOrderingIntegrationTestPostgres extends KeyManagementIntegrationTest {

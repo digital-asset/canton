@@ -46,8 +46,8 @@ CREATE TABLE lapi_command_completions (
     completion_offset bigint not null,
     record_time bigint not null,
     publication_time bigint not null,
-    user_id varchar collate "C" not null,
-    submitters integer[] not null,
+    user_id integer not null,
+    submitters bytea not null,
     command_id varchar collate "C" not null,
     -- The update ID is `NULL` for rejected transactions/reassignments.
     update_id varchar collate "C",
@@ -106,7 +106,7 @@ CREATE TABLE lapi_events_assign (
     contract_id bytea not null,
     template_id integer not null,
     package_id integer not null,
-    flat_event_witnesses integer[] default '{}'::integer[] not null, -- stakeholders
+    flat_event_witnesses bytea not null, -- stakeholders
 
     -- * common reassignment
     source_synchronizer_id integer not null,
@@ -116,8 +116,8 @@ CREATE TABLE lapi_events_assign (
 
     -- * assigned specific
     create_argument bytea not null,
-    create_signatories integer[] default '{}'::integer[] not null,
-    create_observers integer[] default '{}'::integer[] not null,
+    create_signatories bytea not null,
+    create_observers bytea not null,
     create_key_value bytea,
     create_key_hash varchar collate "C",
     create_argument_compression smallint,
@@ -125,7 +125,7 @@ CREATE TABLE lapi_events_assign (
     ledger_effective_time bigint not null,
     authentication_data bytea not null,
 
-    create_key_maintainers integer[],
+    create_key_maintainers bytea,
     trace_context bytea not null,
     record_time bigint not null
 );
@@ -160,20 +160,20 @@ CREATE TABLE lapi_events_consuming_exercise (
 
     -- * submitter info (only visible on submitting participant)
     command_id varchar collate "C",
-    submitters integer[],
+    submitters bytea,
 
     -- * shared event information
     contract_id bytea not null,
     template_id integer not null,
     package_id integer not null,
-    flat_event_witnesses integer[] default '{}'::integer[] not null, -- stakeholders
-    tree_event_witnesses integer[] default '{}'::integer[] not null, -- informees
+    flat_event_witnesses bytea not null, -- stakeholders
+    tree_event_witnesses bytea not null, -- informees
 
     -- * choice data
     exercise_choice varchar collate "C" not null,
     exercise_argument bytea not null,
     exercise_result bytea,
-    exercise_actors integer[] not null,
+    exercise_actors bytea not null,
     exercise_last_descendant_node_id integer not null,
 
     -- * compression flags
@@ -183,8 +183,12 @@ CREATE TABLE lapi_events_consuming_exercise (
     synchronizer_id integer not null,
     trace_context bytea not null,
     record_time bigint not null,
-    external_transaction_hash bytea
+    external_transaction_hash bytea,
+    deactivated_event_sequential_id bigint
 );
+
+-- lookup by deactivation
+CREATE INDEX lapi_events_consuming_exercise_deactivated_id_idx ON lapi_events_consuming_exercise USING BTREE (deactivated_event_sequential_id) INCLUDE (event_sequential_id) WHERE deactivated_event_sequential_id is not null;
 
 -- lookup by contract id
 CREATE INDEX lapi_events_consuming_exercise_contract_id_idx ON lapi_events_consuming_exercise USING hash (contract_id);
@@ -213,19 +217,20 @@ CREATE TABLE lapi_events_create (
 
     -- * submitter info (only visible on submitting participant)
     command_id varchar collate "C",
-    submitters integer[],
+    submitters bytea,
 
     -- * shared event information
     contract_id bytea not null,
     template_id integer not null,
     package_id integer not null,
-    flat_event_witnesses integer[] default '{}'::integer[] not null, -- stakeholders
-    tree_event_witnesses integer[] default '{}'::integer[] not null, -- informees
+    representative_package_id integer not null,
+    flat_event_witnesses bytea not null, -- stakeholders
+    tree_event_witnesses bytea not null, -- informees
 
     -- * contract data
     create_argument bytea not null,
-    create_signatories integer[] not null,
-    create_observers integer[] not null,
+    create_signatories bytea not null,
+    create_observers bytea not null,
     create_key_value bytea,
     create_key_hash varchar collate "C",
 
@@ -234,7 +239,7 @@ CREATE TABLE lapi_events_create (
     create_key_value_compression smallint,
     authentication_data bytea not null,
     synchronizer_id integer not null,
-    create_key_maintainers integer[],
+    create_key_maintainers bytea,
     trace_context bytea not null,
     record_time bigint not null,
     external_transaction_hash bytea
@@ -270,19 +275,19 @@ CREATE TABLE lapi_events_non_consuming_exercise (
 
     -- * submitter info (only visible on submitting participant)
     command_id varchar collate "C",
-    submitters integer[],
+    submitters bytea,
 
     -- * shared event information
     contract_id bytea not null,
     template_id integer not null,
     package_id integer not null,
-    tree_event_witnesses integer[] default '{}'::integer[] not null, -- informees
+    tree_event_witnesses bytea not null, -- informees
 
     -- * choice data
     exercise_choice varchar collate "C" not null,
     exercise_argument bytea not null,
     exercise_result bytea,
-    exercise_actors integer[] not null,
+    exercise_actors bytea not null,
     exercise_last_descendant_node_id integer not null,
 
     -- * compression flags
@@ -325,7 +330,7 @@ CREATE TABLE lapi_events_unassign (
     contract_id bytea not null,
     template_id integer not null,
     package_id integer not null,
-    flat_event_witnesses integer[] default '{}'::integer[] not null, -- stakeholders
+    flat_event_witnesses bytea not null, -- stakeholders
 
     -- * common reassignment
     source_synchronizer_id integer not null,
@@ -337,8 +342,12 @@ CREATE TABLE lapi_events_unassign (
     assignment_exclusivity bigint,
 
     trace_context bytea not null,
-    record_time bigint not null
+    record_time bigint not null,
+    deactivated_event_sequential_id bigint
 );
+
+-- deactivations
+CREATE INDEX lapi_events_unassign_deactivated_idx ON lapi_events_unassign USING btree (deactivated_event_sequential_id) INCLUDE (event_sequential_id) WHERE deactivated_event_sequential_id is not null;
 
 -- multi-column index supporting per contract per synchronizer lookup before/after sequential id query
 CREATE INDEX lapi_events_unassign_contract_id_composite_idx ON lapi_events_unassign USING btree (contract_id, source_synchronizer_id, event_sequential_id);
@@ -357,7 +366,7 @@ CREATE TABLE lapi_events_party_to_participant (
     event_offset bigint not null,
     update_id varchar collate "C" not null,
     party_id integer not null,
-    participant_id varchar collate "C" not null,
+    participant_id integer not null,
     participant_permission integer not null,
     participant_authorization_event integer not null,
     synchronizer_id integer not null,
@@ -535,79 +544,86 @@ CREATE INDEX lapi_party_entries_party_id_and_ledger_offset_idx ON lapi_party_ent
 CREATE TABLE lapi_pe_assign_id_filter_stakeholder (
     event_sequential_id bigint not null,
     template_id integer not null,
-    party_id integer not null
+    party_id integer not null,
+    first_per_sequential_id boolean
 );
-CREATE INDEX lapi_pe_assign_id_filter_stakeholder_pts_idx ON lapi_pe_assign_id_filter_stakeholder(party_id, template_id, event_sequential_id);
-CREATE INDEX lapi_pe_assign_id_filter_stakeholder_ps_idx  ON lapi_pe_assign_id_filter_stakeholder(party_id, event_sequential_id);
-CREATE INDEX lapi_pe_assign_id_filter_stakeholder_ts_idx  ON lapi_pe_assign_id_filter_stakeholder(template_id, event_sequential_id);
-CREATE INDEX lapi_pe_assign_id_filter_stakeholder_s_idx   ON lapi_pe_assign_id_filter_stakeholder(event_sequential_id);
+CREATE INDEX lapi_pe_assign_id_filter_stakeholder_pts_idx ON lapi_pe_assign_id_filter_stakeholder USING btree (party_id, template_id, event_sequential_id);
+CREATE INDEX lapi_pe_assign_id_filter_stakeholder_ps_idx  ON lapi_pe_assign_id_filter_stakeholder USING btree (party_id, event_sequential_id);
+CREATE INDEX lapi_pe_assign_id_filter_stakeholder_ts_idx  ON lapi_pe_assign_id_filter_stakeholder USING btree (template_id, event_sequential_id) WHERE first_per_sequential_id;
+CREATE INDEX lapi_pe_assign_id_filter_stakeholder_s_idx   ON lapi_pe_assign_id_filter_stakeholder USING btree (event_sequential_id, first_per_sequential_id);
 
 
 CREATE TABLE lapi_pe_consuming_id_filter_non_stakeholder_informee (
     event_sequential_id bigint not null,
     template_id integer not null,
-    party_id integer not null
+    party_id integer not null,
+    first_per_sequential_id boolean
 );
 
 CREATE INDEX lapi_pe_consuming_id_filter_non_stakeholder_informee_pts_idx ON lapi_pe_consuming_id_filter_non_stakeholder_informee USING btree (party_id, template_id, event_sequential_id);
 CREATE INDEX lapi_pe_consuming_id_filter_non_stakeholder_informee_ps_idx  ON lapi_pe_consuming_id_filter_non_stakeholder_informee USING btree (party_id, event_sequential_id);
-CREATE INDEX lapi_pe_consuming_id_filter_non_stakeholder_informee_ts_idx  ON lapi_pe_consuming_id_filter_non_stakeholder_informee USING btree (template_id, event_sequential_id);
-CREATE INDEX lapi_pe_consuming_id_filter_non_stakeholder_informee_s_idx   ON lapi_pe_consuming_id_filter_non_stakeholder_informee USING btree (event_sequential_id);
+CREATE INDEX lapi_pe_consuming_id_filter_non_stakeholder_informee_ts_idx  ON lapi_pe_consuming_id_filter_non_stakeholder_informee USING btree (template_id, event_sequential_id) WHERE first_per_sequential_id;
+CREATE INDEX lapi_pe_consuming_id_filter_non_stakeholder_informee_s_idx   ON lapi_pe_consuming_id_filter_non_stakeholder_informee USING btree (event_sequential_id, first_per_sequential_id);
 
 CREATE TABLE lapi_pe_consuming_id_filter_stakeholder (
     event_sequential_id bigint not null,
     template_id integer not null,
-    party_id integer not null
+    party_id integer not null,
+    first_per_sequential_id boolean
 );
 
 CREATE INDEX lapi_pe_consuming_id_filter_stakeholder_ps_idx  ON lapi_pe_consuming_id_filter_stakeholder USING btree (party_id, event_sequential_id);
 CREATE INDEX lapi_pe_consuming_id_filter_stakeholder_pts_idx ON lapi_pe_consuming_id_filter_stakeholder USING btree (party_id, template_id, event_sequential_id);
-CREATE INDEX lapi_pe_consuming_id_filter_stakeholder_ts_idx  ON lapi_pe_consuming_id_filter_stakeholder USING btree (template_id, event_sequential_id);
-CREATE INDEX lapi_pe_consuming_id_filter_stakeholder_s_idx   ON lapi_pe_consuming_id_filter_stakeholder USING btree (event_sequential_id);
+CREATE INDEX lapi_pe_consuming_id_filter_stakeholder_ts_idx  ON lapi_pe_consuming_id_filter_stakeholder USING btree (template_id, event_sequential_id) WHERE first_per_sequential_id;
+CREATE INDEX lapi_pe_consuming_id_filter_stakeholder_s_idx   ON lapi_pe_consuming_id_filter_stakeholder USING btree (event_sequential_id, first_per_sequential_id);
 
 CREATE TABLE lapi_pe_create_id_filter_non_stakeholder_informee (
     event_sequential_id bigint not null,
     template_id integer not null,
-    party_id integer not null
+    party_id integer not null,
+    first_per_sequential_id boolean
 );
 
 CREATE INDEX lapi_pe_create_id_filter_non_stakeholder_informee_pts_idx ON lapi_pe_create_id_filter_non_stakeholder_informee USING btree (party_id, template_id, event_sequential_id);
 CREATE INDEX lapi_pe_create_id_filter_non_stakeholder_informee_ps_idx  ON lapi_pe_create_id_filter_non_stakeholder_informee USING btree (party_id, event_sequential_id);
-CREATE INDEX lapi_pe_create_id_filter_non_stakeholder_informee_ts_idx  ON lapi_pe_create_id_filter_non_stakeholder_informee USING btree (template_id, event_sequential_id);
-CREATE INDEX lapi_pe_create_id_filter_non_stakeholder_informee_s_idx   ON lapi_pe_create_id_filter_non_stakeholder_informee USING btree (event_sequential_id);
+CREATE INDEX lapi_pe_create_id_filter_non_stakeholder_informee_ts_idx  ON lapi_pe_create_id_filter_non_stakeholder_informee USING btree (template_id, event_sequential_id) WHERE first_per_sequential_id;
+CREATE INDEX lapi_pe_create_id_filter_non_stakeholder_informee_s_idx   ON lapi_pe_create_id_filter_non_stakeholder_informee USING btree (event_sequential_id, first_per_sequential_id);
 
 CREATE TABLE lapi_pe_create_id_filter_stakeholder (
     event_sequential_id bigint not null,
     template_id integer not null,
-    party_id integer not null
+    party_id integer not null,
+    first_per_sequential_id boolean
 );
 
 CREATE INDEX lapi_pe_create_id_filter_stakeholder_ps_idx  ON lapi_pe_create_id_filter_stakeholder USING btree (party_id, event_sequential_id);
 CREATE INDEX lapi_pe_create_id_filter_stakeholder_pts_idx ON lapi_pe_create_id_filter_stakeholder USING btree (party_id, template_id, event_sequential_id);
-CREATE INDEX lapi_pe_create_id_filter_stakeholder_ts_idx  ON lapi_pe_create_id_filter_stakeholder USING btree (template_id, event_sequential_id);
-CREATE INDEX lapi_pe_create_id_filter_stakeholder_s_idx   ON lapi_pe_create_id_filter_stakeholder USING btree (event_sequential_id);
+CREATE INDEX lapi_pe_create_id_filter_stakeholder_ts_idx  ON lapi_pe_create_id_filter_stakeholder USING btree (template_id, event_sequential_id) WHERE first_per_sequential_id;
+CREATE INDEX lapi_pe_create_id_filter_stakeholder_s_idx   ON lapi_pe_create_id_filter_stakeholder USING btree (event_sequential_id, first_per_sequential_id);
 
 CREATE TABLE lapi_pe_non_consuming_id_filter_informee (
     event_sequential_id bigint not null,
     template_id integer not null,
-    party_id integer not null
+    party_id integer not null,
+    first_per_sequential_id boolean
 );
 
 CREATE INDEX lapi_pe_non_consuming_id_filter_informee_pts_idx ON lapi_pe_non_consuming_id_filter_informee USING btree (party_id, template_id, event_sequential_id);
 CREATE INDEX lapi_pe_non_consuming_id_filter_informee_ps_idx  ON lapi_pe_non_consuming_id_filter_informee USING btree (party_id, event_sequential_id);
-CREATE INDEX lapi_pe_non_consuming_id_filter_informee_ts_idx  ON lapi_pe_non_consuming_id_filter_informee USING btree (template_id, event_sequential_id);
-CREATE INDEX lapi_pe_non_consuming_id_filter_informee_s_idx   ON lapi_pe_non_consuming_id_filter_informee USING btree (event_sequential_id);
+CREATE INDEX lapi_pe_non_consuming_id_filter_informee_ts_idx  ON lapi_pe_non_consuming_id_filter_informee USING btree (template_id, event_sequential_id) WHERE first_per_sequential_id;
+CREATE INDEX lapi_pe_non_consuming_id_filter_informee_s_idx   ON lapi_pe_non_consuming_id_filter_informee USING btree (event_sequential_id, first_per_sequential_id);
 
 CREATE TABLE lapi_pe_reassignment_id_filter_stakeholder (
     event_sequential_id bigint not null,
     template_id integer not null,
-    party_id integer not null
+    party_id integer not null,
+    first_per_sequential_id boolean
 );
 
 CREATE INDEX lapi_pe_reassignment_id_filter_stakeholder_ps_idx ON lapi_pe_reassignment_id_filter_stakeholder USING btree (party_id, event_sequential_id);
 CREATE INDEX lapi_pe_reassignment_id_filter_stakeholder_pts_idx ON lapi_pe_reassignment_id_filter_stakeholder USING btree (party_id, template_id, event_sequential_id);
-CREATE INDEX lapi_pe_reassignment_id_filter_stakeholder_ts_idx ON lapi_pe_reassignment_id_filter_stakeholder USING btree (template_id, event_sequential_id);
-CREATE INDEX lapi_pe_reassignment_id_filter_stakeholder_s_idx ON lapi_pe_reassignment_id_filter_stakeholder USING btree (event_sequential_id);
+CREATE INDEX lapi_pe_reassignment_id_filter_stakeholder_ts_idx ON lapi_pe_reassignment_id_filter_stakeholder USING btree (template_id, event_sequential_id) WHERE first_per_sequential_id;
+CREATE INDEX lapi_pe_reassignment_id_filter_stakeholder_s_idx ON lapi_pe_reassignment_id_filter_stakeholder USING btree (event_sequential_id, first_per_sequential_id);
 
 CREATE TABLE lapi_string_interning (
     internal_id integer primary key not null,

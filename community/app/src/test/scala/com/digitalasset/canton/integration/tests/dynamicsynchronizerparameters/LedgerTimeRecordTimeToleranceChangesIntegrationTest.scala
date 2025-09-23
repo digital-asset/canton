@@ -8,8 +8,8 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
-  UseCommunityReferenceBlockSequencer,
   UseProgrammableSequencer,
+  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -37,7 +37,7 @@ trait LedgerTimeRecordTimeToleranceChangesIntegrationTest
     with HasCycleUtils {
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1_S1M1
+    EnvironmentDefinition.P1_S1M1_TopologyChangeDelay_0
       .addConfigTransforms(ConfigTransforms.useStaticTime)
       .withSetup { implicit env =>
         import env.*
@@ -139,7 +139,7 @@ trait LedgerTimeRecordTimeToleranceChangesIntegrationTest
 class LedgerTimeRecordTimeToleranceChangesIntegrationTestDefault
     extends LedgerTimeRecordTimeToleranceChangesIntegrationTest {
   registerPlugin(
-    new UseCommunityReferenceBlockSequencer[DbConfig.H2](loggerFactory)
+    new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory)
   )
   // we need to register the ProgrammableSequencer after the ReferenceBlockSequencer
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))

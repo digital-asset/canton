@@ -75,9 +75,15 @@ $$
   returns null on null input;
 
 -- resolve multiple ledger api interned strings
-create or replace function debug.resolve_lapi_interned_strings(integer[]) returns varchar[] as
+create or replace function debug.resolve_lapi_interned_strings(input bytea) returns varchar[] as
 $$
-select array_agg(debug.resolve_lapi_interned_string(s)) from unnest($1) as s;
+select array_agg(debug.resolve_lapi_interned_string(
+        get_byte(input, i)::int << 24 |
+           get_byte(input, i + 1)::int << 16 |
+           get_byte(input, i + 2)::int << 8 |
+           get_byte(input, i + 3)::int
+                 ))
+from generate_series(1, length(input) - 1, 4) as s(i);
 $$
   language sql
   stable
@@ -187,7 +193,8 @@ create or replace view debug.lapi_events_consuming_exercise as
     debug.resolve_lapi_interned_string(synchronizer_id) as synchronizer_id,
     lower(encode(trace_context, 'hex')) as trace_context,
     debug.canton_timestamp(record_time) as record_time,
-    lower(encode(external_transaction_hash, 'hex')) as external_transaction_hash
+    lower(encode(external_transaction_hash, 'hex')) as external_transaction_hash,
+   deactivated_event_sequential_id
   from lapi_events_consuming_exercise;
 
 create or replace view debug.lapi_events_create as
@@ -203,6 +210,7 @@ create or replace view debug.lapi_events_create as
     lower(encode(contract_id, 'hex')) as contract_id,
     debug.resolve_lapi_interned_string(template_id) as template_id,
     debug.resolve_lapi_interned_string(package_id) as package_id,
+    debug.resolve_lapi_interned_string(representative_package_id) as representative_package_id,
     debug.resolve_lapi_interned_strings(flat_event_witnesses) as flat_event_witnesses,
     debug.resolve_lapi_interned_strings(tree_event_witnesses) as tree_event_witnesses,
     lower(encode(create_argument, 'hex')) as create_argument,
@@ -267,7 +275,8 @@ create or replace view debug.lapi_events_unassign as
     reassignment_counter,
     assignment_exclusivity,
     lower(encode(trace_context, 'hex')) as trace_context,
-    debug.canton_timestamp(record_time) as record_time
+    debug.canton_timestamp(record_time) as record_time,
+    deactivated_event_sequential_id
   from lapi_events_unassign;
 
 create or replace view debug.lapi_events_party_to_participant as
@@ -364,49 +373,56 @@ create or replace view debug.lapi_pe_assign_id_filter_stakeholder as
   select
     event_sequential_id,
     debug.resolve_lapi_interned_string(template_id) as template_id,
-    debug.resolve_lapi_interned_string(party_id) as party_id
+    debug.resolve_lapi_interned_string(party_id) as party_id,
+    first_per_sequential_id
   from lapi_pe_assign_id_filter_stakeholder;
 
 create or replace view debug.lapi_pe_consuming_id_filter_non_stakeholder_informee as
   select
     event_sequential_id,
     debug.resolve_lapi_interned_string(template_id) as template_id,
-    debug.resolve_lapi_interned_string(party_id) as party_id
+    debug.resolve_lapi_interned_string(party_id) as party_id,
+    first_per_sequential_id
   from lapi_pe_consuming_id_filter_non_stakeholder_informee;
 
 create or replace view debug.lapi_pe_consuming_id_filter_stakeholder as
   select
     event_sequential_id,
     debug.resolve_lapi_interned_string(template_id) as template_id,
-    debug.resolve_lapi_interned_string(party_id) as party_id
+    debug.resolve_lapi_interned_string(party_id) as party_id,
+    first_per_sequential_id
   from lapi_pe_consuming_id_filter_stakeholder;
 
 create or replace view debug.lapi_pe_create_id_filter_non_stakeholder_informee as
   select
     event_sequential_id,
     debug.resolve_lapi_interned_string(template_id) as template_id,
-    debug.resolve_lapi_interned_string(party_id) as party_id
+    debug.resolve_lapi_interned_string(party_id) as party_id,
+    first_per_sequential_id
   from lapi_pe_create_id_filter_non_stakeholder_informee;
 
 create or replace view debug.lapi_pe_create_id_filter_stakeholder as
   select
     event_sequential_id,
     debug.resolve_lapi_interned_string(template_id) as template_id,
-    debug.resolve_lapi_interned_string(party_id) as party_id
+    debug.resolve_lapi_interned_string(party_id) as party_id,
+    first_per_sequential_id
   from lapi_pe_create_id_filter_stakeholder;
 
 create or replace view debug.lapi_pe_non_consuming_id_filter_informee as
   select
     event_sequential_id,
     debug.resolve_lapi_interned_string(template_id) as template_id,
-    debug.resolve_lapi_interned_string(party_id) as party_id
+    debug.resolve_lapi_interned_string(party_id) as party_id,
+    first_per_sequential_id
   from lapi_pe_non_consuming_id_filter_informee;
 
 create or replace view debug.lapi_pe_reassignment_id_filter_stakeholder as
   select
     event_sequential_id,
     debug.resolve_lapi_interned_string(template_id) as template_id,
-    debug.resolve_lapi_interned_string(party_id) as party_id
+    debug.resolve_lapi_interned_string(party_id) as party_id,
+    first_per_sequential_id
   from lapi_pe_reassignment_id_filter_stakeholder;
 
 create or replace view debug.lapi_string_interning as

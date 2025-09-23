@@ -22,10 +22,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.examples.java.divulgence.DivulgeIouByExercise
 import com.digitalasset.canton.examples.java.iou.Iou
-import com.digitalasset.canton.integration.plugins.{
-  UseCommunityReferenceBlockSequencer,
-  UsePostgres,
-}
+import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.PartyToParticipantDeclarative
 import com.digitalasset.canton.integration.{
@@ -33,7 +30,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.participant.admin.data.ContractIdImportMode
+import com.digitalasset.canton.participant.admin.data.ContractImportMode
 import com.digitalasset.canton.time.PositiveSeconds
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission as PP
@@ -60,7 +57,7 @@ final class DivulgenceIntegrationTest extends CommunityIntegrationTest with Shar
 
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
-    new UseCommunityReferenceBlockSequencer[DbConfig.Postgres](loggerFactory)
+    new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory)
   )
 
   private val acsSnapshotAtOffset: String =
@@ -278,7 +275,7 @@ final class DivulgenceIntegrationTest extends CommunityIntegrationTest with Shar
       exportFilePath = acsSnapshotAtOffset,
     )
 
-    participant2.repair.import_acs(acsSnapshotAtOffset, "", ContractIdImportMode.Accept)
+    participant2.repair.import_acs(acsSnapshotAtOffset, "", ContractImportMode.Accept)
 
     participant2.synchronizers.reconnect(daName)
 

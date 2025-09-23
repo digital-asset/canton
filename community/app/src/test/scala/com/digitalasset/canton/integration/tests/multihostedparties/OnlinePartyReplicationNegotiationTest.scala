@@ -25,10 +25,7 @@ import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
 }
-import com.digitalasset.canton.integration.plugins.{
-  UseCommunityReferenceBlockSequencer,
-  UsePostgres,
-}
+import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -57,6 +54,7 @@ import com.digitalasset.canton.{SequencerAlias, config}
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
+import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.*
 import scala.util.chaining.scalaUtilChainingOps
 
@@ -92,7 +90,7 @@ sealed trait OnlinePartyReplicationNegotiationTest
       .focus(_.parameters.unsafeEnableOnlinePartyReplication)
       .replace(sequencer != "sequencer3")
 
-  registerPlugin(new UseCommunityReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
 
   private val aliceName = "Alice"
 
@@ -148,9 +146,10 @@ sealed trait OnlinePartyReplicationNegotiationTest
           val sequencerConnections = SequencerConnections.tryMany(
             sequencers
               .map(s => s.sequencerConnection.withAlias(SequencerAlias.tryCreate(s.name))),
-            // A threshold of 2 ensures that each participant connects to all the three sequencers in the connectivity map
+            // A threshold of 3 ensures that each participant connects to all the three sequencers in the connectivity map
+            // and stays connected.
             // TODO(#19911) Make this properly configurable
-            sequencerTrustThreshold = PositiveInt.two,
+            sequencerTrustThreshold = PositiveInt.three,
             sequencerLivenessMargin = NonNegativeInt.zero,
             submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
           )
@@ -287,7 +286,9 @@ sealed trait OnlinePartyReplicationNegotiationTest
       })
 
       // Wait until both SP and TP report that party replication has completed.
-      eventually() {
+      // Clearing the onboarding flag takes up to max-decision-timeout (initial value of 60s),
+      // so wait at least 1 minute.
+      eventually(timeUntilSuccess = 2.minutes) {
         val tpStatus = targetParticipant.parties.get_add_party_status(
           addPartyRequestId = addPartyRequestId
         )

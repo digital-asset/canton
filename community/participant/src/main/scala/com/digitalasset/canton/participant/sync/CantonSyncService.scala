@@ -14,7 +14,7 @@ import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.*
 import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApiParticipantProvider}
 import com.digitalasset.canton.data.{
@@ -31,6 +31,13 @@ import com.digitalasset.canton.error.TransactionRoutingError.{
 }
 import com.digitalasset.canton.health.MutableHealthComponent
 import com.digitalasset.canton.ledger.api.health.HealthStatus
+import com.digitalasset.canton.ledger.api.{
+  EnrichedVettedPackage,
+  ListVettedPackagesOpts,
+  UpdateVettedPackagesOpts,
+  UploadDarVettingChange,
+  VetAllPackages,
+}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.*
@@ -98,6 +105,7 @@ import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.FutureInstances.parallelFuture
 import com.digitalasset.canton.util.OptionUtils.OptionExtension
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party, SubmissionId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -619,10 +627,18 @@ class CantonSyncService(
     }
   }
 
+  override def protocolVersionForSynchronizerId(
+      synchronizerId: SynchronizerId
+  ): Option[ProtocolVersion] =
+    connectedSynchronizersLookup
+      .get(synchronizerId)
+      .map(_.synchronizerHandle.staticParameters.protocolVersion)
+
   override def allocateParty(
       hint: LfPartyId,
       rawSubmissionId: LedgerSubmissionId,
       synchronizerIdO: Option[SynchronizerId],
+      externalPartyOnboardingDetails: Option[ExternalPartyOnboardingDetails],
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[SubmissionResult] = {
@@ -663,12 +679,16 @@ class CantonSyncService(
       specifiedSynchronizer.getOrElse(onlyConnectedSynchronizer)
 
     synchronizerIdOrDetectionError
-      .map(partyAllocation.allocate(hint, rawSubmissionId, _))
+      .map(partyAllocation.allocate(hint, rawSubmissionId, _, externalPartyOnboardingDetails))
       .leftMap(FutureUnlessShutdown.pure)
       .merge
   }
 
-  override def uploadDar(dars: Seq[ByteString], submissionId: Ref.SubmissionId)(implicit
+  override def uploadDar(
+      dars: Seq[ByteString],
+      submissionId: Ref.SubmissionId,
+      vettingChange: UploadDarVettingChange,
+  )(implicit
       traceContext: TraceContext
   ): Future[SubmissionResult] =
     withSpan("CantonSyncService.uploadPackages") { implicit traceContext => span =>
@@ -681,7 +701,7 @@ class CantonSyncService(
           .upload(
             dars = dars.map(UploadDarData(_, Some("uploaded-via-ledger-api"), None)),
             submissionIdO = Some(submissionId),
-            vetAllPackages = true,
+            vetAllPackages = vettingChange == VetAllPackages,
             synchronizeVetting = synchronizeVettingOnConnectedSynchronizers,
           )
           .map(_ => SubmissionResult.Acknowledged)
@@ -705,6 +725,30 @@ class CantonSyncService(
           .valueOr(err => SubmissionResult.SynchronousError(err.asGrpcStatus))
       }
     }
+
+  override def updateVettedPackages(
+      opts: UpdateVettedPackagesOpts
+  )(implicit
+      traceContext: TraceContext
+  ): Future[(Seq[EnrichedVettedPackage], Seq[EnrichedVettedPackage])] =
+    EitherTUtil.toFuture(
+      packageService
+        .updateVettedPackages(opts)
+        .failOnShutdownTo(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError)
+        .leftMap(_.asGrpcError)
+    )
+
+  override def listVettedPackages(
+      opts: ListVettedPackagesOpts
+  )(implicit
+      traceContext: TraceContext
+  ): Future[Option[(Seq[EnrichedVettedPackage], PositiveInt)]] =
+    EitherTUtil.toFuture(
+      packageService
+        .listVettedPackages(opts)
+        .failOnShutdownTo(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError)
+        .leftMap(_.asGrpcError)
+    )
 
   override def getLfArchive(packageId: PackageId)(implicit
       traceContext: TraceContext
@@ -1309,18 +1353,34 @@ class CantonSyncService(
         case (synchronizerAlias, (synchronizerId, submissionReady)) if submissionReady.unwrap =>
           for {
             topology <- getSnapshot(synchronizerAlias, synchronizerId)
-            partyWithAttributes <- topology.hostedOn(
-              Set(request.party),
-              participantId = request.participantId.getOrElse(participantId),
+            // Find the attributes for the party if one is passed in, and if we can find it in topology
+            attributesO <- request.party.parFlatTraverse(party =>
+              topology
+                .hostedOn(
+                  Set(party),
+                  participantId = request.participantId.getOrElse(participantId),
+                )
+                .map(
+                  _.get(party)
+                )
             )
-          } yield partyWithAttributes
-            .get(request.party)
+          } yield attributesO
             .map(attributes =>
               ConnectedSynchronizerResponse.ConnectedSynchronizer(
                 synchronizerAlias,
                 synchronizerId,
-                attributes.permission,
+                Some(attributes.permission),
               )
+            )
+            .orElse(
+              // Return the connected synchronizer without party information only when no party was requested
+              Option.when(request.party.isEmpty) {
+                ConnectedSynchronizerResponse.ConnectedSynchronizer(
+                  synchronizerAlias,
+                  synchronizerId,
+                  None,
+                )
+              }
             )
       }.toSeq
 

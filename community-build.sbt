@@ -24,7 +24,7 @@ lazy val `sequencer-driver-api` = CommunityProjects.`sequencer-driver-api`
 lazy val `sequencer-driver-api-conformance-tests` =
   CommunityProjects.`sequencer-driver-api-conformance-tests`
 lazy val `sequencer-driver-lib` = CommunityProjects.`sequencer-driver-lib`
-lazy val `community-reference-driver` = CommunityProjects.`community-reference-driver`
+lazy val `reference-sequencer-driver` = CommunityProjects.`reference-sequencer-driver`
 lazy val `wartremover-extension` = CommunityProjects.`wartremover-extension`
 lazy val `wartremover-annotations` = CommunityProjects.`wartremover-annotations`
 lazy val `google-common-protos-scala` = DamlProjects.`google-common-protos-scala`
@@ -43,6 +43,7 @@ lazy val `daml-adjustable-clock` = CommunityProjects.`daml-adjustable-clock`
 lazy val `kms-driver-api` = CommunityProjects.`kms-driver-api`
 lazy val `kms-driver-testing` = CommunityProjects.`kms-driver-testing`
 lazy val `kms-driver-testing-lib` = CommunityProjects.`kms-driver-testing-lib`
+lazy val `aws-kms-driver` = CommunityProjects.`aws-kms-driver`
 lazy val `mock-kms-driver` = CommunityProjects.`mock-kms-driver`
 lazy val `ledger-api-core` = CommunityProjects.`ledger-api-core`
 lazy val `ledger-json-api` = CommunityProjects.`ledger-json-api`

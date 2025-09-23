@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.store.backend
 import com.daml.scalautil.Statement
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.platform.store.backend.PruningDto.*
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref
 import org.scalatest.flatspec.AnyFlatSpec
@@ -84,7 +85,12 @@ private[backend] trait StorageBackendTestsPruning
             consuming = false,
             signatory = signatoryParty,
           ),
-          DbDto.IdFilterNonConsumingInformee(5L, someTemplateId.toString, signatoryParty),
+          DbDto.IdFilterNonConsumingInformee(
+            5L,
+            someTemplateId.toString,
+            signatoryParty,
+            first_per_sequential_id = true,
+          ),
           dtoExercise(
             offset = offset(4),
             eventSequentialId = 6L,
@@ -93,15 +99,30 @@ private[backend] trait StorageBackendTestsPruning
             signatory = signatoryParty,
             actor = actorParty,
           ),
-          DbDto.IdFilterConsumingStakeholder(6L, someTemplateId.toString, signatoryParty),
-          DbDto.IdFilterConsumingNonStakeholderInformee(6L, someTemplateId.toString, actorParty),
+          DbDto.IdFilterConsumingStakeholder(
+            6L,
+            someTemplateId.toString,
+            signatoryParty,
+            first_per_sequential_id = true,
+          ),
+          DbDto.IdFilterConsumingNonStakeholderInformee(
+            6L,
+            someTemplateId.toString,
+            actorParty,
+            first_per_sequential_id = true,
+          ),
           dtoUnassign(
             offset = offset(5),
             eventSequentialId = 7L,
             contractId = hashCid("#1"),
             signatory = signatoryParty,
           ),
-          DbDto.IdFilterUnassignStakeholder(7L, someTemplateId.toString, signatoryParty),
+          DbDto.IdFilterUnassignStakeholder(
+            7L,
+            someTemplateId.toString,
+            signatoryParty,
+            first_per_sequential_id = true,
+          ),
         ) ++
           Vector(
             dtoExercise(
@@ -111,7 +132,12 @@ private[backend] trait StorageBackendTestsPruning
               consuming = false,
               signatory = signatoryParty,
             ),
-            DbDto.IdFilterNonConsumingInformee(8L, someTemplateId.toString, signatoryParty),
+            DbDto.IdFilterNonConsumingInformee(
+              8L,
+              someTemplateId.toString,
+              signatoryParty,
+              first_per_sequential_id = true,
+            ),
             dtoExercise(
               offset = offset(7),
               eventSequentialId = 9L,
@@ -120,15 +146,30 @@ private[backend] trait StorageBackendTestsPruning
               signatory = signatoryParty,
               actor = actorParty,
             ),
-            DbDto.IdFilterConsumingStakeholder(9L, someTemplateId.toString, signatoryParty),
-            DbDto.IdFilterConsumingNonStakeholderInformee(9L, someTemplateId.toString, actorParty),
+            DbDto.IdFilterConsumingStakeholder(
+              9L,
+              someTemplateId.toString,
+              signatoryParty,
+              first_per_sequential_id = true,
+            ),
+            DbDto.IdFilterConsumingNonStakeholderInformee(
+              9L,
+              someTemplateId.toString,
+              actorParty,
+              first_per_sequential_id = true,
+            ),
             dtoUnassign(
               offset = offset(8),
               eventSequentialId = 10L,
               contractId = hashCid("#1"),
               signatory = signatoryParty,
             ),
-            DbDto.IdFilterUnassignStakeholder(10L, someTemplateId.toString, signatoryParty),
+            DbDto.IdFilterUnassignStakeholder(
+              10L,
+              someTemplateId.toString,
+              signatoryParty,
+              first_per_sequential_id = true,
+            ),
           ),
         _,
       )
@@ -182,7 +223,7 @@ private[backend] trait StorageBackendTestsPruning
       signatory = signatoryParty,
       observer = observerParty,
       nonStakeholderInformees = Set(nonStakeholderInformeeParty),
-      synchronizerId = "x::sourcesynchronizer",
+      synchronizerId = someSynchronizerId,
     )
     // a consuming event in its own transaction
     val archive = dtoExercise(
@@ -191,7 +232,7 @@ private[backend] trait StorageBackendTestsPruning
       consuming = true,
       contractId = hashCid("#1"),
       signatory = signatoryParty,
-      synchronizerId = "x::sourcesynchronizer",
+      synchronizerId = someSynchronizerId,
     )
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     // Ingest a create and archive event
@@ -205,17 +246,38 @@ private[backend] trait StorageBackendTestsPruning
         ) ++
           Vector(
             create,
-            DbDto.IdFilterCreateStakeholder(1L, someTemplateId.toString, signatoryParty),
-            DbDto.IdFilterCreateStakeholder(1L, someTemplateId.toString, observerParty),
+            DbDto.IdFilterCreateStakeholder(
+              1L,
+              someTemplateId.toString,
+              signatoryParty,
+              first_per_sequential_id = true,
+            ),
+            DbDto.IdFilterCreateStakeholder(
+              1L,
+              someTemplateId.toString,
+              observerParty,
+              first_per_sequential_id = false,
+            ),
             DbDto.IdFilterCreateNonStakeholderInformee(
               1L,
               someTemplateId.toString,
               nonStakeholderInformeeParty,
+              first_per_sequential_id = true,
             ),
             metaFromSingle(create),
             archive,
-            DbDto.IdFilterConsumingStakeholder(2L, someTemplateId.toString, signatoryParty),
-            DbDto.IdFilterConsumingStakeholder(2L, someTemplateId.toString, observerParty),
+            DbDto.IdFilterConsumingStakeholder(
+              2L,
+              someTemplateId.toString,
+              signatoryParty,
+              first_per_sequential_id = true,
+            ),
+            DbDto.IdFilterConsumingStakeholder(
+              2L,
+              someTemplateId.toString,
+              observerParty,
+              first_per_sequential_id = false,
+            ),
             metaFromSingle(archive),
           ),
         _,
@@ -261,7 +323,7 @@ private[backend] trait StorageBackendTestsPruning
       signatory = signatoryParty,
       observer = observerParty,
       nonStakeholderInformees = Set(nonStakeholderInformeeParty),
-      synchronizerId = "x::sourcesynchronizer",
+      synchronizerId = someSynchronizerId,
     )
     // a consuming event in its own transaction
     val unassign = dtoUnassign(
@@ -282,16 +344,32 @@ private[backend] trait StorageBackendTestsPruning
         ) ++
           Vector(
             create,
-            DbDto.IdFilterCreateStakeholder(1L, someTemplateId.toString, signatoryParty),
-            DbDto.IdFilterCreateStakeholder(1L, someTemplateId.toString, observerParty),
+            DbDto.IdFilterCreateStakeholder(
+              1L,
+              someTemplateId.toString,
+              signatoryParty,
+              first_per_sequential_id = true,
+            ),
+            DbDto.IdFilterCreateStakeholder(
+              1L,
+              someTemplateId.toString,
+              observerParty,
+              first_per_sequential_id = false,
+            ),
             DbDto.IdFilterCreateNonStakeholderInformee(
               1L,
               someTemplateId.toString,
               nonStakeholderInformeeParty,
+              first_per_sequential_id = true,
             ),
             metaFromSingle(create),
             unassign,
-            DbDto.IdFilterUnassignStakeholder(2L, someTemplateId.toString, signatoryParty),
+            DbDto.IdFilterUnassignStakeholder(
+              2L,
+              someTemplateId.toString,
+              signatoryParty,
+              first_per_sequential_id = true,
+            ),
             metaFromSingle(unassign),
           ),
         _,
@@ -330,7 +408,7 @@ private[backend] trait StorageBackendTestsPruning
       contractId = hashCid("#1"),
       signatory = signatoryParty,
       nonStakeholderInformees = Set(nonStakeholderInformeeParty),
-      synchronizerId = "x::sourcesynchronizer",
+      synchronizerId = someSynchronizerId,
     )
     val archiveDifferentSynchronizer = dtoExercise(
       offset = offset(3),
@@ -338,7 +416,7 @@ private[backend] trait StorageBackendTestsPruning
       consuming = true,
       contractId = hashCid("#1"),
       signatory = signatoryParty,
-      synchronizerId = "x::targetsynchronizer",
+      synchronizerId = someSynchronizerId2,
     )
     val archiveDifferentContractId = dtoExercise(
       offset = offset(4),
@@ -346,23 +424,23 @@ private[backend] trait StorageBackendTestsPruning
       consuming = true,
       contractId = hashCid("#2"),
       signatory = signatoryParty,
-      synchronizerId = "x::sourcesynchronizer",
+      synchronizerId = someSynchronizerId,
     )
     val unassignDifferentSynchronizer = dtoUnassign(
       offset = offset(5),
       eventSequentialId = 4L,
       contractId = hashCid("#1"),
       signatory = signatoryParty,
-      sourceSynchronizerId = "x::targetsynchronizer",
-      targetSynchronizerId = "x::sourcesynchronizer",
+      sourceSynchronizerId = someSynchronizerId2,
+      targetSynchronizerId = someSynchronizerId,
     )
     val unassignDifferentContractId = dtoUnassign(
       offset = offset(6),
       eventSequentialId = 5L,
       contractId = hashCid("#2"),
       signatory = signatoryParty,
-      sourceSynchronizerId = "x::sourcesynchronizer",
-      targetSynchronizerId = "x::targetsynchronizer",
+      sourceSynchronizerId = someSynchronizerId,
+      targetSynchronizerId = someSynchronizerId2,
     )
     val archiveAfter = dtoExercise(
       offset = offset(7),
@@ -370,15 +448,15 @@ private[backend] trait StorageBackendTestsPruning
       consuming = true,
       contractId = hashCid("#1"),
       signatory = signatoryParty,
-      synchronizerId = "x::sourcesynchronizer",
+      synchronizerId = someSynchronizerId,
     )
     val unassignAfter = dtoUnassign(
       offset = offset(8),
       eventSequentialId = 7L,
       contractId = hashCid("#1"),
       signatory = signatoryParty,
-      sourceSynchronizerId = "x::sourcesynchronizer",
-      targetSynchronizerId = "x::targetsynchronizer",
+      sourceSynchronizerId = someSynchronizerId,
+      targetSynchronizerId = someSynchronizerId2,
     )
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     // Ingest a create and archive event
@@ -387,31 +465,72 @@ private[backend] trait StorageBackendTestsPruning
         Vector(
           dtoPartyEntry(offset(1), signatoryParty),
           create,
-          DbDto.IdFilterCreateStakeholder(1L, someTemplateId.toString, signatoryParty),
-          DbDto.IdFilterCreateStakeholder(1L, someTemplateId.toString, observerParty),
+          DbDto.IdFilterCreateStakeholder(
+            1L,
+            someTemplateId.toString,
+            signatoryParty,
+            first_per_sequential_id = true,
+          ),
+          DbDto.IdFilterCreateStakeholder(
+            1L,
+            someTemplateId.toString,
+            observerParty,
+            first_per_sequential_id = false,
+          ),
           DbDto.IdFilterCreateNonStakeholderInformee(
             1L,
             someTemplateId.toString,
             nonStakeholderInformeeParty,
+            first_per_sequential_id = true,
           ),
           metaFromSingle(create),
           archiveDifferentSynchronizer,
-          DbDto.IdFilterConsumingStakeholder(2L, someTemplateId.toString, signatoryParty),
+          DbDto.IdFilterConsumingStakeholder(
+            2L,
+            someTemplateId.toString,
+            signatoryParty,
+            first_per_sequential_id = true,
+          ),
           metaFromSingle(archiveDifferentSynchronizer),
           archiveDifferentContractId,
-          DbDto.IdFilterConsumingStakeholder(3L, someTemplateId.toString, signatoryParty),
+          DbDto.IdFilterConsumingStakeholder(
+            3L,
+            someTemplateId.toString,
+            signatoryParty,
+            first_per_sequential_id = true,
+          ),
           metaFromSingle(archiveDifferentContractId),
           unassignDifferentSynchronizer,
-          DbDto.IdFilterUnassignStakeholder(4L, someTemplateId.toString, signatoryParty),
+          DbDto.IdFilterUnassignStakeholder(
+            4L,
+            someTemplateId.toString,
+            signatoryParty,
+            first_per_sequential_id = true,
+          ),
           metaFromSingle(unassignDifferentSynchronizer),
           unassignDifferentContractId,
-          DbDto.IdFilterUnassignStakeholder(5L, someTemplateId.toString, signatoryParty),
+          DbDto.IdFilterUnassignStakeholder(
+            5L,
+            someTemplateId.toString,
+            signatoryParty,
+            first_per_sequential_id = true,
+          ),
           metaFromSingle(unassignDifferentContractId),
           archiveAfter,
-          DbDto.IdFilterConsumingStakeholder(6L, someTemplateId.toString, signatoryParty),
+          DbDto.IdFilterConsumingStakeholder(
+            6L,
+            someTemplateId.toString,
+            signatoryParty,
+            first_per_sequential_id = true,
+          ),
           metaFromSingle(archiveAfter),
           unassignAfter,
-          DbDto.IdFilterUnassignStakeholder(7L, someTemplateId.toString, signatoryParty),
+          DbDto.IdFilterUnassignStakeholder(
+            7L,
+            someTemplateId.toString,
+            signatoryParty,
+            first_per_sequential_id = true,
+          ),
           metaFromSingle(unassignAfter),
         ),
         _,
@@ -521,8 +640,8 @@ private[backend] trait StorageBackendTestsPruning
       contractId = hashCid("#1"),
       signatory = signatoryParty,
       observer = observerParty,
-      sourceSynchronizerId = "x::sourcesynchronizer",
-      targetSynchronizerId = "x::targetsynchronizer",
+      sourceSynchronizerId = someSynchronizerId,
+      targetSynchronizerId = someSynchronizerId2,
     )
     // a consuming event in its own transaction
     val archive = dtoExercise(
@@ -531,7 +650,7 @@ private[backend] trait StorageBackendTestsPruning
       consuming = true,
       contractId = hashCid("#1"),
       signatory = signatoryParty,
-      synchronizerId = "x::targetsynchronizer",
+      synchronizerId = someSynchronizerId2,
     )
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     // Ingest an assign and an archive event
@@ -544,11 +663,26 @@ private[backend] trait StorageBackendTestsPruning
         ) ++
           Vector(
             assign,
-            DbDto.IdFilterAssignStakeholder(1L, someTemplateId.toString, signatoryParty),
+            DbDto.IdFilterAssignStakeholder(
+              1L,
+              someTemplateId.toString,
+              signatoryParty,
+              first_per_sequential_id = true,
+            ),
             metaFromSingle(assign),
             archive,
-            DbDto.IdFilterConsumingStakeholder(2L, someTemplateId.toString, signatoryParty),
-            DbDto.IdFilterConsumingStakeholder(2L, someTemplateId.toString, observerParty),
+            DbDto.IdFilterConsumingStakeholder(
+              2L,
+              someTemplateId.toString,
+              signatoryParty,
+              first_per_sequential_id = true,
+            ),
+            DbDto.IdFilterConsumingStakeholder(
+              2L,
+              someTemplateId.toString,
+              observerParty,
+              first_per_sequential_id = false,
+            ),
             metaFromSingle(archive),
           ),
         _,
@@ -587,8 +721,8 @@ private[backend] trait StorageBackendTestsPruning
       contractId = hashCid("#1"),
       signatory = signatoryParty,
       observer = observerParty,
-      sourceSynchronizerId = "x::sourcesynchronizer",
-      targetSynchronizerId = "x::targetsynchronizer",
+      sourceSynchronizerId = someSynchronizerId,
+      targetSynchronizerId = someSynchronizerId2,
     )
 
     // an unassign event in its own transaction
@@ -597,8 +731,8 @@ private[backend] trait StorageBackendTestsPruning
       eventSequentialId = 2L,
       contractId = hashCid("#1"),
       signatory = signatoryParty,
-      sourceSynchronizerId = "x::targetsynchronizer",
-      targetSynchronizerId = "x::sourcesynchronizer",
+      sourceSynchronizerId = someSynchronizerId2,
+      targetSynchronizerId = someSynchronizerId,
     )
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     // Ingest the assign and unassign event
@@ -611,10 +745,20 @@ private[backend] trait StorageBackendTestsPruning
         ) ++
           Vector(
             assign,
-            DbDto.IdFilterAssignStakeholder(1L, someTemplateId.toString, signatoryParty),
+            DbDto.IdFilterAssignStakeholder(
+              1L,
+              someTemplateId.toString,
+              signatoryParty,
+              first_per_sequential_id = true,
+            ),
             metaFromSingle(assign),
             unassign,
-            DbDto.IdFilterUnassignStakeholder(2L, someTemplateId.toString, signatoryParty),
+            DbDto.IdFilterUnassignStakeholder(
+              2L,
+              someTemplateId.toString,
+              signatoryParty,
+              first_per_sequential_id = true,
+            ),
             metaFromSingle(unassign),
           ),
         _,
@@ -647,7 +791,7 @@ private[backend] trait StorageBackendTestsPruning
         offsetInt: Int,
         eventSequentialId: Long,
         hashCidString: String = "#1",
-        synchronizerId: String = "x::targetsynchronizer",
+        synchronizerId: SynchronizerId = someSynchronizerId2,
     ): Vector[DbDto] = {
       val archive = dtoExercise(
         offset = offset(offsetInt.toLong),
@@ -660,7 +804,12 @@ private[backend] trait StorageBackendTestsPruning
       Vector(
         archive,
         DbDto
-          .IdFilterConsumingStakeholder(eventSequentialId, someTemplateId.toString, signatoryParty),
+          .IdFilterConsumingStakeholder(
+            eventSequentialId,
+            someTemplateId.toString,
+            signatoryParty,
+            first_per_sequential_id = true,
+          ),
         metaFromSingle(archive),
       )
     }
@@ -668,7 +817,7 @@ private[backend] trait StorageBackendTestsPruning
         offsetInt: Int,
         eventSequentialId: Long,
         hashCidString: String = "#1",
-        synchronizerId: String = "x::targetsynchronizer",
+        synchronizerId: SynchronizerId = someSynchronizerId2,
     ): Vector[DbDto] = {
       val unassign = dtoUnassign(
         offset = offset(offsetInt.toLong),
@@ -676,12 +825,17 @@ private[backend] trait StorageBackendTestsPruning
         contractId = hashCid(hashCidString),
         signatory = signatoryParty,
         sourceSynchronizerId = synchronizerId,
-        targetSynchronizerId = "x::thirdsynchronizer",
+        targetSynchronizerId = SynchronizerId.tryFromString("x::thirdsynchronizer"),
       )
       Vector(
         unassign,
         DbDto
-          .IdFilterUnassignStakeholder(eventSequentialId, someTemplateId.toString, signatoryParty),
+          .IdFilterUnassignStakeholder(
+            eventSequentialId,
+            someTemplateId.toString,
+            signatoryParty,
+            first_per_sequential_id = true,
+          ),
         metaFromSingle(unassign),
       )
     }
@@ -689,12 +843,12 @@ private[backend] trait StorageBackendTestsPruning
     val archiveDifferentSynchronizerEarlierThanAssing = archive(
       offsetInt = 2,
       eventSequentialId = 1,
-      synchronizerId = "x::sourcesynchronizer",
+      synchronizerId = someSynchronizerId,
     )
     val unassignDifferentSynchronizerEarlierThanAssing = unassign(
       offsetInt = 3,
       eventSequentialId = 2,
-      synchronizerId = "x::sourcesynchronizer",
+      synchronizerId = someSynchronizerId,
     )
     val unassignEarlierThanAssing = unassign(
       offsetInt = 4,
@@ -705,18 +859,23 @@ private[backend] trait StorageBackendTestsPruning
       eventSequentialId = 4L,
       contractId = hashCid("#1"),
       signatory = signatoryParty,
-      sourceSynchronizerId = "x::sourcesynchronizer",
-      targetSynchronizerId = "x::targetsynchronizer",
+      sourceSynchronizerId = someSynchronizerId,
+      targetSynchronizerId = someSynchronizerId2,
     )
     val assignEvents = Vector(
       assign,
-      DbDto.IdFilterAssignStakeholder(4L, someTemplateId.toString, signatoryParty),
+      DbDto.IdFilterAssignStakeholder(
+        4L,
+        someTemplateId.toString,
+        signatoryParty,
+        first_per_sequential_id = true,
+      ),
       metaFromSingle(assign),
     )
     val archiveDifferentSynchronizerEarlierThanPruning = archive(
       offsetInt = 6,
       eventSequentialId = 5,
-      synchronizerId = "x::sourcesynchronizer",
+      synchronizerId = someSynchronizerId,
     )
     val archiveDifferentCidEarlierThanPruning = archive(
       offsetInt = 7,
@@ -726,7 +885,7 @@ private[backend] trait StorageBackendTestsPruning
     val unassignDifferentSynchronizerEarlierThanPruning = unassign(
       offsetInt = 8,
       eventSequentialId = 7,
-      synchronizerId = "x::sourcesynchronizer",
+      synchronizerId = someSynchronizerId,
     )
     val unassignDifferentCidEarlierThanPruning = unassign(
       offsetInt = 9, // pruning offset
@@ -940,12 +1099,14 @@ private[backend] trait StorageBackendTestsPruning
             1L,
             someTemplateId.toString,
             divulgee,
+            first_per_sequential_id = true,
           ),
           contract2_createWithLocalStakeholder,
           DbDto.IdFilterCreateStakeholder(
             2L,
             someTemplateId.toString,
             divulgee,
+            first_per_sequential_id = true,
           ),
         ),
         _,

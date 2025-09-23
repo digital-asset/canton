@@ -46,9 +46,9 @@ import com.digitalasset.canton.integration.bootstrap.{
 import com.digitalasset.canton.integration.plugins.UseExternalProcess.ShutdownPhase
 import com.digitalasset.canton.integration.plugins.{
   PostgresDumpRestore,
-  UseCommunityReferenceBlockSequencer,
   UseExternalProcess,
   UsePostgres,
+  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -60,7 +60,7 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable, HasCloseContext}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
-import com.digitalasset.canton.resource.{CommunityStorageFactory, DbStorage, MemoryStorage}
+import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, StorageSingleFactory}
 import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTrafficControlParameters
 import com.digitalasset.canton.synchronizer.block.data.db.DbSequencerBlockStore
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
@@ -148,7 +148,7 @@ abstract class BaseSynchronizerRestartTest
         sys.error(s"logging was used but shouldn't be")
     }
   )
-  val sequencerPlugin = new UseCommunityReferenceBlockSequencer[DbConfig.Postgres](loggerFactory)
+  val sequencerPlugin = new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory)
   registerPlugin(sequencerPlugin)
   registerPlugin(external)
 
@@ -157,7 +157,7 @@ abstract class BaseSynchronizerRestartTest
   )(implicit env: TestConsoleEnvironment, closeContext: CloseContext): DbStorage = {
     import env.*
     val storage =
-      new CommunityStorageFactory(external.storageConfig(sequencerReference.name))
+      new StorageSingleFactory(external.storageConfig(sequencerReference.name))
         .create(
           connectionPoolForParticipant = false,
           None,

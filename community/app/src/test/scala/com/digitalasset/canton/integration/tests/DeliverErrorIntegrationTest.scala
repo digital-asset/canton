@@ -10,9 +10,9 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
-  UseCommunityReferenceBlockSequencer,
   UsePostgres,
   UseProgrammableSequencer,
+  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.integration.{
@@ -35,7 +35,7 @@ trait DeliverErrorIntegrationTest
     with HasProgrammableSequencer {
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1
+    EnvironmentDefinition.P2_S1M1_TopologyChangeDelay_0
       // Use a sim clock so that we don't have to worry about reaction timeouts
       .addConfigTransform(ConfigTransforms.useStaticTime)
 
@@ -70,7 +70,7 @@ trait DeliverErrorIntegrationTest
           val signedModifiedRequest =
             signModifiedSubmissionRequest(
               modifiedRequest,
-              syncCrypto.tryForSynchronizer(daId, defaultStaticSynchronizerParameters),
+              syncCrypto.tryForSynchronizer(daId, staticSynchronizerParameters1),
             )
           SendDecision.Replace(signedModifiedRequest)
 
@@ -104,7 +104,7 @@ trait DeliverErrorIntegrationTest
 
 class DeliverErrorReferenceIntegrationTestPostgres extends DeliverErrorIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseCommunityReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }
 

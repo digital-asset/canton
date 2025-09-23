@@ -449,12 +449,18 @@ object DamlPlugin extends AutoPlugin {
 
     val damlYamlMap = readDamlYaml(originalDamlProjectFile)
     val damlProjectName = damlYamlMap.get("name").toString
-    val outputDar =
-      if (!useVersionedDarName) outputDirectory / s"$damlProjectName.dar"
-      else {
-        val projectVersion = damlYamlMap.get("version").toString
-        outputDirectory / s"$damlProjectName-$projectVersion.dar"
-      }
+    val pluginNameSuffix =
+      if (damlYamlMap.containsKey("canton-daml-plugin-name-suffix"))
+        s"-${damlYamlMap.get("canton-daml-plugin-name-suffix").toString}"
+      else
+        ""
+    val versionSuffix =
+      if (useVersionedDarName)
+        s"-${damlYamlMap.get("version").toString}"
+      else
+        ""
+    val outputDar = outputDirectory / s"$damlProjectName$pluginNameSuffix$versionSuffix.dar"
+
     val processLogger = new BufferedLogger
 
     val damlcCommand = damlc.getAbsolutePath :: "build" :: "--ghc-option" :: "-Werror" ::

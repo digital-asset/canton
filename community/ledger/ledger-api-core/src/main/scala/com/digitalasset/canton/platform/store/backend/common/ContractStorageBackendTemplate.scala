@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend.common
 
-import anorm.SqlParser.{array, byteArray, int}
+import anorm.SqlParser.{byteArray, int, long}
 import anorm.{RowParser, ~}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
@@ -14,9 +14,11 @@ import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.{
 import com.digitalasset.canton.platform.store.backend.Conversions.{
   OffsetToStatement,
   contractId,
+  parties,
   timestampFromMicros,
 }
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
+import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.{
   KeyAssigned,
   KeyState,
@@ -24,12 +26,14 @@ import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReade
 }
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.{ContractId, Key}
+import com.digitalasset.canton.topology.SynchronizerId
 
 import java.sql.Connection
 
 class ContractStorageBackendTemplate(
     queryStrategy: QueryStrategy,
     stringInterning: StringInterning,
+    ledgerEndCache: LedgerEndCache,
 ) extends ContractStorageBackend {
 
   override def supportsBatchKeyStateLookups: Boolean = false
@@ -39,10 +43,11 @@ class ContractStorageBackendTemplate(
   ): Map[Key, KeyState] = keys.map(key => key -> keyState(key, validAt)(connection)).toMap
 
   override def keyState(key: Key, validAt: Offset)(connection: Connection): KeyState = {
-    val resultParser = (contractId("contract_id") ~ array[Int]("flat_event_witnesses")).map {
-      case cId ~ stakeholders =>
-        KeyAssigned(cId, stakeholders.view.map(stringInterning.party.externalize).toSet)
-    }.singleOpt
+    val resultParser =
+      (contractId("contract_id") ~ parties(stringInterning)("flat_event_witnesses")).map {
+        case cId ~ stakeholders =>
+          KeyAssigned(cId, stakeholders.toSet)
+      }.singleOpt
     import com.digitalasset.canton.platform.store.backend.Conversions.HashToStatement
     SQL"""
          WITH last_contract_key_create AS (
@@ -50,7 +55,7 @@ class ContractStorageBackendTemplate(
                   FROM lapi_events_create
                  WHERE create_key_hash = ${key.hash}
                    AND event_offset <= $validAt
-                   AND cardinality(flat_event_witnesses) > 0 -- exclude participant divulgence and transients
+                   AND length(flat_event_witnesses) > 1 -- exclude participant divulgence and transients
                  ORDER BY event_sequential_id DESC
                  FETCH NEXT 1 ROW ONLY
               )
@@ -68,12 +73,10 @@ class ContractStorageBackendTemplate(
   }
 
   private val archivedContractRowParser: RowParser[(ContractId, RawArchivedContract)] =
-    (contractId("contract_id") ~ array[Int]("flat_event_witnesses"))
+    (contractId("contract_id") ~ parties(stringInterning)("flat_event_witnesses"))
       .map { case coid ~ flatEventWitnesses =>
         coid -> RawArchivedContract(
-          flatEventWitnesses = flatEventWitnesses.view
-            .map(stringInterning.party.externalize)
-            .toSet
+          flatEventWitnesses = flatEventWitnesses.toSet
         )
       }
 
@@ -88,7 +91,7 @@ class ContractStorageBackendTemplate(
        WHERE
          contract_id ${queryStrategy.anyOfBinary(contractIds.map(_.toBytes.toByteArray))}
          AND event_offset <= $before
-         AND cardinality(flat_event_witnesses) > 0 -- exclude participant divulgence and transients"""
+         AND length(flat_event_witnesses) > 1 -- exclude participant divulgence and transients"""
         .as(archivedContractRowParser.*)(connection)
         .toMap
     }
@@ -98,30 +101,28 @@ class ContractStorageBackendTemplate(
     (contractId("contract_id")
       ~ int("template_id")
       ~ int("package_id")
-      ~ array[Int]("flat_event_witnesses")
+      ~ parties(stringInterning)("flat_event_witnesses")
       ~ byteArray("create_argument")
       ~ int("create_argument_compression").?
       ~ timestampFromMicros("ledger_effective_time")
-      ~ array[Int]("create_signatories")
+      ~ parties(stringInterning)("create_signatories")
       ~ byteArray("create_key_value").?
       ~ int("create_key_value_compression").?
-      ~ array[Int]("create_key_maintainers").?
+      ~ parties(stringInterning)("create_key_maintainers").?
       ~ byteArray("authentication_data"))
       .map {
         case coid ~ internedTemplateId ~ internedPackageId ~ flatEventWitnesses ~ createArgument ~ createArgumentCompression ~ ledgerEffectiveTime ~ signatories ~ createKey ~ createKeyCompression ~ keyMaintainers ~ authenticationData =>
           coid -> RawCreatedContract(
             templateId = stringInterning.templateId.unsafe.externalize(internedTemplateId),
             packageId = stringInterning.packageId.unsafe.externalize(internedPackageId),
-            flatEventWitnesses =
-              flatEventWitnesses.view.map(stringInterning.party.externalize).toSet,
+            flatEventWitnesses = flatEventWitnesses.toSet,
             createArgument = createArgument,
             createArgumentCompression = createArgumentCompression,
             ledgerEffectiveTime = ledgerEffectiveTime,
-            signatories = signatories.view.map(i => stringInterning.party.externalize(i)).toSet,
+            signatories = signatories.toSet,
             createKey = createKey,
             createKeyCompression = createKeyCompression,
-            keyMaintainers =
-              keyMaintainers.map(_.view.map(i => stringInterning.party.externalize(i)).toSet),
+            keyMaintainers = keyMaintainers.map(_.toSet),
             authenticationData = authenticationData,
           )
       }
@@ -149,7 +150,7 @@ class ContractStorageBackendTemplate(
          WHERE
            contract_id ${queryStrategy.anyOfBinary(contractIds.map(_.toBytes.toByteArray))}
            AND event_offset <= $before
-           AND cardinality(flat_event_witnesses) > 0 -- exclude participant divulgence and transients"""
+           AND length(flat_event_witnesses) > 1 -- exclude participant divulgence and transients"""
         .as(rawCreatedContractRowParser.*)(connection)
         .toMap
     }
@@ -190,4 +191,38 @@ class ContractStorageBackendTemplate(
         .as(rawCreatedContractRowParser.*)(connection)
         .toMap
     }
+
+  override def lastActivations(
+      synchronizerContracts: Iterable[(SynchronizerId, ContractId)]
+  )(
+      connection: Connection
+  ): Map[(SynchronizerId, ContractId), Long] = ledgerEndCache()
+    .map { ledgerEnd =>
+      synchronizerContracts.iterator.flatMap { case (synchronizerId, contractId) =>
+        val internedSynchronizerId = stringInterning.synchronizerId.internalize(synchronizerId)
+        val createEventSeqId = SQL"""
+            SELECT event_sequential_id
+            FROM lapi_events_create
+            WHERE
+              contract_id = ${contractId.toBytes.toByteArray} AND
+              synchronizer_id = $internedSynchronizerId AND
+              event_sequential_id <= ${ledgerEnd.lastEventSeqId}
+              -- not checking here the fact of activation (flat_event_witnesses) because it is invalid to have non-divulged deactivation for non-divulged create. Transients won't be searched for in the first place.
+            LIMIT 1"""
+          .as(long("event_sequential_id").singleOpt)(connection)
+        val assignEventSeqId = SQL"""
+            SELECT event_sequential_id
+            FROM lapi_events_assign
+            WHERE
+              contract_id = ${contractId.toBytes.toByteArray} AND
+              target_synchronizer_id = $internedSynchronizerId AND
+              event_sequential_id <= ${ledgerEnd.lastEventSeqId}
+            ORDER BY event_sequential_id DESC
+            LIMIT 1"""
+          .as(long("event_sequential_id").singleOpt)(connection)
+        List(createEventSeqId, assignEventSeqId).flatten.maxOption
+          .map((synchronizerId, contractId) -> _)
+      }.toMap
+    }
+    .getOrElse(Map.empty)
 }

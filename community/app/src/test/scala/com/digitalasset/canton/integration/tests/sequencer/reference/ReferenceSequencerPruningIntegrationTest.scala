@@ -13,30 +13,29 @@ import com.digitalasset.canton.config.RequireTypes.{
 }
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{
-  UseCommunityReferenceBlockSequencer,
   UseConfigTransforms,
   UsePostgres,
+  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.pruning.SequencerPruningIntegrationTest
 
 class ReferenceSequencerPruningIntegrationTest extends SequencerPruningIntegrationTest {
 
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseCommunityReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
   registerPlugin(
     new UseConfigTransforms(
       Seq(
         reduceSequencerClientAcknowledgementInterval,
         increaseParticipant3AcknowledgementInterval,
         reduceSequencerAcknowledgementConflateWindow,
-        ConfigTransforms.useStaticTime,
       ),
       loggerFactory,
     )
   )
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S1M1
+    EnvironmentDefinition.P3_S1M1_TopologyChangeDelay_0
       .addConfigTransform(ConfigTransforms.useStaticTime)
       .withSetup { implicit env =>
         import env.*

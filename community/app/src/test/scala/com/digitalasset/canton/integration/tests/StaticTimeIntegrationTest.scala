@@ -6,7 +6,7 @@ package com.digitalasset.canton.integration.tests
 import com.digitalasset.canton.config.StorageConfig
 import com.digitalasset.canton.damltests.java.statictimetest.Pass
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.integration.plugins.UseCommunityReferenceBlockSequencer
+import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -21,7 +21,7 @@ import scala.jdk.CollectionConverters.*
 
 trait StaticTimeIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1_S1M1
+    EnvironmentDefinition.P1_S1M1_TopologyChangeDelay_0
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateAllParticipantConfigs_(ConfigTransforms.useTestingTimeService),
@@ -81,5 +81,5 @@ trait StaticTimeIntegrationTest extends CommunityIntegrationTest with SharedEnvi
 }
 
 class StaticTimeIntegrationTestInMemory extends StaticTimeIntegrationTest {
-  registerPlugin(new UseCommunityReferenceBlockSequencer[StorageConfig.Memory](loggerFactory))
+  registerPlugin(new UseReferenceBlockSequencer[StorageConfig.Memory](loggerFactory))
 }

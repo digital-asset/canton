@@ -26,7 +26,8 @@ import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.daml.lf.data.Ref
-import com.digitalasset.daml.lf.data.Ref.{NameTypeConRef, PackageId, Party}
+import com.digitalasset.daml.lf.data.Ref.{NameTypeConRef, PackageId, Party, UserId}
+import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.protobuf.ByteString
 import org.mockito.MockitoSugar.mock
 import org.scalatest.flatspec.AnyFlatSpec
@@ -242,6 +243,9 @@ object SequentialWriteDaoSpec {
 
   private def offset(l: Long): Offset = Offset.tryFromLong(l)
 
+  private def hashCid(key: String): ContractId =
+    ContractId.V1(com.digitalasset.daml.lf.crypto.Hash.hashPrivateKey(key))
+
   private def someUpdate(key: String) = Some(
     Update.PartyAddedToParticipant(
       party = Ref.Party.assertFromString(key),
@@ -270,9 +274,10 @@ object SequentialWriteDaoSpec {
     user_id = None,
     submitters = None,
     node_id = 3,
-    contract_id = Array(24),
+    contract_id = hashCid("24"),
     template_id = "",
     package_id = "2",
+    representative_package_id = "3",
     flat_event_witnesses = Set.empty,
     tree_event_witnesses = Set.empty,
     create_argument = Array.empty,
@@ -285,7 +290,7 @@ object SequentialWriteDaoSpec {
     create_key_value_compression = None,
     event_sequential_id = 0,
     authentication_data = Array.empty,
-    synchronizer_id = "x::synchronizer",
+    synchronizer_id = SynchronizerId.tryFromString("x::synchronizer"),
     trace_context = serializableTraceContext,
     record_time = 0,
     external_transaction_hash = Some(externalTransactionHash),
@@ -301,7 +306,7 @@ object SequentialWriteDaoSpec {
     user_id = None,
     submitters = None,
     node_id = 3,
-    contract_id = Array(24),
+    contract_id = hashCid("24"),
     template_id = "",
     package_id = "2",
     flat_event_witnesses = Set.empty,
@@ -314,10 +319,11 @@ object SequentialWriteDaoSpec {
     exercise_argument_compression = None,
     exercise_result_compression = None,
     event_sequential_id = 0,
-    synchronizer_id = "x::synchronizer",
+    synchronizer_id = SynchronizerId.tryFromString("x::synchronizer"),
     trace_context = serializableTraceContext,
     record_time = 0,
     external_transaction_hash = Some(externalTransactionHash),
+    deactivated_event_sequential_id = None,
   )
 
   val singlePartyFixture: Option[Update.PartyAddedToParticipant] =
@@ -333,8 +339,8 @@ object SequentialWriteDaoSpec {
     partyAndCreateFixture.get.party -> List(someParty, someEventCreated),
     allEventsFixture.get.party -> List(
       someEventCreated,
-      DbDto.IdFilterCreateStakeholder(0L, "", ""),
-      DbDto.IdFilterCreateStakeholder(0L, "", ""),
+      DbDto.IdFilterCreateStakeholder(0L, "", "", first_per_sequential_id = true),
+      DbDto.IdFilterCreateStakeholder(0L, "", "", first_per_sequential_id = false),
       someEventExercise,
     ),
   )
@@ -353,6 +359,8 @@ object SequentialWriteDaoSpec {
         templateIds = List("1").iterator,
         synchronizerIds = Iterator.empty,
         packageIds = Iterator("2"),
+        userIds = Iterator.empty,
+        participantIds = Iterator.empty,
       )
     case _ =>
       new DomainStringIterators(
@@ -360,6 +368,8 @@ object SequentialWriteDaoSpec {
         templateIds = Iterator.empty,
         synchronizerIds = Iterator.empty,
         packageIds = Iterator.empty,
+        userIds = Iterator.empty,
+        participantIds = Iterator.empty,
       )
   }
 
@@ -374,6 +384,11 @@ object SequentialWriteDaoSpec {
       override def party: StringInterningDomain[Party] = throw new NotImplementedException
 
       override def synchronizerId: StringInterningDomain[SynchronizerId] =
+        throw new NotImplementedException
+
+      override def userId: StringInterningDomain[UserId] = throw new NotImplementedException
+
+      override def participantId: StringInterningDomain[Ref.ParticipantId] =
         throw new NotImplementedException
 
       override def internize(
