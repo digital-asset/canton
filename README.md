@@ -3,6 +3,7 @@
  <img alt="Digital Asset" src="https://github.com/digital-asset/.github/raw/main/images/Canton-Vertical-logo-Black-logo-Yellow-C-Black-diamond.png" width="50%">
 </picture>
 
+<br/><br/>
 
 [Canton is a next-generation Daml ledger interoperability protocol](https://docs.daml.com/canton/about.html) that implements Daml's built-in models of authorization and
 privacy faithfully.
