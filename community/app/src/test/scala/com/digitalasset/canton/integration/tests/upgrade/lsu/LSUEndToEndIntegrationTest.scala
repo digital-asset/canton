@@ -3,18 +3,23 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.{DbConfig, SynchronizerTimeTrackerConfig}
+import com.digitalasset.canton.config.{
+  DbConfig,
+  NonNegativeFiniteDuration,
+  SynchronizerTimeTrackerConfig,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencerBase.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
-  UseCommunityReferenceBlockSequencer,
   UsePostgres,
+  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils.SynchronizerNodes
@@ -43,7 +48,7 @@ abstract class LSUEndToEndIntegrationTest extends LSUBase {
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S2M2_Config
       .withNetworkBootstrap { implicit env =>
-        new NetworkBootstrapper(S1M1)
+        new NetworkBootstrapper(S1M1.withTopologyChangeDelay(NonNegativeFiniteDuration.Zero))
       }
       .addConfigTransforms(configTransforms*)
       .withSetup { implicit env =>
@@ -135,15 +140,19 @@ abstract class LSUEndToEndIntegrationTest extends LSUBase {
   }
 }
 
+// TODO(#27960) flaky test
+@UnstableTest
 final class LSUEndToEndReferenceIntegrationTest extends LSUEndToEndIntegrationTest {
   registerPlugin(
-    new UseCommunityReferenceBlockSequencer[DbConfig.Postgres](
+    new UseReferenceBlockSequencer[DbConfig.Postgres](
       loggerFactory,
       MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
     )
   )
 }
 
+// TODO(#27960) flaky test
+@UnstableTest
 final class LSUEndToEndBftOrderingIntegrationTest extends LSUEndToEndIntegrationTest {
   registerPlugin(
     new UseBftSequencer(

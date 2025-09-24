@@ -8,8 +8,7 @@ import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.admin.participant.v30
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
-import com.digitalasset.canton.crypto.kms.CommunityKmsFactory
-import com.digitalasset.canton.crypto.store.CommunityCryptoPrivateStoreFactory
+import com.digitalasset.canton.crypto.store.CryptoPrivateStoreFactory
 import com.digitalasset.canton.environment.{
   CantonNodeBootstrapCommonArguments,
   NodeFactoryArguments,
@@ -22,7 +21,7 @@ import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.store.ParticipantSettingsStore
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.util.DAMLe
-import com.digitalasset.canton.resource.CommunityStorageFactory
+import com.digitalasset.canton.resource.StorageSingleFactory
 import com.digitalasset.canton.time.TestingTimeService
 import com.digitalasset.daml.lf.engine.Engine
 import io.grpc.ServerServiceDefinition
@@ -126,18 +125,17 @@ object CommunityParticipantNodeBootstrapFactory extends ParticipantNodeBootstrap
   ): Either[String, ParticipantNodeBootstrap] =
     arguments
       .toCantonNodeBootstrapCommonArguments(
-        new CommunityStorageFactory(arguments.config.storage),
-        new CommunityCryptoPrivateStoreFactory(
+        new StorageSingleFactory(arguments.config.storage),
+        new CryptoPrivateStoreFactory(
           arguments.config.crypto.provider,
           arguments.config.crypto.kms,
-          CommunityKmsFactory,
           arguments.config.parameters.caching.kmsMetadataCache,
           arguments.config.crypto.privateKeyStore,
+          replicaManager = None,
           arguments.futureSupervisor,
           arguments.clock,
           arguments.executionContext,
         ),
-        CommunityKmsFactory,
       )
       .map { arguments =>
         val engine = createEngine(arguments)

@@ -25,6 +25,7 @@ import com.digitalasset.canton.protocol.{
   DynamicSequencingParametersWithValidity,
   DynamicSynchronizerParameters,
   DynamicSynchronizerParametersWithValidity,
+  StaticSynchronizerParameters,
 }
 import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
@@ -100,6 +101,8 @@ trait TopologyClientApi[+T] { this: HasFutureSupervision =>
   def psid: PhysicalSynchronizerId
   def synchronizerId: SynchronizerId
 
+  def staticSynchronizerParameters: StaticSynchronizerParameters
+
   def protocolVersion: ProtocolVersion = psid.protocolVersion
 
   /** Our current snapshot approximation
@@ -119,8 +122,9 @@ trait TopologyClientApi[+T] { this: HasFutureSupervision =>
     * As we future date topology transactions, the head snapshot is our latest knowledge of the
     * topology state, but as it can be still future dated, we need to be careful when actually using
     * it: the state might not yet be active, as the topology transactions are future dated.
-    * Therefore, do not act towards the sequencer using this snapshot, but use the
-    * currentSnapshotApproximation instead.
+    * Therefore, do not prepare regular transactions using this snapshot, but use the
+    * currentSnapshotApproximation instead. A head snapshot can be useful, however, for producing
+    * new topology changes, e.g., for picking the correct serial.
     */
   def headSnapshot(implicit traceContext: TraceContext): T = checked(
     trySnapshot(topologyKnownUntilTimestamp)
@@ -628,8 +632,7 @@ trait SynchronizerGovernanceSnapshotClient {
           // we must use zero as default change delay parameter, as otherwise static time tests will not work
           // however, once the synchronizer has published the initial set of synchronizer parameters, the zero time will be
           // adjusted.
-          topologyChangeDelay = DynamicSynchronizerParameters.topologyChangeDelayIfAbsent,
-          protocolVersion = protocolVersion,
+          protocolVersion = protocolVersion
         )
     }
 

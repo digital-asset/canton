@@ -13,10 +13,10 @@ import com.digitalasset.canton.config.RequireTypes.{
 }
 import com.digitalasset.canton.config.{StorageConfig, SynchronizerTimeTrackerConfig}
 import com.digitalasset.canton.console.LocalSequencerReference
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencerBase.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
-  UseCommunityReferenceBlockSequencer,
   UseProgrammableSequencer,
+  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.{
@@ -86,10 +86,11 @@ sealed trait TickRequestIntegrationTest
   }
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1_S1M1
+    EnvironmentDefinition.P2_S1M1_S1M1_TopolopgyChangeDelay_0
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateSynchronizerTimeTrackerConfigs_(_ => synchronizerTimeTrackerConfig),
+        ConfigTransforms.updateTargetTimestampForwardTolerance(Duration.ofHours(1)),
       )
       .addConfigTransforms(
         ConfigTransforms.setTopologyTransactionRegistrationTimeout(
@@ -305,7 +306,7 @@ sealed trait TickRequestIntegrationTest
 
 class TickRequestIntegrationTestMemory extends TickRequestIntegrationTest {
   registerPlugin(
-    new UseCommunityReferenceBlockSequencer[StorageConfig.Memory](
+    new UseReferenceBlockSequencer[StorageConfig.Memory](
       loggerFactory,
       sequencerGroups = MultiSynchronizer(
         Seq(Set("sequencer1"), Set("sequencer2"))

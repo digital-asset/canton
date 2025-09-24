@@ -607,7 +607,7 @@ object BuildCommon {
       `sequencer-driver-api`,
       `sequencer-driver-api-conformance-tests`,
       `sequencer-driver-lib`,
-      `community-reference-driver`,
+      `reference-sequencer-driver`,
       blake2b,
       `slick-fork`,
       `wartremover-extension`,
@@ -621,6 +621,7 @@ object BuildCommon {
       `daml-tls`,
       `kms-driver-api`,
       `kms-driver-testing`,
+      `aws-kms-driver`,
       `mock-kms-driver`,
       `ledger-common`,
       `ledger-common-dars`,
@@ -715,6 +716,7 @@ object BuildCommon {
         `community-synchronizer` % "compile->compile;test->test",
         `community-integration-testing` % Test,
         `sequencer-driver-api-conformance-tests` % Test,
+        `mock-kms-driver` % Test,
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -841,6 +843,7 @@ object BuildCommon {
       .enablePlugins(BuildInfoPlugin)
       .dependsOn(
         DamlProjects.`daml-jwt`,
+        DamlProjects.`ledger-api`,
         `daml-tls`,
         `util-observability`,
         `community-admin-api`,
@@ -853,6 +856,10 @@ object BuildCommon {
       .settings(
         sharedCantonCommunitySettings,
         libraryDependencies ++= Seq(
+          aws_kms,
+          aws_sts,
+          gcp_kms,
+          grpc_netty_shaded,
           daml_executors,
           daml_lf_transaction,
           daml_nonempty_cats,
@@ -957,7 +964,7 @@ object BuildCommon {
       .in(file("community/synchronizer"))
       .dependsOn(
         `community-common` % "compile->compile;test->test",
-        `community-reference-driver`,
+        `reference-sequencer-driver`,
       )
       .settings(
         sharedCantonCommunitySettings,
@@ -969,6 +976,7 @@ object BuildCommon {
           scalatestScalacheck % Test,
           mockito_scala % Test,
           scalatestMockito % Test,
+          dropwizard_metrics_core % Test,
           logback_classic % Runtime,
           logback_core % Runtime,
           scalapb_runtime, // not sufficient to include only through the `common` dependency - race conditions ensue
@@ -1203,6 +1211,25 @@ object BuildCommon {
         dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.0.1"
       )
 
+    lazy val `aws-kms-driver` = project
+      .in(file("community/aws-kms-driver"))
+      .dependsOn(
+        `kms-driver-api`,
+        `kms-driver-testing` % Test,
+        `community-common` % "compile->compile;test->test",
+        `wartremover-annotations`,
+      )
+      .settings(
+        sharedCantonSettings,
+        libraryDependencies ++= Seq(
+          aws_kms,
+          aws_sts,
+        ),
+        UberLibrary.assemblySettings("aws-kms-driver", includeDeps = true),
+        // when building the fat jar, we need to properly merge our artefacts
+        assembly / assemblyMergeStrategy := mergeStrategy((assembly / assemblyMergeStrategy).value),
+      )
+
     lazy val `mock-kms-driver` = project
       .in(file("community/mock-kms-driver"))
       .dependsOn(
@@ -1245,7 +1272,7 @@ object BuildCommon {
       )
 
     lazy val `sequencer-driver-api-conformance-tests` = project
-      .in(file("community/drivers/api-conformance-tests"))
+      .in(file("community/sequencer-driver-api-conformance-tests"))
       .dependsOn(
         `community-testing`,
         `sequencer-driver-api`,
@@ -1271,8 +1298,8 @@ object BuildCommon {
         )
         .settings(UberLibrary.of(`sequencer-driver-api`))
 
-    lazy val `community-reference-driver` = project
-      .in(file("community/drivers/reference"))
+    lazy val `reference-sequencer-driver` = project
+      .in(file("community/reference-sequencer-driver"))
       .dependsOn(
         `util-external`,
         `community-common` % "compile->compile;test->test",
@@ -1567,6 +1594,31 @@ object BuildCommon {
           (Compile / damlDarOutput).value / "upgrade-fetch-tests-2.0.0.dar",
           s"com.daml.ledger.test.java.upgrade_fetch_2_0_0",
         ),
+        (
+          (Compile / damlSourceDirectory).value / "main" / "daml" / "vetting_dep",
+          (Compile / damlDarOutput).value / "vetting-dep-1.0.0.dar",
+          s"com.daml.ledger.test.java.vetting_dep",
+        ),
+        (
+          (Compile / damlSourceDirectory).value / "main" / "daml" / "vetting_main" / "1.0.0",
+          (Compile / damlDarOutput).value / "vetting-main-1.0.0.dar",
+          s"com.daml.ledger.test.java.vetting_main_1_0_0",
+        ),
+        (
+          (Compile / damlSourceDirectory).value / "main" / "daml" / "vetting_main" / "2.0.0",
+          (Compile / damlDarOutput).value / "vetting-main-2.0.0.dar",
+          s"com.daml.ledger.test.java.vetting_main_2_0_0",
+        ),
+        (
+          (Compile / damlSourceDirectory).value / "main" / "daml" / "vetting_main" / "split-lineage-2.0.0",
+          (Compile / damlDarOutput).value / "vetting-main-split-lineage-2.0.0.dar",
+          s"com.daml.ledger.test.java.vetting_main_split_lineage_2_0_0",
+        ),
+        (
+          (Compile / damlSourceDirectory).value / "main" / "daml" / "vetting_alt",
+          (Compile / damlDarOutput).value / "vetting-alt-1.0.0.dar",
+          s"com.daml.ledger.test.java.vetting_alt",
+        ),
       ),
       Compile / damlBuildOrder := Seq(
         // define the packages that have a dependency in the right order
@@ -1576,6 +1628,7 @@ object BuildCommon {
         "carbonv1",
         "carbonv2",
         "upgrade_iface",
+        "vetting_dep",
       ),
     )
 

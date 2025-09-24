@@ -7,20 +7,17 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.jwt.{
   AuthServiceJWTCodec,
   DecodedJwt,
-  Jwt,
   JwtSigner,
   StandardJWTPayload,
   StandardJWTTokenFormat,
 }
-import com.daml.logging.LoggingContextOf
 import com.digitalasset.canton.UniquePortGenerator
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, PositiveInt}
 import com.digitalasset.canton.config.{AuthServiceConfig, PemFile, TlsServerConfig}
 import com.digitalasset.canton.console.LocalParticipantReference
-import com.digitalasset.canton.http.util.Logging.{InstanceUUID, instanceUUIDLogCtx}
 import com.digitalasset.canton.http.{HttpServerConfig, JsonApiConfig, WebsocketConfig}
-import com.digitalasset.canton.integration.tests.jsonapi.HttpServiceTestFixture.{UseTls, jsonCodecs}
+import com.digitalasset.canton.integration.tests.jsonapi.HttpServiceTestFixture.UseTls
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixture
 import com.digitalasset.canton.integration.tests.ledgerapi.submission.BaseInteractiveSubmissionTest.ParticipantSelector
 import com.digitalasset.canton.integration.{
@@ -68,7 +65,8 @@ trait HttpJsonApiTestBase extends CantonFixture {
   var validSynchronizerId: SynchronizerId = _
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1_S1M1
+    EnvironmentDefinition.P1_S1M1_TopologyChangeDelay_0
+      .addConfigTransform(ConfigTransforms.useStaticTime)
       .addConfigTransforms(
         ConfigTransforms.updateParticipantConfig("participant1")(config =>
           config.copy(httpLedgerApi =
@@ -113,7 +111,6 @@ trait HttpJsonApiTestBase extends CantonFixture {
               .focus(_.ledgerApi.partyManagementService.maxPartiesPageSize)
               .replace(maxPartiesPageSize)
           ),
-        ConfigTransforms.useStaticTime,
       )
       .withSetup { implicit env =>
         import env.*
@@ -148,18 +145,14 @@ trait HttpJsonApiTestBase extends CantonFixture {
       ),
       loggerFactory,
     )
-    implicit val lc: LoggingContextOf[InstanceUUID] = instanceUUIDLogCtx(identity)
 
     val scheme = if (useTls) "https" else "http"
-    for {
-      codecs <- jsonCodecs(client, token.map(Jwt(_)))
-      uri = Uri.from(scheme = scheme, host = "localhost", port = jsonApiPort)
-      (encoder, decoder) = codecs
-    } yield AbstractHttpServiceIntegrationTestFuns.HttpServiceTestFixtureData(
-      uri,
-      encoder,
-      decoder,
-      client,
+    val uri = Uri.from(scheme = scheme, host = "localhost", port = jsonApiPort)
+    Future.successful(
+      AbstractHttpServiceIntegrationTestFuns.HttpServiceTestFixtureData(
+        uri,
+        client,
+      )
     )
   }
 

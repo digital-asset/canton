@@ -6,9 +6,9 @@ package com.digitalasset.canton.integration.tests
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.integration.plugins.{
-  UseCommunityReferenceBlockSequencer,
   UsePostgres,
   UseProgrammableSequencer,
+  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -35,7 +35,7 @@ trait DecisionTimeElapsedIntegrationTest
   private lazy val mediatorReactionTimeout = NonNegativeFiniteDuration.tryOfSeconds(5)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1
+    EnvironmentDefinition.P2_S1M1_TopologyChangeDelay_0
       .addConfigTransforms(ConfigTransforms.useStaticTime)
       .withSetup { env =>
         import env.*
@@ -128,6 +128,6 @@ trait DecisionTimeElapsedIntegrationTest
 
 class DecisionTimeElapsedIntegrationTestPostgres extends DecisionTimeElapsedIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseCommunityReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }

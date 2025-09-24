@@ -12,9 +12,9 @@ import com.digitalasset.canton.examples.java.cycle
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{
-  UseCommunityReferenceBlockSequencer,
   UsePostgres,
   UseProgrammableSequencer,
+  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.OffsetOutOfRange
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError.UnsafeToPrune
@@ -64,7 +64,7 @@ abstract class LedgerPruningIntegrationTest
     )
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1
+    EnvironmentDefinition.P2_S1M1_TopologyChangeDelay_0
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updatePruningBatchSize(internalPruningBatchSize),
@@ -542,7 +542,7 @@ object LedgerPruningIntegrationTest extends OptionValues {
 class LedgerPruningIntegrationTestPostgres extends LedgerPruningIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
-    new UseCommunityReferenceBlockSequencer[DbConfig.Postgres](loggerFactory)
+    new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory)
   )
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }

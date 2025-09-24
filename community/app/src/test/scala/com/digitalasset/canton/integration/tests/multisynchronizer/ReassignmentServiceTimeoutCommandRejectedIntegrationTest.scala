@@ -12,11 +12,11 @@ import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.{CantonTimestamp, UnassignmentData}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.bootstrap.InitializedSynchronizer
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencerBase.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
-  UseCommunityReferenceBlockSequencer,
   UsePostgres,
   UseProgrammableSequencer,
+  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.HasCommandRunnersHelpers.{
@@ -57,6 +57,7 @@ import com.digitalasset.canton.{
 import org.scalatest.Assertion
 
 import scala.collection.mutable
+import scala.concurrent.duration.DurationInt
 
 sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
     extends CommunityIntegrationTest
@@ -68,8 +69,9 @@ sealed trait ReassignmentServiceTimeoutCommandRejectedIntegrationTest
     with HasExecutionContext {
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1_S1M1
+    EnvironmentDefinition.P2_S1M1_S1M1_TopolopgyChangeDelay_0
       .addConfigTransforms(ConfigTransforms.useStaticTime)
+      .addConfigTransforms(ConfigTransforms.updateTargetTimestampForwardTolerance(60.seconds))
       .withSetup { implicit env =>
         import env.*
 
@@ -324,7 +326,7 @@ class ReassignmentServiceTimeoutCommandRejectedIntegrationTestPostgres
     extends ReassignmentServiceTimeoutCommandRejectedIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
-    new UseCommunityReferenceBlockSequencer[DbConfig.Postgres](
+    new UseReferenceBlockSequencer[DbConfig.Postgres](
       loggerFactory,
       sequencerGroups = MultiSynchronizer(
         Seq(Set("sequencer1"), Set("sequencer2"))

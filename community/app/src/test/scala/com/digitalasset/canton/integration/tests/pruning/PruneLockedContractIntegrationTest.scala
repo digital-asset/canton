@@ -9,9 +9,9 @@ import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.damltests.java.failedtransactionsdonotdivulge.One
 import com.digitalasset.canton.integration.plugins.{
-  UseCommunityReferenceBlockSequencer,
   UsePostgres,
   UseProgrammableSequencer,
+  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -43,7 +43,7 @@ trait PruneLockedContractIntegrationTest
   private val ledgerTimeRecordTimeTolerance = config.NonNegativeFiniteDuration.ofSeconds(1000)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1_S1M1
+    EnvironmentDefinition.P1_S1M1_TopologyChangeDelay_0
       .addConfigTransforms(
         ConfigTransforms.useStaticTime
       )
@@ -179,6 +179,6 @@ trait PruneLockedContractIntegrationTest
 class PruneLockedContractReferenceIntegrationTestPostgres
     extends PruneLockedContractIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseCommunityReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }

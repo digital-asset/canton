@@ -25,11 +25,8 @@ import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.crypto.TestSalt
 import com.digitalasset.canton.data.ViewPosition
 import com.digitalasset.canton.examples.java.iou.{Amount, GetCash, Iou}
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencerBase.MultiSynchronizer
-import com.digitalasset.canton.integration.plugins.{
-  UseCommunityReferenceBlockSequencer,
-  UsePostgres,
-}
+import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
 import com.digitalasset.canton.integration.tests.ActiveContractsIntegrationTest.*
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.GrpcAdminCommandSupport.ParticipantReferenceOps
@@ -41,6 +38,7 @@ import com.digitalasset.canton.integration.util.{
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
   TestConsoleEnvironment,
@@ -61,6 +59,7 @@ import org.scalatest.Assertion
 
 import java.util.UUID
 import scala.collection.concurrent.TrieMap
+import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.*
 
 class ActiveContractsIntegrationTest
@@ -72,7 +71,7 @@ class ActiveContractsIntegrationTest
 
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
-    new UseCommunityReferenceBlockSequencer[DbConfig.Postgres](
+    new UseReferenceBlockSequencer[DbConfig.Postgres](
       loggerFactory,
       sequencerGroups = MultiSynchronizer(
         Seq(Set("sequencer1"), Set("sequencer2"), Set("sequencer3"))
@@ -87,6 +86,10 @@ class ActiveContractsIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1_S1M1
+      .addConfigTransforms(
+        // Ensure reassignments are not tripped up by some participants being a little behind.
+        ConfigTransforms.updateTargetTimestampForwardTolerance(30.seconds)
+      )
       .withSetup { implicit env =>
         import env.*
 
@@ -211,7 +214,12 @@ class ActiveContractsIntegrationTest
     val suffixedFci = LfFatContractInst
       .fromCreateNode(suffixedCreateNode, ledgerCreateTime, authenticationData.toLfBytes)
     val absolutizedFci = contractIdAbsolutizer.absolutizeFci(suffixedFci).value
-    val repairContract = RepairContract(psid, absolutizedFci, ReassignmentCounter(0))
+    val repairContract = RepairContract(
+      psid,
+      absolutizedFci,
+      ReassignmentCounter(0),
+      absolutizedFci.templateId.packageId,
+    )
 
     val startOffset = participant1.ledger_api.state.end()
     participant1.synchronizers.disconnect_all()

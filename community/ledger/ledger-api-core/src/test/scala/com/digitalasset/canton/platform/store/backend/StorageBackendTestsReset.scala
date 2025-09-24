@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.store.backend
 
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.Ids
 import com.digitalasset.canton.platform.store.backend.common.EventPayloadSourceForUpdatesLedgerEffects
+import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.PaginationInput
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -42,17 +43,32 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
       dtoPartyEntry(offset(1)),
       // 2: transaction with create node
       dtoCreate(offset(2), 1L, hashCid("#3")),
-      DbDto.IdFilterCreateStakeholder(1L, someTemplateId.toString, someParty.toString),
+      DbDto.IdFilterCreateStakeholder(
+        1L,
+        someTemplateId.toString,
+        someParty.toString,
+        first_per_sequential_id = true,
+      ),
       dtoCompletion(offset(2)),
       // 3: transaction with exercise node and retroactive divulgence
       dtoExercise(offset(3), 2L, true, hashCid("#3")),
       dtoCompletion(offset(3)),
       // 4: assign event
       dtoAssign(offset(4), 4L, hashCid("#4")),
-      DbDto.IdFilterAssignStakeholder(4L, someTemplateId.toString, someParty.toString),
+      DbDto.IdFilterAssignStakeholder(
+        4L,
+        someTemplateId.toString,
+        someParty,
+        first_per_sequential_id = true,
+      ),
       // 5: unassign event
       dtoUnassign(offset(5), 5L, hashCid("#5")),
-      DbDto.IdFilterUnassignStakeholder(5L, someTemplateId.toString, someParty.toString),
+      DbDto.IdFilterUnassignStakeholder(
+        5L,
+        someTemplateId.toString,
+        someParty,
+        first_per_sequential_id = true,
+      ),
       // 6: topology transaction
       dtoPartyToParticipant(offset(6), 6L),
       // String interning
@@ -91,9 +107,12 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
       backend.event.updateStreamingQueries.fetchIdsOfCreateEventsForStakeholder(
         stakeholderO = Some(someParty),
         templateIdO = None,
-        startExclusive = 0,
-        endInclusive = 1000,
-        limit = 1000,
+      )(_)(
+        PaginationInput(
+          startExclusive = 0,
+          endInclusive = 1000,
+          limit = 1000,
+        )
       )
     )
 
@@ -115,9 +134,12 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
       backend.event.fetchAssignEventIdsForStakeholder(
         stakeholderO = Some(someParty),
         templateId = None,
-        startExclusive = 0L,
-        endInclusive = 1000L,
-        1000,
+      )(_)(
+        PaginationInput(
+          startExclusive = 0L,
+          endInclusive = 1000L,
+          1000,
+        )
       )
     )
 
@@ -125,9 +147,12 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
       backend.event.fetchUnassignEventIdsForStakeholder(
         stakeholderO = Some(someParty),
         templateId = None,
-        startExclusive = 0L,
-        endInclusive = 1000L,
-        1000,
+      )(_)(
+        PaginationInput(
+          startExclusive = 0L,
+          endInclusive = 1000L,
+          1000,
+        )
       )
     )
 

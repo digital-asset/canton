@@ -18,7 +18,7 @@ import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
 import com.digitalasset.canton.metrics.OpenTelemetryOnDemandMetricsReader
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
-import com.digitalasset.canton.time.WallClock
+import com.digitalasset.canton.time.{NonNegativeFiniteDuration, WallClock}
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext, W3CTraceContext}
 import com.digitalasset.canton.util.CheckedT
@@ -99,7 +99,7 @@ trait TestEssentials
 
   override val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
 
-  val futureSupervisor: FutureSupervisor = FutureSupervisor.Noop
+  lazy val futureSupervisor: FutureSupervisor = FutureSupervisor.Noop
 
   lazy val wallClock = new WallClock(timeouts, loggerFactory)
 
@@ -436,7 +436,13 @@ trait BaseTest
   lazy val UpgradeTestsCompatPath: String = BaseTest.UpgradeTestsCompatPath
   lazy val UpgradeTestsIncompatPath: String = BaseTest.UpgradeTestsIncompatPath
   lazy val VettingDepPath: String = BaseTest.VettingDepPath
+  lazy val VettingDepCompatPath: String = BaseTest.VettingDepCompatPath
+  lazy val VettingDepIncompatPath: String = BaseTest.VettingDepIncompatPath
+  lazy val VettingDepSubstitutionPath: String = BaseTest.VettingDepSubstitutionPath
   lazy val VettingMainPath: String = BaseTest.VettingMainPath
+  lazy val VettingMainCompatPath: String = BaseTest.VettingMainCompatPath
+  lazy val VettingMainIncompatPath: String = BaseTest.VettingMainIncompatPath
+  lazy val VettingMainSubstitutionPath: String = BaseTest.VettingMainSubstitutionPath
 
   implicit class RichSynchronizerId(val id: SynchronizerId) {
     def toPhysical: PhysicalSynchronizerId =
@@ -537,23 +543,24 @@ object BaseTest {
     defaultStaticSynchronizerParametersWith()
 
   def defaultStaticSynchronizerParametersWith(
-      protocolVersion: ProtocolVersion = testedProtocolVersion
-  ): StaticSynchronizerParameters = StaticSynchronizerParameters(
-    requiredSigningSpecs = SymbolicCryptoProvider.supportedSigningSpecs,
-    requiredEncryptionSpecs = SymbolicCryptoProvider.supportedEncryptionSpecs,
-    requiredSymmetricKeySchemes = SymbolicCryptoProvider.supportedSymmetricKeySchemes,
-    requiredHashAlgorithms = SymbolicCryptoProvider.supportedHashAlgorithms,
-    requiredCryptoKeyFormats = SymbolicCryptoProvider.supportedCryptoKeyFormats,
-    requiredSignatureFormats = SymbolicCryptoProvider.supportedSignatureFormats,
-    enableTransparencyChecks = false,
-    protocolVersion = protocolVersion,
-    serial = NonNegativeInt.zero,
-  )
+      topologyChangeDelay: NonNegativeFiniteDuration =
+        StaticSynchronizerParameters.defaultTopologyChangeDelay,
+      protocolVersion: ProtocolVersion = testedProtocolVersion,
+  ): StaticSynchronizerParameters =
+    StaticSynchronizerParameters(
+      requiredSigningSpecs = SymbolicCryptoProvider.supportedSigningSpecs,
+      requiredEncryptionSpecs = SymbolicCryptoProvider.supportedEncryptionSpecs,
+      requiredSymmetricKeySchemes = SymbolicCryptoProvider.supportedSymmetricKeySchemes,
+      requiredHashAlgorithms = SymbolicCryptoProvider.supportedHashAlgorithms,
+      requiredCryptoKeyFormats = SymbolicCryptoProvider.supportedCryptoKeyFormats,
+      requiredSignatureFormats = SymbolicCryptoProvider.supportedSignatureFormats,
+      topologyChangeDelay = topologyChangeDelay,
+      enableTransparencyChecks = false,
+      protocolVersion = protocolVersion,
+      serial = NonNegativeInt.zero,
+    )
 
   lazy val testedProtocolVersion: ProtocolVersion = ProtocolVersion.forSynchronizer
-
-  lazy val testedStaticSynchronizerParameters: StaticSynchronizerParameters =
-    defaultStaticSynchronizerParametersWith(testedProtocolVersion)
 
   lazy val testedProtocolVersionValidation: ProtocolVersionValidation =
     ProtocolVersionValidation(testedProtocolVersion)
@@ -575,7 +582,13 @@ object BaseTest {
   lazy val UpgradeTestsCompatPath: String = getResourcePath("UpgradeTests-4.0.0.dar")
   lazy val UpgradeTestsIncompatPath: String = getResourcePath("UpgradeTests-5.0.0.dar")
   lazy val VettingDepPath: String = getResourcePath("VettingDep-1.0.0.dar")
+  lazy val VettingDepCompatPath: String = getResourcePath("VettingDep-2.0.0.dar")
+  lazy val VettingDepIncompatPath: String = getResourcePath("VettingDep-3.0.0.dar")
+  lazy val VettingDepSubstitutionPath: String = getResourcePath("VettingDepSubstitution-1.0.0.dar")
   lazy val VettingMainPath: String = getResourcePath("VettingMain-1.0.0.dar")
+  lazy val VettingMainCompatPath: String = getResourcePath("VettingMain-2.0.0.dar")
+  lazy val VettingMainIncompatPath: String = getResourcePath("VettingMain-3.0.0.dar")
+  lazy val VettingMainSubstitutionPath: String = getResourcePath("VettingMain-4.0.0.dar")
 
   def getResourcePath(name: String): String =
     Option(getClass.getClassLoader.getResource(name))

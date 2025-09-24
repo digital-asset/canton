@@ -16,9 +16,7 @@ import com.digitalasset.canton.participant.admin.PackageDependencyResolver
 import com.digitalasset.canton.participant.protocol.reassignment.IncompleteReassignmentData
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.store.{AcsInspection, ReassignmentStore}
-import com.digitalasset.canton.platform.apiserver.services.admin.PackageUpgradeValidator
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend
-import com.digitalasset.canton.platform.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.TopologyManagerError.ParticipantTopologyManagerError
 import com.digitalasset.canton.topology.transaction.HostingParticipant
 import com.digitalasset.canton.topology.{
@@ -31,7 +29,6 @@ import com.digitalasset.canton.topology.{
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.daml.lf.language.Ast
 
 import scala.concurrent.ExecutionContext
 
@@ -39,7 +36,7 @@ trait ParticipantTopologyValidation extends NamedLogging {
   def validatePackageVetting(
       currentlyVettedPackages: Set[LfPackageId],
       nextPackageIds: Set[LfPackageId],
-      packageMetadataView: Option[PackageMetadataView],
+      packageMetadataView: PackageMetadataView,
       packageDependencyResolver: PackageDependencyResolver,
       acsInspections: () => Map[SynchronizerId, AcsInspection],
       forceFlags: ForceFlags,
@@ -69,23 +66,12 @@ trait ParticipantTopologyValidation extends NamedLogging {
             show"Skipping upgrade validation for newly-added packages $toBeAdded because force flag ${ForceFlag.AllowVetIncompatibleUpgrades.toString} is set"
           )
           Right(())
-        } else {
-          // packageMetadata can be empty if the vetting happens before the package service is created
-          packageMetadataView match {
-            case Some(packageMetadataView) =>
-              checkUpgrades(
-                nextPackageIds,
-                toBeAdded,
-                packageMetadataView.getSnapshot,
-                packageMetadataView.packageUpgradeValidator,
-              )
-            case None =>
-              logger.info(
-                show"Skipping upgrade checks on newly-added packages because package metadata is not available: $toBeAdded"
-              )
-              Right(())
-          }
-        }
+        } else
+          packageMetadataView.packageUpgradeValidator.validateUpgrade(
+            toBeAdded,
+            nextPackageIds,
+            packageMetadataView.getSnapshot.packages,
+          )(LoggingContextWithTrace(loggerFactory))
       }
     } yield ()
   }
@@ -314,40 +300,4 @@ trait ParticipantTopologyValidation extends NamedLogging {
             }
         )
       }
-
-  private def checkUpgrades(
-      nextPackageIds: Set[LfPackageId],
-      toBeAdded: Set[LfPackageId],
-      packageMetadata: PackageMetadata,
-      packageUpgradeValidator: PackageUpgradeValidator,
-  )(implicit traceContext: TraceContext): Either[TopologyManagerError, Unit] = {
-    def getPackageSignature(packageId: LfPackageId): Ast.PackageSignature =
-      packageMetadata.packages.getOrElse(
-        packageId,
-        throw new IllegalStateException(
-          s"Missing package-id $packageId in the package metadata view"
-        ),
-      )
-
-    def isUpgradeable(packageId: LfPackageId): Boolean =
-      packageMetadata.packageUpgradabilityMap
-        .getOrElse(
-          packageId,
-          throw new IllegalStateException(
-            s"Missing package-id $packageId in the package upgradability map"
-          ),
-        )
-
-    // We need to check the entire lineage of newly added packages.
-    // Removing a package can not lead to incompatible upgrade relationships between the remaining
-    // packages in the lineage.
-    val affectedPackageNames = toBeAdded.map(getPackageSignature(_).metadata.name)
-    val packagesToCheck = nextPackageIds.toList
-      .map(packageId => packageId -> getPackageSignature(packageId))
-      .filter { case (packageId, pkg) =>
-        affectedPackageNames.contains(pkg.metadata.name) && isUpgradeable(packageId)
-      }
-    packageUpgradeValidator
-      .validateUpgrade(packagesToCheck)(LoggingContextWithTrace(loggerFactory))
-  }
 }

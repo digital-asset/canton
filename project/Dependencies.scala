@@ -269,6 +269,9 @@ object Dependencies {
   lazy val opentelemetry_instrumentation_hikari =
     "io.opentelemetry.instrumentation" % "opentelemetry-hikaricp-3.0" % opentelemetry_instrumentation_runtime_metrics.revision
 
+  lazy val dropwizard_metrics_core =
+    "io.dropwizard.metrics" % "metrics-core" % dropwizard_version
+
   lazy val better_files = "com.github.pathikrit" %% "better-files" % better_files_version
 
   // TODO(#10852) one database library, not two

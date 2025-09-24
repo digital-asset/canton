@@ -366,6 +366,7 @@ object Generators {
       signatories <- Gen.listOf(Gen.asciiPrintableStr)
       observers <- Gen.listOf(Gen.asciiPrintableStr)
       isAcsDelta <- Arbitrary.arbBool.arbitrary
+      representativePackageId <- identifierGen.map(_.getPackageId)
     } yield v2.EventOuterClass.CreatedEvent
       .newBuilder()
       .setCreatedAt(createdAt)
@@ -381,6 +382,7 @@ object Generators {
       .addAllSignatories(signatories.asJava)
       .addAllObservers(observers.asJava)
       .setAcsDelta(isAcsDelta)
+      .setRepresentativePackageId(representativePackageId)
       .build()
 
   val createdEventGen: Gen[v2.EventOuterClass.CreatedEvent] =
@@ -1492,18 +1494,6 @@ object Generators {
     } yield Response
       .newBuilder()
       .setReassignment(reassignment)
-      .build()
-  }
-  // TODO(#23504) remove as SubmitAndWaitForTransactionTreeResponse is deprecated
-  @nowarn("cat=deprecation")
-  def submitAndWaitForTransactionTreeResponseGen
-      : Gen[v2.CommandServiceOuterClass.SubmitAndWaitForTransactionTreeResponse] = {
-    import v2.CommandServiceOuterClass.SubmitAndWaitForTransactionTreeResponse as Response
-    for {
-      transaction <- transactionTreeGen
-    } yield Response
-      .newBuilder()
-      .setTransaction(transaction)
       .build()
   }
 

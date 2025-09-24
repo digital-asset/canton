@@ -296,6 +296,7 @@
   "org.mockito:mockito-inline" : "3.6.28",
   "org.mockito:mockito-scala_2.13" : "1.16.3",
   "org.objenesis:objenesis" : "3.1",
+  "org.openjdk.jol:jol-core" : "0.17",
   "org.opentest4j:opentest4j" : "1.2.0",
   "org.ow2.asm:asm" : "5.0.4",
   "org.parboiled:parboiled_2.13" : "2.5.1",

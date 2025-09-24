@@ -5,8 +5,10 @@ package com.digitalasset.canton.platform.store.backend
 
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
 import com.digitalasset.canton.crypto.{Hash, HashPurpose}
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
+import com.digitalasset.daml.lf.value.Value.ContractId
 import com.google.protobuf.ByteString
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -63,22 +65,31 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       "s2",
       "95",
       "96",
+      "97",
     ).sorted
-    iterators.synchronizerIds.toList.sorted shouldBe List(
-      "synchronizer2",
-      "synchronizer3",
-      "synchronizer4",
-      "synchronizer5",
-      "synchronizer6",
-      "synchronizer7",
-      "synchronizer8",
-      "synchronizer9",
+    iterators.synchronizerIds.toList.map(_.toProtoPrimitive).sorted shouldBe List(
+      "x::synchronizer2",
+      "x::synchronizer3",
+      "x::synchronizer4",
+      "x::synchronizer5",
+      "x::synchronizer6",
+      "x::synchronizer7",
+      "x::synchronizer8",
+      "x::synchronizer9",
+      "x::synchronizer10",
     ).sorted
     iterators.packageIds.toList.sorted shouldBe List(
       "25.1",
+      "25.2",
       "50.1",
       "87.1",
       "94.1",
+    ).sorted
+    iterators.userIds.toList.sorted shouldBe List(
+      "65"
+    ).sorted
+    iterators.participantIds.toList.sorted shouldBe List(
+      "participant1"
     ).sorted
   }
 
@@ -114,9 +125,10 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       user_id = Some("19"),
       submitters = Some(Set("20", "21", "22")),
       node_id = 1,
-      contract_id = Array(24),
+      contract_id = hashCid("24"),
       template_id = "25",
       package_id = "25.1",
+      representative_package_id = "25.2",
       flat_event_witnesses = Set("26", "27", "28"),
       tree_event_witnesses = Set("29", "30", "31"),
       create_argument = Array.empty,
@@ -129,7 +141,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       create_key_value_compression = Some(1),
       event_sequential_id = 1,
       authentication_data = Array.empty,
-      synchronizer_id = "synchronizer2",
+      synchronizer_id = SynchronizerId.tryFromString("x::synchronizer2"),
       trace_context = serializableTraceContext,
       record_time = 1,
       external_transaction_hash = Some(externalTransactionHash),
@@ -144,7 +156,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       user_id = Some("44"),
       submitters = Some(Set("45", "46", "47")),
       node_id = 1,
-      contract_id = Array(49),
+      contract_id = hashCid("49"),
       template_id = "50",
       package_id = "50.1",
       flat_event_witnesses = Set("51", "52", "53"),
@@ -157,10 +169,11 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       exercise_result = None,
       exercise_last_descendant_node_id = 63,
       exercise_result_compression = Some(1),
-      synchronizer_id = "synchronizer3",
+      synchronizer_id = SynchronizerId.tryFromString("x::synchronizer3"),
       trace_context = serializableTraceContext,
       record_time = 1,
       external_transaction_hash = Some(externalTransactionHash),
+      deactivated_event_sequential_id = None,
     ),
     DbDto.CommandCompletion(
       completion_offset = 64,
@@ -177,7 +190,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       deduplication_offset = Some(73),
       deduplication_duration_seconds = Some(1),
       deduplication_duration_nanos = Some(1),
-      synchronizer_id = "synchronizer4",
+      synchronizer_id = SynchronizerId.tryFromString("x::synchronizer4"),
       message_uuid = None,
       is_transaction = true,
       trace_context = serializableTraceContext,
@@ -189,7 +202,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       workflow_id = None,
       submitter = Option("s1"),
       node_id = 0,
-      contract_id = Array(114),
+      contract_id = hashCid("114"),
       template_id = "87",
       package_id = "87.1",
       flat_event_witnesses = Set("88", "89"),
@@ -204,8 +217,8 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       event_sequential_id = 0,
       ledger_effective_time = 0,
       authentication_data = Array.empty,
-      source_synchronizer_id = "synchronizer5",
-      target_synchronizer_id = "synchronizer6",
+      source_synchronizer_id = SynchronizerId.tryFromString("x::synchronizer5"),
+      target_synchronizer_id = SynchronizerId.tryFromString("x::synchronizer6"),
       reassignment_id = "",
       reassignment_counter = 0,
       trace_context = serializableTraceContext,
@@ -218,20 +231,35 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       workflow_id = None,
       submitter = Option("s2"),
       node_id = 0,
-      contract_id = Array(115),
+      contract_id = hashCid("115"),
       template_id = "94",
       package_id = "94.1",
       flat_event_witnesses = Set("95", "96"),
       event_sequential_id = 0,
-      source_synchronizer_id = "synchronizer7",
-      target_synchronizer_id = "synchronizer8",
+      source_synchronizer_id = SynchronizerId.tryFromString("x::synchronizer7"),
+      target_synchronizer_id = SynchronizerId.tryFromString("x::synchronizer8"),
       reassignment_id = "",
       reassignment_counter = 0,
       assignment_exclusivity = None,
       trace_context = serializableTraceContext,
       record_time = 0,
+      deactivated_event_sequential_id = None,
     ),
-    DbDto.SequencerIndexMoved("synchronizer9"),
+    DbDto.SequencerIndexMoved(SynchronizerId.tryFromString("x::synchronizer9")),
+    DbDto.EventPartyToParticipant(
+      event_sequential_id = 0,
+      event_offset = 1,
+      update_id = "",
+      party_id = "97",
+      participant_id = "participant1",
+      participant_permission = 1,
+      participant_authorization_event = 2,
+      synchronizer_id = SynchronizerId.tryFromString("x::synchronizer10"),
+      record_time = 0,
+      trace_context = Array.empty,
+    ),
   )
 
+  private def hashCid(key: String): ContractId =
+    ContractId.V1(com.digitalasset.daml.lf.crypto.Hash.hashPrivateKey(key))
 }

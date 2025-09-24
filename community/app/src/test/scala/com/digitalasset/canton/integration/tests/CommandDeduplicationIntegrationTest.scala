@@ -20,12 +20,12 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod, Offset}
 import com.digitalasset.canton.error.CantonBaseError
 import com.digitalasset.canton.examples.java.cycle as C
-import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencerBase.MultiSynchronizer
+import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
-  UseCommunityReferenceBlockSequencer,
   UsePostgres,
   UseProgrammableSequencer,
+  UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.CommandDeduplicationIntegrationTest.DelayPromises
 import com.digitalasset.canton.integration.{
@@ -80,7 +80,7 @@ trait CommandDeduplicationIntegrationTest
   protected val isTimestampManipulationSupported: Boolean = true
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1_S1M1
+    EnvironmentDefinition.P2_S1M1_S1M1_TopolopgyChangeDelay_0
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
@@ -783,7 +783,7 @@ trait CommandDeduplicationTestHelpers { this: BaseTest with HasProgrammableSeque
 
 class CommandDeduplicationIntegrationTestInMemory extends CommandDeduplicationIntegrationTest {
   registerPlugin(
-    new UseCommunityReferenceBlockSequencer[StorageConfig.Memory](
+    new UseReferenceBlockSequencer[StorageConfig.Memory](
       loggerFactory,
       sequencerGroups = MultiSynchronizer(
         Seq(Set("sequencer1"), Set("sequencer2"))
@@ -821,7 +821,7 @@ abstract class CommandDeduplicationPruningIntegrationTest
   private val reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1
+    EnvironmentDefinition.P2_S1M1_TopologyChangeDelay_0
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
@@ -1062,6 +1062,6 @@ private object CommandDeduplicationIntegrationTest {
 class CommandDeduplicationPruningIntegrationTestPostgres
     extends CommandDeduplicationPruningIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseCommunityReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
+  registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 }

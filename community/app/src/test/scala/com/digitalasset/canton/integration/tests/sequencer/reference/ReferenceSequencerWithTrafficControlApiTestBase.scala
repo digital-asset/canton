@@ -39,6 +39,7 @@ import com.digitalasset.canton.sequencing.traffic.{
   TrafficReceipt,
 }
 import com.digitalasset.canton.store.db.DbTest
+import com.digitalasset.canton.synchronizer.block.AsyncWriterParameters
 import com.digitalasset.canton.synchronizer.metrics.{SequencerHistograms, SequencerMetrics}
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.config.{
@@ -68,12 +69,13 @@ import com.digitalasset.canton.synchronizer.sequencing.traffic.{
   TrafficConsumedManagerFactory,
   TrafficPurchasedManager,
 }
-import com.digitalasset.canton.time.{Clock, SimClock}
+import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
+  BaseTest,
   FailOnShutdown,
   MockedNodeParameters,
   ProtocolVersionChecksFixtureAsyncWordSpec,
@@ -275,7 +277,13 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
       ),
     )
     val topologyFactoryWithSynchronizerParameters = env.topology
-      .copy(synchronizerParameters = parameters)
+      .copy(
+        synchronizerParameters = parameters,
+        staticSynchronizerParameters = BaseTest.defaultStaticSynchronizerParametersWith(
+          topologyChangeDelay = NonNegativeFiniteDuration.Zero,
+          protocolVersion = testedProtocolVersion,
+        ),
+      )
       .build(loggerFactory)
     val params = SequencerNodeParameters(
       general = MockedNodeParameters.cantonNodeParameters(
@@ -287,6 +295,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
         dontWarnOnDeprecatedPV = false,
       ),
       maxConfirmationRequestsBurstFactor = PositiveDouble.tryCreate(1.0),
+      asyncWriter = AsyncWriterParameters(),
     )
     // Important to create the histograms before the factory, because creating the factory will
     // register them once and for all and we can't add more afterwards

@@ -9,6 +9,41 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2025-09-24 (Exclusive)
+- Add new Ledger API endpoints to improve UX of package vetting:
+
+  1. `ListVettedPackages` in `package_service.proto`, to easily list which
+     packages are vetted.
+  2. `UpdateVettedPackages` in `package_management_service.proto`, to easily vet
+     and unvet packages.
+
+- Modify `UploadDarFileRequest` in `package_management_service.proto` to take a
+  `vetting_change` attribute, which specifies whether the uploaded DAR should be
+  vetted or not.
+
+- Added a new `GetTime` gRPC endpoint to the sequencer API that returns a "current" sequencing time.
+- All JSON API v1 endpoints `/v1/*` have been removed.
+- The legacy gRPC Ledger API method `CommandService.SubmitAndWaitForTransactionTree` has been removed. The JSON version
+  of this request `/v2/commands/submit-and-wait-for-transaction-tree` continues to be supported in 3.4, but will be
+  removed in 3.5.
+- `ParticipantRepairService.ImportAcs` is updated to accommodate new smart-contract upgrading semantics that are introduced in
+  in Canton 3.4. More specifically:
+  - **BREAKING** The `ImportAcsRequest.contract_id_suffix_recomputation_mode` is renamed to `ImportAcsRequest.contract_import_mode`
+    and `ContractIdSuffixRecomputationMode` enum is renamed to `ImportAcsRequest.ContractImportMode` to better reflect its purpose.
+    Upon import, contracts can be fully validated (including contract-id suffix recomputation).
+  - `ImportAcsRequest.representative_package_id_override` is introduced to allow overriding the original package id of the imported contracts.
+    This allows the target participant to use a compatible alternative package for the contract
+    without needing to upload original contracts packages.
+
+- **BREAKING**: `topologyChangeDelay` has been moved from `DynamicSynchronizerParameters` to `StaticSynchronizerParameters` and cannot be changed
+  on a physical synchronizer.
+
+- Deduplication references added to Ledger API DB, giving performance improvement for ACS retrievals in presence of a lot of archived contracts.
+  - New participant config parameter `active-contracts-service-streams-config.id-filter-query-parallelism` is added, controlling the
+    introduced parallel processing stage filtering IDs (default: 2) during the Ledger API client streaming.
+  - New participant config parameter `indexer-config.db-prepare-parallelism` is added, controlling the introduced parallel stage processing
+    stage computing deactivation references during indexing.
+
 ## until 2025-09-17 (Exclusive)
 - The participant admin workflows have been renamed
 
