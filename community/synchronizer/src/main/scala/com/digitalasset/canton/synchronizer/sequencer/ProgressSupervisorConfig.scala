@@ -12,7 +12,7 @@ import com.digitalasset.canton.config.{
 
 final case class ProgressSupervisorConfig(
     enabled: Boolean = true,
-    stuckDetectionTimeout: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(5),
+    stuckDetectionTimeout: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(30),
     logAtDebugLevelDuration: PositiveFiniteDuration = PositiveFiniteDuration.ofSeconds(60),
 ) extends UniformCantonConfigValidation
 

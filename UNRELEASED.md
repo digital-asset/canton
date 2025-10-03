@@ -9,13 +9,47 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
-## until 2024-09-11 (Exclusive)
+## Until 2024-09-26 (Exclusive)
+- Documented external party on the Ledger API allocation endpoints
+- Introduced new command bootstrap.local() to provide a simple way to bootstrap a local synchronizer.
+
+## Until 2024-09-24 (Exclusive)
+- Fixed a bug in the ModelConformanceChecker that would incorrectly reject otherwise valid externally signed transactions
+  that make use of a locally created contract in a subview. The fix is only effective if all root informees of the transaction
+  have upgraded Canton to a patched version.
+
+## until 2025-09-18 (Exclusive)
+- Changed the authorization of the `InteractiveSubmissionService.ExecuteSubmission` and its variants.
+  - Introduced an `CanExecuteAs(party)` right that allows a participant user to execute a transaction submitted by party.
+  - The `CanExecuteAs(party)` is required instead of `ActAs(party)` but the `CanActAs(party)` implies
+    `CanExecuteAs(party)` so that the backwards compatibility is maintained.
+  - Additionally, introduced the `CanExecuteAsAnyParty` variant. The Wallet providers can use this capability in lieu
+    of multiple `CanActAs(userParty)` for all user parties.
+  - `CanExecuteAs(party)` does not imply `CanReadAs(party)`, so if the user requires read access to the  party data,
+    an explicit grant of a `CanReadAs(party)` or `CanReadAsAnyParty` right is necessary.
+- Dropped redundant column `mediator_id` from `mediator_deduplication_store` table.
+- Mediator deduplication store pruning is now much less aggressive:
+  - running at most 1 query at a time
+  - running at most once every configurable interval:
+```hocon
+  canton.mediators.<mediator>.deduplication-store.prune-at-most-every = 10s // default value
+```
+- Mediator deduplication now has batch aggregator configuration exposed for `persist` operation,
+  allowing to tune parallelism and batch size under:
+```hocon
+  canton.mediators.<mediator>.deduplication-store.persist-batching = {
+    maximum-in-flight = 2 // default value
+    maximum-batch-size = 500 // default value
+  }
+```
+
+## until 2025-09-11 (Exclusive)
 - Added endpoints related to topology snapshots that are less memory intensive for the nodes exporting the topology snapshots:
   - `TopologyManagerReadService.ExportTopologySnapshotV2`: generic topology snapshot export
-  - `TopologyManagerReadService.GenesisStateV2`: export genesis state for major upgrade 
+  - `TopologyManagerReadService.GenesisStateV2`: export genesis state for major upgrade
   - `TopologyManagerWriteService.ImportTopologySnapshotV2`: generic topology snapshot export
   - `SequencerAdministrationService.OnboardingStateV2`: export sequencer snapshot for onboarding a new sequencer
-  - `SequencerInitializationService.InitializeSequencerFromGenesisStateV2`: initialize sequencer for a new synchronizer 
+  - `SequencerInitializationService.InitializeSequencerFromGenesisStateV2`: initialize sequencer for a new synchronizer
   - `SequencerInitializationService.InitializeSequencerFromOnboardingStateV2`: initialize sequencer from an onboarding snapshot created by `SequencerAdministrationService.OnboardingStateV2`
 
 - Added indices that speeds up various topology related queries as well as the update of the `valid_until` column.
@@ -26,7 +60,7 @@ Wednesday after your change.
   sequencers.sequencer1.topology.validate-initial-topology-snapshot = true // default value
   ```
 
-## until 2025-09-04 (Exclusive)
+## Until 2025-09-04 (Exclusive)
 - Replace an unbounded timeout with a configurable timeout when waiting to observe the submitted topology tranactions.
   Additionally, the delay between retries of the topology dispatching loop has been made configurable.
   ```
@@ -44,12 +78,12 @@ Wednesday after your change.
 - BREAKING: minor breaking console change: the BaseResult.transactionHash type has been changed
   from ByteString to TxHash. The Admin API itself remained unchanged.
 
-## until 2025-08-25 (Exclusive)
+## Until 2025-08-25 (Exclusive)
 - The HTTP connection timeout is configurable in the Ledger JSON API via
   `canton.participants.<participant-id>.http-ledger-api.server.request-timeout=<duration>`. Configure this value to allow
   more complex Ledger API requests to complete (e.g. `/state/active-contracts`). The default value is 20 seconds.
 
-## until 2025-07-23 (Exclusive)
+## Until 2025-07-23 (Exclusive)
 - Bugfix: Corrected HTTP method for the JSON Ledger API endpoint `interactive-submission/preferred-packages` from GET to POST.
 
 ## Until 2025-07-16 (Exclusive)

@@ -206,7 +206,26 @@ class InMemorySequencerStore(
           .takeWhile(e => e.getKey <= watermark)
           .filter(e => isMemberRecipient(memberId)(e.getValue))
           .take(limit)
-          .map(entry => Sequenced(entry.getKey, entry.getValue))
+          .map { entry =>
+            val event = entry.getValue match {
+              case deliver: DeliverStoreEvent[PayloadId] =>
+                val sequencerMemberId = members
+                  .getOrElse(
+                    sequencerMember,
+                    ErrorUtil.invalidState(
+                      s"Sequencer member $sequencerMember is not registered in the sequencer store"
+                    ),
+                  )
+                  .memberId
+                if (deliver.members.contains(sequencerMemberId)) {
+                  deliver.copy(members = NonEmpty(SortedSet, memberId, sequencerMemberId))
+                } else {
+                  deliver.copy(members = NonEmpty(SortedSet, memberId))
+                }
+              case other => other
+            }
+            Sequenced(entry.getKey, event)
+          }
           .toList
 
       if (payloads.nonEmpty)

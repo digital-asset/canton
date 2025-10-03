@@ -872,4 +872,10 @@ object ConfigTransforms {
     )
   }
 
+  def zeroReassignmentTimeProofFreshnessProportion: ConfigTransform =
+    ConfigTransforms.updateAllParticipantConfigs_(
+      // Always send time proofs for reassignments to avoid using outdated topology snapshots.
+      // We don't want to change the default to avoid potential time proof flooding in production.
+      _.focus(_.parameters.reassignmentTimeProofFreshnessProportion).replace(NonNegativeInt.zero)
+    )
 }

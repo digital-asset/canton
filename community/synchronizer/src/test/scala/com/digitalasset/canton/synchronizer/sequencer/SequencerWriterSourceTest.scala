@@ -37,7 +37,7 @@ import com.digitalasset.canton.synchronizer.sequencer.store.{
 }
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.{Member, ParticipantId, SequencerId, UniqueIdentifier}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.PekkoUtil
 import com.digitalasset.canton.{
   BaseTest,
@@ -96,7 +96,7 @@ class SequencerWriterSourceTest
     override def readSignalsForMember(
         member: Member,
         memberId: SequencerMemberId,
-    )(implicit traceContext: TraceContext): Source[ReadSignal, NotUsed] =
+    )(implicit traceContext: TraceContext): Source[Traced[ReadSignal], NotUsed] =
       fail("shouldn't be used")
 
     override def close(): Unit = ()
@@ -274,6 +274,7 @@ class SequencerWriterSourceTest
 
       for {
         aliceId <- store.registerMember(alice, CantonTimestamp.Epoch)
+        _ <- store.registerMember(sequencerMember, CantonTimestamp.Epoch)
         deliver1 = DeliverStoreEvent.ensureSenderReceivesEvent(
           aliceId,
           messageId1,
@@ -332,6 +333,7 @@ class SequencerWriterSourceTest
 
       for {
         aliceId <- store.registerMember(alice, CantonTimestamp.Epoch).failOnShutdown
+        _ <- store.registerMember(sequencerMember, CantonTimestamp.Epoch).failOnShutdown
         deliver1 = DeliverStoreEvent.ensureSenderReceivesEvent(
           aliceId,
           messageId1,

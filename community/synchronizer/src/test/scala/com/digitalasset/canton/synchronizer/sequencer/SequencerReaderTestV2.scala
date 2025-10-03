@@ -30,7 +30,7 @@ import com.digitalasset.canton.topology.{
   SequencerId,
   TestingTopology,
 }
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.{
   BaseTest,
@@ -88,18 +88,18 @@ class SequencerReaderTestV2
       extends EventSignaller
       with FlagCloseableAsync {
     private val (queue, source) = Source
-      .queue[ReadSignal](1)
+      .queue[Traced[ReadSignal]](1)
       .buffer(1, OverflowStrategy.dropHead)
       .preMaterialize()
 
     override protected def timeouts: ProcessingTimeout = SequencerReaderTestV2.this.timeouts
 
-    def signalRead(): Unit = queue.offer(ReadSignal).discard[QueueOfferResult]
+    def signalRead(): Unit = queue.offer(Traced(ReadSignal)).discard[QueueOfferResult]
 
     override def readSignalsForMember(
         member: Member,
         memberId: SequencerMemberId,
-    )(implicit traceContext: TraceContext): Source[ReadSignal, NotUsed] =
+    )(implicit traceContext: TraceContext): Source[Traced[ReadSignal], NotUsed] =
       source
 
     override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq(
@@ -146,6 +146,8 @@ class SequencerReaderTestV2
       testedProtocolVersion,
       timeouts,
       loggerFactory,
+      streamInstrumentationConfig = BlockSequencerStreamInstrumentationConfig(),
+      SequencerMetrics.noop("sequencer-reader-test"),
     )
     val defaultTimeout: FiniteDuration = 20.seconds
     implicit val closeContext: CloseContext = CloseContext(reader)
@@ -584,10 +586,7 @@ class SequencerReaderTestV2
             _ <- store
               .saveLowerBound(ts(10), ts(9).some)
               .valueOrFail("saveLowerBound")
-            error <- loggerFactory.assertLogs(
-              leftOrFail(reader.readV2(alice, requestedTimestampInclusive = None))("read"),
-              _.errorMessage shouldBe expectedMessage,
-            )
+            error <- leftOrFail(reader.readV2(alice, requestedTimestampInclusive = None))("read")
           } yield inside(error) {
             case CreateSubscriptionError.EventsUnavailableForTimestamp(None, message) =>
               message should include(expectedMessage)
@@ -613,14 +612,9 @@ class SequencerReaderTestV2
           _ <- store
             .saveLowerBound(ts(10), ts(9).some)
             .valueOrFail("saveLowerBound")
-          error <- loggerFactory.assertLogs(
-            leftOrFail(
-              reader.readV2(alice, requestedTimestampInclusive = Some(ts0.plusSeconds(10)))
-            )(
-              "read succeeded"
-            ),
-            _.errorMessage shouldBe expectedMessage,
-          )
+          error <- leftOrFail(
+            reader.readV2(alice, requestedTimestampInclusive = Some(ts0.plusSeconds(10)))
+          )("read succeeded")
         } yield inside(error) {
           case CreateSubscriptionError.EventsUnavailableForTimestamp(Some(timestamp), message) =>
             timestamp shouldBe ts0.plusSeconds(10)

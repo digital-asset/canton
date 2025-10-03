@@ -74,9 +74,12 @@ services:
     image: quay.io/prometheuscommunity/postgres-exporter:v0.14.0
     container_name: daml_observability_postgres_exporter
     environment:
+      # Change the config depending on the postgres instance
       DATA_SOURCE_USER: "postgres"
       DATA_SOURCE_PASS: "postgres"
       DATA_SOURCE_URI: "postgres:5432/postgres?sslmode=disable"
+      # Use this URI if you are running Postgres on the host system
+      # DATA_SOURCE_URI: "host.docker.internal:5432/postgres?sslmode=disable"
       PG_EXPORTER_AUTO_DISCOVER_DATABASES: true
     volumes:
       # PostgreSQL Server Exporter configuration

@@ -135,6 +135,7 @@ class TransactionProcessingSteps(
     tracker: CommandProgressTracker,
     protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
+    messagePayloadLoggingEnabled: Boolean,
 )(implicit val ec: ExecutionContext)
     extends ProcessingSteps[
       SubmissionParam,
@@ -869,6 +870,7 @@ class TransactionProcessingSteps(
           transactionEnricher,
           createNodeEnricher,
           logger,
+          messagePayloadLoggingEnabled,
         )
 
         consistencyResultE = ContractConsistencyChecker

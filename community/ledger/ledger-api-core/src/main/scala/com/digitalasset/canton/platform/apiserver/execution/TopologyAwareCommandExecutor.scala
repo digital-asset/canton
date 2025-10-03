@@ -94,7 +94,9 @@ private[execution] class TopologyAwareCommandExecutor(
         packageMetadataSnapshot.packageIdVersionMap,
       )
 
-    logDebug(s"Attempting pass 1 of $pkgSelectionDesc - using the submitter party")
+    logDebug(
+      show"Attempting pass 1 of $pkgSelectionDesc - using the submitter party: $submitterParty"
+    )
     pass1(
       submitterParty = submitterParty,
       commands = commands,
@@ -160,7 +162,9 @@ private[execution] class TopologyAwareCommandExecutor(
             routingSynchronizerState = routingSynchronizerState,
           )
         )
-      _ = logTrace(s"Using package preference set for pass 1: $packagePreferenceSetPass1")
+      _ = logDebug(
+        s"Using package preference set for pass 1: ${packagePreferenceSetPass1.map(_.show).mkString("[", ", ", "]")}"
+      )
       commandsWithPackageSelectionForPass1 =
         commands.copy(packagePreferenceSet = packagePreferenceSetPass1)
       commandInterpretationResult <- EitherT(
@@ -226,7 +230,9 @@ private[execution] class TopologyAwareCommandExecutor(
       )
       (preselectedSynchronizerId, packagePreferenceSetPass2) =
         preselectedSynchronizerAndPreferenceSet
-      _ = logTrace(s"Using package preference set for pass 2: $packagePreferenceSetPass2")
+      _ = logDebug(
+        s"Using package preference set for pass 2: ${packagePreferenceSetPass2.map(_.show).mkString("[", ", ", "]")}"
+      )
       interpretationResult <- EitherT(
         commandInterpreter.interpret(
           commands.copy(packagePreferenceSet = packagePreferenceSetPass2),
@@ -435,8 +441,8 @@ private[execution] class TopologyAwareCommandExecutor(
   )(implicit
       loggingContextWithTrace: LoggingContextWithTrace
   ): Either[StatusRuntimeException, NonEmpty[Map[SynchronizerId, Set[LfPackageId]]]] = {
-    logTrace(
-      s"Computing per-synchronizer package preference sets using the draft transaction's party-packages ($draftPartyPackages)"
+    logDebug(
+      s"Computing per-synchronizer package preference sets using the draft transaction's party-packages: $draftPartyPackages"
     )
     val (discardedSyncs, availableSyncs) = PackagePreferenceBackend
       .computePerSynchronizerPackageCandidates(
@@ -557,10 +563,6 @@ private[execution] class TopologyAwareCommandExecutor(
   private def logDebug(msg: => String)(implicit
       loggingContext: LoggingContextWithTrace
   ): Unit = logger.debug(s"Phase 1: $msg")
-
-  private def logTrace(msg: => String)(implicit
-      loggingContextWithTrace: LoggingContextWithTrace
-  ): Unit = logger.trace(s"Phase 1: $msg")
 }
 
 private[execution] object TopologyAwareCommandExecutor {

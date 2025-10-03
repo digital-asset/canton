@@ -2017,7 +2017,19 @@ class CantonSyncService(
     val syncCryptoPureApi: RoutingSynchronizerStateFactory.SyncCryptoPureApiLookup =
       (synchronizerId, staticSyncParameters) =>
         syncCrypto.forSynchronizer(synchronizerId, staticSyncParameters).map(_.pureCrypto)
-    RoutingSynchronizerStateFactory.create(connectedSynchronizersLookup, syncCryptoPureApi)
+    val routingState =
+      RoutingSynchronizerStateFactory.create(connectedSynchronizersLookup, syncCryptoPureApi)
+
+    val connectedSynchronizers = routingState.connectedSynchronizers.keySet.mkString(", ")
+    val topologySnapshotInfo = routingState.topologySnapshots.view
+      .map { case (syncId, loader) => s"$syncId at ${loader.timestamp}" }
+      .mkString(", ")
+
+    logger.info(
+      show"Routing state contains connected synchronizers $connectedSynchronizers and topology $topologySnapshotInfo"
+    )
+
+    routingState
   }
 
   override def hashOps: HashOps = this.syncCrypto.pureCrypto
