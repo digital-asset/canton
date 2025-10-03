@@ -45,6 +45,7 @@ abstract class DatabaseSequencerApiTest extends SequencerApiTest {
       sequencerMember = sequencerId,
       blockSequencerMode = false,
       useRecipientsTableForReads = false,
+      bufferEventsWithPayloads = false,
       cachingConfigs = CachingConfigs(),
       batchingConfig = BatchingConfig(),
       sequencerMetrics = metrics,

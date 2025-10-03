@@ -28,6 +28,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.InstrumentedGraph.BufferedFlow
 import com.digitalasset.canton.sequencing.client.SequencedEventValidator.TopologyTimestampVerificationError
 import com.digitalasset.canton.sequencing.client.SequencerSubscriptionError.SequencedEventError
 import com.digitalasset.canton.sequencing.client.{
@@ -39,12 +40,13 @@ import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.sequencing.{GroupAddressResolver, SequencedSerializedEvent}
 import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
 import com.digitalasset.canton.store.db.DbDeserializationException
+import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.SequencerReader.ReadState
 import com.digitalasset.canton.synchronizer.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.synchronizer.sequencer.store.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{Member, SequencerId, SynchronizerId}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.PekkoUtil.WithKillSwitch
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.ShowUtil.*
@@ -127,6 +129,8 @@ class SequencerReader(
     protocolVersion: ProtocolVersion,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
+    streamInstrumentationConfig: BlockSequencerStreamInstrumentationConfig,
+    metrics: SequencerMetrics,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging
     with FlagCloseable
@@ -244,7 +248,10 @@ class SequencerReader(
                 show"but this sequencer cannot serve timestamps at or before ${lowerBoundText.unquoted} " +
                 show"or below the member's registration timestamp ${registeredMember.registeredFrom}."
 
-            logger.error(errorMessage)
+            // Logging at INFO level because this can happen during normal operations for a decentralized synchronizer
+            // where a participant updates its sequencer connection config before it has caught up to the point
+            // where the sequencer was actually onboarded.
+            logger.info(errorMessage)
             CreateSubscriptionError
               .EventsUnavailableForTimestamp(readFromTimestampInclusive, errorMessage)
           },
@@ -277,6 +284,23 @@ class SequencerReader(
       )
     })
 
+  private def instrumentFlow[In, Out, Mat](
+      original: Flow[In, Out, Mat],
+      flowName: String,
+  )(implicit metricsContext: MetricsContext): Flow[In, Out, Mat] =
+    if (streamInstrumentationConfig.isEnabled) {
+      val metricsContextWithFlowName = metricsContext.withExtraLabels("flow" -> flowName)
+      original
+        .map { elem =>
+          metrics.block.streamElementCount.inc()(metricsContextWithFlowName)
+          elem
+        }
+        .buffered(
+          metrics.block.streamBufferSize,
+          streamInstrumentationConfig.bufferSize.value,
+        )(metricsContextWithFlowName)
+    } else original
+
   private[SequencerReader] class EventsReader(
       member: Member,
       registeredMember: RegisteredMember,
@@ -296,13 +320,23 @@ class SequencerReader(
       eventSignaller
         .readSignalsForMember(member, registeredMember.memberId)
         .via(
-          FetchLatestEventsFlow[
-            (PreviousEventTimestamp, Sequenced[IdOrPayload]),
-            ReadState,
-          ](
-            initialReadState,
-            state => fetchUnvalidatedEventsBatchFromReadState(state)(traceContext),
-            (state, _) => !state.lastBatchWasFull,
+          instrumentFlow(
+            Flow[Traced[ReadSignal]],
+            "read-signals-for-member",
+          )
+        )
+        .via(
+          instrumentFlow(
+            FetchLatestEventsFlow[
+              (PreviousEventTimestamp, Sequenced[IdOrPayload]),
+              ReadState,
+            ](
+              initialReadState,
+              state => fetchUnvalidatedEventsBatchFromReadState(state)(traceContext),
+              (state, _) => !state.lastBatchWasFull,
+              loggerFactory,
+            ),
+            "fetch-latest-events",
           )
         )
 
@@ -618,7 +652,12 @@ class SequencerReader(
           .dropWhile(dropWhile)
           .viaMat(KillSwitches.single)(Keep.right)
           .injectKillSwitch(identity)
-          .via(fetchPayloadsForEventsBatch())
+          .via(
+            instrumentFlow(
+              fetchPayloadsForEventsBatch(),
+              "fetch-payloads-for-events-batch",
+            )
+          )
 
       // TODO(#23857): With validated events here we will persist their validation status for re-use by other subscriptions.
       eventsSource
@@ -632,6 +671,12 @@ class SequencerReader(
           parallelism = 1
         )(
           signValidatedEvent(_).value
+        )
+        .via(
+          instrumentFlow(
+            Flow[Either[SequencedEventError, SequencedSerializedEvent]],
+            "signed-events",
+          )
         )
     }
 

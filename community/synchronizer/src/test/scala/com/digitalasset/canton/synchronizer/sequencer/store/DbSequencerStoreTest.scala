@@ -35,6 +35,7 @@ trait DbSequencerStoreTest extends SequencerStoreTest with MultiTenantedSequence
         sequencerMember,
         blockSequencerMode = true,
         useRecipientsTableForReads = false,
+        bufferEventsWithPayloads = false,
         cachingConfigs = CachingConfigs(),
         batchingConfig = BatchingConfig(
           // Required to test the pruning query batching
@@ -55,6 +56,7 @@ trait DbSequencerStoreTest extends SequencerStoreTest with MultiTenantedSequence
         sequencerMember,
         blockSequencerMode = true,
         useRecipientsTableForReads = false,
+        bufferEventsWithPayloads = false,
         cachingConfigs = CachingConfigs(),
         batchingConfig = BatchingConfig(
           // Required to test the pruning query batching
@@ -77,6 +79,7 @@ trait DbSequencerStoreTest extends SequencerStoreTest with MultiTenantedSequence
         sequencerMember,
         blockSequencerMode = true,
         useRecipientsTableForReads = true,
+        bufferEventsWithPayloads = false,
         cachingConfigs = CachingConfigs(),
         batchingConfig = BatchingConfig(
           // Required to test the pruning query batching
@@ -97,6 +100,7 @@ trait DbSequencerStoreTest extends SequencerStoreTest with MultiTenantedSequence
         sequencerMember,
         blockSequencerMode = true,
         useRecipientsTableForReads = true,
+        bufferEventsWithPayloads = false,
         cachingConfigs = CachingConfigs(),
         batchingConfig = BatchingConfig(
           // Required to test the pruning query batching
@@ -119,6 +123,7 @@ trait DbSequencerStoreTest extends SequencerStoreTest with MultiTenantedSequence
         sequencerMember,
         blockSequencerMode = true,
         useRecipientsTableForReads = false,
+        bufferEventsWithPayloads = false,
         cachingConfigs = CachingConfigs(),
         batchingConfig = BatchingConfig(
           // Required to test the pruning query batching

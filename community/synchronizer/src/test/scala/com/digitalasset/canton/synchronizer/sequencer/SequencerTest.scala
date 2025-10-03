@@ -124,6 +124,7 @@ class SequencerTest
       sequencerMember = topologyClientMember,
       blockSequencerMode = false,
       useRecipientsTableForReads = false,
+      bufferEventsWithPayloads = false,
       cachingConfigs = CachingConfigs(),
       batchingConfig = BatchingConfig(),
       sequencerMetrics = SequencerMetrics.noop("sequencer-test"),

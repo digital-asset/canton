@@ -95,7 +95,7 @@ trait TestEssentials
 
   override val loggerFactory: SuppressingLogger = SuppressingLogger(getClass)
 
-  val futureSupervisor: FutureSupervisor = FutureSupervisor.Noop
+  lazy val futureSupervisor: FutureSupervisor = FutureSupervisor.Noop
 
   lazy val wallClock = new WallClock(timeouts, loggerFactory)
 

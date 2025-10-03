@@ -45,6 +45,7 @@ import com.digitalasset.canton.synchronizer.sequencer.admin.data.{
   SequencerHealthStatus,
 }
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameters
+import com.digitalasset.canton.synchronizer.sequencer.time.TimeAdvancingTopologySubscriber
 import com.digitalasset.canton.synchronizer.sequencing.authentication.grpc.SequencerConnectServerInterceptor
 import com.digitalasset.canton.synchronizer.sequencing.service.*
 import com.digitalasset.canton.synchronizer.sequencing.service.channel.GrpcSequencerChannelService
@@ -354,6 +355,19 @@ class SequencerRuntime(
         )
     }
   })
+
+  logger.info("Subscribing to topology transactions for time-advancing broadcast")
+  topologyProcessor.subscribe(
+    new TimeAdvancingTopologySubscriber(
+      clock,
+      client,
+      topologyClient,
+      synchronizerId,
+      sequencerId,
+      staticSynchronizerParameters.protocolVersion,
+      loggerFactory,
+    )
+  )
 
   private lazy val synchronizerOutboxO: Option[SynchronizerOutboxHandle] =
     maybeSynchronizerOutboxFactory

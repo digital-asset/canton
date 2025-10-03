@@ -207,6 +207,7 @@ class ConnectedSynchronizer(
     packageResolver = packageResolver,
     testingConfig = testingConfig,
     promiseUSFactory,
+    parameters.loggingConfig.api.messagePayloads,
   )
 
   private val unassignmentProcessor: UnassignmentProcessor = new UnassignmentProcessor(

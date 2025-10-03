@@ -91,11 +91,19 @@ class BlockMetrics private[metrics] (
     openTelemetryMetricsFactory.gauge(ackGaugeInfo, 0L)(MetricsContext.Empty).discard
   }
 
-  val stramBufferSize: Counter = openTelemetryMetricsFactory.counter(
+  val streamBufferSize: Counter = openTelemetryMetricsFactory.counter(
     MetricInfo(
       name = prefix :+ "stream-buffer-size",
-      summary = "Size of the buffer used by Pekko streams, tagged by stream element",
+      summary = "Size of the buffer of Pekko streams after the flow, tagged by stream flow name",
       qualification = MetricQualification.Saturation,
+    )
+  )
+
+  val streamElementCount: Counter = openTelemetryMetricsFactory.counter(
+    MetricInfo(
+      name = prefix :+ "stream-element-count",
+      summary = "Number of elements passing through a Pekko streams flow, tagged by stream element",
+      qualification = MetricQualification.Traffic,
     )
   )
 

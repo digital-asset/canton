@@ -762,6 +762,7 @@ class SequencerNodeBootstrap(
                           logger.info(
                             s"Switching logging back to $levelBefore"
                           )
+                          warningState.set(false)
                         }): Runnable,
                         supervisorConfig.logAtDebugLevelDuration.asJava.toSeconds,
                         java.util.concurrent.TimeUnit.SECONDS,

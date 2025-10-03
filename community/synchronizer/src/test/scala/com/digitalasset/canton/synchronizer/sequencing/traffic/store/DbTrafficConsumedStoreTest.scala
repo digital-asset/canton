@@ -30,6 +30,7 @@ trait DbTrafficConsumedStoreTest extends AsyncWordSpec with BaseTest with Traffi
     loggerFactory,
     blockSequencerMode = true,
     useRecipientsTableForReads = false,
+    bufferEventsWithPayloads = false,
     sequencerMember = DefaultTestIdentities.sequencerId,
     cachingConfigs = CachingConfigs(),
     batchingConfig = BatchingConfig(),

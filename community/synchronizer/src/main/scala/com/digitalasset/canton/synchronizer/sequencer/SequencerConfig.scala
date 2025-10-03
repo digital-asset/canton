@@ -52,6 +52,8 @@ object SequencerConfig {
       highAvailability: Option[SequencerHighAvailabilityConfig] = None,
       testingInterceptor: Option[DatabaseSequencerConfig.TestingInterceptor] = None,
       pruning: SequencerPruningConfig = SequencerPruningConfig(),
+      streamInstrumentation: BlockSequencerStreamInstrumentationConfig =
+        BlockSequencerStreamInstrumentationConfig(),
   ) extends SequencerConfig
       with DatabaseSequencerConfig
       with UniformCantonConfigValidation {
@@ -181,6 +183,7 @@ trait DatabaseSequencerConfig {
   val testingInterceptor: Option[DatabaseSequencerConfig.TestingInterceptor]
   val pruning: SequencerPruningConfig
   def highAvailabilityEnabled: Boolean
+  val streamInstrumentation: BlockSequencerStreamInstrumentationConfig
 }
 
 object DatabaseSequencerConfig {
@@ -251,8 +254,9 @@ final case class BlockSequencerConfig(
     override val testingInterceptor: Option[TestingInterceptor] = self.testingInterceptor
     // TODO(#15987): Take pruning config from BlockSequencerConfig once block sequencer supports pruning.
     override val pruning: SequencerPruningConfig = SequencerPruningConfig()
-
     override def highAvailabilityEnabled: Boolean = false
+    override val streamInstrumentation: BlockSequencerStreamInstrumentationConfig =
+      self.streamInstrumentation
   }
 }
 

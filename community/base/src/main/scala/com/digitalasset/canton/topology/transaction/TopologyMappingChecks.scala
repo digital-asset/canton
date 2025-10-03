@@ -77,11 +77,26 @@ class ValidatingTopologyMappingChecks(
         !(toValidate.operation == TopologyChangeOp.Remove && inStore.isEmpty),
         TopologyTransactionRejection.NoCorrespondingActiveTxToRevoke(toValidate.mapping),
       )
+
+    def mappingMismatch(expected: TopologyMapping): Boolean = (toValidate.mapping, expected) match {
+      // When removing the synchronizer trust certificate, no need to mandate that the removal mapping has the same
+      // feature flags..
+      case (
+            removeCertificate: SynchronizerTrustCertificate,
+            inStoreCertificate: SynchronizerTrustCertificate,
+          ) =>
+        removeCertificate.uniqueKey != inStoreCertificate.uniqueKey
+      case _ =>
+        toValidate.mapping != expected
+    }
+
     val checkRemoveDoesNotChangeMapping = EitherT.fromEither[FutureUnlessShutdown](
       inStore
         .collect {
           case expected
-              if toValidate.operation == TopologyChangeOp.Remove && toValidate.mapping != expected.mapping =>
+              if toValidate.operation == TopologyChangeOp.Remove && mappingMismatch(
+                expected.mapping
+              ) =>
             TopologyTransactionRejection
               .RemoveMustNotChangeMapping(toValidate.mapping, expected.mapping)
         }

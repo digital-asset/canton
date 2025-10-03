@@ -168,7 +168,9 @@ object SequencerWriterConfig {
 
   val DefaultBufferedEventsMaxMemory: BytesUnit = BytesUnit.MB(2L)
   val DefaultBufferedEventsPreloadBatchSize: PositiveInt = PositiveInt.tryCreate(50)
-  val DefaultBufferEventsWithPayloads: Boolean = true
+
+  // TODO(#17456): this is only set to "false" for testing
+  val DefaultBufferEventsWithPayloads: Boolean = false
   val DefaultBufferPayloads: Boolean = false
 
   /** Use to have events immediately flushed to the database. Useful for decreasing latency however

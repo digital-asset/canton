@@ -15,6 +15,7 @@ import com.digitalasset.canton.synchronizer.block.SequencerDriver
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.DriverBlockSequencerFactory
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.driver.BftSequencerFactory
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameters
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.time.Clock
@@ -81,6 +82,7 @@ abstract class DatabaseSequencerFactory(
       sequencerMember = sequencerId,
       blockSequencerMode = blockSequencerMode,
       useRecipientsTableForReads = config.reader.useRecipientsTableForReads,
+      bufferEventsWithPayloads = config.writer.bufferEventsWithPayloads,
       cachingConfigs = cachingConfigs,
       batchingConfig = batchingConfig,
       // Overriding the store's close context with the writers, so that when the writer gets closed, the store
@@ -171,7 +173,7 @@ trait MkSequencerFactory {
       metrics: SequencerMetrics,
       storage: Storage,
       sequencerId: SequencerId,
-      nodeParameters: CantonNodeParameters,
+      nodeParameters: SequencerNodeParameters,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(
@@ -189,7 +191,7 @@ object CommunitySequencerFactory extends MkSequencerFactory {
       metrics: SequencerMetrics,
       storage: Storage,
       sequencerId: SequencerId,
-      nodeParameters: CantonNodeParameters,
+      nodeParameters: SequencerNodeParameters,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
   )(sequencerConfig: SequencerConfig)(implicit

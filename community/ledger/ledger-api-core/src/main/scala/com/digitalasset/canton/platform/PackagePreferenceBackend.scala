@@ -347,18 +347,18 @@ object PackagePreferenceBackend {
       logger: TracedLogger,
   )(implicit
       loggingContextWithTrace: LoggingContextWithTrace
-  ): Map[LfPackageName, Candidate[SortedPreferences]] =
-    pkgIds.view
-      .flatMap { pkgId =>
-        pkgId
-          .toPackageReference(packageIndex)
-          .tap { pkgRefO =>
-            if (pkgRefO.isEmpty)
-              logger.trace(
-                show"Discarding package ID $pkgId as it doesn't exist in the participant's package store."
-              )
-          }
-      }
+  ): Map[LfPackageName, Candidate[SortedPreferences]] = {
+    val (unknownPkgIds, resolvedPackageReferences) =
+      pkgIds.view.map(pkgId => pkgId.toPackageReference(packageIndex).toRight(pkgId)).toSeq.separate
+
+    if (unknownPkgIds.nonEmpty)
+      logger.debug(
+        s"Discarding package IDs as they don't exist in the participant's package store: ${unknownPkgIds.distinct
+            .map(_.show)
+            .mkString("[", ", ", "]")}"
+      )
+
+    resolvedPackageReferences
       .groupBy(_.packageName)
       .view
       .map { case (pkgName, pkgRefs) =>
@@ -374,6 +374,7 @@ object PackagePreferenceBackend {
         )
       }
       .toMap
+  }
 
   private def computePartyPackageCandidatesIntersection(
       candidatesPerParty: MapView[LfPartyId, Map[LfPackageName, Candidate[SortedPreferences]]]

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.mediator
 
 import cats.data.EitherT
+import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
 import com.digitalasset.canton.connection.GrpcApiInfoService
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
@@ -39,6 +40,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.ServerServiceDefinition
 import io.opentelemetry.api.trace.Tracer
+import org.apache.pekko.stream.Materializer
 
 import scala.concurrent.ExecutionContext
 
@@ -52,8 +54,11 @@ final class MediatorRuntime(
     batchingConfig: BatchingConfig,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
-)(implicit protected val ec: ExecutionContext)
-    extends FlagCloseable
+)(implicit
+    protected val ec: ExecutionContext,
+    esf: ExecutionSequencerFactory,
+    materializer: Materializer,
+) extends FlagCloseable
     with NamedLogging {
   val pruningScheduler: MediatorPruningScheduler = new MediatorPruningScheduler(
     clock = clock,
@@ -127,6 +132,8 @@ object MediatorRuntimeFactory {
       loggerFactory: NamedLoggerFactory,
   )(implicit
       ec: ExecutionContext,
+      esf: ExecutionSequencerFactory,
+      materializer: Materializer,
       tracer: Tracer,
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, String, MediatorRuntime] = {
@@ -140,10 +147,11 @@ object MediatorRuntimeFactory {
     )
     val deduplicationStore =
       MediatorDeduplicationStore(
-        mediatorId,
         storage,
         nodeParameters.processingTimeouts,
         loggerFactory,
+        config.deduplicationStore.pruneAtMostEvery.toInternal,
+        config.deduplicationStore.persistBatching,
       )
     val state =
       new MediatorState(

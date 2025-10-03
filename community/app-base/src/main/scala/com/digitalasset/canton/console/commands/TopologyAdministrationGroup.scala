@@ -2085,11 +2085,13 @@ class TopologyAdministrationGroup(
         mustFullyAuthorize: Boolean = true,
         serial: Option[PositiveInt] = None,
         change: TopologyChangeOp = TopologyChangeOp.Replace,
+        featureFlags: Seq[SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag] = Seq.empty,
     ): SignedTopologyTransaction[TopologyChangeOp, SynchronizerTrustCertificate] = {
       val cmd = TopologyAdminCommands.Write.Propose(
         mapping = SynchronizerTrustCertificate(
           participantId,
           synchronizerId,
+          featureFlags,
         ),
         signedBy = Seq.empty,
         store = store.getOrElse(TopologyStoreId.Synchronizer(synchronizerId)),

@@ -198,17 +198,29 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         Mapping[v2.admin.user_management_service.Right.Kind.CanActAs, openapi.CanActAs](
           openapi.CanActAs.fromJson
         ),
+        Mapping[v2.admin.user_management_service.Right.CanExecuteAs, openapi.CanExecuteAs1](
+          openapi.CanExecuteAs1.fromJson
+        ),
+        Mapping[v2.admin.user_management_service.Right.Kind.CanExecuteAs, openapi.CanExecuteAs](
+          openapi.CanExecuteAs.fromJson
+        ),
+        Mapping[
+          v2.admin.user_management_service.Right.Kind.CanExecuteAsAnyParty,
+          openapi.CanExecuteAsAnyParty,
+        ](
+          openapi.CanExecuteAsAnyParty.fromJson
+        ),
         Mapping[v2.admin.user_management_service.Right.CanReadAs, openapi.CanReadAs1](
           openapi.CanReadAs1.fromJson
+        ),
+        Mapping[v2.admin.user_management_service.Right.Kind.CanReadAs, openapi.CanReadAs](
+          openapi.CanReadAs.fromJson
         ),
         Mapping[
           v2.admin.user_management_service.Right.Kind.CanReadAsAnyParty,
           openapi.CanReadAsAnyParty,
         ](
           openapi.CanReadAsAnyParty.fromJson
-        ),
-        Mapping[v2.admin.user_management_service.Right.Kind.CanReadAs, openapi.CanReadAs](
-          openapi.CanReadAs.fromJson
         ),
         Mapping[v2.completion.Completion, openapi.Completion1](
           openapi.Completion1.fromJson
@@ -669,13 +681,13 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         Mapping[v2.transaction_filter.TopologyFormat, openapi.TopologyFormat](
           openapi.TopologyFormat.fromJson
         ),
-        Mapping[json.JsUpdate.TopologyTransaction, openapi.TopologyTransaction](
-          openapi.TopologyTransaction.fromJson
-        ),
       )
     }
     object GrpcMappings3 {
       val value: Seq[Mapping[_, _]] = Seq(
+        Mapping[json.JsUpdate.TopologyTransaction, openapi.TopologyTransaction](
+          openapi.TopologyTransaction.fromJson
+        ),
         Mapping[v2.trace_context.TraceContext, openapi.TraceContext](
           openapi.TraceContext.fromJson
         ),

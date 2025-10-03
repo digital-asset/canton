@@ -106,7 +106,7 @@ class JsCommandService(
     asList(
       JsCommandService.completionListEndpoint,
       commandCompletionStream,
-      timeoutOpenEndedStream = true,
+      timeoutOpenEndedStream = (_: command_completion_service.CompletionStreamRequest) => true,
     ),
   )
 
