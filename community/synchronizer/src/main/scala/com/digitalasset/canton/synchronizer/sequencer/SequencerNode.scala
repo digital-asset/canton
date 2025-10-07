@@ -24,6 +24,7 @@ import com.digitalasset.canton.lifecycle.{
   PromiseUnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NodeLoggingUtil}
+import com.digitalasset.canton.networking.grpc.ratelimiting.StreamCounterCheck
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, CantonMutableHandlerRegistry}
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.SynchronizerParametersLookup.SequencerSynchronizerParameters
@@ -103,6 +104,7 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{EitherTUtil, SingleUseCell, StackTraceUtil}
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
+import com.google.common.annotations.VisibleForTesting
 import io.grpc.ServerServiceDefinition
 import org.apache.pekko.actor.ActorSystem
 import org.slf4j.event.Level
@@ -1032,6 +1034,10 @@ class SequencerNode(
 ) extends CantonNode
     with NamedLogging
     with HasUptime {
+
+  // Provide access such that it can be modified in tests
+  @VisibleForTesting
+  def streamCounterCheck: Option[StreamCounterCheck] = sequencerNodeServer.streamCounterCheck
 
   override type Status = SequencerNodeStatus
 

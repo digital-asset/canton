@@ -4,6 +4,8 @@
 package com.digitalasset.canton.participant.protocol.validation
 
 import cats.data.EitherT
+import cats.syntax.alternative.*
+import cats.syntax.either.*
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
@@ -45,6 +47,19 @@ import com.digitalasset.canton.version.ProtocolVersion
 import scala.concurrent.ExecutionContext
 
 private[protocol] object AuthenticationValidator {
+
+  /** @param viewAuthenticationErrors
+    *   authentication errors by view position
+    * @param externalHash
+    *   if the transaction has been signed externally and the the signature has been authenticated
+    *   successfully, contains the transaction hash of the transaction. Errors including signature
+    *   validation errors are returned as part of viewAuthenticationErrors.
+    */
+  final case class AuthenticationValidatorResult(
+      viewAuthenticationErrors: Map[ViewPosition, AuthenticationError],
+      externalHash: Option[Hash],
+  )
+
   def verifyViewSignatures(
       parsedRequest: ParsedTransactionRequest,
       reInterpretedTopLevelViewsEval: LazyAsyncReInterpretation,
@@ -57,12 +72,12 @@ private[protocol] object AuthenticationValidator {
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): FutureUnlessShutdown[Map[ViewPosition, AuthenticationError]] =
+  ): FutureUnlessShutdown[AuthenticationValidatorResult] =
     parsedRequest.rootViewTreesWithSignatures.forgetNE
-      .parTraverseFilter { case (rootView, signatureO) =>
+      .parTraverse { case (rootView, signatureO) =>
         rootView.submitterMetadataO match {
           // RootHash -> is a blinded tree
-          case None => FutureUnlessShutdown.pure(None)
+          case None => FutureUnlessShutdown.pure((None, None))
           case Some(submitterMetadata) =>
             for {
               participantSignatureError <- verifyParticipantSignature(
@@ -72,7 +87,7 @@ private[protocol] object AuthenticationValidator {
                 signatureO = signatureO,
                 submittingParticipant = submitterMetadata.submittingParticipant,
               )
-              externalSignatureError <- verifyExternalPartySignature(
+              externalSignatureErrorE <- verifyExternalPartySignature(
                 viewTree = rootView,
                 submitterMetadata = submitterMetadata,
                 topology = parsedRequest.snapshot,
@@ -85,10 +100,40 @@ private[protocol] object AuthenticationValidator {
                 logger = logger,
                 messagePayloadLoggingEnabled = messagePayloadLoggingEnabled,
               )
-            } yield participantSignatureError.orElse(externalSignatureError)
+              externalSignatureError = externalSignatureErrorE.left.toOption
+              externalHash = externalSignatureErrorE.toOption.flatten.map(
+                rootView.viewPosition -> _
+              )
+            } yield {
+              (
+                participantSignatureError.orElse(externalSignatureError),
+                externalHash,
+              )
+            }
         }
       }
-      .map(_.toMap)
+      .map(_.separate)
+      .map { case (errors, externalHashesO) =>
+        val externalHashes = externalHashesO.flatten
+
+        // Only one external hash is expected because we only support single root view externally signed transactions
+        // This may actually be redundant, because if there were 2 or more root views, we only have one transaction
+        // signature, that we check against all root views in the parTraverse above. So for it to pass signature
+        // verification the same signature would be to be valid for both root views,
+        // which could only happen if they're identical.
+        val multipleRootViewsErrors = if (externalHashes.sizeIs > 1) {
+          externalHashes.map { case (viewPosition, _) =>
+            viewPosition -> MultipleExternallySignedRootViews(
+              parsedRequest.requestId,
+              externalHashes.size,
+            )
+          }
+        } else Seq.empty
+
+        val allErrors = multipleRootViewsErrors ++ errors.flatten
+
+        AuthenticationValidatorResult(allErrors.toMap, externalHashes.headOption.map(_._2))
+      }
 
   def verifyViewSignature[VT <: FullReassignmentViewTree](parsed: ParsedReassignmentRequest[VT])(
       implicit
@@ -171,18 +216,18 @@ private[protocol] object AuthenticationValidator {
   )(implicit
       traceContext: TraceContext,
       executionContext: ExecutionContext,
-  ): FutureUnlessShutdown[Option[(ViewPosition, AuthenticationError)]] = {
+  ): FutureUnlessShutdown[Either[(ViewPosition, AuthenticationError), Option[Hash]]] = {
     // Re-compute the hash from the re-interpreted transaction and necessary metadata, and verify the signature
     def computeHashAndVerifyExternalSignature(
         externalAuthorization: ExternalAuthorization
-    ): FutureUnlessShutdown[Option[(ViewPosition, AuthenticationError)]] =
+    ): FutureUnlessShutdown[Either[(ViewPosition, AuthenticationError), Hash]] =
       reInterpretedTopLevelViews.get(viewTree.view.viewHash) match {
         case Some(reInterpretationET) =>
           // At this point we have to run interpretation on the view to get the necessary data to re-compute the hash
           reInterpretationET.value.value.flatMap {
             case Left(error) =>
               FutureUnlessShutdown.pure(
-                Some(
+                Left(
                   viewTree.viewPosition -> FailedToComputeExternallySignedHash(
                     requestId,
                     s"Failed to re-interpret transaction in order to compute externally signed hash: $error",
@@ -227,7 +272,7 @@ private[protocol] object AuthenticationValidator {
                 )
                 // If Hash computation is successful, verify the signature is valid
                 .flatMap { hash =>
-                  EitherT.liftF[FutureUnlessShutdown, String, Option[String]](
+                  EitherT.liftF[FutureUnlessShutdown, String, Either[String, Hash]](
                     verifyExternalSignaturesForActAs(
                       hash,
                       externalAuthorization,
@@ -239,11 +284,11 @@ private[protocol] object AuthenticationValidator {
                         }
                         error
                       case None => None
-                    }
+                    }.map(_.toLeft(hash))
                   )
                 }
                 .map(
-                  _.map[(ViewPosition, AuthenticationError)](signatureError =>
+                  _.leftMap[(ViewPosition, AuthenticationError)](signatureError =>
                     viewTree.viewPosition -> InvalidSignature(
                       requestId,
                       viewTree.viewPosition,
@@ -253,7 +298,7 @@ private[protocol] object AuthenticationValidator {
                 )
                 // If we couldn't compute the hash, fail
                 .valueOr(error =>
-                  Some(
+                  Left(
                     viewTree.viewPosition -> FailedToComputeExternallySignedHash(
                       requestId,
                       error,
@@ -266,7 +311,7 @@ private[protocol] object AuthenticationValidator {
           // (we didn't interpret all available roots in reInterpretedTopLevelViews, or we're missing the top level view entirely
           // despite having the submitterMetadata, which is also wrong
           FutureUnlessShutdown.pure(
-            Some(
+            Left(
               viewTree.viewPosition -> MissingTopLevelView(requestId)
             )
           )
@@ -298,23 +343,14 @@ private[protocol] object AuthenticationValidator {
         }
 
     submitterMetadata.externalAuthorization match {
-      case Some(_) if reInterpretedTopLevelViews.sizeIs > 1 =>
-        FutureUnlessShutdown.pure(
-          Some(
-            viewTree.viewPosition -> MultipleExternallySignedRootViews(
-              requestId,
-              reInterpretedTopLevelViews.size,
-            )
-          )
-        )
       case Some(externalAuthorization) =>
         // If external signatures are provided, we verify they are valid and cover all the actAs parties
-        computeHashAndVerifyExternalSignature(externalAuthorization)
+        computeHashAndVerifyExternalSignature(externalAuthorization).map(_.map(Some(_)))
       // If no external signatures are provided, there's nothing to verify here, and it means
       // this is a classic submission. The classic submission requirements then apply and will be checked
       // in the AuthorizationValidator (typically that the submitting participant must have submission rights
       // for the actAs parties)
-      case None => FutureUnlessShutdown.pure(None)
+      case None => FutureUnlessShutdown.pure(Right(None))
     }
   }
 }

@@ -98,6 +98,7 @@ class BlockUpdateGeneratorImpl(
     metrics: SequencerMetrics,
     protected val loggerFactory: NamedLoggerFactory,
     memberValidator: SequencerMemberValidator,
+    useEfficientBroadcast: Boolean,
 )(implicit val closeContext: CloseContext)
     extends BlockUpdateGenerator
     with NamedLogging {
@@ -114,6 +115,7 @@ class BlockUpdateGeneratorImpl(
       loggerFactory,
       metrics,
       memberValidator = memberValidator,
+      useEfficientBroadcast = useEfficientBroadcast,
     )
 
   override type InternalState = State

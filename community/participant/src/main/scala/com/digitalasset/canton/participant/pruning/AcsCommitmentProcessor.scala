@@ -73,6 +73,7 @@ import com.digitalasset.canton.pruning.{
   ConfigForSynchronizerThresholds,
   PruningStatus,
 }
+import com.digitalasset.canton.sequencing.HandlerResult
 import com.digitalasset.canton.sequencing.client.{SendResult, SequencerClientSend}
 import com.digitalasset.canton.sequencing.protocol.{Batch, OpenEnvelope, Recipients}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -200,6 +201,7 @@ class AcsCommitmentProcessor private (
     exitOnFatalFailures: Boolean,
     batchingConfig: BatchingConfig,
     maxCommitmentSendDelayMillis: Option[NonNegativeInt],
+    doNotAwaitOnCheckingIncomingCommitments: Boolean,
 )(implicit ec: ExecutionContext)
     extends AcsChangeListener
     with FlagCloseable
@@ -889,7 +891,7 @@ class AcsCommitmentProcessor private (
   def processBatch(
       timestamp: CantonTimestamp,
       batch: Traced[Seq[OpenEnvelope[SignedProtocolMessage[AcsCommitment]]]],
-  ): FutureUnlessShutdown[Unit] =
+  ): HandlerResult =
     batch.withTraceContext(implicit traceContext => processBatchInternal(timestamp, _))
 
   /** Process incoming commitments.
@@ -916,9 +918,9 @@ class AcsCommitmentProcessor private (
   def processBatchInternal(
       timestamp: CantonTimestamp,
       batch: Seq[OpenEnvelope[SignedProtocolMessage[AcsCommitment]]],
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+  )(implicit traceContext: TraceContext): HandlerResult = {
 
-    if (batch.lengthCompare(1) != 0) {
+    if (batch.sizeIs != 1) {
       Errors.InternalError
         .MultipleCommitmentsInBatch(synchronizerId, timestamp, batch.length)
         .discard
@@ -935,7 +937,6 @@ class AcsCommitmentProcessor private (
         getReconciliationIntervals(
           envelope.protocolMessage.message.period.toInclusive.forgetRefinement
         )
-          // TODO(#10790) Investigate whether we can validate and process the commitments asynchronously.
           .flatMap { reconciliationIntervals =>
             validateEnvelope(timestamp, envelope, reconciliationIntervals) match {
               case Right(()) =>
@@ -956,7 +957,7 @@ class AcsCommitmentProcessor private (
       )
     } yield ()
 
-    FutureUnlessShutdownUtil.logOnFailureUnlessShutdown(
+    val result = FutureUnlessShutdownUtil.logOnFailureUnlessShutdown(
       future,
       failureMessage = s"Failed to process incoming commitment.",
       onFailure = _ => {
@@ -965,6 +966,8 @@ class AcsCommitmentProcessor private (
       },
       logPassiveInstanceAtInfo = true,
     )
+
+    HandlerResult.asynchronous(result)
   }
 
   private def updateParticipantLatency(
@@ -1219,8 +1222,8 @@ class AcsCommitmentProcessor private (
 
   private def checkCommitment(
       commitment: AcsCommitment
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    dbQueue
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    val fut = dbQueue
       .executeUS(
         {
           // Make sure that the ready-for-remote check is atomic with buffering the commitment
@@ -1236,6 +1239,15 @@ class AcsCommitmentProcessor private (
         s"check commitment readiness at ${commitment.period} by ${commitment.sender}",
       )
       .flatten
+
+    if (doNotAwaitOnCheckingIncomingCommitments) {
+      FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+        fut,
+        s"check incoming commitment for ${commitment.period} by ${commitment.sender}",
+      )
+      FutureUnlessShutdown.unit
+    } else fut
+  }
 
   private def indicateReadyForRemote(timestamp: CantonTimestampSecond)(implicit
       traceContext: TraceContext
@@ -1890,7 +1902,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
     (
         CantonTimestamp,
         Traced[Seq[OpenEnvelope[SignedProtocolMessage[AcsCommitment]]]],
-    ) => FutureUnlessShutdown[Unit]
+    ) => HandlerResult
 
   val emptyCommitment: AcsCommitment.CommitmentType = LtHash16().getByteString()
   val hashedEmptyCommitment: AcsCommitment.HashedCommitmentType =
@@ -1918,6 +1930,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       exitOnFatalFailures: Boolean,
       batchingConfig: BatchingConfig,
       maxCommitmentSendDelayMillis: Option[NonNegativeInt] = None,
+      doNotAwaitOnCheckingIncomingCommitments: Boolean,
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
@@ -1978,6 +1991,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
         exitOnFatalFailures,
         batchingConfig,
         maxCommitmentSendDelayMillis,
+        doNotAwaitOnCheckingIncomingCommitments,
       )
       // We trigger the processing of the buffered commitments, but we do not wait for it to complete here,
       // because, if processing buffered required topology updates that go through the same queue, we'd create a deadlock.

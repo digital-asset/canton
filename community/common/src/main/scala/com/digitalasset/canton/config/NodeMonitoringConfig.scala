@@ -27,7 +27,7 @@ final case class GrpcHealthServerConfig(
   override val sslContext: Option[SslContext] = None
   override val serverCertChainFile: Option[PemFileOrString] = None
   override def maxInboundMessageSize: NonNegativeInt = ServerConfig.defaultMaxInboundMessageSize
-
+  override def stream: Option[StreamLimitConfig] = None
   def toRemoteConfig: FullClientConfig =
     FullClientConfig(address, port, keepAliveClient = keepAliveServer.map(_.clientConfigFor))
 }

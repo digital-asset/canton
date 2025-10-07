@@ -1066,6 +1066,8 @@ object ConnectedSynchronizer {
           clock,
           exitOnFatalFailures = parameters.exitOnFatalFailures,
           parameters.batchingConfig,
+          doNotAwaitOnCheckingIncomingCommitments =
+            parameters.doNotAwaitOnCheckingIncomingCommitments,
         )
         topologyProcessor <- topologyProcessorFactory.create(
           acsCommitmentProcessor.scheduleTopologyTick

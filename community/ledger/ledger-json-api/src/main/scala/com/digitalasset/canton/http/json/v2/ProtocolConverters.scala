@@ -22,7 +22,9 @@ import com.digitalasset.canton.http.json.v2.JsSchema.{
 }
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref
+import com.google.protobuf.ByteString
 import com.google.rpc.status.Status
 import ujson.StringRenderer
 import ujson.circe.CirceJson
@@ -389,6 +391,10 @@ class ProtocolConverters(schemaProcessors: SchemaProcessors)(implicit
             synchronizerId = v.synchronizerId,
             traceContext = v.traceContext,
             recordTime = v.getRecordTime,
+            externalTransactionHash = v.externalTransactionHash
+              .map(_.toByteArray)
+              .map(Hash.assertFromByteArray)
+              .map(_.toHexString),
           )
         )
 
@@ -407,6 +413,7 @@ class ProtocolConverters(schemaProcessors: SchemaProcessors)(implicit
           synchronizerId = v.synchronizerId,
           traceContext = v.traceContext,
           recordTime = Some(v.recordTime),
+          externalTransactionHash = v.externalTransactionHash.map(ByteString.fromHex),
         )
       }
   }

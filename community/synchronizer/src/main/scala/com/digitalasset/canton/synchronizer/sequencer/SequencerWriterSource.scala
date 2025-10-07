@@ -230,6 +230,7 @@ object SequencerWriterSource {
       store,
       () => PayloadId(payloadIdGenerator.generateNext),
       protocolVersion,
+      writerConfig.useEfficientBroadcast,
     )
 
     // Take deliver events with full payloads and first write them before adding them to the events queue
@@ -328,6 +329,7 @@ class SendEventGenerator(
     store: SequencerWriterStore,
     payloadIdGenerator: () => PayloadId,
     protocolVersion: ProtocolVersion,
+    useEfficientBroadcast: Boolean,
 )(implicit
     executionContext: ExecutionContext
 ) {
@@ -390,6 +392,11 @@ class SendEventGenerator(
       }
 
       def deliver(recipientIds: Set[SequencerMemberId]): StoreEvent[BytesPayload] = {
+        val finalRecipientIds = if (submission.batch.isBroadcast && useEfficientBroadcast) {
+          Set(SequencerMemberId.Broadcast)
+        } else {
+          recipientIds
+        }
         val payload =
           BytesPayload(
             submissionOrOutcome.fold(
@@ -402,7 +409,7 @@ class SendEventGenerator(
         DeliverStoreEvent.ensureSenderReceivesEvent(
           senderId,
           submission.messageId,
-          recipientIds,
+          finalRecipientIds,
           payload,
           submission.topologyTimestamp,
           trafficReceiptO,
