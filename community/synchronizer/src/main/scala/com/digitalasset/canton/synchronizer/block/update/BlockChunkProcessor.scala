@@ -60,6 +60,7 @@ final class BlockChunkProcessor(
     override val loggerFactory: NamedLoggerFactory,
     metrics: SequencerMetrics,
     memberValidator: SequencerMemberValidator,
+    useEfficientBroadcast: Boolean,
 )(implicit closeContext: CloseContext)
     extends NamedLogging {
 
@@ -71,6 +72,7 @@ final class BlockChunkProcessor(
       loggerFactory,
       metrics,
       memberValidator = memberValidator,
+      useEfficientBroadcast = useEfficientBroadcast,
     )
 
   private val sequencedSubmissionsValidator =

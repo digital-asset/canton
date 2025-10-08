@@ -300,9 +300,7 @@ final class SyncStateInspection(
                       synchronizerIdForExport,
                       contract,
                       reassignmentCounter,
-                    )(
-                      protocolVersion
-                    )
+                    )(protocolVersion)
 
                   activeContract.writeDelimitedTo(outputStream) match {
                     case Left(errorMessage) =>

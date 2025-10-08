@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.config
 
-import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble}
+import com.digitalasset.canton.config.RequireTypes.PositiveDouble
+import com.digitalasset.canton.config.{ProcessingTimeout, StreamLimitConfig}
 import com.digitalasset.canton.environment.{
   CantonNodeParameters,
   HasGeneralCantonNodeParameters,
@@ -32,10 +32,8 @@ trait SequencerParameters {
   * @param unsafeEnableOnlinePartyReplication
   *   Whether to enable online party replication sequencer channels. Unsafe as still under
   *   development.
-  * @param sequencerApiLimits
-  *   map of service name to maximum number of parallel open streams
-  * @param warnOnUndefinedLimits
-  *   emit warning if a limit is not configured for a stream
+  * @param streamLimits
+  *   optional stream limit configs
   */
 final case class SequencerNodeParameters(
     general: CantonNodeParameters.General,
@@ -43,8 +41,7 @@ final case class SequencerNodeParameters(
     maxConfirmationRequestsBurstFactor: PositiveDouble,
     asyncWriter: AsyncWriterParameters,
     unsafeEnableOnlinePartyReplication: Boolean = false,
-    sequencerApiLimits: Map[String, NonNegativeInt] = Map.empty,
-    warnOnUndefinedLimits: Boolean = true,
+    streamLimits: Option[StreamLimitConfig] = None,
     progressSupervisor: Option[ProgressSupervisorConfig] = None,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters

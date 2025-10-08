@@ -553,6 +553,7 @@ class InMemoryFanoutBufferSpec
       commandId = "",
       synchronizerId = someSynchronizerId.toProtoPrimitive,
       recordTime = Time.Timestamp.Epoch,
+      externalTransactionHash = None,
     )
 
   private def txRejected(idx: Long, offset: Offset) =

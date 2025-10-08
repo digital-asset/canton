@@ -373,6 +373,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       BatchingConfig(),
       // do not delay sending commitments for testing, because tests often expect to see commitments after an interval
       Some(NonNegativeInt.zero),
+      doNotAwaitOnCheckingIncomingCommitments = false,
     )
     (acsCommitmentProcessor, store, sequencerClient, changes, acsCommitmentConfigStore)
   }
@@ -1289,7 +1290,7 @@ class AcsCommitmentProcessorTest
         // First ask for the remote commitments to be processed, and then compute locally
         _ <- delivered
           .parTraverse_ { case (ts, batch) =>
-            processor.processBatchInternal(ts.forgetRefinement, batch)
+            processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
           }
         _ <- processChanges(processor, store, changes)
 
@@ -1376,7 +1377,7 @@ class AcsCommitmentProcessorTest
         // First ask for the remote commitments to be processed, and then compute locally
         _ <- delivered
           .parTraverse_ { case (ts, batch) =>
-            processor.processBatchInternal(ts.forgetRefinement, batch)
+            processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
           }
 
         _ <- processor.flush()
@@ -1807,7 +1808,7 @@ class AcsCommitmentProcessorTest
         )
         // First ask for the remote commitments to be processed
         _ <- delivered.parTraverse_ { case (ts, batch) =>
-          processor.processBatchInternal(ts.forgetRefinement, batch)
+          processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
         }
         _ <- processChanges(processor, store, changes)
 
@@ -2179,7 +2180,7 @@ class AcsCommitmentProcessorTest
           // First ask for the remote commitments to be processed, and then compute locally
           // This triggers catch-up mode
           _ <- delivered.parTraverse_ { case (ts, batch) =>
-            processor.processBatchInternal(ts.forgetRefinement, batch)
+            processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
           }
           _ <- processChanges(processor, store, changes)
 
@@ -2560,7 +2561,10 @@ class AcsCommitmentProcessorTest
           _ <- processChanges(processor, store, changes)
 
           _ <- delivered.parTraverse_ { case (ts, batch) =>
-            processor.processBatchInternal(ts.forgetRefinement, batch)
+            processor
+              .processBatchInternal(ts.forgetRefinement, batch)
+              .flatMap(_.unwrap)
+
           }
           _ <- processor.flush()
           outstanding <- store.noOutstandingCommitments(timeProofs.lastOption.value)
@@ -2666,7 +2670,7 @@ class AcsCommitmentProcessorTest
           )
           // First ask for the remote commitments to be processed, and then compute locally
           _ <- delivered.parTraverse_ { case (ts, batch) =>
-            processor.processBatchInternal(ts.forgetRefinement, batch)
+            processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
           }
 
           _ <- loggerFactory
@@ -3133,7 +3137,7 @@ class AcsCommitmentProcessorTest
           // This triggers catch-up mode
           _ <- delivered
             .parTraverse_ { case (ts, batch) =>
-              processor.processBatchInternal(ts.forgetRefinement, batch)
+              processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
             }
 
           _ <- processChanges(
@@ -3250,7 +3254,7 @@ class AcsCommitmentProcessorTest
           // First ask for the remote commitments to be processed, and then compute locally
           // This triggers catch-up mode
           _ <- delivered.parTraverse_ { case (ts, batch) =>
-            processor.processBatchInternal(ts.forgetRefinement, batch)
+            processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
           }
 
           _ <- loggerFactory.assertLoggedWarningsAndErrorsSeq(
@@ -3416,7 +3420,7 @@ class AcsCommitmentProcessorTest
           // which are up to timestamp 30
           // This causes the local participant to enter catch-up mode
           _ <- deliveredFast.parTraverse_ { case (ts, batch) =>
-            processor.processBatchInternal(ts.forgetRefinement, batch)
+            processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
           }
 
           _ = loggerFactory.assertLogs(
@@ -3443,7 +3447,7 @@ class AcsCommitmentProcessorTest
           )
 
           _ <- deliveredNormal.parTraverse_ { case (ts, batch) =>
-            processor.processBatchInternal(ts.forgetRefinement, batch)
+            processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
           }
           _ <- processor.flush()
 
@@ -3598,7 +3602,7 @@ class AcsCommitmentProcessorTest
             // This causes the local participant to enter catch-up mode, and observe mismatch for timestamp 20,
             // and fine-grained compute and send commitment 10-15
             _ <- deliveredFast.parTraverse_ { case (ts, batch) =>
-              processor.processBatchInternal(ts.forgetRefinement, batch)
+              processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
             }
 
             _ = changes.foreach { case (recordTime, change) =>
@@ -3620,7 +3624,7 @@ class AcsCommitmentProcessorTest
             )
 
             _ <- deliveredNormal.parTraverse_ { case (ts, batch) =>
-              processor.processBatchInternal(ts.forgetRefinement, batch)
+              processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
             }
             _ <- processor.flush()
 
@@ -4104,7 +4108,7 @@ class AcsCommitmentProcessorTest
         // This triggers catch-up mode
         _ <- delivered
           .parTraverse_ { case (ts, batch) =>
-            processor.processBatchInternal(ts.forgetRefinement, batch)
+            processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
           }
 
       } yield {
@@ -4201,7 +4205,7 @@ class AcsCommitmentProcessorTest
         // This triggers catch-up mode
         _ <- delivered
           .parTraverse_ { case (ts, batch) =>
-            processor.processBatchInternal(ts.forgetRefinement, batch)
+            processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
           }
 
       } yield {
@@ -4293,7 +4297,7 @@ class AcsCommitmentProcessorTest
         // This triggers catch-up mode
         _ <- delivered
           .parTraverse_ { case (ts, batch) =>
-            processor.processBatchInternal(ts.forgetRefinement, batch)
+            processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
           }
 
       } yield {

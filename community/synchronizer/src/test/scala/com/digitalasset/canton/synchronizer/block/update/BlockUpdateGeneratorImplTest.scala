@@ -63,6 +63,7 @@ class BlockUpdateGeneratorImplTest
             SequencerTestMetrics,
             loggerFactory,
             memberValidatorMock,
+            useEfficientBroadcast = true,
           )
 
         blockUpdateGenerator.extractBlockEvents(
@@ -104,6 +105,7 @@ class BlockUpdateGeneratorImplTest
             SequencerTestMetrics,
             loggerFactory,
             memberValidatorMock,
+            useEfficientBroadcast = true,
           )
 
         for {

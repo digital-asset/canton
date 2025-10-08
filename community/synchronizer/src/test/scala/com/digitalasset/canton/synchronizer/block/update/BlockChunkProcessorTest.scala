@@ -58,6 +58,7 @@ class BlockChunkProcessorTest extends AsyncWordSpec with BaseTest {
             loggerFactory,
             SequencerTestMetrics,
             memberValidatorMock,
+            useEfficientBroadcast = true,
           )
 
         blockChunkProcessor

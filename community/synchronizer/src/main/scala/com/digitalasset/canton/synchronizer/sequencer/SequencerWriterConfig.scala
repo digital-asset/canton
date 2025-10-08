@@ -79,6 +79,10 @@ object CommitMode {
   *   whether to pass payloads from buffered events into DbSequencerStore.payloadCache. When enabled
   *   this spares reloading payloads from the database. Only works when bufferEventsWithPayloads =
   *   false.
+  * @param useEfficientBroadcast
+  *   whether to use the new efficient broadcast via a symbolic group instead of expanding the list
+  *   of every member for events addressed to
+  *   [[com.digitalasset.canton.sequencing.protocol.AllMembersOfSynchronizer]].
   */
 sealed trait SequencerWriterConfig {
   this: {
@@ -96,6 +100,7 @@ sealed trait SequencerWriterConfig {
         bufferedEventsPreloadBatchSize: PositiveInt,
         bufferEventsWithPayloads: Boolean,
         bufferPayloads: Boolean,
+        useEfficientBroadcast: Boolean,
     ): SequencerWriterConfig
   } =>
 
@@ -110,6 +115,7 @@ sealed trait SequencerWriterConfig {
   val bufferedEventsPreloadBatchSize: PositiveInt
   val bufferEventsWithPayloads: Boolean
   val bufferPayloads: Boolean
+  val useEfficientBroadcast: Boolean
 
   /** how frequently to generate counter checkpoints for all members */
   val checkpointInterval: NonNegativeFiniteDuration
@@ -129,6 +135,7 @@ sealed trait SequencerWriterConfig {
       bufferedEventsPreloadBatchSize: PositiveInt = this.bufferedEventsPreloadBatchSize,
       bufferEventsWithPayloads: Boolean = this.bufferEventsWithPayloads,
       bufferPayloads: Boolean = this.bufferPayloads,
+      useEfficientBroadcast: Boolean = this.useEfficientBroadcast,
   ): SequencerWriterConfig =
     copy(
       payloadQueueSize,
@@ -144,6 +151,7 @@ sealed trait SequencerWriterConfig {
       bufferedEventsPreloadBatchSize,
       bufferEventsWithPayloads,
       bufferPayloads,
+      useEfficientBroadcast,
     )
 }
 
@@ -169,9 +177,9 @@ object SequencerWriterConfig {
   val DefaultBufferedEventsMaxMemory: BytesUnit = BytesUnit.MB(2L)
   val DefaultBufferedEventsPreloadBatchSize: PositiveInt = PositiveInt.tryCreate(50)
 
-  // TODO(#17456): this is only set to "false" for testing
   val DefaultBufferEventsWithPayloads: Boolean = false
-  val DefaultBufferPayloads: Boolean = false
+  val DefaultBufferPayloads: Boolean = true
+  val DefaultUseEfficientBroadcast: Boolean = true
 
   /** Use to have events immediately flushed to the database. Useful for decreasing latency however
     * at a high throughput a large number of writes will be detrimental for performance.
@@ -192,6 +200,7 @@ object SequencerWriterConfig {
         DefaultBufferedEventsPreloadBatchSize,
       override val bufferEventsWithPayloads: Boolean = DefaultBufferEventsWithPayloads,
       override val bufferPayloads: Boolean = DefaultBufferPayloads,
+      override val useEfficientBroadcast: Boolean = DefaultUseEfficientBroadcast,
   ) extends SequencerWriterConfig
       with UniformCantonConfigValidation
 
@@ -216,6 +225,7 @@ object SequencerWriterConfig {
         DefaultBufferedEventsPreloadBatchSize,
       override val bufferEventsWithPayloads: Boolean = DefaultBufferEventsWithPayloads,
       override val bufferPayloads: Boolean = DefaultBufferPayloads,
+      override val useEfficientBroadcast: Boolean = DefaultUseEfficientBroadcast,
   ) extends SequencerWriterConfig
       with UniformCantonConfigValidation
 }

@@ -160,6 +160,7 @@ class BlockSequencer(
       metrics,
       loggerFactory,
       memberValidator = memberValidator,
+      useEfficientBroadcast = blockSequencerConfig.writer.useEfficientBroadcast,
     )(CloseContext(cryptoApi))
 
     implicit val traceContext: TraceContext = TraceContext.empty

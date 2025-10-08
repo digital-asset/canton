@@ -86,7 +86,7 @@ class LocalSequencerStateEventSignaller(
       s"Creating signal source for $member (id: $memberId)"
     ) // TODO(i28037): remove extra logging
     notificationsHubSourceWithLogging
-      .filter(_.value.includes(memberId))
+      .filter(_.value.isBroadcastOrIncludes(memberId))
       .map { notification =>
         // TODO(#26818): clean up excessive debug logging
         logger.debug(s"Processing read signal for $member due to $notification")(

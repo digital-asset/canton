@@ -134,6 +134,7 @@ class ParallelIndexerSubscriptionSpec
     synchronizer_id = "x::sourcesynchronizer",
     trace_context = serializableTraceContext,
     record_time = 0,
+    external_transaction_hash = None,
   )
 
   private val someEventExercise = DbDto.EventExercise(
@@ -164,6 +165,7 @@ class ParallelIndexerSubscriptionSpec
     synchronizer_id = "",
     trace_context = serializableTraceContext,
     record_time = 0,
+    external_transaction_hash = None,
   )
 
   private val someEventAssign = DbDto.EventAssign(

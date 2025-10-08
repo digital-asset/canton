@@ -239,6 +239,9 @@ final case class LedgerApiServerConfig(
 ) extends ServerConfig // We can't currently expose enterprise server features at the ledger api anyway
     {
 
+  // LAPI server does not use the canonical server builder, so doesn't support the stream limits using stream limit config
+  override val stream: Option[StreamLimitConfig] = None
+
   lazy val clientConfig: FullClientConfig =
     FullClientConfig(address, port, tls.map(_.clientConfig))
 
@@ -336,6 +339,9 @@ object TestingTimeServiceConfig {
   * @param protocolFeatureFlags
   *   Enable usage of protocol feature flags. See
   *   [[com.digitalasset.canton.version.ParticipantProtocolFeatureFlags]]
+  * @param doNotAwaitOnCheckingIncomingCommitments
+  *   Enable fully asynchronous checking of incoming commitments. This may result in some incoming
+  *   commitments not being checked in case of crashes or HA failovers.
   */
 final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -367,6 +373,7 @@ final case class ParticipantNodeParameterConfig(
     commandProgressTracker: CommandProgressTrackerConfig = CommandProgressTrackerConfig(),
     unsafeOnlinePartyReplication: Option[UnsafeOnlinePartyReplicationConfig] = None,
     protocolFeatureFlags: Boolean = true,
+    doNotAwaitOnCheckingIncomingCommitments: Boolean = false,
 ) extends LocalNodeParametersConfig
     with UniformCantonConfigValidation
 

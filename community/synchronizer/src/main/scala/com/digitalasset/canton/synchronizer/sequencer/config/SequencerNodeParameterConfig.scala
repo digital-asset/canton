@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.config
 
 import cats.data.Chain
 import com.digitalasset.canton.config.*
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{PositiveDouble, PositiveInt}
 import com.digitalasset.canton.config.manual.CantonConfigValidatorDerivation
 import com.digitalasset.canton.synchronizer.block.AsyncWriterParameters
 import com.digitalasset.canton.synchronizer.sequencer.ProgressSupervisorConfig
@@ -56,11 +56,6 @@ object AsyncWriterConfig {
   * @param maxConfirmationRequestsBurstFactor
   *   how forgiving the rate limit is in case of bursts (so rate limit starts after observing an
   *   initial burst of factor * max_rate commands)
-  * @param sequencerApiLimits
-  *   map of service name to maximum number of parallel open streams
-  * @param warnOnUndefinedLimits
-  *   if true, then this sequencer will emit a warning once if there is no limit configured for a
-  *   particular stream
   * @param progressSupervisor
   *   if defined, enables the progress supervisor to monitor if the sequencer stops progressing and
   *   to collect diagnostic data
@@ -78,8 +73,6 @@ final case class SequencerNodeParameterConfig(
     override val watchdog: Option[WatchdogConfig] = None,
     progressSupervisor: Option[ProgressSupervisorConfig] = None,
     unsafeEnableOnlinePartyReplication: Boolean = false,
-    sequencerApiLimits: Map[String, NonNegativeInt] = Map.empty,
-    warnOnUndefinedLimits: Boolean = true,
     asyncWriter: AsyncWriterConfig = AsyncWriterConfig(),
 ) extends ProtocolConfig
     with LocalNodeParametersConfig

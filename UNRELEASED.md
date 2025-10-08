@@ -9,11 +9,17 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
-## Until 2024-09-26 (Exclusive)
+## Until 2025-10-08 (Exclusive)
+- BREAKING: Moved the sequencer-api limits into the server config. Now, the same functionality is
+  also available on the Admin API. The configuration is now under `<api-config>.stream.limits = { ... }`, for both the public and admin api.
+
+- new participant config parameter `canton.participants.<participant>.parameters.do-not-await-on-checking-incoming-commitments` to disable the synchronization of checking incoming commitments with crash recovery.
+
+## Until 2025-09-01 (Exclusive)
 - Documented external party on the Ledger API allocation endpoints
 - Introduced new command bootstrap.local() to provide a simple way to bootstrap a local synchronizer.
 
-## Until 2024-09-24 (Exclusive)
+## Until 2025-09-24 (Exclusive)
 - Fixed a bug in the ModelConformanceChecker that would incorrectly reject otherwise valid externally signed transactions
   that make use of a locally created contract in a subview. The fix is only effective if all root informees of the transaction
   have upgraded Canton to a patched version.

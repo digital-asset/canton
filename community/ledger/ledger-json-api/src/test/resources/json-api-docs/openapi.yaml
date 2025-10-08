@@ -4722,6 +4722,12 @@ components:
             which synchronized the transaction.
             Required
           type: string
+        externalTransactionHash:
+          description: |-
+            For transaction externally signed, contains the external transaction hash
+            signed by the external party. Can be used to correlate an external submission with a committed transaction.
+            Optional
+          type: string
     JsTransactionTree:
       title: JsTransactionTree
       description: |-

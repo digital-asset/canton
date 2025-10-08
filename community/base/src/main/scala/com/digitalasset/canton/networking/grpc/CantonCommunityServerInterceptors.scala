@@ -6,16 +6,14 @@ package com.digitalasset.canton.networking.grpc
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.metrics.grpc.{GrpcMetricsServerInterceptor, GrpcServerMetrics}
 import com.daml.tracing.Telemetry
-import com.digitalasset.canton.auth.{
-  AdminAuthorizer,
-  AuthInterceptor,
-  AuthServiceWildcard,
-  CantonAdminToken,
-  CantonAdminTokenAuthService,
-}
+import com.digitalasset.canton.auth.*
 import com.digitalasset.canton.concurrent.DirectExecutionContext
-import com.digitalasset.canton.config.{ApiLoggingConfig, AuthServiceConfig}
+import com.digitalasset.canton.config.{ApiLoggingConfig, AuthServiceConfig, StreamLimitConfig}
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.networking.grpc.ratelimiting.{
+  RateLimitingInterceptor,
+  StreamCounterCheck,
+}
 import com.digitalasset.canton.tracing.{TraceContextGrpc, TracingConfig}
 import io.grpc.ServerInterceptors.intercept
 import io.grpc.ServerServiceDefinition
@@ -27,6 +25,8 @@ trait CantonServerInterceptors {
       service: ServerServiceDefinition,
       withLogging: Boolean,
   ): ServerServiceDefinition
+
+  def streamCounterCheck: Option[StreamCounterCheck]
 }
 
 class CantonCommunityServerInterceptors(
@@ -38,7 +38,13 @@ class CantonCommunityServerInterceptors(
     adminToken: Option[CantonAdminToken],
     jwtTimestampLeeway: Option[JwtTimestampLeeway],
     telemetry: Telemetry,
+    streamLimits: Option[StreamLimitConfig],
 ) extends CantonServerInterceptors {
+
+  override val streamCounterCheck: Option[StreamCounterCheck] = streamLimits.map { limits =>
+    new StreamCounterCheck(limits.limits, limits.warnOnUndefinedLimits, loggerFactory)
+  }
+
   private def interceptForLogging(
       service: ServerServiceDefinition,
       withLogging: Boolean,
@@ -86,6 +92,11 @@ class CantonCommunityServerInterceptors(
     intercept(service, interceptor)
   }
 
+  private def addLimitInterceptor(service: ServerServiceDefinition): ServerServiceDefinition =
+    streamCounterCheck.fold(service) { limits =>
+      intercept(service, new RateLimitingInterceptor(List(limits.check)), limits)
+    }
+
   def addAllInterceptors(
       service: ServerServiceDefinition,
       withLogging: Boolean,
@@ -94,5 +105,6 @@ class CantonCommunityServerInterceptors(
       .pipe(interceptForLogging(_, withLogging))
       .pipe(addTraceContextInterceptor)
       .pipe(addMetricsInterceptor)
+      .pipe(addLimitInterceptor)
       .pipe(addAuthInterceptor)
 }
