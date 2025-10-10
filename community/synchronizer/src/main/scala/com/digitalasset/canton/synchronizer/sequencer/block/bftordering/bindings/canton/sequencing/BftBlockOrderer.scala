@@ -7,7 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.tracing.NoOpTelemetry
-import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
@@ -60,8 +60,11 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.OrderingTopologyProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.PekkoBlockSubscription
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.OutputMetadataStore
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.{
+  OutputModule,
+  PekkoBlockSubscription,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.P2PNetworkOutModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.data.P2PEndpointsStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.pruning.BftOrdererPruningScheduler
@@ -134,7 +137,6 @@ final class BftBlockOrderer(
     metrics: BftOrderingMetrics,
     override val loggerFactory: NamedLoggerFactory,
     queryCostMonitoring: Option[QueryCostMonitoringConfig],
-    futureSupervisor: FutureSupervisor,
 )(implicit executionContext: ExecutionContext, materializer: Materializer, tracer: Tracer)
     extends BlockOrderer
     with NamedLogging
@@ -280,6 +282,8 @@ final class BftBlockOrderer(
 
   private val isOrdererHealthy = new AtomicBoolean(true)
 
+  private val outputPreviousStoredBlock = new OutputModule.PreviousStoredBlock
+
   private val PekkoModuleSystem.PekkoModuleSystemInitResult(
     actorSystem,
     initResult,
@@ -411,6 +415,7 @@ final class BftBlockOrderer(
       metrics,
       loggerFactory,
       timeouts,
+      outputPreviousStoredBlock = outputPreviousStoredBlock,
     )
   }
 
@@ -617,14 +622,8 @@ final class BftBlockOrderer(
 
   override def sequencingTime(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[CantonTimestamp]] = {
-    val maybeTimePromise =
-      mkPromise[Option[CantonTimestamp]]("get-current-bft-time", futureSupervisor)
-    outputModuleRef.asyncSend(Output.GetCurrentBftTime { maybeTime =>
-      maybeTimePromise.outcome_(maybeTime)
-    })
-    maybeTimePromise.futureUS
-  }
+  ): FutureUnlessShutdown[Option[CantonTimestamp]] =
+    FutureUnlessShutdown.pure(outputPreviousStoredBlock.getBlockNumberAndBftTime.map(_._2))
 
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     logger.debug("Beginning async BFT block orderer shutdown")(TraceContext.empty)

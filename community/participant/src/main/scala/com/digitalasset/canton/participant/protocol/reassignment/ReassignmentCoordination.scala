@@ -185,6 +185,7 @@ class ReassignmentCoordination(
       targetSynchronizerId: Target[PhysicalSynchronizerId],
       submitterMetadata: ReassignmentSubmitterMetadata,
       reassignmentId: ReassignmentId,
+      targetTopology: Target[TopologySnapshot],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, ReassignmentProcessorError, AssignmentProcessingSteps.SubmissionResult] = {
@@ -200,6 +201,7 @@ class ReassignmentCoordination(
         .submitAssignments(
           submitterMetadata,
           reassignmentId,
+          targetTopology,
         )
         .mapK(FutureUnlessShutdown.outcomeK)
         .semiflatMap(Predef.identity)
@@ -279,10 +281,12 @@ class ReassignmentCoordination(
   private def getRecentTopologyTimestamp[T[X] <: ReassignmentTag[X]
     : SameReassignmentType: SingletonTraverse](
       psid: T[PhysicalSynchronizerId]
+  )(implicit
+      traceContext: TraceContext
   ): Either[UnknownPhysicalSynchronizer, T[CantonTimestamp]] = for {
     staticSynchronizerParameters <- getStaticSynchronizerParameter(psid)
     topoClient <- getTopologyClient(psid, staticSynchronizerParameters)
-  } yield topoClient.map(_.approximateTimestamp)
+  } yield topoClient.map(_.currentSnapshotApproximation.ipsSnapshot.timestamp)
 
   override def maybeAwaitTopologySnapshot(
       targetPSId: Target[PhysicalSynchronizerId],
@@ -432,6 +436,7 @@ trait ReassignmentSubmissionHandle {
       submitterMetadata: ReassignmentSubmitterMetadata,
       contractIds: Seq[LfContractId],
       targetSynchronizer: Target[PhysicalSynchronizerId],
+      sourceTopology: Source[TopologySnapshot],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, ReassignmentProcessorError, FutureUnlessShutdown[
@@ -441,6 +446,7 @@ trait ReassignmentSubmissionHandle {
   def submitAssignments(
       submitterMetadata: ReassignmentSubmitterMetadata,
       reassignmentId: ReassignmentId,
+      targetTopology: Target[TopologySnapshot],
   )(implicit
       traceContext: TraceContext
   ): EitherT[Future, ReassignmentProcessorError, FutureUnlessShutdown[

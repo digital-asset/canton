@@ -3,7 +3,9 @@
 
 package com.digitalasset.canton.topology.store
 
+import cats.Monoid
 import cats.data.EitherT
+import cats.implicits.catsSyntaxParallelTraverse1
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
@@ -17,13 +19,16 @@ import com.digitalasset.canton.config.CantonRequireTypes.{
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.parallelInstanceFutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
+import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.admin.v30 as topoV30
+import com.digitalasset.canton.topology.admin.v30 as adminTopoV30
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
@@ -43,10 +48,19 @@ import com.digitalasset.canton.topology.transaction.TopologyTransaction.{
   TxHash,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.util.collection.MapsUtil
+import com.digitalasset.canton.version.{
+  HasVersionedMessageCompanion,
+  HasVersionedWrapper,
+  ProtoVersion,
+  ProtocolVersion,
+}
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.google.common.annotations.VisibleForTesting
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.scaladsl.Source
 
+import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.duration.Duration
 import scala.reflect.ClassTag
@@ -59,7 +73,6 @@ sealed trait TopologyStoreId extends PrettyPrinting with Product with Serializab
 
   def forSynchronizer: Option[PhysicalSynchronizerId] = None
 }
-
 object TopologyStoreId {
 
   /** A topology store storing sequenced topology transactions
@@ -131,7 +144,20 @@ final case class StoredTopologyTransaction[+Op <: TopologyChangeOp, +M <: Topolo
     transaction: SignedTopologyTransaction[Op, M],
     rejectionReason: Option[String300],
 ) extends DelegatedTopologyTransactionLike[Op, M]
+    with HasVersionedWrapper[StoredTopologyTransaction[TopologyChangeOp, TopologyMapping]]
     with PrettyPrinting {
+
+  override protected def companionObj: StoredTopologyTransaction.type = StoredTopologyTransaction
+
+  def toAdminProtoV30: adminTopoV30.TopologyTransactions.Item =
+    adminTopoV30.TopologyTransactions.Item(
+      sequenced = Some(sequenced.value.toProtoTimestamp),
+      validFrom = Some(validFrom.value.toProtoTimestamp),
+      validUntil = validUntil.map(_.value.toProtoTimestamp),
+      transaction = transaction.toByteString,
+      rejectionReason = rejectionReason.map(_.str),
+    )
+
   override protected def transactionLikeDelegate: TopologyTransactionLike[Op, M] = transaction
 
   override protected def pretty: Pretty[StoredTopologyTransaction.this.type] =
@@ -154,7 +180,37 @@ final case class StoredTopologyTransaction[+Op <: TopologyChangeOp, +M <: Topolo
     .map(_ => this.asInstanceOf[StoredTopologyTransaction[TargetOp, M]])
 }
 
-object StoredTopologyTransaction {
+object StoredTopologyTransaction
+    extends HasVersionedMessageCompanion[
+      StoredTopologyTransaction[TopologyChangeOp, TopologyMapping]
+    ] {
+
+  override def name: String = "stored topology transaction"
+
+  def fromProtoV30(
+      proto: adminTopoV30.TopologyTransactions.Item
+  ): ParsingResult[StoredTopologyTransaction[TopologyChangeOp, TopologyMapping]] =
+    for {
+      sequenced <- ProtoConverter
+        .parseRequired(SequencedTime.fromProtoPrimitive, "sequenced", proto.sequenced)
+      validFrom <- ProtoConverter
+        .parseRequired(EffectiveTime.fromProtoPrimitive, "valid_from", proto.validFrom)
+      validUntil <- proto.validUntil.traverse(EffectiveTime.fromProtoPrimitive)
+      rejectionReason <- proto.rejectionReason.traverse(
+        String300.fromProtoPrimitive(_, "rejection_reason")
+      )
+      signedTx <- SignedTopologyTransaction.fromTrustedByteStringPVV(proto.transaction)
+    } yield StoredTopologyTransaction(sequenced, validFrom, validUntil, signedTx, rejectionReason)
+
+  override def supportedProtoVersions: StoredTopologyTransaction.SupportedProtoVersions =
+    SupportedProtoVersions(
+      ProtoVersion(30) -> ProtoCodec(
+        ProtocolVersion.v34,
+        supportedProtoVersion(adminTopoV30.TopologyTransactions.Item)(fromProtoV30),
+        _.toAdminProtoV30,
+      )
+    )
+
   type GenericStoredTopologyTransaction =
     StoredTopologyTransaction[TopologyChangeOp, TopologyMapping]
 
@@ -217,6 +273,8 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
   this: NamedLogging =>
 
   def storeId: StoreID
+
+  def protocolVersion: ProtocolVersion
 
   /** fetch the effective time updates greater than or equal to a certain timestamp
     *
@@ -304,6 +362,10 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 
+  def bulkInsert(
+      initialSnapshot: GenericStoredTopologyTransactions
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
+
   @VisibleForTesting
   protected[topology] def dumpStoreContent()(implicit
       traceContext: TraceContext
@@ -371,7 +433,7 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
   def findEssentialStateAtSequencedTime(
       asOfInclusive: SequencedTime,
       includeRejected: Boolean,
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[GenericStoredTopologyTransactions]
+  )(implicit traceContext: TraceContext): Source[GenericStoredTopologyTransaction, NotUsed]
 
   /** Checks whether the given signed topology transaction has signatures (at this point still
     * unvalidated) from signing keys, for which there aren't yet signatures in the store.
@@ -550,39 +612,111 @@ object TopologyStore {
       before: PositiveStoredTopologyTransactions,
       after: PositiveStoredTopologyTransactions,
   )
+
+  /** determine valid parties within the given mappings (requires p2p, otk and stc) */
+  private[store] def determineValidParties(
+      mappings: Seq[TopologyMapping],
+      filterParty: String,
+      filterParticipant: String,
+  ): Set[PartyId] = {
+    val (filterPartyIdentifier, filterPartyNamespaceO) =
+      UniqueIdentifier.splitFilter(filterParty)
+    val (
+      filterParticipantIdentifier,
+      filterParticipantNamespaceO,
+    ) =
+      UniqueIdentifier.splitFilter(filterParticipant)
+    val validParticipants = determineValidParticipants(mappings)
+    val validParties = mutable.HashSet[PartyId]()
+    mappings.foreach {
+      case ptp: PartyToParticipant
+          if (filterParty.isEmpty || ptp.partyId.uid
+            .matchesFilters(filterPartyIdentifier, filterPartyNamespaceO)) &&
+            (filterParticipant.isEmpty || ptp.participants
+              .exists(
+                _.participantId.uid
+                  .matchesFilters(filterParticipantIdentifier, filterParticipantNamespaceO)
+              )) && ptp.participants.exists(h => validParticipants.contains(h.participantId)) =>
+        validParties.add(ptp.partyId).discard
+      case cert: SynchronizerTrustCertificate
+          if (filterParty.isEmpty || cert.participantId.adminParty.uid
+            .matchesFilters(filterPartyIdentifier, filterPartyNamespaceO))
+            && (filterParticipant.isEmpty || cert.participantId.adminParty.uid.matchesFilters(
+              filterParticipantIdentifier,
+              filterParticipantNamespaceO,
+            ))
+            && validParticipants
+              .contains(cert.participantId) =>
+        validParties.add(cert.participantId.adminParty).discard
+      case _ => ()
+    }
+    validParties.toSet
+  }
+
+  /** Given a series of topology transactions, determine the participant ids that have OTK and STC
+    */
+  private def determineValidParticipants(
+      txs: Iterable[TopologyMapping]
+  ): Set[ParticipantId] = {
+    val validParticipants = mutable.Map[ParticipantId, (Boolean, Boolean)]()
+    txs.foreach {
+      case OwnerToKeyMapping(
+            pid: ParticipantId,
+            _,
+          ) => // assumption: keys is checked as a state variant
+        validParticipants
+          .updateWith(pid) {
+            case None => Some((true, false))
+            case Some((_, stc)) => Some((true, stc))
+          }
+          .discard
+      case SynchronizerTrustCertificate(pid, _, _) =>
+        validParticipants
+          .updateWith(pid) {
+            case None => Some((false, true))
+            case Some((otk, _)) => Some((otk, true))
+          }
+          .discard
+      case _ => ()
+    }
+    validParticipants.filter { case (_, (otk, stc)) => otk && stc }.keySet.toSet
+  }
+
 }
 
 sealed trait TimeQuery {
-  def toProtoV30: topoV30.BaseQuery.TimeQuery
+  def toProtoV30: adminTopoV30.BaseQuery.TimeQuery
 }
 
 object TimeQuery {
   case object HeadState extends TimeQuery {
-    override def toProtoV30: topoV30.BaseQuery.TimeQuery =
-      topoV30.BaseQuery.TimeQuery.HeadState(com.google.protobuf.empty.Empty())
+    override def toProtoV30: adminTopoV30.BaseQuery.TimeQuery =
+      adminTopoV30.BaseQuery.TimeQuery.HeadState(com.google.protobuf.empty.Empty())
   }
   final case class Snapshot(asOf: CantonTimestamp) extends TimeQuery {
-    override def toProtoV30: topoV30.BaseQuery.TimeQuery =
-      topoV30.BaseQuery.TimeQuery.Snapshot(asOf.toProtoTimestamp)
+    override def toProtoV30: adminTopoV30.BaseQuery.TimeQuery =
+      adminTopoV30.BaseQuery.TimeQuery.Snapshot(asOf.toProtoTimestamp)
   }
   final case class Range(from: Option[CantonTimestamp], until: Option[CantonTimestamp])
       extends TimeQuery {
-    override def toProtoV30: topoV30.BaseQuery.TimeQuery = topoV30.BaseQuery.TimeQuery.Range(
-      topoV30.BaseQuery.TimeRange(from.map(_.toProtoTimestamp), until.map(_.toProtoTimestamp))
-    )
+    override def toProtoV30: adminTopoV30.BaseQuery.TimeQuery =
+      adminTopoV30.BaseQuery.TimeQuery.Range(
+        adminTopoV30.BaseQuery
+          .TimeRange(from.map(_.toProtoTimestamp), until.map(_.toProtoTimestamp))
+      )
   }
 
   def fromProto(
-      proto: topoV30.BaseQuery.TimeQuery,
+      proto: adminTopoV30.BaseQuery.TimeQuery,
       fieldName: String,
   ): ParsingResult[TimeQuery] =
     proto match {
-      case topoV30.BaseQuery.TimeQuery.Empty =>
+      case adminTopoV30.BaseQuery.TimeQuery.Empty =>
         Left(ProtoDeserializationError.FieldNotSet(fieldName))
-      case topoV30.BaseQuery.TimeQuery.Snapshot(value) =>
+      case adminTopoV30.BaseQuery.TimeQuery.Snapshot(value) =>
         CantonTimestamp.fromProtoTimestamp(value).map(Snapshot.apply)
-      case topoV30.BaseQuery.TimeQuery.HeadState(_) => Right(HeadState)
-      case topoV30.BaseQuery.TimeQuery.Range(value) =>
+      case adminTopoV30.BaseQuery.TimeQuery.HeadState(_) => Right(HeadState)
+      case adminTopoV30.BaseQuery.TimeQuery.Range(value) =>
         for {
           fromO <- value.from.traverse(CantonTimestamp.fromProtoTimestamp)
           toO <- value.until.traverse(CantonTimestamp.fromProtoTimestamp)
@@ -590,10 +724,56 @@ object TimeQuery {
     }
 }
 
-trait PackageDependencyResolverUS {
+object UnknownOrUnvettedPackages {
+
+  val empty: UnknownOrUnvettedPackages = UnknownOrUnvettedPackages(Map.empty, Map.empty)
+
+  implicit val monoid: Monoid[UnknownOrUnvettedPackages] =
+    new Monoid[UnknownOrUnvettedPackages] {
+      override def empty: UnknownOrUnvettedPackages = UnknownOrUnvettedPackages.empty
+      override def combine(
+          x: UnknownOrUnvettedPackages,
+          y: UnknownOrUnvettedPackages,
+      ): UnknownOrUnvettedPackages =
+        UnknownOrUnvettedPackages(
+          unknown = MapsUtil.mergeMapsOfSets(x.unknown, y.unknown),
+          unvetted = MapsUtil.mergeMapsOfSets(x.unvetted, y.unvetted),
+        )
+
+    }
+
+  def unknown(participantId: ParticipantId, packageId: PackageId): UnknownOrUnvettedPackages =
+    empty.copy(unknown = Map(participantId -> Set(packageId)))
+  def unvetted(participantId: ParticipantId, packageId: PackageId): UnknownOrUnvettedPackages =
+    empty.copy(unvetted = Map(participantId -> Set(packageId)))
+  def unvetted(
+      participantId: ParticipantId,
+      packageIds: Set[PackageId],
+  ): UnknownOrUnvettedPackages =
+    if (packageIds.isEmpty) empty else empty.copy(unvetted = Map(participantId -> packageIds))
+}
+
+final case class UnknownOrUnvettedPackages(
+    unknown: Map[ParticipantId, Set[PackageId]],
+    unvetted: Map[ParticipantId, Set[PackageId]],
+) {
+  def isEmpty: Boolean = unknown.isEmpty && unvetted.isEmpty
+  def unknownOrUnvetted: Map[ParticipantId, Set[PackageId]] =
+    MapsUtil.mergeMapsOfSets(unknown, unvetted)
+}
+
+trait PackageDependencyResolver {
 
   def packageDependencies(packageId: PackageId)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, PackageId, Set[PackageId]]
+  ): EitherT[FutureUnlessShutdown, (PackageId, ParticipantId), Set[PackageId]]
+
+  def packageDependencies(packages: List[PackageId])(implicit
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, (PackageId, ParticipantId), Set[PackageId]] =
+    packages
+      .parTraverse(packageDependencies)
+      .map(_.flatten.toSet -- packages)
 
 }

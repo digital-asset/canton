@@ -40,7 +40,7 @@ import com.digitalasset.canton.topology.client.PartyTopologySnapshotClient.Party
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.store.{
-  PackageDependencyResolverUS,
+  PackageDependencyResolver,
   TopologyStoreId,
   ValidatedTopologyTransaction,
 }
@@ -509,7 +509,7 @@ class TestingIdentityFactory(
 
   def topologySnapshot(
       synchronizerId: SynchronizerId = DefaultTestIdentities.synchronizerId,
-      packageDependencyResolver: PackageDependencyResolverUS =
+      packageDependencyResolver: PackageDependencyResolver =
         StoreBasedSynchronizerTopologyClient.NoPackageDependencies,
       timestampForSynchronizerParameters: CantonTimestamp = CantonTimestamp.Epoch,
       timestampOfSnapshot: CantonTimestamp = CantonTimestamp.Epoch,
@@ -887,9 +887,15 @@ class TestingOwnerWithKeys(
       )
     )
 
-    val p1_dtc = mkAdd(SynchronizerTrustCertificate(participant1, synchronizerId))
-    val p2_dtc = mkAdd(SynchronizerTrustCertificate(participant2, synchronizerId))
-    val p3_dtc = mkAdd(SynchronizerTrustCertificate(participant3, synchronizerId))
+    val p1_dtc = mkAdd(
+      SynchronizerTrustCertificate(participant1, synchronizerId)
+    )
+    val p2_dtc = mkAdd(
+      SynchronizerTrustCertificate(participant2, synchronizerId)
+    )
+    val p3_dtc = mkAdd(
+      SynchronizerTrustCertificate(participant3, synchronizerId)
+    )
     val p1_otk = mkAddMultiKey(
       OwnerToKeyMapping
         .tryCreate(participant1, NonEmpty(Seq, EncryptionKeys.key1, SigningKeys.key1)),

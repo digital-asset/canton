@@ -188,6 +188,9 @@ class SequencerReader(
       _ = logger.debug(
         s"Current safe watermark is $safeWatermarkTimestampO"
       )
+      _ = logger.debug(
+        s"Member $member was registered at ${registeredMember.registeredFrom}"
+      )
 
       // It can happen that a member switching between sequencers runs into a sequencer that is catching up.
       // In this situation, the sequencer has to wait for the watermark to catch up to the requested timestamp.
@@ -268,7 +271,11 @@ class SequencerReader(
                 show"but this sequencer cannot serve timestamps at or before ${lowerBoundText.unquoted} " +
                 show"or below the member's registration timestamp ${registeredMember.registeredFrom}."
 
-            logger.error(errorMessage)
+            // Logging at INFO level because this can happen during normal operations for a decentralized synchronizer
+            // where a participant updates its sequencer connection config before it has caught up to the point
+            // where the sequencer was actually onboarded.
+            // TODO(#28184) Make sure that this cannot happen due to misconfiguration of sequencer connections
+            logger.info(errorMessage)
             CreateSubscriptionError
               .EventsUnavailableForTimestamp(readFromTimestampInclusive, errorMessage)
           },
@@ -288,10 +295,10 @@ class SequencerReader(
         // This is a "reading watermark" meaning that "we have read up to and including this timestamp",
         // so if we want to grab the event exactly at timestampInclusive, we do -1 here
         nextReadTimestamp = readFromTimestampInclusive
+          .map(_.immediatePredecessor)
           .getOrElse(
             registeredMember.registeredFrom
-          )
-          .immediatePredecessor,
+          ),
         nextPreviousEventTimestamp = previousEventTimestamp,
         latestTopologyClientRecipientTimestamp = latestTopologyClientRecipientTimestampO,
       )
@@ -608,7 +615,6 @@ class SequencerReader(
                       ),
                     )
                   case payload: BytesPayload => payload.decodeBatchAndTrim(protocolVersion, member)
-                  case batch: FilteredBatch => Batch.trimForMember(batch.batch, member)
                 })
               )
             }
@@ -913,10 +919,10 @@ object SequencerReader {
           case None => nextPreviousEventTimestamp
         },
         // set the timestamp to next timestamp from the read events or keep the current timestamp if we got no results
-        nextReadTimestamp = readEvents.nextTimestamp
-          .getOrElse(nextReadTimestamp),
+        nextReadTimestamp = readEvents.nextTimestamp.getOrElse(nextReadTimestamp),
         // did we receive a full batch of events on this update
-        lastBatchWasFull = readEvents.events.sizeCompare(batchSize) == 0,
+        // the case > is there as events query can return more events than requested in multi-instance setups
+        lastBatchWasFull = readEvents.events.sizeCompare(batchSize) >= 0,
       )
 
     override protected def pretty: Pretty[ReadState] = prettyOfClass(

@@ -3,13 +3,8 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.{
-  DbConfig,
-  NonNegativeFiniteDuration,
-  SynchronizerTimeTrackerConfig,
-}
+import com.digitalasset.canton.config.{DbConfig, SynchronizerTimeTrackerConfig}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.integration.*
@@ -23,7 +18,6 @@ import com.digitalasset.canton.integration.plugins.{
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils.SynchronizerNodes
-import com.digitalasset.canton.integration.tests.upgrade.lsu.LSUBase.Fixture
 import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
 import com.digitalasset.canton.sequencing.SequencerConnections
 
@@ -48,7 +42,7 @@ abstract class LSUEndToEndIntegrationTest extends LSUBase {
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S2M2_Config
       .withNetworkBootstrap { implicit env =>
-        new NetworkBootstrapper(S1M1.withTopologyChangeDelay(NonNegativeFiniteDuration.Zero))
+        new NetworkBootstrapper(S1M1)
       }
       .addConfigTransforms(configTransforms*)
       .withSetup { implicit env =>
@@ -83,7 +77,7 @@ abstract class LSUEndToEndIntegrationTest extends LSUBase {
     "work end-to-end" in { implicit env =>
       import env.*
 
-      val fixture = Fixture(daId, upgradeTime)
+      val fixture = fixtureWithDefaults()
 
       participant1.health.ping(participant2)
 
@@ -97,9 +91,6 @@ abstract class LSUEndToEndIntegrationTest extends LSUBase {
 
       eventually() {
         participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
-
-        // The sequencer connection pool internal mechanisms to restart connections rely on the clock time advancing.
-        environment.simClock.value.advance(Duration.ofSeconds(1))
       }
 
       oldSynchronizerNodes.all.stop()
@@ -140,8 +131,6 @@ abstract class LSUEndToEndIntegrationTest extends LSUBase {
   }
 }
 
-// TODO(#27960) flaky test
-@UnstableTest
 final class LSUEndToEndReferenceIntegrationTest extends LSUEndToEndIntegrationTest {
   registerPlugin(
     new UseReferenceBlockSequencer[DbConfig.Postgres](
@@ -151,8 +140,6 @@ final class LSUEndToEndReferenceIntegrationTest extends LSUEndToEndIntegrationTe
   )
 }
 
-// TODO(#27960) flaky test
-@UnstableTest
 final class LSUEndToEndBftOrderingIntegrationTest extends LSUEndToEndIntegrationTest {
   registerPlugin(
     new UseBftSequencer(

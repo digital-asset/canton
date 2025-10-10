@@ -17,15 +17,16 @@ import com.digitalasset.canton.topology.store.{
   TopologyStore,
   TopologyStoreId,
 }
+import com.digitalasset.canton.topology.transaction.checks.RequiredTopologyMappingChecks
 import com.digitalasset.canton.topology.transaction.{
   SignedTopologyTransaction,
   TopologyChangeOp,
   TopologyMapping,
-  ValidatingTopologyMappingChecks,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.util.MonadUtil.syntax.*
+import org.apache.pekko.stream.Materializer
+import org.apache.pekko.stream.scaladsl.{Sink, Source}
 
 import scala.concurrent.ExecutionContext
 
@@ -47,14 +48,15 @@ import scala.concurrent.ExecutionContext
 class InitialTopologySnapshotValidator(
     pureCrypto: CryptoPureApi,
     store: TopologyStore[TopologyStoreId],
+    validateInitialSnapshot: Boolean,
     override val loggerFactory: NamedLoggerFactory,
-)(implicit ec: ExecutionContext)
+)(implicit ec: ExecutionContext, materializer: Materializer)
     extends NamedLogging {
 
   protected val stateProcessor: TopologyStateProcessor =
     TopologyStateProcessor.forInitialSnapshotValidation(
       store,
-      new ValidatingTopologyMappingChecks(store, loggerFactory),
+      new RequiredTopologyMappingChecks(store, loggerFactory, relaxSynchronizerStateChecks = true),
       pureCrypto,
       loggerFactory,
     )
@@ -71,28 +73,98 @@ class InitialTopologySnapshotValidator(
   final def validateAndApplyInitialTopologySnapshot(
       initialSnapshot: GenericStoredTopologyTransactions
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
+    val finalSnapshot = preprocessInitialSnapshot(initialSnapshot)
+    if (!validateInitialSnapshot) {
+      logger.info("Skipping initial topology snapshot validation")
+      EitherT.right(store.bulkInsert(finalSnapshot))
+    } else {
+      logger.info(
+        s"Validating ${finalSnapshot.result.size}/${initialSnapshot.result.size} transactions to initialize the topology store ${store.storeId}"
+      )
+      val groupedBySequencedTime: Seq[
+        (
+            (SequencedTime, EffectiveTime),
+            Seq[StoredTopologyTransaction[TopologyChangeOp, TopologyMapping]],
+        )
+      ] = finalSnapshot.result
+        // process transactions from the same timestamp at once
+        .groupBy(stored => (stored.sequenced, stored.validFrom))
+        .toSeq
+        // ensure that the groups of transactions come in the correct order
+        .sortBy { case (timestamps, _) => timestamps }
 
-    // the following preprocessing is necessary because the topology transactions have been assigned the same timestamp
-    // upon export and it's possible that the following situation happened:
-    // ---------------
-    // original store:
-    // ts1: tx hashOfSignatures = h1, validFrom = ts1, validUntil = ts2
-    // ts2: tx hashOfSignatures = h1, validFrom = ts2
-    // ---------------
-    // since the topology transaction was stored at two different timestamps, they were inserted into the table just as expected.
-    // but upon export the transactions have the same timestamp:
-    // ---------------
-    // initial snapshot:
-    // ts1: tx hashOfSignatures = h1, validFrom = ts1, validUntil = ts1
-    // ts1: tx hashOfSignatures = h1, validFrom = ts1
-    // ---------------
-    // Therefore the second insert would be ignored because of the deduplication via the unique index and "on conflict do nothing".
-    // To work around this, we combine the two transaction entries (they are literally the same) by doing the following:
-    // * take the validFrom value from the first occurrence
-    // * take the validUntil value from the last occurrence
-    // * only retain the first occurrence of the transaction with the updated validFrom/validUntil. We need to do this
-    //   because there could be another transaction between the duplicates, that depends on the first duplicate to have been valid.
-    val finalSnapshot = StoredTopologyTransactions(
+      for {
+        _ <- EitherT.right(store.deleteAllData())
+        _ <-
+          groupedBySequencedTime.sequentialTraverse_ { case ((sequenced, validFrom), storedTxs) =>
+            processTransactionsAtSequencedTime(sequenced, validFrom, storedTxs)
+          }
+
+        // this comparison of the input and output topology snapshots serves as a security guard/barrier
+        mismatch <-
+          EitherT
+            .right(
+              Source(finalSnapshot.result)
+                .zip(
+                  store.findEssentialStateAtSequencedTime(
+                    SequencedTime.MaxValue,
+                    includeRejected = true,
+                  )
+                )
+                .zipWithIndex
+                .dropWhile { case ((fromInitial, fromStore), _) =>
+                  // we don't do a complete == comparison, because the snapshot might contain transactions with superfluous
+                  // signatures that are now filtered out. As long as the hash, validFrom, validUntil, isProposal and rejection reason
+                  // agree between initial and stored topology transaciton, we accept the result.
+                  StoredTopologyTransaction.equalIgnoringSignatures(fromInitial, fromStore)
+                }
+                runWith (Sink.headOption)
+            )
+            .mapK(FutureUnlessShutdown.outcomeK)
+        _ <- EitherT.fromEither[FutureUnlessShutdown](
+          mismatch
+            .map { case ((fromInitial, fromStore), idx) =>
+              s"""Mismatch between transactions at index $idx from the initial snapshot and the topology store:
+           |Initial: $fromInitial
+           |Store:   $fromStore""".stripMargin
+            }
+            .toLeft(())
+        )
+      } yield {
+        logger.info(
+          s"Successfully validated and imported ${finalSnapshot.result.size} topology transactions into the topology store ${store.storeId}."
+        )
+      }
+    }
+  }
+
+  /** The following preprocessing is necessary because the topology transactions have been assigned
+    * the same timestamp upon export and it's possible that the following situation happened:
+    * {{{
+    * original store:
+    * ts1: tx hashOfSignatures = h1, validFrom = ts1, validUntil = ts2
+    * ts2: tx hashOfSignatures = h1, validFrom = ts2
+    * }}}
+    * since the topology transaction was stored at two different timestamps, they were inserted into
+    * the table just as expected. but upon export the transactions have the same timestamp:
+    * {{{
+    * initial snapshot:
+    * ts1: tx hashOfSignatures = h1, validFrom = ts1, validUntil = ts1
+    * ts1: tx hashOfSignatures = h1, validFrom = ts1
+    * }}}
+    * --------------- Therefore the second insert would be ignored because of the deduplication via
+    * the unique index and "on conflict do nothing". To work around this, we combine the two
+    * transaction entries (they are literally the same) by doing the following:
+    *   - take the validFrom value from the first occurrence
+    *   - take the validUntil value from the last occurrence
+    *   - only retain the first occurrence of the transaction with the updated validFrom/validUntil.
+    *     We need to do this because there could be another transaction between the duplicates, that
+    *     depends on the first duplicate to have been valid.
+    */
+  private def preprocessInitialSnapshot(
+      initialSnapshot: GenericStoredTopologyTransactions
+  )(implicit traceContext: TraceContext): GenericStoredTopologyTransactions =
+    StoredTopologyTransactions(
       initialSnapshot.result
         // first retain the global order of the topology transactions within the snapshot
         .zipWithIndex
@@ -142,7 +214,8 @@ class InitialTopologySnapshotValidator(
             .map { nonRejectedNE =>
               val (txWithMinIndex, minIndex) = nonRejectedNE.minBy1 { case (tx_, idx) => idx }
               val (txWithMaxIndex, _) = nonRejectedNE.maxBy1 { case (tx_, idx) => idx }
-              val retainedTransaction = txWithMinIndex.copy(validUntil = txWithMaxIndex.validUntil)
+              val retainedTransaction =
+                txWithMinIndex.copy(validUntil = txWithMaxIndex.validUntil)
               if (nonRejectedNE.sizeIs > 1) {
                 logger.info(s"""Combining duplicate valid transactions at $sequenced
                      |originals: $nonRejected
@@ -166,46 +239,6 @@ class InitialTopologySnapshotValidator(
         // throw away the index
         .map { case (tx, _idx) => tx }
     )
-
-    logger.debug(
-      s"Validating ${finalSnapshot.result.size}/${initialSnapshot.result.size} transactions to initialize the topology store ${store.storeId}"
-    )
-    val groupedBySequencedTime: Seq[
-      (
-          (SequencedTime, EffectiveTime),
-          Seq[StoredTopologyTransaction[TopologyChangeOp, TopologyMapping]],
-      )
-    ] = finalSnapshot.result
-      // process transactions from the same timestamp at once
-      .groupBy(stored => (stored.sequenced, stored.validFrom))
-      .toSeq
-      // ensure that the groups of transactions come in the correct order
-      .sortBy { case (timestamps, _) => timestamps }
-
-    for {
-      _ <- EitherT.right(store.deleteAllData())
-      _ <-
-        groupedBySequencedTime.sequentialTraverse_ { case ((sequenced, validFrom), storedTxs) =>
-          processTransactionsAtSequencedTime(sequenced, validFrom, storedTxs)
-        }
-      snapshotFromStore <- EitherT.right(
-        store.findEssentialStateAtSequencedTime(SequencedTime.MaxValue, includeRejected = true)
-      )
-      // this comparison of the input and output topology snapshots serves as a security guard/barrier
-      _ <- finalSnapshot.result.zip(snapshotFromStore.result).zipWithIndex.sequentialTraverse_ {
-        case ((fromInitial, fromStore), idx) =>
-          EitherTUtil.condUnitET[FutureUnlessShutdown](
-            // we don't do a complete == comparison, because the snapshot might contain transactions with superfluous
-            // signatures that are now filtered out. As long as the hash, validFrom, validUntil, isProposal and rejection reason
-            // agree between initial and stored topology transaciton, we accept the result.
-            StoredTopologyTransaction.equalIgnoringSignatures(fromInitial, fromStore),
-            s"""Mismatch between transactions at index $idx from the initial snapshot and the topology store:
-              |Initial: $fromInitial
-              |Store:   $fromStore""".stripMargin,
-          )
-      }
-    } yield ()
-  }
 
   private def processTransactionsAtSequencedTime(
       sequenced: SequencedTime,

@@ -56,7 +56,7 @@ trait TrafficControlConcurrentTopologyChangeTest
   )
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S2M2_TopologyChangeDelay_0
+    EnvironmentDefinition.P2_S2M2
       .withSetup { implicit env =>
         import env.*
 

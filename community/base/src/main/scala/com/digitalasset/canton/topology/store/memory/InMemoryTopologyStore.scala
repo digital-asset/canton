@@ -29,8 +29,11 @@ import com.digitalasset.canton.topology.transaction.TopologyTransaction.{
   TxHash,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.PekkoUtil
 import com.digitalasset.canton.version.{ProtocolVersion, RepresentativeProtocolVersion}
 import com.google.common.annotations.VisibleForTesting
+import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.scaladsl.Source
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
@@ -40,7 +43,7 @@ import scala.math.Ordering.Implicits.*
 
 class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
     val storeId: StoreId,
-    protocolVersion: ProtocolVersion,
+    override val protocolVersion: ProtocolVersion,
     val loggerFactory: NamedLoggerFactory,
     override val timeouts: ProcessingTimeout,
 )(implicit ec: ExecutionContext)
@@ -186,6 +189,34 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
     FutureUnlessShutdown.unit
   }
 
+  override def bulkInsert(
+      initialSnapshot: GenericStoredTopologyTransactions
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    initialSnapshot.result.foreach { tx =>
+      val uniqueKey = (
+        tx.mapping.uniqueKey,
+        tx.serial,
+        tx.validFrom,
+        tx.operation,
+        tx.transaction.representativeProtocolVersion,
+        tx.transaction.hashOfSignatures(protocolVersion),
+        tx.hash,
+      )
+      if (topologyTransactionsStoreUniqueIndex.add(uniqueKey)) {
+        topologyTransactionStore.append(
+          TopologyStoreEntry(
+            tx.transaction,
+            tx.sequenced,
+            from = tx.validFrom,
+            until = tx.validUntil,
+            rejected = tx.rejectionReason,
+          )
+        )
+      }
+    }
+    FutureUnlessShutdown.unit
+  }
+
   @VisibleForTesting
   override protected[topology] def dumpStoreContent()(implicit
       traceContext: TraceContext
@@ -253,33 +284,15 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
         // is not a proposal
         !entry.transaction.isProposal &&
         // is of type Replace
-        entry.operation == TopologyChangeOp.Replace &&
-        // matches a party to participant mapping (with appropriate filters)
-        (entry.mapping match {
-          case ptp: PartyToParticipant =>
-            ptp.partyId.uid.matchesFilters(prefixPartyIdentifier, prefixPartyNS) &&
-            (filterParticipant.isEmpty ||
-              ptp.participants.exists(
-                _.participantId.uid
-                  .matchesFilters(prefixParticipantIdentifier, prefixParticipantNS)
-              ))
-          case cert: SynchronizerTrustCertificate =>
-            cert.participantId.adminParty.uid
-              .matchesFilters(prefixPartyIdentifier, prefixPartyNS) &&
-            cert.participantId.uid
-              .matchesFilters(prefixParticipantIdentifier, prefixParticipantNS)
-          case _ => false
-        })
+        entry.operation == TopologyChangeOp.Replace
 
-    val topologyStateStoreSeq = blocking(synchronized(topologyTransactionStore.toSeq))
+    val mappings =
+      blocking(synchronized(topologyTransactionStore.toSeq)).filter(filter).map(_.mapping)
+
     FutureUnlessShutdown.pure(
-      topologyStateStoreSeq
-        .foldLeft(Set.empty[PartyId]) {
-          case (acc, elem) if !filter(elem) => acc
-          case (acc, elem) =>
-            elem.mapping.maybeUid.fold(acc)(x => acc + PartyId(x))
-        }
+      TopologyStore.determineValidParties(mappings, filterParty, filterParticipant)
     )
+
   }
 
   override def inspect(
@@ -447,10 +460,10 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
       includeRejected: Boolean,
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[GenericStoredTopologyTransactions] =
+  ): Source[GenericStoredTopologyTransaction, NotUsed] = {
     // asOfInclusive is the effective time of the transaction that onboarded the member.
     // 1. load all transactions with a sequenced time <= asOfInclusive, including proposals
-    filteredState(
+    val dataF = filteredState(
       blocking(synchronized {
         topologyTransactionStore.toSeq
       }),
@@ -459,7 +472,9 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
     ).map(
       // 2. transform the result such that the validUntil fields are set as they were at maxEffective time of the snapshot
       _.asSnapshotAtMaxEffectiveTime
-    )
+    ).map(stored => Source(stored.result))
+    PekkoUtil.futureSourceUS(dataF)
+  }
 
   override def findUpcomingEffectiveChanges(asOfInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext

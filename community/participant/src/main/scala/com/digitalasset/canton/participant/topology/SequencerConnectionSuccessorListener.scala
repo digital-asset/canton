@@ -90,7 +90,7 @@ class SequencerConnectionSuccessorListener(
         }.toMap
       configuredSequencerIds = configuredSequencers.keySet
 
-      (synchronizerUpgradeOngoing, _) <- OptionT(snapshot.isSynchronizerUpgradeOngoing())
+      (synchronizerUpgradeOngoing, _) <- OptionT(snapshot.synchronizerUpgradeOngoing())
       SynchronizerSuccessor(successorPSId, upgradeTime) = synchronizerUpgradeOngoing
 
       _ = logger.debug(
@@ -128,6 +128,7 @@ class SequencerConnectionSuccessorListener(
             activeConfig.config.sequencerConnections.sequencerTrustThreshold,
             activeConfig.config.sequencerConnections.sequencerLivenessMargin,
             activeConfig.config.sequencerConnections.submissionRequestAmplification,
+            activeConfig.config.sequencerConnections.sequencerConnectionPoolDelays,
           )
           .toOption
       )

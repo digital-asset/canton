@@ -25,6 +25,7 @@ import com.digitalasset.canton.lifecycle.{
   PromiseUnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.networking.grpc.ratelimiting.StreamCounterCheck
 import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, CantonMutableHandlerRegistry}
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
 import com.digitalasset.canton.protocol.SynchronizerParametersLookup.SequencerSynchronizerParameters
@@ -105,6 +106,7 @@ import com.digitalasset.canton.topology.transaction.{
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{EitherTUtil, SingleUseCell}
 import com.digitalasset.canton.version.{ProtocolVersion, ReleaseVersion}
+import com.google.common.annotations.VisibleForTesting
 import io.grpc.ServerServiceDefinition
 import org.apache.pekko.actor.ActorSystem
 
@@ -237,6 +239,7 @@ class SequencerNodeBootstrap(
         arguments.metrics.trafficControl.consumedCache.closeAcquired()
         arguments.metrics.eventBuffer.closeAcquired()
         arguments.metrics.memberCache.closeAcquired()
+        arguments.metrics.payloadCache.closeAcquired()
       }
     })
 
@@ -299,6 +302,7 @@ class SequencerNodeBootstrap(
                   existing.synchronizerParameters,
                   store = createSynchronizerTopologyStore(existing.synchronizerId),
                   outboxQueue = new SynchronizerOutboxQueue(loggerFactory),
+                  disableOptionalTopologyChecks = config.topology.disableOptionalTopologyChecks,
                   exitOnFatalFailures = parameters.exitOnFatalFailures,
                   timeouts,
                   futureSupervisor,
@@ -420,6 +424,7 @@ class SequencerNodeBootstrap(
               request.synchronizerParameters,
               store,
               outboxQueue,
+              disableOptionalTopologyChecks = config.topology.disableOptionalTopologyChecks,
               exitOnFatalFailures = parameters.exitOnFatalFailures,
               timeouts,
               futureSupervisor,
@@ -514,6 +519,7 @@ class SequencerNodeBootstrap(
                 val topologySnapshotValidator = new InitialTopologySnapshotValidator(
                   crypto.pureCrypto,
                   synchronizerTopologyStore,
+                  validateInitialSnapshot = config.topology.validateInitialTopologySnapshot,
                   loggerFactory,
                 )
                 for {
@@ -1000,6 +1006,10 @@ class SequencerNode(
     with NamedLogging
     with HasUptime {
 
+  // Provide access such that it can be modified in tests
+  @VisibleForTesting
+  def streamCounterCheck: Option[StreamCounterCheck] = sequencerNodeServer.streamCounterCheck
+
   override type Status = SequencerNodeStatus
 
   logger.info(s"Creating sequencer server with public api ${config.publicApi}")(TraceContext.empty)
@@ -1013,8 +1023,8 @@ class SequencerNode(
     val ports = Map("public" -> config.publicApi.port, "admin" -> config.adminApi.port)
 
     SequencerNodeStatus(
-      sequencer.synchronizerId.logical.unwrap,
-      sequencer.synchronizerId,
+      sequencer.psid.logical.unwrap,
+      sequencer.psid,
       uptime(),
       ports,
       activeMembers,

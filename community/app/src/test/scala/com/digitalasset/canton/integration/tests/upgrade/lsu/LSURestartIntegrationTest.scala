@@ -4,7 +4,7 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.{DbConfig, NonNegativeFiniteDuration}
+import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
@@ -16,7 +16,6 @@ import com.digitalasset.canton.integration.plugins.{
   UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils.SynchronizerNodes
-import com.digitalasset.canton.integration.tests.upgrade.lsu.LSUBase.Fixture
 import monocle.macros.syntax.lens.*
 
 /*
@@ -36,14 +35,9 @@ abstract class LSURestartIntegrationTest extends LSUBase {
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S2M2_Config
       .withNetworkBootstrap { implicit env =>
-        new NetworkBootstrapper(S1M1.withTopologyChangeDelay(NonNegativeFiniteDuration.Zero))
+        new NetworkBootstrapper(S1M1)
       }
       .addConfigTransforms(configTransforms*)
-      // Set a connection pool timeout larger than the upgrade time, otherwise it may trigger when we advance the simclock
-      .addConfigTransform(
-        _.focus(_.parameters.timeouts.processing.sequencerInfo)
-          .replace(config.NonNegativeDuration.ofSeconds(40))
-      )
       .withSetup { implicit env =>
         import env.*
 
@@ -80,7 +74,7 @@ abstract class LSURestartIntegrationTest extends LSUBase {
     "work when participants are restarted" in { implicit env =>
       import env.*
 
-      val fixture = Fixture(daId, upgradeTime)
+      val fixture = fixtureWithDefaults()
 
       participant1.health.ping(participant1)
 

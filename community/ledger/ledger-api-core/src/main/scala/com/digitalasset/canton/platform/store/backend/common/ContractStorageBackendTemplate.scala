@@ -3,21 +3,12 @@
 
 package com.digitalasset.canton.platform.store.backend.common
 
-import anorm.SqlParser.{byteArray, int, long}
+import anorm.SqlParser.{bool, long}
 import anorm.{RowParser, ~}
-import com.digitalasset.canton.data.Offset
-import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
-import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.{
-  RawArchivedContract,
-  RawCreatedContract,
-}
-import com.digitalasset.canton.platform.store.backend.Conversions.{
-  OffsetToStatement,
-  contractId,
-  parties,
-  timestampFromMicros,
-}
+import com.digitalasset.canton.platform.store.backend.Conversions.contractId
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
+import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.`SimpleSql ops`
+import com.digitalasset.canton.platform.store.backend.{ContractStorageBackend, PersistentEventType}
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.{
   KeyAssigned,
@@ -36,132 +27,180 @@ class ContractStorageBackendTemplate(
     ledgerEndCache: LedgerEndCache,
 ) extends ContractStorageBackend {
 
+  /** Batch lookup of key states
+    *
+    * If the backend does not support batch lookups, the implementation will fall back to sequential
+    * lookups
+    */
+  override def keyStatesNew(keys: Seq[Key], validAtEventSeqId: Long)(
+      connection: Connection
+  ): Map[Key, Long] =
+    keys.iterator
+      .flatMap(key =>
+        keyStateNew(key, validAtEventSeqId)(connection)
+          .map(key -> _)
+      )
+      .toMap
+
+  /** Sequential lookup of key states */
+  override def keyStateNew(key: Key, validAtEventSeqId: Long)(
+      connection: Connection
+  ): Option[Long] = {
+    import com.digitalasset.canton.platform.store.backend.Conversions.HashToStatement
+    SQL"""
+         WITH last_contract_key_create AS (
+                SELECT lapi_events_activate_contract.*
+                  FROM lapi_events_activate_contract
+                 WHERE create_key_hash = ${key.hash}
+                   AND event_sequential_id <= $validAtEventSeqId
+                 ORDER BY event_sequential_id DESC
+                 FETCH NEXT 1 ROW ONLY
+              )
+         SELECT internal_contract_id
+           FROM last_contract_key_create
+         WHERE NOT EXISTS
+                (SELECT 1
+                   FROM lapi_events_deactivate_contract
+                  WHERE
+                    internal_contract_id = last_contract_key_create.internal_contract_id
+                    AND event_sequential_id <= $validAtEventSeqId
+                    AND event_type = ${PersistentEventType.ConsumingExercise.asInt}
+                )"""
+      .as(long("internal_contract_id").singleOpt)(connection)
+  }
+
+  override def activeContractsNew(internalContractIds: Seq[Long], beforeEventSeqId: Long)(
+      connection: Connection
+  ): Map[Long, Boolean] =
+    if (internalContractIds.isEmpty) Map.empty
+    else {
+      SQL"""
+       SELECT
+         internal_contract_id,
+         NOT EXISTS (
+           SELECT 1
+           FROM lapi_events_deactivate_contract
+           WHERE
+             internal_contract_id = lapi_events_activate_contract.internal_contract_id
+             AND event_sequential_id <= $beforeEventSeqId
+             AND event_type = ${PersistentEventType.ConsumingExercise.asInt}
+           LIMIT 1
+         ) active
+       FROM lapi_events_activate_contract
+       WHERE
+         internal_contract_id ${queryStrategy.anyOf(internalContractIds)}
+         AND event_sequential_id <= $beforeEventSeqId"""
+        .asVectorOf(long("internal_contract_id") ~ bool("active"))(connection)
+        .view
+        .map { case internalContractId ~ active =>
+          internalContractId -> active
+        }
+        .toMap
+    }
+
+  override def lastActivationsNew(synchronizerContracts: Iterable[(SynchronizerId, Long)])(
+      connection: Connection
+  ): Map[(SynchronizerId, Long), Long] =
+    ledgerEndCache()
+      .map { ledgerEnd =>
+        synchronizerContracts.iterator.flatMap { case (synchronizerId, internalContractId) =>
+          val internedSynchronizerId = stringInterning.synchronizerId.internalize(synchronizerId)
+          SQL"""
+          SELECT event_sequential_id
+          FROM lapi_events_activate_contract as activate
+          WHERE
+            internal_contract_id = $internalContractId AND
+            event_sequential_id <= ${ledgerEnd.lastEventSeqId} AND
+            EXISTS ( -- subquery for triggering (event_sequential_id) INCLUDE (synchronizer_id) index usage
+              SELECT 1
+              FROM lapi_events_activate_contract as activate2
+              WHERE
+                activate2.event_sequential_id = activate.event_sequential_id AND
+                activate2.synchronizer_id = $internedSynchronizerId
+            )
+          ORDER BY event_sequential_id DESC
+          LIMIT 1"""
+            .as(long("event_sequential_id").singleOpt)(connection)
+            .map((synchronizerId, internalContractId) -> _)
+        }.toMap
+      }
+      .getOrElse(Map.empty)
+
   override def supportsBatchKeyStateLookups: Boolean = false
 
-  override def keyStates(keys: Seq[Key], validAt: Offset)(
+  override def keyStates(keys: Seq[Key], validAtEventSeqId: Long)(
       connection: Connection
-  ): Map[Key, KeyState] = keys.map(key => key -> keyState(key, validAt)(connection)).toMap
+  ): Map[Key, KeyState] = keys.map(key => key -> keyState(key, validAtEventSeqId)(connection)).toMap
 
-  override def keyState(key: Key, validAt: Offset)(connection: Connection): KeyState = {
-    val resultParser =
-      (contractId("contract_id") ~ parties(stringInterning)("flat_event_witnesses")).map {
-        case cId ~ stakeholders =>
-          KeyAssigned(cId, stakeholders.toSet)
-      }.singleOpt
+  override def keyState(key: Key, validAtEventSeqId: Long)(connection: Connection): KeyState = {
+    val resultParser = contractId("contract_id").map(KeyAssigned.apply).singleOpt
     import com.digitalasset.canton.platform.store.backend.Conversions.HashToStatement
     SQL"""
          WITH last_contract_key_create AS (
                 SELECT lapi_events_create.*
                   FROM lapi_events_create
                  WHERE create_key_hash = ${key.hash}
-                   AND event_offset <= $validAt
+                   AND event_sequential_id <= $validAtEventSeqId
                    AND length(flat_event_witnesses) > 1 -- exclude participant divulgence and transients
                  ORDER BY event_sequential_id DESC
                  FETCH NEXT 1 ROW ONLY
               )
-         SELECT contract_id, flat_event_witnesses
+         SELECT contract_id
            FROM last_contract_key_create
          WHERE NOT EXISTS
                 (SELECT 1
                    FROM lapi_events_consuming_exercise
                   WHERE
                     contract_id = last_contract_key_create.contract_id
-                    AND event_offset <= $validAt
+                    AND event_sequential_id <= $validAtEventSeqId
                 )"""
       .as(resultParser)(connection)
       .getOrElse(KeyUnassigned)
   }
 
-  private val archivedContractRowParser: RowParser[(ContractId, RawArchivedContract)] =
-    (contractId("contract_id") ~ parties(stringInterning)("flat_event_witnesses"))
-      .map { case coid ~ flatEventWitnesses =>
-        coid -> RawArchivedContract(
-          flatEventWitnesses = flatEventWitnesses.toSet
-        )
-      }
+  private val contractIdRowParser: RowParser[ContractId] =
+    contractId("contract_id")
 
-  override def archivedContracts(contractIds: Seq[ContractId], before: Offset)(
+  override def archivedContracts(contractIds: Seq[ContractId], beforeEventSeqId: Long)(
       connection: Connection
-  ): Map[ContractId, RawArchivedContract] =
-    if (contractIds.isEmpty) Map.empty
+  ): Set[ContractId] =
+    if (contractIds.isEmpty) Set.empty
     else {
       SQL"""
-       SELECT contract_id, flat_event_witnesses
+       SELECT contract_id
        FROM lapi_events_consuming_exercise
        WHERE
          contract_id ${queryStrategy.anyOfBinary(contractIds.map(_.toBytes.toByteArray))}
-         AND event_offset <= $before
+         AND event_sequential_id <= $beforeEventSeqId
          AND length(flat_event_witnesses) > 1 -- exclude participant divulgence and transients"""
-        .as(archivedContractRowParser.*)(connection)
-        .toMap
+        .as(contractIdRowParser.*)(connection)
+        .toSet
     }
 
-  private val rawCreatedContractRowParser
-      : RowParser[(ContractId, ContractStorageBackend.RawCreatedContract)] =
-    (contractId("contract_id")
-      ~ int("template_id")
-      ~ int("package_id")
-      ~ parties(stringInterning)("flat_event_witnesses")
-      ~ byteArray("create_argument")
-      ~ int("create_argument_compression").?
-      ~ timestampFromMicros("ledger_effective_time")
-      ~ parties(stringInterning)("create_signatories")
-      ~ byteArray("create_key_value").?
-      ~ int("create_key_value_compression").?
-      ~ parties(stringInterning)("create_key_maintainers").?
-      ~ byteArray("authentication_data"))
-      .map {
-        case coid ~ internedTemplateId ~ internedPackageId ~ flatEventWitnesses ~ createArgument ~ createArgumentCompression ~ ledgerEffectiveTime ~ signatories ~ createKey ~ createKeyCompression ~ keyMaintainers ~ authenticationData =>
-          coid -> RawCreatedContract(
-            templateId = stringInterning.templateId.unsafe.externalize(internedTemplateId),
-            packageId = stringInterning.packageId.unsafe.externalize(internedPackageId),
-            flatEventWitnesses = flatEventWitnesses.toSet,
-            createArgument = createArgument,
-            createArgumentCompression = createArgumentCompression,
-            ledgerEffectiveTime = ledgerEffectiveTime,
-            signatories = signatories.toSet,
-            createKey = createKey,
-            createKeyCompression = createKeyCompression,
-            keyMaintainers = keyMaintainers.map(_.toSet),
-            authenticationData = authenticationData,
-          )
-      }
-
-  override def createdContracts(contractIds: Seq[ContractId], before: Offset)(
+  override def createdContracts(contractIds: Seq[ContractId], beforeEventSeqId: Long)(
       connection: Connection
-  ): Map[ContractId, RawCreatedContract] =
-    if (contractIds.isEmpty) Map.empty
+  ): Set[ContractId] =
+    if (contractIds.isEmpty) Set.empty
     else {
       SQL"""
          SELECT
-           contract_id,
-           template_id,
-           package_id,
-           flat_event_witnesses,
-           create_argument,
-           create_argument_compression,
-           ledger_effective_time,
-           create_signatories,
-           create_key_value,
-           create_key_value_compression,
-           create_key_maintainers,
-           authentication_data
+           contract_id
          FROM lapi_events_create
          WHERE
            contract_id ${queryStrategy.anyOfBinary(contractIds.map(_.toBytes.toByteArray))}
-           AND event_offset <= $before
+           AND event_sequential_id <= $beforeEventSeqId
            AND length(flat_event_witnesses) > 1 -- exclude participant divulgence and transients"""
-        .as(rawCreatedContractRowParser.*)(connection)
-        .toMap
+        .as(contractIdRowParser.*)(connection)
+        .toSet
     }
 
   override def assignedContracts(
       contractIds: Seq[ContractId],
-      before: Offset,
+      beforeEventSeqId: Long,
   )(
       connection: Connection
-  ): Map[ContractId, RawCreatedContract] =
-    if (contractIds.isEmpty) Map.empty
+  ): Set[ContractId] =
+    if (contractIds.isEmpty) Set.empty
     else {
       SQL"""
          WITH min_event_sequential_ids_of_assign AS (
@@ -169,27 +208,16 @@ class ContractStorageBackendTemplate(
              FROM lapi_events_assign
              WHERE
                contract_id ${queryStrategy.anyOfBinary(contractIds.map(_.toBytes.toByteArray))}
-               AND event_offset <= $before
+               AND event_sequential_id <= $beforeEventSeqId
              GROUP BY contract_id
            )
          SELECT
-           contract_id,
-           template_id,
-           package_id,
-           flat_event_witnesses,
-           create_argument,
-           create_argument_compression,
-           ledger_effective_time,
-           create_signatories,
-           create_key_value,
-           create_key_value_compression,
-           create_key_maintainers,
-           authentication_data
+           contract_id
          FROM lapi_events_assign, min_event_sequential_ids_of_assign
          WHERE
            event_sequential_id = min_event_sequential_ids_of_assign.min_event_sequential_id"""
-        .as(rawCreatedContractRowParser.*)(connection)
-        .toMap
+        .as(contractIdRowParser.*)(connection)
+        .toSet
     }
 
   override def lastActivations(

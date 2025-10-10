@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.admin.party
 
 import cats.data.EitherT
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
@@ -26,6 +27,7 @@ import com.digitalasset.canton.topology.{
   ForceFlags,
   ParticipantId,
   PartyId,
+  SynchronizerId,
   SynchronizerTopologyManager,
 }
 import com.digitalasset.canton.tracing.TraceContext
@@ -336,8 +338,9 @@ class PartyReplicationTopologyWorkflow(
     * @param onboardingEffectiveAt
     *   effective time of the onboarding topology transaction needed to determine the safe time to
     *   clear the onboarding flag.
-    * @param latestSynchronizerTimestampObservedO
-    *   latest synchronizer timestamp observed by the participant
+    * @param synchronizerTimeTracker
+    *   synchronizer time tracker to find the latest synchronizer timestamp observed by the
+    *   participant
     * @param topologyManager
     *   synchronizer topology manager to use for authorizing and TP-signature checking
     * @param topologyStore
@@ -369,6 +372,33 @@ class PartyReplicationTopologyWorkflow(
         _,
         _,
       ) = params
+    val res = authorizeOnboardedTopology(
+      partyId,
+      synchronizerId,
+      targetParticipantId,
+      onboardingEffectiveAt,
+      synchronizerTimeTracker,
+      topologyManager,
+      topologyStore,
+      topologyClient,
+      Some(requestId),
+    )
+    res.map { case (partyHasBeenOnboarded, _) => partyHasBeenOnboarded }
+  }
+
+  private[party] def authorizeOnboardedTopology(
+      partyId: PartyId,
+      synchronizerId: SynchronizerId,
+      targetParticipantId: ParticipantId,
+      onboardingEffectiveAt: CantonTimestamp,
+      synchronizerTimeTracker: SynchronizerTimeTracker,
+      topologyManager: SynchronizerTopologyManager,
+      topologyStore: TopologyStore[SynchronizerStore],
+      topologyClient: SynchronizerTopologyClient,
+      requestId: Option[Hash] = None,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, (Boolean, Option[CantonTimestamp])] = {
     require(
       synchronizerId == topologyManager.psid.logical,
       s"party replication synchronizer id $synchronizerId does not match topology manager synchronizer id ${topologyManager.psid.logical}",
@@ -377,16 +407,21 @@ class PartyReplicationTopologyWorkflow(
       synchronizerId == topologyStore.storeId.psid.logical,
       s"party replication synchronizer id $synchronizerId does not match topology store synchronizer id ${topologyStore.storeId.psid.logical}",
     )
+    val requestIdLogPart = if (requestId.nonEmpty) s"For request $requestId: " else ""
     for {
       ptpHeadTxn <- EitherT(
         partyToParticipantTopologyHeadO(partyId, topologyStore).map(txO =>
           txO
             .filter(_.mapping.participants.exists(_.participantId == targetParticipantId))
             .toRight(
-              s"Party $partyId is not hosted by target participant $targetParticipantId as expected by request $requestId"
+              s"${requestIdLogPart}Party $partyId is not hosted by target participant $targetParticipantId"
             )
         )
-      )
+      ): EitherT[
+        FutureUnlessShutdown,
+        String,
+        StoredTopologyTransaction[Replace, PartyToParticipant],
+      ]
       onboardedPtpProposalO = Option.when(
         ptpHeadTxn.mapping.participants.exists(p =>
           p.participantId == targetParticipantId && p.onboarding
@@ -406,13 +441,15 @@ class PartyReplicationTopologyWorkflow(
         )
       )
       partyHasBeenOnboarded = true
+      noDecisionDeadline = None
       latestSynchronizerTimestampObservedO = synchronizerTimeTracker.latestTime
       isPartyVerifiedOnboarded <- onboardedPtpProposalO match {
-        case None => EitherT.rightT[FutureUnlessShutdown, String](partyHasBeenOnboarded)
+        case None =>
+          EitherT.rightT[FutureUnlessShutdown, String]((partyHasBeenOnboarded, noDecisionDeadline))
         case Some((ptpProposal, serial))
             if participantId == targetParticipantId && latestSynchronizerTimestampObservedO.isDefined =>
           logger.info(
-            s"About to mark party $partyId as onboarded on target participant on behalf of request $requestId"
+            s"${requestIdLogPart}About to mark party $partyId as onboarded on target participant"
           )
 
           for {
@@ -427,17 +464,18 @@ class PartyReplicationTopologyWorkflow(
             synchronizerParameterHistory <- EitherT.right[String](
               onboardingTsSnapshot.listDynamicSynchronizerParametersChanges()
             )
-            safeTimestamp = DynamicSynchronizerParametersHistory.latestDecisionDeadlineEffectiveAt(
-              synchronizerParameterHistory,
-              onboardingEffectiveAt,
-            )
+            decisionDeadline = DynamicSynchronizerParametersHistory
+              .latestDecisionDeadlineEffectiveAt(
+                synchronizerParameterHistory,
+                onboardingEffectiveAt,
+              )
             _ = if (logger.underlying.isDebugEnabled) {
               logger.debug(
-                s"safe timestamp: $safeTimestamp compared to latest synchronizer ts $latestSynchronizerTimestampObservedO" +
+                s"safe timestamp: $decisionDeadline compared to latest synchronizer ts $latestSynchronizerTimestampObservedO" +
                   s" with onboardingEffectiveAt $onboardingEffectiveAt"
               )
             }
-            isSafeToOnboard = latestSynchronizerTimestampObservedO.exists(_ > safeTimestamp)
+            isSafeToOnboard = latestSynchronizerTimestampObservedO.exists(_ > decisionDeadline)
             _ <-
               if (isSafeToOnboard) {
                 topologyManager
@@ -457,13 +495,13 @@ class PartyReplicationTopologyWorkflow(
                   .recover { case err @ NoAppropriateSigningKeyInStore.Failure(_, _) =>
                     // See the note above on the possible race condition between the existingProposal and the topology manager call.
                     logger.info(
-                      s"No appropriate key response to proposing topology change for $partyId and $requestId indicates race with proposal authorization: $err"
+                      s"${requestIdLogPart}No appropriate key response to proposing topology change for $partyId indicates race with proposal authorization: $err"
                     )
                   }
                   .leftMap { err =>
                     val exception = err.asGrpcError
                     logger.warn(
-                      s"Error proposing party to participant topology change on $participantId for $partyId and $requestId",
+                      s"${requestIdLogPart}Error proposing party to participant topology change on $participantId for $partyId",
                       exception,
                     )
                     exception.getMessage
@@ -473,13 +511,15 @@ class PartyReplicationTopologyWorkflow(
                 // serve any load, so that the party does not stay in the onboarding state until the next
                 // "minObservationDuration" (24 hours by default).
                 logger.info(
-                  s"Requesting time proof to advance synchronizer time to the safe onboarded timestamp $safeTimestamp"
+                  s"Requesting time proof to advance synchronizer time to the safe onboarded timestamp $decisionDeadline"
                 )
-                synchronizerTimeTracker.requestTick(safeTimestamp.immediateSuccessor).discard
+                synchronizerTimeTracker.requestTick(decisionDeadline.immediateSuccessor).discard
                 EitherTUtil.unitUS[String]
               }
-          } yield !partyHasBeenOnboarded
-        case Some((_, _)) => EitherT.rightT[FutureUnlessShutdown, String](!partyHasBeenOnboarded)
+          } yield (!partyHasBeenOnboarded, Some(decisionDeadline))
+        case Some((_, _)) =>
+          // for any participant other than the target participant which is
+          EitherT.rightT[FutureUnlessShutdown, String]((!partyHasBeenOnboarded, noDecisionDeadline))
       }
     } yield isPartyVerifiedOnboarded
   }

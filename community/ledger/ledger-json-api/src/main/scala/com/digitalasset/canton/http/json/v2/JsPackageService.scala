@@ -28,7 +28,7 @@ import org.apache.pekko.util
 import sttp.capabilities.pekko.PekkoStreams
 import sttp.tapir.generic.auto.*
 import sttp.tapir.json.circe.jsonBody
-import sttp.tapir.{AnyEndpoint, CodecFormat, Schema, path, query, streamBinaryBody}
+import sttp.tapir.{AnyEndpoint, CodecFormat, Schema, SchemaType, path, query, streamBinaryBody}
 
 import scala.annotation.unused
 import scala.concurrent.{ExecutionContext, Future}
@@ -103,15 +103,17 @@ class JsPackageService(
       .resultToRight
 
   private def upload(caller: CallerContext) = {
-    (tracedInput: TracedInput[(Source[util.ByteString, Any], Option[Boolean])]) =>
+    (tracedInput: TracedInput[(Source[util.ByteString, Any], Option[Boolean], Option[String])]) =>
       implicit val traceContext: TraceContext = tracedInput.traceContext
-      val inputStream = tracedInput.in._1.runWith(StreamConverters.asInputStream())(materializer)
+      val (bytesSource, vetAllPackagesO, synchronizerIdO) = tracedInput.in
+      val inputStream = bytesSource.runWith(StreamConverters.asInputStream())(materializer)
       val bs = protobuf.ByteString.readFrom(inputStream)
       packageManagementClient
         .uploadDarFile(
           darFile = bs,
           token = caller.token(),
-          vetAllPackages = tracedInput.in._2.getOrElse(true),
+          vetAllPackages = vetAllPackagesO.getOrElse(true),
+          synchronizerId = synchronizerIdO,
         )
         .map { _ =>
           package_management_service.UploadDarFileResponse()
@@ -148,9 +150,9 @@ object JsPackageService extends DocumentationEndpoints {
     packages.post
       .in(streamBinaryBody(PekkoStreams)(CodecFormat.OctetStream()).toEndpointIO)
       .in(query[Option[Boolean]]("vetAllPackages"))
+      .in(query[Option[String]]("synchronizerId"))
       .out(jsonBody[package_management_service.UploadDarFileResponse])
       .description("Upload a DAR to the participant node")
-
   val listPackagesEndpoint =
     packages.get
       .out(jsonBody[package_service.ListPackagesResponse])
@@ -224,6 +226,25 @@ object JsPackageCodecs {
       : Schema[package_management_service.VettedPackagesChange.Operation] =
     Schema.oneOfWrapped
 
+  implicit val topologySerial: Codec[package_reference.PriorTopologySerial] =
+    deriveRelaxedCodec
+
+  implicit val topologySerialSerial: Codec[package_reference.PriorTopologySerial.Serial] =
+    deriveConfiguredCodec
+
+  implicit val topologySerialSerialPriorOneOf
+      : Codec[package_reference.PriorTopologySerial.Serial.Prior] =
+    deriveRelaxedCodec
+
+  implicit val topologySerialSerialNoPriorOneOf
+      : Codec[package_reference.PriorTopologySerial.Serial.NoPrior] =
+    Codec.from(
+      Decoder.decodeUnit.map(_ =>
+        package_reference.PriorTopologySerial.Serial.NoPrior(com.google.protobuf.empty.Empty())
+      ),
+      Encoder.encodeUnit.contramap[package_reference.PriorTopologySerial.Serial.NoPrior](_ => ()),
+    )
+
   implicit val vettedPackagesChange: Codec[package_management_service.VettedPackagesChange] =
     deriveRelaxedCodec
   implicit val updateVettedPackagesRequest
@@ -257,5 +278,16 @@ object JsPackageCodecs {
     Schema.oneOfWrapped
 
   implicit val packageStatusSchema: Schema[package_service.PackageStatus] = stringSchemaForEnum()
+
+  implicit val topologySerialSerialNoPriorSchema
+      : Schema[package_reference.PriorTopologySerial.Serial.NoPrior] =
+    Schema(
+      schemaType =
+        SchemaType.SProduct[package_reference.PriorTopologySerial.Serial.NoPrior](List.empty),
+      name = Some(Schema.SName("NoPrior")),
+    )
+
+  implicit val topologySerialSerialSchema: Schema[package_reference.PriorTopologySerial.Serial] =
+    Schema.oneOfWrapped
 
 }

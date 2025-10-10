@@ -35,7 +35,7 @@ trait DeliverErrorIntegrationTest
     with HasProgrammableSequencer {
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1_TopologyChangeDelay_0
+    EnvironmentDefinition.P2_S1M1
       // Use a sim clock so that we don't have to worry about reaction timeouts
       .addConfigTransform(ConfigTransforms.useStaticTime)
 

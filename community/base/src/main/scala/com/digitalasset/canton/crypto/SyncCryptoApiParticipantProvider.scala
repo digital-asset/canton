@@ -177,7 +177,6 @@ object SyncCryptoClient {
     * then the current approximation is returned and if `warnIfApproximate` is set a warning is
     * logged.
     */
-  // TODO(#28014): make it return the value directly and not wrapped in a future
   def getSnapshotForTimestamp(
       client: SyncCryptoClient[SyncCryptoApi],
       desiredTimestamp: CantonTimestamp,

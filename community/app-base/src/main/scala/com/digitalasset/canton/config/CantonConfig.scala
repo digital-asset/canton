@@ -73,6 +73,7 @@ import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.synchronizer.block.{SequencerDriver, SequencerDriverFactory}
 import com.digitalasset.canton.synchronizer.config.PublicServerConfig
 import com.digitalasset.canton.synchronizer.mediator.{
+  DeduplicationStoreConfig,
   MediatorConfig,
   MediatorNodeConfig,
   MediatorNodeParameterConfig,
@@ -483,6 +484,9 @@ final case class CantonConfig(
         automaticallyPerformLogicalSynchronizerUpgrade =
           participantParameters.automaticallyPerformLogicalSynchronizerUpgrade,
         reassignmentsConfig = participantParameters.reassignmentsConfig,
+        doNotAwaitOnCheckingIncomingCommitments =
+          participantParameters.doNotAwaitOnCheckingIncomingCommitments,
+        disableOptionalTopologyChecks = participantConfig.topology.disableOptionalTopologyChecks,
       )
     }
 
@@ -507,8 +511,7 @@ final case class CantonConfig(
         asyncWriter = sequencerNodeConfig.parameters.asyncWriter.toParameters,
         unsafeEnableOnlinePartyReplication =
           sequencerNodeConfig.parameters.unsafeEnableOnlinePartyReplication,
-        sequencerApiLimits = sequencerNodeConfig.parameters.sequencerApiLimits,
-        warnOnUndefinedLimits = sequencerNodeConfig.parameters.warnOnUndefinedLimits,
+        streamLimits = sequencerNodeConfig.publicApi.stream,
       )
     }
 
@@ -687,6 +690,14 @@ object CantonConfig {
     fieldMapping = ConfigFieldMapping(CamelCase, KebabCase).withOverrides("internalPort" -> "port"),
     allowUnknownKeys = false,
   )
+
+  // TODO(#27556): Align TlsServerConfig and HttpServerConfig
+  implicit def httpServerConfigProductHint: ProductHint[HttpServerConfig] =
+    ProductHint[HttpServerConfig](
+      fieldMapping =
+        ConfigFieldMapping(CamelCase, KebabCase).withOverrides("internalPort" -> "port"),
+      allowUnknownKeys = false,
+    )
 
   object ConfigReaders {
     import CantonConfigUtil.*
@@ -1103,6 +1114,8 @@ object CantonConfig {
     lazy implicit final val mediatorConfigReader: ConfigReader[MediatorConfig] = {
       implicit val mediatorPruningConfigReader: ConfigReader[MediatorPruningConfig] =
         deriveReader[MediatorPruningConfig]
+      implicit val deduplicationStoreConfigReader: ConfigReader[DeduplicationStoreConfig] =
+        deriveReader[DeduplicationStoreConfig]
       deriveReader[MediatorConfig]
     }
     lazy implicit final val remoteMediatorConfigReader: ConfigReader[RemoteMediatorConfig] =
@@ -1315,6 +1328,9 @@ object CantonConfig {
 
     lazy implicit final val startupMemoryCheckConfigReader: ConfigReader[StartupMemoryCheckConfig] =
       deriveReader[StartupMemoryCheckConfig]
+
+    lazy implicit final val streamLimitConfigReader: ConfigReader[StreamLimitConfig] =
+      deriveReader[StreamLimitConfig]
 
     implicit val participantReplicationConfigReader: ConfigReader[ReplicationConfig] =
       deriveReader[ReplicationConfig]
@@ -1781,6 +1797,8 @@ object CantonConfig {
     lazy implicit final val mediatorConfigWriter: ConfigWriter[MediatorConfig] = {
       implicit val mediatorPruningConfigWriter: ConfigWriter[MediatorPruningConfig] =
         deriveWriter[MediatorPruningConfig]
+      implicit val deduplicationStoreConfigWriter: ConfigWriter[DeduplicationStoreConfig] =
+        deriveWriter[DeduplicationStoreConfig]
       deriveWriter[MediatorConfig]
     }
     lazy implicit final val mediatorNodeParameterConfigWriter
@@ -1969,6 +1987,9 @@ object CantonConfig {
 
     lazy implicit final val startupMemoryCheckConfigWriter: ConfigWriter[StartupMemoryCheckConfig] =
       deriveWriter[StartupMemoryCheckConfig]
+
+    lazy implicit final val streamLimitConfigWriter: ConfigWriter[StreamLimitConfig] =
+      deriveWriter[StreamLimitConfig]
 
     implicit val participantReplicationConfigWriter: ConfigWriter[ReplicationConfig] =
       deriveWriter[ReplicationConfig]

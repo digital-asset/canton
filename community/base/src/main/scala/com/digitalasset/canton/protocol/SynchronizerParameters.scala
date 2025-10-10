@@ -19,7 +19,7 @@ import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, PositiveSeconds}
+import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveSeconds}
 import com.digitalasset.canton.topology.transaction.ParticipantSynchronizerLimits
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.version.*
@@ -113,8 +113,6 @@ object StaticSynchronizerParameters
     NonNegativeFiniteDuration.tryOfMillis(250)
   val defaultTopologyChangeDelayNonStandardClock: NonNegativeFiniteDuration =
     NonNegativeFiniteDuration.Zero // SimClock, RemoteClock
-
-  def defaultValues(clock: Clock) = {}
 
   val versioningTable: VersioningTable = VersioningTable(
     ProtoVersion(30) -> VersionedProtoCodec(ProtocolVersion.v34)(
@@ -566,6 +564,12 @@ object DynamicSynchronizerParameters extends VersioningCompanion[DynamicSynchron
   private val defaultAcsCommitmentsCatchUp: Option[AcsCommitmentsCatchUpParameters] = Some(
     AcsCommitmentsCatchUpParameters(PositiveInt.tryCreate(5), PositiveInt.tryCreate(2))
   )
+
+  val confirmationResponseTimeoutBounds =
+    (NonNegativeFiniteDuration.tryOfSeconds(1), NonNegativeFiniteDuration.tryOfMinutes(5))
+
+  val mediatorReactionTimeoutBounds =
+    (NonNegativeFiniteDuration.tryOfSeconds(1), NonNegativeFiniteDuration.tryOfMinutes(5))
 
   /** Safely creates DynamicSynchronizerParameters.
     *

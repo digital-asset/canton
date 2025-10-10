@@ -57,8 +57,6 @@ trait LedgerApiParticipantPruningTest
         .replace(1)
         .focus(_.ledgerApi.indexService.updatesStreams.maxPayloadsPerPayloadsPage)
         .replace(1)
-        .focus(_.ledgerApi.indexService.transactionTreeStreams.maxPayloadsPerPayloadsPage)
-        .replace(1)
     )
 
   private val confirmationRequestsMaxRate = NonNegativeInt.tryCreate(2 * largeTransactionBatchSize)
@@ -82,7 +80,7 @@ trait LedgerApiParticipantPruningTest
 
   // single participant environment to focus on ledger api server pruning rather than acs canton commitments
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1_TopologyChangeDelay_0
+    EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(transactionTolerance.asJava),

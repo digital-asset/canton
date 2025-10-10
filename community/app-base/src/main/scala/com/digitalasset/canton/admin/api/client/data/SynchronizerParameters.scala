@@ -13,12 +13,8 @@ import com.digitalasset.canton.admin.api.client.data.crypto.{
   RequiredSigningSpecs,
   SymmetricKeyScheme,
 }
+import com.digitalasset.canton.config.CryptoConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.config.{
-  CryptoConfig,
-  NonNegativeFiniteDuration,
-  PositiveDurationSeconds,
-}
 import com.digitalasset.canton.crypto.SignatureFormat
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters.InvalidDynamicSynchronizerParameters
@@ -34,8 +30,11 @@ import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.config.SynchronizerParametersConfig
 import com.digitalasset.canton.time.{
+  Clock,
   NonNegativeFiniteDuration as InternalNonNegativeFiniteDuration,
   PositiveSeconds,
+  RemoteClock,
+  SimClock,
 }
 import com.digitalasset.canton.util.BinaryFileUtil
 import com.digitalasset.canton.version.{ProtoVersion, ProtocolVersion}
@@ -52,7 +51,7 @@ final case class StaticSynchronizerParameters(
     requiredHashAlgorithms: NonEmpty[Set[HashAlgorithm]],
     requiredCryptoKeyFormats: NonEmpty[Set[CryptoKeyFormat]],
     requiredSignatureFormats: NonEmpty[Set[SignatureFormat]],
-    topologyChangeDelay: NonNegativeFiniteDuration,
+    topologyChangeDelay: config.NonNegativeFiniteDuration,
     enableTransparencyChecks: Boolean,
     protocolVersion: ProtocolVersion,
     serial: NonNegativeInt,
@@ -100,7 +99,7 @@ object StaticSynchronizerParameters {
   def defaultsWithoutKMS(
       protocolVersion: ProtocolVersion,
       serial: NonNegativeInt = NonNegativeInt.zero,
-      topologyChangeDelay: NonNegativeFiniteDuration =
+      topologyChangeDelay: config.NonNegativeFiniteDuration =
         StaticSynchronizerParametersInternal.defaultTopologyChangeDelay.toConfig,
   ): StaticSynchronizerParameters =
     defaults(CryptoConfig(), protocolVersion, serial, topologyChangeDelay)
@@ -110,7 +109,7 @@ object StaticSynchronizerParameters {
       cryptoConfig: CryptoConfig,
       protocolVersion: ProtocolVersion,
       serial: NonNegativeInt = NonNegativeInt.zero,
-      topologyChangeDelay: NonNegativeFiniteDuration =
+      topologyChangeDelay: config.NonNegativeFiniteDuration =
         StaticSynchronizerParametersInternal.defaultTopologyChangeDelay.toConfig,
   ): StaticSynchronizerParameters = {
     val internal = SynchronizerParametersConfig(topologyChangeDelay = Some(topologyChangeDelay))
@@ -120,8 +119,20 @@ object StaticSynchronizerParameters {
           s"Cannot instantiate static synchronizer parameters: $err"
         )
       )
-
     StaticSynchronizerParameters(internal)
+  }
+
+  private[canton] def initialValues(
+      clock: Clock,
+      protocolVersion: ProtocolVersion,
+      serial: NonNegativeInt = NonNegativeInt.zero,
+  ): StaticSynchronizerParameters = {
+    val topologyChangeDelay = clock match {
+      case _: SimClock | _: RemoteClock =>
+        StaticSynchronizerParametersInternal.defaultTopologyChangeDelayNonStandardClock
+      case _ => StaticSynchronizerParametersInternal.defaultTopologyChangeDelay
+    }
+    defaultsWithoutKMS(protocolVersion, serial, topologyChangeDelay.toConfig)
   }
 
   def apply(
@@ -218,7 +229,7 @@ object StaticSynchronizerParameters {
         SynchronizerCrypto.SignatureFormat.fromProtoEnum,
       )
       topologyChangeDelay <- ProtoConverter.parseRequired(
-        NonNegativeFiniteDuration.fromProtoPrimitive("topology_change_delay")(_),
+        config.NonNegativeFiniteDuration.fromProtoPrimitive("topology_change_delay")(_),
         "topology_change_delay",
         topologyChangeDelayP,
       )
@@ -246,19 +257,19 @@ object StaticSynchronizerParameters {
 
 // TODO(#15650) Properly expose new BFT parameters and synchronizer limits
 final case class DynamicSynchronizerParameters(
-    confirmationResponseTimeout: NonNegativeFiniteDuration,
-    mediatorReactionTimeout: NonNegativeFiniteDuration,
-    assignmentExclusivityTimeout: NonNegativeFiniteDuration,
-    ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration,
-    mediatorDeduplicationTimeout: NonNegativeFiniteDuration,
-    reconciliationInterval: PositiveDurationSeconds,
+    confirmationResponseTimeout: config.NonNegativeFiniteDuration,
+    mediatorReactionTimeout: config.NonNegativeFiniteDuration,
+    assignmentExclusivityTimeout: config.NonNegativeFiniteDuration,
+    ledgerTimeRecordTimeTolerance: config.NonNegativeFiniteDuration,
+    mediatorDeduplicationTimeout: config.NonNegativeFiniteDuration,
+    reconciliationInterval: config.PositiveDurationSeconds,
     maxRequestSize: NonNegativeInt,
-    sequencerAggregateSubmissionTimeout: NonNegativeFiniteDuration,
+    sequencerAggregateSubmissionTimeout: config.NonNegativeFiniteDuration,
     trafficControl: Option[TrafficControlParameters],
     onboardingRestriction: OnboardingRestriction,
     acsCommitmentsCatchUp: Option[AcsCommitmentsCatchUpParameters],
     participantSynchronizerLimits: ParticipantSynchronizerLimits,
-    preparationTimeRecordTimeTolerance: NonNegativeFiniteDuration,
+    preparationTimeRecordTimeTolerance: config.NonNegativeFiniteDuration,
 ) extends PrettyPrinting {
 
   def decisionTimeout: config.NonNegativeFiniteDuration =
@@ -277,7 +288,7 @@ final case class DynamicSynchronizerParameters(
   // Originally the validation was done on ledgerTimeRecordTimeTolerance, but was moved to preparationTimeRecordTimeTolerance
   // instead when the parameter was introduced
   private[canton] def compatibleWithNewPreparationTimeRecordTimeTolerance(
-      newPreparationTimeRecordTimeTolerance: NonNegativeFiniteDuration
+      newPreparationTimeRecordTimeTolerance: config.NonNegativeFiniteDuration
   ): Boolean =
     // If false, a new request may receive the same submission time as a previous request and the previous
     // request may be evicted too early from the mediator's deduplication store.
@@ -304,21 +315,22 @@ final case class DynamicSynchronizerParameters(
     )
 
   def update(
-      confirmationResponseTimeout: NonNegativeFiniteDuration = confirmationResponseTimeout,
-      mediatorReactionTimeout: NonNegativeFiniteDuration = mediatorReactionTimeout,
-      assignmentExclusivityTimeout: NonNegativeFiniteDuration = assignmentExclusivityTimeout,
-      ledgerTimeRecordTimeTolerance: NonNegativeFiniteDuration = ledgerTimeRecordTimeTolerance,
-      mediatorDeduplicationTimeout: NonNegativeFiniteDuration = mediatorDeduplicationTimeout,
-      reconciliationInterval: PositiveDurationSeconds = reconciliationInterval,
+      confirmationResponseTimeout: config.NonNegativeFiniteDuration = confirmationResponseTimeout,
+      mediatorReactionTimeout: config.NonNegativeFiniteDuration = mediatorReactionTimeout,
+      assignmentExclusivityTimeout: config.NonNegativeFiniteDuration = assignmentExclusivityTimeout,
+      ledgerTimeRecordTimeTolerance: config.NonNegativeFiniteDuration =
+        ledgerTimeRecordTimeTolerance,
+      mediatorDeduplicationTimeout: config.NonNegativeFiniteDuration = mediatorDeduplicationTimeout,
+      reconciliationInterval: config.PositiveDurationSeconds = reconciliationInterval,
       confirmationRequestsMaxRate: NonNegativeInt = confirmationRequestsMaxRate,
       maxRequestSize: NonNegativeInt = maxRequestSize,
-      sequencerAggregateSubmissionTimeout: NonNegativeFiniteDuration =
+      sequencerAggregateSubmissionTimeout: config.NonNegativeFiniteDuration =
         sequencerAggregateSubmissionTimeout,
       trafficControl: Option[TrafficControlParameters] = trafficControl,
       onboardingRestriction: OnboardingRestriction = onboardingRestriction,
       acsCommitmentsCatchUpParameters: Option[AcsCommitmentsCatchUpParameters] =
         acsCommitmentsCatchUp,
-      preparationTimeRecordTimeTolerance: NonNegativeFiniteDuration =
+      preparationTimeRecordTimeTolerance: config.NonNegativeFiniteDuration =
         preparationTimeRecordTimeTolerance,
   ): DynamicSynchronizerParameters = this.copy(
     confirmationResponseTimeout = confirmationResponseTimeout,

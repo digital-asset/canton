@@ -91,7 +91,7 @@ sealed trait RobustSynchronizerBootstrapIntegrationTest
     new LocalSequencerReference(env, sequencerReference.name) {
       val counter = new AtomicInteger(0)
       override def setup: SequencerAdministration = new SequencerAdministration(this) {
-        override def assign_from_genesis_state(
+        override def assign_from_genesis_stateV2(
             genesisState: ByteString,
             synchronizerParameters: StaticSynchronizerParameters,
             waitForReady: Boolean,
@@ -99,7 +99,7 @@ sealed trait RobustSynchronizerBootstrapIntegrationTest
           if (counter.incrementAndGet() == 1)
             throw new RuntimeException("First time sequencer init fails")
           else
-            super.assign_from_genesis_state(genesisState, synchronizerParameters)
+            super.assign_from_genesis_stateV2(genesisState, synchronizerParameters)
       }
     }
 
@@ -232,7 +232,7 @@ sealed trait RobustSynchronizerBootstrapIntegrationTest
       mediator.stop()
     }
 
-    "fail if trying to boostrap a synchronizer with a sequencer or mediator already initialized previously with another synchronizer" in {
+    "fail if trying to bootstrap a synchronizer with a sequencer or mediator already initialized previously with another synchronizer" in {
       implicit env =>
         import env.*
 

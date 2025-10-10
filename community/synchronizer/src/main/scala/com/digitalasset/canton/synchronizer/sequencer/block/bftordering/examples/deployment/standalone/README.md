@@ -14,9 +14,9 @@ the easiest way to get the sequencers fully initialized, so that they start thei
 The mediator component takes up some limited amount of memory, as it is never actually used.
 
 The standalone portions of the Canton sequencer configurations have been generated using
-[`CreateStandaloneConfig`].
+[`GenStandaloneConfig`].
 
-[`CreateStandaloneConfig`]: ../../../core/BftBlockOrdererConfig.scala
+[`GenStandaloneConfig`]: ../../../../../../../../../../../../../../../community/synchronizer/src/test/scala/com/digitalasset/canton/synchronizer/sequencer/block/bftordering/performance/GenStandaloneConfig.scala
 [Canton Observability Example]: ../../../../../../../../../../../../../../../community/app/src/test/resources/examples/13-observability
 
 ## 🚦 Prerequisites 🚦

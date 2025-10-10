@@ -103,6 +103,8 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
     requestInspector: RequestInspector =
       OutputModule.DefaultRequestInspector, // Only set by simulation tests
     epochChecker: EpochChecker = EpochChecker.DefaultEpochChecker, // Only set by simulation tests
+    outputPreviousStoredBlock: OutputModule.PreviousStoredBlock =
+      new OutputModule.PreviousStoredBlock,
 )(implicit synchronizerProtocolVersion: ProtocolVersion, mc: MetricsContext, tracer: Tracer)
     extends SystemInitializer[
       E,
@@ -295,6 +297,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
             timeouts,
             requestInspector,
             epochChecker,
+            previousStoredBlock = outputPreviousStoredBlock,
           ),
         pruning = () =>
           new PruningModule(

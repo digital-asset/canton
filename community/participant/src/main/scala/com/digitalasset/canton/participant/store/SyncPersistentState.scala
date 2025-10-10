@@ -9,7 +9,6 @@ import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCrypto}
 import com.digitalasset.canton.lifecycle.LifeCycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
-import com.digitalasset.canton.participant.admin.PackageDependencyResolver
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.store.db.{
   DbLogicalSyncPersistentState,
@@ -168,7 +167,6 @@ object PhysicalSyncPersistentState {
       crypto: SynchronizerCrypto,
       parameters: ParticipantNodeParameters,
       packageMetadataView: PackageMetadataView,
-      packageDependencyResolver: PackageDependencyResolver,
       ledgerApiStore: Eval[LedgerApiStore],
       logicalSyncPersistentState: LogicalSyncPersistentState,
       loggerFactory: NamedLoggerFactory,
@@ -182,10 +180,8 @@ object PhysicalSyncPersistentState {
           crypto,
           physicalSynchronizerIdx,
           staticSynchronizerParameters,
-          exitOnFatalFailures = parameters.exitOnFatalFailures,
-          disableUpgradeValidation = parameters.disableUpgradeValidation,
+          parameters,
           packageMetadataView,
-          packageDependencyResolver,
           ledgerApiStore,
           logicalSyncPersistentState,
           loggerFactory,
@@ -202,7 +198,6 @@ object PhysicalSyncPersistentState {
           crypto,
           parameters,
           packageMetadataView,
-          packageDependencyResolver,
           ledgerApiStore,
           logicalSyncPersistentState,
           loggerFactory,

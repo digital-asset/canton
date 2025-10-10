@@ -77,7 +77,7 @@ sealed trait CommandRejectionConcurrentRequestTopologyChangeIntegrationTest
   private var programmableSequencer: ProgrammableSequencer = _
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P4_S1M1_TopologyChangeDelay_0
+    EnvironmentDefinition.P4_S1M1
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         // Reduce max delay between submission and sequencing topology timestamp to be < maxSequencingTime

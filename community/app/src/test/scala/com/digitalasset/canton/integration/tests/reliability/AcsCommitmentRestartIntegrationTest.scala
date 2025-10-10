@@ -5,8 +5,8 @@ package com.digitalasset.canton.integration.tests.reliability
 
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
-import com.digitalasset.canton.config.DbConfig
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.NonNegativeProportion
+import com.digitalasset.canton.config.{CommitmentSendDelay, DbConfig}
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
@@ -31,6 +31,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   ProgrammableSequencer,
 }
 import com.digitalasset.canton.time.PositiveSeconds
+import com.digitalasset.canton.topology.{ForceFlag, ForceFlags}
 import com.digitalasset.canton.{LedgerParticipantId, config}
 import monocle.Monocle.toAppliedFocusOps
 
@@ -49,13 +50,17 @@ trait AcsCommitmentRestartIntegrationTest
   private lazy val mediatorReactionTimeout = Duration.ofHours(1)
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1_TopologyChangeDelay_0
+    EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory),
       )
       .updateTestingConfig(
-        _.focus(_.maxCommitmentSendDelayMillis).replace(Some(NonNegativeInt.zero))
+        _.focus(_.commitmentSendDelay).replace(
+          Some(
+            CommitmentSendDelay(Some(NonNegativeProportion.zero), Some(NonNegativeProportion.zero))
+          )
+        )
       )
       .withSetup { implicit env =>
         import env.*
@@ -70,6 +75,7 @@ trait AcsCommitmentRestartIntegrationTest
             sequencerAggregateSubmissionTimeout = config
               .NonNegativeFiniteDuration(confirmationResponseTimeout.plus(mediatorReactionTimeout)),
           ),
+          force = ForceFlags(ForceFlag.AllowOutOfBoundsValue),
         )
 
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)

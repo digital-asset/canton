@@ -61,7 +61,7 @@ sealed trait ReassignmentNoReassignmentDataIntegrationTest
   private val acmeConfirmationResponses = new TrieMap[ParticipantId, SubmissionRequest]()
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S1M1_S1M1_TopologyChangeDelay_0
+    EnvironmentDefinition.P3_S1M1_S1M1
       .addConfigTransforms(ConfigTransforms.useStaticTime)
       .withSetup { implicit env =>
         import env.*
@@ -81,7 +81,8 @@ sealed trait ReassignmentNoReassignmentDataIntegrationTest
 
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
         participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
-        participants.all.dars.upload(BaseTest.CantonExamplesPath)
+        participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = daId)
+        participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = acmeId)
 
         alice = participant1.parties.enable("alice", synchronizer = daName)
         participant1.parties.enable("alice", synchronizer = acmeName)

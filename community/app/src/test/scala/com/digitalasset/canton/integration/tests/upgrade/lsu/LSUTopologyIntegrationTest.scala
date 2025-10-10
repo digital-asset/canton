@@ -4,8 +4,8 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.config
+import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.config.{DbConfig, NonNegativeFiniteDuration}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
@@ -17,7 +17,6 @@ import com.digitalasset.canton.integration.plugins.{
   UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils.SynchronizerNodes
-import com.digitalasset.canton.integration.tests.upgrade.lsu.LSUBase.Fixture
 import com.digitalasset.canton.topology.TopologyManagerError
 import com.digitalasset.canton.topology.store.TimeQuery
 import com.digitalasset.canton.topology.transaction.TopologyMapping
@@ -40,7 +39,7 @@ abstract class LSUTopologyIntegrationTest extends LSUBase {
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P0S2M2_Config
       .withNetworkBootstrap { implicit env =>
-        new NetworkBootstrapper(S1M1.withTopologyChangeDelay(NonNegativeFiniteDuration.Zero))
+        new NetworkBootstrapper(S1M1)
       }
       .addConfigTransforms(configTransforms*)
       .withSetup { implicit env =>
@@ -89,7 +88,7 @@ abstract class LSUTopologyIntegrationTest extends LSUBase {
     "work end-to-end" in { implicit env =>
       import env.*
 
-      val fixture = Fixture(daId, upgradeTime)
+      val fixture = fixtureWithDefaults()
       val newPSId = fixture.newPSId
       val newStaticSynchronizerParameters = fixture.newStaticSynchronizerParameters
 

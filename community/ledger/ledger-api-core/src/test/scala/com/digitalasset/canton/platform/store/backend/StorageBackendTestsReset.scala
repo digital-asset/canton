@@ -4,7 +4,8 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.Ids
-import com.digitalasset.canton.platform.store.backend.common.EventPayloadSourceForUpdatesLedgerEffects
+import com.digitalasset.canton.platform.store.backend.common.EventIdSourceLegacy.CreateStakeholder
+import com.digitalasset.canton.platform.store.backend.common.EventPayloadSourceForUpdatesLedgerEffectsLegacy
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.PaginationInput
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -42,7 +43,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
       // 1: party allocation
       dtoPartyEntry(offset(1)),
       // 2: transaction with create node
-      dtoCreate(offset(2), 1L, hashCid("#3")),
+      dtoCreateLegacy(offset(2), 1L, hashCid("#3")),
       DbDto.IdFilterCreateStakeholder(
         1L,
         someTemplateId.toString,
@@ -51,10 +52,10 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
       ),
       dtoCompletion(offset(2)),
       // 3: transaction with exercise node and retroactive divulgence
-      dtoExercise(offset(3), 2L, true, hashCid("#3")),
+      dtoExerciseLegacy(offset(3), 2L, true, hashCid("#3")),
       dtoCompletion(offset(3)),
       // 4: assign event
-      dtoAssign(offset(4), 4L, hashCid("#4")),
+      dtoAssignLegacy(offset(4), 4L, hashCid("#4")),
       DbDto.IdFilterAssignStakeholder(
         4L,
         someTemplateId.toString,
@@ -62,7 +63,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
         first_per_sequential_id = true,
       ),
       // 5: unassign event
-      dtoUnassign(offset(5), 5L, hashCid("#5")),
+      dtoUnassignLegacy(offset(5), 5L, hashCid("#5")),
       DbDto.IdFilterUnassignStakeholder(
         5L,
         someTemplateId.toString,
@@ -87,13 +88,13 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
 
     def events =
       executeSql(
-        backend.event.fetchEventPayloadsLedgerEffects(
-          EventPayloadSourceForUpdatesLedgerEffects.Create
+        backend.event.fetchEventPayloadsLedgerEffectsLegacy(
+          EventPayloadSourceForUpdatesLedgerEffectsLegacy.Create
         )(Ids(List(1L)), Some(Set.empty))
       ) ++
         executeSql(
-          backend.event.fetchEventPayloadsLedgerEffects(
-            EventPayloadSourceForUpdatesLedgerEffects.Consuming
+          backend.event.fetchEventPayloadsLedgerEffectsLegacy(
+            EventPayloadSourceForUpdatesLedgerEffectsLegacy.Consuming
           )(Ids(List(2L)), Some(Set.empty))
         )
 
@@ -104,7 +105,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     )
 
     def filterIds = executeSql(
-      backend.event.updateStreamingQueries.fetchIdsOfCreateEventsForStakeholder(
+      backend.event.updateStreamingQueries.fetchEventIdsLegacy(CreateStakeholder)(
         stakeholderO = Some(someParty),
         templateIdO = None,
       )(_)(
@@ -117,21 +118,21 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     )
 
     def assignEvents = executeSql(
-      backend.event.assignEventBatch(
+      backend.event.assignEventBatchLegacy(
         eventSequentialIds = Ids(List(4)),
         allFilterParties = Some(Set.empty),
       )
     )
 
     def unassignEvents = executeSql(
-      backend.event.unassignEventBatch(
+      backend.event.unassignEventBatchLegacy(
         eventSequentialIds = Ids(List(5)),
         allFilterParties = Some(Set.empty),
       )
     )
 
     def assignIds = executeSql(
-      backend.event.fetchAssignEventIdsForStakeholder(
+      backend.event.fetchAssignEventIdsForStakeholderLegacy(
         stakeholderO = Some(someParty),
         templateId = None,
       )(_)(
@@ -144,7 +145,7 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     )
 
     def reassignmentIds = executeSql(
-      backend.event.fetchUnassignEventIdsForStakeholder(
+      backend.event.fetchUnassignEventIdsForStakeholderLegacy(
         stakeholderO = Some(someParty),
         templateId = None,
       )(_)(

@@ -21,6 +21,7 @@ import com.digitalasset.canton.crypto.{
   CryptoHandshakeValidator,
   SynchronizerCrypto,
   SynchronizerCryptoClient,
+  SynchronizerCryptoPureApi,
 }
 import com.digitalasset.canton.environment.*
 import com.digitalasset.canton.health.*
@@ -444,6 +445,7 @@ class MediatorNodeBootstrap(
           staticSynchronizerParameters = staticSynchronizerParameters,
           store = synchronizerTopologyStore,
           outboxQueue = outboxQueue,
+          disableOptionalTopologyChecks = config.topology.disableOptionalTopologyChecks,
           exitOnFatalFailures = parameters.exitOnFatalFailures,
           timeouts = timeouts,
           futureSupervisor = futureSupervisor,
@@ -492,6 +494,7 @@ class MediatorNodeBootstrap(
                   synchronizerTopologyStore,
                   topologyManagerStatus = TopologyManagerStatus
                     .combined(authorizedTopologyManager, synchronizerTopologyManager),
+                  config.topology,
                   synchronizerOutboxFactory,
                 ),
               storage.isActive,
@@ -552,6 +555,7 @@ class MediatorNodeBootstrap(
       staticSynchronizerParameters: StaticSynchronizerParameters,
       synchronizerTopologyStore: TopologyStore[SynchronizerStore],
       topologyManagerStatus: TopologyManagerStatus,
+      topologyConfig: TopologyConfig,
       synchronizerOutboxFactory: SynchronizerOutboxFactory,
   ): EitherT[FutureUnlessShutdown, String, MediatorRuntime] = {
     val synchronizerLoggerFactory = loggerFactory.append("synchronizerId", synchronizerId.toString)
@@ -572,7 +576,7 @@ class MediatorNodeBootstrap(
       seedForRandomnessO = arguments.testingConfig.sequencerTransportSeed,
       futureSupervisor = futureSupervisor,
       timeouts = timeouts,
-      loggerFactory = loggerFactory,
+      loggerFactory = synchronizerLoggerFactory,
     )
 
     val useNewConnectionPool = parameters.sequencerClient.useNewConnectionPool
@@ -661,10 +665,10 @@ class MediatorNodeBootstrap(
       connectionPoolAndInfo <-
         if (useNewConnectionPool)
           GrpcSequencerConnectionService.waitUntilSequencerConnectionIsValidWithPool(
-            connectionPoolFactory,
-            parameters.tracing,
-            this,
-            getSequencerConnectionFromStore,
+            connectionPoolFactory = connectionPoolFactory,
+            tracingConfig = parameters.tracing,
+            flagCloseable = this,
+            loadConfig = getSequencerConnectionFromStore,
           )
         else
           for {
@@ -676,9 +680,10 @@ class MediatorNodeBootstrap(
             dummyPool <- EitherT.fromEither[FutureUnlessShutdown](
               connectionPoolFactory
                 .createFromOldConfig(
-                  info.sequencerConnections,
+                  sequencerConnections = info.sequencerConnections,
                   expectedPSIdO = None,
-                  parameters.tracing,
+                  tracingConfig = parameters.tracing,
+                  name = "dummy",
                 )
                 .leftMap(error => error.toString)
             )
@@ -718,9 +723,11 @@ class MediatorNodeBootstrap(
             ),
             sequencerClientFactory,
             sequencerInfoLoader,
+            connectionPoolFactory,
             synchronizerAlias,
             synchronizerId,
             sequencerClient,
+            parameters.tracing,
             loggerFactory,
           )
 
@@ -744,8 +751,9 @@ class MediatorNodeBootstrap(
           mediatorId
         ).callback(
           new InitialTopologySnapshotValidator(
-            crypto.pureCrypto,
+            new SynchronizerCryptoPureApi(staticSynchronizerParameters, crypto.pureCrypto),
             synchronizerTopologyStore,
+            validateInitialSnapshot = topologyConfig.validateInitialTopologySnapshot,
             synchronizerLoggerFactory,
           ),
           topologyClient,

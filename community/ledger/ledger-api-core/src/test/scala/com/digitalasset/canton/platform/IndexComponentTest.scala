@@ -12,7 +12,9 @@ import com.digitalasset.canton.ledger.participant.state.index.IndexService
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
+import com.digitalasset.canton.participant.store.memory.InMemoryContractStore
 import com.digitalasset.canton.platform.IndexComponentTest.TestServices
+import com.digitalasset.canton.platform.LedgerApiServerInternals
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.config.{IndexServiceConfig, ServerRole}
 import com.digitalasset.canton.platform.index.IndexServiceOwner
@@ -23,8 +25,8 @@ import com.digitalasset.canton.platform.store.DbSupport.{ConnectionPoolConfig, D
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.dao.events.{ContractLoader, LfValueTranslation}
 import com.digitalasset.canton.platform.store.interning.StringInterningView
-import com.digitalasset.canton.platform.store.packagemeta.PackageMetadata
-import com.digitalasset.canton.platform.store.{DbSupport, FlywayMigrations}
+import com.digitalasset.canton.platform.store.{DbSupport, FlywayMigrations, PruningOffsetService}
+import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.tracing.NoReportingTracerProvider
 import com.digitalasset.canton.util.PekkoUtil.{FutureQueue, IndexingFutureQueue}
@@ -50,7 +52,13 @@ trait IndexComponentTest extends PekkoBeforeAndAfterAll with BaseTest with HasEx
     LoggingContextWithTrace.ForTesting
 
   // if we would need multi-db, polimorphism can come here, look for JdbcLedgerDaoBackend
-  private val jdbcUrl = s"jdbc:h2:mem:${getClass.getSimpleName.toLowerCase};db_close_delay=-1"
+  protected val jdbcUrl = s"jdbc:h2:mem:${getClass.getSimpleName.toLowerCase};db_close_delay=-1"
+
+  protected val indexerConfig: IndexerConfig = IndexerConfig()
+
+  protected val indexServiceConfig: IndexServiceConfig = IndexServiceConfig()
+
+  protected val indexReadConnectionPoolSize: Int = 10
 
   private val testServicesRef: AtomicReference[TestServices] = new AtomicReference()
 
@@ -70,7 +78,13 @@ trait IndexComponentTest extends PekkoBeforeAndAfterAll with BaseTest with HasEx
     }
   }
 
+  protected def ingestUpdateAsync(update: Update): Future[Unit] =
+    testServices.indexer.offer(update).map(_ => ())
+
   protected def index: IndexService = testServices.index
+
+  protected def participantContractStore: InMemoryContractStore =
+    testServices.participantContractStore
 
   protected def sequentialPostProcessor: Update => Unit = _ => ()
 
@@ -79,14 +93,14 @@ trait IndexComponentTest extends PekkoBeforeAndAfterAll with BaseTest with HasEx
     // We use the dispatcher here because the default Scalatest execution context is too slow.
     implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
 
-    val indexerConfig = IndexerConfig()
-
     val engine = new Engine(
       EngineConfig(LanguageVersion.StableVersions(LanguageMajorVersion.V2))
     )
     val mutableLedgerEndCache = MutableLedgerEndCache()
     val stringInterningView = new StringInterningView(loggerFactory)
     val participantId = Ref.ParticipantId.assertFromString("index-component-test-participant-id")
+    val participantContractStore = new InMemoryContractStore(timeouts, loggerFactory)
+    val pruningOffsetService = mock[PruningOffsetService]
 
     val indexResourceOwner =
       for {
@@ -108,7 +122,7 @@ trait IndexComponentTest extends PekkoBeforeAndAfterAll with BaseTest with HasEx
             dbConfig = DbConfig(
               jdbcUrl = jdbcUrl,
               connectionPool = ConnectionPoolConfig(
-                connectionPoolSize = 10,
+                connectionPoolSize = indexReadConnectionPoolSize,
                 connectionTimeout = 250.millis,
               ),
             ),
@@ -153,7 +167,7 @@ trait IndexComponentTest extends PekkoBeforeAndAfterAll with BaseTest with HasEx
         )
         indexService <- new IndexServiceOwner(
           dbSupport = dbSupport,
-          config = IndexServiceConfig(),
+          config = indexServiceConfig,
           participantId = Ref.ParticipantId.assertFromString(IndexComponentTest.TestParticipantId),
           metrics = LedgerApiServerMetrics.ForTesting,
           inMemoryState = inMemoryState,
@@ -177,6 +191,8 @@ trait IndexComponentTest extends PekkoBeforeAndAfterAll with BaseTest with HasEx
               _: String,
               _: LoggingContextWithTrace,
           ) => FutureUnlessShutdown.pure(Left("not used")),
+          participantContractStore = participantContractStore,
+          pruningOffsetService = pruningOffsetService,
         )
       } yield indexService -> indexer
 
@@ -188,6 +204,7 @@ trait IndexComponentTest extends PekkoBeforeAndAfterAll with BaseTest with HasEx
         indexResource = indexResource,
         index = index,
         indexer = indexer,
+        participantContractStore = participantContractStore,
       )
     )
   }
@@ -207,11 +224,10 @@ object IndexComponentTest {
 
   val TestParticipantId = "index-component-test-participant-id"
 
-  val maxUpdateCount = 1000000
-
   final case class TestServices(
       indexResource: Resource[Any],
       index: IndexService,
       indexer: FutureQueue[Update],
+      participantContractStore: InMemoryContractStore,
   )
 }

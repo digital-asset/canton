@@ -10,7 +10,7 @@ import org.scalafmt.sbt.ScalafmtPlugin
 import pl.project13.scala.sbt.JmhPlugin
 import sbt.Keys.*
 import sbt.Tests.{Group, SubProcess}
-import sbt.*
+import sbt.{File, *}
 import sbt.internal.util.ManagedLogger
 import sbt.nio.Keys.*
 import sbtassembly.AssemblyKeys.*
@@ -633,6 +633,13 @@ object BuildCommon {
       `ledger-api-tools`,
       `ledger-api-string-interning-benchmark`,
       `transcode`,
+      `conformance-testing`,
+      `ledger-api-bench-tool`,
+      `ledger-test-tool-suites-2-1`,
+      `ledger-test-tool-suites-2-dev`,
+      `ledger-test-tool-2-1`,
+      `ledger-test-tool-2-dev`,
+      `enterprise-upgrading-integration-tests`,
     )
 
     // Project for utilities that are also used outside of the Canton repo
@@ -760,6 +767,11 @@ object BuildCommon {
         // Explicit set the Daml project dependency to common
         Test / damlDependencies := (`community-common` / Compile / damlBuild).value :+ (`ledger-common` / Test / resourceDirectory).value / "test-models" / "model-tests-1.15.dar",
         Test / damlEnableJavaCodegen := true,
+        Test / damlBuildOrder := Seq(
+          "daml/JsonApiTest/Upgrades/Iface",
+          "daml/JsonApiTest/Upgrades/V1",
+          "daml/JsonApiTest/Upgrades/V2",
+        ),
         Test / damlCodeGeneration := Seq(
           (
             (Test / sourceDirectory).value / "daml" / "CantonTest",
@@ -797,6 +809,11 @@ object BuildCommon {
             "com.digitalasset.canton.http.json.tests.user",
           ),
           (
+            (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "Upgrades" / "Iface",
+            (Test / damlDarOutput).value / "ifoo-0.0.1.dar",
+            "com.digitalasset.canton.http.json.tests.upgrades.v1",
+          ),
+          (
             (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "Upgrades" / "V1",
             (Test / damlDarOutput).value / "foo-0.0.1.dar",
             "com.digitalasset.canton.http.json.tests.upgrades.v1",
@@ -805,6 +822,11 @@ object BuildCommon {
             (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "Upgrades" / "V2",
             (Test / damlDarOutput).value / "foo-0.0.2.dar",
             "com.digitalasset.canton.http.json.tests.upgrades.v2",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "Upgrades" / "IncompatibleV3",
+            (Test / damlDarOutput).value / "foo-0.0.3.dar",
+            "com.digitalasset.canton.http.json.tests.upgrades.v3",
           ),
         ),
         Test / useVersionedDarName := true,
@@ -910,6 +932,9 @@ object BuildCommon {
       """
         ),
         addProtobufFilesToHeaderCheck(Compile),
+        // Remove custom LogReporter, as it is missing from classpath
+        // LogReport is defined in `community-testing` which depends on `community-base`
+        Test / testOptions -= Tests.Argument("-C", "com.digitalasset.canton.LogReporter"),
       )
 
     lazy val `community-common` = project
@@ -1220,7 +1245,7 @@ object BuildCommon {
         `wartremover-annotations`,
       )
       .settings(
-        sharedCantonSettings,
+        sharedCantonCommunitySettings,
         libraryDependencies ++= Seq(
           aws_kms,
           aws_sts,
@@ -1871,6 +1896,339 @@ object BuildCommon {
           `community-testing` % Test,
           `community-common` % Test,
         )
+
+    lazy val `ledger-api-bench-tool` = project
+      .in(file("community/ledger-api-bench-tool"))
+      .dependsOn(
+        `ledger-api-core`,
+        `ledger-common` % "compile->compile;compile->test",
+        `community-base`,
+        `community-app` % "test->test",
+        `daml-adjustable-clock`,
+      )
+      .disablePlugins(WartRemover) // TODO(i12064): enable WartRemover
+      .enablePlugins(DamlPlugin)
+      .settings(
+        libraryDependencies ++= Seq(
+          pekko_actor_typed,
+          pekko_actor_testkit_typed % Test,
+          circe_core,
+          circe_yaml,
+        ),
+        sharedSettings,
+        coverageEnabled := false,
+        JvmRulesPlugin.damlRepoHeaderSettings,
+        Compile / damlDarLfVersion := "2.dev",
+        Compile / damlEnableJavaCodegen := true,
+        Compile / damlCodeGeneration := Seq(
+          (
+            (Compile / sourceDirectory).value / "daml" / "benchtool",
+            (Compile / damlDarOutput).value / "benchtool-tests.dar",
+            s"com.daml.ledger.test.java.benchtool",
+          )
+        ),
+      )
+
+    def ledgerTestToolSuitesProject(
+        lfVersion: String,
+        darsProject: Project,
+        additionalSetting: Def.SettingsDefinition*
+    ): Project =
+      Project(
+        s"ledger-test-tool-suites-$lfVersion".replace('.', '-'),
+        file(s"community/ledger-test-tool/suites/lf-v$lfVersion"),
+      )
+        .dependsOn(
+          DamlProjects.`bindings-java`,
+          `community-participant`,
+          `community-testing`,
+          `community-base`,
+          `base-errors`,
+          `ledger-api-core`,
+          `ledger-common`,
+          `ledger-json-api`,
+          darsProject,
+        )
+        .disablePlugins(WartRemover)
+        .settings(
+          libraryDependencies ++= Seq(
+            daml_test_evidence_tag,
+            daml_libs_scala_grpc_test_utils,
+            munit,
+            sttp_pekko_backend,
+            pekko_stream,
+            tapir_sttp_client,
+          ),
+          compileOrder := CompileOrder.JavaThenScala,
+          sharedSettings,
+          Def.settings(additionalSetting.toSeq*),
+          Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
+          Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
+          scalacOptions --= JvmRulesPlugin.scalacOptionsToDisableForTests,
+          // 2.1 tests will fail to compile with a 2.1 dar, so we exclude them from the test suite
+          if (lfVersion != "2.dev")
+            Seq(
+              Compile / unmanagedSources / excludeFilter := "*NamesSpec.scala" || ((_: File).getAbsolutePath
+                .contains("v2_dev"))
+            )
+          else Seq.empty,
+        )
+
+    lazy val `ledger-test-tool-suites-2-1` =
+      ledgerTestToolSuitesProject("2.1", `ledger-common-dars-lf-v2-1`)
+    lazy val `ledger-test-tool-suites-2-dev` =
+      ledgerTestToolSuitesProject(
+        "2.dev",
+        `ledger-common-dars-lf-v2-dev`,
+        // Suites sources are identical between test tool versions
+        // Hence, keep ledger-test-tool-suites-2-1 as primary sbt module holding the sources
+        // and all other sbt suites modules add them as unmanagedSourceDirectories for compilation
+        Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "lf-v2.1" / "src",
+        Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "lf-v2.1" / "src",
+      )
+
+    def ledgerTestToolProject(lfVersion: String, ledgerTestToolSuites: Project): Project =
+      Project(
+        s"ledger-test-tool-$lfVersion".replace('.', '-'),
+        file(s"community/ledger-test-tool/tool/lf-v$lfVersion"),
+      ).dependsOn(
+        ledgerTestToolSuites
+      ).disablePlugins(WartRemover)
+        .enablePlugins(DamlPlugin)
+        .settings(
+          compileOrder := CompileOrder.JavaThenScala,
+          sharedSettings,
+          Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
+          Compile / unmanagedResourceDirectories += baseDirectory.value / ".." / "src" / "main" / "resources",
+          assembly / mainClass := Some("com.daml.ledger.api.testtool.Main"),
+          assembly / assemblyJarName := s"ledger-api-test-tool-$lfVersion-${version.value}.jar",
+          assembly / assemblyMergeStrategy := {
+            case PathList("org", "hamcrest", _ @_*) => MergeStrategy.last
+            // complains about okio.kotlin_module clash
+            case PathList("META-INF", "okio.kotlin_module") => MergeStrategy.last
+            case x =>
+              val oldStrategy = (ThisBuild / assemblyMergeStrategy).value
+              mergeStrategy(oldStrategy)(x)
+          },
+        )
+
+    lazy val `ledger-test-tool-2-1` = ledgerTestToolProject("2.1", `ledger-test-tool-suites-2-1`)
+    lazy val `ledger-test-tool-2-dev` =
+      ledgerTestToolProject("2.dev", `ledger-test-tool-suites-2-dev`)
+
+    lazy val `conformance-testing` = project
+      .in(file("community/conformance-testing"))
+      .dependsOn(
+        `community-app` % "compile->compile;test->test",
+        `ledger-test-tool-2-1` % Test,
+        `ledger-test-tool-2-dev` % Test,
+      )
+      .settings(
+        sharedCantonCommunitySettings,
+        // Allow to exit the systematic testing generator app
+        (Test / run / trapExit) := false,
+        Test / run := (Test / run)
+          .dependsOn(`ledger-test-tool-2-1` / assembly, `ledger-test-tool-2-dev` / assembly)
+          .evaluated,
+        Test / test := (Test / test)
+          .dependsOn(`ledger-test-tool-2-1` / assembly, `ledger-test-tool-2-dev` / assembly)
+          .value,
+        Test / testOnly := (Test / testOnly)
+          .dependsOn(`ledger-test-tool-2-1` / assembly, `ledger-test-tool-2-dev` / assembly)
+          .evaluated,
+        Test / unmanagedResourceDirectories += (`ledger-common-dars-lf-v2-1` / Compile / resourceManaged).value,
+      )
+
+    // TODO(#25385): Consider extracting this integration test setup into its own sbt file due to its size
+    lazy val `enterprise-upgrading-integration-tests` = project
+      .in(file("community/upgrading-integration-tests"))
+      .dependsOn(
+        `community-app` % "test->test",
+        `ledger-api-core` % "test->test",
+      )
+      .enablePlugins(DamlPlugin)
+      .settings(
+        sharedCantonCommunitySettings,
+        Test / damlEnableJavaCodegen := true,
+        Test / useVersionedDarName := true,
+        Test / damlEnableProjectVersionOverride := false,
+        Test / damlBuildOrder := Seq(
+          "daml/DvP/Assets",
+          "daml/DvP/Offer",
+          "daml/DvP/AssetFactory",
+          "daml/Systematic/Util/V1",
+          "daml/Systematic/Util/V2",
+          "daml/Systematic/IBar",
+          "daml/Systematic/IBaz",
+          "daml/Systematic/Bar/V1",
+          "daml/Systematic/Bar/V2",
+          "daml/Systematic/Baz/V1",
+          "daml/Systematic/Baz/V2",
+          "daml/Systematic/Foo",
+        ),
+        Test / damlCodeGeneration := Seq(
+          (
+            (Test / sourceDirectory).value / "daml" / "CantonUpgrade" / "If",
+            (Test / damlDarOutput).value / "UpgradeIf-1.0.0.dar",
+            "com.digitalasset.canton.damltests.upgrade.upgradeif",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "CantonUpgrade" / "V1",
+            (Test / damlDarOutput).value / "Upgrade-1.0.0.dar",
+            "com.digitalasset.canton.damltests.upgrade.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "CantonUpgrade" / "V2",
+            (Test / damlDarOutput).value / "Upgrade-2.0.0.dar",
+            "com.digitalasset.canton.damltests.upgrade.v2",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "NonConforming" / "V1",
+            (Test / damlDarOutput).value / "NonConforming-1.0.0.dar",
+            "com.digitalasset.canton.damltests.nonconforming.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "NonConforming" / "V2",
+            (Test / damlDarOutput).value / "NonConforming-2.0.0.dar",
+            "com.digitalasset.canton.damltests.nonconforming.v2",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "AppUpgrade" / "V1",
+            (Test / damlDarOutput).value / "AppUpgrade-1.0.0.dar",
+            "com.digitalasset.canton.damltests.appupgrade.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "AppUpgrade" / "V2",
+            (Test / damlDarOutput).value / "AppUpgrade-2.0.0.dar",
+            "com.digitalasset.canton.damltests.appupgrade.v2",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "TopologyAwarePackageSelection" / "ScenarioAppInstall" / "V1",
+            (Test / damlDarOutput).value / "tests-app-install-1.0.0.dar",
+            "com.digitalasset.canton.damltests.appinstall.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "TopologyAwarePackageSelection" / "ScenarioAppInstall" / "V2",
+            (Test / damlDarOutput).value / "tests-app-install-2.0.0.dar",
+            "com.digitalasset.canton.damltests.appinstall.v2",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "TopologyAwarePackageSelection" / "FeaturedAppRight" / "V1",
+            (Test / damlDarOutput).value / "tests-featured-app-right-impl-1.0.0.dar",
+            "com.digitalasset.canton.damltests.featuredapprightimpl.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "TopologyAwarePackageSelection" / "FeaturedAppRight" / "V2",
+            (Test / damlDarOutput).value / "tests-featured-app-right-impl-2.0.0.dar",
+            "com.digitalasset.canton.damltests.featuredapprightimpl.v2",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "TopologyAwarePackageSelection" / "FeaturedAppRight" / "If",
+            (Test / damlDarOutput).value / "tests-featured-app-right-iface-1.0.0.dar",
+            "com.digitalasset.canton.damltests.featuredappright.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "UpgradesWithInterfaces" / "HoldingV1",
+            (Test / damlDarOutput).value / "tests-Holding-v1-1.0.0.dar",
+            "com.digitalasset.canton.damltests.holding.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "UpgradesWithInterfaces" / "HoldingV2",
+            (Test / damlDarOutput).value / "tests-Holding-v2-1.0.0.dar",
+            "com.digitalasset.canton.damltests.holding.v2",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "UpgradesWithInterfaces" / "TokenV1",
+            (Test / damlDarOutput).value / "tests-Token-1.0.0.dar",
+            "com.digitalasset.canton.damltests.token.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "UpgradesWithInterfaces" / "TokenV2",
+            (Test / damlDarOutput).value / "tests-Token-2.0.0.dar",
+            "com.digitalasset.canton.damltests.token.v2",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "UpgradesWithInterfaces" / "TokenV3",
+            (Test / damlDarOutput).value / "tests-Token-3.0.0.dar",
+            "com.digitalasset.canton.damltests.token.v3",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "UpgradesWithInterfaces" / "TokenV4",
+            (Test / damlDarOutput).value / "tests-Token-4.0.0.dar",
+            "com.digitalasset.canton.damltests.token.v4",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "DvP" / "Assets" / "V1",
+            (Test / damlDarOutput).value / "dvp-assets-1.0.0.dar",
+            "com.digitalasset.canton.damltests.dvpassets.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "DvP" / "Assets" / "V2",
+            (Test / damlDarOutput).value / "dvp-assets-2.0.0.dar",
+            "com.digitalasset.canton.damltests.dvpassets.v2",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "DvP" / "Offer" / "V1",
+            (Test / damlDarOutput).value / "dvp-offer-1.0.0.dar",
+            "com.digitalasset.canton.damltests.dvpoffer.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "DvP" / "Offer" / "V2",
+            (Test / damlDarOutput).value / "dvp-offer-2.0.0.dar",
+            "com.digitalasset.canton.damltests.dvpoffer.v2",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "Systematic" / "IBaz",
+            (Test / damlDarOutput).value / "ibaz-1.0.0.dar",
+            "com.digitalasset.canton.damltests.ibaz.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "Systematic" / "IBar",
+            (Test / damlDarOutput).value / "ibar-1.0.0.dar",
+            "com.digitalasset.canton.damltests.ibar.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "Systematic" / "Baz" / "V1",
+            (Test / damlDarOutput).value / "baz-1.0.0.dar",
+            "com.digitalasset.canton.damltests.baz.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "Systematic" / "Baz" / "V2",
+            (Test / damlDarOutput).value / "baz-2.0.0.dar",
+            "com.digitalasset.canton.damltests.baz.v2",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "Systematic" / "Bar" / "V1",
+            (Test / damlDarOutput).value / "bar-1.0.0.dar",
+            "com.digitalasset.canton.damltests.bar.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "Systematic" / "Bar" / "V2",
+            (Test / damlDarOutput).value / "bar-2.0.0.dar",
+            "com.digitalasset.canton.damltests.bar.v2",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "Systematic" / "Foo" / "V1",
+            (Test / damlDarOutput).value / "foo-1.0.0.dar",
+            "com.digitalasset.canton.damltests.foo.v1",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "Systematic" / "Foo" / "V2",
+            (Test / damlDarOutput).value / "foo-2.0.0.dar",
+            "com.digitalasset.canton.damltests.foo.v2",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "Systematic" / "Foo" / "V3",
+            (Test / damlDarOutput).value / "foo-3.0.0.dar",
+            "com.digitalasset.canton.damltests.foo.v3",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "Systematic" / "Foo" / "V4",
+            (Test / damlDarOutput).value / "foo-4.0.0.dar",
+            "com.digitalasset.canton.damltests.foo.v4",
+          ),
+        ),
+      )
   }
 
   object DamlProjects {
