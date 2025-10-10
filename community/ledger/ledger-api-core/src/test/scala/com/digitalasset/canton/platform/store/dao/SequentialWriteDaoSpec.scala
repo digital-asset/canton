@@ -267,7 +267,7 @@ object SequentialWriteDaoSpec {
 
   private val someEventCreated = DbDto.EventCreate(
     event_offset = 1,
-    update_id = "",
+    update_id = new Array[Byte](0),
     ledger_effective_time = 3,
     command_id = None,
     workflow_id = None,
@@ -294,12 +294,13 @@ object SequentialWriteDaoSpec {
     trace_context = serializableTraceContext,
     record_time = 0,
     external_transaction_hash = Some(externalTransactionHash),
+    internal_contract_id = 42L,
   )
 
   private val someEventExercise = DbDto.EventExercise(
     consuming = true,
     event_offset = 1,
-    update_id = "",
+    update_id = new Array[Byte](0),
     ledger_effective_time = 3,
     command_id = None,
     workflow_id = None,
@@ -312,6 +313,7 @@ object SequentialWriteDaoSpec {
     flat_event_witnesses = Set.empty,
     tree_event_witnesses = Set.empty,
     exercise_choice = "",
+    exercise_choice_interface_id = None,
     exercise_argument = Array.empty,
     exercise_result = None,
     exercise_actors = Set.empty,
@@ -361,6 +363,8 @@ object SequentialWriteDaoSpec {
         packageIds = Iterator("2"),
         userIds = Iterator.empty,
         participantIds = Iterator.empty,
+        choiceNames = Iterator.empty,
+        interfaceIds = Iterator.empty,
       )
     case _ =>
       new DomainStringIterators(
@@ -370,6 +374,8 @@ object SequentialWriteDaoSpec {
         packageIds = Iterator.empty,
         userIds = Iterator.empty,
         participantIds = Iterator.empty,
+        choiceNames = Iterator.empty,
+        interfaceIds = Iterator.empty,
       )
   }
 
@@ -389,6 +395,12 @@ object SequentialWriteDaoSpec {
       override def userId: StringInterningDomain[UserId] = throw new NotImplementedException
 
       override def participantId: StringInterningDomain[Ref.ParticipantId] =
+        throw new NotImplementedException
+
+      override def choiceName: StringInterningDomain[Ref.ChoiceName] =
+        throw new NotImplementedException
+
+      override def interfaceId: StringInterningDomain[Ref.Identifier] =
         throw new NotImplementedException
 
       override def internize(

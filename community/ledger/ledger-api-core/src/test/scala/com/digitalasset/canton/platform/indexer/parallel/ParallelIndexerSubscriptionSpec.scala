@@ -37,9 +37,14 @@ import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscrip
   ZeroLedgerEnd,
 }
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
-import com.digitalasset.canton.platform.store.backend.{DbDto, DbDtoEq, ParameterStorageBackend}
+import com.digitalasset.canton.platform.store.backend.{
+  DbDto,
+  ParameterStorageBackend,
+  ScalatestEqualityHelpers,
+}
 import com.digitalasset.canton.platform.store.cache.MutableLedgerEndCache
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
+import com.digitalasset.canton.protocol.TestUpdateId
 import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
@@ -71,7 +76,7 @@ class ParallelIndexerSubscriptionSpec
     with Matchers
     with NamedLogging {
 
-  implicit private val DbDtoEqual: org.scalactic.Equality[DbDto] = DbDtoEq.DbDtoEq
+  implicit private val DbDtoEqual: org.scalactic.Equality[DbDto] = ScalatestEqualityHelpers.DbDtoEq
   implicit val traceContext: TraceContext = TraceContext.empty
   private val serializableTraceContext =
     SerializableTraceContext(traceContext).toDamlProto.toByteArray
@@ -80,6 +85,7 @@ class ParallelIndexerSubscriptionSpec
     classOf[ParallelIndexerSubscriptionSpec].getSimpleName
   )
   implicit val materializer: Materializer = Materializer(actorSystem)
+  val emptyByteArray = new Array[Byte](0)
 
   private val someParty = DbDto.PartyEntry(
     ledger_offset = 1,
@@ -106,15 +112,107 @@ class ParallelIndexerSubscriptionSpec
     submissionId = Some(Ref.SubmissionId.assertFromString("abc")),
   )
 
+  private val updateId = TestUpdateId("mock_hash")
+  private val updateIdByteArray = updateId.toProtoPrimitive.toByteArray
+
   private def offset(l: Long): Offset = Offset.tryFromLong(l)
 
   private val metrics = LedgerApiServerMetrics.ForTesting
 
   private def hashCid(key: String): ContractId = ContractId.V1(Hash.hashPrivateKey(key))
 
+  private val someEventActivate = DbDto.EventActivate(
+    event_offset = 1,
+    update_id = updateIdByteArray,
+    workflow_id = None,
+    command_id = None,
+    submitters = None,
+    record_time = 1,
+    synchronizer_id = someSynchronizerId,
+    trace_context = serializableTraceContext,
+    external_transaction_hash = None,
+    event_type = 1,
+    event_sequential_id = 15,
+    node_id = 3,
+    additional_witnesses = None,
+    source_synchronizer_id = None,
+    reassignment_counter = None,
+    reassignment_id = None,
+    representative_package_id = "",
+    notPersistedContractId = hashCid("1"),
+    internal_contract_id = 1,
+    create_key_hash = None,
+  )
+
+  private val someEventDeactivate = DbDto.EventDeactivate(
+    event_offset = 1,
+    update_id = updateIdByteArray,
+    workflow_id = None,
+    command_id = None,
+    submitters = None,
+    record_time = 1,
+    synchronizer_id = someSynchronizerId,
+    trace_context = serializableTraceContext,
+    external_transaction_hash = None,
+    event_type = 1,
+    event_sequential_id = 1,
+    node_id = 1,
+    deactivated_event_sequential_id = None,
+    additional_witnesses = None,
+    exercise_choice = None,
+    exercise_choice_interface_id = None,
+    exercise_argument = None,
+    exercise_result = None,
+    exercise_actors = None,
+    exercise_last_descendant_node_id = None,
+    exercise_argument_compression = None,
+    exercise_result_compression = None,
+    reassignment_id = None,
+    assignment_exclusivity = None,
+    target_synchronizer_id = None,
+    reassignment_counter = None,
+    contract_id = hashCid("1"),
+    internal_contract_id = None,
+    template_id = "",
+    package_id = "",
+    stakeholders = Set.empty,
+    ledger_effective_time = None,
+  )
+
+  private val someEventWitnessed = DbDto.EventVariousWitnessed(
+    event_offset = 1,
+    update_id = updateIdByteArray,
+    workflow_id = None,
+    command_id = None,
+    submitters = None,
+    record_time = 1,
+    synchronizer_id = someSynchronizerId,
+    trace_context = serializableTraceContext,
+    external_transaction_hash = None,
+    event_type = 1,
+    event_sequential_id = 1,
+    node_id = 1,
+    additional_witnesses = Set.empty,
+    consuming = None,
+    exercise_choice = None,
+    exercise_choice_interface_id = None,
+    exercise_argument = None,
+    exercise_result = None,
+    exercise_actors = None,
+    exercise_last_descendant_node_id = None,
+    exercise_argument_compression = None,
+    exercise_result_compression = None,
+    representative_package_id = None,
+    contract_id = None,
+    internal_contract_id = None,
+    template_id = None,
+    package_id = None,
+    ledger_effective_time = None,
+  )
+
   private val someEventCreated = DbDto.EventCreate(
     event_offset = 1,
-    update_id = "",
+    update_id = emptyByteArray,
     ledger_effective_time = 15,
     command_id = None,
     workflow_id = None,
@@ -141,12 +239,13 @@ class ParallelIndexerSubscriptionSpec
     trace_context = serializableTraceContext,
     record_time = 0,
     external_transaction_hash = None,
+    internal_contract_id = 1,
   )
 
   private val someEventExercise = DbDto.EventExercise(
     consuming = true,
     event_offset = 1,
-    update_id = "",
+    update_id = emptyByteArray,
     ledger_effective_time = 15,
     command_id = None,
     workflow_id = None,
@@ -159,6 +258,7 @@ class ParallelIndexerSubscriptionSpec
     flat_event_witnesses = Set.empty,
     tree_event_witnesses = Set.empty,
     exercise_choice = "",
+    exercise_choice_interface_id = None,
     exercise_argument = Array.empty,
     exercise_result = None,
     exercise_actors = Set.empty,
@@ -175,7 +275,7 @@ class ParallelIndexerSubscriptionSpec
 
   private val someEventAssign = DbDto.EventAssign(
     event_offset = 1,
-    update_id = "",
+    update_id = emptyByteArray,
     command_id = None,
     workflow_id = None,
     submitter = None,
@@ -197,15 +297,16 @@ class ParallelIndexerSubscriptionSpec
     authentication_data = Array.empty,
     source_synchronizer_id = someSynchronizerId,
     target_synchronizer_id = someSynchronizerId,
-    reassignment_id = "",
+    reassignment_id = new Array[Byte](0),
     reassignment_counter = 0,
     trace_context = serializableTraceContext,
     record_time = 0,
+    internal_contract_id = 1,
   )
 
   private val someEventUnassign = DbDto.EventUnassign(
     event_offset = 1,
-    update_id = "",
+    update_id = emptyByteArray,
     command_id = None,
     workflow_id = None,
     submitter = None,
@@ -217,7 +318,7 @@ class ParallelIndexerSubscriptionSpec
     event_sequential_id = 0,
     source_synchronizer_id = someSynchronizerId,
     target_synchronizer_id = someSynchronizerId,
-    reassignment_id = "",
+    reassignment_id = new Array[Byte](0),
     reassignment_counter = 0,
     assignment_exclusivity = None,
     trace_context = serializableTraceContext,
@@ -370,22 +471,30 @@ class ParallelIndexerSubscriptionSpec
           DbDto.IdFilterNonConsumingInformee(0L, "", "", first_per_sequential_id = true),
           someEventCreated,
           someEventCreated,
-          DbDto.TransactionMeta("", 1, 0L, 0L, someSynchronizerId, 0L, 0L),
+          DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L),
           someParty,
           someEventExercise,
-          DbDto.TransactionMeta("", 1, 0L, 0L, someSynchronizerId, 0L, 0L),
+          DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L),
           someParty,
           someEventAssign,
           DbDto.IdFilterAssignStakeholder(0L, "", "", first_per_sequential_id = true),
           DbDto.IdFilterAssignStakeholder(0L, "", "", first_per_sequential_id = false),
-          DbDto.TransactionMeta("", 1, 0L, 0L, someSynchronizerId, 0L, 0L),
+          DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L),
           someParty,
           someEventUnassign,
           DbDto.IdFilterUnassignStakeholder(0L, "", "", first_per_sequential_id = true),
           DbDto.IdFilterUnassignStakeholder(0L, "", "", first_per_sequential_id = false),
-          DbDto.TransactionMeta("", 1, 0L, 0L, someSynchronizerId, 0L, 0L),
+          DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L),
           someParty,
           someCompletion,
+          someEventActivate,
+          DbDto.IdFilter(0, "", "", first_per_sequential_id = false).activateStakeholder,
+          DbDto.IdFilter(0, "", "", first_per_sequential_id = false).activateWitness,
+          someEventDeactivate,
+          DbDto.IdFilter(0, "", "", first_per_sequential_id = false).deactivateStakeholder,
+          DbDto.IdFilter(0, "", "", first_per_sequential_id = false).deactivateWitness,
+          someEventWitnessed,
+          DbDto.IdFilter(0, "", "", first_per_sequential_id = false).variousWitness,
         ),
         batchSize = 3,
         offsetsUpdates = offsetsAndUpdates,
@@ -395,7 +504,7 @@ class ParallelIndexerSubscriptionSpec
     )
     import scala.util.chaining.*
 
-    result.ledgerEnd.lastEventSeqId shouldBe 21
+    result.ledgerEnd.lastEventSeqId shouldBe 24
     result.ledgerEnd.lastStringInterningId shouldBe 1
     result.ledgerEnd.lastPublicationTime shouldBe currentPublicationTime
     result.ledgerEnd.lastOffset shouldBe offset(2)
@@ -448,10 +557,38 @@ class ParallelIndexerSubscriptionSpec
       .batch(25)
       .asInstanceOf[DbDto.CommandCompletion]
       .publication_time shouldBe currentPublicationTime.toMicros
-    result.batch(26).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 0
-    result.batch(26).asInstanceOf[DbDto.StringInterningDto].externalString shouldBe "0"
-    result.batch(27).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 1
-    result.batch(27).asInstanceOf[DbDto.StringInterningDto].externalString shouldBe "1"
+    result.batch(26).asInstanceOf[DbDto.EventActivate].event_sequential_id shouldBe 22L
+    result
+      .batch(27)
+      .asInstanceOf[DbDto.IdFilterActivateStakeholder]
+      .idFilter
+      .event_sequential_id shouldBe 22L
+    result
+      .batch(28)
+      .asInstanceOf[DbDto.IdFilterActivateWitness]
+      .idFilter
+      .event_sequential_id shouldBe 22L
+    result.batch(29).asInstanceOf[DbDto.EventDeactivate].event_sequential_id shouldBe 23L
+    result
+      .batch(30)
+      .asInstanceOf[DbDto.IdFilterDeactivateStakeholder]
+      .idFilter
+      .event_sequential_id shouldBe 23L
+    result
+      .batch(31)
+      .asInstanceOf[DbDto.IdFilterDeactivateWitness]
+      .idFilter
+      .event_sequential_id shouldBe 23L
+    result.batch(32).asInstanceOf[DbDto.EventVariousWitnessed].event_sequential_id shouldBe 24L
+    result
+      .batch(33)
+      .asInstanceOf[DbDto.IdFilterVariousWitness]
+      .idFilter
+      .event_sequential_id shouldBe 24L
+    result.batch(34).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 0
+    result.batch(34).asInstanceOf[DbDto.StringInterningDto].externalString shouldBe "0"
+    result.batch(35).asInstanceOf[DbDto.StringInterningDto].internalId shouldBe 1
+    result.batch(35).asInstanceOf[DbDto.StringInterningDto].externalString shouldBe "1"
   }
 
   it should "preserve sequence id if nothing to assign" in {
@@ -548,6 +685,10 @@ class ParallelIndexerSubscriptionSpec
               target_synchronizer_id = someSynchronizerId2,
               contract_id = hashCid("B"),
             ),
+            someEventActivate.copy(
+              synchronizer_id = someSynchronizerId2,
+              notPersistedContractId = hashCid("C"),
+            ),
           ),
           batchSize = 10,
           offsetsUpdates = offsetsAndUpdates,
@@ -558,6 +699,7 @@ class ParallelIndexerSubscriptionSpec
     zeroBatch.activeContracts shouldBe Map(
       (someSynchronizerId, hashCid("A")) -> 16L,
       (someSynchronizerId2, hashCid("B")) -> 17L,
+      (someSynchronizerId2, hashCid("C")) -> 18L,
     )
     result.missingDeactivatedActivations shouldBe Map.empty
   }
@@ -654,6 +796,10 @@ class ParallelIndexerSubscriptionSpec
               source_synchronizer_id = someSynchronizerId,
               contract_id = hashCid("A"),
             ),
+            someEventDeactivate.copy(
+              synchronizer_id = someSynchronizerId2,
+              contract_id = hashCid("E"),
+            ),
             someEventExercise.copy(
               synchronizer_id = someSynchronizerId,
               contract_id = hashCid("C"),
@@ -681,7 +827,17 @@ class ParallelIndexerSubscriptionSpec
     result.missingDeactivatedActivations shouldBe Map(
       (someSynchronizerId, hashCid("A")) -> None,
       (someSynchronizerId, hashCid("B")) -> None,
+      (someSynchronizerId2, hashCid("E")) -> None,
     )
+    result.batch
+      .collect { case u: DbDto.EventDeactivate =>
+        u.deactivated_event_sequential_id
+      }
+      .shouldBe(
+        Seq(
+          Some(0)
+        )
+      )
     result.batch
       .collect { case u: DbDto.EventUnassign =>
         u.deactivated_event_sequential_id
@@ -715,6 +871,8 @@ class ParallelIndexerSubscriptionSpec
           (someSynchronizerId2, hashCid("B")) -> 2L,
           (someSynchronizerId3, hashCid("A")) -> 3L,
           (someSynchronizerId3, hashCid("B")) -> 4L,
+          (someSynchronizerId3, hashCid("C")) -> 5L,
+          (someSynchronizerId, hashCid("C")) -> 6L,
         )
       )
     val result = ParallelIndexerSubscription
@@ -724,6 +882,10 @@ class ParallelIndexerSubscriptionSpec
           ledgerEnd = ZeroLedgerEnd.copy(lastOffset = offset(2)),
           batchTraceContext = TraceContext.empty,
           batch = Vector(
+            someEventDeactivate.copy(
+              synchronizer_id = someSynchronizerId3,
+              contract_id = hashCid("C"),
+            ),
             someEventUnassign.copy(
               source_synchronizer_id = someSynchronizerId2,
               contract_id = hashCid("A"),
@@ -732,6 +894,10 @@ class ParallelIndexerSubscriptionSpec
               synchronizer_id = someSynchronizerId,
               contract_id = hashCid("B"),
               flat_event_witnesses = Set("party"),
+            ),
+            someEventDeactivate.copy(
+              synchronizer_id = someSynchronizerId2,
+              contract_id = hashCid("C"),
             ),
             someEventUnassign.copy(
               source_synchronizer_id = someSynchronizerId,
@@ -752,11 +918,23 @@ class ParallelIndexerSubscriptionSpec
     zeroBatch.activeContracts shouldBe Map(
       (someSynchronizerId3, hashCid("A")) -> 3L,
       (someSynchronizerId3, hashCid("B")) -> 4L,
+      (someSynchronizerId, hashCid("C")) -> 6L,
     )
     result.missingDeactivatedActivations shouldBe Map(
       (someSynchronizerId2, hashCid("A")) -> None,
       (someSynchronizerId, hashCid("B")) -> None,
+      (someSynchronizerId2, hashCid("C")) -> None,
     )
+    result.batch
+      .collect { case u: DbDto.EventDeactivate =>
+        u.deactivated_event_sequential_id
+      }
+      .shouldBe(
+        Seq(
+          Some(5L),
+          Some(0L),
+        )
+      )
     result.batch
       .collect { case u: DbDto.EventUnassign =>
         u.deactivated_event_sequential_id
@@ -863,13 +1041,18 @@ class ParallelIndexerSubscriptionSpec
 
   it should "correctly refill the missing activations" in {
     ParallelIndexerSubscription
-      .refillMissingDeactivatiedActivations(logger)(
+      .refillMissingDeactivatedActivations(logger)(
         Batch(
           ledgerEnd = previousLedgerEnd,
           batch = Vector(
             someEventUnassign.copy(
               source_synchronizer_id = someSynchronizerId2,
               contract_id = hashCid("A"),
+              deactivated_event_sequential_id = Some(0),
+            ),
+            someEventDeactivate.copy(
+              synchronizer_id = someSynchronizerId,
+              contract_id = hashCid("C"),
               deactivated_event_sequential_id = Some(0),
             ),
             someEventExercise.copy(
@@ -897,6 +1080,7 @@ class ParallelIndexerSubscriptionSpec
           missingDeactivatedActivations = Map(
             (someSynchronizerId2, hashCid("A")) -> Some(123),
             (someSynchronizerId, hashCid("B")) -> Some(1234),
+            (someSynchronizerId, hashCid("C")) -> Some(12345),
           ),
           batchTraceContext = TraceContext.empty,
         )
@@ -906,6 +1090,11 @@ class ParallelIndexerSubscriptionSpec
         source_synchronizer_id = someSynchronizerId2,
         contract_id = hashCid("A"),
         deactivated_event_sequential_id = Some(123),
+      ),
+      someEventDeactivate.copy(
+        synchronizer_id = someSynchronizerId,
+        contract_id = hashCid("C"),
+        deactivated_event_sequential_id = Some(12345),
       ),
       someEventExercise.copy(
         synchronizer_id = someSynchronizerId,
@@ -933,7 +1122,7 @@ class ParallelIndexerSubscriptionSpec
       LoggerNameContains("ParallelIndexerSubscription") && SuppressionRule.Level(Level.WARN)
     )(
       ParallelIndexerSubscription
-        .refillMissingDeactivatiedActivations(logger)(
+        .refillMissingDeactivatedActivations(logger)(
           Batch(
             ledgerEnd = previousLedgerEnd,
             batch = Vector(
@@ -968,7 +1157,7 @@ class ParallelIndexerSubscriptionSpec
 
   it should "report error and fail, if activation was not even requested" in {
     loggerFactory.assertInternalError[IllegalStateException](
-      ParallelIndexerSubscription.refillMissingDeactivatiedActivations(logger)(
+      ParallelIndexerSubscription.refillMissingDeactivatedActivations(logger)(
         Batch(
           ledgerEnd = previousLedgerEnd,
           batch = Vector(
@@ -1814,17 +2003,18 @@ class ParallelIndexerSubscriptionSpec
         optByKeyNodes = None,
       ),
       transaction = CommittedTransaction(TransactionBuilder.Empty),
-      updateId = Ref.TransactionId.fromLong(15000),
+      updateId = TestUpdateId("15000"),
       contractAuthenticationData = Map.empty,
       representativePackageIds = RepresentativePackageIds.Empty,
       synchronizerId = SynchronizerId.tryFromString("x::synchronizer"),
       repairCounter = repairCounter,
       recordTime = recordTime,
+      internalContractIds = Map.empty,
     )(TraceContext.empty)
 
   def floatingUpdate(recordTime: CantonTimestamp): Update =
     TopologyTransactionEffective(
-      updateId = Ref.TransactionId.fromLong(16000),
+      updateId = TestUpdateId("16000"),
       events = Set.empty,
       synchronizerId = SynchronizerId.tryFromString("x::synchronizer"),
       effectiveTime = recordTime,

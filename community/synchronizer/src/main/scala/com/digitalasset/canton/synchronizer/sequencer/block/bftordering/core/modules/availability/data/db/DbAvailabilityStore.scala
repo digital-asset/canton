@@ -25,7 +25,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.BatchAggregator
-import slick.dbio.DBIOAction
 import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
 
 import scala.concurrent.ExecutionContext
@@ -57,7 +56,9 @@ class DbAvailabilityStore(
             traceContext: TraceContext,
             callerCloseContext: CloseContext,
         ): FutureUnlessShutdown[Iterable[Unit]] =
-          runAddBatches(items.map(_.value))
+          // Sorting should prevent deadlocks in Postgres when using concurrent clashing batched inserts
+          //  with idempotency "on conflict do nothing" clauses.
+          runAddBatches(items.sortBy(_.value._1).map(_.value))
             .map(_ => Seq.fill(items.size)(()))
 
         override def prettyItem: Pretty[(BatchId, OrderingRequestBatch)] = {
@@ -130,39 +131,32 @@ class DbAvailabilityStore(
       traceContext: TraceContext,
   ): FutureUnlessShutdown[Unit] =
     storage.synchronizeWithClosing("add-batches") {
-      profile match {
-        case _: Postgres =>
-          val insertSql =
+      val insertSql =
+        profile match {
+          case _: Postgres =>
             """insert into ord_availability_batch
-                 values (?, ?, ?)
-                 on conflict (id) do nothing"""
-          storage
-            .runWrite(
-              DbStorage
-                .bulkOperation_(insertSql, batches, storage.profile) { pp => msg =>
-                  pp >> msg._1
-                  pp >> msg._2
-                  pp >> msg._2.epochNumber
-                },
-              functionFullName,
-              maxRetries = 1,
-            )
-            .map(_ => ())
-        case _: H2 =>
-          storage.update_(
-            DBIOAction
-              .sequence(batches.map { case (batchId, batch) =>
-                sqlu"""merge into ord_availability_batch using dual
-                     on (id = $batchId)
+                      values (?, ?, ?)
+                      on conflict (id) do nothing"""
+          case _: H2 =>
+            """merge into ord_availability_batch using dual
+                     on (id = ?1)
                      when not matched then
                        insert (id, batch, epoch_number)
-                       values ($batchId, $batch, ${batch.epochNumber})
-                  """
-              })
-              .transactionally,
-            functionFullName,
-          )
-      }
+                       values (?1, ?2, ?3)"""
+        }
+
+      storage
+        .runWrite(
+          DbStorage
+            .bulkOperation_(insertSql, batches, storage.profile) { pp => msg =>
+              pp >> msg._1
+              pp >> msg._2
+              pp >> msg._2.epochNumber
+            },
+          functionFullName,
+          maxRetries = 1,
+        )
+        .map(_ => ())
     }
 
   @SuppressWarnings(Array("org.wartremover.warts.Return"))

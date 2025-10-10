@@ -8,11 +8,11 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.submission.SynchronizerSelectionFixture.*
 import com.digitalasset.canton.participant.protocol.submission.SynchronizerSelectionFixture.Transactions.ExerciseByInterface
 import com.digitalasset.canton.participant.protocol.submission.SynchronizersFilterTest.*
-import com.digitalasset.canton.protocol.{LfLanguageVersion, LfVersionedTransaction}
+import com.digitalasset.canton.protocol.{LfSerializationVersion, LfVersionedTransaction}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.{DamlLfVersionToProtocolVersions, ProtocolVersion}
+import com.digitalasset.canton.version.{LfSerializationVersionToProtocolVersions, ProtocolVersion}
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext, LfPartyId}
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits.*
 import org.scalatest.wordspec.AnyWordSpec
@@ -30,7 +30,7 @@ class SynchronizersFilterTest
     val ledgerTime = CantonTimestamp.now()
 
     val filter = SynchronizersFilterForTx(
-      Transactions.Create.tx(fixtureTransactionVersion),
+      Transactions.Create.tx(fixtureSerializationVersion),
       ledgerTime,
       testedProtocolVersion,
     )
@@ -119,7 +119,7 @@ class SynchronizersFilterTest
       val currentSynchronizerPV = ProtocolVersion.v34
       val filter =
         SynchronizersFilterForTx(
-          Transactions.Create.tx(LfLanguageVersion.v2_dev),
+          Transactions.Create.tx(LfSerializationVersion.VDev),
           ledgerTime,
           currentSynchronizerPV,
         )
@@ -128,14 +128,15 @@ class SynchronizersFilterTest
         filter
           .split(correctTopology, Transactions.Create.correctPackages)
           .futureValueUS
-      val requiredPV = DamlLfVersionToProtocolVersions.damlLfVersionToMinimumProtocolVersions
-        .get(LfLanguageVersion.v2_dev)
-        .value
+      val requiredPV =
+        LfSerializationVersionToProtocolVersions.lfSerializationVersionToMinimumProtocolVersions
+          .get(LfSerializationVersion.VDev)
+          .value
       unusableSynchronizers shouldBe List(
         UsableSynchronizers.UnsupportedMinimumProtocolVersion(
           synchronizerId = DefaultTestIdentities.physicalSynchronizerId,
           requiredPV = requiredPV,
-          lfVersion = LfLanguageVersion.v2_dev,
+          lfVersion = LfSerializationVersion.VDev,
         )
       )
       usableSynchronizers shouldBe empty
@@ -144,7 +145,7 @@ class SynchronizersFilterTest
 
   "SynchronizersFilter (simple exercise by interface)" should {
     import SimpleTopology.*
-    val exerciseByInterface = Transactions.ExerciseByInterface(fixtureTransactionVersion)
+    val exerciseByInterface = Transactions.ExerciseByInterface(fixtureSerializationVersion)
 
     val ledgerTime = CantonTimestamp.now()
     val filter = SynchronizersFilterForTx(exerciseByInterface.tx, ledgerTime, testedProtocolVersion)

@@ -10,6 +10,7 @@ import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import cats.syntax.validated.*
 import com.daml.metrics.api.MetricsContext
+import com.daml.metrics.api.MetricsContext.withEmptyMetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.base.error.{
@@ -23,12 +24,13 @@ import com.digitalasset.base.error.{
 }
 import com.digitalasset.canton.admin.participant.v30.{ReceivedCommitmentState, SentCommitmentState}
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
-import com.digitalasset.canton.config.RequireTypes.{
-  NonNegativeInt,
-  NonNegativeLong,
-  PositiveNumeric,
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt, PositiveNumeric}
+import com.digitalasset.canton.config.{
+  BatchingConfig,
+  CommitmentSendDelay,
+  ProcessingTimeout,
+  TestingConfigInternal,
 }
-import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.{
   AcsCommitmentData,
@@ -104,6 +106,7 @@ import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.{Map, SortedSet}
+import scala.collection.mutable
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, blocking}
 import scala.math.Ordering.Implicits.*
@@ -172,16 +175,25 @@ import scala.math.Ordering.Implicits.*
   * mode, the participant skips sending and checking commitments for some reconciliation intervals.
   * The parameter governing catch-up mode is:
   *
-  * @param maxCommitmentSendDelayMillis
-  *   Optional parameter to specify the maximum delay in milliseconds for sending out commitments.
-  *   To avoid a spike in network activity at the end of each reconciliation period, commitment
-  *   sending is delayed by default with a random amount uniformly distributed between 0 and max.
-  *   Commitment sending should not be delayed by more than a reconciliation interval, for two
-  *   reasons: (1) it'll overlap with the next round of commitment sends, defeating somewhat the
-  *   purpose of delaying commitment sends; and (2) and might not interact well with the catch-up
-  *   mode, depending on the parameters there. If this is not specified, the maximum delay is
-  *   testingConfig.maxCommitmentSendDelayMillis if specified, otherwise the maximum delay is 2/3 of
-  *   the reconciliation interval.
+  * @param commitmentSendDelay
+  *   Optional parameter to specify the minimum and delay as fraction of the reconciliation interval
+  *   for sending out commitments. To avoid a spike in network activity at the end of each
+  *   reconciliation period, commitment sending is delayed by default with a random amount uniformly
+  *   distributed between min and max. Commitment sending should not be delayed by more than a
+  *   reconciliation interval, for two reasons: (1) It'll overlap with the next round of commitment
+  *   sends, defeating somewhat the purpose of delaying commitment sends; and (2) It might not
+  *   interact well with the catch-up mode, depending on the parameters there. If a commitment delay
+  *   is not specified, the delay is testingConfig.commitmentSendDelay. If
+  *   testingConfig.commitmentSendDelay is not set, commitment sending is delayed by a random amount
+  *   between the default bounds of 1/3 and 5/6. If any of the bounds is not set, we take the
+  *   default value for that bound. If the maximum bound is smaller than the minimum bound, both
+  *   become the default bounds.
+  *
+  * @param increasePerceivedComputationTimeForCommitments
+  *   Optional parameter that artificially increases the measured computation time for commitments
+  *   used to decide whether to trigger catch-up mode. This is useful to test catch-up mode without
+  *   having to create a large number of commitments. This parameter does not influence neither the
+  *   actual time spent to compute commitments, nor the compute metrics.
   *
   * The constructor of this class is private. Instances of this class can only be created using
   * [[AcsCommitmentProcessor.apply]], which in turn uses the Factory method in the companion object
@@ -210,7 +222,9 @@ class AcsCommitmentProcessor private (
     clock: Clock,
     exitOnFatalFailures: Boolean,
     batchingConfig: BatchingConfig,
-    maxCommitmentSendDelayMillis: Option[NonNegativeInt],
+    commitmentSendDelay: Option[CommitmentSendDelay],
+    increasePerceivedComputationTimeForCommitments: Option[java.time.Duration],
+    doNotAwaitOnCheckingIncomingCommitments: Boolean,
 )(implicit ec: ExecutionContext)
     extends AcsChangeListener
     with FlagCloseable
@@ -248,6 +262,9 @@ class AcsCommitmentProcessor private (
 
   // used to generate randomized commitment sending delays
   private val rand = new scala.util.Random
+  // fraction of length of reconciliation interval
+  private lazy val defaultMinDelay = 1.0 / 3.0
+  private lazy val defaultMaxDelay = 5.0 / 6.0
 
   /** The sequencer timestamp for which we are ready to process remote commitments.
     *
@@ -328,6 +345,11 @@ class AcsCommitmentProcessor private (
     */
   private val reinitializationEnqueued: AtomicReference[Boolean] =
     new AtomicReference[Boolean](false)
+
+  // initialize with a seq of length the skip step of catch-up config, in order to even out computation
+  // duration over the skip window
+  private lazy val lastCommitmentsComputeTimes: DurationResizableRingBuffer =
+    new DurationResizableRingBuffer(0)
 
   /** Queue to serialize the access to the DB, to avoid serialization failures at SERIALIZABLE level
     */
@@ -447,6 +469,24 @@ class AcsCommitmentProcessor private (
         catchUpBoundaryTimestamp
       } else None
     }
+
+  // initialize with a seq of length the skip step of catch-up config, in order to even out computation
+  // duration over the skip window
+  private def initLastCommitmentsComputeTimes(
+      lastCatchUpConfig: Option[AcsCommitmentsCatchUpParameters]
+  ) =
+    // we initialize with a seq of skip size of high values if increasePerceivedComputationTimeForCommitments is non-empty,
+    // otherwise we initialize to an empty array meaning there are no previous catch-up times since restart
+    lastCatchUpConfig.map(cfg =>
+      if (increasePerceivedComputationTimeForCommitments.nonEmpty) {
+        lastCommitmentsComputeTimes.setCapacity(cfg.catchUpIntervalSkip.value)
+        lastCommitmentsComputeTimes.addAll(
+          Seq.fill(cfg.catchUpIntervalSkip.value)(
+            java.time.Duration.ofSeconds(Long.MaxValue)
+          )
+        )
+      }
+    )
 
   def initializeTicksOnStartup(
       timestamps: List[EffectiveTime]
@@ -649,6 +689,7 @@ class AcsCommitmentProcessor private (
     ): FutureUnlessShutdown[Unit] = {
       for {
         config <- catchUpConfig(completedPeriod.toInclusive.forgetRefinement)
+        _ = initLastCommitmentsComputeTimes(config)
 
         // Evaluate in the beginning the catch-up conditions for simplicity
         catchingUpInProgress <- catchUpInProgress(
@@ -714,6 +755,13 @@ class AcsCommitmentProcessor private (
             batchingConfig,
           )
 
+        reconIntervals <- getReconciliationIntervals(
+          completedPeriod.toInclusive.forgetRefinement
+        )
+        reconIntervalLength = reconIntervals.intervals.headOption.fold(0L)(
+          _.intervalLength.duration.toMillis
+        )
+
         _ <-
           if (!catchingUpInProgress || hasCaughtUpToBoundaryRes) {
             for {
@@ -728,7 +776,7 @@ class AcsCommitmentProcessor private (
               _ <- MarkOutstandingIfNonEmpty(completedPeriod, msgs.keySet)
               _ <- persistRunningCommitments(snapshotRes)
             } yield {
-              sendCommitmentMessages(completedPeriod, msgs.toSeq)
+              sendCommitmentMessages(completedPeriod, msgs.toSeq, reconIntervalLength)
             }
           } else FutureUnlessShutdown.unit
 
@@ -1002,7 +1050,7 @@ class AcsCommitmentProcessor private (
       batch: Seq[OpenEnvelope[SignedProtocolMessage[AcsCommitment]]],
   )(implicit traceContext: TraceContext): HandlerResult = {
 
-    if (batch.lengthCompare(1) != 0) {
+    if (batch.sizeIs != 1) {
       Errors.InternalError
         .MultipleCommitmentsInBatch(psid.logical, timestamp, batch.length)
         .discard
@@ -1308,8 +1356,8 @@ class AcsCommitmentProcessor private (
 
   private def checkCommitment(
       commitment: AcsCommitment
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    dbQueue
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    val fut = dbQueue
       .executeUS(
         {
           // Make sure that the ready-for-remote check is atomic with buffering the commitment
@@ -1325,6 +1373,15 @@ class AcsCommitmentProcessor private (
         s"check commitment readiness at ${commitment.period} by ${commitment.sender}",
       )
       .flatten
+
+    if (doNotAwaitOnCheckingIncomingCommitments) {
+      FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+        fut,
+        s"check incoming commitment for ${commitment.period} by ${commitment.sender}",
+      )
+      FutureUnlessShutdown.unit
+    } else fut
+  }
 
   private def indicateReadyForRemote(timestamp: CantonTimestampSecond)(implicit
       traceContext: TraceContext
@@ -1372,6 +1429,7 @@ class AcsCommitmentProcessor private (
       local: Iterable[(CommitmentPeriod, AcsCommitment.HashedCommitmentType)],
       lastPruningTime: Option[CantonTimestamp],
       possibleCatchUp: Boolean,
+      intervalMillis: Long,
   )(implicit traceContext: TraceContext): Boolean =
     if (local.isEmpty) {
       if (
@@ -1392,7 +1450,7 @@ class AcsCommitmentProcessor private (
         // end of the catch-up boundary, we then reply with an empty commitment.
         val msg = mkCommitment(remote.sender, AcsCommitmentProcessor.emptyCommitment, remote.period)
 
-        sendCommitmentMessages(remote.period, Seq(remote.sender -> msg))
+        sendCommitmentMessages(remote.period, Seq(remote.sender -> msg), intervalMillis)
         logger.debug(
           s" ${remote.sender} send a non-empty ACS, but local ACS was empty. returned an empty ACS counter-commitment."
         )
@@ -1467,6 +1525,13 @@ class AcsCommitmentProcessor private (
         completedPeriod.toInclusive.forgetRefinement,
       )
 
+      reconIntervals <- getReconciliationIntervals(
+        completedPeriod.toInclusive.forgetRefinement
+      )
+      reconIntervalLength = reconIntervals.intervals.headOption.fold(0L)(
+        _.intervalLength.duration.toMillis
+      )
+
       _ <- MonadUtil.parTraverseWithLimit_(threadCount)(computed.toList) {
         case (period, counterParticipant, cmt) =>
           logger.debug(
@@ -1500,6 +1565,7 @@ class AcsCommitmentProcessor private (
                 List((period, cmt)),
                 lastPruningTime.map(_.timestamp),
                 possibleCatchUp,
+                reconIntervalLength,
               )
             )
 
@@ -1519,6 +1585,13 @@ class AcsCommitmentProcessor private (
 
             }
 
+            reconIntervals <- getReconciliationIntervals(
+              completedPeriod.toInclusive.forgetRefinement
+            )
+            reconIntervalLength = reconIntervals.intervals.headOption.fold(0L)(
+              _.intervalLength.duration.toMillis
+            )
+
             // if there is a mismatch, send all fine-grained commitments between `lastSentCatchUpCommitmentTimestamp`
             // and `lastProcessedCatchUpCommitmentTimestamp`
             _ <-
@@ -1531,6 +1604,7 @@ class AcsCommitmentProcessor private (
                         lastSentCatchUpCommitmentTimestamp,
                         lastProcessedCatchUpCommitmentTimestamp,
                         filterOutParticipantId = matching.map(c => c.counterParticipant),
+                        intervalMillis = reconIntervalLength,
                       )
                     } else {
                       // send to all counter-participants from whom I have cmts, but they don't match
@@ -1539,6 +1613,7 @@ class AcsCommitmentProcessor private (
                         lastProcessedCatchUpCommitmentTimestamp,
                         filterInParticipantId = mismatches.map(c => c.counterParticipant),
                         filterOutParticipantId = matching.map(c => c.counterParticipant),
+                        reconIntervalLength,
                       )
                     }
                 } yield res
@@ -1576,6 +1651,7 @@ class AcsCommitmentProcessor private (
       s"Computing commitments for $period, number of stakeholder sets: ${commitmentSnapshot.keySet.size}"
     )
     for {
+      catchUpConfig <- catchUpConfig(period.toInclusive.forgetRefinement)
       cmts <-
         commitments(
           participantId,
@@ -1585,6 +1661,10 @@ class AcsCommitmentProcessor private (
           Some(metrics),
           threadCount,
           cachedCommitments.getOrElse(new CachedCommitments()),
+          lastCommitmentsComputeTimes =
+            catchUpConfig.map(cfg => (cfg.catchUpIntervalSkip, lastCommitmentsComputeTimes)),
+          increasePerceivedComputationTimeForCommitments =
+            increasePerceivedComputationTimeForCommitments,
         )
 
     } yield cmts.collect {
@@ -1609,6 +1689,7 @@ class AcsCommitmentProcessor private (
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[CantonTimestamp]] =
     config.parFlatTraverse(cfg =>
       for {
+        // compute what timestamp we would need to catch-up to
         sortedReconciliationIntervals <- sortedReconciliationIntervalsProvider
           .reconciliationIntervals(completedPeriodTimestamp)
         catchUpTimestamp = sortedReconciliationIntervals.intervals.headOption.flatMap(interval =>
@@ -1637,13 +1718,31 @@ class AcsCommitmentProcessor private (
           }
         )
 
+        // if we already saw commitments from a counter-participant at the time we'd need to catch up to, then
+        // we can be in a situation where we need to catch up
         comm <- catchUpTimestamp.fold(FutureUnlessShutdown.pure(Seq.empty[BufferedAcsCommitment]))(
           ts => store.queue.peekThroughAtOrAfter(ts)
         )
-
       } yield {
-        if (comm.nonEmpty) catchUpTimestamp
-        else None
+        if (comm.nonEmpty) {
+          // It seems we might need to catch up, but only if the participant was actually lagging behind, i.e.,
+          // it was supposed to compute commitments at the time when the counter-participant computed commitments.
+          // This is not the case when the counter-participant sends a commitment because of activity on
+          // other contracts than the ones we share with it.
+          // Also, it's not the case when there are delays in the record order publisher that make the participant slow
+          // in observing time advance, but not actually slow in computing commitments.
+          // Thus, we only enter catch-up mode if the participant is actually falling behind, i.e., metrics.compute,
+          // which represents processing commitments * nr commitments per period, approaches the interval length.
+          sortedReconciliationIntervals.intervals.headOption.flatMap(interval =>
+            lastCommitmentsComputeTimes
+              .averageDuration()
+              .fold[Option[CantonTimestamp]](None)(avgDuration =>
+                if (avgDuration > interval.intervalLength.duration)
+                  catchUpTimestamp
+                else None
+              )
+          )
+        } else None
       }
     )
 
@@ -1661,20 +1760,36 @@ class AcsCommitmentProcessor private (
   private def sendCommitmentMessages(
       period: CommitmentPeriod,
       msgs: Seq[(ParticipantId, AcsCommitment)],
+      intervalMillis: Long,
   )(implicit traceContext: TraceContext): Unit = {
 
-    // delay sending out commitments by at most (in this order): maxCommitmentSendDelayMillis, or
-    // testingConfig.maxCommitmentSendDelayMillis, or 2/3 of the reconciliation interval
-    val maxDelayMillis =
-      maxCommitmentSendDelayMillis.fold(testingConfig.maxCommitmentSendDelayMillis.fold({
-        val latestReconciliationInterval =
-          sortedReconciliationIntervalsProvider.getApproximateLatestReconciliationInterval
-            .map(_.intervalLength.toScala)
-            .getOrElse(Duration.Zero)
-        2 * latestReconciliationInterval.toMillis.toInt / 3
-      })(_.value))(_.value)
+    def contentsOrDefaults(delay: CommitmentSendDelay): (Double, Double) =
+      (
+        delay.minCommitmentSendDelay.map(_.n.value).getOrElse(defaultMinDelay),
+        delay.maxCommitmentSendDelay.map(_.n.value).getOrElse(defaultMaxDelay),
+      )
 
-    val delayMillis = if (maxDelayMillis > 0) rand.nextInt(maxDelayMillis) else 0
+    // delay sending out commitments by (in this order): commitmentSendDelay, or testingConfig.commitmentSendDelay,
+    // or at least defaultMinDelay and at most defaultMaxDelay of the reconciliation interval
+    val (minDelayFraction, maxDelayFraction) =
+      commitmentSendDelay.fold(
+        testingConfig.commitmentSendDelay.fold({
+          (defaultMinDelay, defaultMaxDelay)
+        })(delay => contentsOrDefaults(delay))
+      )(delay => contentsOrDefaults(delay))
+    val randDelayMillis = // max bound smaller or equal to the min bound
+      (if (maxDelayFraction < minDelayFraction) {
+         rand.between(
+           defaultMinDelay,
+           defaultMaxDelay,
+         ) * intervalMillis
+       } else if (maxDelayFraction == minDelayFraction) {
+         minDelayFraction * intervalMillis
+       } else
+         rand.between(
+           minDelayFraction,
+           maxDelayFraction,
+         ) * intervalMillis).toLong
 
     // filter the commitments to send based on the participants active at the "current time",
     // and not the ones active at the period end of the commitment
@@ -1761,7 +1876,7 @@ class AcsCommitmentProcessor private (
                           val difference = deliver.timestamp.toMicros - period.toInclusive.toMicros
                           // subtract the randomized sending delay to reflect the actual sequencing delay
                           metrics.sequencingTime.updateValue(
-                            difference - FiniteDuration(delayMillis, MILLISECONDS).toMicros
+                            difference - FiniteDuration(randDelayMillis, MILLISECONDS).toMicros
                           )
                           FutureUnlessShutdown.pure(Right[CommitmentSendState, Unit](()).either)
                         case notSequenced: SendResult.NotSequenced =>
@@ -1810,10 +1925,10 @@ class AcsCommitmentProcessor private (
           clock
             .scheduleAfter(
               _ => stubbornSendUnlessClosing(),
-              java.time.Duration.ofMillis(delayMillis.toLong),
+              java.time.Duration.ofMillis(randDelayMillis),
             ),
           s"Failed to schedule sending commitment message batch for period $period at time ${clock.now
-              .add(java.time.Duration.ofMillis(delayMillis.toLong))}",
+              .add(java.time.Duration.ofMillis(randDelayMillis))}",
           logPassiveInstanceAtInfo = true,
         )
         .discard
@@ -1835,6 +1950,7 @@ class AcsCommitmentProcessor private (
       toInclusive: Option[CantonTimestampSecond],
       filterInParticipantId: Seq[ParticipantId] = Seq.empty,
       filterOutParticipantId: Seq[ParticipantId],
+      intervalMillis: Long,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
@@ -1894,6 +2010,7 @@ class AcsCommitmentProcessor private (
           )
 
         for {
+          catchUpConfig <- catchUpConfig(period.toInclusive.forgetRefinement)
           cmts <-
             commitments(
               participantId,
@@ -1905,6 +2022,10 @@ class AcsCommitmentProcessor private (
               cachedCommitmentsForRetroactiveSends,
               filterInParticipantId,
               filterOutParticipantId,
+              lastCommitmentsComputeTimes =
+                catchUpConfig.map(cfg => (cfg.catchUpIntervalSkip, lastCommitmentsComputeTimes)),
+              increasePerceivedComputationTimeForCommitments =
+                increasePerceivedComputationTimeForCommitments,
             )
 
           _ = logger.debug(
@@ -1918,7 +2039,7 @@ class AcsCommitmentProcessor private (
             }
           _ <- storeCommitments(msgs)
           // TODO(i15333) batch more commitments and handle the case when we reach the maximum message limit.
-          _ = sendCommitmentMessages(period, msgs.toSeq)
+          _ = sendCommitmentMessages(period, msgs.toSeq, intervalMillis)
         } yield ()
       }
       .toSeq
@@ -1955,9 +2076,24 @@ class AcsCommitmentProcessor private (
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     for {
       splitPeriods <- sortedReconciliationIntervalsProvider.splitCommitmentPeriod(cmt.period)
+      reconIntervals <- getReconciliationIntervals(
+        cmt.period.toInclusive.forgetRefinement
+      )
+      reconIntervalLength = reconIntervals.intervals.headOption.fold(0L)(
+        _.intervalLength.duration.toMillis
+      )
+
       _ <- splitPeriods match {
         case Some(periods) =>
-          if (matches(cmt, commitments, lastPruningTime.map(_.timestamp), possibleCatchUp)) {
+          if (
+            matches(
+              cmt,
+              commitments,
+              lastPruningTime.map(_.timestamp),
+              possibleCatchUp,
+              reconIntervalLength,
+            )
+          ) {
             for {
               _ <- multiHostMark(cmt.sender, periods)
               _ <-
@@ -2149,7 +2285,9 @@ object AcsCommitmentProcessor extends HasLoggerName {
       clock: Clock,
       exitOnFatalFailures: Boolean,
       batchingConfig: BatchingConfig,
-      maxCommitmentSendDelayMillis: Option[NonNegativeInt] = None,
+      maxCommitmentSendDelayMillis: Option[CommitmentSendDelay] = None,
+      increasePerceivedComputationTimeForCommitments: Option[java.time.Duration] = None,
+      doNotAwaitOnCheckingIncomingCommitments: Boolean,
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
@@ -2208,6 +2346,8 @@ object AcsCommitmentProcessor extends HasLoggerName {
         exitOnFatalFailures,
         batchingConfig,
         maxCommitmentSendDelayMillis,
+        increasePerceivedComputationTimeForCommitments,
+        doNotAwaitOnCheckingIncomingCommitments,
       )
       // We trigger the processing of the buffered commitments, but we do not wait for it to complete here,
       // because, if processing buffered required topology updates that go through the same queue, we'd create a deadlock.
@@ -2469,11 +2609,14 @@ object AcsCommitmentProcessor extends HasLoggerName {
       filterInParticipantIds: Seq[ParticipantId] = Seq.empty,
       // exclude from computing commitments excludeCounterParticipantIds, if non-empty, otherwise do not exclude anyone
       filterOutParticipantIds: Seq[ParticipantId] = Seq.empty,
+      lastCommitmentsComputeTimes: Option[(PositiveInt, DurationResizableRingBuffer)] = None,
+      increasePerceivedComputationTimeForCommitments: Option[java.time.Duration] = None,
   )(implicit
       ec: ExecutionContext,
       loggingContext: ErrorLoggingContext,
   ): FutureUnlessShutdown[Map[ParticipantId, AcsCommitment.CommitmentType]] = {
-    val commitmentTimer = pruningMetrics.map(_.compute.startAsync())
+
+    val startedAtNano = System.nanoTime()
 
     for {
       byParticipant <- stakeholderCommitmentsPerParticipant(
@@ -2501,7 +2644,24 @@ object AcsCommitmentProcessor extends HasLoggerName {
         runningCommitments,
         byParticipant.fmap(m => m.map { case (stkhd, _cmt) => stkhd }.toSet),
       )
-      commitmentTimer.foreach(_.stop())
+
+      // update the duration of last interval computation
+      val duration = java.time.Duration.ofNanos(System.nanoTime() - startedAtNano)
+
+      lastCommitmentsComputeTimes.foreach { case (catchUpSkip, computeTimes) =>
+        computeTimes.setCapacity(catchUpSkip.value)
+        computeTimes.add(
+          duration.plus(
+            increasePerceivedComputationTimeForCommitments.getOrElse(java.time.Duration.ZERO)
+          )
+        )
+      }
+
+      withEmptyMetricsContext { implicit metricsContext =>
+        pruningMetrics.foreach { m =>
+          m.compute.update(duration)
+        }
+      }
       res
     }
   }
@@ -3005,5 +3165,77 @@ object AcsCommitmentProcessor extends HasLoggerName {
   private object CommitmentSendState {
     case object Retry extends CommitmentSendState
     case object StopRetrying extends CommitmentSendState
+  }
+}
+
+@SuppressWarnings(Array("org.wartremover.warts.Var"))
+final class DurationResizableRingBuffer(initialMaxSize: Int) {
+  require(initialMaxSize >= 0, s"max size must be >= 0, got $initialMaxSize")
+
+  private val buf = mutable.ArrayDeque.empty[java.time.Duration]
+  @volatile private var maxSize: Int = initialMaxSize
+
+  def capacity: Int = maxSize
+
+  def size: Int = blocking(this.synchronized(buf.size))
+
+  def isEmpty: Boolean = blocking(this.synchronized(buf.isEmpty))
+
+  /** Change capacity. Drops oldest items if shrinking below current size. */
+  def setCapacity(newMaxSize: Int): Unit = blocking {
+    this.synchronized {
+      require(newMaxSize >= 0, s"max size must be >= 0, got $newMaxSize")
+      maxSize = newMaxSize
+      if (buf.sizeIs > maxSize) {
+        val toDrop = buf.size - maxSize
+        buf.dropInPlace(toDrop)
+      }
+      ()
+    }
+  }
+
+  /** Append one element, dropping from front if full (or no-op if capacity=0). */
+  def add(elem: java.time.Duration): Unit = blocking {
+    this.synchronized {
+      if (maxSize > 0) {
+        if (buf.sizeIs >= maxSize) { val _ = buf.removeHead() }
+        buf.append(elem)
+      }
+      ()
+    }
+  }
+
+  /** Append many elements efficiently, dropping as needed. */
+  def addAll(elems: IterableOnce[java.time.Duration]): Unit = blocking {
+    this.synchronized {
+      if (maxSize > 0) {
+        buf.appendAll(elems)
+        // keep only the last `maxSize` elements
+        if (buf.sizeIs > maxSize) {
+          val toDrop = buf.size - maxSize
+          buf.dropInPlace(toDrop)
+        }
+      }
+      ()
+    }
+  }
+
+  /** Compute the average Duration if this buffer stores Duration. */
+  def averageDuration(): Option[java.time.Duration] = blocking {
+    this.synchronized {
+      if (buf.isEmpty) None
+      else {
+        val billion = BigInt(1_000_000_000)
+        val avgNanos = buf.iterator
+          .map(d => BigInt(d.getSeconds) * billion + d.getNano)
+          .sum / buf.size
+        Some(
+          java.time.Duration.ofSeconds(
+            (avgNanos / billion).toLong,
+            (avgNanos % billion).toLong,
+          )
+        )
+      }
+    }
   }
 }

@@ -19,6 +19,12 @@ import com.digitalasset.canton.config.manual.CantonConfigValidatorDerivation
   *   The maximum number of topology transactions sent in a topology transaction broadcast
   * @param broadcastRetryDelay
   *   The delay after which a failed dispatch cycle will be triggered again.
+  * @param validateInitialTopologySnapshot
+  *   Whether or not the node will validate the initial topology snapshot when onboarding to a
+  *   synchronizer.
+  * @param disableOptionalTopologyChecks
+  *   if true (default is false), don't run the optional checks which prevent accidental damage to
+  *   this node
   */
 final case class TopologyConfig(
     topologyTransactionRegistrationTimeout: NonNegativeFiniteDuration =
@@ -27,6 +33,8 @@ final case class TopologyConfig(
       defaultTopologyTransactionObservationTimeout,
     broadcastBatchSize: PositiveInt = defaultBroadcastBatchSize,
     broadcastRetryDelay: NonNegativeFiniteDuration = defaultBroadcastRetryDelay,
+    validateInitialTopologySnapshot: Boolean = true,
+    disableOptionalTopologyChecks: Boolean = false,
 ) extends UniformCantonConfigValidation
 
 object TopologyConfig {

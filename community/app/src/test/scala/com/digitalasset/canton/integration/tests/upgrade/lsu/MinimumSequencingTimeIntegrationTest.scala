@@ -4,11 +4,8 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
-import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
-import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils
 import com.digitalasset.canton.integration.util.EntitySyntax
@@ -42,11 +39,8 @@ abstract class MinimumSequencingTimeIntegrationTest
   private val sequencingTimeLowerBoundExclusive = CantonTimestamp.Epoch.plusSeconds(60)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1S1M1_Config
+    EnvironmentDefinition.P1_S1M1
       .addConfigTransforms(ConfigTransforms.useStaticTime)
-      .withNetworkBootstrap { implicit env =>
-        new NetworkBootstrapper(S1M1.withTopologyChangeDelay(NonNegativeFiniteDuration.Zero))
-      }
       .addConfigTransforms(
         ConfigTransforms
           .updateAllSequencerConfigs_(

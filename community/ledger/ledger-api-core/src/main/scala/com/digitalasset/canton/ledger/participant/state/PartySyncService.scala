@@ -3,8 +3,13 @@
 
 package com.digitalasset.canton.ledger.participant.state
 
+import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.topology.{ExternalPartyOnboardingDetails, SynchronizerId}
+import com.digitalasset.canton.topology.{
+  ExternalPartyOnboardingDetails,
+  ParticipantId,
+  SynchronizerId,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.data.Ref
@@ -51,4 +56,11 @@ trait PartySyncService {
   /** Return the protocol version for a synchronizer ID if the node is connected to it.
     */
   def protocolVersionForSynchronizerId(synchronizerId: SynchronizerId): Option[ProtocolVersion]
+
+  /** The participant id */
+  def participantId: ParticipantId
+
+  /** Hash ops of the participant */
+  def hashOps: HashOps
+
 }

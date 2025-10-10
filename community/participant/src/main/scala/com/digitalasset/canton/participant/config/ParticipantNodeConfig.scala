@@ -80,7 +80,7 @@ final case class ParticipantNodeConfig(
     override val init: ParticipantInitConfig = ParticipantInitConfig(),
     override val crypto: CryptoConfig = CryptoConfig(),
     ledgerApi: LedgerApiServerConfig = LedgerApiServerConfig(),
-    httpLedgerApi: Option[JsonApiConfig] = None,
+    httpLedgerApi: JsonApiConfig = JsonApiConfig(),
     override val adminApi: AdminServerConfig = AdminServerConfig(),
     override val storage: StorageConfig = StorageConfig.Memory(),
     testingTime: Option[TestingTimeServiceConfig] = None,
@@ -112,6 +112,8 @@ final case class ParticipantNodeConfig(
       .modify(ports.participantAdminApiPort.setDefaultPort)
       .focus(_.replication)
       .modify(ReplicationConfig.withDefaultO(storage, _, edition))
+      .focus(_.httpLedgerApi.server.internalPort)
+      .modify(ports.jsonLedgerApiPort.setDefaultPort)
 }
 
 object ParticipantNodeConfig {
@@ -247,6 +249,9 @@ final case class LedgerApiServerConfig(
 ) extends ServerConfig // We can't currently expose enterprise server features at the ledger api anyway
     {
 
+  // LAPI server does not use the canonical server builder, so doesn't support the stream limits using stream limit config
+  override val stream: Option[StreamLimitConfig] = None
+
   lazy val clientConfig: FullClientConfig =
     FullClientConfig(address, port, tls.map(_.clientConfig))
 
@@ -344,6 +349,9 @@ object TestingTimeServiceConfig {
   *   [[com.digitalasset.canton.config.CantonParameters.enableAdditionalConsistencyChecks]] being
   *   enabled are logged, measured in the number of contract activations during a single connection
   *   to a synchronizer. Used only for database storage.
+  * @param doNotAwaitOnCheckingIncomingCommitments
+  *   Enable fully asynchronous checking of incoming commitments. This may result in some incoming
+  *   commitments not being checked in case of crashes or HA failovers.
   */
 final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -378,6 +386,7 @@ final case class ParticipantNodeParameterConfig(
     automaticallyPerformLogicalSynchronizerUpgrade: Boolean = true,
     activationFrequencyForWarnAboutConsistencyChecks: Long = 1000,
     reassignmentsConfig: ReassignmentsConfig = ReassignmentsConfig(),
+    doNotAwaitOnCheckingIncomingCommitments: Boolean = false,
 ) extends LocalNodeParametersConfig
     with UniformCantonConfigValidation
 

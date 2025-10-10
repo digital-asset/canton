@@ -90,27 +90,48 @@ final case class NetworkTopologyDescription(
     ],
     mediatorThreshold: PositiveInt,
 ) {
-  def withTopologyChangeDelay(topologyChangeDelay: NonNegativeFiniteDuration) =
+  def withTopologyChangeDelay(
+      topologyChangeDelay: NonNegativeFiniteDuration
+  ): NetworkTopologyDescription =
     this
       .focus(_.staticSynchronizerParameters.topologyChangeDelay)
       .replace(topologyChangeDelay)
 }
 
 object NetworkTopologyDescription {
+
   def apply(
       synchronizerAlias: SynchronizerAlias,
       synchronizerOwners: Seq[InstanceReference],
       synchronizerThreshold: PositiveInt,
       sequencers: Seq[SequencerReference],
       mediators: Seq[MediatorReference],
-      staticSynchronizerParameters: StaticSynchronizerParameters =
-        EnvironmentDefinition.defaultStaticSynchronizerParameters,
       mediatorRequestAmplification: SubmissionRequestAmplification =
         SubmissionRequestAmplification.NoAmplification,
       overrideMediatorToSequencers: Option[
         Map[MediatorReference, (Seq[SequencerReference], PositiveInt, NonNegativeInt)]
       ] = None,
       mediatorThreshold: PositiveInt = PositiveInt.one,
+  )(implicit env: TestConsoleEnvironment): NetworkTopologyDescription =
+    NetworkTopologyDescription(
+      synchronizerName = synchronizerAlias.unwrap,
+      synchronizerOwners,
+      synchronizerThreshold,
+      sequencers,
+      mediators,
+      EnvironmentDefinition.defaultStaticSynchronizerParameters,
+      mediatorRequestAmplification,
+      overrideMediatorToSequencers,
+      mediatorThreshold,
+    )
+
+  def createWithStaticSynchronizerParameters(
+      synchronizerAlias: SynchronizerAlias,
+      synchronizerOwners: Seq[InstanceReference],
+      synchronizerThreshold: PositiveInt,
+      sequencers: Seq[SequencerReference],
+      mediators: Seq[MediatorReference],
+      staticSynchronizerParameters: StaticSynchronizerParameters,
   ): NetworkTopologyDescription =
     NetworkTopologyDescription(
       synchronizerName = synchronizerAlias.unwrap,
@@ -119,10 +140,11 @@ object NetworkTopologyDescription {
       sequencers,
       mediators,
       staticSynchronizerParameters,
-      mediatorRequestAmplification,
-      overrideMediatorToSequencers,
-      mediatorThreshold,
+      SubmissionRequestAmplification.NoAmplification,
+      None,
+      PositiveInt.one,
     )
+
 }
 
 /** A data container to hold useful information for initialized synchronizers

@@ -9,6 +9,142 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2025-10-15 (Exclusive)
+- Add a `max_record_time` field in the `PrepareSubmissionRequest` for externally signed transaction.
+  This is effectively a Time To Live (TTL) for the submission: it won't be committed to the ledger after that timestamp.
+  Important: The enforcement of this TTL is done by the submitting node (NOT the confirming node of the external party).
+  It is therefore unsigned and does not require a change to the transaction hashing scheme.
+  This also means that the submitting node must be trusted to honor this field if used.
+- new participant config parameter `canton.participants.<participant>.parameters.do-not-await-on-checking-incoming-commitments` to disable the synchronization of checking incoming commitments with crash recovery.
+- Removed `contractSynchronizerRenames` on ACS import legacy.
+- **BREAKING**: Removed force flag `FORCE_FLAG_ALLOW_UNVET_PACKAGE` and topology manager error `TOPOLOGY_DANGEROUS_VETTING_COMMAND_REQUIRES_FORCE_FLAG`.
+  Unvetting a package is not a dangerous operation anymore.
+- Added new endpoints to allocate external parties via the Ledger API in the `PartyManagementService`:
+  - `GenerateExternalPartyTopology`: Generates topology transactions required to onboard an external party along with the pre-computed hash ready to sign
+  - `AllocateExternalParty`: Allocates an external party on a synchronizer from a set of signed topology transactions
+    Refer to the external party onboarding documentation for more details.
+- **BREAKING**: The new party allocation endpoints above come with a breaking change for users of the gRPC `InteractiveSubmissionService` used in external signing workflows.
+  - The following protobuf messages have been refactored to a new common protobuf package so they can be re-used across different services:
+
+| Old file                                                                | Old FQN                                                 | New file                            | New FQN                                     |
+|-------------------------------------------------------------------------|---------------------------------------------------------|-------------------------------------|---------------------------------------------|
+| com/daml/ledger/api/v2/interactive/interactive_submission_service.proto | com.daml.ledger.api.v2.interactive.Signature            | com/daml/ledger/api/v2/crypto.proto | com.daml.ledger.api.v2.Signature            |
+| com/daml/ledger/api/v2/interactive/interactive_submission_service.proto | com.daml.ledger.api.v2.interactive.SigningAlgorithmSpec | com/daml/ledger/api/v2/crypto.proto | com.daml.ledger.api.v2.SigningAlgorithmSpec |
+| com/daml/ledger/api/v2/interactive/interactive_submission_service.proto | com.daml.ledger.api.v2.interactive.SignatureFormat      | com/daml/ledger/api/v2/crypto.proto | com.daml.ledger.api.v2.SignatureFormat      |
+
+To consume the update, re-generate any client code generated from the protobuf definitions and update the package names accordingly in your application code.
+
+## until 2025-10-08 (Exclusive)
+- Fixed a bug in the ModelConformanceChecker that would incorrectly reject otherwise valid externally signed transactions
+  that make use of a locally created contract in a subview.
+- Added support for vetting packages on specific synchonizers, by adding an
+  optional synchronizer_id field to the following messages:
+    - `ValidateDarRequest`, `UploadDarRequest`, `VetDarRequest`, and
+      `UnvetDarRequest` in the Admin API
+    - `UploadDarFileRequest`, `ValidateDarFileRequest`, and
+      `UpdateVettedPackagesRequest` in the Ledger API
+    - These requests no longer use AuthorizedStore for vetting changes, they
+      must specify a target synchronizer via the new synchronizer_id fields if
+      the target participant is connected to more than one synchronizer.
+- The `ExportPartyAcs` endpoint (`party_management_service.proto`), intended for offline party replication only, now
+  requires the onboarding flag to be set in the party-to-participant topology transaction that activates the party on a
+  target participant. The ACS export fails if this flag is missing.
+- Setting DynamicSynchronizerParameters.participantResponseTimeout and mediatorReactionTimeout outside
+  of the interval [1s, 5min] requires force flag.
+- BREAKING: Moved the sequencer-api limits into the server config. Now, the same functionality is
+  also available on the Admin API. The configuration is now under `<api-config>.stream.limits = { ... }`, for both the public and admin api.
+- Added extra configuration for compressing data in indexer DB.
+
+
+## until 2025-10-01 (Exclusive)
+- Some methods in Ledger JSON API are now marked as deprecated in `openapi.yml`.
+- Config `canton.sequencers.<sequencer>.sequencer.block.reader.use-recipients-table-for-reads = true` has been removed,
+  `sequencer_event_recipients` table is now always used for reading from the sequencer via subscriptions.
+- Config `canton.sequencers.<sequencer>.sequencer.block.writer.buffer-events-with-payloads = false // default` has been removed,
+  events are always buffered without payloads now (payloads are cached separately).
+- Config `canton.sequencers.<sequencer>.sequencer.block.writer.buffer-payloads = true // default` has been removed,
+  payloads are always handed off to the cache now.
+- Dropped redundant column `mediator_id` from `mediator_deduplication_store` table.
+- Mediator deduplication store pruning is now much less aggressive:
+    - running at most 1 query at a time
+    - running at most once every configurable interval:
+```hocon
+  canton.mediators.<mediator>.deduplication-store.prune-at-most-every = 10s // default value
+```
+- Mediator deduplication now has batch aggregator configuration exposed for `persist` operation,
+  allowing to tune parallelism and batch size under:
+```hocon
+  canton.mediators.<mediator>.deduplication-store.persist-batching = {
+    maximum-in-flight = 2 // default value
+    maximum-batch-size = 500 // default value
+  }
+```
+- Added endpoints related to topology snapshots that are less memory intensive for the nodes exporting the topology snapshots:
+    - `TopologyManagerReadService.ExportTopologySnapshotV2`: generic topology snapshot export
+    - `TopologyManagerReadService.GenesisStateV2`: export genesis state for major upgrade
+    - `TopologyManagerWriteService.ImportTopologySnapshotV2`: generic topology snapshot export
+    - `SequencerAdministrationService.OnboardingStateV2`: export sequencer snapshot for onboarding a new sequencer
+    - `SequencerInitializationService.InitializeSequencerFromGenesisStateV2`: initialize sequencer for a new synchronizer
+    - `SequencerInitializationService.InitializeSequencerFromOnboardingStateV2`: initialize sequencer from an onboarding snapshot created by `SequencerAdministrationService.OnboardingStateV2`
+
+- Added indices that speeds up various topology related queries as well as the update of the `valid_until` column.
+- Add flag to disable the initial topology snapshot validation
+  ```
+  participants.participant1.topology.validate-initial-topology-snapshot = true // default value
+  mediators.mediator1.topology.validate-initial-topology-snapshot = true // default value
+  sequencers.sequencer1.topology.validate-initial-topology-snapshot = true // default value
+  ```
+
+- Add new endpoint to complete the party onboarding process for offline party replication by removing the onboarding flag.
+  It's intended for polling (called repeatedly by the client), and removes the flag when the conditions are right.
+  See `party_management_service.proto`; `CompletePartyOnboarding` rpc for more details.
+
+- JSON Ledger API is now configured by default. It listens on the port 4003. It can be disabled by setting
+  ```
+  canton.participants.<participant>.http-ledger-api.enabled=false
+  ```
+- Introduced the ability for the user to self-administer. A user can now
+    - query the details (`getParties`) of any the party it has any right to operate (ReadAs, ActAs, ExecuteAs or wildcard forms thereof)
+    - query own user record (`getUser`)
+    - query own rights (`listUserRights`)
+    - allocate own party (`allocateParty`)
+
+  There is a per-participant setting that defines maximum number of access rights that a user can have and still
+  be able to self-allocate a party:
+  ```
+  canton.participants.<participant-id>.ledger-api.party-management-service.max-self-allocated-parties = 4
+  ```
+  The default is 0.
+- `DisclosedContract.template_id` and `DisclosedContract.contract_id` for Ledger API commands
+  are not required anymore. When provided, the fields are used for validation of the analogous fields in the encoded
+  created event blob.
+- Unvetting a package that is used as a dependency by another vetted package now requires `FORCE_FLAG_ALLOW_UNVETTED_DEPENDENCIES`
+- The legacy gRPC Ledger API message `TransactionFilter` has been removed. As a consequence, the `filter` and `verbose` fields
+  have been dropped from the `GetUpdatesRequest` and `GetActiveContractsRequest` messages.
+- The JSON versions of the above gRPC messages **continue to be supported in their old form 3.4**.
+  They will be removed and altered respectively 3.5. This affects:
+  - `TransactionFilter` will be removed in 3.5
+  - `GetUpdatesRequest` will be altered in 3.5, it is used in
+    - `/v2/updates` HTTP POST and websocket GET endpoints
+    - `/v2/updates/flats` HTTP POST and websocket GET endpoints
+    - `/v2/updates/trees` HTTP POST and websocket GET endpoints
+  - `GetActiveContractsRequest` will be altered in 3.5, it is used in
+    - `/v2/state/active-contracts` HTTP POST and websocket GET endpoints
+- The configuration for the removed Ledger API transaction tree stream related methods have been removed as well
+  ```
+  canton.participants.<participant>.ledger-api.index-service.transaction-tree-streams.*
+  ```
+- gRPC and JSON API payloads for create events (create arguments, interface views and keys) are now
+  rendered using the normal form of the types defined in `CreatedEvent.representative_package_id`.
+  This should be transparent on the returned values, with the exception of the record-ids in Ledger API verbose
+  rendering (`verbose = true`) which now effectively reflect the representative package id as well.
+- `VettedPackagesRef` have to refer to only one package if used to vet packages. If they refer to zero packages while unvetting, we log to debug.
+- Aligned new Sequencer `GetTime` gRPC API with established conventions
+- Topology dispatching errors are now logged at WARN level (instead of ERROR).
+- Party allocation and tx generation is now supported on Ledger API.
+- BREAKING: minor breaking console change: the BaseResult.transactionHash type has been changed from ByteString to TxHash. The Admin API itself remained unchanged.
+- **BREAKING**: `timeProofFreshnessProportion` has been removed
+
 ## until 2025-09-24 (Exclusive)
 - Add new Ledger API endpoints to improve UX of package vetting:
 
@@ -26,6 +162,18 @@ Wednesday after your change.
 - The legacy gRPC Ledger API method `CommandService.SubmitAndWaitForTransactionTree` has been removed. The JSON version
   of this request `/v2/commands/submit-and-wait-for-transaction-tree` continues to be supported in 3.4, but will be
   removed in 3.5.
+- The legacy gRPC Ledger API methods in the `UpdateService` have been removed.
+  - `GetUpdateTrees`
+  - `GetTransactionTreeByOffset`
+  - `GetTransactionTreeById`
+  - `GetTransactionByOffset`
+  - `GetTransactionById`
+- The JSON versions of the removed `UpdateService` requests continue to be supported in 3.4, but will be removed in 3.5.
+  - `/v2/updates/trees`
+  - `/v2/updates/transaction-tree-by-offset`
+  - `/v2/updates/transaction-tree-by-id`
+  - `/v2/updates/transaction-by-offset`
+  - `/v2/updates/transaction-by-id`
 - `ParticipantRepairService.ImportAcs` is updated to accommodate new smart-contract upgrading semantics that are introduced in
   in Canton 3.4. More specifically:
   - **BREAKING** The `ImportAcsRequest.contract_id_suffix_recomputation_mode` is renamed to `ImportAcsRequest.contract_import_mode`
@@ -37,6 +185,8 @@ Wednesday after your change.
 
 - **BREAKING**: `topologyChangeDelay` has been moved from `DynamicSynchronizerParameters` to `StaticSynchronizerParameters` and cannot be changed
   on a physical synchronizer.
+
+- **BREAKING**: `reassignmentTimeProofFreshnessProportion` has been moved to nested location `reassignmentsConfig.timeProofFreshnessProportion`
 
 - Deduplication references added to Ledger API DB, giving performance improvement for ACS retrievals in presence of a lot of archived contracts.
   - New participant config parameter `active-contracts-service-streams-config.id-filter-query-parallelism` is added, controlling the
@@ -87,7 +237,6 @@ Wednesday after your change.
   sequencers.sequencer1.topology.topology-transaction-observation-timeout = 30s // default value
   sequencers.sequencer1.topology.broadcast-retry-delay = 10s // default value
   ```
-
 - **Breaking** Renamed `AuthenticationTokenManagerConfig#pauseRetries` to `minRetryInterval`.
 - **Breaking** Package upgrade validation moved to vetting state change.
   Thus uploading an upgrade-incompatible DAR with vetting disabled is now possible.

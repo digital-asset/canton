@@ -20,12 +20,12 @@ import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.time.{Clock, TimeAwaiter}
 import com.digitalasset.canton.topology.processing.{ApproximateTime, EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.{
-  PackageDependencyResolverUS,
+  PackageDependencyResolver,
   TopologyStore,
   TopologyStoreId,
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
-import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.daml.lf.data.Ref.PackageId
@@ -120,7 +120,7 @@ class StoreBasedSynchronizerTopologyClient(
     val clock: Clock,
     val staticSynchronizerParameters: StaticSynchronizerParameters,
     store: TopologyStore[TopologyStoreId.SynchronizerStore],
-    packageDependenciesResolver: PackageDependencyResolverUS,
+    packageDependenciesResolver: PackageDependencyResolver,
     override val timeouts: ProcessingTimeout,
     override protected val futureSupervisor: FutureSupervisor,
     val loggerFactory: NamedLoggerFactory,
@@ -372,11 +372,11 @@ class StoreBasedSynchronizerTopologyClient(
 
 object StoreBasedSynchronizerTopologyClient {
 
-  object NoPackageDependencies extends PackageDependencyResolverUS {
+  object NoPackageDependencies extends PackageDependencyResolver {
     override def packageDependencies(packagesId: PackageId)(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, PackageId, Set[PackageId]] =
-      EitherT[FutureUnlessShutdown, PackageId, Set[PackageId]](
+    ): EitherT[FutureUnlessShutdown, (PackageId, ParticipantId), Set[PackageId]] =
+      EitherT[FutureUnlessShutdown, (PackageId, ParticipantId), Set[PackageId]](
         FutureUnlessShutdown.pure(Right(Set.empty[PackageId]))
       )
   }

@@ -4,8 +4,9 @@
 package com.digitalasset.canton.sequencing
 
 import cats.syntax.either.*
+import com.digitalasset.canton.config as cantonConfig
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.HealthListener
 import com.digitalasset.canton.lifecycle.LifeCycle
@@ -15,7 +16,10 @@ import com.digitalasset.canton.sequencing.SequencerSubscriptionPool.{
   SequencerSubscriptionPoolConfig,
   SequencerSubscriptionPoolHealth,
 }
-import com.digitalasset.canton.sequencing.SequencerSubscriptionPoolImpl.SubscriptionStartProvider
+import com.digitalasset.canton.sequencing.SequencerSubscriptionPoolImpl.{
+  ConfigWithThreshold,
+  SubscriptionStartProvider,
+}
 import com.digitalasset.canton.sequencing.client.SequencerClient.CloseReason.UnrecoverableError
 import com.digitalasset.canton.sequencing.client.SequencerClientSubscriptionError.{
   ApplicationHandlerPassive,
@@ -26,7 +30,7 @@ import com.digitalasset.canton.sequencing.client.{
   SequencerClientSubscriptionError,
   SubscriptionCloseReason,
 }
-import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{ErrorUtil, FutureUnlessShutdownUtil, LoggerUtil}
@@ -42,13 +46,17 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
     subscriptionHandlerFactory: SubscriptionHandlerXFactory,
     pool: SequencerConnectionXPool,
     member: Member,
-    clock: Clock,
     private val initialSubscriptionEventO: Option[ProcessingSerializedEvent],
     subscriptionStartProvider: SubscriptionStartProvider,
     protected override val timeouts: ProcessingTimeout,
     protected override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends SequencerSubscriptionPool {
+
+  /** Use a wall clock for scheduling restart delays, so that the pool can make progress even in
+    * tests that use static time without explicitly advancing the time
+    */
+  private val wallClock = new WallClock(timeouts, loggerFactory)
 
   /** Reference to the currently active configuration */
   private val configRef = new AtomicReference[SequencerSubscriptionPoolConfig](initialConfig)
@@ -67,10 +75,17 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
 
   override def config: SequencerSubscriptionPoolConfig = configRef.get
 
+  /** Use this instead of [[config]] to obtain a snapshot of all the current configuration
+    * parameters at once.
+    */
+  private def currentConfigWithThreshold: ConfigWithThreshold =
+    ConfigWithThreshold(config, pool.config.trustThreshold)
+
   override def updateConfig(
       newConfig: SequencerSubscriptionPoolConfig
   )(implicit traceContext: TraceContext): Unit = {
     configRef.set(newConfig)
+    logger.info(s"Configuration updated to: $newConfig")
 
     // We might need new connections
     adjustConnectionsIfNeeded()
@@ -85,7 +100,7 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
   /** Examine the current number of subscriptions in comparison to the configured trust threshold
     * with liveness margin. If we are under, we request additional connections, and if we can't
     * obtain enough, we reschedule the check later after
-    * [[SequencerSubscriptionPoolConfig.connectionRequestDelay]]. If we are over, we drop some
+    * [[SequencerSubscriptionPoolConfig.subscriptionRequestDelay]]. If we are over, we drop some
     * subscriptions.
     */
   private def adjustConnectionsIfNeeded()(implicit traceContext: TraceContext): Unit = {
@@ -95,8 +110,7 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
     def adjustInternal(): Unit = blocking {
       lock.synchronized {
         if (!isClosing && currentRequest.get == myToken) {
-          val currentConfig = config
-          val activeThreshold = currentConfig.activeThreshold
+          val activeThreshold = currentConfigWithThreshold.activeThreshold
 
           val current = trackedSubscriptions.toSet
           logger.debug(
@@ -146,8 +160,8 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
 
             case Left(_) if nbToRequest < 0 =>
               val toRemove = trackedSubscriptions.take(-nbToRequest)
-              logger.debug(
-                s"Dropping ${toRemove.size} subscriptions: ${toRemove.map(_.subscription.connection.name).mkString(", ")}"
+              logger.info(
+                s"Dropping ${toRemove.size} extra subscription(s): ${toRemove.map(_.subscription.connection.name).mkString(", ")}"
               )
               removeSubscriptionsFromPool(toRemove.toSeq*)
 
@@ -163,11 +177,11 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
       if (!isClosing) {
         FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
           {
-            val delay = config.connectionRequestDelay
+            val delay = config.subscriptionRequestDelay
             logger.debug(
               s"Scheduling new check in ${LoggerUtil.roundDurationForHumans(delay.duration)}"
             )
-            clock.scheduleAfter(_ => adjustInternal(), delay.asJava)
+            wallClock.scheduleAfter(_ => adjustInternal(), delay.asJava)
           },
           "adjustConnectionsIfNeeded",
         )
@@ -204,7 +218,8 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
     def isThresholdStillReachable(ignoreCurrent: Boolean): Boolean = blocking(lock.synchronized {
       val ignored: Set[ConnectionX.ConnectionXConfig] =
         if (ignoreCurrent) Set(connection.config) else Set.empty
-      val result = pool.isThresholdStillReachable(config.trustThreshold, ignored)
+      val trustThreshold = currentConfigWithThreshold.trustThreshold
+      val result = pool.isThresholdStillReachable(trustThreshold, ignored)
       logger.debug(s"isThresholdStillReachable(ignored = $ignored) = $result")
       result
     })
@@ -303,7 +318,7 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
   }
 
   private def updateHealth()(implicit traceContext: TraceContext): Unit = {
-    val currentConfig = config
+    val currentConfig = currentConfigWithThreshold
 
     trackedSubscriptions.size match {
       case nb if nb >= currentConfig.activeThreshold.unwrap => health.resolveUnhealthy()
@@ -312,8 +327,8 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
           s"below liveness margin: $nb subscription(s) available, trust threshold = ${currentConfig.trustThreshold}," +
             s" liveness margin = ${currentConfig.livenessMargin}"
         )
-      case _ if !pool.isThresholdStillReachable(config.trustThreshold, Set.empty) =>
-        val reason = s"Trust threshold ${config.trustThreshold} is no longer reachable"
+      case _ if !pool.isThresholdStillReachable(currentConfig.trustThreshold, Set.empty) =>
+        val reason = s"Trust threshold ${currentConfig.trustThreshold} is no longer reachable"
         health.fatalOccurred(reason)
         closeReasonPromise.tryComplete(Success(UnrecoverableError(reason))).discard
       case nb =>
@@ -363,6 +378,15 @@ final class SequencerSubscriptionPoolImpl private[sequencing] (
 }
 
 object SequencerSubscriptionPoolImpl {
+  private final case class ConfigWithThreshold(
+      private val poolConfig: SequencerSubscriptionPoolConfig,
+      trustThreshold: PositiveInt,
+  ) {
+    val livenessMargin: NonNegativeInt = poolConfig.livenessMargin
+    val subscriptionRequestDelay: cantonConfig.NonNegativeFiniteDuration =
+      poolConfig.subscriptionRequestDelay
+    lazy val activeThreshold: PositiveInt = trustThreshold + livenessMargin
+  }
 
   /** Trait for an object that can provide the starting event for a subscription
     */
@@ -377,7 +401,6 @@ object SequencerSubscriptionPoolImpl {
 class SequencerSubscriptionPoolFactoryImpl(
     sequencerSubscriptionFactory: SequencerSubscriptionXFactory,
     subscriptionHandlerFactory: SubscriptionHandlerXFactory,
-    clock: Clock,
     timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 ) extends SequencerSubscriptionPoolFactory
@@ -397,7 +420,6 @@ class SequencerSubscriptionPoolFactoryImpl(
       subscriptionHandlerFactory,
       connectionPool,
       member,
-      clock,
       initialSubscriptionEventO,
       subscriptionStartProvider,
       timeouts,

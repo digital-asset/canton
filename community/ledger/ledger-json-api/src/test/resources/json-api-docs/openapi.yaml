@@ -102,8 +102,9 @@ paths:
       - apiKeyAuth: []
   /v2/commands/submit-and-wait-for-transaction-tree:
     post:
-      description: 'Submit a batch of commands and wait for the transaction trees
-        response (deprecated: use submit-and-wait-for-transaction instead)'
+      description: Submit a batch of commands and wait for the transaction trees response.
+        Provided for backwards compatibility, it will be removed in the Canton version
+        3.5.0, use submit-and-wait-for-transaction instead.
       operationId: postV2CommandsSubmit-and-wait-for-transaction-tree
       requestBody:
         content:
@@ -130,6 +131,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JsCantonError'
+      deprecated: true
       security:
       - httpAuth: []
       - apiKeyAuth: []
@@ -349,6 +351,11 @@ paths:
         required: false
         schema:
           type: boolean
+      - name: synchronizerId
+        in: query
+        required: false
+        schema:
+          type: string
       requestBody:
         content:
           application/octet-stream:
@@ -365,7 +372,8 @@ paths:
                 $ref: '#/components/schemas/UploadDarFileResponse'
         '400':
           description: 'Invalid value for: body, Invalid value for: query parameter
-            vetAllPackages, Invalid value for: headers'
+            vetAllPackages, Invalid value for: query parameter synchronizerId, Invalid
+            value for: headers'
           content:
             text/plain:
               schema:
@@ -586,10 +594,10 @@ paths:
       security:
       - httpAuth: []
       - apiKeyAuth: []
-  /v2/parties/external:
+  /v2/parties/external/allocate:
     post:
       description: Allocate a new external party
-      operationId: postV2PartiesExternal
+      operationId: postV2PartiesExternalAllocate
       requestBody:
         content:
           application/json:
@@ -726,6 +734,38 @@ paths:
       security:
       - httpAuth: []
       - apiKeyAuth: []
+  /v2/parties/external/generate-topology:
+    post:
+      description: Generate a topology for an external party
+      operationId: postV2PartiesExternalGenerate-topology
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateExternalPartyTopologyRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateExternalPartyTopologyResponse'
+        '400':
+          description: 'Invalid value for: body, Invalid value for: headers'
+          content:
+            text/plain:
+              schema:
+                type: string
+        default:
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JsCantonError'
+      security:
+      - httpAuth: []
+      - apiKeyAuth: []
   /v2/state/active-contracts:
     post:
       description: |-
@@ -797,7 +837,7 @@ paths:
       parameters:
       - name: party
         in: query
-        required: true
+        required: false
         schema:
           type: string
       - name: participantId
@@ -948,7 +988,7 @@ paths:
   /v2/updates/flats:
     post:
       description: |-
-        Query flat transactions update list (blocking call, deprecated: use v2/updates instead)
+        Query flat transactions update list (blocking call). Provided for backwards compatibility, it will be removed in the Canton version 3.5.0, use v2/updates instead.
         Notice: This endpoint should be used for small results set.
         When number of results exceeded node configuration limit (`http-list-max-elements-limit`)
         there will be an error (`413 Content Too Large`) returned.
@@ -1001,13 +1041,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JsCantonError'
+      deprecated: true
       security:
       - httpAuth: []
       - apiKeyAuth: []
   /v2/updates/trees:
     post:
       description: |-
-        Query update transactions tree list (blocking call, deprecated: use v2/updates instead)
+        Query update transactions tree list (blocking call). Provided for backwards compatibility, it will be removed in the Canton version 3.5.0, use v2/updates instead.
         Notice: This endpoint should be used for small results set.
         When number of results exceeded node configuration limit (`http-list-max-elements-limit`)
         there will be an error (`413 Content Too Large`) returned.
@@ -1060,13 +1101,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JsCantonError'
+      deprecated: true
       security:
       - httpAuth: []
       - apiKeyAuth: []
   /v2/updates/transaction-tree-by-offset/{offset}:
     get:
-      description: 'Get transaction tree by offset (deprecated: use v2/updates/update-by-offset
-        instead)'
+      description: Get transaction tree by offset. Provided for backwards compatibility,
+        it will be removed in the Canton version 3.5.0, use v2/updates/update-by-offset
+        instead.
       operationId: getV2UpdatesTransaction-tree-by-offsetOffset
       parameters:
       - name: offset
@@ -1102,13 +1145,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JsCantonError'
+      deprecated: true
       security:
       - httpAuth: []
       - apiKeyAuth: []
   /v2/updates/transaction-by-offset:
     post:
-      description: 'Get transaction by offset (deprecated: use v2/updates/update-by-offset
-        instead)'
+      description: Get transaction by offset. Provided for backwards compatibility,
+        it will be removed in the Canton version 3.5.0, use v2/updates/update-by-offset
+        instead.
       operationId: postV2UpdatesTransaction-by-offset
       requestBody:
         content:
@@ -1135,6 +1180,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JsCantonError'
+      deprecated: true
       security:
       - httpAuth: []
       - apiKeyAuth: []
@@ -1172,8 +1218,8 @@ paths:
       - apiKeyAuth: []
   /v2/updates/transaction-by-id:
     post:
-      description: 'Get transaction by id (deprecated: use v2/updates/update-by-id
-        instead)'
+      description: Get transaction by id. Provided for backwards compatibility, it
+        will be removed in the Canton version 3.5.0, use v2/updates/update-by-id instead.
       operationId: postV2UpdatesTransaction-by-id
       requestBody:
         content:
@@ -1200,6 +1246,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JsCantonError'
+      deprecated: true
       security:
       - httpAuth: []
       - apiKeyAuth: []
@@ -1237,8 +1284,9 @@ paths:
       - apiKeyAuth: []
   /v2/updates/transaction-tree-by-id/{update-id}:
     get:
-      description: 'Get transaction tree by id (deprecated: use v2/updates/update-by-id
-        instead)'
+      description: Get transaction tree by id. Provided for backwards compatibility,
+        it will be removed in the Canton version 3.5.0, use v2/updates/update-by-id
+        instead.
       operationId: getV2UpdatesTransaction-tree-by-idUpdate-id
       parameters:
       - name: update-id
@@ -1273,6 +1321,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JsCantonError'
+      deprecated: true
       security:
       - httpAuth: []
       - apiKeyAuth: []
@@ -2011,24 +2060,35 @@ components:
       description: 'Required authorization: ``HasRight(ParticipantAdmin) OR IsAuthenticatedIdentityProviderAdmin(identity_provider_id)``'
       type: object
       required:
-      - synchronizerId
+      - synchronizer
       - identityProviderId
       properties:
-        synchronizerId:
+        synchronizer:
           description: |-
+            TODO(#27670) support synchronizer aliases
             Synchronizer ID on which to onboard the party
             Required
           type: string
         onboardingTransactions:
           description: |-
             TopologyTransactions to onboard the external party
-            Must contain 3 signed transactions: NamespaceDelegation, PartyToKeyMapping, PartyToParticipant
+            Can contain:
+            - A namespace for the party.
+            This can be either a single NamespaceDelegation,
+            or DecentralizedNamespaceDefinition along with its authorized namespace owners in the form of NamespaceDelegations.
+            May be provided, if so it must be fully authorized by the signatures in this request combined with the existing topology state.
+            - A PartyToKeyMapping to register the party's signing keys.
+            May be provided, if so it must be fully authorized by the signatures in this request combined with the existing topology state.
+            - A PartyToParticipant to register the hosting relationship of the party.
+            Must be provided.
             Required
           type: array
           items:
             $ref: '#/components/schemas/SignedTransaction'
         multiHashSignatures:
-          description: Signatures of the combined hash of all onboarding_transactions
+          description: |-
+            Optional signatures of the combined hash of all onboarding_transactions
+            This may be used instead of providing signatures on each individual transaction
           type: array
           items:
             $ref: '#/components/schemas/Signature'
@@ -2883,7 +2943,7 @@ components:
         - Empty
         properties:
           Empty:
-            $ref: '#/components/schemas/Empty9'
+            $ref: '#/components/schemas/Empty10'
     DeleteIdentityProviderConfigResponse:
       title: DeleteIdentityProviderConfigResponse
       description: Does not (yet) contain any data.
@@ -2904,12 +2964,15 @@ components:
             The template id of the contract.
             The identifier uses the package-id reference format.
 
-            Required
+            If provided, used to validate the template id of the contract serialized in the created_event_blob.
+            Optional
           type: string
         contractId:
           description: |-
             The contract id
-            Required
+
+            If provided, used to validate the contract id of the contract serialized in the created_event_blob.
+            Optional
           type: string
         createdEventBlob:
           description: |-
@@ -2943,6 +3006,9 @@ components:
       title: Empty
       type: object
     Empty1:
+      title: Empty
+      type: object
+    Empty10:
       title: Empty
       type: object
     Empty2:
@@ -3390,6 +3456,76 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CumulativeFilter'
+    GenerateExternalPartyTopologyRequest:
+      title: GenerateExternalPartyTopologyRequest
+      type: object
+      required:
+      - synchronizer
+      - partyHint
+      - localParticipantObservationOnly
+      - confirmationThreshold
+      properties:
+        synchronizer:
+          description: |-
+            TODO(#27670) support synchronizer aliases
+            Required: synchronizer-id for which we are building this request.
+          type: string
+        partyHint:
+          description: 'Required: the actual party id will be constructed from this
+            hint and a fingerprint of the public key'
+          type: string
+        publicKey:
+          $ref: '#/components/schemas/SigningPublicKey'
+          description: 'Required: public key'
+        localParticipantObservationOnly:
+          description: 'Optional: if true, then the local participant will only be
+            observing, not confirming. Default false.'
+          type: boolean
+        otherConfirmingParticipantUids:
+          description: 'Optional: other participant ids which should be confirming
+            for this party'
+          type: array
+          items:
+            type: string
+        confirmationThreshold:
+          description: 'Optional: Confirmation threshold >= 1 for the party. Defaults
+            to all available confirmers (or if set to 0).'
+          type: integer
+          format: int32
+        observingParticipantUids:
+          description: 'Optional: other observing participant ids for this party'
+          type: array
+          items:
+            type: string
+    GenerateExternalPartyTopologyResponse:
+      title: GenerateExternalPartyTopologyResponse
+      description: Response message with topology transactions and the multi-hash
+        to be signed.
+      type: object
+      required:
+      - partyId
+      - publicKeyFingerprint
+      - multiHash
+      properties:
+        partyId:
+          description: the generated party id
+          type: string
+        publicKeyFingerprint:
+          description: the fingerprint of the supplied public key
+          type: string
+        topologyTransactions:
+          description: |-
+            The serialized topology transactions which need to be signed and submitted as part of the allocate party process
+            Note that the serialization includes the versioning information. Therefore, the transaction here is serialized
+            as an `UntypedVersionedMessage` which in turn contains the serialized `TopologyTransaction` in the version
+            supported by the synchronizer.
+          type: array
+          items:
+            type: string
+        multiHash:
+          description: the multi-hash which may be signed instead of each individual
+            transaction
+          type: string
     GetActiveContractsRequest:
       title: GetActiveContractsRequest
       description: |-
@@ -4686,7 +4822,8 @@ components:
         synchronizerId:
           description: |-
             Must be a valid synchronizer id
-            Required
+            If not set, a suitable synchronizer that this node is connected to will be chosen
+            Optional
           type: string
         packageIdSelectionPreference:
           description: |-
@@ -4712,6 +4849,17 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PrefetchContractKey'
+        maxRecordTime:
+          description: |-
+            Maximum timestamp at which the transaction can be recorded onto the ledger via the synchronizer specified in the `PrepareSubmissionResponse`.
+            If submitted after it will be rejected even if otherwise valid, in which case it needs to be prepared and signed again
+            with a new valid max_record_time.
+            Use this to limit the time-to-life of a prepared transaction,
+            which is useful to know when it can definitely not be accepted
+            anymore and resorting to preparing another transaction for the same
+            intent is safe again.
+            Optional
+          type: string
     JsPrepareSubmissionResponse:
       title: JsPrepareSubmissionResponse
       description: '[docs-entry-end: HashingSchemeVersion]'
@@ -5152,7 +5300,7 @@ components:
         - Empty
         properties:
           Empty:
-            $ref: '#/components/schemas/Empty7'
+            $ref: '#/components/schemas/Empty8'
       - type: object
         required:
         - IdentityProviderAdmin
@@ -5233,17 +5381,20 @@ components:
     ListVettedPackagesRequest:
       title: ListVettedPackagesRequest
       type: object
+      required:
+      - pageToken
+      - pageSize
       properties:
         packageMetadataFilter:
           $ref: '#/components/schemas/PackageMetadataFilter'
           description: |-
             The package metadata filter the returned vetted packages set must satisfy.
-            Optional.
+            Optional
         topologyStateFilter:
           $ref: '#/components/schemas/TopologyStateFilter'
           description: |-
             The topology filter the returned vetted packages set must satisfy.
-            Optional.
+            Optional
         pageToken:
           description: |-
             Pagination token to determine the specific page to fetch. Using the token
@@ -5256,7 +5407,7 @@ components:
             added and a page is requested twice using the same token, more packages can
             be returned on the second call.
 
-            Leave empty to fetch the first page.
+            Leave unspecified (i.e. as empty string) to fetch the first page.
 
             Optional
           type: string
@@ -5264,8 +5415,8 @@ components:
           description: |-
             Maximum number of ``VettedPackages`` results to return in a single page.
 
-            If the page_size is unspecified, the server will decide the number of
-            results to be returned.
+            If the page_size is unspecified (i.e. left as 0), the server will decide
+            the number of results to be returned.
 
             If the page_size exceeds the maximum supported by the server, an
             error will be returned.
@@ -5279,6 +5430,8 @@ components:
     ListVettedPackagesResponse:
       title: ListVettedPackagesResponse
       type: object
+      required:
+      - nextPageToken
       properties:
         vettedPackages:
           description: |-
@@ -5291,7 +5444,7 @@ components:
         nextPageToken:
           description: |-
             Pagination token to retrieve the next page.
-            Empty, if there are no further results.
+            Empty string if there are no further results.
           type: string
     Map_Filters:
       title: Map_Filters
@@ -5337,6 +5490,9 @@ components:
       properties:
         value:
           $ref: '#/components/schemas/Duration'
+    NoPrior:
+      title: NoPrior
+      type: object
     ObjectMeta:
       title: ObjectMeta
       description: |-
@@ -5466,7 +5622,7 @@ components:
         - Empty
         properties:
           Empty:
-            $ref: '#/components/schemas/Empty5'
+            $ref: '#/components/schemas/Empty6'
       - type: object
         required:
         - Unvet
@@ -5752,6 +5908,26 @@ components:
           description: |-
             The key of the contract the client wants to prefetch.
             Required
+    Prior:
+      title: Prior
+      type: object
+      required:
+      - value
+      properties:
+        value:
+          type: integer
+          format: int32
+    PriorTopologySerial:
+      title: PriorTopologySerial
+      description: |-
+        The serial of last ``VettedPackages`` topology transaction on a given
+        participant and synchronizer.
+      type: object
+      required:
+      - serial
+      properties:
+        serial:
+          $ref: '#/components/schemas/Serial'
     ProtoAny:
       title: ProtoAny
       type: object
@@ -5892,6 +6068,27 @@ components:
       properties:
         kind:
           $ref: '#/components/schemas/Kind'
+    Serial:
+      title: Serial
+      oneOf:
+      - type: object
+        required:
+        - Empty
+        properties:
+          Empty:
+            $ref: '#/components/schemas/Empty5'
+      - type: object
+        required:
+        - NoPrior
+        properties:
+          NoPrior:
+            $ref: '#/components/schemas/NoPrior'
+      - type: object
+        required:
+        - Prior
+        properties:
+          Prior:
+            $ref: '#/components/schemas/Prior'
     Signature:
       title: Signature
       type: object
@@ -5926,6 +6123,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Signature'
+    SigningPublicKey:
+      title: SigningPublicKey
+      type: object
+      required:
+      - format
+      - keyData
+      - keySpec
+      properties:
+        format:
+          description: The serialization format of the public key
+          example: CRYPTO_KEY_FORMAT_DER_X509_SUBJECT_PUBLIC_KEY_INFO
+          type: string
+        keyData:
+          description: Serialized public key in the format specified above
+          type: string
+        keySpec:
+          description: The key specification
+          example: SIGNING_KEY_SPEC_EC_CURVE25519
+          type: string
     SinglePartySignatures:
       title: SinglePartySignatures
       description: Signatures provided by a single party
@@ -6052,7 +6268,7 @@ components:
         - Empty
         properties:
           Empty:
-            $ref: '#/components/schemas/Empty8'
+            $ref: '#/components/schemas/Empty9'
       - type: object
         required:
         - MinLedgerTimeAbs
@@ -6081,7 +6297,7 @@ components:
         - Empty
         properties:
           Empty:
-            $ref: '#/components/schemas/Empty6'
+            $ref: '#/components/schemas/Empty7'
       - type: object
         required:
         - ParticipantAuthorizationAdded
@@ -6447,7 +6663,6 @@ components:
             $ref: '#/components/schemas/Transaction'
     Update1:
       title: Update
-      description: The update that matches the filter in the request.
       oneOf:
       - type: object
         required:
@@ -6647,20 +6862,28 @@ components:
           type: boolean
         synchronizerId:
           description: |-
-            The sychronizer on which the ``VettedPackages`` of this participant node
-            should be changed.
+            If set, the requested changes will take place on the specified
+            synchronizer. If synchronizer_id is unset and the participant is only
+            connected to a single synchronizer, that synchronizer will be used by
+            default. If synchronizer_id is unset and the participant is connected to
+            multiple synchronizers, the request will error out with
+            PACKAGE_SERVICE_CANNOT_AUTODETECT_SYNCHRONIZER.
+
+            Optional
           type: string
         expectedTopologySerial:
+          $ref: '#/components/schemas/PriorTopologySerial'
           description: |-
             The serial of the last ``VettedPackages`` topology transaction of this
             participant and on this synchronizer.
 
-            Execution of the request fails if this is not correct. If the serial is
-            left unspecified, the request always succeeds.
+            Execution of the request fails if this is not correct. Use this to guard
+            against concurrent changes.
 
-            Use this to guard against concurrent changes.
-          type: integer
-          format: int32
+            If left unspecified, no validation is done against the last transaction's
+            serial.
+
+            Optional
     UpdateVettedPackagesResponse:
       title: UpdateVettedPackagesResponse
       type: object
@@ -6783,6 +7006,8 @@ components:
       type: object
       required:
       - packageId
+      - packageName
+      - packageVersion
       properties:
         packageId:
           description: Package ID of this package. Always present.
@@ -6801,11 +7026,13 @@ components:
           description: |-
             Name of this package.
             Only available if the package has been uploaded to the current participant.
+            If unavailable, is empty string.
           type: string
         packageVersion:
           description: |-
             Version of this package.
             Only available if the package has been uploaded to the current participant.
+            If unavailable, is empty string.
           type: string
     VettedPackages:
       title: VettedPackages
@@ -6818,7 +7045,6 @@ components:
       required:
       - participantId
       - synchronizerId
-      - topologySerial
       properties:
         packages:
           description: |-
@@ -6834,11 +7060,10 @@ components:
           description: Synchronizer on which these packages are vetted. Always present.
           type: string
         topologySerial:
+          $ref: '#/components/schemas/PriorTopologySerial'
           description: |-
             Serial of last ``VettedPackages`` topology transaction of this participant
-            and on this synchronizer.
-          type: integer
-          format: int32
+            and on this synchronizer. Always present.
     VettedPackagesChange:
       title: VettedPackagesChange
       description: A change to the set of vetted packages.
@@ -6855,22 +7080,33 @@ components:
 
         A reference matches a package if its ``package_id`` matches the package's ID,
         its ``package_name`` matches the package's name, and its ``package_version``
-        matches the package's version. If any attribute is left unspecified in the
-        reference, it is treated as a wildcard. At a minimum, ``package_id`` or the
-        ``package_name`` must be specified.
+        matches the package's version. If an attribute in the reference is left
+        unspecified (i.e. as an empty string), that attribute is treated as a
+        wildcard. At a minimum, ``package_id`` or the ``package_name`` must be
+        specified.
 
         If a reference does not match any package, the reference is considered
         unresolved and the entire update request is rejected.
       type: object
+      required:
+      - packageId
+      - packageName
+      - packageVersion
       properties:
         packageId:
-          description: Package's package id must be the same as this field.
+          description: |-
+            Package's package id must be the same as this field.
+            Optional
           type: string
         packageName:
-          description: Package's name must be the same as this field.
+          description: |-
+            Package's name must be the same as this field.
+            Optional
           type: string
         packageVersion:
-          description: Package's version must be the same as this field.
+          description: |-
+            Package's version must be the same as this field.
+            Optional
           type: string
     WildcardFilter:
       title: WildcardFilter

@@ -320,12 +320,12 @@ object ApiServices {
           metrics,
           loggerFactory,
         )
-
       val apiPartyManagementService = ApiPartyManagementService.createApiService(
         partyManagementService,
         userManagementStore,
         new IdentityProviderExists(identityProviderConfigStore),
         partyManagementServiceConfig.maxPartiesPageSize,
+        partyManagementServiceConfig.maxSelfAllocatedParties,
         partyRecordStore,
         syncService,
         managementServiceTimeout,
@@ -333,7 +333,6 @@ object ApiServices {
         partyAllocationTracker = partyAllocationTracker,
         submissionIdGenerator =
           ApiPartyManagementService.CreateSubmissionId.forParticipant(participantId),
-        participantId = participantId,
         loggerFactory = loggerFactory,
       )
 

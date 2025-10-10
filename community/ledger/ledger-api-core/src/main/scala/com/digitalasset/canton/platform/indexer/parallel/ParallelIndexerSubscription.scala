@@ -155,7 +155,7 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
             inputMapper(
               metrics,
               mapInSpan(
-                UpdateToDbDto(
+                UpdateToDbDtoLegacy(
                   participantId = participantId,
                   translation = translation,
                   compressionStrategy = compressionStrategy,
@@ -240,7 +240,7 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
         }
       )
       .mapConcat(
-        _.map(batch => (batch.offsetsUpdates, batch.ledgerEnd))
+        _.map(batch => (batch.offsetsUpdates, batch.ledgerEnd, batch.batchTraceContext))
       )
       .buffered(
         counter = metrics.indexer.outputBatchedBufferLength,
@@ -532,6 +532,29 @@ object ParallelIndexerSubscription {
         @SuppressWarnings(Array("org.wartremover.warts.Var"))
         var lastTransactionMetaEventSeqId = eventSeqId
         val batchWithSeqIdsAndPublicationTime = current.batch.map {
+          case dbDto: DbDto.EventActivate =>
+            eventSeqId += 1
+            // activation
+            setActivation(
+              dbDto.synchronizer_id -> dbDto.notPersistedContractId,
+              eventSeqId,
+            )
+            dbDto.copy(event_sequential_id = eventSeqId)
+
+          case dbDto: DbDto.EventDeactivate =>
+            eventSeqId += 1
+            // deactivation
+            dbDto.copy(
+              event_sequential_id = eventSeqId,
+              deactivated_event_sequential_id = Some(
+                tryToGetDeactivated(dbDto.synchronizer_id -> dbDto.contract_id)
+              ),
+            )
+
+          case dbDto: DbDto.EventVariousWitnessed =>
+            eventSeqId += 1
+            dbDto.copy(event_sequential_id = eventSeqId)
+
           case dbDto: DbDto.EventCreate =>
             eventSeqId += 1
             if (dbDto.flat_event_witnesses.nonEmpty) {
@@ -577,6 +600,8 @@ object ParallelIndexerSubscription {
             dbDto.copy(event_sequential_id = eventSeqId)
 
           // we do not increase the event_seq_id here, because all the DbDto-s must have the same eventSeqId as the preceding Event
+          case dbDto: DbDto.IdFilterDbDto =>
+            dbDto.withEventSequentialId(eventSeqId)
           case dbDto: DbDto.IdFilterCreateStakeholder =>
             dbDto.copy(event_sequential_id = eventSeqId)
           case dbDto: DbDto.IdFilterCreateNonStakeholderInformee =>
@@ -671,7 +696,7 @@ object ParallelIndexerSubscription {
       }
   }
 
-  def refillMissingDeactivatiedActivations(
+  def refillMissingDeactivatedActivations(
       logger: TracedLogger
   )(batch: Batch[Vector[DbDto]]): Batch[Vector[DbDto]] = {
     def deactivationRefFor(
@@ -694,6 +719,17 @@ object ParallelIndexerSubscription {
         case Some(Some(deactivationReference)) => Some(deactivationReference)
       }
     val dbDtosWithDeactivationReferences = batch.batch.map {
+      case deactivate: DbDto.EventDeactivate
+          if deactivate.deactivated_event_sequential_id.contains(0L) =>
+        deactivate.copy(
+          deactivated_event_sequential_id = deactivationRefFor(
+            deactivate.synchronizer_id,
+            deactivate.contract_id,
+            s"deactivated event with type:${PersistentEventType
+                .fromInt(deactivate.event_type)} offset:${deactivate.event_offset} nodeId:${deactivate.node_id}",
+          )
+        )
+
       case unassign: DbDto.EventUnassign if unassign.deactivated_event_sequential_id.contains(0L) =>
         unassign.copy(
           deactivated_event_sequential_id = deactivationRefFor(
@@ -723,7 +759,7 @@ object ParallelIndexerSubscription {
       logger: TracedLogger,
   )(inBatch: Batch[Vector[DbDto]]): Batch[DB_BATCH] = {
     val dbBatch = inBatch
-      .pipe(refillMissingDeactivatiedActivations(logger))
+      .pipe(refillMissingDeactivatedActivations(logger))
       .batch
       .pipe(batchF)
     inBatch.copy(batch = dbBatch)

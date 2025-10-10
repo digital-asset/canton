@@ -53,7 +53,7 @@ trait CantonFixtureAbstract
     participant.config.ledgerApi.clientConfig
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1_S1M1_TopologyChangeDelay_0
+    EnvironmentDefinition.P1_S1M1
       .addConfigTransforms(
         ConfigTransforms.updateParticipantConfig("participant1") {
           _.focus(_.ledgerApi.authServices).replace(
@@ -85,7 +85,7 @@ trait CantonFixtureAbstract
 
         createChannel(participant1)
 
-        participant1.dars.upload(CantonTestsPath)
+        participant1.dars.upload(CantonTestsPath, synchronizerId = daId)
       }
 
   protected val channels = TrieMap[String, CloseableChannel]()

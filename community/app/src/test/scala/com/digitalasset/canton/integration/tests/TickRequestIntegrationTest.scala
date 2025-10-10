@@ -86,7 +86,7 @@ sealed trait TickRequestIntegrationTest
   }
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1_S1M1_TopolopgyChangeDelay_0
+    EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateSynchronizerTimeTrackerConfigs_(_ => synchronizerTimeTrackerConfig),
@@ -139,7 +139,8 @@ sealed trait TickRequestIntegrationTest
           )
         )
 
-        participants.all.dars.upload(CantonExamplesPath)
+        participants.all.dars.upload(CantonExamplesPath, synchronizerId = daId)
+        participants.all.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
         participant1.parties.enable("Alice", synchronizer = daName)
         participant2.parties.enable("Bob", synchronizer = daName)
         participant1.parties.enable("Alice", synchronizer = acmeName)

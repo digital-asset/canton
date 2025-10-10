@@ -82,7 +82,7 @@ sealed trait ReassignmentsConfirmationObserversIntegrationTest
     mutable.Map()
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S1M1_S1M1_TopologyChangeDelay_0
+    EnvironmentDefinition.P3_S1M1_S1M1
       // We want to trigger time out
       .addConfigTransforms(ConfigTransforms.useStaticTime)
       .withSetup { implicit env =>
@@ -103,7 +103,8 @@ sealed trait ReassignmentsConfirmationObserversIntegrationTest
 
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
         participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
-        participants.all.dars.upload(BaseTest.CantonExamplesPath)
+        participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = daId)
+        participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = acmeId)
 
         PartiesAllocator(Set(participant1, participant2, participant3))(
           newParties = Seq(

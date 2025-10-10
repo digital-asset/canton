@@ -35,7 +35,7 @@ class ReferenceSequencerPruningIntegrationTest extends SequencerPruningIntegrati
   )
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S1M1_TopologyChangeDelay_0
+    EnvironmentDefinition.P3_S1M1
       .addConfigTransform(ConfigTransforms.useStaticTime)
       .withSetup { implicit env =>
         import env.*

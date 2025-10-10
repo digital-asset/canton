@@ -80,7 +80,7 @@ trait CommandDeduplicationIntegrationTest
   protected val isTimestampManipulationSupported: Boolean = true
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1_S1M1_TopolopgyChangeDelay_0
+    EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
@@ -97,7 +97,8 @@ trait CommandDeduplicationIntegrationTest
         )
         participant1.synchronizers.connect_local(sequencer1, alias = daName)
         participant1.synchronizers.connect_local(sequencer2, alias = acmeName)
-        participant1.dars.upload(CantonExamplesPath)
+        participant1.dars.upload(CantonExamplesPath, synchronizerId = daId)
+        participant1.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
         participant1.parties.enable("Alice", synchronizer = daName)
         participant1.parties.enable("Alice", synchronizer = acmeName)
       }
@@ -821,7 +822,7 @@ abstract class CommandDeduplicationPruningIntegrationTest
   private val reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1_TopologyChangeDelay_0
+    EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),

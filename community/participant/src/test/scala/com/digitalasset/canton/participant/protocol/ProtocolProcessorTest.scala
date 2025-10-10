@@ -32,7 +32,6 @@ import com.digitalasset.canton.lifecycle.{
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.pretty.Pretty
-import com.digitalasset.canton.participant.admin.PackageDependencyResolver
 import com.digitalasset.canton.participant.config.LedgerApiServerConfig
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
@@ -250,8 +249,6 @@ class ProtocolProcessorTest
       SyncEphemeralState,
       ParticipantNodeEphemeralState,
   ) = {
-
-    val packageDependencyResolver = mock[PackageDependencyResolver]
     val clock = new WallClock(timeouts, loggerFactory)
 
     val nodePersistentState = timeouts.default.await("creating node persistent state")(
@@ -289,10 +286,8 @@ class ProtocolProcessorTest
         crypto.crypto,
         IndexedPhysicalSynchronizer.tryCreate(psid, 1),
         defaultStaticSynchronizerParameters,
-        exitOnFatalFailures = true,
-        disableUpgradeValidation = false,
+        parameters = ParticipantNodeParameters.forTestingOnly(testedProtocolVersion),
         mock[PackageMetadataView],
-        packageDependencyResolver,
         Eval.now(nodePersistentState.ledgerApiStore),
         logical,
         loggerFactory,

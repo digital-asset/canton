@@ -8,7 +8,6 @@ import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
@@ -57,10 +56,9 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.ConsensusMessage as ProtoConsensusMessage
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.BatchAggregator
+import com.digitalasset.canton.util.{BatchAggregator, FutureUnlessShutdownUtil}
 import com.digitalasset.canton.{ProtoDeserializationError, RichGeneratedMessage}
 import com.google.protobuf.ByteString
-import slick.dbio.DBIOAction
 import slick.jdbc.{GetResult, PositionedResult, SetParameter}
 
 import scala.concurrent.ExecutionContext
@@ -92,17 +90,28 @@ class DbEpochStore(
   }
 
   private implicit val readPbftMessage: GetResult[SignedMessage[PbftNetworkMessage]] =
-    GetResult(parseSignedMessage(from => IssConsensusModule.parseConsensusNetworkMessage(from, _)))
+    GetResult(
+      parseSignedMessage(from =>
+        // actual sender is not needed when reading from the store
+        IssConsensusModule.parseConsensusNetworkMessage(from, actualSender = None, _)
+      )
+    )
 
   private implicit val tryReadPrePrepareMessageAndEpochInfo: GetResult[(PrePrepare, EpochInfo)] =
     GetResult { r =>
-      val prePrepare = parseSignedMessage(_ => PrePrepare.fromProtoConsensusMessage)(r)
+      // actual sender is not needed when reading from the store
+      val prePrepare =
+        parseSignedMessage(_ => PrePrepare.fromProtoConsensusMessage(actualSender = None, _))(r)
       prePrepare.message -> readEpoch(r)
     }
 
   private implicit val readCommitMessage: GetResult[SignedMessage[Commit]] = GetResult {
-    parseSignedMessage(_ => Commit.fromProtoConsensusMessage)
+    // actual sender is not needed when reading from the store
+    parseSignedMessage(_ => Commit.fromProtoConsensusMessage(actualSender = None, _))
   }
+
+  // TODO(#28200): introduce `BatchAggregator#runTogether` that avoids splitting items into different batches
+  //  and use it in `addPrepares` and `addOrderedBlock`
 
   private val insertInProgressPbftMessagesBatchAggregator =
     BatchAggregator(
@@ -112,19 +121,6 @@ class DbEpochStore(
           runInsertInProgressPbftMessages(seq)
         },
         "In-progress consensus block network message insert",
-        logger,
-      ),
-      batchAggregatorConfig,
-    )
-
-  private val insertFinalPbftMessagesBatchAggregator =
-    BatchAggregator(
-      new InsertBatchAggregatorProcessor(
-        { (seq, traceContext) =>
-          implicit val tc: TraceContext = traceContext
-          runInsertFinalPbftMessages(seq)
-        },
-        "Completed consensus block network message insert",
         logger,
       ),
       batchAggregatorConfig,
@@ -196,12 +192,14 @@ class DbEpochStore(
   )(implicit traceContext: TraceContext): PekkoFutureUnlessShutdown[Unit] =
     createFuture(completeEpochActionName(epochNumber), orderingStage = functionFullName) {
       // asynchronously delete all in-progress messages after an epoch ends
-      storage
-        .update_(
-          sqlu"""delete from ord_pbft_messages_in_progress where epoch_number <= $epochNumber""",
-          functionFullName,
-        )
-        .discard
+      FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+        storage
+          .update_(
+            sqlu"""delete from ord_pbft_messages_in_progress where epoch_number <= $epochNumber""",
+            functionFullName,
+          ),
+        failureMessage = "could not delete in-progress pbft messages from previous epoch(s)",
+      )
       // synchronously update the completed epoch to no longer be in progress
       storage.update_(
         sqlu"""update ord_epochs set in_progress = false where epoch_number = $epochNumber""",
@@ -249,13 +247,13 @@ class DbEpochStore(
       insertInProgressPbftMessagesBatchAggregator.run(prePrepare)
     }
 
-  override def addPrepares(
+  override def addPreparesAtomically(
       prepares: Seq[SignedMessage[ConsensusMessage.Prepare]]
   )(implicit traceContext: TraceContext): PekkoFutureUnlessShutdown[Unit] =
     createFuture(addPreparesActionName, orderingStage = functionFullName) {
-      FutureUnlessShutdown
-        .sequence(prepares.map(insertInProgressPbftMessagesBatchAggregator.run))
-        .map(_ => ())
+      // Cannot use the batch aggregator here as we need to make sure for CFT that all messages end up
+      //  in the same transaction.
+      runInsertInProgressPbftMessages(prepares)
     }
 
   override def addViewChangeMessage[M <: PbftViewChangeMessage](
@@ -270,7 +268,7 @@ class DbEpochStore(
       insertInProgressPbftMessagesBatchAggregator.run(viewChangeMessage)
     }
 
-  override def addOrderedBlock(
+  override def addOrderedBlockAtomically(
       prePrepare: SignedMessage[PrePrepare],
       commitMessages: Seq[SignedMessage[Commit]],
   )(implicit
@@ -284,117 +282,97 @@ class DbEpochStore(
     ) {
       val messages: Seq[SignedMessage[PbftNormalCaseMessage]] =
         commitMessages :++ Seq[SignedMessage[PbftNormalCaseMessage]](prePrepare)
-      FutureUnlessShutdown
-        .sequence(messages.map(insertFinalPbftMessagesBatchAggregator.run))
-        .map(_ => ())
+      // Cannot use the batch aggregator here as we need to make sure for CFT that all messages end up
+      //  in the same transaction.
+      runInsertFinalPbftMessages(messages)
     }
   }
 
   private def runInsertInProgressPbftMessages(
       messages: Seq[SignedMessage[PbftNetworkMessage]]
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    profile match {
-      case _: Postgres =>
-        val insertSql =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    val insertSql =
+      profile match {
+        case _: Postgres =>
           """insert into ord_pbft_messages_in_progress(block_number, epoch_number, view_number, message, discriminator, from_sequencer_id)
                    values (?, ?, ?, ?, ?, ?)
                    on conflict (block_number, view_number, discriminator, from_sequencer_id) do nothing
                 """
-        storage
-          .runWrite(
-            DbStorage
-              .bulkOperation_(insertSql, messages, storage.profile) { pp => msg =>
-                pp >> msg.message.blockMetadata.blockNumber
-                pp >> msg.message.blockMetadata.epochNumber
-                pp >> msg.message.viewNumber
-                pp >> msg
-                pp >> getDiscriminator(msg.message)
-                pp >> msg.from
-              },
-            functionFullName,
-            maxRetries = 1,
-          )
-          .map(_ => ())
-      case _: H2 =>
-        storage.update_(
-          DBIOAction
-            .sequence(
-              messages.map { msg =>
-                val blockNumber = msg.message.blockMetadata.blockNumber
-                val epochNumber = msg.message.blockMetadata.epochNumber
-                val viewNumber = msg.message.viewNumber
-                val discriminator = getDiscriminator(msg.message)
-                val from = msg.from
-
-                sqlu"""merge into ord_pbft_messages_in_progress
-                   using dual on (ord_pbft_messages_in_progress.block_number = $blockNumber
-                     and ord_pbft_messages_in_progress.epoch_number = $epochNumber
-                     and ord_pbft_messages_in_progress.view_number = $viewNumber
-                     and ord_pbft_messages_in_progress.discriminator = $discriminator
-                     and ord_pbft_messages_in_progress.from_sequencer_id = $from
+        case _: H2 =>
+          """merge into ord_pbft_messages_in_progress
+                   using dual on (ord_pbft_messages_in_progress.block_number = ?1
+                     and ord_pbft_messages_in_progress.epoch_number = ?2
+                     and ord_pbft_messages_in_progress.view_number = ?3
+                     and ord_pbft_messages_in_progress.discriminator = ?5
+                     and ord_pbft_messages_in_progress.from_sequencer_id = ?6
                    )
                    when not matched then
                      insert (block_number, epoch_number, view_number, message, discriminator, from_sequencer_id)
-                     values ($blockNumber, $epochNumber, $viewNumber, $msg, $discriminator, $from)
+                     values (?1, ?2, ?3, ?4, ?5, ?6)
                 """
-              }
-            )
-            .transactionally,
-          functionFullName,
-        )
-    }
+      }
+
+    storage
+      .runWrite(
+        // Sorting should prevent deadlocks in Postgres when using concurrent clashing batched inserts
+        //  with idempotency "on conflict do nothing" clauses.
+        DbStorage
+          .bulkOperation_(insertSql, messages.sortBy(key), storage.profile) { pp => msg =>
+            pp >> msg.message.blockMetadata.blockNumber
+            pp >> msg.message.blockMetadata.epochNumber
+            pp >> msg.message.viewNumber
+            pp >> msg
+            pp >> getDiscriminator(msg.message)
+            pp >> msg.from
+          },
+        functionFullName,
+        maxRetries = 1,
+      )
+      .map(_ => ())
+  }
 
   private def runInsertFinalPbftMessages[M <: PbftNetworkMessage](
       messages: Seq[SignedMessage[M]]
   )(implicit
       errorLoggingContext: ErrorLoggingContext,
       traceContext: TraceContext,
-  ): FutureUnlessShutdown[Unit] =
-    profile match {
-      case _: Postgres =>
-        val insertSql =
+  ): FutureUnlessShutdown[Unit] = {
+    val insertSql =
+      profile match {
+        case _: Postgres =>
           """insert into ord_pbft_messages_completed(block_number, epoch_number, message, discriminator, from_sequencer_id)
-                   values (?, ?, ?, ?, ?)
-                   on conflict (block_number, epoch_number, discriminator, from_sequencer_id) do nothing
-                """
-        storage
-          .runWrite(
-            DbStorage
-              .bulkOperation_(insertSql, messages, storage.profile) { pp => msg =>
-                pp >> msg.message.blockMetadata.blockNumber
-                pp >> msg.message.blockMetadata.epochNumber
-                pp >> msg
-                pp >> getDiscriminator(msg.message)
-                pp >> msg.from
-              },
-            functionFullName,
-            maxRetries = 1,
-          )
-          .map(_ => ())
-      case _: H2 =>
-        storage.update_(
-          DBIOAction
-            .sequence(messages.map { msg =>
-              val sequencerId = msg.from
-              val blockNumber = msg.message.blockMetadata.blockNumber
-              val epochNumber = msg.message.blockMetadata.epochNumber
-              val discriminator = getDiscriminator(msg.message)
-
-              sqlu"""merge into ord_pbft_messages_completed
-                 using dual on (ord_pbft_messages_completed.block_number = $blockNumber
-                   and ord_pbft_messages_completed.epoch_number = $epochNumber
-                   and ord_pbft_messages_completed.discriminator = $discriminator
-                   and ord_pbft_messages_completed.from_sequencer_id = $sequencerId
+                 values (?, ?, ?, ?, ?)
+                 on conflict (block_number, epoch_number, discriminator, from_sequencer_id) do nothing
+              """
+        case _: H2 =>
+          """merge into ord_pbft_messages_completed
+                 using dual on (ord_pbft_messages_completed.block_number = ?1
+                   and ord_pbft_messages_completed.epoch_number = ?2
+                   and ord_pbft_messages_completed.discriminator = ?4
+                   and ord_pbft_messages_completed.from_sequencer_id = ?5
                  )
                  when not matched then
                    insert (block_number, epoch_number, message, discriminator, from_sequencer_id)
-                   values ($blockNumber, $epochNumber, $msg, $discriminator, $sequencerId)
+                   values (?1, ?2, ?3, ?4, ?5)
               """
-            })
-            .transactionally,
-          functionFullName,
-        )
-    }
+      }
+    storage
+      .runWrite(
+        // Sorting should prevent deadlocks in Postgres when using concurrent clashing batched inserts
+        //  with idempotency "on conflict do nothing" clauses.
+        DbStorage
+          .bulkOperation_(insertSql, messages.sortBy(key), storage.profile) { pp => msg =>
+            pp >> msg.message.blockMetadata.blockNumber
+            pp >> msg.message.blockMetadata.epochNumber
+            pp >> msg
+            pp >> getDiscriminator(msg.message)
+            pp >> msg.from
+          },
+        functionFullName,
+        maxRetries = 1,
+      )
+      .map(_ => ())
+  }
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
   override def loadEpochProgress(activeEpochInfo: EpochInfo)(implicit
@@ -598,15 +576,6 @@ object DbEpochStore {
   private val ViewChangeDiscriminator = 3
   private val NewViewDiscriminator = 4
 
-  private def getDiscriminator[M <: PbftNetworkMessage](message: M): Int =
-    message match {
-      case _: PrePrepare => PrePrepareMessageDiscriminator
-      case _: ConsensusMessage.Prepare => PrepareMessageDiscriminator
-      case _: Commit => CommitMessageDiscriminator
-      case _: ConsensusMessage.ViewChange => ViewChangeDiscriminator
-      case _: ConsensusMessage.NewView => NewViewDiscriminator
-    }
-
   private class InsertBatchAggregatorProcessor(
       exec: (
           Seq[SignedMessage[PbftNetworkMessage]],
@@ -634,4 +603,24 @@ object DbEpochStore {
       )
     }
   }
+
+  private def key[M <: PbftNetworkMessage](
+      msg: SignedMessage[M]
+  ): (BlockNumber, EpochNumber, BftNodeId, Int) =
+    (
+      msg.message.blockMetadata.blockNumber,
+      msg.message.blockMetadata.epochNumber,
+      msg.from,
+      getDiscriminator(msg.message),
+    )
+
+  private def getDiscriminator[M <: PbftNetworkMessage](message: M): Int =
+    message match {
+      case _: PrePrepare => PrePrepareMessageDiscriminator
+      case _: ConsensusMessage.Prepare => PrepareMessageDiscriminator
+      case _: Commit => CommitMessageDiscriminator
+      case _: ConsensusMessage.ViewChange => ViewChangeDiscriminator
+      case _: ConsensusMessage.NewView => NewViewDiscriminator
+    }
+
 }

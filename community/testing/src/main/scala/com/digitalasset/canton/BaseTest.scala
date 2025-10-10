@@ -50,6 +50,7 @@ import org.typelevel.discipline.Laws
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.language.implicitConversions
+import scala.util.control.NonFatal
 import scala.util.{Failure, Success, Try}
 
 trait ScalaFuturesWithPatience extends ScalaFutures {
@@ -329,6 +330,18 @@ trait BaseTest
     )
   }
 
+  private final val retryTimes = 3
+
+  def retryET[A, T](
+      times: Int = retryTimes
+  )(
+      block: => EitherT[FutureUnlessShutdown, A, T]
+  )(implicit ec: ExecutionContext): EitherT[FutureUnlessShutdown, A, T] =
+    block.recoverWith {
+      case NonFatal(_) if times > 0 =>
+        retryET(times - 1)(block)
+    }
+
   def clue[T](message: String)(expr: => T): T = {
     logger.debug(s"Running clue: $message")
     Try(expr) match {
@@ -432,6 +445,10 @@ trait BaseTest
   lazy val PerformanceTestPath: String = BaseTest.PerformanceTestPath
   lazy val DamlTestFilesPath: String = BaseTest.DamlTestFilesPath
   lazy val DamlTestLfDevFilesPath: String = BaseTest.DamlTestLfDevFilesPath
+  // TODO(#25385): Consider deduplicating the upgrade test DARs below
+  lazy val FooV1Path: String = BaseTest.FooV1Path
+  lazy val FooV2Path: String = BaseTest.FooV2Path
+  lazy val FooV3Path: String = BaseTest.FooV3Path
   lazy val UpgradeTestsPath: String = BaseTest.UpgradeTestsPath
   lazy val UpgradeTestsCompatPath: String = BaseTest.UpgradeTestsCompatPath
   lazy val UpgradeTestsIncompatPath: String = BaseTest.UpgradeTestsIncompatPath
@@ -578,6 +595,10 @@ object BaseTest {
   lazy val DamlScript3TestFilesPath: String = getResourcePath("DamlScript3TestFiles-3.4.0.dar")
   lazy val DamlTestFilesPath: String = getResourcePath("DamlTestFiles-3.4.0.dar")
   lazy val DamlTestLfDevFilesPath: String = getResourcePath("DamlTestLfDevFiles-3.4.0.dar")
+  // TODO(#25385): Deduplicate these upgrading test DARs
+  lazy val FooV1Path: String = getResourcePath("foo-0.0.1.dar")
+  lazy val FooV2Path: String = getResourcePath("foo-0.0.2.dar")
+  lazy val FooV3Path: String = getResourcePath("foo-0.0.3.dar")
   lazy val UpgradeTestsPath: String = getResourcePath("UpgradeTests-3.4.0.dar")
   lazy val UpgradeTestsCompatPath: String = getResourcePath("UpgradeTests-4.0.0.dar")
   lazy val UpgradeTestsIncompatPath: String = getResourcePath("UpgradeTests-5.0.0.dar")

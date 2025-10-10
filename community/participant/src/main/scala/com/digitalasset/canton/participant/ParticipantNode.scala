@@ -14,7 +14,7 @@ import com.digitalasset.canton.auth.CantonAdminTokenDispenser
 import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.config.AdminTokenConfig
-import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.connection.GrpcApiInfoService
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.crypto.{
@@ -65,14 +65,12 @@ import com.digitalasset.canton.resource.*
 import com.digitalasset.canton.scheduler.{Schedulers, SchedulersImpl}
 import com.digitalasset.canton.sequencing.client.{RecordingConfig, ReplayConfig, SequencerClient}
 import com.digitalasset.canton.store.IndexedStringStore
+import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.time.*
 import com.digitalasset.canton.time.admin.v30.SynchronizerTimeServiceGrpc
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.PSIdLookup
-import com.digitalasset.canton.topology.client.{
-  StoreBasedTopologySnapshot,
-  SynchronizerTopologyClient,
-}
+import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.topology.store.TopologyStoreId.{AuthorizedStore, SynchronizerStore}
 import com.digitalasset.canton.topology.store.{PartyMetadataStore, TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.topology.transaction.HostingParticipant
@@ -118,7 +116,7 @@ class ParticipantNodeBootstrap(
 
   private val cantonSyncService = new SingleUseCell[CantonSyncService]
   private val mutablePackageMetadataView = new SingleUseCell[MutablePackageMetadataViewImpl]
-  private val packageDependencyResolver = new SingleUseCell[PackageDependencyResolver]
+  private val packageDependencyResolver = new SingleUseCell[PackageDependencyResolver.Impl]
   private val packageUpgradeValidator = new PackageUpgradeValidator(
     arguments.parameterConfig.general.cachingConfigs.packageUpgradeCache,
     loggerFactory,
@@ -133,7 +131,7 @@ class ParticipantNodeBootstrap(
       sys.error("mutablePackageMetadataView should be defined")
     )
 
-  private def tryGetPackageDependencyResolver(): PackageDependencyResolver =
+  private def tryGetPackageDependencyResolver(): PackageDependencyResolver.Impl =
     packageDependencyResolver.getOrElse(
       sys.error("packageDependencyResolver should be defined")
     )
@@ -201,12 +199,21 @@ class ParticipantNodeBootstrap(
       loggerFactory,
       config.parameters.packageMetadataView,
       timeouts,
+      arguments.futureSupervisor,
+      exitOnFatalFailures = parameters.exitOnFatalFailures,
     )
 
     mutablePackageMetadataView.putIfAbsent(packageMetadataView).discard
 
-    val resolver = new PackageDependencyResolver(
-      damlPackageStore = store,
+    val resolver = new PackageDependencyResolver.Impl(
+      participantId = ParticipantId(nodeId),
+      damlPackageStore = DamlPackageStore(
+        storage,
+        arguments.futureSupervisor,
+        arguments.parameterConfig,
+        exitOnFatalFailures = parameters.exitOnFatalFailures,
+        loggerFactory,
+      ),
       timeouts = arguments.parameterConfig.processingTimeouts,
       loggerFactory = loggerFactory,
       fetchPackageParallelism = arguments.parameterConfig.general.batchingConfig.parallelism,
@@ -230,7 +237,6 @@ class ParticipantNodeBootstrap(
       cantonSyncService.get
         .traverse(_.ledgerApiIndexer.asEval.value.ledgerApiStore.value.ledgerEnd)
         .map(_.flatten)
-
     val topologyManager = new AuthorizedTopologyManager(
       nodeId,
       clock,
@@ -241,9 +247,14 @@ class ParticipantNodeBootstrap(
       futureSupervisor,
       bootstrapStageCallback.loggerFactory,
     ) with ParticipantTopologyValidation {
+      override def initialize(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+        // initialize the package metadata view before we start vetting any package
+        packageMetadataView.refreshState
+
       override def validatePackageVetting(
           currentlyVettedPackages: Set[LfPackageId],
           nextPackageIds: Set[LfPackageId],
+          dryRunSnapshot: Option[PackageMetadata],
           forceFlags: ForceFlags,
       )(implicit
           traceContext: TraceContext
@@ -252,7 +263,7 @@ class ParticipantNodeBootstrap(
           currentlyVettedPackages,
           nextPackageIds,
           packageMetadataView,
-          resolver,
+          dryRunSnapshot,
           acsInspections = () => acsInspectionPerSynchronizer(),
           forceFlags,
           disableUpgradeValidation = parameters.disableUpgradeValidation,
@@ -359,17 +370,16 @@ class ParticipantNodeBootstrap(
       }
 
     private def createPackageOps(manager: SyncPersistentStateManager): PackageOps = {
-      val authorizedTopologyStoreClient = new StoreBasedTopologySnapshot(
-        CantonTimestamp.MaxValue,
-        topologyManager.store,
-        tryGetPackageDependencyResolver(),
-        loggerFactory,
-      )
       val packageOps = new PackageOpsImpl(
         participantId = participantId,
-        headAuthorizedTopologySnapshot = authorizedTopologyStoreClient,
         stateManager = manager,
-        topologyManager = topologyManager,
+        topologyManagerLookup = new TopologyManagerLookup(
+          lookupByPsid = psid =>
+            cantonSyncService.get
+              .flatMap(_.syncPersistentStateManager.get(psid))
+              .map(_.topologyManager),
+          lookupActivePsidByLsid = lookupActivePSId,
+        ),
         nodeId = nodeId,
         initialProtocolVersion = ProtocolVersion.latest,
         loggerFactory = ParticipantNodeBootstrap.this.loggerFactory,
@@ -388,7 +398,7 @@ class ParticipantNodeBootstrap(
         storage: Storage,
         engine: Engine,
         authorizedTopologyManager: AuthorizedTopologyManager,
-        packageDependencyResolver: PackageDependencyResolver,
+        packageDependencyResolver: PackageDependencyResolver.Impl,
     )(implicit executionSequencerFactory: ExecutionSequencerFactory): EitherT[
       FutureUnlessShutdown,
       String,
@@ -458,7 +468,6 @@ class ParticipantNodeBootstrap(
         persistentState = persistentStateContainer.asEval
 
         mutablePackageMetadataView = tryGetMutablePackageMetadataView()
-        _ <- EitherT.right(mutablePackageMetadataView.refreshState)
 
         syncPersistentStateManager = new SyncPersistentStateManager(
           participantId,
@@ -472,7 +481,6 @@ class ParticipantNodeBootstrap(
             SynchronizerCrypto(crypto, staticSynchronizerParameters),
           clock,
           mutablePackageMetadataView,
-          packageDependencyResolver,
           persistentState.map(_.ledgerApiStore),
           persistentState.map(_.contractStore),
           futureSupervisor,
@@ -618,6 +626,7 @@ class ParticipantNodeBootstrap(
           topologyDispatcher,
           syncCryptoSignerWithSessionKeys,
           config.crypto,
+          config.topology,
           clock,
           parameters,
           synchronizerAliasManager,
@@ -1031,7 +1040,7 @@ class ParticipantNode(
 
   override def status: ParticipantStatus = {
     val ports = Map("ledger" -> config.ledgerApi.port, "admin" -> config.adminApi.port) ++
-      config.httpLedgerApi.flatMap(_.server.port).flatMap(Port.create(_).toOption).map("json" -> _)
+      Option.when(config.httpLedgerApi.enabled)("json" -> config.httpLedgerApi.server.port)
     val synchronizers = readySynchronizers
     val topologyQueues = identityPusher.queueStatus
 

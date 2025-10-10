@@ -214,7 +214,26 @@ class InMemorySequencerStore(
           .takeWhile(e => e.getKey <= watermark)
           .filter(e => isMemberRecipient(memberId)(e.getValue))
           .take(limit)
-          .map(entry => Sequenced(entry.getKey, entry.getValue))
+          .map { entry =>
+            val event = entry.getValue match {
+              case deliver: DeliverStoreEvent[PayloadId] =>
+                val sequencerMemberId = memberMap
+                  .getOrElse(
+                    sequencerMember,
+                    ErrorUtil.invalidState(
+                      s"Sequencer member $sequencerMember is not registered in the sequencer store"
+                    ),
+                  )
+                  .memberId
+                if (deliver.members.contains(sequencerMemberId)) {
+                  deliver.copy(members = NonEmpty(SortedSet, memberId, sequencerMemberId))
+                } else {
+                  deliver.copy(members = NonEmpty(SortedSet, memberId))
+                }
+              case other => other
+            }
+            Sequenced(entry.getKey, event)
+          }
           .toList
 
       if (payloads.nonEmpty)
@@ -238,13 +257,13 @@ class InMemorySequencerStore(
             .toList
         case payload: BytesPayload =>
           List(payload.id -> payload.decodeBatchAndTrim(protocolVersion, member))
-        case batch: FilteredBatch => List(batch.id -> Batch.trimForMember(batch.batch, member))
       }.toMap
     )
 
   private def isMemberRecipient(member: SequencerMemberId)(event: StoreEvent[_]): Boolean =
     event match {
       case deliver: DeliverStoreEvent[_] =>
+        deliver.members.contains(SequencerMemberId.Broadcast) ||
         deliver.members.contains(
           member
         ) // only if they're a recipient (sender should already be a recipient)

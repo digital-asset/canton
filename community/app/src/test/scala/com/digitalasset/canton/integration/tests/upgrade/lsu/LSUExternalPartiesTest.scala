@@ -4,13 +4,8 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.daml.ledger.javaapi.data.DisclosedContract
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.{
-  DbConfig,
-  NonNegativeFiniteDuration,
-  SynchronizerTimeTrackerConfig,
-}
+import com.digitalasset.canton.config.{DbConfig, SynchronizerTimeTrackerConfig}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.*
@@ -20,11 +15,11 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.Mu
 import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils.SynchronizerNodes
-import com.digitalasset.canton.integration.tests.upgrade.lsu.LSUBase.Fixture
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
 import com.digitalasset.canton.sequencing.SequencerConnections
 
+import java.util.Optional
 import scala.jdk.CollectionConverters.*
 
 abstract class LSUExternalPartiesIntegrationTest extends LSUBase {
@@ -41,7 +36,7 @@ abstract class LSUExternalPartiesIntegrationTest extends LSUBase {
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3S2M2_Config
       .withNetworkBootstrap { implicit env =>
-        new NetworkBootstrapper(S1M1.withTopologyChangeDelay(NonNegativeFiniteDuration.Zero))
+        new NetworkBootstrapper(S1M1)
       }
       .addConfigTransforms(configTransforms*)
       .withSetup { implicit env =>
@@ -76,7 +71,7 @@ abstract class LSUExternalPartiesIntegrationTest extends LSUBase {
     "work with external parties" in { implicit env =>
       import env.*
 
-      val fixture = Fixture(daId, upgradeTime)
+      val fixture = fixtureWithDefaults()
 
       val alice = participant1.parties.external.enable("AliceE")
       val bob = participant2.parties.enable("Bob")
@@ -109,10 +104,10 @@ abstract class LSUExternalPartiesIntegrationTest extends LSUBase {
       val iouCreated = txIouAlice.getEvents.asScalaProtoCreatedContracts.loneElement
 
       val disclosedIou = new DisclosedContract(
-        Iou.TEMPLATE_ID_WITH_PACKAGE_ID,
-        iou.id.contractId,
         iouCreated.createdEventBlob,
         daId.logical.toProtoPrimitive,
+        Optional.of(Iou.TEMPLATE_ID_WITH_PACKAGE_ID),
+        Optional.of(iou.id.contractId),
       )
 
       participant3.ledger_api.state.acs.of_all() shouldBe empty
@@ -130,8 +125,6 @@ abstract class LSUExternalPartiesIntegrationTest extends LSUBase {
   }
 }
 
-// TODO(#27960) flaky test
-@UnstableTest
 final class LSUExternalPartiesReferenceIntegrationTest extends LSUExternalPartiesIntegrationTest {
   registerPlugin(
     new UseReferenceBlockSequencer[DbConfig.Postgres](

@@ -63,7 +63,7 @@ sealed trait ReassignmentConfirmationAdminPartyIntegrationTest
     mutable.Map()
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1_S1M1_TopolopgyChangeDelay_0
+    EnvironmentDefinition.P2_S1M1_S1M1
       // We want to trigger time out
       .addConfigTransforms(ConfigTransforms.useStaticTime)
       .addConfigTransforms(
@@ -89,7 +89,8 @@ sealed trait ReassignmentConfirmationAdminPartyIntegrationTest
 
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
         participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
-        participants.all.dars.upload(BaseTest.CantonExamplesPath)
+        participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = daId)
+        participants.all.dars.upload(BaseTest.CantonExamplesPath, synchronizerId = acmeId)
 
         signatory = participant1.parties.enable(
           "signatory",

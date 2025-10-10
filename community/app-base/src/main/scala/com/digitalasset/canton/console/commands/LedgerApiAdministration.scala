@@ -9,10 +9,7 @@ import cats.syntax.traverse.*
 import com.daml.jwt.{AuthServiceJWTCodec, JwksUrl, Jwt, JwtDecoder, StandardJWTPayload}
 import com.daml.ledger.api.v2.admin.command_inspection_service.CommandState
 import com.daml.ledger.api.v2.admin.package_management_service.PackageDetails
-import com.daml.ledger.api.v2.admin.party_management_service.{
-  AllocateExternalPartyResponse,
-  PartyDetails as ProtoPartyDetails,
-}
+import com.daml.ledger.api.v2.admin.party_management_service.AllocateExternalPartyResponse
 import com.daml.ledger.api.v2.commands.{Command, DisclosedContract, PrefetchContractKey}
 import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.api.v2.event.CreatedEvent
@@ -69,10 +66,15 @@ import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.{
   WrappedIncompleteUnassigned,
 }
 import com.digitalasset.canton.admin.api.client.data.*
+import com.digitalasset.canton.admin.api.client.data.parties.{
+  GenerateExternalPartyTopology,
+  PartyDetails,
+}
 import com.digitalasset.canton.config.ConsoleCommandTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
+  ConsoleCommandResult,
   ConsoleEnvironment,
   ConsoleMacros,
   FeatureFlag,
@@ -84,7 +86,7 @@ import com.digitalasset.canton.console.{
   ParticipantReference,
   RemoteParticipantReference,
 }
-import com.digitalasset.canton.crypto.Signature
+import com.digitalasset.canton.crypto.{Signature, SigningPublicKey}
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.ledger.api.{IdentityProviderConfig, IdentityProviderId}
 import com.digitalasset.canton.ledger.client.services.admin.IdentityProviderConfigClient
@@ -668,6 +670,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
           verboseHashing: Boolean = false,
           prefetchContractKeys: Seq[PrefetchContractKey] = Seq.empty,
+          maxRecordTime: Option[CantonTimestamp] = None,
       ): PrepareResponseProto =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -683,6 +686,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               userPackageSelectionPreference,
               verboseHashing,
               prefetchContractKeys,
+              maxRecordTime,
             )
           )
         }
@@ -1366,7 +1370,9 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         }
 
       @Help.Summary("Read the current connected synchronizers for a party", FeatureFlag.Testing)
-      def connected_synchronizers(partyId: Option[PartyId]): GetConnectedSynchronizersResponse =
+      def connected_synchronizers(
+          partyId: Option[PartyId] = None
+      ): GetConnectedSynchronizersResponse =
         check(FeatureFlag.Testing)(consoleEnvironment.run {
           ledgerApiCommand(
             LedgerApiCommands.StateService.GetConnectedSynchronizers(partyId.map(_.toLf))
@@ -1428,6 +1434,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             limit: PositiveInt = defaultLimit,
             verbose: Boolean = true,
             filterTemplates: Seq[TemplateId] = Seq.empty,
+            filterInterfaces: Seq[TemplateId] = Seq.empty,
             activeAtOffsetO: Option[Long] = None,
             timeout: config.NonNegativeDuration = timeouts.unbounded,
             includeCreatedEventBlob: Boolean = false,
@@ -1453,6 +1460,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                   Set(party.toLf),
                   limit,
                   filterTemplates,
+                  filterInterfaces,
                   activeAt,
                   verbose,
                   timeout.asFiniteApproximation,
@@ -1475,6 +1483,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             |- limit: limit (default set via canton.parameter.console)
             |- verbose: whether the resulting events should contain detailed type information
             |- filterTemplate: list of templates ids to filter for, empty sequence acts as a wildcard
+            |- filterInterfaces: list of interface ids to filter for, empty sequence does not influence the resulting filter
             |- activeAtOffsetO: the offset at which the snapshot of the active contracts will be computed, it
             |  must be no greater than the current ledger end offset and must be greater than or equal to the
             |  last pruning offset. If no offset is specified then the current participant end will be used.
@@ -1487,6 +1496,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             limit: PositiveInt = defaultLimit,
             verbose: Boolean = true,
             filterTemplates: Seq[TemplateId] = Seq.empty,
+            filterInterfaces: Seq[TemplateId] = Seq.empty,
             activeAtOffsetO: Option[Long] = None,
             timeout: config.NonNegativeDuration = timeouts.unbounded,
             includeCreatedEventBlob: Boolean = false,
@@ -1496,6 +1506,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             limit,
             verbose,
             filterTemplates,
+            filterInterfaces,
             activeAtOffsetO,
             timeout,
             includeCreatedEventBlob,
@@ -1512,6 +1523,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             |- limit: limit (default set via canton.parameter.console)
             |- verbose: whether the resulting events should contain detailed type information
             |- filterTemplate: list of templates ids to filter for, empty sequence acts as a wildcard
+            |- filterInterfaces: list of interface ids to filter for, empty sequence does not influence the resulting filter
             |- activeAtOffsetO: the offset at which the snapshot of the events will be computed, it
             |  must be no greater than the current ledger end offset and must be greater than or equal to the
             |  last pruning offset. If no offset is specified then the current participant end will be used.
@@ -1524,6 +1536,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             limit: PositiveInt = defaultLimit,
             verbose: Boolean = true,
             filterTemplates: Seq[TemplateId] = Seq.empty,
+            filterInterfaces: Seq[TemplateId] = Seq.empty,
             activeAtOffsetO: Option[Long] = None,
             timeout: config.NonNegativeDuration = timeouts.unbounded,
             includeCreatedEventBlob: Boolean = false,
@@ -1533,6 +1546,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             limit,
             verbose,
             filterTemplates,
+            filterInterfaces,
             activeAtOffsetO,
             timeout,
             includeCreatedEventBlob,
@@ -1550,6 +1564,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             |- limit: limit (default set via canton.parameter.console)
             |- verbose: whether the resulting events should contain detailed type information
             |- filterTemplate: list of templates ids to filter for, empty sequence acts as a wildcard
+            |- filterInterfaces: list of interface ids to filter for, empty sequence does not influence the resulting filter
             |- activeAtOffsetO: the offset at which the snapshot of the events will be computed, it must be no
             |  greater than the current ledger end offset and must be greater than or equal to the last
             |  pruning offset. If no offset is specified then the current participant end will be used.
@@ -1562,6 +1577,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             limit: PositiveInt = defaultLimit,
             verbose: Boolean = true,
             filterTemplates: Seq[TemplateId] = Seq.empty,
+            filterInterfaces: Seq[TemplateId] = Seq.empty,
             activeAtOffsetO: Option[Long] = None,
             timeout: config.NonNegativeDuration = timeouts.unbounded,
             includeCreatedEventBlob: Boolean = false,
@@ -1571,6 +1587,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             limit,
             verbose,
             filterTemplates,
+            filterInterfaces,
             activeAtOffsetO,
             timeout,
             includeCreatedEventBlob,
@@ -1589,6 +1606,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
              - limit: limit (default set via canton.parameter.console)
              - verbose: whether the resulting events should contain detailed type information
              - filterTemplate: list of templates ids to filter for, empty sequence acts as a wildcard
+             - filterInterfaces: list of interface ids to filter for, empty sequence does not influence the resulting filter
              - activeAtOffsetO: the offset at which the snapshot of the active contracts will be computed, it
                must be no greater than the current ledger end offset and must be greater than or equal to the
                last pruning offset. If no offset is specified then the current participant end will be used.
@@ -1603,6 +1621,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             limit: PositiveInt = defaultLimit,
             verbose: Boolean = true,
             filterTemplates: Seq[TemplateId] = Seq.empty,
+            filterInterfaces: Seq[TemplateId] = Seq.empty,
             activeAtOffsetO: Option[Long] = None,
             timeout: config.NonNegativeDuration = timeouts.unbounded,
             identityProviderId: String = "",
@@ -1633,6 +1652,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                             localParties.toSet,
                             limit,
                             filterTemplates,
+                            filterInterfaces,
                             activeAtOffsetO.getOrElse(end()),
                             verbose,
                             timeout.asFiniteApproximation,
@@ -1723,6 +1743,42 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         PartyDetails.fromProtoPartyDetails(proto)
       }
 
+      @Help.Summary("Generate topology transactions for an external party", FeatureFlag.Preview)
+      @Help.Description(
+        """Convenience function to generate the necessary topology transactions.
+           For more complex setups, please generate your topology transactions manually.
+          synchronizerId: SynchronizerId for which the transactions should be generated.
+          partyHint: the prefix for the party
+          publicKey: the signing public key of the external party
+          localParticipantObservationOnly: if true, then the allocating participant will only be an observer
+          otherConfirmingParticipantUids: list of other participants that will be confirming daml transactions on behalf of the party
+          confirmationThreshold: number of confirming participants which need to approve a daml transaction
+          observingParticipantUids: list of other participants that should observe the transactions of the external party
+          """
+      )
+      def generate_topology(
+          synchronizerId: SynchronizerId,
+          partyHint: String,
+          publicKey: SigningPublicKey,
+          localParticipantObservationOnly: Boolean = false,
+          otherConfirmingParticipantIds: Seq[ParticipantId] = Seq.empty,
+          confirmationThreshold: NonNegativeInt = NonNegativeInt.zero,
+          observingParticipantIds: Seq[ParticipantId] = Seq.empty,
+      ): GenerateExternalPartyTopology =
+        check(FeatureFlag.Preview)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.PartyManagementService.GenerateExternalPartyTopology(
+              synchronizerId = synchronizerId,
+              partyHint = partyHint,
+              publicKey = publicKey,
+              localParticipantObservationOnly = localParticipantObservationOnly,
+              otherConfirmingParticipantIds = otherConfirmingParticipantIds,
+              confirmationThreshold = confirmationThreshold,
+              observingParticipantIds = observingParticipantIds,
+            )
+          )
+        })
+
       @Help.Summary("Allocate a new external party", FeatureFlag.Preview)
       @Help.Description(
         """Allocates a new external party on the ledger.
@@ -1762,6 +1818,26 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         proto.map(PartyDetails.fromProtoPartyDetails)
       }
 
+      @Help.Summary("Get party details for known parties")
+      @Help.Description(
+        """Get party details for parties known by the Ledger API server for the given identity provider.
+           identityProviderId: identity provider id"""
+      )
+      def get(
+          parties: Seq[PartyId],
+          identityProviderId: String = "",
+          failOnNotFound: Boolean = true,
+      ): Map[PartyId, PartyDetails] =
+        check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.PartyManagementService.GetParties(
+              parties = parties,
+              identityProviderId = identityProviderId,
+              failOnNotFound = failOnNotFound,
+            )
+          )
+        }).map { case (k, v) => (k, PartyDetails.fromProtoPartyDetails(v)) }
+
       @Help.Summary("Update participant-local party details")
       @Help.Description(
         """Currently you can update only the annotations.
@@ -1775,25 +1851,46 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           modifier: PartyDetails => PartyDetails,
           identityProviderId: String = "",
       ): PartyDetails = {
-        val rawDetails = get(party = party)
-        val srcDetails = PartyDetails.fromProtoPartyDetails(rawDetails)
-        val modifiedDetails = modifier(srcDetails)
-        verifyOnlyModifiableFieldsWhereModified(srcDetails, modifiedDetails)
-        val annotationsUpdate = makeAnnotationsUpdate(
-          original = srcDetails.annotations,
-          modified = modifiedDetails.annotations,
-        )
         val rawUpdatedDetails = consoleEnvironment.run {
-          ledgerApiCommand(
-            LedgerApiCommands.PartyManagementService.Update(
-              party = party,
-              annotationsUpdate = Some(annotationsUpdate),
-              resourceVersionO = Some(rawDetails.localMetadata.fold("")(_.resourceVersion)),
-              identityProviderId = identityProviderId,
+          for {
+            rawDetailsMap <- ledgerApiCommand(
+              LedgerApiCommands.PartyManagementService.GetParties(
+                parties = Seq(party.partyId),
+                identityProviderId = identityProviderId,
+                failOnNotFound = true,
+              )
             )
-          )
+            rawDetails <- ConsoleCommandResult.fromEither(
+              rawDetailsMap
+                .get(party.partyId)
+                .toRight(s"No such party $party")
+            )
+            srcDetails = PartyDetails.fromProtoPartyDetails(rawDetails)
+            modifiedDetails = modifier(srcDetails)
+            // verify only modifiable fields where modified
+            _ <- {
+              ConsoleCommandResult.fromEither(
+                Either.cond(
+                  modifiedDetails.copy(annotations = srcDetails.annotations) == srcDetails,
+                  (),
+                  s"Update to party details of ${party.partyId} attempted to modify unmodifiable fields.",
+                )
+              )
+            }
+            annotationsUpdate = makeAnnotationsUpdate(
+              original = srcDetails.annotations,
+              modified = modifiedDetails.annotations,
+            )
+            result <- ledgerApiCommand(
+              LedgerApiCommands.PartyManagementService.Update(
+                party = party,
+                annotationsUpdate = Some(annotationsUpdate),
+                resourceVersionO = Some(rawDetails.localMetadata.fold("")(_.resourceVersion)),
+                identityProviderId = identityProviderId,
+              )
+            )
+          } yield result
         }
-
         PartyDetails.fromProtoPartyDetails(rawUpdatedDetails)
       }
 
@@ -1819,25 +1916,6 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         )
       }
 
-      private def verifyOnlyModifiableFieldsWhereModified(
-          srcDetails: PartyDetails,
-          modifiedDetails: PartyDetails,
-      ): Unit = {
-        val withAllowedUpdatesReverted = modifiedDetails.copy(annotations = srcDetails.annotations)
-        if (withAllowedUpdatesReverted != srcDetails) {
-          throw ModifyingNonModifiablePartyDetailsPropertiesError()
-        }
-      }
-
-      private def get(party: Party, identityProviderId: String = ""): ProtoPartyDetails =
-        consoleEnvironment.run {
-          ledgerApiCommand(
-            LedgerApiCommands.PartyManagementService.GetParty(
-              party = party,
-              identityProviderId = identityProviderId,
-            )
-          )
-        }
     }
 
     @Help.Summary("Manage packages")
@@ -1852,9 +1930,11 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           |Additionally, Dars uploaded using the ledger Api will be vetted, but the system will not wait
           |for the Dars to be successfully registered with all connected synchronizers. As such, if a Dar is uploaded and then
           |used immediately thereafter, a command might bounce due to missing package vettings.""")
-      def upload_dar(darPath: String): Unit =
+      def upload_dar(darPath: String, synchronizerId: Option[SynchronizerId] = None): Unit =
         consoleEnvironment.run {
-          ledgerApiCommand(LedgerApiCommands.PackageManagementService.UploadDarFile(darPath))
+          ledgerApiCommand(
+            LedgerApiCommands.PackageManagementService.UploadDarFile(darPath, synchronizerId)
+          )
         }
 
       @Help.Summary("List Daml Packages")
@@ -1870,7 +1950,9 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
       )
       def validate_dar(darPath: String): Unit =
         consoleEnvironment.run {
-          ledgerApiCommand(LedgerApiCommands.PackageManagementService.ValidateDarFile(darPath))
+          ledgerApiCommand(
+            LedgerApiCommands.PackageManagementService.ValidateDarFile(darPath, None)
+          )
         }
     }
 
@@ -2404,6 +2486,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
             verboseHashing: Boolean = false,
             prefetchContractKeys: Seq[javab.data.PrefetchContractKey] = Seq.empty,
+            maxRecordTime: Option[CantonTimestamp] = None,
         ): PrepareResponseProto =
           consoleEnvironment.run {
             ledgerApiCommand(
@@ -2419,6 +2502,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 userPackageSelectionPreference,
                 verboseHashing,
                 prefetchContractKeys.map(k => PrefetchContractKey.fromJavaProto(k.toProto)),
+                maxRecordTime,
               )
             )
           }

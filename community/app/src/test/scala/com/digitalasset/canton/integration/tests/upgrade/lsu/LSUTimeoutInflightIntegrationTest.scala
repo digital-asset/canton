@@ -4,11 +4,7 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.{
-  DbConfig,
-  NonNegativeFiniteDuration,
-  SynchronizerTimeTrackerConfig,
-}
+import com.digitalasset.canton.config.{DbConfig, SynchronizerTimeTrackerConfig}
 import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
@@ -22,7 +18,6 @@ import com.digitalasset.canton.integration.plugins.{
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils.SynchronizerNodes
-import com.digitalasset.canton.integration.tests.upgrade.lsu.LSUBase.Fixture
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
 import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
@@ -33,7 +28,6 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   ProgrammableSequencerPolicies,
   SendDecision,
 }
-import monocle.macros.syntax.lens.*
 
 import scala.concurrent.Future
 import scala.jdk.CollectionConverters.*
@@ -68,15 +62,9 @@ abstract class LSUTimeoutInFlightIntegrationTest extends LSUBase with HasProgram
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S2M2_Config
       .withNetworkBootstrap { implicit env =>
-        new NetworkBootstrapper(S1M1.withTopologyChangeDelay(NonNegativeFiniteDuration.Zero))
+        new NetworkBootstrapper(S1M1)
       }
       .addConfigTransforms(configTransforms*)
-      // Set a connection pool timeout larger than the duration between the initial time of the test
-      // and the upgrade time, otherwise it may trigger when we advance the simclock
-      .addConfigTransform(
-        _.focus(_.parameters.timeouts.processing.sequencerInfo)
-          .replace(config.NonNegativeDuration.ofSeconds(40))
-      )
       .withSetup { implicit env =>
         import env.*
 
@@ -117,7 +105,7 @@ abstract class LSUTimeoutInFlightIntegrationTest extends LSUBase with HasProgram
     "be timed out around LSU" in { implicit env =>
       import env.*
 
-      val fixture = Fixture(daId, upgradeTime)
+      val fixture = fixtureWithDefaults()
 
       val alice = participant1.parties.enable("alice")
       val bob = participant2.parties.enable("bob")

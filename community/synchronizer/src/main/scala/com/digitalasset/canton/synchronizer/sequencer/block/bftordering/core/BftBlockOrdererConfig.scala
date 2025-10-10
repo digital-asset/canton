@@ -20,17 +20,15 @@ import com.digitalasset.canton.config.{
   PemFileOrString,
   ServerConfig,
   StorageConfig,
+  StreamLimitConfig,
   TlsClientConfig,
   TlsServerConfig,
   UniformCantonConfigValidation,
 }
-import com.digitalasset.canton.crypto.provider.jce.JcePrivateCrypto
-import com.digitalasset.canton.crypto.{Fingerprint, SigningKeySpec, SigningKeyUsage}
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.{
   BftBlockOrderingStandaloneNetworkConfig,
-  BftBlockOrderingStandalonePeerConfig,
   DefaultAvailabilityMaxNonOrderedBatchesPerNode,
   DefaultAvailabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning,
   DefaultConsensusQueueMaxSize,
@@ -54,13 +52,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.time.BftTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
-import com.digitalasset.canton.topology.{Namespace, SequencerId}
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
-import pureconfig.ConfigWriter
 
 import java.io.File
 import scala.concurrent.duration.*
-import scala.util.control.NonFatal
 
 /** @param maxRequestsInBatch
   *   A maximum number of requests in a batch. Needs to be the same across the network for the BFT
@@ -212,7 +207,9 @@ object BftBlockOrdererConfig {
         TlsClientConfig(trustCollectionFile = None, clientCert = None, enabled = true)
       ),
       tls: Option[TlsServerConfig] = None,
-      override val maxInboundMessageSize: NonNegativeInt = ServerConfig.defaultMaxInboundMessageSize,
+      override val maxInboundMessageSize: NonNegativeInt =
+        ServerConfig.defaultMaxInboundMessageSize,
+      override val stream: Option[StreamLimitConfig] = None,
   ) extends ServerConfig
       with UniformCantonConfigValidation {
     override val maxTokenLifetime: config.NonNegativeDuration =
@@ -345,67 +342,5 @@ object BftBlockOrdererConfig {
     implicit val bftBlockOrderingStandalonePeerConfigValidator
         : CantonConfigValidator[BftBlockOrderingStandalonePeerConfig] =
       CantonConfigValidatorDerivation[BftBlockOrderingStandalonePeerConfig]
-  }
-}
-
-/** Utility to create a standalone BFT block ordering network configuration with the given number of
-  * nodes in the specified directory. It generates key pairs for each node and creates a config file
-  * for each node referencing the generated keys and the public keys of all other nodes.
-  *
-  * Usage: `BftBlockOrderingStandaloneNetworkConfig <new directory> <numNodes>`
-  */
-object CreateStandaloneConfig extends App {
-
-  private def printUsageAndExit(): Nothing = {
-    println(s"Usage: BftBlockOrderingStandaloneNetworkConfig <new directory> <numNodes>")
-    sys.exit(1)
-  }
-
-  private def sequencerId(i: Int): String =
-    SequencerId
-      .tryCreate(i.toString, Namespace(Fingerprint.tryFromString("default")))
-      .toProtoPrimitive
-
-  if (args.sizeIs < 2)
-    printUsageAndExit()
-
-  val (dir, numNodes) =
-    try {
-      better.files.File(args(0)).createDirectory() -> args(1).toInt
-    } catch {
-      case NonFatal(e) =>
-        e.printStackTrace()
-        printUsageAndExit()
-    }
-
-  for (i <- 1 to numNodes) {
-    val keyPair = JcePrivateCrypto
-      .generateSigningKeypair(SigningKeySpec.EcCurve25519, SigningKeyUsage.ProtocolOnly)
-      .getOrElse(throw new RuntimeException("Failed to generate keypair"))
-    val privKey = keyPair.privateKey
-    val pubKey = keyPair.publicKey
-    val privKeyFile = dir / s"node${i}_signing_private_key.bin"
-    val pubKeyFile = dir / s"node${i}_signing_public_key.bin"
-    privKeyFile.writeByteArray(privKey.toProtoV30.toByteArray)
-    pubKeyFile.writeByteArray(pubKey.toProtoV30.toByteArray)
-
-    val config = BftBlockOrderingStandaloneNetworkConfig(
-      thisSequencerId = sequencerId(i),
-      signingPrivateKeyProtoFile = privKeyFile.toJava,
-      signingPublicKeyProtoFile = pubKeyFile.toJava,
-      peers = (1 to numNodes)
-        .filter(_ != i)
-        .map { j =>
-          BftBlockOrderingStandalonePeerConfig(
-            sequencerId = sequencerId(j),
-            signingPublicKeyProtoFile = dir / s"node${j}_signing_public_key.bin" toJava,
-          )
-        },
-    )
-    val configFile = dir / s"node$i.conf"
-    import pureconfig.generic.auto.*
-    configFile.writeText(
-      ConfigWriter[BftBlockOrderingStandaloneNetworkConfig].to(config).render()
-    )
   }
 }

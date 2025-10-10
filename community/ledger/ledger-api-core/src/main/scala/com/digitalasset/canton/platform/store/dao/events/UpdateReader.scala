@@ -12,15 +12,7 @@ import com.daml.ledger.api.v2.reassignment.{
 }
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.trace_context.TraceContext as DamlTraceContext
-import com.daml.ledger.api.v2.transaction.TreeEvent
-import com.daml.ledger.api.v2.update_service.{
-  GetTransactionResponse,
-  GetTransactionTreeResponse,
-  GetUpdateResponse,
-  GetUpdateTreesResponse,
-  GetUpdatesResponse,
-}
-import com.digitalasset.canton.data
+import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesResponse}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.util.{LfEngineToApi, TimestampConversion}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
@@ -28,14 +20,14 @@ import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   Entry,
-  RawArchivedEvent,
-  RawAssignEvent,
-  RawCreatedEvent,
-  RawEvent,
-  RawExercisedEvent,
-  RawFlatEvent,
-  RawTreeEvent,
-  RawUnassignEvent,
+  RawAcsDeltaEventLegacy,
+  RawArchivedEventLegacy,
+  RawAssignEventLegacy,
+  RawCreatedEventLegacy,
+  RawEventLegacy,
+  RawExercisedEventLegacy,
+  RawLedgerEffectsEventLegacy,
+  RawUnassignEventLegacy,
 }
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.dao.{
@@ -43,18 +35,12 @@ import com.digitalasset.canton.platform.store.dao.{
   EventProjectionProperties,
   LedgerDaoUpdateReader,
 }
-import com.digitalasset.canton.platform.{
-  InternalTransactionFormat,
-  InternalUpdateFormat,
-  Party,
-  TemplatePartiesFilter,
-}
+import com.digitalasset.canton.platform.{FatContract, InternalUpdateFormat, TemplatePartiesFilter}
 import com.digitalasset.canton.util.MonadUtil
 import io.opentelemetry.api.trace.Span
 import org.apache.pekko.stream.scaladsl.Source
 import org.apache.pekko.{Done, NotUsed}
 
-import scala.annotation.nowarn
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.{Failure, Success}
 
@@ -82,8 +68,6 @@ import scala.util.{Failure, Success}
 private[dao] final class UpdateReader(
     updatesStreamReader: UpdatesStreamReader,
     updatePointwiseReader: UpdatePointwiseReader,
-    treeTransactionsStreamReader: TransactionsTreeStreamReader,
-    treeTransactionPointwiseReader: TransactionTreePointwiseReader,
     dispatcher: DbDispatcher,
     queryValidRange: QueryValidRange,
     eventStorageBackend: EventStorageBackend,
@@ -114,42 +98,6 @@ private[dao] final class UpdateReader(
       .mapMaterializedValue((_: Future[NotUsed]) => NotUsed)
   }
 
-  // TODO(#23504) remove when getTransactionById is removed
-  @nowarn("cat=deprecation")
-  override def lookupTransactionById(
-      updateId: data.UpdateId,
-      internalTransactionFormat: InternalTransactionFormat,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[GetTransactionResponse]] =
-    updatePointwiseReader
-      .lookupUpdateBy(
-        lookupKey = LookupKey.UpdateId(updateId),
-        internalUpdateFormat = InternalUpdateFormat(
-          includeTransactions = Some(internalTransactionFormat),
-          includeReassignments = None,
-          includeTopologyEvents = None,
-        ),
-      )
-      .map(_.flatMap(_.update.transaction))
-      .map(_.map(tx => GetTransactionResponse(transaction = Some(tx))))
-
-  // TODO(#23504) remove when getTransactionByOffset is removed
-  @nowarn("cat=deprecation")
-  override def lookupTransactionByOffset(
-      offset: data.Offset,
-      internalTransactionFormat: InternalTransactionFormat,
-  )(implicit loggingContext: LoggingContextWithTrace): Future[Option[GetTransactionResponse]] =
-    updatePointwiseReader
-      .lookupUpdateBy(
-        lookupKey = LookupKey.Offset(offset),
-        internalUpdateFormat = InternalUpdateFormat(
-          includeTransactions = Some(internalTransactionFormat),
-          includeReassignments = None,
-          includeTopologyEvents = None,
-        ),
-      )
-      .map(_.flatMap(_.update.transaction))
-      .map(_.map(tx => GetTransactionResponse(transaction = Some(tx))))
-
   override def lookupUpdateBy(
       lookupKey: LookupKey,
       internalUpdateFormat: InternalUpdateFormat,
@@ -158,60 +106,6 @@ private[dao] final class UpdateReader(
       lookupKey = lookupKey,
       internalUpdateFormat = internalUpdateFormat,
     )
-
-  // TODO(#23504) remove when getTransactionByOffset is removed
-  @nowarn("cat=deprecation")
-  override def lookupTransactionTreeById(
-      updateId: data.UpdateId,
-      requestingParties: Set[Party],
-      eventProjectionProperties: EventProjectionProperties,
-  )(implicit
-      loggingContext: LoggingContextWithTrace
-  ): Future[Option[GetTransactionTreeResponse]] =
-    treeTransactionPointwiseReader.lookupTransactionBy(
-      lookupKey = LookupKey.UpdateId(updateId),
-      requestingParties = requestingParties,
-      eventProjectionProperties = eventProjectionProperties,
-    )
-
-  // TODO(#23504) remove when getTransactionByOffset is removed
-  @nowarn("cat=deprecation")
-  override def lookupTransactionTreeByOffset(
-      offset: data.Offset,
-      requestingParties: Set[Party],
-      eventProjectionProperties: EventProjectionProperties,
-  )(implicit
-      loggingContext: LoggingContextWithTrace
-  ): Future[Option[GetTransactionTreeResponse]] =
-    treeTransactionPointwiseReader.lookupTransactionBy(
-      lookupKey = LookupKey.Offset(offset),
-      requestingParties = requestingParties,
-      eventProjectionProperties = eventProjectionProperties,
-    )
-
-  // TODO(#23504) remove when getTransactionByOffset is removed
-  @nowarn("cat=deprecation")
-  override def getTransactionTrees(
-      startInclusive: Offset,
-      endInclusive: Offset,
-      requestingParties: Option[Set[Party]],
-      eventProjectionProperties: EventProjectionProperties,
-  )(implicit
-      loggingContext: LoggingContextWithTrace
-  ): Source[(Offset, GetUpdateTreesResponse), NotUsed] = {
-    val futureSource =
-      getEventSeqIdRange(startInclusive, endInclusive)
-        .map(queryRange =>
-          treeTransactionsStreamReader.streamTreeTransaction(
-            queryRange = queryRange,
-            requestingParties = requestingParties,
-            eventProjectionProperties = eventProjectionProperties,
-          )
-        )
-    Source
-      .futureSource(futureSource)
-      .mapMaterializedValue((_: Future[NotUsed]) => NotUsed)
-  }
 
   override def getActiveContracts(
       activeAt: Option[Offset],
@@ -239,50 +133,46 @@ private[dao] final class UpdateReader(
   private def getMaxAcsEventSeqId(activeAt: Offset)(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Long] =
-    dispatcher
-      .executeSql(dbMetrics.getAcsEventSeqIdRange)(implicit connection =>
-        queryValidRange.withOffsetNotBeforePruning(
-          offset = activeAt,
-          errorPruning = pruned =>
-            ACSReader.acsBeforePruningErrorReason(
-              acsOffset = activeAt,
-              prunedUpToOffset = pruned,
-            ),
-          errorLedgerEnd = ledgerEnd =>
-            ACSReader.acsAfterLedgerEndErrorReason(
-              acsOffset = activeAt,
-              ledgerEndOffset = ledgerEnd,
-            ),
-        )(
-          eventStorageBackend.maxEventSequentialId(Some(activeAt))(connection)
-        )
+    queryValidRange.withOffsetNotBeforePruning(
+      offset = activeAt,
+      errorPruning = pruned =>
+        ACSReader.acsBeforePruningErrorReason(
+          acsOffset = activeAt,
+          prunedUpToOffset = pruned,
+        ),
+      errorLedgerEnd = ledgerEnd =>
+        ACSReader.acsAfterLedgerEndErrorReason(
+          acsOffset = activeAt,
+          ledgerEndOffset = ledgerEnd,
+        ),
+    )(
+      dispatcher.executeSql(dbMetrics.getAcsEventSeqIdRange)(
+        eventStorageBackend.maxEventSequentialId(Some(activeAt))
       )
+    )
 
   private def getEventSeqIdRange(
       startInclusive: Offset,
       endInclusive: Offset,
   )(implicit loggingContext: LoggingContextWithTrace): Future[EventsRange] =
-    dispatcher
-      .executeSql(dbMetrics.getEventSeqIdRange)(implicit connection =>
-        queryValidRange.withRangeNotPruned(
-          minOffsetInclusive = startInclusive,
-          maxOffsetInclusive = endInclusive,
-          errorPruning = (prunedOffset: Offset) =>
-            s"Transactions request from ${startInclusive.unwrap} to ${endInclusive.unwrap} precedes pruned offset ${prunedOffset.unwrap}",
-          errorLedgerEnd = (ledgerEndOffset: Option[Offset]) =>
-            s"Transactions request from ${startInclusive.unwrap} to ${endInclusive.unwrap} is beyond ledger end offset ${ledgerEndOffset
-                .fold(0L)(_.unwrap)}",
-        ) {
-          EventsRange(
-            startInclusiveOffset = startInclusive,
-            startInclusiveEventSeqId =
-              eventStorageBackend.maxEventSequentialId(startInclusive.decrement)(connection),
-            endInclusiveOffset = endInclusive,
-            endInclusiveEventSeqId =
-              eventStorageBackend.maxEventSequentialId(Some(endInclusive))(connection),
-          )
-        }
+    queryValidRange.withRangeNotPruned(
+      minOffsetInclusive = startInclusive,
+      maxOffsetInclusive = endInclusive,
+      errorPruning = (prunedOffset: Offset) =>
+        s"Transactions request from ${startInclusive.unwrap} to ${endInclusive.unwrap} precedes pruned offset ${prunedOffset.unwrap}",
+      errorLedgerEnd = (ledgerEndOffset: Option[Offset]) =>
+        s"Transactions request from ${startInclusive.unwrap} to ${endInclusive.unwrap} is beyond ledger end offset ${ledgerEndOffset
+            .fold(0L)(_.unwrap)}",
+    )(dispatcher.executeSql(dbMetrics.getEventSeqIdRange) { connection =>
+      EventsRange(
+        startInclusiveOffset = startInclusive,
+        startInclusiveEventSeqId =
+          eventStorageBackend.maxEventSequentialId(startInclusive.decrement)(connection),
+        endInclusiveOffset = endInclusive,
+        endInclusiveEventSeqId =
+          eventStorageBackend.maxEventSequentialId(Some(endInclusive))(connection),
       )
+    })
 
 }
 
@@ -330,25 +220,29 @@ private[dao] object UpdateReader {
       .fold(Vector.empty[A])(_ :+ _)
       .concatSubstreams
 
-  def toUnassignedEvent(offset: Long, rawUnassignEvent: RawUnassignEvent): UnassignedEvent =
+  def toUnassignedEvent(
+      offset: Long,
+      rawUnassignEvent: Entry[RawUnassignEventLegacy],
+  ): UnassignedEvent =
     UnassignedEvent(
       offset = offset,
-      reassignmentId = rawUnassignEvent.reassignmentId,
-      contractId = rawUnassignEvent.contractId.coid,
-      templateId = Some(LfEngineToApi.toApiIdentifier(rawUnassignEvent.templateId.toIdentifier)),
-      packageName = rawUnassignEvent.templateId.pkgName,
-      source = rawUnassignEvent.sourceSynchronizerId,
-      target = rawUnassignEvent.targetSynchronizerId,
-      submitter = rawUnassignEvent.submitter.getOrElse(""),
-      reassignmentCounter = rawUnassignEvent.reassignmentCounter,
+      reassignmentId = rawUnassignEvent.event.reassignmentId,
+      contractId = rawUnassignEvent.event.contractId.coid,
+      templateId =
+        Some(LfEngineToApi.toApiIdentifier(rawUnassignEvent.event.templateId.toIdentifier)),
+      packageName = rawUnassignEvent.event.templateId.pkgName,
+      source = rawUnassignEvent.event.sourceSynchronizerId,
+      target = rawUnassignEvent.event.targetSynchronizerId,
+      submitter = rawUnassignEvent.event.submitter.getOrElse(""),
+      reassignmentCounter = rawUnassignEvent.event.reassignmentCounter,
       assignmentExclusivity =
-        rawUnassignEvent.assignmentExclusivity.map(TimestampConversion.fromLf),
-      witnessParties = rawUnassignEvent.witnessParties.toSeq,
+        rawUnassignEvent.event.assignmentExclusivity.map(TimestampConversion.fromLf),
+      witnessParties = rawUnassignEvent.event.witnessParties.toSeq,
       nodeId = rawUnassignEvent.nodeId,
     )
 
   def toApiUnassigned(
-      rawUnassignEntries: Seq[Entry[RawUnassignEvent]]
+      rawUnassignEntries: Seq[Entry[RawUnassignEventLegacy]]
   ): Option[Reassignment] =
     rawUnassignEntries.headOption map { first =>
       Reassignment(
@@ -359,7 +253,7 @@ private[dao] object UpdateReader {
         events = rawUnassignEntries.map(entry =>
           ReassignmentEvent(
             ReassignmentEvent.Event.Unassigned(
-              UpdateReader.toUnassignedEvent(first.offset, entry.event)
+              UpdateReader.toUnassignedEvent(first.offset, entry)
             )
           )
         ),
@@ -370,7 +264,7 @@ private[dao] object UpdateReader {
     }
 
   def toAssignedEvent(
-      rawAssignEvent: RawAssignEvent,
+      rawAssignEvent: RawAssignEventLegacy,
       createdEvent: CreatedEvent,
   ): AssignedEvent =
     AssignedEvent(
@@ -386,24 +280,34 @@ private[dao] object UpdateReader {
       eventProjectionProperties: EventProjectionProperties,
       lfValueTranslation: LfValueTranslation,
   )(
-      rawAssignEntries: Seq[Entry[RawAssignEvent]]
+      rawAssignEntries: Seq[(Entry[RawAssignEventLegacy], Option[FatContract])]
   )(implicit lc: LoggingContextWithTrace, ec: ExecutionContext): Future[Option[Reassignment]] =
     MonadUtil
-      .sequentialTraverse(rawAssignEntries) { rawAssignEntry =>
+      .sequentialTraverse(rawAssignEntries) { case (rawAssignEntry, fatContractO) =>
         lfValueTranslation
-          .deserializeRaw(
-            eventProjectionProperties,
-            rawAssignEntry.event.rawCreatedEvent,
+          .toApiCreatedEvent(
+            eventProjectionProperties = eventProjectionProperties,
+            fatContractInstance = fatContractO.getOrElse(
+              throw new IllegalStateException(
+                s"Contract for internal contract id ${rawAssignEntry.event.rawCreatedEvent.internalContractId} was not found in the contract store."
+              )
+            ),
+            offset = rawAssignEntry.offset,
+            nodeId = rawAssignEntry.nodeId,
+            representativePackageId = rawAssignEntry.event.rawCreatedEvent.representativePackageId,
+            witnesses = rawAssignEntry.event.rawCreatedEvent.witnessParties,
+            acsDelta = rawAssignEntry.event.rawCreatedEvent.flatEventWitnesses.nonEmpty,
           )
+
       }
       .map(createdEvents =>
-        rawAssignEntries.headOption.map(first =>
+        rawAssignEntries.headOption.map { case (first, _) =>
           Reassignment(
             updateId = first.updateId,
             commandId = first.commandId.getOrElse(""),
             workflowId = first.workflowId.getOrElse(""),
             offset = first.offset,
-            events = rawAssignEntries.zip(createdEvents).map { case (entry, created) =>
+            events = rawAssignEntries.zip(createdEvents).map { case ((entry, _), created) =>
               ReassignmentEvent(
                 ReassignmentEvent.Event.Assigned(
                   UpdateReader.toAssignedEvent(entry.event, created)
@@ -414,94 +318,101 @@ private[dao] object UpdateReader {
             traceContext = first.traceContext.map(DamlTraceContext.parseFrom),
             synchronizerId = first.synchronizerId,
           )
-        )
+        }
       )
 
-  def deserializeRawFlatEvent(
+  def deserializeRawAcsDeltaEvent(
       eventProjectionProperties: EventProjectionProperties,
       lfValueTranslation: LfValueTranslation,
   )(
-      rawFlatEntry: Entry[RawFlatEvent]
+      rawFlatEntryFatContract: (Entry[RawAcsDeltaEventLegacy], Option[FatContract])
   )(implicit
       loggingContext: LoggingContextWithTrace,
       ec: ExecutionContext,
-  ): Future[Entry[Event]] = rawFlatEntry.event match {
-    case rawCreated: RawCreatedEvent =>
-      lfValueTranslation
-        .deserializeRaw(eventProjectionProperties, rawCreated)
-        .map(createdEvent => rawFlatEntry.copy(event = Event(Event.Event.Created(createdEvent))))
+  ): Future[Entry[Event]] =
+    rawFlatEntryFatContract match {
+      case (rawFlatEntry, fatContractO) =>
+        rawFlatEntry.event match {
+          case rawCreated: RawCreatedEventLegacy =>
+            lfValueTranslation
+              .toApiCreatedEvent(
+                eventProjectionProperties = eventProjectionProperties,
+                fatContractInstance = fatContractO.getOrElse(
+                  throw new IllegalStateException(
+                    s"Contract for internal contract id ${rawCreated.internalContractId} was not found in the contract store."
+                  )
+                ),
+                offset = rawFlatEntry.offset,
+                nodeId = rawFlatEntry.nodeId,
+                representativePackageId = rawCreated.representativePackageId,
+                witnesses = rawCreated.witnessParties,
+                acsDelta = rawCreated.flatEventWitnesses.nonEmpty,
+              )
+              .map(createdEvent => rawFlatEntry.withEvent(Event(Event.Event.Created(createdEvent))))
 
-    case rawArchived: RawArchivedEvent =>
-      Future.successful(
-        rawFlatEntry.copy(
-          event = Event(
-            Event.Event.Archived(
-              lfValueTranslation.deserializeRaw(eventProjectionProperties, rawArchived)
+          case rawArchived: RawArchivedEventLegacy =>
+            Future.successful(
+              rawFlatEntry.withEvent(
+                Event(
+                  Event.Event.Archived(
+                    lfValueTranslation.deserializeRawArchived(
+                      eventProjectionProperties,
+                      rawFlatEntry.withEvent(rawArchived),
+                    )
+                  )
+                )
+              )
             )
-          )
-        )
-      )
-  }
+        }
+    }
 
-  // TODO(#23504) cleanup
-  @nowarn("cat=deprecation")
-  def deserializeTreeEvent(
+  def deserializeRawLedgerEffectsEvent(
       eventProjectionProperties: EventProjectionProperties,
       lfValueTranslation: LfValueTranslation,
   )(
-      rawTreeEntry: Entry[RawTreeEvent]
+      rawTreeEntryFatContract: (Entry[RawLedgerEffectsEventLegacy], Option[FatContract])
   )(implicit
       loggingContext: LoggingContextWithTrace,
       ec: ExecutionContext,
-  ): Future[Entry[TreeEvent]] = rawTreeEntry.event match {
-    case rawCreated: RawCreatedEvent =>
-      lfValueTranslation
-        .deserializeRaw(eventProjectionProperties, rawCreated)
-        .map(createdEvent =>
-          rawTreeEntry.copy(
-            event = TreeEvent(TreeEvent.Kind.Created(createdEvent))
-          )
-        )
+  ): Future[Entry[Event]] =
+    rawTreeEntryFatContract match {
+      case (rawTreeEntry, fatContractO) =>
+        rawTreeEntry.event match {
+          case rawCreated: RawCreatedEventLegacy =>
+            lfValueTranslation
+              .toApiCreatedEvent(
+                eventProjectionProperties = eventProjectionProperties,
+                fatContractInstance = fatContractO.getOrElse(
+                  throw new IllegalStateException(
+                    s"Contract for internal contract id ${rawCreated.internalContractId} was not found in the contract store."
+                  )
+                ),
+                offset = rawTreeEntry.offset,
+                nodeId = rawTreeEntry.nodeId,
+                representativePackageId = rawCreated.representativePackageId,
+                witnesses = rawCreated.witnessParties,
+                acsDelta = rawCreated.flatEventWitnesses.nonEmpty,
+              )
+              .map(createdEvent =>
+                rawTreeEntry.withEvent(
+                  Event(Event.Event.Created(createdEvent))
+                )
+              )
 
-    case rawExercised: RawExercisedEvent =>
-      lfValueTranslation
-        .deserializeRaw(eventProjectionProperties, rawExercised)
-        .map(exercisedEvent =>
-          rawTreeEntry.copy(
-            event = TreeEvent(TreeEvent.Kind.Exercised(exercisedEvent))
-          )
-        )
-  }
-
-  def deserializeRawTreeEvent(
-      eventProjectionProperties: EventProjectionProperties,
-      lfValueTranslation: LfValueTranslation,
-  )(
-      rawTreeEntry: Entry[RawTreeEvent]
-  )(implicit
-      loggingContext: LoggingContextWithTrace,
-      ec: ExecutionContext,
-  ): Future[Entry[Event]] = rawTreeEntry.event match {
-    case rawCreated: RawCreatedEvent =>
-      lfValueTranslation
-        .deserializeRaw(eventProjectionProperties, rawCreated)
-        .map(createdEvent =>
-          rawTreeEntry.copy(
-            event = Event(Event.Event.Created(createdEvent))
-          )
-        )
-
-    case rawExercised: RawExercisedEvent =>
-      lfValueTranslation
-        .deserializeRaw(eventProjectionProperties, rawExercised)
-        .map(exercisedEvent =>
-          rawTreeEntry.copy(
-            event = Event(Event.Event.Exercised(exercisedEvent))
-          )
-        )
-  }
-
-  def filterRawEvents[T <: RawEvent](templatePartiesFilter: TemplatePartiesFilter)(
+          case rawExercised: RawExercisedEventLegacy =>
+            lfValueTranslation
+              .deserializeRawExercised(
+                eventProjectionProperties,
+                rawTreeEntry.withEvent(rawExercised),
+              )
+              .map(exercisedEvent =>
+                rawTreeEntry.copy(
+                  event = Event(Event.Event.Exercised(exercisedEvent))
+                )
+              )
+        }
+    }
+  def filterRawEvents[T <: RawEventLegacy](templatePartiesFilter: TemplatePartiesFilter)(
       rawEvents: Seq[Entry[T]]
   ): Seq[Entry[T]] = {
     val templateWildcardPartiesO = templatePartiesFilter.templateWildcardParties

@@ -12,6 +12,7 @@ import com.daml.ledger.api.v2.transaction_filter.TransactionShape.{
 }
 import com.daml.ledger.api.v2.{package_reference, package_service}
 import com.daml.logging.entries.{LoggingValue, ToLoggingValue}
+import com.daml.nonempty.*
 import com.digitalasset.canton.ProtoDeserializationError.{
   FieldNotSet,
   InvariantViolation,
@@ -20,11 +21,12 @@ import com.digitalasset.canton.ProtoDeserializationError.{
 }
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.platform.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.protocol.LfFatContractInst
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
+import com.digitalasset.canton.util.OptionUtil
 import com.digitalasset.canton.{LfPackageId, LfPackageName, LfPackageVersion}
 import com.digitalasset.daml.lf.command.{ApiCommands as LfCommands, ApiContractKey}
 import com.digitalasset.daml.lf.data.Time.Timestamp
@@ -232,15 +234,10 @@ final case class ListVettedPackagesOpts(
     topologyStateFilter: Option[TopologyStateFilter],
 ) {
   def toPredicate(metadata: PackageMetadata): Ref.PackageId => Boolean = { (pkgId: Ref.PackageId) =>
-    val matchesMetadata =
-      packageFilter
-        .map(_.toPredicate(metadata)(pkgId))
-        .getOrElse(true)
+    val matchesMetadata = packageFilter.forall(_.toPredicate(metadata)(pkgId))
 
     val matchesTopologyState =
-      topologyStateFilter
-        .map(_.toPredicate(metadata)(pkgId))
-        .getOrElse(true)
+      topologyStateFilter.forall(_.toPredicate(metadata)(pkgId))
 
     matchesMetadata && matchesTopologyState
   }
@@ -306,7 +303,6 @@ final case class TopologyStateFilter(
       synchronizerIds.map(_.toString),
     )
 
-  // TODO(#27750) Implement filtering by synch/participant
   @nowarn
   def toPredicate(metadata: PackageMetadata): Ref.PackageId => Boolean =
     (_: Ref.PackageId) => true
@@ -332,6 +328,7 @@ object TopologyStateFilter {
 final case class UpdateVettedPackagesOpts(
     changes: Seq[VettedPackagesChange],
     dryRun: Boolean,
+    synchronizerIdO: Option[SynchronizerId],
 ) {
   def toTargetStates: Seq[SinglePackageTargetVetting[VettedPackagesRef]] =
     for {
@@ -347,10 +344,13 @@ final case class UpdateVettedPackagesOpts(
 object UpdateVettedPackagesOpts {
   def fromProto(
       req: package_management_service.UpdateVettedPackagesRequest
-  ): ParsingResult[UpdateVettedPackagesOpts] =
-    req.changes
+  ): ParsingResult[UpdateVettedPackagesOpts] = for {
+    vettingChanges <- req.changes
       .traverse(VettedPackagesChange.fromProto)
-      .map(UpdateVettedPackagesOpts(_, req.dryRun))
+    synchronizerIdO <- OptionUtil
+      .emptyStringAsNone(req.synchronizerId)
+      .traverse(SynchronizerId.fromProtoPrimitive(_, "synchronizer_id"))
+  } yield UpdateVettedPackagesOpts(vettingChanges, req.dryRun, synchronizerIdO)
 }
 
 sealed trait VettedPackagesChange {
@@ -431,6 +431,7 @@ object UploadDarVettingChange {
     change match {
       case package_management_service.UploadDarFileRequest.VettingChange.VETTING_CHANGE_UNSPECIFIED =>
         Right(default)
+
       case package_management_service.UploadDarFileRequest.VettingChange.VETTING_CHANGE_VET_ALL_PACKAGES =>
         Right(VetAllPackages)
       case package_management_service.UploadDarFileRequest.VettingChange.VETTING_CHANGE_DONT_VET_ANY_PACKAGES =>
@@ -441,9 +442,9 @@ object UploadDarVettingChange {
     }
 }
 
-sealed trait VettedPackagesRef {
+sealed trait VettedPackagesRef extends PrettyPrinting {
   def toProtoLAPI: package_management_service.VettedPackagesRef
-  def findMatchingPackages(metadata: PackageMetadata): Seq[Ref.PackageId]
+  def findMatchingPackages(metadata: PackageMetadata): Either[String, NonEmpty[Set[Ref.PackageId]]]
 }
 
 object VettedPackagesRef {
@@ -451,11 +452,19 @@ object VettedPackagesRef {
       id: Ref.PackageId
   ) extends VettedPackagesRef {
     def toProtoLAPI: package_management_service.VettedPackagesRef =
-      package_management_service.VettedPackagesRef(Some(id.toString), None, None)
+      package_management_service.VettedPackagesRef(id.toString, "", "")
 
-    // TODO(#27753): Check that the package ID exists on the participant
-    def findMatchingPackages(metadata: PackageMetadata): Seq[Ref.PackageId] =
-      Seq(id)
+    def findMatchingPackages(
+        metadata: PackageMetadata
+    ): Either[String, NonEmpty[Set[Ref.PackageId]]] =
+      if (!metadata.packageIdVersionMap.contains(id)) {
+        Left(s"No packages with package ID $id")
+      } else {
+        Right(NonEmpty(Set, id))
+      }
+
+    override protected def pretty: Pretty[Id] =
+      prettyOfString(id => s"package-id: ${id.id.singleQuoted}")
   }
 
   final case class NameAndVersion(
@@ -464,20 +473,38 @@ object VettedPackagesRef {
   ) extends VettedPackagesRef {
     def toProtoLAPI: package_management_service.VettedPackagesRef =
       package_management_service.VettedPackagesRef(
-        None,
-        Some(name.toString),
-        Some(version.toString),
+        "",
+        name.toString,
+        version.toString,
       )
 
-    // TODO(#27753): Check that the package name and version resolves to at least one package ID
-    // TODO(#27499): Stop relying on `(name, version) -> id` injection
-    def findMatchingPackages(metadata: PackageMetadata): Seq[Ref.PackageId] =
-      for {
-        packageResolution <- metadata.packageNameMap.get(name).toList
-        matchingId <- packageResolution.allPackageIdsForName.iterator
-        matchingVersion <- metadata.packageIdVersionMap.get(matchingId).map(_._2).toList
-        if version == matchingVersion
-      } yield matchingId
+    def findMatchingPackages(
+        metadata: PackageMetadata
+    ): Either[String, NonEmpty[Set[Ref.PackageId]]] =
+      metadata.packageNameMap.get(name) match {
+        case None => Left(s"Name $name did not match any packages.")
+        case Some(packageResolution) =>
+          val matchingIds: Set[Ref.PackageId] =
+            packageResolution.allPackageIdsForName.toSet
+              .filter { matchingId =>
+                val (_, matchingVersion) = metadata.packageIdVersionMap.getOrElse(
+                  matchingId,
+                  sys.error(
+                    s"Unexpectedly missing package ID $matchingId from the package ID version map."
+                  ),
+                )
+                version == matchingVersion
+              }
+          NonEmpty.from(matchingIds) match {
+            case None => Left(s"No packages with name $name have version $version.")
+            case Some(ne) => Right(ne)
+          }
+      }
+
+    override protected def pretty: Pretty[NameAndVersion] = prettyOfClass(
+      param("name", _.name),
+      param("version", _.version),
+    )
   }
 
   final case class All(
@@ -487,40 +514,61 @@ object VettedPackagesRef {
   ) extends VettedPackagesRef {
     def toProtoLAPI: package_management_service.VettedPackagesRef =
       package_management_service.VettedPackagesRef(
-        Some(id.toString),
-        Some(name.toString),
-        Some(version.toString),
+        id.toString,
+        name.toString,
+        version.toString,
       )
 
-    // TODO(#27753): Check that the package name and version resolves to at least one package ID
-    def findMatchingPackages(metadata: PackageMetadata): Seq[Ref.PackageId] =
-      for {
-        (matchingName, matchingVersion) <- metadata.packageIdVersionMap.get(id).toList
-        if name == matchingName
-        if version == matchingVersion
-      } yield id
+    def findMatchingPackages(
+        metadata: PackageMetadata
+    ): Either[String, NonEmpty[Set[Ref.PackageId]]] =
+      metadata.packageIdVersionMap.get(id) match {
+        case None => Left(s"No packages with package ID $id")
+        case Some((matchingName, matchingVersion)) =>
+          if (name == matchingName && version == matchingVersion) {
+            Right(NonEmpty(Set, id))
+          } else {
+            Left(
+              s"Package with package ID $id has name $matchingName and version $matchingVersion, but filter specifies name $name and version $version"
+            )
+          }
+      }
+
+    override protected def pretty: Pretty[All] =
+      prettyOfClass(
+        param("id", _.id),
+        param("name", _.name),
+        param("version", _.version),
+      )
   }
 
   final case class Name(
       name: Ref.PackageName
   ) extends VettedPackagesRef {
     def toProtoLAPI: package_management_service.VettedPackagesRef =
-      package_management_service.VettedPackagesRef(None, Some(name.toString), None)
+      package_management_service.VettedPackagesRef("", name.toString, "")
 
-    // TODO(#27753): Check that the package name resolves to at least one package ID
-    def findMatchingPackages(metadata: PackageMetadata): Seq[Ref.PackageId] =
-      for {
-        packageResolution <- metadata.packageNameMap.get(name).toList
-        matchingId <- packageResolution.allPackageIdsForName.toList
-      } yield matchingId
+    def findMatchingPackages(
+        metadata: PackageMetadata
+    ): Either[String, NonEmpty[Set[Ref.PackageId]]] =
+      metadata.packageNameMap.get(name) match {
+        case None => Left(s"No packages with name $name")
+        case Some(packageResolution) => Right(packageResolution.allPackageIdsForName)
+      }
+
+    override protected def pretty: Pretty[Name] =
+      prettyOfString(name => s"package-name: ${name.name.singleQuoted}")
   }
 
   private def parseWith[A](
       name: String,
-      value: Option[String],
+      value: String,
       f: String => Either[String, A],
   ): ParsingResult[Option[A]] =
-    value.traverse(f(_).leftMap(ValueConversionError(name, _)))
+    Some(value)
+      .filter(_.nonEmpty)
+      .traverse(f)
+      .leftMap(ValueConversionError(name, _))
 
   private def process(
       mbPackageId: Option[Ref.PackageId],
@@ -559,19 +607,9 @@ object VettedPackagesRef {
 final case class SinglePackageTargetVetting[R](
     ref: R,
     bounds: Option[(Option[CantonTimestamp], Option[CantonTimestamp])],
-)
-
-object SinglePackageTargetVetting {
-  implicit class SinglePackageTargetVettingResolver(
-      target: SinglePackageTargetVetting[VettedPackagesRef]
-  ) {
-    def findMatchingPackages(
-        snapshot: PackageMetadata
-    ): Seq[SinglePackageTargetVetting[Ref.PackageId]] =
-      target.ref
-        .findMatchingPackages(snapshot)
-        .map((pkgId: Ref.PackageId) => target.copy(ref = pkgId))
-  }
+) {
+  def isVetting: Boolean = !isUnvetting
+  def isUnvetting: Boolean = bounds.isEmpty
 }
 
 final case class EnrichedVettedPackage(
@@ -583,7 +621,25 @@ final case class EnrichedVettedPackage(
     vetted.packageId,
     validFromInclusive = vetted.validFromInclusive.map(_.toProtoTimestamp),
     validUntilExclusive = vetted.validUntilExclusive.map(_.toProtoTimestamp),
-    packageName = name.map(_.toString),
-    packageVersion = version.map(_.toString),
+    packageName = name.map(_.toString).getOrElse(""),
+    packageVersion = version.map(_.toString).getOrElse(""),
   )
+}
+
+sealed trait PriorTopologySerial {
+  def toProtoLAPI: package_reference.PriorTopologySerial
+}
+
+final case class PriorTopologySerialExists(serial: Int) extends PriorTopologySerial {
+  override def toProtoLAPI =
+    package_reference.PriorTopologySerial(
+      package_reference.PriorTopologySerial.Serial.Prior(serial)
+    )
+}
+
+final case object PriorTopologySerialNone extends PriorTopologySerial {
+  override def toProtoLAPI =
+    package_reference.PriorTopologySerial(
+      package_reference.PriorTopologySerial.Serial.NoPrior(com.google.protobuf.empty.Empty())
+    )
 }

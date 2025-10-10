@@ -722,6 +722,7 @@ abstract class CantonNodeBootstrapImpl[
       val snapshotValidator = new InitialTopologySnapshotValidator(
         crypto.pureCrypto,
         temporaryTopologyStore,
+        validateInitialSnapshot = config.topology.validateInitialTopologySnapshot,
         this.loggerFactory,
       )
 
@@ -926,48 +927,6 @@ abstract class CantonNodeBootstrapImpl[
     private val topologyManager: AuthorizedTopologyManager =
       createAuthorizedTopologyManager(nodeId, crypto, authorizedStore, storage)
     addCloseable(topologyManager)
-    adminServerRegistry
-      .addServiceU(
-        adminV30.TopologyManagerReadServiceGrpc
-          .bindService(
-            new GrpcTopologyManagerReadService(
-              member(nodeId),
-              temporaryStoreRegistry.stores() ++ sequencedTopologyStores :+ authorizedStore,
-              crypto,
-              lookupTopologyClient,
-              lookupActivePSId,
-              processingTimeout = parameters.processingTimeouts,
-              bootstrapStageCallback.loggerFactory,
-            ),
-            executionContext,
-          )
-      )
-    adminServerRegistry
-      .addServiceU(
-        adminV30.TopologyManagerWriteServiceGrpc
-          .bindService(
-            new GrpcTopologyManagerWriteService(
-              temporaryStoreRegistry.managers() ++ sequencedTopologyManagers :+ topologyManager,
-              lookupActivePSId,
-              temporaryStoreRegistry,
-              bootstrapStageCallback.loggerFactory,
-            ),
-            executionContext,
-          )
-      )
-    adminServerRegistry
-      .addServiceU(
-        adminV30.TopologyAggregationServiceGrpc.bindService(
-          new GrpcTopologyAggregationService(
-            sequencedTopologyStores.mapFilter(
-              TopologyStoreId.select[TopologyStoreId.SynchronizerStore]
-            ),
-            ips,
-            bootstrapStageCallback.loggerFactory,
-          ),
-          executionContext,
-        )
-      )
 
     private val topologyManagerObserver = new TopologyManagerObserver {
       override def addedNewTransactions(
@@ -995,17 +954,62 @@ abstract class CantonNodeBootstrapImpl[
     ): EitherT[FutureUnlessShutdown, String, Unit] = {
       // Register the observer first so that it does not race with the removal when the stage has finished.
       topologyManager.addObserver(topologyManagerObserver)
-      // Add any topology transactions that were passed as part of the init process
-      // This is not crash safe if we crash between storing the node-id and adding the transactions,
-      // but a crash can recovered (use manual for anything).
-      topologyManager
-        .add(
-          transactions,
-          forceChanges = ForceFlags.none,
-          expectFullAuthorization = true,
-        )
-        .leftMap(_.cause)
-        .flatMap(_ => super.start())
+      for {
+        _ <- EitherT.right(topologyManager.initialize)
+        // add services after the topology manager is initialized
+        _ = {
+          adminServerRegistry
+            .addServiceU(
+              adminV30.TopologyManagerReadServiceGrpc
+                .bindService(
+                  new GrpcTopologyManagerReadService(
+                    member(nodeId),
+                    temporaryStoreRegistry.stores() ++ sequencedTopologyStores :+ authorizedStore,
+                    crypto,
+                    lookupTopologyClient,
+                    lookupActivePSId,
+                    processingTimeout = parameters.processingTimeouts,
+                    bootstrapStageCallback.loggerFactory,
+                  ),
+                  executionContext,
+                )
+            )
+          adminServerRegistry
+            .addServiceU(
+              adminV30.TopologyManagerWriteServiceGrpc
+                .bindService(
+                  new GrpcTopologyManagerWriteService(
+                    temporaryStoreRegistry
+                      .managers() ++ sequencedTopologyManagers :+ topologyManager,
+                    lookupActivePSId,
+                    temporaryStoreRegistry,
+                    bootstrapStageCallback.loggerFactory,
+                  ),
+                  executionContext,
+                )
+            )
+          adminServerRegistry
+            .addServiceU(
+              adminV30.TopologyAggregationServiceGrpc.bindService(
+                new GrpcTopologyAggregationService(
+                  sequencedTopologyStores.mapFilter(
+                    TopologyStoreId.select[TopologyStoreId.SynchronizerStore]
+                  ),
+                  ips,
+                  bootstrapStageCallback.loggerFactory,
+                ),
+                executionContext,
+              )
+            )
+        }
+        // Add any topology transactions that were passed as part of the init process
+        // This is not crash safe if we crash between storing the node-id and adding the transactions,
+        // but a crash can recovered (use manual for anything).
+        _ <- topologyManager
+          .add(transactions, forceChanges = ForceFlags.none, expectFullAuthorization = true)
+          .leftMap(_.cause)
+        _ <- super.start()
+      } yield ()
     }
 
     override def waitingFor: Option[WaitingForExternalInput] = Some(WaitingForNodeTopology)

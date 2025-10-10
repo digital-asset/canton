@@ -13,7 +13,7 @@ import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedIncompleteUnassigned
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{
   DbConfig,
   NonNegativeFiniteDuration as NonNegativeFiniteDurationConfig,
@@ -26,8 +26,6 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.*
-import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1_S1M1
-import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{
   UsePostgres,
@@ -107,15 +105,7 @@ abstract class SynchronizerChangeIntegrationTest(config: SynchronizerChangeInteg
     config.assignmentExclusivityTimeout
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P5_S1M1_S1M1_Config
-      .withNetworkBootstrap { implicit env =>
-        NetworkBootstrapper(
-          S1M1_S1M1.map(desc =>
-            if (config.simClock) desc.withTopologyChangeDelay(NonNegativeFiniteDurationConfig.Zero)
-            else desc
-          )
-        )
-      }
+    EnvironmentDefinition.P5_S1M1_S1M1
       .addConfigTransforms(
         simClockTransform, // required such that late message processing warning isn't emitted
         _.focus(_.monitoring.logging.delayLoggingThreshold)
@@ -161,7 +151,12 @@ abstract class SynchronizerChangeIntegrationTest(config: SynchronizerChangeInteg
     )
 
     darPaths.foreach { darPath =>
-      participants.all.foreach(_.dars.upload(darPath))
+      participants.all.foreach { p =>
+        p.dars.upload(darPath, synchronizerId = iouSynchronizerId)
+      }
+      Seq(participant4, participant5).foreach(p =>
+        p.dars.upload(darPath, synchronizerId = paintSynchronizerId)
+      )
     }
 
     // Advance the simClock to trigger time-proof requests, if present
@@ -343,13 +338,6 @@ abstract class SynchronizerChangeSimClockIntegrationTest
       )
     )
     with SecurityTestSuite {
-
-  override protected def additionalConfigTransforms: Seq[ConfigTransform] = Seq(
-    ConfigTransforms.updateAllParticipantConfigs_(
-      _.focus(_.parameters.reassignmentsConfig.timeProofFreshnessProportion)
-        .replace(NonNegativeInt.zero)
-    )
-  )
 
   // Workaround to avoid false errors reported by IDEA.
   implicit def tagToContainer(tag: EvidenceTag): Tag = new TagContainer(tag)
