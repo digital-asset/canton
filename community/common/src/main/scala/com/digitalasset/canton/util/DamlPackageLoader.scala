@@ -48,7 +48,7 @@ object DamlPackageLoader {
   def validateDar(
       name: String,
       content: ByteString,
-      unzippedMaxBytes: Int = 1064 * 1064 * 1064,
+      unzippedMaxBytes: Int = 1024 * 1024 * 1024,
   ): Either[String, Unit] =
     DarReader
       .readArchive(
