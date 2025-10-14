@@ -35,6 +35,7 @@ import com.daml.ledger.api.v2.event_query_service.{
   GetEventsByContractIdResponse,
 }
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
+  CostEstimationHints,
   ExecuteSubmissionAndWaitForTransactionRequest,
   ExecuteSubmissionAndWaitForTransactionResponse,
   ExecuteSubmissionAndWaitRequest,
@@ -639,8 +640,12 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
   ): SubmitAndWaitForTransactionRequest =
     delegate.submitAndWaitForTransactionRequest(party, commands)
 
-  def prepareSubmissionRequest(party: Party, commands: JList[Command]): PrepareSubmissionRequest =
-    delegate.prepareSubmissionRequest(party, commands)
+  def prepareSubmissionRequest(
+      party: Party,
+      commands: JList[Command],
+      estimateTrafficCost: Option[CostEstimationHints] = None,
+  ): PrepareSubmissionRequest =
+    delegate.prepareSubmissionRequest(party, commands, estimateTrafficCost)
 
   def executeSubmissionRequest(
       party: ExternalParty,

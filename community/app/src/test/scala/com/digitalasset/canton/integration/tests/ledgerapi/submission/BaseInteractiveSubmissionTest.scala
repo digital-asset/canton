@@ -29,23 +29,18 @@ import com.digitalasset.canton.console.{
   ParticipantReference,
 }
 import com.digitalasset.canton.crypto.*
+import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.tests.ledgerapi.submission.BaseInteractiveSubmissionTest.{
   ParticipantSelector,
   defaultConfirmingParticipant,
   defaultExecutingParticipant,
   defaultPreparingParticipant,
 }
-import com.digitalasset.canton.integration.{
-  ConfigTransform,
-  ConfigTransforms,
-  TestConsoleEnvironment,
-}
 import com.digitalasset.canton.logging.{LogEntry, NamedLogging}
 import com.digitalasset.canton.topology.ForceFlag.DisablePartyWithActiveContracts
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{ExternalParty, ForceFlags, PartyId, SynchronizerId}
 import com.google.protobuf.ByteString
-import monocle.Monocle.toAppliedFocusOps
 import org.scalatest.Suite
 
 import java.util.UUID
@@ -68,16 +63,6 @@ trait BaseInteractiveSubmissionTest extends BaseTest {
     defaultConfirmingParticipant(env)
   protected def epn(implicit env: TestConsoleEnvironment): LocalParticipantReference =
     defaultExecutingParticipant(env)
-
-  protected val enableInteractiveSubmissionTransforms: Seq[ConfigTransform] = Seq(
-    ConfigTransforms.updateAllParticipantConfigs_(
-      _.focus(_.ledgerApi.interactiveSubmissionService.enableVerboseHashing)
-        .replace(true)
-    ),
-    ConfigTransforms.updateAllParticipantConfigs_(
-      _.focus(_.topology.broadcastBatchSize).replace(PositiveInt.one)
-    ),
-  )
 
   protected def offboardParty(
       party: ExternalParty,

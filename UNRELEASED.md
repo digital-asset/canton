@@ -10,6 +10,8 @@ header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
 ## until 2025-10-15 (Exclusive)
+- Documented external party on the Ledger API allocation endpoints
+- **BREAKING**: Renamed command `bootstrap.local()` to `bootstrap.synchronizer_local()`. It provides a simple way to bootstrap a local synchronizer.
 - Add a `max_record_time` field in the `PrepareSubmissionRequest` for externally signed transaction.
   This is effectively a Time To Live (TTL) for the submission: it won't be committed to the ledger after that timestamp.
   Important: The enforcement of this TTL is done by the submitting node (NOT the confirming node of the external party).
@@ -34,7 +36,85 @@ Wednesday after your change.
 
 To consume the update, re-generate any client code generated from the protobuf definitions and update the package names accordingly in your application code.
 
+- The participant node Admin API `PartyManagementService.ImportPartyAcs` endpoint has the request enriched with:
+  - the `representative_package_id_override` field which allows overriding the original package id of the imported contracts.
+  - the `contract_import_mode` field which allows toggling the contract import mode
+    (no validation OR full contract and contract-id validation OR contract-id recomputation) for the imported contracts.
+
+- **BREAKING**: Participant configuration and metrics changes because of major changes in Ledger API Index DB schema:
+    - `UpdatesStreamsConfig` is adapted to the new table structure, and respective streaming parameters changed:
+        - Configuration parameters controlling parallelism of streaming ID retrieval for the legacy DB tables are removed:
+            - `maxParallelIdCreateQueries`
+            - `maxParallelIdConsumingQueries`
+            - `maxParallelIdNonConsumingQueries`
+            - `maxParallelIdAssignQueries`
+            - `maxParallelIdUnassignQueries`
+        - Configuration parameters controlling parallelism of streaming ID retrieval for the new DB tables are added:
+            - `maxParallelIdActivateQueries`
+            - `maxParallelIdDeactivateQueries`
+            - `maxParallelIdVariousWitnessedQueries`
+        - Configuration parameters controlling parallelism of streaming Payload retrievals for the legacy DB tables are removed:
+            - `maxParallelPayloadCreateQueries`
+            - `maxParallelPayloadConsumingQueries`
+            - `maxParallelPayloadNonConsumingQueries`
+            - `maxParallelPayloadAssignQueries`
+            - `maxParallelPayloadUnassignQueries`
+        - Configuration parameters controlling parallelism of streaming Payload retrievals for the new DB tables are added:
+            - `maxParallelPayloadActivateQueries`
+            - `maxParallelPayloadDeactivateQueries`
+            - `maxParallelPayloadVariousWitnessedQueries`
+    - `IndexDBMetrics` is adapted to the new table structure, and respective DB metrics changed:
+        - Metrics for DB queries related to legacy DB tables are removed:
+            - `fetch_event_create_payloads`
+            - `fetch_event_consuming_payloads`
+            - `fetch_event_non_consuming_payloads`
+            - `fetch_event_assign_payloads`
+            - `fetch_event_unassign_payloads`
+            - `fetch_event_create_ids_stakeholder`
+            - `fetch_event_create_ids_non_stakeholder`
+            - `fetch_event_consuming_ids_stakeholder`
+            - `fetch_event_consuming_ids_non_stakeholder`
+            - `fetch_event_non_consuming_ids_informee`
+            - `fetch_event_assign_ids_stakeholder`
+            - `fetch_event_unassign_ids_stakeholder`
+            - `lookup_assigned_contracts`
+            - `lookup_archived_contracts`
+            - `lookup_transaction_tree_by_id`
+            - `get_active_contract_id_ranges_for_created`
+            - `get_active_contract_id_ranges_for_assigned`
+            - `get_active_contract_batch_for_created`
+            - `get_active_contract_batch_for_assigned`
+            - `get_create_ids_for_contract_ids`
+            - `get_assign_ids_for_contract_ids`
+            - `archivals`
+        - Metrics for DB queries related to the new DB tables are added:
+            - `fetch_event_activate_payloads`
+            - `fetch_event_deactivate_payloads`
+            - `fetch_event_various_witnessed_payloads`
+            - `fetch_event_activate_ids_stakeholder`
+            - `fetch_event_activate_ids_stakeholder_filtered_range`
+            - `fetch_event_activate_ids_stakeholder_filtered_ids`
+            - `fetch_event_activate_ids_witness`
+            - `fetch_event_activate_ids_witness_filtered_range`
+            - `fetch_event_activate_ids_witness_filtered_ids`
+            - `fetch_event_deactivate_ids_stakeholder`
+            - `fetch_event_deactivate_ids_stakeholder_filtered_range`
+            - `fetch_event_deactivate_ids_stakeholder_filtered_ids`
+            - `fetch_event_deactivate_ids_witness`
+            - `fetch_event_deactivate_ids_witness_filtered_range`
+            - `fetch_event_deactivate_ids_witness_filtered_ids`
+            - `fetch_event_various_ids_witness`
+            - `lookup_active_contracts`
+            - `get_active_contracts`
+            - `get_active_contract_id_ranges`
+            - `get_filtered_active_contract_ids`
+            - `get_active_contract_batch`
+            - `pruneable_contracts`
+
+
 ## until 2025-10-08 (Exclusive)
+- The GCP KMS now supports the `Ed25519` scheme for signing.
+- Updated the KMS driver to support the `Ed25519` scheme for signing and `EciesHkdfHmacSha256Aes128Cbc` for encryption. To enable this, the drivers must be recompiled.
 - Fixed a bug in the ModelConformanceChecker that would incorrectly reject otherwise valid externally signed transactions
   that make use of a locally created contract in a subview.
 - Added support for vetting packages on specific synchonizers, by adding an

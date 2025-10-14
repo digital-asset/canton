@@ -108,7 +108,8 @@ class SynchronizerTopologyManager(
 
   override protected val processor: TopologyStateProcessor = {
 
-    val required = new RequiredTopologyMappingChecks(store, loggerFactory)
+    val required =
+      new RequiredTopologyMappingChecks(store, Some(staticSynchronizerParameters), loggerFactory)
     val checks =
       if (!disableOptionalTopologyChecks)
         new TopologyMappingChecks.All(
@@ -534,7 +535,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
           EitherT.cond[FutureUnlessShutdown][TopologyManagerError, PositiveInt](
             proposed == PositiveInt.one,
             PositiveInt.one,
-            TopologyManagerError.SerialMismatch.Failure(PositiveInt.one, proposed),
+            TopologyManagerError.SerialMismatch.Failure(Some(PositiveInt.one), Some(proposed)),
           )
         // The stored mapping and the proposed mapping are the same. This likely only adds an additional signature.
         // If not, then duplicates will be filtered out down the line.
@@ -558,7 +559,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
           EitherT.cond[FutureUnlessShutdown](
             next == proposed,
             next,
-            TopologyManagerError.SerialMismatch.Failure(next, proposed),
+            TopologyManagerError.SerialMismatch.Failure(Some(next), Some(proposed)),
           )
       }): EitherT[FutureUnlessShutdown, TopologyManagerError, PositiveInt]
     } yield TopologyTransaction(op, theSerial, mapping, protocolVersion)

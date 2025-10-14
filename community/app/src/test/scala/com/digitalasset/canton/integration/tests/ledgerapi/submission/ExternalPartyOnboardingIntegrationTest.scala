@@ -10,6 +10,7 @@ import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.console.commands.PartiesAdministration
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
@@ -37,7 +38,7 @@ trait ExternalPartyOnboardingIntegrationTestSetup
         import env.*
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
       }
-      .addConfigTransforms(enableInteractiveSubmissionTransforms*)
+      .addConfigTransform(ConfigTransforms.enableInteractiveSubmissionTransforms)
 }
 
 class ExternalPartyOnboardingIntegrationTest extends ExternalPartyOnboardingIntegrationTestSetup {

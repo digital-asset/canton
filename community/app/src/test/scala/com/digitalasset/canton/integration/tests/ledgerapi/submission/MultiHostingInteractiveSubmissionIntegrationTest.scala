@@ -14,6 +14,7 @@ import com.digitalasset.canton.integration.plugins.UseH2
 import com.digitalasset.canton.integration.tests.ledgerapi.submission.BaseInteractiveSubmissionTest.ParticipantsSelector
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
@@ -85,7 +86,7 @@ sealed trait MultiHostingInteractiveSubmissionIntegrationTest
           synchronizerId = synchronizer1Id.logical,
         )
       }
-      .addConfigTransforms(enableInteractiveSubmissionTransforms*)
+      .addConfigTransform(ConfigTransforms.enableInteractiveSubmissionTransforms)
 
   "Interactive submission" should {
     "create a contract and read it from all confirming and observing participants" in {
