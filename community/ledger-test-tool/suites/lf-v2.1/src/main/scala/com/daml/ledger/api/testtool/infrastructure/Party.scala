@@ -6,6 +6,7 @@ package com.daml.ledger.api.testtool.infrastructure
 import com.daml.ledger.api.v2.crypto as lapicrypto
 import com.daml.ledger.api.v2.crypto.SignatureFormat.SIGNATURE_FORMAT_RAW
 import com.daml.ledger.javaapi.data.Party as ApiParty
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.Fingerprint
 import com.google.protobuf.ByteString
 
@@ -22,6 +23,7 @@ case class ExternalParty(
     initialSynchronizers: List[String],
     signingFingerprint: Fingerprint,
     signingKeyPair: KeyPair,
+    signingThreshold: PositiveInt,
 ) extends Party {
   def sign(data: ByteString): ByteString = {
     val signatureInstance = Signature.getInstance("Ed25519")
@@ -45,9 +47,16 @@ object Party {
       value: String,
       signingFingerprint: Fingerprint,
       signingKeyPair: KeyPair,
+      signingThreshold: PositiveInt,
       initialSynchronizers: List[String] = List.empty,
   ): ExternalParty =
-    ExternalParty(new ApiParty(value), initialSynchronizers, signingFingerprint, signingKeyPair)
+    ExternalParty(
+      new ApiParty(value),
+      initialSynchronizers,
+      signingFingerprint,
+      signingKeyPair,
+      signingThreshold,
+    )
 
   def apply(value: String, initialSynchronizers: List[String] = List.empty): Party =
     LocalParty(new ApiParty(value), initialSynchronizers)

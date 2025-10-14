@@ -10,6 +10,7 @@ import com.daml.metrics.api.{HistogramInventory, MetricName}
 import com.daml.resources.PureResource
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.ParticipantId
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace.withNewLoggingContext
 import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.metrics.{LedgerApiServerHistograms, LedgerApiServerMetrics}
@@ -109,6 +110,7 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
         loggerFactory = loggerFactory,
       )
       contractLoader <- ContractLoader.create(
+        participantContractStore = contractStore,
         contractStorageBackend = dbSupport.storageBackendFactory.createContractStorageBackend(
           stringInterningView,
           ledgerEndCache,
@@ -125,9 +127,9 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
       val engine = Some(
         new Engine(EngineConfig(LanguageVersion.StableVersions(LanguageMajorVersion.V2)))
       )
-      JdbcLedgerDao.writeForTests(
-        dbSupport = dbSupport,
-        sequentialWriteDao = SequentialWriteDao(
+      new JdbcLedgerWriteDao(
+        dbDispatcher = dbSupport.dbDispatcher,
+        sequentialIndexer = SequentialWriteDao(
           participantId = JdbcLedgerDaoBackend.TestParticipantIdRef,
           metrics = metrics,
           compressionStrategy = CompressionStrategy.none(metrics),
@@ -138,18 +140,22 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
             storageBackendFactory.createParameterStorageBackend(stringInterningView),
           loggerFactory = loggerFactory,
         ),
-        servicesExecutionContext = ec,
+        queryExecutionContext = ec,
+        commandExecutionContext = ec,
         metrics = metrics,
         participantId = JdbcLedgerDaoBackend.TestParticipantIdRef,
+        readStorageBackend = dbSupport.storageBackendFactory
+          .readStorageBackend(ledgerEndCache, stringInterningView, loggerFactory),
+        parameterStorageBackend =
+          dbSupport.storageBackendFactory.createParameterStorageBackend(stringInterningView),
         ledgerEndCache = ledgerEndCache,
-        stringInterning = stringInterningView,
         completionsPageSize = 1000,
         activeContractsServiceStreamsConfig = ActiveContractsServiceStreamsConfig(
           maxPayloadsPerPayloadsPage = eventsPageSize,
           maxIdsPerIdPage = acsIdPageSize,
           maxPagesPerIdPagesBuffer = 1,
           maxWorkingMemoryInBytesForIdPages = 100 * 1024 * 1024,
-          maxParallelIdCreateQueries = acsIdFetchingParallelism,
+          maxParallelActiveIdQueries = acsIdFetchingParallelism,
           maxParallelPayloadCreateQueries = acsContractFetchingParallelism,
           contractProcessingParallelism = eventsProcessingParallelism,
         ),
@@ -158,6 +164,7 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
         globalMaxEventPayloadQueries = 10,
         tracer = OpenTelemetry.noop().getTracer("test"),
         loggerFactory = loggerFactory,
+        incompleteOffsets = (_, _, _) => FutureUnlessShutdown.pure(Vector.empty),
         contractLoader = contractLoader,
         lfValueTranslation = new LfValueTranslation(
           metrics = metrics,
@@ -171,7 +178,7 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
     }
   }
 
-  type LedgerDao = LedgerReadDao with LedgerWriteDaoForTests
+  type LedgerDao = LedgerReadDao & LedgerWriteDao
 
   protected final var ledgerDao: LedgerDao = _
   protected var ledgerEndCache: MutableLedgerEndCache = _

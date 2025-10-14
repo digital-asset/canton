@@ -58,7 +58,6 @@ final class CommandsValidator(
       prepareRequest: PrepareSubmissionRequest,
       currentLedgerTime: Instant,
       currentUtcTime: Instant,
-      maxDeduplicationDuration: Duration,
   )(implicit
       errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, Commands] =
@@ -94,7 +93,7 @@ final class CommandsValidator(
       readAs = submitters.readAs,
       submittedAt = Time.Timestamp.assertFromInstant(currentUtcTime),
       // Unused for transaction preparation
-      deduplicationPeriod = DeduplicationPeriod.DeduplicationDuration(maxDeduplicationDuration),
+      deduplicationPeriod = DeduplicationPeriod.DeduplicationDuration(Duration.ZERO),
       commands = ApiCommands(
         commands = validatedCommands.to(ImmArray),
         ledgerEffectiveTime = ledgerEffectiveTimestamp,

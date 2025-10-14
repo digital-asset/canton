@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.apiserver.services
 
-import com.daml.ledger.api.v2.package_reference.VettedPackages
 import com.daml.ledger.api.v2.package_service.PackageServiceGrpc.PackageService
 import com.daml.ledger.api.v2.package_service.{
   GetPackageRequest,
@@ -24,11 +23,7 @@ import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFai
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.grpc.Logging.traceId
 import com.digitalasset.canton.ledger.api.validation.ValidationErrors
-import com.digitalasset.canton.ledger.api.{
-  ListVettedPackagesOpts,
-  PriorTopologySerialExists,
-  ValidationLogger,
-}
+import com.digitalasset.canton.ledger.api.{ListVettedPackagesOpts, ValidationLogger}
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.ledger.participant.state.PackageSyncService
 import com.digitalasset.canton.logging.LoggingContextUtil.createLoggingContext
@@ -43,6 +38,7 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
 }
+import com.digitalasset.canton.platform.config.PackageServiceConfig
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.daml.lf.archive.DamlLf.{Archive, HashFunction}
@@ -53,12 +49,14 @@ import scala.concurrent.{ExecutionContext, Future}
 
 private[apiserver] final class ApiPackageService(
     packageSyncService: PackageSyncService,
+    packageServiceConfig: PackageServiceConfig,
     telemetry: Telemetry,
     val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends PackageService
     with GrpcApiService
     with NamedLogging {
+
   private implicit val loggingContext: LoggingContext =
     createLoggingContext(loggerFactory)(identity)
 
@@ -134,21 +132,15 @@ private[apiserver] final class ApiPackageService(
     ) { implicit loggingContext =>
       for {
         opts <- ListVettedPackagesOpts
-          .fromProto(request)
+          .fromProto(request, packageServiceConfig.maxVettedPackagesPageSize)
           .toFuture(ProtoDeserializationFailure.Wrap(_).asGrpcError)
-        result <- packageSyncService.listVettedPackages(opts)
+        results <- packageSyncService.listVettedPackages(opts)
+        // TODO(#28528) Use token to limit pagination processing, instead of
+        // post-processing entire listing.
+        (pageResults, nextPageToken) = opts.toPage(results)
       } yield ListVettedPackagesResponse(
-        vettedPackages = result.map { case (packages, synchronizerId, serial) =>
-          VettedPackages(
-            packages = packages.map(_.toProtoLAPI),
-            // TODO(#27750) Populate these fields and assert over them when
-            // updates and queries can specify target participants
-            participantId = "",
-            synchronizerId = synchronizerId.toProtoPrimitive,
-            topologySerial = Some(PriorTopologySerialExists(serial.value).toProtoLAPI),
-          )
-        },
-        nextPageToken = "",
+        vettedPackages = pageResults.map(_.toProtoLAPI),
+        nextPageToken = nextPageToken,
       )
     }
 

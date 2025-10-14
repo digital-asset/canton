@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.topology
 
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag
 import com.digitalasset.canton.version.ProtocolVersion
@@ -39,7 +39,8 @@ final class GeneratorsTopology(protocolVersion: ProtocolVersion) {
     for {
       partyId <- Arbitrary.arbitrary[PartyId]
       signingFingerprints <- nonEmptyListGen[Fingerprint]
-    } yield ExternalParty(partyId, signingFingerprints)
+      keyThreshold <- Arbitrary.arbitrary[PositiveInt]
+    } yield ExternalParty(partyId, signingFingerprints, keyThreshold)
   )
   implicit val identityArb: Arbitrary[Identity] = genArbitrary
 

@@ -61,7 +61,7 @@ final class TimeBasedInteractiveIntegrationTest
         participants.all.dars.upload(CantonExamplesPath)
         participants.all.dars.upload(CantonTestsPath)
       }
-      .addConfigTransforms(enableInteractiveSubmissionTransforms*)
+      .addConfigTransform(ConfigTransforms.enableInteractiveSubmissionTransforms)
 
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 

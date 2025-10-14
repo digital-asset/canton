@@ -8,7 +8,7 @@ object DamlVersions {
   /** The version of the daml compiler (and in most cases of the daml libraries as well).
     */
   // after changing version, run `sbt updateDamlProjectVersions` to update the `daml.yaml` project files.
-  val version: String = "3.4.0-snapshot.20251007.14274.0.ve2024cd6"
+  val version: String = "3.4.0-snapshot.20251013.14309.0.v65e95a99"
 
   /** Custom Daml artifacts override version.
     */

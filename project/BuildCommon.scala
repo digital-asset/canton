@@ -2050,6 +2050,7 @@ object BuildCommon {
       .settings(
         sharedCantonCommunitySettings,
         Test / damlEnableJavaCodegen := true,
+        Test / damlExcludeFromCodegen := Seq("com.digitalasset.canton.damltests.nonconforming.x"),
         Test / useVersionedDarName := true,
         Test / damlEnableProjectVersionOverride := false,
         Test / damlBuildOrder := Seq(
@@ -2091,6 +2092,11 @@ object BuildCommon {
             (Test / sourceDirectory).value / "daml" / "NonConforming" / "V2",
             (Test / damlDarOutput).value / "NonConforming-2.0.0.dar",
             "com.digitalasset.canton.damltests.nonconforming.v2",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "NonConforming" / "X",
+            (Test / damlDarOutput).value / "NonConformingX-1.0.0.dar",
+            "com.digitalasset.canton.damltests.nonconforming.x",
           ),
           (
             (Test / sourceDirectory).value / "daml" / "AppUpgrade" / "V1",

@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.implicits.{toBifunctorOps, toTraverseOps}
 import com.daml.ledger.api.v2.admin.package_management_service.*
 import com.daml.ledger.api.v2.admin.package_management_service.PackageManagementServiceGrpc.PackageManagementService
-import com.daml.ledger.api.v2.package_reference.VettedPackages
 import com.daml.logging.LoggingContext
 import com.daml.tracing.Telemetry
 import com.digitalasset.base.error.RpcError
@@ -15,7 +14,6 @@ import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFai
 import com.digitalasset.canton.ledger.api.grpc.GrpcApiService
 import com.digitalasset.canton.ledger.api.util.TimestampConversion
 import com.digitalasset.canton.ledger.api.{
-  PriorTopologySerialNone,
   UpdateVettedPackagesOpts,
   UploadDarVettingChange as UploadDarOpts,
 }
@@ -157,31 +155,10 @@ private[apiserver] final class ApiPackageManagementService private (
           .toFuture(ProtoDeserializationFailure.Wrap(_).asGrpcError)
         result <- packageSyncService.updateVettedPackages(updateVettedPackagesOpts)
       } yield result match {
-        case (previousStates, newStates) =>
+        case (previousState, newState) =>
           UpdateVettedPackagesResponse(
-            // TODO(#27750) Make sure to only populate this when a prior vetting
-            // state actually exists. If no vetting state exists, this should be
-            // None.
-            pastVettedPackages = Some(
-              VettedPackages(
-                packages = previousStates.map(_.toProtoLAPI),
-                // TODO(#27750) Populate these fields and assert over them when
-                // updates and queries can specify target synchronizers
-                participantId = "",
-                synchronizerId = "",
-                topologySerial = Some(PriorTopologySerialNone.toProtoLAPI),
-              )
-            ),
-            newVettedPackages = Some(
-              VettedPackages(
-                packages = newStates.map(_.toProtoLAPI),
-                // TODO(#27750) Populate these fields and assert over them when
-                // updates and queries can specify target synchronizers
-                participantId = "",
-                synchronizerId = "",
-                topologySerial = Some(PriorTopologySerialNone.toProtoLAPI),
-              )
-            ),
+            pastVettedPackages = previousState.map(_.toProtoLAPI),
+            newVettedPackages = newState.map(_.toProtoLAPI),
           )
       }
     }

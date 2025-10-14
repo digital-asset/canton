@@ -5,6 +5,7 @@ package com.digitalasset.canton.http.json.v2
 
 import com.daml.ledger.api.v2.interactive.interactive_submission_service
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
+  CostEstimation,
   ExecuteSubmissionResponse,
   GetPreferredPackageVersionRequest,
   InteractiveSubmissionServiceGrpc,
@@ -185,6 +186,7 @@ final case class JsPrepareSubmissionRequest(
     verboseHashing: Boolean = false,
     prefetchContractKeys: Seq[js.PrefetchContractKey] = Seq.empty,
     maxRecordTime: Option[com.google.protobuf.timestamp.Timestamp],
+    estimateTrafficCost: Option[interactive_submission_service.CostEstimationHints] = None,
 )
 
 final case class JsPrepareSubmissionResponse(
@@ -192,6 +194,7 @@ final case class JsPrepareSubmissionResponse(
     preparedTransactionHash: protobuf.ByteString,
     hashingSchemeVersion: interactive_submission_service.HashingSchemeVersion,
     hashingDetails: Option[String],
+    costEstimation: Option[CostEstimation],
 )
 
 final case class JsExecuteSubmissionRequest(
@@ -340,6 +343,9 @@ object JsInteractiveSubmissionServiceCodecs {
   implicit val minLedgerTimeRW: Codec[interactive_submission_service.MinLedgerTime] =
     deriveRelaxedCodec
 
+  implicit val costEstimationHintsRW: Codec[interactive_submission_service.CostEstimationHints] =
+    deriveConfiguredCodec
+
   implicit val jsPrepareSubmissionRequestRW: Codec[JsPrepareSubmissionRequest] =
     deriveConfiguredCodec
 
@@ -356,6 +362,9 @@ object JsInteractiveSubmissionServiceCodecs {
 
   implicit val executeSubmissionResponseRW
       : Codec[interactive_submission_service.ExecuteSubmissionResponse] =
+    deriveRelaxedCodec
+
+  implicit val estimateTrafficCostResponseRW: Codec[interactive_submission_service.CostEstimation] =
     deriveRelaxedCodec
 
   implicit val executeSubmissionAndWaitResponseRW

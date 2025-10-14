@@ -350,20 +350,6 @@ class TransactionProcessingSteps(
               )
           )
 
-        lookupContractsWithDisclosed: ContractInstanceOfId =
-          (contractId: LfContractId) =>
-            disclosedContracts
-              .get(contractId)
-              .map(contract =>
-                EitherT.rightT[FutureUnlessShutdown, TransactionTreeFactory.ContractLookupError](
-                  contract: GenContractInstance
-                )
-              )
-              .getOrElse(
-                TransactionTreeFactory
-                  .contractInstanceLookup(contractLookup)(implicitly, implicitly)(contractId)
-              )
-
         confirmationRequestTimer = metrics.protocolMessages.confirmationRequestCreation
         // Perform phase 1 of the protocol that produces a transaction confirmation request
         request <- confirmationRequestTimer.timeEitherFUS(
@@ -376,7 +362,8 @@ class TransactionProcessingSteps(
               mediator,
               recentSnapshot,
               sessionKeyStore,
-              lookupContractsWithDisclosed,
+              TransactionProcessingSteps
+                .lookupContractsWithDisclosed(disclosedContracts, contractLookup),
               maxSequencingTime,
               protocolVersion,
             )
@@ -843,14 +830,6 @@ class TransactionProcessingSteps(
     // TODO(i12911): check that all non-root lightweight trees can be decrypted with the expected (derived) randomness
     //   Also, check that all the view's informees received the derived randomness
     Right(parsedRequest.usedAndCreated.activenessSet)
-
-  override def authenticateInputContracts(
-      parsedRequest: ParsedTransactionRequest
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, TransactionProcessorError, Unit] =
-    // For transaction processing contract authentication is done as part of model conformance
-    EitherT.pure(())
 
   override def constructPendingDataAndResponse(
       parsedRequest: ParsedTransactionRequest,
@@ -1570,6 +1549,23 @@ class TransactionProcessingSteps(
 }
 
 object TransactionProcessingSteps {
+
+  private[canton] def lookupContractsWithDisclosed(
+      disclosedContracts: Map[LfContractId, ContractInstance],
+      contractLookup: ContractLookup { type ContractsCreatedAtTime <: CreationTime.CreatedAt },
+  )(implicit executionContext: ExecutionContext, traceContext: TraceContext): ContractInstanceOfId =
+    (contractId: LfContractId) =>
+      disclosedContracts
+        .get(contractId)
+        .map(contract =>
+          EitherT.rightT[FutureUnlessShutdown, TransactionTreeFactory.ContractLookupError](
+            contract: GenContractInstance
+          )
+        )
+        .getOrElse(
+          TransactionTreeFactory
+            .contractInstanceLookup(contractLookup)(implicitly, implicitly)(contractId)
+        )
 
   final case class SubmissionParam(
       submitterInfo: SubmitterInfo,

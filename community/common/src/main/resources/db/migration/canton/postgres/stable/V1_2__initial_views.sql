@@ -744,7 +744,6 @@ create or replace view debug.acs_slow_counter_participants as
 
 create or replace view debug.common_pending_operations as
   select
-    id,
     operation_trigger,
     operation_name,
     operation_key,

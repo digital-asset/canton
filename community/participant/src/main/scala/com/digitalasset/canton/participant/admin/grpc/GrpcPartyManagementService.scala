@@ -56,11 +56,10 @@ import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.Sink
 
 import java.io.{ByteArrayOutputStream, OutputStream}
-import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.GZIPOutputStream
 import scala.concurrent.{ExecutionContextExecutor, Future}
-import scala.util.control.NonFatal
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Success, Try}
 
 /** grpc service to allow modifying party hosting on participants
   */
@@ -467,10 +466,72 @@ class GrpcPartyManagementService(
     // TODO(#23818): This buffer will contain the whole ACS snapshot.
     val outputStream = new ByteArrayOutputStream()
 
+    // TODO(#24610): Deduplicate ImportArgs setting with logic from `ParticipantRepairService.ImportAcs`
+    // (ContractImportMode, representativePackageIdOverride)
+    type ImportArgs = (String, ContractImportMode, RepresentativePackageIdOverride)
+
+    val args = new AtomicReference[Option[ImportArgs]](None)
+
+    def recordedArgs: Either[String, ImportArgs] =
+      args
+        .get()
+        .toRight("The import ACS request fields are not set")
+
+    def setOrCheck(
+        workflowIdPrefix: String,
+        contractImportMode: ContractImportMode,
+        representativePackageIdOverride: RepresentativePackageIdOverride,
+    ): Either[String, Unit] = {
+      val newOrMatchingValue = Some(
+        (workflowIdPrefix, contractImportMode, representativePackageIdOverride)
+      )
+      if (args.compareAndSet(None, newOrMatchingValue)) {
+        Right(()) // This was the first message, success, set.
+      } else {
+        recordedArgs.flatMap {
+          case (oldWorkflowIdPrefix, _, _) if oldWorkflowIdPrefix != workflowIdPrefix =>
+            Left(
+              s"Workflow ID prefix cannot be changed from $oldWorkflowIdPrefix to $workflowIdPrefix"
+            )
+          case (_, oldContractImportMode, _) if oldContractImportMode != contractImportMode =>
+            Left(
+              s"Contract authentication import mode cannot be changed from $oldContractImportMode to $contractImportMode"
+            )
+          case (_, _, oldRepresentativePackageIdOverride)
+              if oldRepresentativePackageIdOverride != representativePackageIdOverride =>
+            Left(
+              s"Representative package ID override cannot be changed from $oldRepresentativePackageIdOverride to $representativePackageIdOverride"
+            )
+
+          case _ => Right(()) // All arguments matched successfully
+        }
+      }
+    }
+
     new StreamObserver[ImportPartyAcsRequest] {
 
-      override def onNext(request: ImportPartyAcsRequest): Unit =
-        outputStream.write(request.acsSnapshot.toByteArray)
+      override def onNext(request: ImportPartyAcsRequest): Unit = {
+        val processRequest: Either[String, Unit] = for {
+          contractImportMode <- ContractImportMode
+            .fromProtoV30(request.contractImportMode)
+            .leftMap(_.message)
+          representativePackageIdOverrideO <- request.representativePackageIdOverride
+            .traverse(RepresentativePackageIdOverride.fromProtoV30)
+            .leftMap(_.message)
+          _ <- setOrCheck(
+            request.workflowIdPrefix,
+            contractImportMode,
+            representativePackageIdOverrideO.getOrElse(RepresentativePackageIdOverride.NoOverride),
+          )
+        } yield ()
+
+        processRequest.fold(
+          // On failure: Signal the error, that is throw an exception.
+          // Observer's top-level onError will handle cleanup.
+          errorMessage => responseObserver.onError(new IllegalArgumentException(errorMessage)),
+          _ => outputStream.write(request.acsSnapshot.toByteArray),
+        )
+      }
 
       override def onError(t: Throwable): Unit =
         try {
@@ -481,28 +542,34 @@ class GrpcPartyManagementService(
 
       override def onCompleted(): Unit = {
         // Synchronously try to get the snapshot and start the import
-        val importFuture =
-          try {
+        val result: EitherT[Future, Throwable, Map[String, String]] = for {
+
+          argsTuple <- EitherT.fromEither[Future](
+            recordedArgs.leftMap(new IllegalStateException(_))
+          )
+          (workflowIdPrefix, contractImportMode, representativePackageIdOverride) = argsTuple
+          acsSnapshot <- EitherT.fromEither[Future](
+            Try(ByteString.copyFrom(outputStream.toByteArray)).toEither
+          )
+          contractIdRemapping <- EitherT.liftF[Future, Throwable, Map[String, String]](
             ParticipantCommon.importAcsNewSnapshot(
-              acsSnapshot = ByteString.copyFrom(outputStream.toByteArray),
+              acsSnapshot = acsSnapshot,
               batching = batching,
-              contractImportMode = ContractImportMode.Validation,
+              contractImportMode = contractImportMode,
               excludedStakeholders = Set.empty,
               loggerFactory = loggerFactory,
-              // TODO(#27872): Consider allowing package-id overrides for party imports
-              representativePackageIdOverride = RepresentativePackageIdOverride.NoOverride,
+              representativePackageIdOverride = representativePackageIdOverride,
               sync = sync,
-              workflowIdPrefix = s"import-party-acs-${UUID.randomUUID}",
+              workflowIdPrefix = workflowIdPrefix,
             )
-          } catch {
-            // If toByteArray or importAcsNewSnapshot fails
-            case NonFatal(e) => Future.failed(e)
-          }
+          )
+        } yield contractIdRemapping
 
-        importFuture
+        result
           .thereafter { _ =>
             outputStream.close()
           }
+          .value
           .onComplete {
             case Failure(exception) =>
               responseObserver.onError(exception)
@@ -603,19 +670,19 @@ class GrpcPartyManagementService(
     mapErrNewEUS(res.leftMap(_.toCantonRpcError))
   }
 
-  override def completePartyOnboarding(
-      request: v30.CompletePartyOnboardingRequest
-  ): Future[v30.CompletePartyOnboardingResponse] = {
+  override def clearPartyOnboardingFlag(
+      request: v30.ClearPartyOnboardingFlagRequest
+  ): Future[v30.ClearPartyOnboardingFlagResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val res = for {
-      r <- processPartyOnboardingRequest(request)
+      r <- processPartyOnboardingFlagRequest(request)
       (onboarded, safeTime) = r
-    } yield v30.CompletePartyOnboardingResponse(onboarded, safeTime.map(x => x.toProtoTimestamp))
+    } yield v30.ClearPartyOnboardingFlagResponse(onboarded, safeTime.map(x => x.toProtoTimestamp))
     mapErrNewEUS(res.leftMap(_.toCantonRpcError))
   }
 
-  private def processPartyOnboardingRequest(
-      request: v30.CompletePartyOnboardingRequest
+  private def processPartyOnboardingFlagRequest(
+      request: v30.ClearPartyOnboardingFlagRequest
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -629,7 +696,7 @@ class GrpcPartyManagementService(
         .leftMap(PartyManagementServiceError.InvalidState.Error(_))
       allLogicalSynchronizerIds = sync.syncPersistentStateManager.getAllLatest.keySet
 
-      validRequest <- validateCompletePartyOnboardingRequest(
+      validRequest <- validateClearPartyOnboardingFlagRequest(
         request,
         ledgerEnd,
         allLogicalSynchronizerIds,
@@ -705,8 +772,8 @@ class GrpcPartyManagementService(
 
     } yield (onboardingCompletionOutcome)
 
-  private def validateCompletePartyOnboardingRequest(
-      request: v30.CompletePartyOnboardingRequest,
+  private def validateClearPartyOnboardingFlagRequest(
+      request: v30.ClearPartyOnboardingFlagRequest,
       ledgerEnd: Offset,
       synchronizerIds: Set[SynchronizerId],
   )(implicit
