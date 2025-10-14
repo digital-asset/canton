@@ -341,9 +341,7 @@ class BlockSequencer(
     )
 
     for {
-      _ <-
-        if (submission.isConfirmationRequest) rejectSubmissionsIfOverloaded(submission)
-        else EitherT.rightT[FutureUnlessShutdown, SequencerDeliverError](())
+      _ <- rejectSubmissionsIfOverloaded(submission)
       // TODO(i17584): revisit the consequences of no longer enforcing that
       //  aggregated submissions with signed envelopes define a topology snapshot
       _ <- validateMaxSequencingTime(submission)
@@ -595,11 +593,6 @@ class BlockSequencer(
       if (!ledgerStatus.isActive) SequencerHealthStatus(isActive = false, ledgerStatus.description)
       else if (!isStorageActive)
         SequencerHealthStatus(isActive = false, Some("Can't connect to database"))
-      else if (circuitBreaker.shouldRejectRequests(SubmissionRequestType.ConfirmationRequest))
-        SequencerHealthStatus(
-          isActive = false,
-          Some("Overloaded. Can't receive requests at the moment"),
-        )
       else SequencerHealthStatus(isActive = true, None)
     }
 
