@@ -84,7 +84,7 @@ class ApiInteractiveSubmissionService(
   ): FutureUnlessShutdown[PrepareResponseP] = {
     implicit val loggingContextWithTrace: LoggingContextWithTrace =
       LoggingContextWithTrace(loggerFactory)(request.traceContext)
-    val errorLogger: ErrorLoggingContext =
+    implicit val errorLogger: ErrorLoggingContext =
       ErrorLoggingContext.fromOption(
         logger,
         loggingContextWithTrace,
@@ -101,7 +101,6 @@ class ApiInteractiveSubmissionService(
             req = request.value,
             currentLedgerTime = currentLedgerTime(),
             currentUtcTime = currentUtcTime(),
-            maxDeduplicationDuration = maxDeduplicationDuration,
           )(errorLogger),
         )
         .fold(

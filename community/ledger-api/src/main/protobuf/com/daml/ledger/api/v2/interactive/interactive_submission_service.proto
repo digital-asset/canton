@@ -76,6 +76,36 @@ service InteractiveSubmissionService {
   rpc GetPreferredPackages(GetPreferredPackagesRequest) returns (GetPreferredPackagesResponse);
 }
 
+// Hints to improve cost estimation precision of a prepared transaction
+message CostEstimationHints {
+  // Disable cost estimation
+  // Default (not set) is false
+  bool disabled = 1;
+  // Details on the keys that will be used to sign the transaction (how many and of which type).
+  // Signature size impacts the cost of the transaction.
+  // If empty, the signature sizes will be approximated with threshold-many signatures (where threshold is defined
+  // in the PartyToKeyMapping of the external party), using keys in the order they are registered.
+  // Optional (empty list is equivalent to not providing this field)
+  repeated SigningAlgorithmSpec expected_signatures = 2;
+}
+
+// Estimation of the cost of submitting the prepared transaction
+// The estimation is done against the synchronizer chosen during preparation of the transaction
+// (or the one explicitly requested).
+// The cost of re-assigning contracts to another synchronizer when necessary is not included in the estimation.
+message CostEstimation {
+  // Timestamp at which the estimation was made
+  google.protobuf.Timestamp estimation_timestamp = 1;
+  // Estimated traffic cost of the confirmation request associated with the transaction
+  uint64 confirmation_request_traffic_cost_estimation = 2;
+  // Estimated traffic cost of the confirmation response associated with the transaction
+  // This field can also be used as an indication of the cost that other potential confirming nodes
+  // of the party will incur to approve or reject the transaction
+  uint64 confirmation_response_traffic_cost_estimation = 3;
+  // Sum of the fields above
+  uint64 total_traffic_cost_estimation = 4;
+}
+
 message PrepareSubmissionRequest {
   // Uniquely identifies the participant user that prepares the transaction.
   // Must be a valid UserIdString (as described in ``value.proto``).
@@ -155,6 +185,16 @@ message PrepareSubmissionRequest {
   //
   // Optional
   repeated PrefetchContractKey prefetch_contract_keys = 15;
+
+  // Hints to improve the accuracy of traffic cost estimation.
+  // The estimation logic assumes that this node will be used for the execution of the transaction
+  // If another node is used instead, the estimation may be less precise.
+  // Request amplification is not accounted for in the estimation: each amplified request will
+  // result in the cost of the confirmation request to be charged additionally.
+  //
+  // Optional - Traffic cost estimation is enabled by default if this field is not set
+  // To turn off cost estimation, set the CostEstimationHints#disabled field to true
+  optional CostEstimationHints estimate_traffic_cost = 16;
 }
 
 // [docs-entry-start: HashingSchemeVersion]
@@ -182,6 +222,10 @@ message PrepareSubmissionResponse {
   // Note that there are no guarantees on the stability of the format or content of this field.
   // Its content should NOT be parsed and should only be used for troubleshooting purposes.
   optional string hashing_details = 4;
+
+  // Traffic cost estimation of the prepared transaction
+  // Optional
+  optional CostEstimation cost_estimation = 5;
 }
 
 // Signatures provided by a single party

@@ -684,6 +684,7 @@ object ApiServicesRequiredClaimSpec {
       verboseHashing = true,
       prefetchContractKeys = Seq.empty,
       maxRecordTime = Option.empty,
+      estimateTrafficCost = None,
     )
 
   val preparedTransaction = PreparedTransaction(

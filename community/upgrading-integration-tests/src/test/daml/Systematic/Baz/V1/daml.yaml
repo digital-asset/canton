@@ -1,4 +1,4 @@
-sdk-version: 3.4.0-snapshot.20251007.14274.0.ve2024cd6
+sdk-version: 3.4.0-snapshot.20251013.14305.0.v93a220d8
 build-options: 
 - --target=2.1
 name: baz

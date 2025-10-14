@@ -959,7 +959,6 @@ create type pending_operation_trigger_type as enum ('synchronizer_reconnect');
 
 -- Stores operations that must be completed, ensuring execution even after a node restart (e.g., following a crash)
 create table common_pending_operations (
-  id int not null generated always as identity,
   operation_trigger pending_operation_trigger_type not null,
   -- The name of the procedure to execute for this operation.
   operation_name varchar not null,
@@ -970,6 +969,5 @@ create table common_pending_operations (
   operation bytea not null,
   -- The ID of the synchronizer instance this operation is associated with
   synchronizer_id varchar not null,
-  primary key (id),
-  unique (synchronizer_id, operation_key, operation_name)
+  primary key (synchronizer_id, operation_key, operation_name)
 );

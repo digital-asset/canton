@@ -54,6 +54,7 @@ import com.daml.ledger.api.v2.event_query_service.{
   GetEventsByContractIdResponse,
 }
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
+  CostEstimationHints,
   ExecuteSubmissionAndWaitForTransactionRequest,
   ExecuteSubmissionAndWaitForTransactionResponse,
   ExecuteSubmissionAndWaitRequest,
@@ -92,6 +93,7 @@ import com.daml.ledger.javaapi.data.{
 import com.daml.logging.{ContextualizedLogger, LoggingContext}
 import com.daml.timer.Delayed
 import com.digitalasset.base.error.ErrorCode
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.ledger.api.TransactionShape
 import com.digitalasset.canton.ledger.api.TransactionShape.{AcsDelta, LedgerEffects, toProto}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -405,6 +407,7 @@ final class SingleParticipantTestContext private[participant] (
       result.head.partyId,
       UniqueIdentifier.tryFromProtoPrimitive(result.head.partyId).fingerprint,
       keyPair,
+      signingThreshold = PositiveInt.one,
       connectedSynchronizerIds.toList,
     )
   }
@@ -1193,6 +1196,7 @@ final class SingleParticipantTestContext private[participant] (
   override def prepareSubmissionRequest(
       party: Party,
       commands: JList[Command],
+      estimateTrafficCost: Option[CostEstimationHints] = None,
   ): PrepareSubmissionRequest =
     PrepareSubmissionRequest(
       userId = userId,
@@ -1216,6 +1220,7 @@ final class SingleParticipantTestContext private[participant] (
       verboseHashing = false,
       prefetchContractKeys = Seq.empty,
       maxRecordTime = Option.empty,
+      estimateTrafficCost = estimateTrafficCost,
     )
 
   override def executeSubmissionRequest(

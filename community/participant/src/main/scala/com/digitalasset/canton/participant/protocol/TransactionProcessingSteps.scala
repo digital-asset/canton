@@ -350,20 +350,6 @@ class TransactionProcessingSteps(
               )
           )
 
-        lookupContractsWithDisclosed: ContractInstanceOfId =
-          (contractId: LfContractId) =>
-            disclosedContracts
-              .get(contractId)
-              .map(contract =>
-                EitherT.rightT[FutureUnlessShutdown, TransactionTreeFactory.ContractLookupError](
-                  contract: GenContractInstance
-                )
-              )
-              .getOrElse(
-                TransactionTreeFactory
-                  .contractInstanceLookup(contractLookup)(implicitly, implicitly)(contractId)
-              )
-
         confirmationRequestTimer = metrics.protocolMessages.confirmationRequestCreation
         // Perform phase 1 of the protocol that produces a transaction confirmation request
         request <- confirmationRequestTimer.timeEitherFUS(
@@ -376,7 +362,8 @@ class TransactionProcessingSteps(
               mediator,
               recentSnapshot,
               sessionKeyStore,
-              lookupContractsWithDisclosed,
+              TransactionProcessingSteps
+                .lookupContractsWithDisclosed(disclosedContracts, contractLookup),
               maxSequencingTime,
               protocolVersion,
             )
@@ -1570,6 +1557,23 @@ class TransactionProcessingSteps(
 }
 
 object TransactionProcessingSteps {
+
+  private[canton] def lookupContractsWithDisclosed(
+      disclosedContracts: Map[LfContractId, ContractInstance],
+      contractLookup: ContractLookup { type ContractsCreatedAtTime <: CreationTime.CreatedAt },
+  )(implicit executionContext: ExecutionContext, traceContext: TraceContext): ContractInstanceOfId =
+    (contractId: LfContractId) =>
+      disclosedContracts
+        .get(contractId)
+        .map(contract =>
+          EitherT.rightT[FutureUnlessShutdown, TransactionTreeFactory.ContractLookupError](
+            contract: GenContractInstance
+          )
+        )
+        .getOrElse(
+          TransactionTreeFactory
+            .contractInstanceLookup(contractLookup)(implicitly, implicitly)(contractId)
+        )
 
   final case class SubmissionParam(
       submitterInfo: SubmitterInfo,

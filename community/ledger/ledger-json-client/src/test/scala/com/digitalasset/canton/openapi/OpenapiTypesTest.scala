@@ -801,6 +801,18 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
         ](
           openapi.ExecuteSubmissionAndWaitResponse.fromJson
         ),
+        Mapping[
+          v2.interactive.interactive_submission_service.CostEstimation,
+          openapi.CostEstimation,
+        ](
+          openapi.CostEstimation.fromJson
+        ),
+        Mapping[
+          v2.interactive.interactive_submission_service.CostEstimationHints,
+          openapi.CostEstimationHints,
+        ](
+          openapi.CostEstimationHints.fromJson
+        ),
         Mapping[v2.package_reference.VettedPackages, openapi.VettedPackages](
           openapi.VettedPackages.fromJson
         ),
