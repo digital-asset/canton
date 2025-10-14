@@ -637,8 +637,9 @@ object ParticipantAdminCommands {
 
     final case class ImportPartyAcs(
         acsChunk: ByteString,
-        representativePackageIdOverride: RepresentativePackageIdOverride,
+        workflowIdPrefix: String,
         contractImportMode: ContractImportMode,
+        representativePackageIdOverride: RepresentativePackageIdOverride,
     ) extends GrpcAdminCommand[
           v30.ImportPartyAcsRequest,
           v30.ImportPartyAcsResponse,
@@ -654,8 +655,9 @@ object ParticipantAdminCommands {
         Right(
           v30.ImportPartyAcsRequest(
             acsChunk,
-            Some(representativePackageIdOverride.toProtoV30),
+            workflowIdPrefix,
             contractImportMode.toProtoV30,
+            Some(representativePackageIdOverride.toProtoV30),
           )
         )
 
@@ -668,8 +670,9 @@ object ParticipantAdminCommands {
           (bytes: Array[Byte]) =>
             v30.ImportPartyAcsRequest(
               ByteString.copyFrom(bytes),
-              Some(representativePackageIdOverride.toProtoV30),
+              workflowIdPrefix,
               contractImportMode.toProtoV30,
+              Some(representativePackageIdOverride.toProtoV30),
             ),
           request.acsSnapshot,
         )
@@ -885,8 +888,8 @@ object ParticipantAdminCommands {
         acsChunk: ByteString,
         workflowIdPrefix: String,
         contractImportMode: ContractImportMode,
-        excludedStakeholders: Set[PartyId],
         representativePackageIdOverride: RepresentativePackageIdOverride,
+        excludedStakeholders: Set[PartyId],
     ) extends GrpcAdminCommand[
           v30.ImportAcsRequest,
           v30.ImportAcsResponse,

@@ -10,6 +10,8 @@ header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
 ## until 2025-10-15 (Exclusive)
+- **BREAKING** Add the `workflowIdPrefix` parameter for the import party ACS endpoint to align it with the repair ACS import endpoint.
+  This does NOT break the ACS import endpoint in the repair service!
 - Documented external party on the Ledger API allocation endpoints
 - **BREAKING**: Renamed command `bootstrap.local()` to `bootstrap.synchronizer_local()`. It provides a simple way to bootstrap a local synchronizer.
 - Add a `max_record_time` field in the `PrepareSubmissionRequest` for externally signed transaction.
