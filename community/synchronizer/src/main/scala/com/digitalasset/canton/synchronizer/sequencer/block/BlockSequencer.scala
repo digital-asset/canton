@@ -146,6 +146,13 @@ class BlockSequencer(
     materializer,
     loggerFactory,
   )
+  private val throughputCap =
+    new BlockSequencerThroughputCap(
+      blockSequencerConfig.throughputCap,
+      clock,
+      materializer.system.scheduler,
+      loggerFactory,
+    )
 
   private val (killSwitchF, done) = {
     val headState = stateManager.getHeadState
@@ -178,6 +185,9 @@ class BlockSequencer(
       .async
       .map(updateGenerator.extractBlockEvents)
       .via(stateManager.processBlock(updateGenerator))
+      .wireTap { update =>
+        throughputCap.addBlockUpdate(update.value)
+      }
       .async
       .via(stateManager.applyBlockUpdate(this))
       .wireTap { lastTs =>
@@ -304,6 +314,17 @@ class BlockSequencer(
           )
       }
 
+  private def enforceThroughputCap(
+      submission: SubmissionRequest
+  ): Either[SequencerDeliverError, Unit] =
+    if (throughputCap.shouldRejectTransaction(submission.requestType, submission.sender, 0))
+      Left(
+        SequencerErrors.SubmissionRequestRefused(
+          s"Member ${submission.sender} has reached its throughput cap"
+        )
+      )
+    else Right(())
+
   private def rejectSubmissionsIfOverloaded(
       submission: SubmissionRequest
   ): EitherT[FutureUnlessShutdown, SequencerDeliverError, Unit] =
@@ -341,9 +362,8 @@ class BlockSequencer(
     )
 
     for {
-      _ <-
-        if (submission.isConfirmationRequest) rejectSubmissionsIfOverloaded(submission)
-        else EitherT.rightT[FutureUnlessShutdown, SequencerDeliverError](())
+      _ <- EitherT.fromEither[FutureUnlessShutdown](enforceThroughputCap(submission))
+      _ <- rejectSubmissionsIfOverloaded(submission)
       // TODO(i17584): revisit the consequences of no longer enforcing that
       //  aggregated submissions with signed envelopes define a topology snapshot
       _ <- validateMaxSequencingTime(submission)
@@ -595,11 +615,6 @@ class BlockSequencer(
       if (!ledgerStatus.isActive) SequencerHealthStatus(isActive = false, ledgerStatus.description)
       else if (!isStorageActive)
         SequencerHealthStatus(isActive = false, Some("Can't connect to database"))
-      else if (circuitBreaker.shouldRejectRequests(SubmissionRequestType.ConfirmationRequest))
-        SequencerHealthStatus(
-          isActive = false,
-          Some("Overloaded. Can't receive requests at the moment"),
-        )
       else SequencerHealthStatus(isActive = true, None)
     }
 

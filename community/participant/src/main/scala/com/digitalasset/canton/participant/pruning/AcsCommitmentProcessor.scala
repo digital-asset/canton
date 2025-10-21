@@ -23,12 +23,13 @@ import com.digitalasset.base.error.{
 }
 import com.digitalasset.canton.admin.participant.v30.{ReceivedCommitmentState, SentCommitmentState}
 import com.digitalasset.canton.concurrent.{FutureSupervisor, Threading}
-import com.digitalasset.canton.config.RequireTypes.{
-  NonNegativeInt,
-  NonNegativeLong,
-  PositiveNumeric,
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveNumeric}
+import com.digitalasset.canton.config.{
+  BatchingConfig,
+  CommitmentSendDelay,
+  ProcessingTimeout,
+  TestingConfigInternal,
 }
-import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout, TestingConfigInternal}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.{CantonTimestamp, CantonTimestampSecond}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -160,16 +161,19 @@ import scala.math.Ordering.Implicits.*
   * mode, the participant skips sending and checking commitments for some reconciliation intervals.
   * The parameter governing catch-up mode is:
   *
-  * @param maxCommitmentSendDelayMillis
-  *   Optional parameter to specify the maximum delay in milliseconds for sending out commitments.
-  *   To avoid a spike in network activity at the end of each reconciliation period, commitment
-  *   sending is delayed by default with a random amount uniformly distributed between 0 and max.
-  *   Commitment sending should not be delayed by more than a reconciliation interval, for two
-  *   reasons: (1) it'll overlap with the next round of commitment sends, defeating somewhat the
-  *   purpose of delaying commitment sends; and (2) and might not interact well with the catch-up
-  *   mode, depending on the parameters there. If this is not specified, the maximum delay is
-  *   testingConfig.maxCommitmentSendDelayMillis if specified, otherwise the maximum delay is 2/3 of
-  *   the reconciliation interval.
+  * @param commitmentSendDelay
+  *   Optional parameter to specify the minimum and delay as fraction of the reconciliation interval
+  *   for sending out commitments. To avoid a spike in network activity at the end of each
+  *   reconciliation period, commitment sending is delayed by default with a random amount uniformly
+  *   distributed between min and max. Commitment sending should not be delayed by more than a
+  *   reconciliation interval, for two reasons: (1) It'll overlap with the next round of commitment
+  *   sends, defeating somewhat the purpose of delaying commitment sends; and (2) It might not
+  *   interact well with the catch-up mode, depending on the parameters there. If a commitment delay
+  *   is not specified, the delay is testingConfig.commitmentSendDelay. If
+  *   testingConfig.commitmentSendDelay is not set, commitment sending is delayed by a random amount
+  *   between the default bounds of 1/3 and 5/6. If any of the bounds is not set, we take the
+  *   default value for that bound. If the maximum bound is smaller than the minimum bound, both
+  *   become the default bounds.
   *
   * The constructor of this class is private. Instances of this class can only be created using
   * [[AcsCommitmentProcessor.apply]], which in turn uses the Factory method in the companion object
@@ -200,7 +204,7 @@ class AcsCommitmentProcessor private (
     clock: Clock,
     exitOnFatalFailures: Boolean,
     batchingConfig: BatchingConfig,
-    maxCommitmentSendDelayMillis: Option[NonNegativeInt],
+    commitmentSendDelay: Option[CommitmentSendDelay],
     doNotAwaitOnCheckingIncomingCommitments: Boolean,
 )(implicit ec: ExecutionContext)
     extends AcsChangeListener
@@ -236,6 +240,9 @@ class AcsCommitmentProcessor private (
 
   // used to generate randomized commitment sending delays
   private val rand = new scala.util.Random
+  // fraction of length of reconciliation interval
+  private lazy val defaultMinDelay = 1.0 / 3.0
+  private lazy val defaultMaxDelay = 5.0 / 6.0
 
   /** The sequencer timestamp for which we are ready to process remote commitments.
     *
@@ -680,6 +687,13 @@ class AcsCommitmentProcessor private (
             batchingConfig,
           )
 
+        reconIntervals <- getReconciliationIntervals(
+          completedPeriod.toInclusive.forgetRefinement
+        )
+        reconIntervalLength = reconIntervals.intervals.headOption.fold(0L)(
+          _.intervalLength.duration.toMillis
+        )
+
         _ <-
           if (!catchingUpInProgress || hasCaughtUpToBoundaryRes) {
             for {
@@ -695,7 +709,7 @@ class AcsCommitmentProcessor private (
               _ <- persistRunningCommitments(snapshotRes)
 
             } yield {
-              sendCommitmentMessages(completedPeriod, msgs)
+              sendCommitmentMessages(completedPeriod, msgs, reconIntervalLength)
             }
           } else FutureUnlessShutdown.unit
 
@@ -1295,6 +1309,7 @@ class AcsCommitmentProcessor private (
       local: Iterable[(CommitmentPeriod, AcsCommitment.HashedCommitmentType)],
       lastPruningTime: Option[CantonTimestamp],
       possibleCatchUp: Boolean,
+      intervalMillis: Long,
   )(implicit traceContext: TraceContext): Boolean =
     if (local.isEmpty) {
       if (
@@ -1315,7 +1330,7 @@ class AcsCommitmentProcessor private (
         // end of the catch-up boundary, we then reply with an empty commitment.
         val msg = mkCommitment(remote.sender, AcsCommitmentProcessor.emptyCommitment, remote.period)
 
-        sendCommitmentMessages(remote.period, Map(remote.sender -> msg))
+        sendCommitmentMessages(remote.period, Map(remote.sender -> msg), intervalMillis)
         logger.debug(
           s" ${remote.sender} send a non-empty ACS, but local ACS was empty. returned an empty ACS counter-commitment."
         )
@@ -1390,6 +1405,13 @@ class AcsCommitmentProcessor private (
         completedPeriod.toInclusive.forgetRefinement,
       )
 
+      reconIntervals <- getReconciliationIntervals(
+        completedPeriod.toInclusive.forgetRefinement
+      )
+      reconIntervalLength = reconIntervals.intervals.headOption.fold(0L)(
+        _.intervalLength.duration.toMillis
+      )
+
       _ <- MonadUtil.parTraverseWithLimit_(threadCount)(computed.toList) {
         case (period, counterParticipant, cmt) =>
           logger.debug(
@@ -1423,6 +1445,7 @@ class AcsCommitmentProcessor private (
                 List((period, cmt)),
                 lastPruningTime.map(_.timestamp),
                 possibleCatchUp,
+                reconIntervalLength,
               )
             )
 
@@ -1442,6 +1465,13 @@ class AcsCommitmentProcessor private (
 
             }
 
+            reconIntervals <- getReconciliationIntervals(
+              completedPeriod.toInclusive.forgetRefinement
+            )
+            reconIntervalLength = reconIntervals.intervals.headOption.fold(0L)(
+              _.intervalLength.duration.toMillis
+            )
+
             // if there is a mismatch, send all fine-grained commitments between `lastSentCatchUpCommitmentTimestamp`
             // and `lastProcessedCatchUpCommitmentTimestamp`
             _ <-
@@ -1454,6 +1484,7 @@ class AcsCommitmentProcessor private (
                         lastSentCatchUpCommitmentTimestamp,
                         lastProcessedCatchUpCommitmentTimestamp,
                         filterOutParticipantId = matching.map(c => c.counterParticipant),
+                        intervalMillis = reconIntervalLength,
                       )
                     } else {
                       // send to all counter-participants from whom I have cmts, but they don't match
@@ -1462,6 +1493,7 @@ class AcsCommitmentProcessor private (
                         lastProcessedCatchUpCommitmentTimestamp,
                         filterInParticipantId = mismatches.map(c => c.counterParticipant),
                         filterOutParticipantId = matching.map(c => c.counterParticipant),
+                        reconIntervalLength,
                       )
                     }
                 } yield res
@@ -1584,19 +1616,36 @@ class AcsCommitmentProcessor private (
   private def sendCommitmentMessages(
       period: CommitmentPeriod,
       msgs: Map[ParticipantId, AcsCommitment],
+      intervalMillis: Long,
   )(implicit traceContext: TraceContext): Unit = {
 
-    // delay sending out commitments by at most (in this order): maxCommitmentSendDelayMillis, or
-    // testingConfig.maxCommitmentSendDelayMillis, or 2/3 of the reconciliation interval
-    val maxDelayMillis =
-      maxCommitmentSendDelayMillis.fold(testingConfig.maxCommitmentSendDelayMillis.fold({
-        val latestReconciliationInterval =
-          sortedReconciliationIntervalsProvider.getApproximateLatestReconciliationInterval
-            .map(_.intervalLength.toScala)
-            .getOrElse(Duration.Zero)
-        2 * latestReconciliationInterval.toMillis.toInt / 3
-      })(_.value))(_.value)
-    val delayMillis = if (maxDelayMillis > 0) rand.nextInt(maxDelayMillis) else 0
+    def contentsOrDefaults(delay: CommitmentSendDelay): (Double, Double) =
+      (
+        delay.minCommitmentSendDelay.map(_.n.value).getOrElse(defaultMinDelay),
+        delay.maxCommitmentSendDelay.map(_.n.value).getOrElse(defaultMaxDelay),
+      )
+
+    // delay sending out commitments by (in this order): commitmentSendDelay, or testingConfig.commitmentSendDelay,
+    // or at least defaultMinDelay and at most defaultMaxDelay of the reconciliation interval
+    val (minDelayFraction, maxDelayFraction) =
+      commitmentSendDelay.fold(
+        testingConfig.commitmentSendDelay.fold({
+          (defaultMinDelay, defaultMaxDelay)
+        })(delay => contentsOrDefaults(delay))
+      )(delay => contentsOrDefaults(delay))
+    val randDelayMillis = // max bound smaller or equal to the min bound
+      (if (maxDelayFraction < minDelayFraction) {
+         rand.between(
+           defaultMinDelay,
+           defaultMaxDelay,
+         ) * intervalMillis
+       } else if (maxDelayFraction == minDelayFraction) {
+         minDelayFraction * intervalMillis
+       } else
+         rand.between(
+           minDelayFraction,
+           maxDelayFraction,
+         ) * intervalMillis).toLong
 
     def sendUnlessClosing() = {
       implicit val metricsContext: MetricsContext = MetricsContext("type" -> "send-commitment")
@@ -1641,10 +1690,10 @@ class AcsCommitmentProcessor private (
           clock
             .scheduleAfter(
               _ => sendUnlessClosing(),
-              java.time.Duration.ofMillis(delayMillis.toLong),
+              java.time.Duration.ofMillis(randDelayMillis),
             ),
           s"Failed to schedule sending commitment message batch for period $period at time ${clock.now
-              .add(java.time.Duration.ofMillis(delayMillis.toLong))}",
+              .add(java.time.Duration.ofMillis(randDelayMillis))}",
           logPassiveInstanceAtInfo = true,
         )
         .discard
@@ -1666,6 +1715,7 @@ class AcsCommitmentProcessor private (
       toInclusive: Option[CantonTimestampSecond],
       filterInParticipantId: Seq[ParticipantId] = Seq.empty,
       filterOutParticipantId: Seq[ParticipantId],
+      intervalMillis: Long,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
@@ -1749,7 +1799,7 @@ class AcsCommitmentProcessor private (
             }
           _ <- storeCommitments(msgs)
           // TODO(i15333) batch more commitments and handle the case when we reach the maximum message limit.
-          _ = sendCommitmentMessages(period, msgs)
+          _ = sendCommitmentMessages(period, msgs, intervalMillis)
         } yield ()
       }
       .toSeq
@@ -1786,9 +1836,24 @@ class AcsCommitmentProcessor private (
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     for {
       splitPeriods <- sortedReconciliationIntervalsProvider.splitCommitmentPeriod(cmt.period)
+      reconIntervals <- getReconciliationIntervals(
+        cmt.period.toInclusive.forgetRefinement
+      )
+      reconIntervalLength = reconIntervals.intervals.headOption.fold(0L)(
+        _.intervalLength.duration.toMillis
+      )
+
       _ <- splitPeriods match {
         case Some(periods) =>
-          if (matches(cmt, commitments, lastPruningTime.map(_.timestamp), possibleCatchUp)) {
+          if (
+            matches(
+              cmt,
+              commitments,
+              lastPruningTime.map(_.timestamp),
+              possibleCatchUp,
+              reconIntervalLength,
+            )
+          ) {
             for {
               _ <- multiHostMark(cmt.sender, periods)
               _ <-
@@ -1929,7 +1994,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       clock: Clock,
       exitOnFatalFailures: Boolean,
       batchingConfig: BatchingConfig,
-      maxCommitmentSendDelayMillis: Option[NonNegativeInt] = None,
+      maxCommitmentSendDelayMillis: Option[CommitmentSendDelay] = None,
       doNotAwaitOnCheckingIncomingCommitments: Boolean,
   )(implicit
       ec: ExecutionContext,

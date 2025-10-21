@@ -17,8 +17,14 @@ import com.digitalasset.canton.admin.api.client.data.LedgerApiUser
 import com.digitalasset.canton.auth.CantonAdminToken
 import com.digitalasset.canton.config.ClientConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.GrpcAdminCommandRunner
+import com.digitalasset.canton.console.CommandErrors.{CommandError, GenericCommandError}
 import com.digitalasset.canton.console.declarative.DeclarativeApi.UpdateResult
+import com.digitalasset.canton.console.declarative.DeclarativeParticipantApi.{
+  Err,
+  NotFound,
+  QueryResult,
+}
+import com.digitalasset.canton.console.{CommandSuccessful, GrpcAdminCommandRunner}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api
 import com.digitalasset.canton.ledger.api.IdentityProviderId
@@ -39,14 +45,14 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.BinaryFileUtil
+import com.digitalasset.canton.util.{BinaryFileUtil, MonadUtil}
 import com.digitalasset.canton.{SynchronizerAlias, config}
 import com.digitalasset.daml.lf.archive.DarParser
 import com.google.protobuf.field_mask.FieldMask
 
 import java.io.{File, FileInputStream}
 import java.util.zip.ZipInputStream
-import scala.collection.mutable
+import scala.annotation.tailrec
 import scala.concurrent.ExecutionContext
 
 class DeclarativeParticipantApi(
@@ -79,24 +85,46 @@ class DeclarativeParticipantApi(
       runner: GrpcAdminCommandRunner,
       cfg: ClientConfig,
       command: GrpcAdminCommand[_, _, Result],
-  )(implicit traceContext: TraceContext): Either[String, Result] = if (
+  )(implicit traceContext: TraceContext): Either[QueryResult, Result] = if (
     closeContext.context.isClosing
   )
-    Left("Node is shutting down")
+    Left(Err("Node is shutting down"))
   else
-    activeAdminToken.fold(Left("Node instance is passive"): Either[String, Result])(token =>
-      runner.runCommandWithExistingTrace(name, command, cfg, Some(token.secret)).toEither
+    activeAdminToken.fold(Left(Err("Node instance is passive")): Either[QueryResult, Result])(
+      token =>
+        runner.runCommandWithExistingTrace(name, command, cfg, Some(token.secret)) match {
+          case CommandSuccessful(value) => Right(value)
+          case GenericCommandError(cause) if cause.contains("NOT_FOUND/") =>
+            Left(NotFound(cause))
+          case c: CommandError => Left(Err(c.cause))
+        }
     )
 
   private def queryAdminApi[Result](
       command: GrpcAdminCommand[_, _, Result]
   )(implicit traceContext: TraceContext): Either[String, Result] =
-    queryApi(adminApiRunner, adminApiConfig, command)
-
+    queryApi(adminApiRunner, adminApiConfig, command).leftMap(_.str)
   private def queryLedgerApi[Result](
       command: GrpcAdminCommand[_, _, Result]
   )(implicit traceContext: TraceContext): Either[String, Result] =
-    queryApi(ledgerApiRunner, ledgerApiConfig, command)
+    queryApi(ledgerApiRunner, ledgerApiConfig, command).leftMap(_.str)
+
+  private def toOptionalE[Result](
+      res: Either[QueryResult, Result]
+  ): Either[String, Option[Result]] = res match {
+    case Right(v) => Right(Some(v))
+    case Left(NotFound(_)) => Right(None)
+    case Left(Err(str)) => Left(str)
+  }
+
+  private def queryAdminApiIfExists[Result](
+      command: GrpcAdminCommand[_, _, Result]
+  )(implicit traceContext: TraceContext): Either[String, Option[Result]] =
+    toOptionalE(queryApi(adminApiRunner, adminApiConfig, command))
+  private def queryLedgerApiIfExists[Result](
+      command: GrpcAdminCommand[_, _, Result]
+  )(implicit traceContext: TraceContext): Either[String, Option[Result]] =
+    toOptionalE(queryApi(ledgerApiRunner, ledgerApiConfig, command))
 
   override protected def prepare(config: DeclarativeParticipantConfig)(implicit
       traceContext: TraceContext
@@ -177,6 +205,20 @@ class DeclarativeParticipantApi(
         filterParticipant = participantId.filterString,
       )
     )
+    def fetchHostedTuple(filterParty: String, synchronizerId: SynchronizerId) =
+      fetchHosted(filterParty, synchronizerId).map(_.flatMap { party2Participant =>
+        val maybePermission = party2Participant.item.participants
+          .find(_.participantId == participantId)
+          .map(_.permission)
+        maybePermission
+          .map(permission =>
+            (
+              (party2Participant.item.partyId.uid, synchronizerId),
+              ParticipantPermissionConfig.fromInternal(permission),
+            )
+          )
+          .toList
+      })
 
     def createTopologyTx(
         uid: UniqueIdentifier,
@@ -220,22 +262,33 @@ class DeclarativeParticipantApi(
 
     def awaitLedgerApiServer(
         parties: Seq[(UniqueIdentifier, SynchronizerId)]
-    ): Either[String, Boolean] =
+    ): Either[String, Boolean] = {
+      @tailrec
+      def go(
+          idps: List[String],
+          pending: Set[PartyId],
+      ): Either[String, Set[PartyId]] = if (pending.isEmpty) Right(Set.empty)
+      else
+        idps match {
+          case Nil => Right(pending)
+          case next :: rest =>
+            val unknown = findPartiesNotKnownToIdp(next, pending)
+            unknown match {
+              case Right(unknown) => go(rest, unknown)
+              case Left(value) => Left(value)
+            }
+        }
       for {
         idps <- queryLedgerApi(LedgerApiCommands.IdentityProviderConfigs.List())
         // loop over all idps and include default one
-        observed <- (idps.map(_.identityProviderId) :+ "").flatTraverse(idp =>
-          queryLedgerApi(
-            LedgerApiCommands.PartyManagementService.ListKnownParties(identityProviderId = idp)
-          )
+        notFound <- go(
+          (idps.map(_.identityProviderId) :+ "").toList,
+          parties.map { case (uid, _) => PartyId(uid) }.toSet,
         )
-        observedUids <- observed
-          .traverse(details => UniqueIdentifier.fromProtoPrimitive(details.party, "party"))
-          .leftMap(_.toString)
       } yield {
-        val observedSet = observedUids.toSet
-        parties.map(_._1).toSet.subsetOf(observedSet)
+        notFound.isEmpty
       }
+    }
 
     queryAdminApi(ListConnectedSynchronizers())
       .flatMap { synchronizerIds =>
@@ -255,19 +308,7 @@ class DeclarativeParticipantApi(
         def fetchAll() =
           // fold synchronizers and found parties and find the ones that are allocated to our node
           synchronizerIds.map(_.synchronizerId).flatTraverse { synchronizerId =>
-            fetchHosted(filterParty = "", synchronizerId).map(_.flatMap { party2Participant =>
-              val maybePermission = party2Participant.item.participants
-                .find(_.participantId == participantId)
-                .map(_.permission)
-              maybePermission
-                .map(permission =>
-                  (
-                    (party2Participant.item.partyId.uid, synchronizerId),
-                    ParticipantPermissionConfig.fromInternal(permission),
-                  )
-                )
-                .toList
-            })
+            fetchHostedTuple(filterParty = "", synchronizerId)
           }
 
         run[(UniqueIdentifier, SynchronizerId), ParticipantPermissionConfig](
@@ -276,6 +317,16 @@ class DeclarativeParticipantApi(
           checkSelfConsistency,
           want = wanted,
           fetch = _ => fetchAll(),
+          get = { case (uid, synchronizerId) =>
+            fetchHostedTuple(uid.toProtoPrimitive, synchronizerId).map(_.toList).flatMap {
+              case (_, v) :: Nil => Right(Some(v))
+              case Nil => Right(None)
+              case rst =>
+                Left(
+                  s"Multiple entries found for party $uid and synchronizer $synchronizerId: $rst"
+                )
+            }
+          },
           add = { case ((uid, synchronizerId), permission) =>
             createTopologyTx(uid, synchronizerId, permission.toNative)
           },
@@ -288,6 +339,19 @@ class DeclarativeParticipantApi(
       }
   }
 
+  private def findPartiesNotKnownToIdp(idp: String, parties: Set[PartyId])(implicit
+      traceContext: TraceContext
+  ) =
+    queryLedgerApi(
+      LedgerApiCommands.PartyManagementService.GetParties(
+        parties = parties.toList,
+        identityProviderId = idp,
+        failOnNotFound = false,
+      )
+    ).map { found =>
+      parties -- found.keySet
+    }
+
   private def syncUsers(
       participantId: ParticipantId,
       users: Seq[DeclarativeUserConfig],
@@ -297,28 +361,57 @@ class DeclarativeParticipantApi(
       traceContext: TraceContext
   ): Either[String, UpdateResult] = {
 
-    // temporarily cache the available parties
-    val idpParties = mutable.Map[String, Set[String]]()
-    def getIdpParties(idp: String): Either[String, Set[String]] =
-      idpParties.get(idp) match {
-        case Some(parties) => Right(parties)
-        case None =>
-          queryLedgerApi(
-            LedgerApiCommands.PartyManagementService.ListKnownParties(identityProviderId = idp)
-          ).map { parties =>
-            val partySet = parties.map(_.party).toSet
-            idpParties.put(idp, partySet).discard
-            partySet
-          }
-      }
+    def fetchUserRights(user: LedgerApiUser): Either[String, DeclarativeUserConfig] = user match {
+      case LedgerApiUser(id, primaryParty, isDeactivated, metadata, identityProviderId) =>
+        queryLedgerApi(
+          LedgerApiCommands.Users.Rights.List(id = id, identityProviderId = identityProviderId)
+        ).map { rights =>
+          DeclarativeUserConfig(
+            user = id,
+            primaryParty = primaryParty.map(_.toProtoPrimitive),
+            isDeactivated = isDeactivated,
+            annotations = metadata.annotations,
+            identityProviderId = identityProviderId,
+            rights = DeclarativeUserRightsConfig(
+              actAs = rights.actAs.map(_.toProtoPrimitive),
+              readAs = rights.readAs.map(_.toProtoPrimitive),
+              participantAdmin = rights.participantAdmin,
+              identityProviderAdmin = rights.identityProviderAdmin,
+              readAsAnyParty = rights.readAsAnyParty,
+            ),
+          )(resourceVersion = metadata.resourceVersion)
+        }
+    }
+
+    val idpsE = queryLedgerApi(
+      LedgerApiCommands.IdentityProviderConfigs.List()
+    ).map(x => "" +: x.map(_.identityProviderId)) // empty string to load default idp)
+
+    def getUser(id: String): Either[String, Option[DeclarativeUserConfig]] = idpsE.flatMap { idps =>
+      MonadUtil
+        .foldLeftM(None: Option[LedgerApiUser], idps) {
+          case (Some(cfg), _) => Right(Some(cfg))
+          case (None, idp) =>
+            // using list user and not get user as get user will return permission denied and log warning
+            // however, as user ids are unique, this will give the same result
+            queryLedgerApiIfExists(
+              LedgerApiCommands.Users
+                .List(filterUser = id, identityProviderId = idp, pageToken = "", pageSize = 10000)
+            ).map { res =>
+              res.flatMap(_.users.find(_.id == id))
+            }
+        }
+        .flatMap {
+          case Some(user) => fetchUserRights(user).map(c => Some(c))
+          case None => Right(None)
+        }
+    }
 
     def fetchUsers(limit: PositiveInt): Either[String, Seq[(String, DeclarativeUserConfig)]] =
       for {
         // meeh, we need to iterate over all idps to load all users
-        idps <- queryLedgerApi(
-          LedgerApiCommands.IdentityProviderConfigs.List()
-        ).map(_.map(_.identityProviderId))
-        users <- (idps :+ "") // empty string to load default idp
+        idps <- idpsE
+        users <- idps
           .traverse(idp =>
             queryLedgerApi(
               LedgerApiCommands.Users.List(
@@ -330,29 +423,8 @@ class DeclarativeParticipantApi(
             )
           )
           .map(_.flatMap(_.users.filter(_.id != "participant_admin")))
-        parsedUsers <- users.traverse {
-          case LedgerApiUser(id, primaryParty, isDeactivated, metadata, identityProviderId) =>
-            queryLedgerApi(
-              LedgerApiCommands.Users.Rights.List(id = id, identityProviderId = identityProviderId)
-            ).map { rights =>
-              (
-                id,
-                DeclarativeUserConfig(
-                  user = id,
-                  primaryParty = primaryParty.map(_.toProtoPrimitive),
-                  isDeactivated = isDeactivated,
-                  annotations = metadata.annotations,
-                  identityProviderId = identityProviderId,
-                  rights = DeclarativeUserRightsConfig(
-                    actAs = rights.actAs.map(_.toProtoPrimitive),
-                    readAs = rights.readAs.map(_.toProtoPrimitive),
-                    participantAdmin = rights.participantAdmin,
-                    identityProviderAdmin = rights.identityProviderAdmin,
-                    readAsAnyParty = rights.readAsAnyParty,
-                  ),
-                )(resourceVersion = metadata.resourceVersion),
-              )
-            }
+        parsedUsers <- users.traverse { user =>
+          fetchUserRights(user).map(cfg => (cfg.user, cfg))
         }
       } yield parsedUsers.take(limit.value)
 
@@ -477,29 +549,25 @@ class DeclarativeParticipantApi(
         )
       } else Either.unit
 
-    def activePartyFilter(idp: String, user: String): Either[String, String => Boolean] =
-      getIdpParties(idp).map { parties => party =>
-        {
-          if (!parties.contains(party)) {
-            logger.info(s"User $user refers to party $party not yet known to the ledger api server")
-            false
-          } else true
-        }
-      }
-
     val wantedE =
       users.traverse { user =>
-        activePartyFilter(user.identityProviderId, user.user).map { filter =>
-          (
-            user.user,
-            user.mapPartiesToNamespace(
-              participantId.uid.namespace,
-              filter,
-            ),
-          )
+        val mapped = user.mapPartiesToNamespace(
+          participantId.uid.namespace
+        )
 
+        // Ledger API server can only assign to parties it has already seen. Therefore, we remove
+        // the parties not yet known. This can happen if we don't have a synchronizer connection
+        // when setting up the users.
+        findPartiesNotKnownToIdp(user.identityProviderId, mapped.referencedParties).map { unknown =>
+          if (unknown.nonEmpty) {
+            logger.info(
+              s"User ${user.user} with idp=${user.identityProviderId} refers to the following parties not known to the Ledger API server: $unknown"
+            )
+          }
+          (user.user, mapped.removeParties(unknown))
         }
       }
+
     wantedE.flatMap { wanted =>
       run[String, DeclarativeUserConfig](
         "users",
@@ -507,6 +575,7 @@ class DeclarativeParticipantApi(
         checkSelfConsistency,
         want = wanted,
         fetch = fetchUsers,
+        get = getUser,
         add = { case (_, user) =>
           createUser(user)
         },
@@ -565,6 +634,11 @@ class DeclarativeParticipantApi(
         .map(_.map { case (synchronizerConnectionConfig, _) => synchronizerConnectionConfig }
           .map(toDeclarative))
 
+    def getConnection(
+        alias: SynchronizerAlias
+    ): Either[String, Option[DeclarativeConnectionConfig]] =
+      fetchConnections().map(_.collectFirst { case (a, c) if a == alias => c })
+
     def removeSynchronizerConnection(
         synchronizerAlias: SynchronizerAlias
     ): Either[String, Unit] =
@@ -618,6 +692,7 @@ class DeclarativeParticipantApi(
       checkSelfConsistent = checkSelfConsistent,
       want = connections.map(c => (SynchronizerAlias.tryCreate(c.synchronizerAlias), c)),
       fetch = _ => fetchConnections(),
+      get = getConnection,
       add = { case (_, config) => add(config) },
       upd = { case (_, config, existing) =>
         if (config.isEquivalent(existing)) Either.unit
@@ -648,6 +723,13 @@ class DeclarativeParticipantApi(
       queryLedgerApi(
         LedgerApiCommands.IdentityProviderConfigs.List()
       ).map(_.map(c => (c.identityProviderId, toDeclarative(c))))
+
+    def getIdp(idpName: String): Either[String, Option[DeclarativeIdpConfig]] =
+      queryLedgerApiIfExists(
+        LedgerApiCommands.IdentityProviderConfigs.Get(identityProviderId =
+          IdentityProviderId.Id.assertFromString(idpName)
+        )
+      ).map(_.map(toDeclarative))
 
     def add(config: DeclarativeIdpConfig): Either[String, Unit] =
       queryLedgerApi(
@@ -687,6 +769,7 @@ class DeclarativeParticipantApi(
       checkSelfConsistent = checkSelfConsistent,
       want = idps.map(c => (c.identityProviderId, c)),
       fetch = _ => fetchIdps(),
+      get = getIdp,
       add = { case (_, config) => add(config) },
       upd = { case (_, config, _) => update(config) },
       rm = (idp, _) => removeIdp(idp),
@@ -753,12 +836,17 @@ class DeclarativeParticipantApi(
         .filterNot(_.name == "AdminWorkflows")
         .map(_.mainPackageId)
         .map((_, "<ignored string>"))
+    def getDar(mainPkgId: String): Either[String, Option[String]] =
+      queryAdminApiIfExists(
+        ParticipantAdminCommands.Package.GetDarContents(mainPackageId = mainPkgId)
+      ).map(_.map(_ => "<ignored string>"))
     run[String, String](
       "dars",
       removeExcess = false,
       checkSelfConsistency,
       want = want,
       fetch = fetchDars,
+      get = getDar,
       add = { case (_, file) =>
         queryAdminApi(
           ParticipantAdminCommands.Package.UploadDar(
@@ -779,4 +867,13 @@ class DeclarativeParticipantApi(
 
   }
 
+}
+
+object DeclarativeParticipantApi {
+
+  private sealed trait QueryResult {
+    def str: String
+  }
+  private final case class Err(str: String) extends QueryResult
+  private final case class NotFound(str: String) extends QueryResult
 }
