@@ -625,7 +625,7 @@ object BuildCommon {
       `mock-kms-driver`,
       `ledger-common`,
       `ledger-common-dars`,
-      `ledger-common-dars-lf-v2-1`,
+      `ledger-common-dars-lf-v2-2`,
       `ledger-common-dars-lf-v2-dev`,
       `ledger-api-core`,
       `ledger-json-api`,
@@ -635,9 +635,9 @@ object BuildCommon {
       `transcode`,
       `conformance-testing`,
       `ledger-api-bench-tool`,
-      `ledger-test-tool-suites-2-1`,
+      `ledger-test-tool-suites-2-2`,
       `ledger-test-tool-suites-2-dev`,
-      `ledger-test-tool-2-1`,
+      `ledger-test-tool-2-2`,
       `ledger-test-tool-2-dev`,
       `enterprise-upgrading-integration-tests`,
     )
@@ -1524,7 +1524,7 @@ object BuildCommon {
         DamlProjects.`daml-jwt`,
         DamlProjects.`bindings-java` % "test->test",
         `util-observability` % "compile->compile;test->test",
-        `ledger-common-dars-lf-v2-1` % "test",
+        `ledger-common-dars-lf-v2-2` % "test",
         `util-external`,
       )
       .settings(
@@ -1533,7 +1533,7 @@ object BuildCommon {
           PB.gens.java -> (Compile / sourceManaged).value / "protobuf",
           scalapb.gen(flatPackage = false) -> (Compile / sourceManaged).value / "protobuf",
         ),
-        Test / unmanagedResourceDirectories += (`ledger-common-dars-lf-v2-1` / Compile / resourceManaged).value,
+        Test / unmanagedResourceDirectories += (`ledger-common-dars-lf-v2-2` / Compile / resourceManaged).value,
         addProtobufFilesToHeaderCheck(Compile),
         libraryDependencies ++= Seq(
           daml_libs_scala_ledger_resources,
@@ -1638,6 +1638,11 @@ object BuildCommon {
           s"com.daml.ledger.test.java.vetting_main_split_lineage_2_0_0",
         ),
         (
+          (Compile / damlSourceDirectory).value / "main" / "daml" / "vetting_main" / "upgrade-incompatible-3.0.0",
+          (Compile / damlDarOutput).value / "vetting-main-3.0.0.dar",
+          s"com.daml.ledger.test.java.vetting_main_3_0_0",
+        ),
+        (
           (Compile / damlSourceDirectory).value / "main" / "daml" / "vetting_alt",
           (Compile / damlDarOutput).value / "vetting-alt-1.0.0.dar",
           s"com.daml.ledger.test.java.vetting_alt",
@@ -1655,7 +1660,7 @@ object BuildCommon {
       ),
     )
 
-    lazy val `ledger-common-dars-lf-v2-1` = createLedgerCommonDarsProject(lfVersion = "2.1")
+    lazy val `ledger-common-dars-lf-v2-2` = createLedgerCommonDarsProject(lfVersion = "2.2")
     lazy val `ledger-common-dars-lf-v2-dev` = createLedgerCommonDarsProject(lfVersion = "2.dev")
 
     // The TlsCertificateRevocationCheckingSpec relies on the "com.sun.net.ssl.checkRevocation" system variable to
@@ -1759,7 +1764,7 @@ object BuildCommon {
           coverageEnabled := false,
           Test / damlCodeGeneration := Seq(
             (
-              (Test / sourceDirectory).value / "daml" / "v2_1",
+              (Test / sourceDirectory).value / "daml" / "v2_2",
               (Test / damlDarOutput).value / "JsonEncodingTest.dar",
               "com.digitalasset.canton.http.json.encoding",
             ),
@@ -1963,7 +1968,7 @@ object BuildCommon {
           Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
           Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
           scalacOptions --= JvmRulesPlugin.scalacOptionsToDisableForTests,
-          // 2.1 tests will fail to compile with a 2.1 dar, so we exclude them from the test suite
+          // 2.2 tests will fail to compile with a 2.2 dar, so we exclude them from the test suite
           if (lfVersion != "2.dev")
             Seq(
               Compile / unmanagedSources / excludeFilter := "*NamesSpec.scala" || ((_: File).getAbsolutePath
@@ -1972,17 +1977,17 @@ object BuildCommon {
           else Seq.empty,
         )
 
-    lazy val `ledger-test-tool-suites-2-1` =
-      ledgerTestToolSuitesProject("2.1", `ledger-common-dars-lf-v2-1`)
+    lazy val `ledger-test-tool-suites-2-2` =
+      ledgerTestToolSuitesProject("2.2", `ledger-common-dars-lf-v2-2`)
     lazy val `ledger-test-tool-suites-2-dev` =
       ledgerTestToolSuitesProject(
         "2.dev",
         `ledger-common-dars-lf-v2-dev`,
         // Suites sources are identical between test tool versions
-        // Hence, keep ledger-test-tool-suites-2-1 as primary sbt module holding the sources
+        // Hence, keep ledger-test-tool-suites-2-2 as primary sbt module holding the sources
         // and all other sbt suites modules add them as unmanagedSourceDirectories for compilation
-        Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "lf-v2.1" / "src",
-        Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "lf-v2.1" / "src",
+        Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "lf-v2.2" / "src",
+        Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "lf-v2.2" / "src",
       )
 
     def ledgerTestToolProject(lfVersion: String, ledgerTestToolSuites: Project): Project =
@@ -2010,7 +2015,7 @@ object BuildCommon {
           },
         )
 
-    lazy val `ledger-test-tool-2-1` = ledgerTestToolProject("2.1", `ledger-test-tool-suites-2-1`)
+    lazy val `ledger-test-tool-2-2` = ledgerTestToolProject("2.2", `ledger-test-tool-suites-2-2`)
     lazy val `ledger-test-tool-2-dev` =
       ledgerTestToolProject("2.dev", `ledger-test-tool-suites-2-dev`)
 
@@ -2018,7 +2023,7 @@ object BuildCommon {
       .in(file("community/conformance-testing"))
       .dependsOn(
         `community-app` % "compile->compile;test->test",
-        `ledger-test-tool-2-1` % Test,
+        `ledger-test-tool-2-2` % Test,
         `ledger-test-tool-2-dev` % Test,
       )
       .settings(
@@ -2026,15 +2031,15 @@ object BuildCommon {
         // Allow to exit the systematic testing generator app
         (Test / run / trapExit) := false,
         Test / run := (Test / run)
-          .dependsOn(`ledger-test-tool-2-1` / assembly, `ledger-test-tool-2-dev` / assembly)
+          .dependsOn(`ledger-test-tool-2-2` / assembly, `ledger-test-tool-2-dev` / assembly)
           .evaluated,
         Test / test := (Test / test)
-          .dependsOn(`ledger-test-tool-2-1` / assembly, `ledger-test-tool-2-dev` / assembly)
+          .dependsOn(`ledger-test-tool-2-2` / assembly, `ledger-test-tool-2-dev` / assembly)
           .value,
         Test / testOnly := (Test / testOnly)
-          .dependsOn(`ledger-test-tool-2-1` / assembly, `ledger-test-tool-2-dev` / assembly)
+          .dependsOn(`ledger-test-tool-2-2` / assembly, `ledger-test-tool-2-dev` / assembly)
           .evaluated,
-        Test / unmanagedResourceDirectories += (`ledger-common-dars-lf-v2-1` / Compile / resourceManaged).value,
+        Test / unmanagedResourceDirectories += (`ledger-common-dars-lf-v2-2` / Compile / resourceManaged).value,
       )
 
     // TODO(#25385): Consider extracting this integration test setup into its own sbt file due to its size

@@ -9,7 +9,50 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2025-10-22 (Exclusive)
+- **BREAKING** The default security configuration of the APIs has been tightened
+    - Maximum token lifetime accepted by the Ledger API (gRPC and JSON) and Admin API has been reduced. Tokens which have
+      time to live longer than 5 minutes will not be accepted. This default value can be overridden through
+      ```
+      canton.participants.<participant>.ledger-api.max-token-lifetime=10.minutes
+      ```
+      and
+      ```
+      canton.participants.<participant>.admin-api.max-token-lifetime=10.minutes
+      ```
+    - The JWKS cache expiration has been reduced to 5 minutes. A JWKS key will be evicted from the cache after that time and
+      the participant will access the JWKS address again to pull the fresh keys. You can modify this behavior by setting
+      ```
+      canton.participants.<participant>.ledger-api.jwks-cache-config.cache-expiration=10.minutes
+      ```
+      and
+      ```
+      canton.participants.<participant>.admin-api.jwks-cache-config.cache-expiration=10.minutes
+      ```
+    - By default, the Canton Admin Tokens no longer entitle the bearer to operate as a `ParticipantAdmin` nor to `ActAs` any party.
+      This behavior can be altered by setting
+      ```
+      canton.participants.<participant>.ledger-api.admin-token-config.act-as-any-party-claim=true
+      canton.participants.<participant>.ledger-api.admin-token-config.admin-claim=true
+      ```
+- Introduced `/dars/validate` JSON API endpoint to validate DAR files without uploading them, mirroring
+  the gRPC `PackageManagementService.ValidateDarFile` endpoint.
+  As part of this, also aliased POST `packages` (for DAR upload) to POST `dars`.
+- **BREAKING**: Renamed `complete_party_onboarding` command to `clear_party_onboarding_flag` as well as
+  the gRPC RPC `CompletePartyOnboarding` to `ClearPartyOnboardingFlag` in the `party_management_service.proto`.
+- **BREAKING**: Removed force flag `FORCE_FLAG_ALLOW_UNVET_PACKAGE_WITH_ACTIVE_CONTRACTS`.
+  Unvetting a package with active contracts is not a dangerous operation anymore.
+- **BREAKING**: Ports for (admin, gRPC Ledger, JSON Ledger, public) API have to be provided explicitly
+  (they are not generated automatically anymore.)
+- Participant background pruning now motivates Postgres to use the partial pruning index on the
+  `par_active_contracts` table. The newly introduced
+  `canton.participants.<participant>.parameters.stores.journal-pruning.max-items-expected-to-prune-per-batch`
+  config can be adapted in case the pruning index is not used in some cases.
+- ParticipantRepairService.ExportAcsOld is deprecated
+
 ## until 2025-10-15 (Exclusive)
+- **BREAKING** Add the `workflowIdPrefix` parameter for the import party ACS endpoint to align it with the repair ACS import endpoint.
+  This does NOT break the ACS import endpoint in the repair service!
 - Documented external party on the Ledger API allocation endpoints
 - **BREAKING**: Renamed command `bootstrap.local()` to `bootstrap.synchronizer_local()`. It provides a simple way to bootstrap a local synchronizer.
 - Add a `max_record_time` field in the `PrepareSubmissionRequest` for externally signed transaction.
@@ -110,7 +153,10 @@ To consume the update, re-generate any client code generated from the protobuf d
             - `get_filtered_active_contract_ids`
             - `get_active_contract_batch`
             - `pruneable_contracts`
-
+- `PackageManagementService.UpdateVettedPackages` request is extended with the `UPDATE_VETTED_PACKAGES_FORCE_FLAG_ALLOW_VET_INCOMPATIBLE_UPGRADES`
+  force flag to allow vetting packages that are upgrade incompatible.
+- `PackageManagementService.UpdateVettedPackages` request is extended with the `UPDATE_VETTED_PACKAGES_FORCE_FLAG_ALLOW_UNVETTED_DEPENDENCIES`
+  force flag to allow vetting packages without vetting one or more of their dependencies.
 
 ## until 2025-10-08 (Exclusive)
 - The GCP KMS now supports the `Ed25519` scheme for signing.

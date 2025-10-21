@@ -20,4 +20,7 @@ trait IndexParticipantPruningService {
       loggingContext: LoggingContextWithTrace
   ): Future[Unit]
 
+  def indexDbPrunedUpTo(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[Option[Offset]]
 }

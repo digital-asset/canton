@@ -56,7 +56,6 @@ import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.scaladsl.Sink
 
 import java.io.{ByteArrayOutputStream, OutputStream}
-import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.GZIPOutputStream
 import scala.concurrent.{ExecutionContextExecutor, Future}
@@ -65,6 +64,7 @@ import scala.util.{Failure, Success, Try}
 /** grpc service to allow modifying party hosting on participants
   */
 class GrpcPartyManagementService(
+    participantId: ParticipantId,
     adminWorkflowO: Option[PartyReplicationAdminWorkflow],
     processingTimeout: ProcessingTimeout,
     sync: CantonSyncService,
@@ -209,11 +209,16 @@ class GrpcPartyManagementService(
         .leftMap(PartyManagementServiceError.InvalidState.Error(_))
       allLogicalSynchronizerIds = sync.syncPersistentStateManager.getAllLatest.keySet
 
-      validRequest <- validateExportPartyAcsRequest(request, ledgerEnd, allLogicalSynchronizerIds)
+      validRequest <- validatePartyReplicationCommonRequestParams(
+        request.partyId,
+        request.synchronizerId,
+        request.beginOffsetExclusive,
+        request.waitForActivationTimeout,
+      )(ledgerEnd, allLogicalSynchronizerIds)
+
       ValidPartyReplicationCommonRequestParams(
         party,
         synchronizerId,
-        targetParticipant,
         beginOffsetExclusive,
         waitForActivationTimeout,
       ) = validRequest
@@ -223,13 +228,20 @@ class GrpcPartyManagementService(
         PartyManagementServiceError.InvalidState.Error("Unavailable internal index service"),
       )
 
+      targetParticipant <- EitherT.fromEither[FutureUnlessShutdown](
+        UniqueIdentifier
+          .fromProtoPrimitive(request.targetParticipantUid, "target_participant_uid")
+          .map(ParticipantId(_))
+          .leftMap(error => PartyManagementServiceError.InvalidArgument.Error(error.message))
+      )
+
       topologyTx <-
         findSinglePartyActivationTopologyTransaction(
           indexService,
           party,
           beginOffsetExclusive,
           synchronizerId,
-          targetParticipant,
+          targetParticipant = targetParticipant,
           waitForActivationTimeout,
         )
 
@@ -243,9 +255,7 @@ class GrpcPartyManagementService(
         client.awaitSnapshot(activationTimestamp.immediateSuccessor)
       )
       // TODO(#28208) - Indirection because LAPI topology transaction does not include the onboarding flag
-      activeParticipants <- EitherT.right(
-        snapshot.activeParticipantsOf(party.toLf)
-      )
+      activeParticipants <- EitherT.right(snapshot.activeParticipantsOf(party.toLf))
       _ <-
         EitherT.cond[FutureUnlessShutdown](
           activeParticipants.exists { case (participantId, participantAttributes) =>
@@ -266,7 +276,7 @@ class GrpcPartyManagementService(
           .flatMap(snapshot =>
             snapshot.inspectKnownParties(
               filterParty = "",
-              filterParticipant = targetParticipant.uid.toProtoPrimitive,
+              filterParticipant = targetParticipant.filterString,
             )
           )
       )
@@ -291,29 +301,9 @@ class GrpcPartyManagementService(
     mapErrNewEUS(res.leftMap(_.toCantonRpcError))
   }
 
-  private def validateExportPartyAcsRequest(
-      request: v30.ExportPartyAcsRequest,
-      ledgerEnd: Offset,
-      synchronizerIds: Set[SynchronizerId],
-  )(implicit
-      elc: ErrorLoggingContext
-  ): EitherT[
-    FutureUnlessShutdown,
-    PartyManagementServiceError,
-    ValidPartyReplicationCommonRequestParams,
-  ] =
-    validatePartyReplicationCommonRequestParams(
-      request.partyId,
-      request.synchronizerId,
-      request.targetParticipantUid,
-      request.beginOffsetExclusive,
-      request.waitForActivationTimeout,
-    )(ledgerEnd, synchronizerIds)
-
   private def validatePartyReplicationCommonRequestParams(
       partyId: String,
       synchronizerId: String,
-      targetParticipantUid: String,
       beginOffsetExclusive: Long,
       waitForActivationTimeout: Option[Duration],
   )(
@@ -339,12 +329,6 @@ class GrpcPartyManagementService(
         parsedSynchronizerId,
         OtherError(s"Synchronizer ID $parsedSynchronizerId is unknown"),
       )
-      targetParticipantId <- UniqueIdentifier
-        .fromProtoPrimitive(
-          targetParticipantUid,
-          "target_participant_uid",
-        )
-        .map(ParticipantId(_))
       parsedBeginOffsetExclusive <- ProtoConverter
         .parseOffset("begin_offset_exclusive", beginOffsetExclusive)
       beginOffsetExclusive <- Either.cond(
@@ -360,7 +344,6 @@ class GrpcPartyManagementService(
     } yield ValidPartyReplicationCommonRequestParams(
       party,
       synchronizerId,
-      targetParticipantId,
       beginOffsetExclusive,
       waitForActivationTimeout,
     )
@@ -469,7 +452,7 @@ class GrpcPartyManagementService(
 
     // TODO(#24610): Deduplicate ImportArgs setting with logic from `ParticipantRepairService.ImportAcs`
     // (ContractImportMode, representativePackageIdOverride)
-    type ImportArgs = (ContractImportMode, RepresentativePackageIdOverride)
+    type ImportArgs = (String, ContractImportMode, RepresentativePackageIdOverride)
 
     val args = new AtomicReference[Option[ImportArgs]](None)
 
@@ -479,19 +462,26 @@ class GrpcPartyManagementService(
         .toRight("The import ACS request fields are not set")
 
     def setOrCheck(
+        workflowIdPrefix: String,
         contractImportMode: ContractImportMode,
         representativePackageIdOverride: RepresentativePackageIdOverride,
     ): Either[String, Unit] = {
-      val newOrMatchingValue = Some((contractImportMode, representativePackageIdOverride))
+      val newOrMatchingValue = Some(
+        (workflowIdPrefix, contractImportMode, representativePackageIdOverride)
+      )
       if (args.compareAndSet(None, newOrMatchingValue)) {
         Right(()) // This was the first message, success, set.
       } else {
         recordedArgs.flatMap {
-          case (oldContractImportMode, _) if oldContractImportMode != contractImportMode =>
+          case (oldWorkflowIdPrefix, _, _) if oldWorkflowIdPrefix != workflowIdPrefix =>
+            Left(
+              s"Workflow ID prefix cannot be changed from $oldWorkflowIdPrefix to $workflowIdPrefix"
+            )
+          case (_, oldContractImportMode, _) if oldContractImportMode != contractImportMode =>
             Left(
               s"Contract authentication import mode cannot be changed from $oldContractImportMode to $contractImportMode"
             )
-          case (_, oldRepresentativePackageIdOverride)
+          case (_, _, oldRepresentativePackageIdOverride)
               if oldRepresentativePackageIdOverride != representativePackageIdOverride =>
             Left(
               s"Representative package ID override cannot be changed from $oldRepresentativePackageIdOverride to $representativePackageIdOverride"
@@ -513,6 +503,7 @@ class GrpcPartyManagementService(
             .traverse(RepresentativePackageIdOverride.fromProtoV30)
             .leftMap(_.message)
           _ <- setOrCheck(
+            request.workflowIdPrefix,
             contractImportMode,
             representativePackageIdOverrideO.getOrElse(RepresentativePackageIdOverride.NoOverride),
           )
@@ -540,7 +531,7 @@ class GrpcPartyManagementService(
           argsTuple <- EitherT.fromEither[Future](
             recordedArgs.leftMap(new IllegalStateException(_))
           )
-          (contractImportMode, representativePackageIdOverride) = argsTuple
+          (workflowIdPrefix, contractImportMode, representativePackageIdOverride) = argsTuple
           acsSnapshot <- EitherT.fromEither[Future](
             Try(ByteString.copyFrom(outputStream.toByteArray)).toEither
           )
@@ -553,7 +544,7 @@ class GrpcPartyManagementService(
               loggerFactory = loggerFactory,
               representativePackageIdOverride = representativePackageIdOverride,
               sync = sync,
-              workflowIdPrefix = s"import-party-acs-${UUID.randomUUID}",
+              workflowIdPrefix = workflowIdPrefix,
             )
           )
         } yield contractIdRemapping
@@ -663,19 +654,19 @@ class GrpcPartyManagementService(
     mapErrNewEUS(res.leftMap(_.toCantonRpcError))
   }
 
-  override def completePartyOnboarding(
-      request: v30.CompletePartyOnboardingRequest
-  ): Future[v30.CompletePartyOnboardingResponse] = {
+  override def clearPartyOnboardingFlag(
+      request: v30.ClearPartyOnboardingFlagRequest
+  ): Future[v30.ClearPartyOnboardingFlagResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val res = for {
-      r <- processPartyOnboardingRequest(request)
+      r <- processPartyOnboardingFlagRequest(request)
       (onboarded, safeTime) = r
-    } yield v30.CompletePartyOnboardingResponse(onboarded, safeTime.map(x => x.toProtoTimestamp))
+    } yield v30.ClearPartyOnboardingFlagResponse(onboarded, safeTime.map(x => x.toProtoTimestamp))
     mapErrNewEUS(res.leftMap(_.toCantonRpcError))
   }
 
-  private def processPartyOnboardingRequest(
-      request: v30.CompletePartyOnboardingRequest
+  private def processPartyOnboardingFlagRequest(
+      request: v30.ClearPartyOnboardingFlagRequest
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -689,7 +680,7 @@ class GrpcPartyManagementService(
         .leftMap(PartyManagementServiceError.InvalidState.Error(_))
       allLogicalSynchronizerIds = sync.syncPersistentStateManager.getAllLatest.keySet
 
-      validRequest <- validateCompletePartyOnboardingRequest(
+      validRequest <- validateClearPartyOnboardingFlagRequest(
         request,
         ledgerEnd,
         allLogicalSynchronizerIds,
@@ -697,7 +688,6 @@ class GrpcPartyManagementService(
       ValidPartyReplicationCommonRequestParams(
         party,
         synchronizerId,
-        targetParticipant,
         beginOffsetExclusive,
         waitForActivationTimeout,
       ) = validRequest
@@ -713,7 +703,7 @@ class GrpcPartyManagementService(
           party,
           beginOffsetExclusive,
           synchronizerId,
-          targetParticipant,
+          targetParticipant = participantId,
           waitForActivationTimeout,
         )
 
@@ -731,14 +721,14 @@ class GrpcPartyManagementService(
         snapshot.activeParticipantsOf(party.toLf)
       )
       _ <- EitherT.cond[FutureUnlessShutdown](
-        activeParticipants.exists { case (participantId, participantAttributes) =>
-          participantId == targetParticipant &&
+        activeParticipants.exists { case (pId, participantAttributes) =>
+          pId == participantId &&
           participantAttributes.onboarding
         },
         (),
         PartyManagementServiceError.InvalidState.MissingOnboardingFlagCannotCompleteOnboarding(
           party,
-          targetParticipant,
+          participantId,
         ): PartyManagementServiceError,
       )
 
@@ -751,7 +741,7 @@ class GrpcPartyManagementService(
       onboarding = new PartyOnboardingCompletion(
         party,
         synchronizerId,
-        targetParticipant,
+        participantId,
         timeTracker,
         topologyManager,
         topologyStore,
@@ -765,8 +755,8 @@ class GrpcPartyManagementService(
 
     } yield (onboardingCompletionOutcome)
 
-  private def validateCompletePartyOnboardingRequest(
-      request: v30.CompletePartyOnboardingRequest,
+  private def validateClearPartyOnboardingFlagRequest(
+      request: v30.ClearPartyOnboardingFlagRequest,
       ledgerEnd: Offset,
       synchronizerIds: Set[SynchronizerId],
   )(implicit
@@ -779,7 +769,6 @@ class GrpcPartyManagementService(
     validatePartyReplicationCommonRequestParams(
       request.partyId,
       request.synchronizerId,
-      request.targetParticipantUid,
       request.beginOffsetExclusive,
       request.waitForActivationTimeout,
     )(ledgerEnd, synchronizerIds)
@@ -849,7 +838,6 @@ object GrpcPartyManagementService {
 private final case class ValidPartyReplicationCommonRequestParams(
     party: PartyId,
     synchronizerId: SynchronizerId,
-    targetParticipant: ParticipantId,
     beginOffsetExclusive: Offset,
     waitForActivationTimeout: Option[NonNegativeFiniteDuration],
 )
