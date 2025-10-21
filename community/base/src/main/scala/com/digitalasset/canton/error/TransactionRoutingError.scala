@@ -28,13 +28,13 @@ sealed trait TransactionRoutingErrorWithSynchronizer extends TransactionRoutingE
 object TransactionRoutingError extends RoutingErrorGroup {
 
   final case class SubmissionError[PARENT <: TransactionError](
-      synchronizerId: PhysicalSynchronizerId,
+      psid: PhysicalSynchronizerId,
       parent: PARENT,
   ) extends TransactionParentError[PARENT]
       with TransactionRoutingError {
 
     override def mixinContext: Map[String, String] = Map(
-      "synchronizerId" -> synchronizerId.toString
+      "physicalSynchronizerId" -> psid.toString
     )
 
   }
@@ -80,10 +80,10 @@ object TransactionRoutingError extends RoutingErrorGroup {
 
       final case class NotAllInformeeAreOnSynchronizer(
           physicalSynchronizerId: PhysicalSynchronizerId,
-          synchronizersOfAllInformee: NonEmpty[Set[PhysicalSynchronizerId]],
+          synchronizersOfAllInformees: NonEmpty[Set[PhysicalSynchronizerId]],
       ) extends TransactionErrorImpl(
             cause =
-              s"Not all informee are on the specified synchronizer: $physicalSynchronizerId, but on $synchronizersOfAllInformee"
+              s"Not all informees are on the specified synchronizer: $physicalSynchronizerId, but on $synchronizersOfAllInformees"
           )
           with TransactionRoutingErrorWithSynchronizer {
         override def synchronizerId: SynchronizerId = physicalSynchronizerId.logical

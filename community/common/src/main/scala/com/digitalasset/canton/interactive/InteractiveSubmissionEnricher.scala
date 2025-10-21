@@ -3,17 +3,16 @@
 
 package com.digitalasset.canton.interactive
 
-import cats.data.EitherT
-import cats.implicits.catsSyntaxEitherId
+import cats.data.{EitherT, NonEmptySet}
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher.PackageResolver
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.protocol.LfTemplateId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.engine.*
 import com.digitalasset.daml.lf.language.Ast.Package
-import com.digitalasset.daml.lf.transaction.{FatContractInstance, Node, VersionedTransaction}
+import com.digitalasset.daml.lf.transaction.{FatContractInstance, VersionedTransaction}
 
+import scala.collection.immutable.SortedSet
 import scala.concurrent.ExecutionContext
 
 object InteractiveSubmissionEnricher {
@@ -49,38 +48,16 @@ class InteractiveSubmissionEnricher(engine: Engine, packageResolver: PackageReso
       ec: ExecutionContext,
       traceContext: TraceContext,
   ): EitherT[FutureUnlessShutdown, String, FatContractInstance] =
-    EitherT(targetPackageIds.toList.minOption match {
-      case Some(pkgId) =>
-        enrichCreateNode(contract.toCreateNode, pkgId).map { enriched =>
-          FatContractInstance
-            .fromCreateNode(
-              enriched,
-              contract.createdAt,
-              contract.authenticationData,
-            )
-            .asRight[String]
-        }
-      case None =>
-        FutureUnlessShutdown.pure(
-          s"Cannot enrich contract ${contract.contractId} without knowing its package ID"
-            .asLeft[FatContractInstance]
-        )
-    })
-
-  private def enrichCreateNode(original: Node.Create, targetPackageId: PackageId)(implicit
-      ec: ExecutionContext,
-      traceContext: TraceContext,
-  ): FutureUnlessShutdown[Node.Create] = {
-
-    def updateTemplateId(create: Node.Create, targetPackageId: PackageId): Node.Create = {
-      val templateId = LfTemplateId(targetPackageId, create.templateId.qualifiedName)
-      create.copy(templateId = templateId)
-    }
-
-    consumeEnricherResult(enricher.enrichCreate(updateTemplateId(original, targetPackageId))).map(
-      enriched => updateTemplateId(enriched, original.templateId.packageId)
-    )
-  }
+    for {
+      packageIds <- EitherT.fromEither[FutureUnlessShutdown](
+        NonEmptySet
+          .fromSet(SortedSet.from(targetPackageIds))
+          .toRight("No target package ids provided")
+      )
+      enriched <- EitherT(
+        consumeEnricherResult(enricher.enrichContractWithPackages(contract, packageIds))
+      )
+    } yield enriched
 
   private[this] def consumeEnricherResult[V](
       result: Result[V]

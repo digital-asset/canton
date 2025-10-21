@@ -39,6 +39,7 @@ abstract class TopologyTransactionProcessorTest
     val proc = new TopologyTransactionProcessor(
       new SynchronizerCryptoPureApi(defaultStaticSynchronizerParameters, crypto),
       store,
+      defaultStaticSynchronizerParameters,
       _ => (),
       TerminateProcessing.NoOpTerminateTopologyProcessing,
       futureSupervisor,
@@ -187,6 +188,7 @@ abstract class TopologyTransactionProcessorTest
               effectiveTimestamp: EffectiveTime,
               sequencerCounter: SequencerCounter,
               transactions: Seq[GenericSignedTopologyTransaction],
+              synchronizerId: SynchronizerId,
           )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
             if (transactions.nonEmpty) {
               testTopoSubscriberCalledWithTxs = true

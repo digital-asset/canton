@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration
 
 import com.daml.ledger.api.v2.commands.Command
+import com.daml.ledger.javaapi.data
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiTypeWrappers.WrappedCreatedEvent
 import com.digitalasset.canton.config
@@ -48,7 +49,7 @@ trait HasCycleUtils {
       )
     }
 
-    awaitAndExerciseCycleContract(participant2, partyId, commandId).discard
+    awaitAndArchiveCycleContract(participant2, partyId, commandId).discard
 
     eventually() {
       participantAcs(participant2, partyId) shouldBe empty
@@ -64,14 +65,14 @@ trait HasCycleUtils {
       .filter(_.templateId.isModuleEntity("Cycle", "Cycle"))
       .map(entry => WrappedCreatedEvent(entry.event))
 
+  def createCycleCommandJava(party: Party, id: String): data.Command =
+    new Cycle(id, party.toProtoPrimitive)
+      .create()
+      .commands
+      .loneElement
+
   def createCycleCommand(party: Party, id: String): Command =
-    Command.fromJavaProto(
-      new Cycle(id, party.toProtoPrimitive)
-        .create()
-        .commands
-        .loneElement
-        .toProtoCommand
-    )
+    Command.fromJavaProto(createCycleCommandJava(party, id).toProtoCommand)
 
   def cleanupCycles(
       partyId: PartyId,
@@ -105,13 +106,26 @@ trait HasCycleUtils {
     JavaDecodeUtil.decodeAllCreated(Cycle.COMPANION)(tx).loneElement
   }
 
-  def awaitAndExerciseCycleContract(
+  def awaitAndArchiveCycleContract(
       participant: ParticipantReference,
       partyId: PartyId,
       commandId: String = "",
   ): Unit = {
     val coid = participant.ledger_api.javaapi.state.acs.await(M.Cycle.COMPANION)(partyId)
     archiveCycleContract(
+      participant,
+      partyId,
+      coid,
+      commandId,
+    )
+  }
+  def awaitAndTouchCycleContract(
+      participant: ParticipantReference,
+      partyId: PartyId,
+      commandId: String = "",
+  ): Unit = {
+    val coid = participant.ledger_api.javaapi.state.acs.await(M.Cycle.COMPANION)(partyId)
+    touchCycleContract(
       participant,
       partyId,
       coid,
@@ -147,6 +161,19 @@ trait HasCycleUtils {
       Seq(partyId),
       Seq(cycleEx),
       commandId = (if (commandId.isEmpty) "" else s"$commandId-response"),
+    )
+  }
+  def touchCycleContract(
+      participant: ParticipantReference,
+      partyId: PartyId,
+      coid: Cycle.Contract,
+      commandId: String = "",
+  ): Unit = {
+    val cycleEx = coid.id.exerciseRepeat().commands.loneElement
+    participant.ledger_api.javaapi.commands.submit(
+      Seq(partyId),
+      Seq(cycleEx),
+      commandId = (if (commandId.isEmpty) "" else s"$commandId-touch"),
     )
   }
 

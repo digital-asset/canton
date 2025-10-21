@@ -80,6 +80,7 @@ import com.daml.ledger.api.v2.event_query_service.{
 }
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.InteractiveSubmissionServiceGrpc.InteractiveSubmissionServiceStub
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
+  CostEstimationHints,
   ExecuteSubmissionAndWaitForTransactionRequest,
   ExecuteSubmissionAndWaitForTransactionResponse,
   ExecuteSubmissionAndWaitRequest,
@@ -1595,6 +1596,7 @@ object LedgerApiCommands {
         verboseHashing: Boolean,
         prefetchContractKeys: Seq[PrefetchContractKey],
         maxRecordTime: Option[CantonTimestamp],
+        costEstimationHints: Option[CostEstimationHints],
     ) extends BaseCommand[
           PrepareSubmissionRequest,
           PrepareSubmissionResponse,
@@ -1619,6 +1621,7 @@ object LedgerApiCommands {
             verboseHashing = verboseHashing,
             prefetchContractKeys = prefetchContractKeys,
             maxRecordTime = maxRecordTime.map(_.toProtoTimestamp),
+            estimateTrafficCost = costEstimationHints,
           )
         )
 

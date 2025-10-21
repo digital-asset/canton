@@ -199,6 +199,7 @@ class LedgerApiServer(
         import cantonParameterConfig.ledgerApiServerParameters.contractLoader.*
         ContractLoader
           .create(
+            participantContractStore = participantContractStore.value,
             contractStorageBackend = dbSupport.storageBackendFactory.createContractStorageBackend(
               inMemoryState.stringInterningView,
               inMemoryState.ledgerEndCache,
@@ -355,6 +356,7 @@ class LedgerApiServer(
         managementServiceTimeout = serverConfig.managementServiceTimeout,
         userManagement = serverConfig.userManagementService,
         partyManagementServiceConfig = serverConfig.partyManagementService,
+        packageServiceConfig = serverConfig.packageService,
         tls = serverConfig.tls,
         address = Some(serverConfig.address),
         maxInboundMessageSize = serverConfig.maxInboundMessageSize.unwrap,
@@ -449,7 +451,7 @@ class LedgerApiServer(
           logger.info(
             s"Creating admin user with id $userId failed. User with this id already exists"
           )
-          Future.successful(())
+          Future.unit
         case other =>
           Utils.handleResult("creating extra admin user")(other).map(_ => ())
       }

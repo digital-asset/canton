@@ -15,6 +15,7 @@ import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.api.v2.event.CreatedEvent
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
+  CostEstimationHints,
   ExecuteSubmissionAndWaitResponse as ExecuteAndWaitResponseProto,
   ExecuteSubmissionResponse as ExecuteResponseProto,
   GetPreferredPackagesResponse,
@@ -160,7 +161,9 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
       txSynchronizerId: String,
       optTimeout: Option[config.NonNegativeDuration],
   ): Tx
+
   private def timeouts: ConsoleCommandTimeout = consoleEnvironment.commandTimeouts
+
   protected def defaultLimit: PositiveInt =
     consoleEnvironment.environment.config.parameters.console.defaultLimit
 
@@ -671,6 +674,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           verboseHashing: Boolean = false,
           prefetchContractKeys: Seq[PrefetchContractKey] = Seq.empty,
           maxRecordTime: Option[CantonTimestamp] = None,
+          estimateTrafficCost: Option[CostEstimationHints] = None,
       ): PrepareResponseProto =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -687,6 +691,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               verboseHashing,
               prefetchContractKeys,
               maxRecordTime,
+              estimateTrafficCost,
             )
           )
         }
@@ -2487,6 +2492,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             verboseHashing: Boolean = false,
             prefetchContractKeys: Seq[javab.data.PrefetchContractKey] = Seq.empty,
             maxRecordTime: Option[CantonTimestamp] = None,
+            estimateTrafficCost: Option[CostEstimationHints] = None,
         ): PrepareResponseProto =
           consoleEnvironment.run {
             ledgerApiCommand(
@@ -2503,6 +2509,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 verboseHashing,
                 prefetchContractKeys.map(k => PrefetchContractKey.fromJavaProto(k.toProto)),
                 maxRecordTime,
+                estimateTrafficCost,
               )
             )
           }
@@ -3057,6 +3064,7 @@ trait LedgerApiAdministration extends BaseLedgerApiAdministration {
             .isDefined,
         )
       }
+
     ConsoleMacros.utils.retry_until_true(timeout)(
       scan().forall { case (_, _, updateFound) => updateFound }, {
         val res = scan().map { case (participant, party, res) =>

@@ -138,7 +138,7 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
     override protected[this] def logger: TracedLogger = self.logger
   })
 
-  // TODO(i26270): cleanup when the new connection pool is stable
+  // TODO(i27260): cleanup when the new connection pool is stable
   val useNewConnectionPool: Boolean = true
 
   when(topologyClient.currentSnapshotApproximation(any[TraceContext]))
@@ -307,6 +307,8 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
     crypto = cryptoApi.crypto.crypto,
     seedForRandomnessO = None,
     futureSupervisor = futureSupervisor,
+    metrics = CommonMockMetrics.sequencerClient.connectionPool,
+    metricsContext = MetricsContext.Empty,
     timeouts = timeouts,
     loggerFactory = loggerFactory,
   )
@@ -606,7 +608,7 @@ class GrpcSequencerIntegrationTest
 
     override protected lazy val companionObj = MockProtocolMessage
 
-    override def synchronizerId: PhysicalSynchronizerId =
+    override def psid: PhysicalSynchronizerId =
       DefaultTestIdentities.physicalSynchronizerId
 
     override def toProtoSomeEnvelopeContentV30: protocolV30.EnvelopeContent.SomeEnvelopeContent =
@@ -684,14 +686,20 @@ class GrpcSequencerIntegrationWithFailingTokenRefreshTest
                 "Failing token refresh",
               ),
               (
+                _.warningMessage should (include(
+                  "Request failed"
+                ) and include("Request: download-topology-state-for-init-hash")),
+                "Request failure",
+              ),
+              (
                 _.warningMessage should include(
-                  "The operation 'Download topology state for init' was not successful."
+                  "The operation 'Get hash for init topology state' was not successful."
                 ),
                 "Attempt failure",
               ),
               (
                 _.warningMessage should include(
-                  "Now retrying operation 'Download topology state for init'."
+                  "Now retrying operation 'Get hash for init topology state'."
                 ),
                 "Retry message",
               ),

@@ -231,7 +231,7 @@ sealed abstract class LedgerApiCommandUpgradingIntegrationTest
           _.warningMessage should include regex "Received an identifier with package ID .*, but expected a package name.",
           _.commandFailureMessage should
             (include(s"Request failed for participant2") and
-              include("FAILED_PRECONDITION/INTERPRETATION_DEV_ERROR") and
+              include("INVALID_ARGUMENT/INTERPRETATION_UPGRADE_ERROR_AUTHENTICATION_FAILED") and
               include("failed to authenticate contract")),
         )
       }

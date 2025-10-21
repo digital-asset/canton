@@ -59,7 +59,7 @@ object CryptoValidator {
         Left(invalidField(fieldName, message = s"Signing algorithm spec $other not supported"))
     }
 
-  private def validateSigningAlgorithmSpec(
+  def validateSigningAlgorithmSpec(
       signingAlgorithmSpecP: crypto.SigningAlgorithmSpec,
       fieldName: String,
   )(implicit

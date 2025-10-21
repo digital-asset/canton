@@ -175,7 +175,7 @@ final class IndexServiceOwner(
         .flatMap {
           case Some(`participantId`) =>
             logger.info(s"Found existing participant with ID: $participantId`")
-            Future.successful(())
+            Future.unit
           case Some(foundParticipantId) =>
             Future.failed(
               new MismatchException.ParticipantId(
@@ -201,14 +201,16 @@ final class IndexServiceOwner(
       queryExecutionContext: ExecutionContextExecutorService,
       commandExecutionContext: ExecutionContextExecutorService,
   ): LedgerReadDao =
-    JdbcLedgerDao.read(
-      dbSupport = dbSupport,
+    new JdbcLedgerDao(
+      dbDispatcher = dbSupport.dbDispatcher,
       queryExecutionContext = queryExecutionContext,
       commandExecutionContext = commandExecutionContext,
       metrics = metrics,
-      participantId = participantId,
+      readStorageBackend = dbSupport.storageBackendFactory
+        .readStorageBackend(ledgerEndCache, stringInterning, loggerFactory),
+      parameterStorageBackend =
+        dbSupport.storageBackendFactory.createParameterStorageBackend(stringInterning),
       ledgerEndCache = ledgerEndCache,
-      stringInterning = stringInterning,
       completionsPageSize = config.completionsPageSize,
       activeContractsServiceStreamsConfig = config.activeContractsServiceStreams,
       updatesStreamsConfig = config.updatesStreams,

@@ -81,6 +81,7 @@ import io.grpc.{Context, ManagedChannel}
 import java.io.{File, IOException}
 import java.nio.file.{Files, Path, Paths}
 import java.time.Instant
+import scala.annotation.nowarn
 import scala.concurrent.Future
 import scala.concurrent.duration.{Duration, MILLISECONDS}
 
@@ -636,7 +637,10 @@ object ParticipantAdminCommands {
     }
 
     final case class ImportPartyAcs(
-        acsChunk: ByteString
+        acsChunk: ByteString,
+        workflowIdPrefix: String,
+        contractImportMode: ContractImportMode,
+        representativePackageIdOverride: RepresentativePackageIdOverride,
     ) extends GrpcAdminCommand[
           v30.ImportPartyAcsRequest,
           v30.ImportPartyAcsResponse,
@@ -649,7 +653,14 @@ object ParticipantAdminCommands {
         v30.PartyManagementServiceGrpc.stub(channel)
 
       override protected def createRequest(): Either[String, v30.ImportPartyAcsRequest] =
-        Right(v30.ImportPartyAcsRequest(acsChunk))
+        Right(
+          v30.ImportPartyAcsRequest(
+            acsChunk,
+            workflowIdPrefix,
+            contractImportMode.toProtoV30,
+            Some(representativePackageIdOverride.toProtoV30),
+          )
+        )
 
       override protected def submitRequest(
           service: PartyManagementServiceStub,
@@ -659,7 +670,10 @@ object ParticipantAdminCommands {
           service.importPartyAcs,
           (bytes: Array[Byte]) =>
             v30.ImportPartyAcsRequest(
-              ByteString.copyFrom(bytes)
+              ByteString.copyFrom(bytes),
+              workflowIdPrefix,
+              contractImportMode.toProtoV30,
+              Some(representativePackageIdOverride.toProtoV30),
             ),
           request.acsSnapshot,
         )
@@ -670,15 +684,14 @@ object ParticipantAdminCommands {
 
     }
 
-    final case class CompletePartyOnboarding(
+    final case class ClearPartyOnboardingFlag(
         party: PartyId,
         synchronizerId: SynchronizerId,
-        targetParticipantId: ParticipantId,
         beginOffsetExclusive: NonNegativeLong,
         waitForActivationTimeout: Option[config.NonNegativeFiniteDuration],
     ) extends GrpcAdminCommand[
-          v30.CompletePartyOnboardingRequest,
-          v30.CompletePartyOnboardingResponse,
+          v30.ClearPartyOnboardingFlagRequest,
+          v30.ClearPartyOnboardingFlagResponse,
           (Boolean, Option[CantonTimestamp]),
         ] {
 
@@ -687,12 +700,11 @@ object ParticipantAdminCommands {
       override def createService(channel: ManagedChannel): PartyManagementServiceStub =
         v30.PartyManagementServiceGrpc.stub(channel)
 
-      override protected def createRequest(): Either[String, v30.CompletePartyOnboardingRequest] =
+      override protected def createRequest(): Either[String, v30.ClearPartyOnboardingFlagRequest] =
         Right(
-          v30.CompletePartyOnboardingRequest(
+          v30.ClearPartyOnboardingFlagRequest(
             party.toProtoPrimitive,
             synchronizerId.toProtoPrimitive,
-            targetParticipantId.uid.toProtoPrimitive,
             beginOffsetExclusive.unwrap,
             waitForActivationTimeout.map(_.toProtoPrimitive),
           )
@@ -700,11 +712,11 @@ object ParticipantAdminCommands {
 
       override protected def submitRequest(
           service: PartyManagementServiceStub,
-          request: v30.CompletePartyOnboardingRequest,
-      ): Future[v30.CompletePartyOnboardingResponse] = service.completePartyOnboarding(request)
+          request: v30.ClearPartyOnboardingFlagRequest,
+      ): Future[v30.ClearPartyOnboardingFlagResponse] = service.clearPartyOnboardingFlag(request)
 
       override protected def handleResponse(
-          response: v30.CompletePartyOnboardingResponse
+          response: v30.ClearPartyOnboardingFlagResponse
       ): Either[String, (Boolean, Option[CantonTimestamp])] =
         response.earliestRetryTimestamp
           .traverse(
@@ -720,6 +732,7 @@ object ParticipantAdminCommands {
   object ParticipantRepairManagement {
 
     // TODO(#24610) – Remove, replaced by ExportAcs
+    @nowarn("cat=deprecation")
     final case class ExportAcsOld(
         parties: Set[PartyId],
         partiesOffboarding: Boolean,
@@ -767,6 +780,7 @@ object ParticipantAdminCommands {
     }
 
     // TODO(#24610) - Remove, replaced by ImportAcs
+    @nowarn("cat=deprecation")
     final case class ImportAcsOld(
         acsChunk: ByteString,
         workflowIdPrefix: String,
@@ -875,8 +889,8 @@ object ParticipantAdminCommands {
         acsChunk: ByteString,
         workflowIdPrefix: String,
         contractImportMode: ContractImportMode,
-        excludedStakeholders: Set[PartyId],
         representativePackageIdOverride: RepresentativePackageIdOverride,
+        excludedStakeholders: Set[PartyId],
     ) extends GrpcAdminCommand[
           v30.ImportAcsRequest,
           v30.ImportAcsResponse,

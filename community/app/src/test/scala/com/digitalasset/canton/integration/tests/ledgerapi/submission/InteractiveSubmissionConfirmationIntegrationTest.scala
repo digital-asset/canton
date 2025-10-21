@@ -17,6 +17,7 @@ import com.digitalasset.canton.integration.plugins.UseProgrammableSequencer
 import com.digitalasset.canton.integration.tests.ledgerapi.submission.BaseInteractiveSubmissionTest.defaultConfirmingParticipant
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   HasCycleUtils,
   SharedEnvironment,
@@ -74,7 +75,7 @@ final class InteractiveSubmissionConfirmationIntegrationTest
           keysThreshold = PositiveInt.one,
         )
       }
-      .addConfigTransforms(enableInteractiveSubmissionTransforms*)
+      .addConfigTransform(ConfigTransforms.enableInteractiveSubmissionTransforms)
 
   registerPlugin(new UseProgrammableSequencer(this.getClass.toString, loggerFactory))
 
@@ -167,7 +168,11 @@ final class InteractiveSubmissionConfirmationIntegrationTest
         ),
       )
       val signatures = Map(
-        aliceE.partyId -> global_secret.sign(prepared.preparedTransactionHash, aliceE)
+        aliceE.partyId -> global_secret.sign(
+          prepared.preparedTransactionHash,
+          aliceE,
+          useAllKeys = true,
+        )
       )
 
       // To bypass the checks in phase 1 we play a trick by holding back the submission request in the sequencer
@@ -278,7 +283,11 @@ final class InteractiveSubmissionConfirmationIntegrationTest
       val prepared = ppn.ledger_api.javaapi.interactive_submission
         .prepare(Seq(aliceE.partyId), Seq(pass.commands().loneElement))
       val signatures = Map(
-        aliceE.partyId -> global_secret.sign(prepared.preparedTransactionHash, aliceE)
+        aliceE.partyId -> global_secret.sign(
+          prepared.preparedTransactionHash,
+          aliceE,
+          useAllKeys = true,
+        )
       )
       // This is only currently detected in phase III, at which point warnings are issued
       val completion =
@@ -305,6 +314,13 @@ final class InteractiveSubmissionConfirmationIntegrationTest
     "fail with missing input contracts" in { implicit env =>
       import env.*
       import monocle.syntax.all.*
+
+      // Set Alice back to threshold one
+      cpn.topology.party_to_key_mappings.sign_and_update(
+        aliceE.partyId,
+        env.daId,
+        _.tryCopy(threshold = PositiveInt.one),
+      )
 
       // Exercise the Repeat choice
       val exerciseRepeatOnCycleContract =

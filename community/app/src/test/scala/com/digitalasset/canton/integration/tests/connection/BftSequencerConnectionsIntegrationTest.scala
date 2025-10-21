@@ -28,6 +28,7 @@ import com.digitalasset.canton.sequencing.{
   SequencerConnections,
   SubmissionRequestAmplification,
 }
+import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.{SequencerAlias, config}
 import org.scalatest.Assertion
 
@@ -72,7 +73,13 @@ sealed trait BftSequencerConnectionsIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S4M1_Config
-      .addConfigTransforms(ConfigTransforms.setConnectionPool(true))
+      .addConfigTransforms(
+        ConfigTransforms.setConnectionPool(true),
+        // Increase the acknowledgement interval to avoid flakes with failing acknowledgements log messages
+        ConfigTransforms.updateSequencerClientAcknowledgementInterval(
+          NonNegativeFiniteDuration.tryOfMinutes(60)
+        ),
+      )
       .withManualStart
       .withSetup { implicit env =>
         import env.*
@@ -116,7 +123,9 @@ sealed trait BftSequencerConnectionsIntegrationTest
   private lazy val expectedLogEntries = Seq[LogEntry => Assertion](
     _.warningMessage should include regex
       raw"Request failed for server-.*\. Is the server running\? Did you configure the server address as 0\.0\.0\.0\?" +
-      raw" Are you using the right TLS settings\?"
+      raw" Are you using the right TLS settings\?",
+    _.errorMessage should (include regex
+      raw"Request failed for server-.*\." and include("GrpcServerError: UNKNOWN/channel closed")),
   )
 
   private def pingWithSequencersDown()(implicit env: TestConsoleEnvironment) = {

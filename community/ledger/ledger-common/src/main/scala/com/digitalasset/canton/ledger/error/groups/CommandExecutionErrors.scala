@@ -423,6 +423,38 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
     }
 
     @Explanation(
+      """This error occurs when trying to hash an ill-formed contract."""
+    )
+    @Resolution(
+      "Ensure that the contract being hashed is a valid contract."
+    )
+    object ContractHashingError
+        extends ErrorCode(
+          id = "CONTRACT_HASHING_ERROR",
+          ErrorCategory.InvalidIndependentOfSystemState,
+        ) {
+
+      final case class Reject(
+          override val cause: String,
+          err: LfInterpretationError.ContractHashingError,
+      )(implicit
+          loggingContext: ErrorLoggingContext
+      ) extends DamlErrorWithDefiniteAnswer(
+            cause = cause
+          ) {
+
+        override def resources: Seq[(ErrorResource, String)] =
+          withEncodedValue(err.createArg) { encodedCreateArg =>
+            Seq(
+              (ErrorResource.ContractId, err.coid.coid),
+              (ErrorResource.TemplateId, err.dstTemplateId.toString),
+              (ErrorResource.ContractArg, encodedCreateArg),
+            )
+          }
+      }
+    }
+
+    @Explanation(
       """This error occurs if a user attempts to provide a key hash for a disclosed contract which we have already cached to be different."""
     )
     @Resolution(
@@ -779,6 +811,18 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
     }
 
     @Explanation(
+      "This error occurs when a Daml text is not a valid UTF-8 string or contains null characters."
+    )
+    @Resolution("Restructure your code and reduce value nesting.")
+    object MalformedText
+        extends ErrorCode(id = "MALFORMED_TEXT", ErrorCategory.InvalidIndependentOfSystemState) {
+
+      final case class Reject(override val cause: String, err: LfInterpretationError.MalformedText)(
+          implicit loggingContext: ErrorLoggingContext
+      ) extends DamlErrorWithDefiniteAnswer(cause = cause) {}
+    }
+
+    @Explanation(
       "This error is thrown by use of `failWithStatus` in daml code. The Daml code determines the canton error category, and thus the grpc status code."
     )
     @Resolution(
@@ -828,12 +872,12 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
     object UpgradeError extends ErrorGroup {
       @Explanation("Validation fails when trying to upgrade the contract")
       @Resolution(
-        "Verify that neither the signatories, nor the observers, nor the contract key, nor the key's maintainers have changed"
+        "Verify that neither the signatories, nor the observers, nor the contract key, nor the key's maintainers, nor the package name have changed"
       )
       object ValidationFailed
           extends ErrorCode(
             id = "INTERPRETATION_UPGRADE_ERROR_VALIDATION_FAILED",
-            ErrorCategory.InvalidGivenCurrentSystemStateOther,
+            ErrorCategory.InvalidIndependentOfSystemState,
           ) {
         final case class Reject(
             override val cause: String,
@@ -867,6 +911,8 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
               (ErrorResource.ContractId, err.coid.coid),
               (ErrorResource.TemplateId, err.srcTemplateId.toString),
               (ErrorResource.TemplateId, err.dstTemplateId.toString),
+              (ErrorResource.PackageName, err.srcPackageName),
+              (ErrorResource.PackageName, err.dstPackageName),
             )
               ++ encodeParties(err.originalSignatories)
               ++ encodeParties(err.originalObservers)
@@ -875,6 +921,66 @@ object CommandExecutionErrors extends CommandExecutionErrorGroup {
               ++ encodeParties(err.recomputedObservers)
               ++ optKeyResources(err.recomputedKeyOpt)
           }
+        }
+      }
+
+      @Explanation("Contract is malformed or doesn't match the expected type")
+      @Resolution(
+        "Verify that the template used for loading the contract is upgrade-compatible with the template that created it."
+      )
+      object TranslationFailed
+          extends ErrorCode(
+            id = "INTERPRETATION_UPGRADE_ERROR_TRANSLATION_FAILED",
+            ErrorCategory.InvalidIndependentOfSystemState,
+          ) {
+        final case class Reject(
+            override val cause: String,
+            err: LfInterpretationError.Upgrade.TranslationFailed,
+        )(implicit
+            loggingContext: ErrorLoggingContext
+        ) extends DamlErrorWithDefiniteAnswer(
+              cause = cause
+            ) {
+
+          override def resources: Seq[(ErrorResource, String)] =
+            withEncodedValue(err.createArg) { encodedArg =>
+              Seq(
+                (ErrorResource.ContractId.nullable, err.coid.fold("NULL")(_.coid)),
+                (ErrorResource.TemplateId, err.srcTemplateId.toString),
+                (ErrorResource.TemplateId, err.dstTemplateId.toString),
+                (ErrorResource.ContractArg, encodedArg),
+              )
+            }
+        }
+      }
+
+      @Explanation("Cannot authenticate contract")
+      @Resolution(
+        "Verify that the template used for loading the contract is upgrade-compatible with the template that created it."
+      )
+      object AuthenticationFailed
+          extends ErrorCode(
+            id = "INTERPRETATION_UPGRADE_ERROR_AUTHENTICATION_FAILED",
+            ErrorCategory.InvalidIndependentOfSystemState,
+          ) {
+        final case class Reject(
+            override val cause: String,
+            err: LfInterpretationError.Upgrade.AuthenticationFailed,
+        )(implicit
+            loggingContext: ErrorLoggingContext
+        ) extends DamlErrorWithDefiniteAnswer(
+              cause = cause
+            ) {
+
+          override def resources: Seq[(ErrorResource, String)] =
+            withEncodedValue(err.createArg) { encodedArg =>
+              Seq(
+                (ErrorResource.ContractId, err.coid.coid),
+                (ErrorResource.TemplateId, err.srcTemplateId.toString),
+                (ErrorResource.TemplateId, err.dstTemplateId.toString),
+                (ErrorResource.ContractArg, encodedArg),
+              )
+            }
         }
       }
     }
