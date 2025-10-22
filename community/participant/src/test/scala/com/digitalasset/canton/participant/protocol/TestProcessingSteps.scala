@@ -60,7 +60,7 @@ import com.digitalasset.canton.{BaseTest, LfPartyId, RequestCounter, SequencerCo
 import com.google.protobuf.ByteString
 
 import scala.collection.concurrent
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 
 class TestProcessingSteps(
     pendingSubmissionMap: concurrent.Map[Int, Unit],
@@ -325,13 +325,6 @@ class TestProcessingSteps(
       traceContext: TraceContext
   ): Unit = ()
 
-  override def authenticateInputContracts(
-      parsedRequest: ParsedRequestType
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, TestProcessingError, Unit] =
-    EitherT.rightT(())
-
   override def handleTimeout(parsedRequest: TestParsedRequest)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TestProcessingError, Unit] = EitherT.pure(())
@@ -344,7 +337,7 @@ object TestProcessingSteps {
       rootHash: RootHash,
       informees: Set[LfPartyId] = Set.empty,
       viewPosition: ViewPosition = ViewPosition(List(MerkleSeqIndex(List.empty))),
-      synchronizerId: PhysicalSynchronizerId = DefaultTestIdentities.physicalSynchronizerId,
+      psid: PhysicalSynchronizerId = DefaultTestIdentities.physicalSynchronizerId,
       mediator: MediatorGroupRecipient = MediatorGroupRecipient(MediatorGroupIndex.zero),
   ) extends ViewTree
       with HasToByteString {

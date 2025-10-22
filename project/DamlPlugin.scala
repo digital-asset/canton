@@ -67,6 +67,8 @@ object DamlPlugin extends AutoPlugin {
       taskKey[Unit]("Update the checked in DAR with a DAR built with the current Daml version")
     val damlEnableJavaCodegen =
       settingKey[Boolean]("Enable Java codegen")
+    val damlExcludeFromCodegen =
+      settingKey[Seq[String]]("To be excluded from code gen")
 
     lazy val baseDamlPluginSettings: Seq[Def.Setting[_]] = Seq(
       sourceGenerators += damlGenerateCode.taskValue,
@@ -80,6 +82,7 @@ object DamlPlugin extends AutoPlugin {
       damlBuildOrder := Seq(),
       damlCodeGeneration := Seq(),
       damlEnableJavaCodegen := true,
+      damlExcludeFromCodegen := Seq(),
       useVersionedDarName := false,
       damlGenerateCode := {
         // for the time being we assume if we're using code generation then the DARs must first be built
@@ -90,29 +93,33 @@ object DamlPlugin extends AutoPlugin {
         val cacheDirectory = streams.value.cacheDirectory
         val log = streams.value.log
         val enableJavaCodegen = damlEnableJavaCodegen.value
+        val excludeFromCodegen = damlExcludeFromCodegen.value
         val depResolution = dependencyResolution.value
 
         val cache = FileFunction.cached(cacheDirectory, FileInfo.hash) { input =>
           val codegens =
             if (enableJavaCodegen) Seq((Codegen.Java, javaOutputDirectory)) else Seq.empty
           codegens.foreach { case (_, outputDirectory) => IO.delete(outputDirectory) }
-          settings.flatMap { case (damlProjectDirectory, darFile, packageName) =>
-            codegens
-              .flatMap { case (codegen, outputDirectory) =>
-                generateCode(
-                  log,
-                  damlProjectDirectory,
-                  darFile,
-                  packageName,
-                  codegen,
-                  outputDirectory,
-                  damlCompilerVersion.value,
-                  useCustomDamlVersion.value,
-                  csrCacheDirectory.value,
-                  depResolution,
-                )
-              }
-          }.toSet
+          settings
+            .filter { case (_, _, packageName) => !excludeFromCodegen.contains(packageName) }
+            .flatMap { case (damlProjectDirectory, darFile, packageName) =>
+              codegens
+                .flatMap { case (codegen, outputDirectory) =>
+                  generateCode(
+                    log,
+                    damlProjectDirectory,
+                    darFile,
+                    packageName,
+                    codegen,
+                    outputDirectory,
+                    damlCompilerVersion.value,
+                    useCustomDamlVersion.value,
+                    csrCacheDirectory.value,
+                    depResolution,
+                  )
+                }
+            }
+            .toSet
         }
         cache(settings.map(_._2).toSet).toSeq
       },

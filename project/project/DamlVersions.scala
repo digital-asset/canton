@@ -8,7 +8,7 @@ object DamlVersions {
   /** The version of the daml compiler (and in most cases of the daml libraries as well).
     */
   // after changing version, run `sbt updateDamlProjectVersions` to update the `daml.yaml` project files.
-  val version: String = "3.4.0-snapshot.20251007.14274.0.ve2024cd6"
+  val version: String = "3.5.0-snapshot.20251020.14344.0.vac465d36"
 
   /** Custom Daml artifacts override version.
     */
@@ -25,6 +25,6 @@ object DamlVersions {
   /** The daml-lf language versions supported by canton. (needed to load the corresponding daml-libs
     * dependencies when building packaged dars)
     */
-  val daml_language_versions = Seq("2.1", "2.dev")
+  val daml_language_versions = Seq("2.1", "2.2", "2.dev")
 
 }

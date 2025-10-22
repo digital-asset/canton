@@ -38,6 +38,7 @@ import com.daml.ledger.api.v2.event_query_service.{
   GetEventsByContractIdResponse,
 }
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
+  CostEstimationHints,
   ExecuteSubmissionAndWaitForTransactionRequest,
   ExecuteSubmissionAndWaitForTransactionResponse,
   ExecuteSubmissionAndWaitRequest,
@@ -487,7 +488,11 @@ trait ParticipantTestContext extends UserManagementTestContext {
       transactionShape: TransactionShape,
   ): SubmitAndWaitForTransactionRequest
   def submitAndWaitRequest(party: Party, commands: JList[Command]): SubmitAndWaitRequest
-  def prepareSubmissionRequest(party: Party, commands: JList[Command]): PrepareSubmissionRequest
+  def prepareSubmissionRequest(
+      party: Party,
+      commands: JList[Command],
+      estimateTrafficCost: Option[CostEstimationHints] = None,
+  ): PrepareSubmissionRequest
   def executeSubmissionRequest(
       party: ExternalParty,
       preparedTx: PrepareSubmissionResponse,

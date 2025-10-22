@@ -919,7 +919,7 @@ object BuildCommon {
           scalaVersion,
           sbtVersion,
           BuildInfoKey("damlLibrariesVersion" -> Dependencies.daml_libraries_version),
-          BuildInfoKey("stableProtocolVersions" -> List()),
+          BuildInfoKey("stableProtocolVersions" -> List("34")),
           BuildInfoKey("betaProtocolVersions" -> List()),
         ),
         buildInfoPackage := "com.digitalasset.canton.buildinfo",
@@ -1072,22 +1072,20 @@ object BuildCommon {
         Compile / damlCodeGeneration := Seq(
           (
             (Compile / sourceDirectory).value / "daml" / "canton-builtin-admin-workflow-ping",
-            (Compile / damlDarOutput).value / "canton-builtin-admin-workflow-ping.dar",
+            (Compile / resourceDirectory).value / "dar" / "canton-builtin-admin-workflow-ping.dar",
             "com.digitalasset.canton.participant.admin.workflows",
           ),
           (
             (Compile / sourceDirectory).value / "daml" / "canton-builtin-admin-workflow-party-replication-alpha",
-            (Compile / damlDarOutput).value / "canton-builtin-admin-workflow-party-replication-alpha.dar",
+            (Compile / resourceDirectory).value / "dar" / "canton-builtin-admin-workflow-party-replication-alpha.dar",
             "com.digitalasset.canton.participant.admin.workflows",
           ),
         ),
-        Compile / damlBuildOrder := Seq(
-          "daml/canton-builtin-admin-workflow-ping/daml.yaml",
-          "daml/canton-builtin-admin-workflow-party-replication-alpha/daml.yaml",
+        Compile / damlDarOutput := (Compile / target).value / "dar-output",
+        damlFixedDars := Seq(
+          "canton-builtin-admin-workflow-ping.dar",
+          "canton-builtin-admin-workflow-party-replication-alpha.dar",
         ),
-        // TODO(#16168) Before creating the first stable release with backwards compatibility guarantees,
-        //  pin/fix "canton-builtin-admin-workflow-ping.dar" and "canton-builtin-admin-workflow-party-replication-alpha.dar"
-        damlFixedDars := Seq(),
         addProtobufFilesToHeaderCheck(Compile),
         addFilesToHeaderCheck("*.daml", "daml", Compile),
       )
@@ -1640,6 +1638,11 @@ object BuildCommon {
           s"com.daml.ledger.test.java.vetting_main_split_lineage_2_0_0",
         ),
         (
+          (Compile / damlSourceDirectory).value / "main" / "daml" / "vetting_main" / "upgrade-incompatible-3.0.0",
+          (Compile / damlDarOutput).value / "vetting-main-3.0.0.dar",
+          s"com.daml.ledger.test.java.vetting_main_3_0_0",
+        ),
+        (
           (Compile / damlSourceDirectory).value / "main" / "daml" / "vetting_alt",
           (Compile / damlDarOutput).value / "vetting-alt-1.0.0.dar",
           s"com.daml.ledger.test.java.vetting_alt",
@@ -2050,6 +2053,7 @@ object BuildCommon {
       .settings(
         sharedCantonCommunitySettings,
         Test / damlEnableJavaCodegen := true,
+        Test / damlExcludeFromCodegen := Seq("com.digitalasset.canton.damltests.nonconforming.x"),
         Test / useVersionedDarName := true,
         Test / damlEnableProjectVersionOverride := false,
         Test / damlBuildOrder := Seq(
@@ -2091,6 +2095,11 @@ object BuildCommon {
             (Test / sourceDirectory).value / "daml" / "NonConforming" / "V2",
             (Test / damlDarOutput).value / "NonConforming-2.0.0.dar",
             "com.digitalasset.canton.damltests.nonconforming.v2",
+          ),
+          (
+            (Test / sourceDirectory).value / "daml" / "NonConforming" / "X",
+            (Test / damlDarOutput).value / "NonConformingX-1.0.0.dar",
+            "com.digitalasset.canton.damltests.nonconforming.x",
           ),
           (
             (Test / sourceDirectory).value / "daml" / "AppUpgrade" / "V1",

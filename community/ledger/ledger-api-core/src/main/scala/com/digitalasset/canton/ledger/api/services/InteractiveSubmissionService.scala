@@ -22,6 +22,7 @@ import com.digitalasset.canton.ledger.api.validation.GetPreferredPackagesRequest
 import com.digitalasset.canton.ledger.api.{Commands, PackageReference}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.platform.apiserver.services.command.interactive.CostEstimationHints
 import com.digitalasset.canton.topology.{PartyId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.version.HashingSchemeVersion
 import com.digitalasset.daml.lf.data.Ref.{SubmissionId, UserId}
@@ -31,6 +32,7 @@ object InteractiveSubmissionService {
       commands: Commands,
       verboseHashing: Boolean,
       maxRecordTime: Option[LfTimestamp],
+      costEstimationHints: Option[CostEstimationHints],
   )
 
   final case class ExecuteRequest(

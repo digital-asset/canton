@@ -264,7 +264,6 @@ class ParticipantNodeBootstrap(
           nextPackageIds,
           packageMetadataView,
           dryRunSnapshot,
-          acsInspections = () => acsInspectionPerSynchronizer(),
           forceFlags,
           disableUpgradeValidation = parameters.disableUpgradeValidation,
         )
@@ -380,7 +379,6 @@ class ParticipantNodeBootstrap(
               .map(_.topologyManager),
           lookupActivePsidByLsid = lookupActivePSId,
         ),
-        nodeId = nodeId,
         initialProtocolVersion = ProtocolVersion.latest,
         loggerFactory = ParticipantNodeBootstrap.this.loggerFactory,
         timeouts = timeouts,
@@ -538,6 +536,7 @@ class ParticipantNodeBootstrap(
                 clock = clock,
                 commandProgressTracker = commandProgressTracker,
                 ledgerApiStore = persistentState.map(_.ledgerApiStore),
+                contractStore = persistentState.map(_.contractStore),
                 ledgerApiIndexerConfig = LedgerApiIndexerConfig(
                   storageConfig = config.storage,
                   processingTimeout = parameters.processingTimeouts,

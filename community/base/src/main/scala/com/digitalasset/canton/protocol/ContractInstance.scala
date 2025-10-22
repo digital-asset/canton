@@ -13,6 +13,7 @@ import com.digitalasset.daml.lf.transaction.{
   TransactionCoder,
   Versioned,
 }
+import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
 /** Wraps a [[com.digitalasset.daml.lf.transaction.FatContractInstance]] and ensures the following
@@ -49,8 +50,7 @@ sealed trait GenContractInstance extends PrettyPrinting {
 }
 
 object ContractInstance {
-  // TODO(#28382) revert removal of private access modifier
-  final case class ContractInstanceImpl[Time <: CreationTime](
+  private final case class ContractInstanceImpl[Time <: CreationTime](
       override val inst: FatContractInstance { type CreatedAtTime = Time },
       override val metadata: ContractMetadata,
       override val serialization: ByteString,
@@ -182,4 +182,17 @@ object ContractInstance {
       param("created at", _.inst.createdAt),
     )
   }
+
+  @VisibleForTesting
+  def createWithSerialization[Time <: CreationTime](
+      inst: FatContractInstance { type CreatedAtTime = Time },
+      metadata: ContractMetadata,
+      serialization: ByteString,
+  ): GenContractInstance =
+    ContractInstanceImpl(
+      inst = inst,
+      metadata = metadata,
+      serialization = serialization,
+    )
+
 }

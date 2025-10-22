@@ -175,6 +175,7 @@ class DbPhysicalSyncPersistentState(
       SynchronizerStore(physicalSynchronizerIdx.synchronizerId),
       staticSynchronizerParameters.protocolVersion,
       timeouts,
+      parameters.batchingConfig,
       loggerFactory,
     )
 
@@ -207,8 +208,6 @@ class DbPhysicalSyncPersistentState(
         nextPackageIds,
         packageMetadataView,
         dryRunSnapshot,
-        acsInspections =
-          () => Map(logicalSyncPersistentState.lsid -> logicalSyncPersistentState.acsInspection),
         forceFlags,
         parameters.disableUpgradeValidation,
       )

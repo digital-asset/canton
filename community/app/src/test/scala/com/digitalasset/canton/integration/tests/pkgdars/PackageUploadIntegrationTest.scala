@@ -230,13 +230,38 @@ trait PackageUploadIntegrationTest
   }
 
   "dar inspection" should {
-    "show content of dars" in { implicit env =>
+    "show the content of a DAR if it was uploaded via the Admin API" in { implicit env =>
       import env.*
 
       participant3.synchronizers.connect_local(sequencer1, alias = daName)
+      participant3.dars.list(filterName = "CantonExamples") shouldBe empty
+
       participant3.dars.upload(CantonExamplesPath)
 
       val items = participant3.dars.list(filterName = "CantonExamples")
+      items should have length (1)
+
+      val dar = items.loneElement
+
+      // list contents
+      val content = participant3.dars.get_contents(dar.mainPackageId)
+      content.description.name shouldBe dar.name
+
+      // packages should exist ...
+      val allPackages = participant3.packages.list().map(_.packageId).toSet
+      forAll((content.packages)) { pkg =>
+        allPackages contains pkg.packageId
+      }
+    }
+
+    "show the content of a DAR if it was uploaded via the Ledger API" in { implicit env =>
+      import env.*
+
+      participant3.synchronizers.connect_local(sequencer1, alias = daName)
+      participant3.dars.list(filterName = "CantonTests") shouldBe empty
+      participant3.ledger_api.packages.upload_dar(CantonTestsPath)
+
+      val items = participant3.dars.list(filterName = "CantonTests")
       items should have length (1)
 
       val dar = items.loneElement
@@ -486,7 +511,7 @@ trait PackageUploadIntegrationTest
       ) shouldBe (content.description.name, content.description.version, content.description.description)
       content.packages.map(_.packageId) should contain(mainPackageId)
 
-      val prim = participant1.packages.list(filterName = "daml-prim").headOption.value
+      val prim = participant1.packages.list(filterName = "daml-prim-DA-Types").headOption.value
       // just test whether we correctly can find the references for a given package
       participant1.packages.get_references(prim.packageId).map(_.name).toSet shouldBe Set(
         AdminWorkflowServices.PingDarResourceName,
@@ -547,13 +572,20 @@ trait PackageUploadIntegrationTest
         cantonExamplesMainPkgId
       )
 
+      // Wait for the package vetting to be effectively removed from the store
+      eventually() {
+        inStore(daId, participant4) should not contain cantonTestsMainPackageId
+      }
       // Now, remove the CantonExamples DAR
-      participant4.packages.synchronize_vetting()
       participant4.dars.remove(cantonExamplesMainPkgId)
       // Check that CantonExamples main package-id was removed
       participant4.packages
         .list(filterName = "CantonExamples")
         .map(_.packageId) should not contain cantonExamplesMainPkgId
+
+      eventually() {
+        inStore(daId, participant4) should not contain cantonExamplesMainPkgId
+      }
     }
   }
 

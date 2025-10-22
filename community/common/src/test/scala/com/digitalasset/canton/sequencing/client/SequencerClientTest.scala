@@ -1528,6 +1528,10 @@ final class SequencerClientTest
     override def subscriptionRetryPolicyPekko
         : SubscriptionErrorRetryPolicyPekko[SubscriptionError] =
       SubscriptionErrorRetryPolicyPekko.never
+
+    override def downloadTopologyStateForInitHash(request: TopologyStateForInitRequest)(implicit
+        traceContext: TraceContext
+    ): EitherT[FutureUnlessShutdown, String, TopologyStateForInitHashResponse] = ???
   }
 
   private object MockTransport {
@@ -1642,6 +1646,13 @@ final class SequencerClientTest
 
     override protected def loggerFactory: NamedLoggerFactory =
       SequencerClientTest.this.loggerFactory
+
+    override def downloadTopologyStateForInitHash(
+        request: TopologyStateForInitRequest,
+        timeout: Duration,
+    )(implicit
+        traceContext: TraceContext
+    ): EitherT[FutureUnlessShutdown, String, TopologyStateForInitHashResponse] = ???
   }
 
   private class MockPool extends SequencerConnectionXPool {
@@ -1669,6 +1680,7 @@ final class SequencerClientTest
         trustThreshold = PositiveInt.one,
         minRestartConnectionDelay = cantonConfig.NonNegativeFiniteDuration.Zero,
         maxRestartConnectionDelay = cantonConfig.NonNegativeFiniteDuration.Zero,
+        warnConnectionValidationDelay = cantonConfig.NonNegativeFiniteDuration.Zero,
       )
 
     override def updateConfig(newConfig: SequencerConnectionXPool.SequencerConnectionXPoolConfig)(
@@ -1813,7 +1825,7 @@ final class SequencerClientTest
   private class TestProtocolMessage()
       extends UnsignedProtocolMessage
       with IgnoreInSerializationTestExhaustivenessCheck {
-    override def synchronizerId: PhysicalSynchronizerId = fail("shouldn't be used")
+    override def psid: PhysicalSynchronizerId = fail("shouldn't be used")
 
     override def representativeProtocolVersion: RepresentativeProtocolVersion[companionObj.type] =
       fail("shouldn't be used")

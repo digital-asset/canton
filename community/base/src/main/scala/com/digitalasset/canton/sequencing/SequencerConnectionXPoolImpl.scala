@@ -7,16 +7,19 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.functorFilter.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
+import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.{Crypto, SynchronizerCrypto}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.HealthListener
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle, PromiseUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.SequencerConnectionPoolMetrics
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencing.ConnectionX.ConnectionXConfig
 import com.digitalasset.canton.sequencing.InternalSequencerConnectionX.{
@@ -41,6 +44,7 @@ import org.apache.pekko.stream.Materializer
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.collection.{immutable, mutable}
+import scala.compat.java8.DurationConverters.DurationOps
 import scala.concurrent.{ExecutionContextExecutor, blocking}
 import scala.util.Random
 
@@ -52,6 +56,8 @@ class SequencerConnectionXPoolImpl private[sequencing] (
     member: Member,
     crypto: Crypto,
     seedForRandomnessO: Option[Long],
+    metrics: SequencerConnectionPoolMetrics,
+    metricsContext: MetricsContext,
     futureSupervisor: FutureSupervisor,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -120,6 +126,9 @@ class SequencerConnectionXPoolImpl private[sequencing] (
 
   override def staticSynchronizerParametersO: Option[StaticSynchronizerParameters] =
     bootstrapCell.get.map(_.staticParameters)
+
+  private implicit def mc: MetricsContext = metricsContext
+  metrics.trustThreshold.updateValue(config.trustThreshold.value)
 
   override def start()(implicit
       traceContext: TraceContext
@@ -209,6 +218,8 @@ class SequencerConnectionXPoolImpl private[sequencing] (
       // Newly created connections are not yet validated
       trackedConnections.addAll(newConnections.map(_ -> false))
 
+      metrics.trackedConnections.updateValue(trackedConnections.size)
+
       // Note that the following calls to `connection.fatal` and `startConnection` can potentially trigger
       // further processing via health state changes and modify the tracked connections or the pool.
       // Even if this happens in the same thread, it does not interfere with our processing.
@@ -236,27 +247,47 @@ class SequencerConnectionXPoolImpl private[sequencing] (
     private case class RestartData(
         scheduled: Boolean,
         delay: cantonConfig.NonNegativeFiniteDuration,
+        initialStartTimeO: Option[CantonTimestamp],
     )
 
     private val restartDataRef = new AtomicReference[RestartData](
-      RestartData(scheduled = false, delay = config.minRestartConnectionDelay)
+      RestartData(
+        scheduled = false,
+        delay = config.minRestartConnectionDelay,
+        initialStartTimeO = None,
+      )
     )
 
     private def resetRestartDelay(): Unit = restartDataRef.getAndUpdate {
-      _.copy(delay = config.minRestartConnectionDelay)
+      _.copy(
+        delay = config.minRestartConnectionDelay,
+        initialStartTimeO = None,
+      )
     }.discard
 
     private def scheduleRestart()(implicit traceContext: TraceContext): Unit = {
-      val RestartData(restartAlreadyScheduled, delay) = restartDataRef.getAndUpdate {
-        case RestartData(false, delay) =>
-          RestartData(
-            scheduled = true,
-            // Exponentially backoff the restart delay, bounded by the max
-            delay = canton.config.NonNegativeFiniteDuration.tryFromDuration(
-              (delay.duration * 2).min(config.maxRestartConnectionDelay.duration)
-            ),
+      val RestartData(restartAlreadyScheduled, delay, initialStartTimeO) =
+        restartDataRef.getAndUpdate {
+          case current @ RestartData(false, delay, _) =>
+            current.copy(
+              scheduled = true,
+              // Exponentially backoff the restart delay, bounded by the max
+              delay = canton.config.NonNegativeFiniteDuration.tryFromDuration(
+                (delay.duration * 2).min(config.maxRestartConnectionDelay.duration)
+              ),
+            )
+          case other => other
+        }
+
+      initialStartTimeO.foreach { initialStartTime =>
+        val durationSinceInitialStart = (wallClock.now - initialStartTime).toScala
+        if (durationSinceInitialStart > config.warnConnectionValidationDelay.duration) {
+          logger.warn(
+            s"Connection has failed validation since $initialStartTime" +
+              s" (${LoggerUtil.roundDurationForHumans(durationSinceInitialStart)} ago)." +
+              s" Last failure reason: \"${connection.lastFailureReason.getOrElse("N/A")}\""
           )
-        case other => other
+        }
       }
 
       if (restartAlreadyScheduled)
@@ -280,10 +311,17 @@ class SequencerConnectionXPoolImpl private[sequencing] (
         }
       }
 
-    def startConnection()(implicit traceContext: TraceContext): Unit =
+    def startConnection()(implicit traceContext: TraceContext): Unit = {
+      restartDataRef.getAndUpdate {
+        case current @ RestartData(_, _, None) =>
+          current.copy(initialStartTimeO = Some(wallClock.now))
+        case other => other
+      }.discard
+
       connection
         .start()
         .valueOr(err => logger.warn(s"Failed to start connection ${connection.name}: $err"))
+    }
 
     private def register(): Unit =
       connection.health
@@ -378,6 +416,8 @@ class SequencerConnectionXPoolImpl private[sequencing] (
         } yield {
           configRef.set(newConfig)
           logger.info(s"Configuration updated to: $newConfig")
+
+          metrics.trustThreshold.updateValue(config.trustThreshold.value)
 
           // If the trust threshold is now reached, process it
           bootstrapIfThresholdReachedO.foreach(initializePool)
@@ -592,6 +632,7 @@ class SequencerConnectionXPoolImpl private[sequencing] (
             }
             .discard
 
+          metrics.validatedConnections.updateValue(pool.size)
           updateHealth()
         }
         .valueOr { error =>
@@ -619,7 +660,7 @@ class SequencerConnectionXPoolImpl private[sequencing] (
             .updateWith(sequencerId) {
               // Match on config
               case Some(current) if current.exists(_.config == connection.config) =>
-                logger.debug(s"Removing $connection from the pool")
+                logger.debug(s"Removing ${connection.name} from the pool")
                 actionIfPresent
                 val newList = current.filter(_.config != connection.config)
                 NonEmpty.from(newList)
@@ -628,6 +669,7 @@ class SequencerConnectionXPoolImpl private[sequencing] (
             }
             .discard
 
+          metrics.validatedConnections.updateValue(pool.size)
           updateHealth()
 
         case None =>
@@ -657,7 +699,7 @@ class SequencerConnectionXPoolImpl private[sequencing] (
     blocking {
       lock.synchronized {
         logger.debug(
-          s"[$requester] requesting $requestedNumber connections excluding ${exclusions.map(_.uid.identifier)}"
+          s"[$requester] requesting $requestedNumber connection(s) excluding ${exclusions.map(_.uid.identifier)}"
         )
 
         // Pick up to `requestedNumber` non-excluded sequencer IDs from the pool
@@ -721,6 +763,8 @@ class GrpcSequencerConnectionXPoolFactory(
     clock: Clock,
     crypto: Crypto,
     seedForRandomnessO: Option[Long],
+    metrics: SequencerConnectionPoolMetrics,
+    metricsContext: MetricsContext,
     futureSupervisor: FutureSupervisor,
     timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -741,6 +785,8 @@ class GrpcSequencerConnectionXPoolFactory(
     val connectionFactory = new GrpcInternalSequencerConnectionXFactory(
       clientProtocolVersions,
       minimumProtocolVersion,
+      metrics,
+      metricsContext,
       futureSupervisor,
       timeouts,
       loggerWithPoolName,
@@ -757,6 +803,8 @@ class GrpcSequencerConnectionXPoolFactory(
         member,
         crypto,
         seedForRandomnessO,
+        metrics,
+        metricsContext,
         futureSupervisor,
         timeouts,
         loggerWithPoolName,

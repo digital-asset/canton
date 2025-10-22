@@ -11,10 +11,11 @@ import cats.syntax.parallel.*
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.ledger.api.{
   EnrichedVettedPackage,
+  EnrichedVettedPackages,
   ListVettedPackagesOpts,
+  ParticipantVettedPackages,
   SinglePackageTargetVetting,
   UpdateVettedPackagesOpts,
   VettedPackagesRef,
@@ -48,12 +49,7 @@ import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.transaction.VettedPackage
-import com.digitalasset.canton.topology.{
-  ForceFlag,
-  ForceFlags,
-  PhysicalSynchronizerId,
-  SynchronizerId,
-}
+import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.{LedgerSubmissionId, LfPackageId, ProtoDeserializationError}
@@ -252,7 +248,7 @@ class PackageService(
   ): EitherT[
     FutureUnlessShutdown,
     RpcError,
-    (Seq[EnrichedVettedPackage], Seq[EnrichedVettedPackage]),
+    (Option[EnrichedVettedPackages], Option[EnrichedVettedPackages]),
   ] = {
     val snapshot = getPackageMetadataView.getSnapshot
     val targetStates = opts.toTargetStates
@@ -265,13 +261,13 @@ class PackageService(
           synchronizerId,
           synchronizeVetting,
           dryRunSnapshot,
+          opts.expectedTopologySerial,
+          updateForceFlags = Some(opts.forceFlags),
         )
         .leftWiden[RpcError]
     } yield {
       val (pre, post) = preAndPost
-      val enrichedPre = pre.map(enrichVettedPackage)
-      val enrichedPost = post.map(enrichVettedPackage)
-      (enrichedPre, enrichedPost)
+      (pre.map(enrichVettedPackages), post.map(enrichVettedPackages))
     }
   }
 
@@ -279,19 +275,37 @@ class PackageService(
       opts: ListVettedPackagesOpts
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, RpcError, Seq[
-    (Seq[EnrichedVettedPackage], SynchronizerId, PositiveInt)
-  ]] = {
+  ): EitherT[FutureUnlessShutdown, RpcError, Seq[EnrichedVettedPackages]] = {
     val snapshot = getPackageMetadataView.getSnapshot
-    val filterPredicates = opts.toPredicate(snapshot)
+    val packagePredicate = opts.toPackagePredicate(snapshot)
     packageOps
-      .getVettedPackages(opts.topologyStateFilter.map(_.synchronizerIds.toSet))
+      .getVettedPackages(opts)
       .leftWiden[RpcError]
-      .map(_.map { case (allVettedPackages, synchronizerId, serial) =>
-        val matching = allVettedPackages.filter((v: VettedPackage) => filterPredicates(v.packageId))
-        val enriched = matching.map(enrichVettedPackage)
-        (enriched, synchronizerId, serial)
-      })
+      .map(_.flatMap(pkgs => filterAndEnrich(pkgs, predicate = packagePredicate)))
+  }
+
+  private def enrichVettedPackages(vetted: ParticipantVettedPackages)(implicit
+      traceContext: TraceContext
+  ): EnrichedVettedPackages =
+    EnrichedVettedPackages(
+      vetted.packages.map(enrichVettedPackage),
+      vetted.participantId,
+      vetted.synchronizerId,
+      vetted.serial,
+    )
+
+  private def filterAndEnrich(vetted: ParticipantVettedPackages, predicate: LfPackageId => Boolean)(
+      implicit traceContext: TraceContext
+  ): Option[EnrichedVettedPackages] = {
+    val filteredPackages = vetted.packages.filter(pkg => predicate(pkg.packageId))
+    Option.when(filteredPackages.nonEmpty)(
+      EnrichedVettedPackages(
+        filteredPackages.map(enrichVettedPackage),
+        vetted.participantId,
+        vetted.synchronizerId,
+        vetted.serial,
+      )
+    )
   }
 
   private def enrichVettedPackage(vetted: VettedPackage)(implicit
@@ -579,13 +593,13 @@ class PackageService(
           .map { case (packageId, packageAst) => PackageMetadata.from(packageId, packageAst) }
           .foldLeft(getPackageMetadataView.getSnapshot)(_ |+| _)
 
-      // TODO(#27750): all requests are of the authorized store instead of a synchronizer
       _ <- packageOps
         .updateVettedPackages(
           targetVettingState,
           synchronizerId,
           PackageVettingSynchronization.NoSync,
           Some(dryRunSnapshot),
+          expectedTopologySerial = None,
         )
         .leftWiden[RpcError]
     } yield DarMainPackageId.tryCreate(mainPackageId)

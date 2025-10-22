@@ -116,7 +116,7 @@ class SequencerSubscriptionX[HandlerError] private[sequencing] (
   ): Unit =
     // Stop the connection non-fatally and let the subscription pool start a new subscription.
     connection.fail(reason)
-  // TODO(i27278): Warn after some delay or number of failures?
+  // TODO(i28761): Warn after some delay or number of failures
   // LostSequencerSubscription.Warn(connection.attributes.sequencerId).discard
 
   // stop the current subscription, do not retry, and propagate the failure upstream
@@ -139,12 +139,13 @@ class SequencerSubscriptionX[HandlerError] private[sequencing] (
 
       case Success(SubscriptionCloseReason.Shutdown) =>
         logger.info("Closing sequencer subscription due to an ongoing shutdown")
-      // If we reach here, it is due to a concurrent closing of the subscription (see previous case) and a subscription
+      // If we reach here, it is due to a concurrent closing of the subscription (see above) and a subscription
       // error. Again, we don't need to explicitly close the connection.
 
       case Success(SubscriptionCloseReason.HandlerError(_: ApplicationHandlerShutdown.type)) =>
         logger.info("Closing sequencer subscription due to handler shutdown")
-        connection.fatal("Subscription handler shutdown")
+      // If we reach here, it is due to a concurrent closing of the subscription (see above) and a subscription
+      // error. Again, we don't need to explicitly close the connection.
 
       case Success(SubscriptionCloseReason.HandlerError(exception: ApplicationHandlerException)) =>
         logger.error(

@@ -58,12 +58,12 @@ import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
 import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{ContractValidator, EitherTUtil, ReassignmentTag}
+import com.digitalasset.canton.util.{ContractValidator, ReassignmentTag}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
 
 import scala.collection.concurrent
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.concurrent.{ExecutionContext, Promise}
 
 private[reassignment] trait ReassignmentProcessingSteps[
     SubmissionParam,
@@ -80,7 +80,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
 
   val participantId: ParticipantId
 
-  val synchronizerId: ReassignmentTag[PhysicalSynchronizerId]
+  val psid: ReassignmentTag[PhysicalSynchronizerId]
 
   val protocolVersion: ReassignmentTag[ProtocolVersion]
 
@@ -160,15 +160,6 @@ private[reassignment] trait ReassignmentProcessingSteps[
       requestId: RequestId,
       validationResult: ReassignmentValidationResult,
   ): Option[LocalRejectError]
-
-  override def authenticateInputContracts(
-      parsedRequest: ParsedRequestType
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[Future, ReassignmentProcessorError, Unit] =
-    // this check is implemented in the ReassignmentValidation.checkMetadata as part of the phase 3 and phase 7.
-    // TODO(i12928): Remove this method once the transaction validation has fixed the non-authenticated contract issue.
-    EitherTUtil.unit
 
   protected def performPendingSubmissionMapUpdate(
       pendingSubmissionMap: concurrent.Map[RootHash, PendingReassignmentSubmission],
@@ -319,7 +310,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
       requestId = requestId,
       rootHash = rootHash,
       malformedPayloads = malformedPayloads,
-      synchronizerId = synchronizerId.unwrap,
+      synchronizerId = psid.unwrap,
       participantId = participantId,
       protocolVersion = protocolVersion.unwrap,
     )
@@ -348,7 +339,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
       Update.SequencedCommandRejected(
         completionInfo,
         rejection,
-        synchronizerId.unwrap.logical,
+        psid.unwrap.logical,
         ts,
       )
     )
@@ -378,7 +369,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
       Update.SequencedCommandRejected(
         info,
         rejection,
-        synchronizerId.unwrap.logical,
+        psid.unwrap.logical,
         pendingReassignment.requestId.unwrap,
       )
     )
@@ -427,7 +418,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
           requestId = requestId,
           rootHash = validationResult.rootHash,
           malformedPayloads = malformedPayloads,
-          synchronizerId = synchronizerId.unwrap,
+          synchronizerId = psid.unwrap,
           participantId = participantId,
           protocolVersion = protocolVersion,
         )
@@ -453,7 +444,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
           ConfirmationResponses.tryCreate(
             requestId,
             rootHash,
-            synchronizerId.unwrap,
+            psid.unwrap,
             participantId,
             NonEmpty.mk(
               Seq,
@@ -530,7 +521,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
             ConfirmationResponses.tryCreate(
               requestId,
               validationResult.rootHash,
-              synchronizerId.unwrap,
+              psid.unwrap,
               participantId,
               NonEmpty.mk(
                 Seq,
