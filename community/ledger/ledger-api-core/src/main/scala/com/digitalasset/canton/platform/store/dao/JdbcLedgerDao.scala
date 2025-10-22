@@ -203,6 +203,14 @@ private class JdbcLedgerDao(
 
     dbDispatcher
       .executeSql(metrics.index.db.pruneDbMetrics) { conn =>
+        // verifying pruning is continuous
+        val prunedUpToInDb = parameterStorageBackend.prunedUpToInclusive(conn)
+        if (prunedUpToInDb != previousPruneUpToInclusive) {
+          throw new IllegalStateException(
+            s"Previous pruned up to ($previousPruneUpToInclusive) is different from the current pruning offset in DB ($prunedUpToInDb)"
+          )
+        }
+
         readStorageBackend.eventStorageBackend.pruneEvents(
           previousPruneUpToInclusive = previousPruneUpToInclusive,
           previousIncompleteReassignmentOffsets = previousIncompleteReassignmentOffsets,
@@ -230,6 +238,14 @@ private class JdbcLedgerDao(
           logger.warn("Pruning failed", ex)
       }
   }
+
+  def indexDbPrunedUpTo(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[Option[Offset]] =
+    dbDispatcher
+      .executeSql(metrics.index.db.fetchPruningOffsetsMetrics)(
+        parameterStorageBackend.prunedUpToInclusive
+      )
 
   override def pruningOffset(implicit
       loggingContext: LoggingContextWithTrace

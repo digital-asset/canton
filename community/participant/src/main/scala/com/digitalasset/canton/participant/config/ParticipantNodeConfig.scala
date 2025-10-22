@@ -37,7 +37,7 @@ import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 import monocle.macros.syntax.lens.*
 
 import java.nio.file.Path
-import scala.concurrent.duration.Duration
+import scala.concurrent.duration.DurationInt
 
 /** Base for all participant configs - both local and remote */
 trait BaseParticipantConfig extends NodeConfig with Product with Serializable {
@@ -94,7 +94,7 @@ final case class ParticipantNodeConfig(
     alphaDynamic: DeclarativeParticipantConfig = DeclarativeParticipantConfig(),
 ) extends LocalNodeConfig
     with BaseParticipantConfig
-    with ConfigDefaults[DefaultPorts, ParticipantNodeConfig]
+    with ConfigDefaults[Option[DefaultPorts], ParticipantNodeConfig]
     with UniformCantonConfigValidation {
   override def nodeTypeName: String = "participant"
 
@@ -105,16 +105,22 @@ final case class ParticipantNodeConfig(
   def toRemoteConfig: RemoteParticipantConfig =
     RemoteParticipantConfig(adminApi.clientConfig, ledgerApi.clientConfig)
 
-  override def withDefaults(ports: DefaultPorts, edition: CantonEdition): ParticipantNodeConfig =
-    this
-      .focus(_.ledgerApi.internalPort)
-      .modify(ports.ledgerApiPort.setDefaultPort)
-      .focus(_.adminApi.internalPort)
-      .modify(ports.participantAdminApiPort.setDefaultPort)
-      .focus(_.replication)
-      .modify(ReplicationConfig.withDefaultO(storage, _, edition))
-      .focus(_.httpLedgerApi.server.internalPort)
-      .modify(ports.jsonLedgerApiPort.setDefaultPort)
+  override def withDefaults(
+      ports: Option[DefaultPorts],
+      edition: CantonEdition,
+  ): ParticipantNodeConfig =
+    ports.fold(this)(ports =>
+      this
+        .focus(_.ledgerApi.internalPort)
+        .modify(ports.ledgerApiPort.setDefaultPort)
+        .focus(_.adminApi.internalPort)
+        .modify(ports.participantAdminApiPort.setDefaultPort)
+        .focus(_.replication)
+        .modify(ReplicationConfig.withDefaultO(storage, _, edition))
+        .focus(_.httpLedgerApi.server.internalPort)
+        .modify(ports.jsonLedgerApiPort.setDefaultPort)
+    )
+
 }
 
 object ParticipantNodeConfig {
@@ -248,7 +254,7 @@ final case class LedgerApiServerConfig(
       InteractiveSubmissionServiceConfig.Default,
     topologyAwarePackageSelection: TopologyAwarePackageSelectionConfig =
       TopologyAwarePackageSelectionConfig.Default,
-    maxTokenLifetime: NonNegativeDuration = config.NonNegativeDuration(Duration.Inf),
+    maxTokenLifetime: NonNegativeDuration = config.NonNegativeDuration(5.minutes),
     jwksCacheConfig: JwksCacheConfig = JwksCacheConfig(),
 ) extends ServerConfig // We can't currently expose enterprise server features at the ledger api anyway
     {
@@ -356,6 +362,10 @@ object TestingTimeServiceConfig {
   * @param doNotAwaitOnCheckingIncomingCommitments
   *   Enable fully asynchronous checking of incoming commitments. This may result in some incoming
   *   commitments not being checked in case of crashes or HA failovers.
+  * @param commitmentCheckpointInterval
+  *   Checkpoint interval for commitments. Smaller intervals lead to less resource-intensive crash
+  *   recovery, at the cost of more frequent DB writing of checkpoints. Regardless of this
+  *   checkpoint interval, checkpointing is also performed at reconciliation interval boundaries.
   */
 final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -390,6 +400,8 @@ final case class ParticipantNodeParameterConfig(
     activationFrequencyForWarnAboutConsistencyChecks: Long = 1000,
     reassignmentsConfig: ReassignmentsConfig = ReassignmentsConfig(),
     doNotAwaitOnCheckingIncomingCommitments: Boolean = false,
+    commitmentCheckpointInterval: config.PositiveDurationSeconds =
+      config.PositiveDurationSeconds.ofMinutes(1),
 ) extends LocalNodeParametersConfig
     with UniformCantonConfigValidation
 
@@ -431,17 +443,26 @@ object ParticipantStoreConfig {
   *   The initial interval size for pruning
   * @param maxBuckets
   *   The maximum number of buckets used for any pruning interval
+  * @param maxItemsExpectedToPrunePerBatch
+  *   The maximum on the number of items expected to prune per batch. Implemented by select stores
+  *   (e.g. ActiveContractStore) to help motivate database filtered index selection. Should be at
+  *   least an order of magnitude larger than targetBatchSize to not interfere with dynamic
+  *   bucketing after a participant node has been inactive for a while, but not excessively large to
+  *   discourage scanning the entire table.
   */
 final case class JournalPruningConfig(
     targetBatchSize: PositiveInt = JournalPruningConfig.DefaultTargetBatchSize,
     initialInterval: config.NonNegativeFiniteDuration = JournalPruningConfig.DefaultInitialInterval,
     maxBuckets: PositiveInt = JournalPruningConfig.DefaultMaxBuckets,
+    maxItemsExpectedToPrunePerBatch: PositiveInt =
+      JournalPruningConfig.DefaultMaxItemsExpectedToPrunePerBatch,
 ) extends UniformCantonConfigValidation {
   def toInternal: PrunableByTimeParameters =
     PrunableByTimeParameters(
       targetBatchSize,
       initialInterval = initialInterval.toInternal,
       maxBuckets = maxBuckets,
+      maxItemsExpectedToPrunePerBatch = maxItemsExpectedToPrunePerBatch,
     )
 }
 
@@ -455,6 +476,7 @@ object JournalPruningConfig {
   private val DefaultTargetBatchSize = PositiveInt.tryCreate(5000)
   private val DefaultInitialInterval = config.NonNegativeFiniteDuration.ofSeconds(5)
   private val DefaultMaxBuckets = PositiveInt.tryCreate(100)
+  private val DefaultMaxItemsExpectedToPrunePerBatch = PositiveInt.tryCreate(100000)
 }
 
 /** Parameters for the ledger api server

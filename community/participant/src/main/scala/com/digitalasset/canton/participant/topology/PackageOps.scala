@@ -23,6 +23,7 @@ import com.digitalasset.canton.ledger.api.{
   PriorTopologySerialExists,
   PriorTopologySerialNone,
   SinglePackageTargetVetting,
+  UpdateVettedPackagesForceFlags,
 }
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -75,7 +76,7 @@ trait PackageOps extends NamedLogging {
       synchronizeVetting: PackageVettingSynchronization,
       dryRunSnapshot: Option[PackageMetadata],
       expectedTopologySerial: Option[PriorTopologySerial],
-      allowUnvetPackageIdInUse: Boolean = false,
+      updateForceFlags: Option[UpdateVettedPackagesForceFlags] = None,
   )(implicit
       tc: TraceContext
   ): EitherT[
@@ -213,7 +214,7 @@ class PackageOpsImpl(
       synchronizeVetting: PackageVettingSynchronization,
       dryRunSnapshot: Option[PackageMetadata],
       expectedTopologySerial: Option[PriorTopologySerial],
-      allowUnvetPackageIdInUse: Boolean = false,
+      updateForceFlags: Option[UpdateVettedPackagesForceFlags] = None,
   )(implicit
       tc: TraceContext
   ): EitherT[
@@ -233,11 +234,7 @@ class PackageOpsImpl(
               VettedPackageChange.Changed(Some(previousState), target.toVettedPackage)
           }
 
-        val forceFlags =
-          if (allowUnvetPackageIdInUse)
-            ForceFlags(ForceFlag.AllowUnvetPackageWithActiveContracts)
-          else
-            ForceFlags.none
+        val forceFlags = updateForceFlags.map(_.toForceFlags).getOrElse(ForceFlags.none)
 
         for {
           topologyManager <- topologyManagerLookup.byPhysicalSynchronizerId(psid)

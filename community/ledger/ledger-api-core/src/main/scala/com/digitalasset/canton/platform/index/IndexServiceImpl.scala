@@ -392,6 +392,11 @@ private[index] class IndexServiceImpl(
     )
   }
 
+  override def indexDbPrunedUpTo(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[Option[Offset]] =
+    ledgerDao.indexDbPrunedUpTo
+
   override def currentLedgerEnd(): Future[Option[Offset]] =
     Future.successful(ledgerEnd())
 
