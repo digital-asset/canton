@@ -417,17 +417,26 @@ object ParticipantStoreConfig {
   *   The initial interval size for pruning
   * @param maxBuckets
   *   The maximum number of buckets used for any pruning interval
+  * @param maxItemsExpectedToPrunePerBatch
+  *   The maximum on the number of items expected to prune per batch. Implemented by select stores
+  *   (e.g. ActiveContractStore) to help motivate database filtered index selection. Should be at
+  *   least an order of magnitude larger than targetBatchSize to not interfere with dynamic
+  *   bucketing after a participant node has been inactive for a while, but not excessively large to
+  *   discourage scanning the entire table.
   */
 final case class JournalPruningConfig(
     targetBatchSize: PositiveInt = JournalPruningConfig.DefaultTargetBatchSize,
     initialInterval: config.NonNegativeFiniteDuration = JournalPruningConfig.DefaultInitialInterval,
     maxBuckets: PositiveInt = JournalPruningConfig.DefaultMaxBuckets,
+    maxItemsExpectedToPrunePerBatch: PositiveInt =
+      JournalPruningConfig.DefaultMaxItemsExpectedToPrunePerBatch,
 ) extends UniformCantonConfigValidation {
   def toInternal: PrunableByTimeParameters =
     PrunableByTimeParameters(
       targetBatchSize,
       initialInterval = initialInterval.toInternal,
       maxBuckets = maxBuckets,
+      maxItemsExpectedToPrunePerBatch = maxItemsExpectedToPrunePerBatch,
     )
 }
 
@@ -441,6 +450,7 @@ object JournalPruningConfig {
   private val DefaultTargetBatchSize = PositiveInt.tryCreate(5000)
   private val DefaultInitialInterval = config.NonNegativeFiniteDuration.ofSeconds(5)
   private val DefaultMaxBuckets = PositiveInt.tryCreate(100)
+  private val DefaultMaxItemsExpectedToPrunePerBatch = PositiveInt.tryCreate(100000)
 }
 
 /** Parameters for the ledger api server

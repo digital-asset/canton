@@ -392,13 +392,16 @@ object LedgerApiCommands {
         Right(response.partyDetails)
     }
 
-    final case class GetParty(party: PartyId, identityProviderId: String)
-        extends BaseCommand[GetPartiesRequest, GetPartiesResponse, PartyDetails] {
+    final case class GetParties(
+        parties: Seq[PartyId],
+        identityProviderId: String,
+        failOnNotFound: Boolean,
+    ) extends BaseCommand[GetPartiesRequest, GetPartiesResponse, Map[PartyId, PartyDetails]] {
 
       override protected def createRequest(): Either[String, GetPartiesRequest] =
         Right(
           GetPartiesRequest(
-            parties = Seq(party.toProtoPrimitive),
+            parties = parties.map(_.toProtoPrimitive),
             identityProviderId = identityProviderId,
           )
         )
@@ -410,8 +413,18 @@ object LedgerApiCommands {
 
       override protected def handleResponse(
           response: GetPartiesResponse
-      ): Either[String, PartyDetails] =
-        response.partyDetails.headOption.toRight("PARTY_NOT_FOUND")
+      ): Either[String, Map[PartyId, PartyDetails]] = {
+        val result =
+          response.partyDetails.map(d => (PartyId.tryFromProtoPrimitive(d.party), d)).toMap
+        if (failOnNotFound) {
+          val notFound = parties.toSet -- result.keySet
+          Either.cond(
+            notFound.isEmpty,
+            result,
+            s"The following parties were not found on the Ledger API: $notFound",
+          )
+        } else Right(result)
+      }
     }
 
     final case class UpdateIdp(

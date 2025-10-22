@@ -9,6 +9,12 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2025-10-22 (Exclusive)
+- Participant background pruning now motivates Postgres to use the partial pruning index on the
+  `par_active_contracts` table. The newly introduced
+  `canton.participants.<participant>.parameters.stores.journal-pruning.max-items-expected-to-prune-per-batch`
+  config can be adapted in case the pruning index is not used in some cases.
+
 ## Until 2025-10-08 (Exclusive)
 - BREAKING: Moved the sequencer-api limits into the server config. Now, the same functionality is
   also available on the Admin API. The configuration is now under `<api-config>.stream.limits = { ... }`, for both the public and admin api.

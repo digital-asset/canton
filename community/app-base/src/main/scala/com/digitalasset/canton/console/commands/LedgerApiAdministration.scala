@@ -9,10 +9,7 @@ import cats.syntax.traverse.*
 import com.daml.jwt.{AuthServiceJWTCodec, Jwt, JwtDecoder, StandardJWTPayload}
 import com.daml.ledger.api.v2.admin.command_inspection_service.CommandState
 import com.daml.ledger.api.v2.admin.package_management_service.PackageDetails
-import com.daml.ledger.api.v2.admin.party_management_service.{
-  AllocateExternalPartyResponse,
-  PartyDetails as ProtoPartyDetails,
-}
+import com.daml.ledger.api.v2.admin.party_management_service.AllocateExternalPartyResponse
 import com.daml.ledger.api.v2.commands.{Command, DisclosedContract, PrefetchContractKey}
 import com.daml.ledger.api.v2.completion.Completion
 import com.daml.ledger.api.v2.event.CreatedEvent
@@ -76,6 +73,7 @@ import com.digitalasset.canton.config.ConsoleCommandTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
+  ConsoleCommandResult,
   ConsoleEnvironment,
   ConsoleMacros,
   FeatureFlag,
@@ -1666,6 +1664,26 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
         proto.map(PartyDetails.fromProtoPartyDetails)
       }
 
+      @Help.Summary("Get party details for known parties")
+      @Help.Description(
+        """Get party details for parties known by the Ledger API server for the given identity provider.
+           identityProviderId: identity provider id"""
+      )
+      def get(
+          parties: Seq[PartyId],
+          identityProviderId: String = "",
+          failOnNotFound: Boolean = true,
+      ): Map[PartyId, PartyDetails] =
+        check(FeatureFlag.Testing)(consoleEnvironment.run {
+          ledgerApiCommand(
+            LedgerApiCommands.PartyManagementService.GetParties(
+              parties = parties,
+              identityProviderId = identityProviderId,
+              failOnNotFound = failOnNotFound,
+            )
+          )
+        }).map { case (k, v) => (k, PartyDetails.fromProtoPartyDetails(v)) }
+
       @Help.Summary("Update participant-local party details")
       @Help.Description(
         """Currently you can update only the annotations.
@@ -1678,27 +1696,35 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           party: PartyId,
           modifier: PartyDetails => PartyDetails,
           identityProviderId: String = "",
-      ): PartyDetails = {
-        val rawDetails = get(party = party)
-        val srcDetails = PartyDetails.fromProtoPartyDetails(rawDetails)
-        val modifiedDetails = modifier(srcDetails)
-        verifyOnlyModifiableFieldsWhereModified(srcDetails, modifiedDetails)
-        val annotationsUpdate = makeAnnotationsUpdate(
-          original = srcDetails.annotations,
-          modified = modifiedDetails.annotations,
-        )
-        val rawUpdatedDetails = check(FeatureFlag.Testing)(consoleEnvironment.run {
-          ledgerApiCommand(
-            LedgerApiCommands.PartyManagementService.Update(
-              party = party,
-              annotationsUpdate = Some(annotationsUpdate),
-              resourceVersionO = Some(rawDetails.localMetadata.fold("")(_.resourceVersion)),
-              identityProviderId = identityProviderId,
+      ): PartyDetails =
+        check(FeatureFlag.Testing)(consoleEnvironment.run {
+          for {
+            rawDetails <- ledgerApiCommand(
+              LedgerApiCommands.PartyManagementService.GetParties(
+                parties = Seq(party),
+                identityProviderId = identityProviderId,
+                failOnNotFound = false,
+              )
+            ).flatMap { res =>
+              ConsoleCommandResult.fromEither(res.get(party).toRight(s"PARTY_NOT_FOUND: $party"))
+            }
+            srcDetails = PartyDetails.fromProtoPartyDetails(rawDetails)
+            modifiedDetails = modifier(srcDetails)
+            _ = verifyOnlyModifiableFieldsWhereModified(srcDetails, modifiedDetails)
+            annotationsUpdate = makeAnnotationsUpdate(
+              original = srcDetails.annotations,
+              modified = modifiedDetails.annotations,
             )
-          )
+            rawUpdatedDetails <- ledgerApiCommand(
+              LedgerApiCommands.PartyManagementService.Update(
+                party = party,
+                annotationsUpdate = Some(annotationsUpdate),
+                resourceVersionO = Some(rawDetails.localMetadata.fold("")(_.resourceVersion)),
+                identityProviderId = identityProviderId,
+              )
+            )
+          } yield PartyDetails.fromProtoPartyDetails(rawUpdatedDetails)
         })
-        PartyDetails.fromProtoPartyDetails(rawUpdatedDetails)
-      }
 
       @Help.Summary("Update party's identity provider id", FeatureFlag.Testing)
       @Help.Description(
@@ -1732,16 +1758,6 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           throw ModifyingNonModifiablePartyDetailsPropertiesError()
         }
       }
-
-      private def get(party: PartyId, identityProviderId: String = ""): ProtoPartyDetails =
-        check(FeatureFlag.Testing)(consoleEnvironment.run {
-          ledgerApiCommand(
-            LedgerApiCommands.PartyManagementService.GetParty(
-              party = party,
-              identityProviderId = identityProviderId,
-            )
-          )
-        })
 
     }
 

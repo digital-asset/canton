@@ -194,6 +194,26 @@ object RequireTypes {
     def tryCreate(n: Int): NonNegativeInt = NonNegativeNumeric.tryCreate(n)
   }
 
+  type NonNegativeDouble = NonNegativeNumeric[Double]
+
+  object NonNegativeDouble {
+    lazy val zero: NonNegativeDouble = NonNegativeDouble.tryCreate(0.0)
+    lazy val one: NonNegativeDouble = NonNegativeDouble.tryCreate(1.0)
+    lazy val maxValue: NonNegativeDouble = NonNegativeDouble.tryCreate(Double.MaxValue)
+
+    def create(n: Double): Either[InvariantViolation, NonNegativeDouble] =
+      NonNegativeNumeric.create(n)
+    def tryCreate(n: Double): NonNegativeDouble = NonNegativeNumeric.tryCreate(n)
+  }
+
+  final case class NonNegativeProportion(n: NonNegativeDouble) {
+    require(n <= NonNegativeDouble.one, "proportion may not be larger than 1")
+  }
+
+  object NonNegativeProportion {
+    lazy val zero: NonNegativeProportion = NonNegativeProportion(NonNegativeDouble.zero)
+  }
+
   type NonNegativeLong = NonNegativeNumeric[Long]
 
   object NonNegativeLong {

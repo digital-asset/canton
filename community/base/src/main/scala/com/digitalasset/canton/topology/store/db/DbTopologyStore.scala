@@ -189,30 +189,33 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
 
   override def bulkInsert(
       initialSnapshot: GenericStoredTopologyTransactions
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-
-    val inserts = initialSnapshot.result
-      .grouped(1000)
-      .map(
-        insertSignedTransaction[GenericStoredTopologyTransaction](tx =>
-          TransactionEntry(
-            sequenced = tx.sequenced,
-            validFrom = tx.validFrom,
-            validUntil = tx.validUntil,
-            signedTx = tx.transaction,
-            rejectionReason = tx.rejectionReason,
-          )
-        )
-      )
-      .toSeq
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     storage.update_(
-      DBIO
-        .seq(inserts*)
+      initialSnapshot.result
+        .grouped(1000)
+        .zipWithIndex
+        .foldLeft(
+          DBIO.successful(()): slick.dbio.DBIOAction[Unit, NoStream, slick.dbio.Effect.Write]
+        ) { case (acc, (elem, idx)) =>
+          acc
+            .flatMap { _ =>
+              logger.debug(s"Bulk inserting batch ${idx + 1}")
+              insertSignedTransaction[GenericStoredTopologyTransaction](tx =>
+                TransactionEntry(
+                  sequenced = tx.sequenced,
+                  validFrom = tx.validFrom,
+                  validUntil = tx.validUntil,
+                  signedTx = tx.transaction,
+                  rejectionReason = tx.rejectionReason,
+                )
+              )(elem)
+            }
+            .map(_ => ())
+        }
         .transactionally
         .withTransactionIsolation(TransactionIsolation.Serializable),
       operationName = "bulk-insert",
     )
-  }
 
   @VisibleForTesting
   override protected[topology] def dumpStoreContent()(implicit
