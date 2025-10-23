@@ -26,7 +26,8 @@ privacy faithfully.
 Refer to the [Canton Whitepaper](https://www.canton.io/publications/canton-whitepaper.pdf) for further details.
 
 ## Availability
-
+For a high-level overview of Canton’s core components and how synchronization domains and participants interact, see  
+👉 [Architecture Overview](docs/architecture/overview.md)
 This repository hosts the open source version of Canton. The Enterprise version can be purchased from [Digital Asset](https://digitalasset.com/products).
 
 ## Running
