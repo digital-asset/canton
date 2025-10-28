@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.admin.party
 
 import cats.data.EitherT
+import cats.syntax.option.*
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.{Fingerprint, Hash, HashAlgorithm, TestHash}
@@ -37,7 +38,6 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyMapping,
 }
 import com.digitalasset.canton.topology.{
-  DefaultTestIdentities,
   ForceFlags,
   ParticipantId,
   PartyId,
@@ -202,8 +202,7 @@ class PartyReplicationTopologyWorkflowTest
       .update(
         SequencedTime(ts),
         EffectiveTime(ts),
-        removeMapping = if (proposal) Map.empty else Map(mapping.uniqueKey -> serial),
-        removeTxs = Set.empty,
+        removals = if (proposal) Map.empty else Map(mapping.uniqueKey -> (serial.some, Set.empty)),
         additions = Seq(ValidatedTopologyTransaction(signedTx)),
       )
       .map(_ => signedTx)
@@ -278,8 +277,8 @@ class PartyReplicationTopologyWorkflowTest
         )
 
         for {
-          _ <- add(topologyStore)(tsSerialMinusOne, serialBefore, ptpBefore)
-          _ <- add(topologyStore)(tsSerial, serial, ptpProposal, proposal = true)
+          _ <- add(topologyStore)(tsSerialMinusTwo, serialBefore, ptpBefore)
+          _ <- add(topologyStore)(tsSerialMinusOne, serial, ptpProposal, proposal = true)
           effectiveTsBeforeO <- tw
             .authorizeOnboardingTopology(params, connectedSynchronizer)
             .valueOrFail("expect authorization to succeed")
@@ -402,9 +401,8 @@ class PartyReplicationTopologyWorkflowTest
             EffectiveTime(tsSerial),
             SequencerCounter.Genesis,
             Seq.empty,
-            DefaultTestIdentities.synchronizerId,
           )
-          _ <- add(topologyStore)(tsSerialMinusTwo, serialBefore2, ptpBefore)
+          _ <- add(topologyStore)(tsSerialMinusTwo.minusSeconds(1), serialBefore2, ptpBefore)
           _ <- add(topologyStore)(
             tsSerialMinusTwo,
             serialBefore2,

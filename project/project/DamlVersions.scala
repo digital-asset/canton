@@ -8,7 +8,11 @@ object DamlVersions {
   /** The version of the daml compiler (and in most cases of the daml libraries as well).
     */
   // after changing version, run `sbt updateDamlProjectVersions` to update the `daml.yaml` project files.
-  val version: String = "3.5.0-snapshot.20251020.14344.0.vac465d36"
+  val version: String = "3.5.0-snapshot.20251027.14374.0.v7e9c549b"
+
+  /** The dpm registry to install daml components from.
+    */
+  val dpm_registry: String = "europe-docker.pkg.dev/da-images/public-unstable"
 
   /** Custom Daml artifacts override version.
     */

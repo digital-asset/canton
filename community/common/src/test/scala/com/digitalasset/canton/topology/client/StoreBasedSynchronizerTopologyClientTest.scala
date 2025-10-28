@@ -24,6 +24,7 @@ import com.digitalasset.canton.topology.store.{
 }
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.*
+import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.{
   BaseTest,
@@ -96,18 +97,15 @@ trait StoreBasedTopologySnapshotTest
           _ <- store.update(
             SequencedTime(timestamp),
             EffectiveTime(timestamp),
-            removeMapping = transactions.map(tx => tx.mapping.uniqueKey -> tx.serial).toMap,
-            removeTxs = transactions.map(_.hash).toSet,
+            removals = transactions
+              .groupBy(_.mapping.uniqueKey)
+              .map { case (kk, txs) =>
+                kk -> (txs.map(_.serial).maxOption, Set.empty[TxHash])
+              },
             additions = transactions.map(ValidatedTopologyTransaction(_)),
           )
           _ <- client
-            .observed(
-              timestamp,
-              timestamp,
-              SequencerCounter(1),
-              transactions,
-              DefaultTestIdentities.synchronizerId,
-            )
+            .observed(timestamp, timestamp, SequencerCounter(1), transactions)
         } yield ()
 
       def observed(ts: CantonTimestamp): Unit =
@@ -115,17 +113,8 @@ trait StoreBasedTopologySnapshotTest
 
       def observed(st: SequencedTime, et: EffectiveTime): Unit =
         client
-          .observed(st, et, SequencerCounter(0), List(), DefaultTestIdentities.synchronizerId)
+          .observed(st, et, SequencerCounter(0), List())
           .futureValueUS
-
-      def updateHead(
-          st: SequencedTime,
-          et: EffectiveTime,
-          at: ApproximateTime,
-          potentialTopologyChange: Boolean,
-      ): Unit =
-        client
-          .updateHead(st, et, at, potentialTopologyChange)
     }
 
     "waiting for snapshots" should {
@@ -196,27 +185,23 @@ trait StoreBasedTopologySnapshotTest
       }
 
       "correctly get notified on updateHead" in {
-        Table("potential topology change", true, false).forEvery { potentialTopologyChange =>
-          val fixture = new Fixture()
-          import fixture.*
-          val awaitSequencedTimestampF =
-            client.awaitSequencedTimestamp(ts2).getOrElse(fail("expected future"))
+        val fixture = new Fixture()
+        import fixture.*
+        val awaitSequencedTimestampF =
+          client.awaitSequencedTimestamp(ts2).getOrElse(fail("expected future"))
 
-          updateHead(
-            SequencedTime(ts1),
-            EffectiveTime(ts1),
-            ApproximateTime(ts1),
-            potentialTopologyChange,
-          )
-          awaitSequencedTimestampF.isCompleted shouldBe false
-          updateHead(
-            SequencedTime(ts2),
-            EffectiveTime(ts1),
-            ApproximateTime(ts1),
-            potentialTopologyChange,
-          )
-          awaitSequencedTimestampF.isCompleted shouldBe true
-        }
+        client.updateHead(
+          SequencedTime(ts1),
+          EffectiveTime(ts1),
+          ApproximateTime(ts1),
+        )
+        awaitSequencedTimestampF.isCompleted shouldBe false
+        client.updateHead(
+          SequencedTime(ts2),
+          EffectiveTime(ts1),
+          ApproximateTime(ts1),
+        )
+        awaitSequencedTimestampF.isCompleted shouldBe true
       }
 
       "just return None if sequenced time already known" in {
@@ -271,7 +256,6 @@ trait StoreBasedTopologySnapshotTest
           ts.immediateSuccessor,
           SequencerCounter(0),
           Seq(),
-          DefaultTestIdentities.synchronizerId,
         )
         recent = fixture.client.currentSnapshotApproximation
         party1Mappings <- recent.activeParticipantsOf(party1.toLf)
@@ -299,7 +283,6 @@ trait StoreBasedTopologySnapshotTest
           ts.immediateSuccessor,
           SequencerCounter(0),
           Seq(),
-          DefaultTestIdentities.synchronizerId,
         )
         snapshot <- fixture.client.snapshot(ts.immediateSuccessor)
         party1Mappings <- snapshot.activeParticipantsOf(party1.toLf)
@@ -340,7 +323,6 @@ trait StoreBasedTopologySnapshotTest
           ts2.immediateSuccessor,
           SequencerCounter(0),
           Seq(),
-          DefaultTestIdentities.synchronizerId,
         )
         snapshotA <- fixture.client.snapshot(ts1)
         snapshotB <- fixture.client.snapshot(ts1.immediateSuccessor)
@@ -435,7 +417,6 @@ trait StoreBasedTopologySnapshotTest
               ts.immediateSuccessor,
               SequencerCounter(0),
               Seq(),
-              DefaultTestIdentities.synchronizerId,
             )
             snapshot <- fixture.client.snapshot(ts.immediateSuccessor)
             // PartyKeyTopologySnapshotClient
@@ -628,7 +609,9 @@ trait DbStoreBasedTopologySnapshotTest
   this: AsyncWordSpec with BaseTest with HasExecutionContext with DbTest =>
 
   "DbStoreBasedTopologySnapshot" should {
-    behave like topologySnapshot(() => mkStore(DefaultTestIdentities.physicalSynchronizerId))
+    behave like topologySnapshot(() =>
+      mkStore(DefaultTestIdentities.physicalSynchronizerId, "topologySnapshot")
+    )
   }
 
 }

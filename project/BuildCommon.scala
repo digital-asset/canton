@@ -37,7 +37,10 @@ object BuildCommon {
 
     val commandAliases =
       addCommandAlias("checkDamlProjectVersions", alsoTest("damlCheckProjectVersions")) ++
-        addCommandAlias("updateDamlProjectVersions", alsoTest("damlUpdateProjectVersions")) ++
+        addCommandAlias(
+          "updateDamlProjectVersions",
+          alsoTest("damlUpdateProjectVersions") + ";damlUpdateDependencies",
+        ) ++
         addCommandAlias("checkLicenseHeaders", alsoTest("headerCheck")) ++
         addCommandAlias("createLicenseHeaders", alsoTest("headerCreate")) ++
         addCommandAlias(
@@ -78,9 +81,10 @@ object BuildCommon {
         libraryDependencySchemes += "io.circe" %% "circe-parser" % VersionScheme.Always,
         libraryDependencySchemes += "io.circe" %% "circe-yaml" % VersionScheme.Always,
         /*
-        The default JDK is the latest stable (21 in August 2025) but we target the previous LTS
+        The default JDK is the latest stable (21 in August 2025) but we target the previous LTS (17)
         for backwards compatibility (see `contributing/runtime-versions.md`).
          */
+        scalacOptions ++= Seq("--release", "17"),
         javacOptions ++= Seq("--release", "17"),
         javacOptions ++= Seq("-proc:full"),
       )
