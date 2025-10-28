@@ -182,23 +182,25 @@ final class TimeBasedInteractiveIntegrationTest
 
     "respect max record time" in { implicit env =>
       import env.*
+      // Use another party so there's no concurrent updates of its acs with previous tests
+      val johnE = participant3.parties.external.enable("John")
       val simClock = env.environment.simClock.value
-      def getAliceAcsSize = participant3.ledger_api.state.acs.of_party(aliceE).size
+      def getJohnAcsSize = participant3.ledger_api.state.acs.of_party(johnE).size
 
       def test(sequenceAt: CantonTimestamp => CantonTimestamp, expectSuccess: Boolean): Unit = {
-        val aliceAcsSize = getAliceAcsSize
+        val johnAcsSize = getJohnAcsSize
 
         // Set max record time below ledgerTimeRecordTimeTolerance
         val maxRecordTime = simClock.now.add(ledgerTimeRecordTimeTolerance.dividedBy(2))
         val prepared =
           cpn.ledger_api.interactive_submission.prepare(
-            Seq(aliceE),
-            Seq(createCycleCommand(aliceE, "test")),
+            Seq(johnE),
+            Seq(createCycleCommand(johnE, "test")),
             maxRecordTime = Some(maxRecordTime),
           )
 
         val signatures = Map(
-          aliceE.partyId -> global_secret.sign(prepared.preparedTransactionHash, aliceE)
+          johnE.partyId -> global_secret.sign(prepared.preparedTransactionHash, johnE)
         )
 
         getProgrammableSequencer(sequencer1.name).withSendPolicy(
@@ -219,7 +221,9 @@ final class TimeBasedInteractiveIntegrationTest
           // = maxRecordTime
           if (expectSuccess) {
             execAndWait(prepared, signatures)
-            getAliceAcsSize shouldBe aliceAcsSize + 1
+            eventually() {
+              getJohnAcsSize shouldBe johnAcsSize + 1
+            }
           } else {
             loggerFactory.assertEventuallyLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
               {
@@ -227,7 +231,7 @@ final class TimeBasedInteractiveIntegrationTest
                 val completion = findCompletion(
                   submissionId,
                   ledgerEnd,
-                  aliceE,
+                  johnE,
                   epn,
                   runBetweenAttempts = Eval.always {
                     // Request a time proof to advance synchronizer time on the participant so it realizes
@@ -244,7 +248,7 @@ final class TimeBasedInteractiveIntegrationTest
                 completion.status.value.code shouldBe io.grpc.Status.Code.ABORTED.value()
                 completion.status.value.message should include(TimeoutError.code.id)
                 // Acs size should not have changed
-                getAliceAcsSize shouldBe aliceAcsSize
+                getJohnAcsSize shouldBe johnAcsSize
                 ()
               },
               LogEntry.assertLogSeq(

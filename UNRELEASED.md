@@ -9,6 +9,18 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2025-10-29 (Exclusive)
+- A level of nesting in the Http Ledger API configuration has been eliminated. Now the `address`,
+  `port`, `portFile`, `pathPrefix`, as well as `requestTimeout` are set directly on the `http-ledger-api` like so:
+  ```
+  canton.participants.<participant>.http-ledger-api.port=5555
+  ```
+  instead of
+  ```
+  canton.participants.<participant>.http-ledger-api.server.port=5555
+  ```
+  The old configuration paths continue to be supported in 3.4.0.
+
 ## until 2025-10-22 (Exclusive)
 - **BREAKING** The default security configuration of the APIs has been tightened
     - Maximum token lifetime accepted by the Ledger API (gRPC and JSON) and Admin API has been reduced. Tokens which have

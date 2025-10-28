@@ -134,8 +134,8 @@ trait TransactionAuthorizationCache[+PureCrypto <: CryptoPureApi] {
         .map(_.transaction)
 
     // only load the ones we don't already hold in memory
-    val decentralizedNamespacesToLoad = namespaces -- decentralizedNamespaceCache.keys
-    val namespacesToLoad = namespaces -- namespaceCache.keys
+    val decentralizedNamespacesToLoad = namespaces.filterNot(decentralizedNamespaceCache.contains)
+    val namespacesToLoad = namespaces.filterNot(namespaceCache.contains)
     val codes =
       (if (decentralizedNamespacesToLoad.nonEmpty) Seq(DecentralizedNamespaceDefinition.code)
        else
@@ -169,8 +169,11 @@ trait TransactionAuthorizationCache[+PureCrypto <: CryptoPureApi] {
         .flatMap(_.mapping.owners)
         .toSet
       remainingNamespacesToLoad =
-        decentralizedNamespaceOwners -- namespaceCache.keys -- ordinaryNamespaceDelegations
-          .map(_.mapping.namespace)
+        decentralizedNamespaceOwners.filterNot(ns =>
+          namespaceCache.contains(ns) || ordinaryNamespaceDelegations.exists(
+            _.mapping.namespace == ns
+          )
+        )
 
       storedRemainingNamespaceDelegations <-
         NonEmpty

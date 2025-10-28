@@ -50,6 +50,7 @@ abstract class InitialTopologySnapshotValidatorTest
       staticSynchronizerParameters = Some(defaultStaticSynchronizerParameters),
       validateInitialSnapshot = true,
       loggerFactory,
+      cleanupTopologySnapshot = true,
     )
     (validator, store)
   }

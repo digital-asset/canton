@@ -35,10 +35,10 @@ trait SerializationDeserializationTestHelpers extends BaseTest with ScalaCheckPr
   // Populated by the methods `testVersioned` and friends
   lazy val testedClasses: scala.collection.mutable.Set[String] = mutable.Set.empty
 
-  /** We use 10 seconds default for `warnWhenTestRunsLongerThan` to have a very generous buffer to
+  /** We use 20 seconds default for `warnWhenTestRunsLongerThan` to have a very generous buffer to
     * prevent test flakiness. On CI, tests should normally finish within 1 to 3 seconds.
     */
-  private val maxDurationWarning: Duration = 10.second
+  private val maxDurationWarning: Duration = 20.seconds
 
   /** Test for classes extending `HasVersionedWrapper` (protocol version passed to the serialization
     * method), without context for deserialization.

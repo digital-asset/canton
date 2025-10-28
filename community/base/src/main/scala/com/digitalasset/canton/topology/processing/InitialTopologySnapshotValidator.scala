@@ -54,6 +54,9 @@ import scala.concurrent.ExecutionContext
   *   if false, the validation is skipped and the snapshot is directly imported. this is risky as it
   *   might create a fork if the validation was changed. therefore, we only use this with great
   *   care. the proper solution is to make validation so fast that it doesn't impact performance.
+  * @param cleanupTopologySnapshot
+  *   if true, then we will clean up the topology snapshot (used for hard migration to clean up the
+  *   genesis state)
   */
 class InitialTopologySnapshotValidator(
     pureCrypto: CryptoPureApi,
@@ -61,7 +64,7 @@ class InitialTopologySnapshotValidator(
     staticSynchronizerParameters: Option[StaticSynchronizerParameters],
     validateInitialSnapshot: Boolean,
     override val loggerFactory: NamedLoggerFactory,
-    filterOutCompletedProposals: Boolean = true,
+    cleanupTopologySnapshot: Boolean = false,
 )(implicit ec: ExecutionContext, materializer: Materializer)
     extends NamedLogging {
 
@@ -89,12 +92,12 @@ class InitialTopologySnapshotValidator(
   final def validateAndApplyInitialTopologySnapshot(
       initialSnapshot: GenericStoredTopologyTransactions
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
-    val finalSnapshot = preprocessInitialSnapshot(initialSnapshot)
+    val finalSnapshot =
+      if (cleanupTopologySnapshot) preprocessInitialSnapshot(initialSnapshot) else initialSnapshot
     if (!validateInitialSnapshot) {
       logger.info("Skipping initial topology snapshot validation")
       EitherT.right(store.bulkInsert(finalSnapshot))
     } else {
-
       val groupedBySequencedTime: Seq[
         (
             (SequencedTime, EffectiveTime),
@@ -173,7 +176,8 @@ class InitialTopologySnapshotValidator(
     val previous = mutable.Map.empty[TxHash, MergeTx]
     initialSnapshot.result.zipWithIndex
       .filter { case (tx, idx) =>
-        if (filterOutCompletedProposals && tx.transaction.isProposal && tx.validUntil.nonEmpty) {
+        // TODO should we clean this up?
+        if (tx.transaction.isProposal && tx.validUntil.nonEmpty) {
           logger.info(s"Dropping completed proposal at idx=$idx $tx")
           false
         } else true
@@ -200,7 +204,9 @@ class InitialTopologySnapshotValidator(
               val txWithMergedSignatures = stored.copy(transaction =
                 stored.transaction.addSignatures(existing.tx.transaction.signatures)
               )
-              if (txWithMergedSignatures.transaction.signatures != stored.transaction.signatures) {
+              if (
+                txWithMergedSignatures.transaction.signatures != existing.tx.transaction.signatures
+              ) {
                 logger.debug(
                   s"At $idx, merging at ${stored.validFrom} from ${existing.tx.validFrom}(idx=${existing.idx}) existing signatures by ${(existing.tx.transaction.signatures -- stored.transaction.signatures)
                       .map(_.authorizingLongTermKey)} into\n  $txWithMergedSignatures"

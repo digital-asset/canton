@@ -525,6 +525,8 @@ class SequencerNodeBootstrap(
                   Some(crypto.staticSynchronizerParameters),
                   validateInitialSnapshot = config.topology.validateInitialTopologySnapshot,
                   loggerFactory,
+                  // only filter out completed proposals if this is a bootstrap from genesis.
+                  cleanupTopologySnapshot = sequencerSnapshot.isEmpty,
                 )
                 for {
                   _ <- topologySnapshotValidator.validateAndApplyInitialTopologySnapshot(
@@ -752,7 +754,6 @@ class SequencerNodeBootstrap(
             .right[String](
               sequencerFactory.create(
                 sequencerId,
-                clock,
                 clock,
                 syncCryptoWithOptionalSessionKeys,
                 futureSupervisor,
