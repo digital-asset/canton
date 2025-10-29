@@ -24,7 +24,10 @@ import com.digitalasset.canton.topology.store.StoredTopologyTransactions.{
   GenericStoredTopologyTransactions,
   PositiveStoredTopologyTransactions,
 }
-import com.digitalasset.canton.topology.store.TopologyStore.EffectiveStateChange
+import com.digitalasset.canton.topology.store.TopologyStore.{
+  EffectiveStateChange,
+  TopologyStoreDeactivations,
+}
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransaction.GenericValidatedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
@@ -35,14 +38,13 @@ import com.digitalasset.canton.topology.transaction.TopologyTransaction.{
   TxHash,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{LoggerUtil, MonadUtil, PekkoUtil}
+import com.digitalasset.canton.util.{DBIOUtil, LoggerUtil, MonadUtil, PekkoUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 import slick.jdbc.canton.SQLActionBuilder
 import slick.jdbc.{GetResult, TransactionIsolation}
-import slick.sql.SqlStreamingAction
 
 import scala.concurrent.ExecutionContext
 import scala.math.Ordering.Implicits.*
@@ -152,53 +154,71 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
   override def update(
       sequenced: SequencedTime,
       effective: EffectiveTime,
-      removeMapping: Map[TopologyMapping.MappingHash, PositiveInt],
-      removeTxs: Set[TopologyTransaction.TxHash],
+      removes: TopologyStoreDeactivations,
       additions: Seq[GenericValidatedTopologyTransaction],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
 
     val effectiveTs = effective.value
 
-    val transactionRemovals = removeMapping.toList.map { case (mappingHash, serial) =>
-      sql"mapping_key_hash=${mappingHash.hash} and serial_counter <= $serial"
-    } ++ removeTxs.map(txHash => sql"tx_hash=${txHash.hash}")
+    def removalSql(removals: Seq[SQLActionBuilder]) =
+      (sql"UPDATE common_topology_transactions SET valid_until = ${Some(effectiveTs)} WHERE store_id=$storeIndex AND (" ++
+        removals
+          .intercalate(
+            sql" OR "
+          ) ++ sql") AND valid_from < $effectiveTs AND valid_until is null").asUpdate
 
-    val updateRemovals =
-      transactionRemovals.grouped(5000).toSeq.map { removals =>
-        (sql"UPDATE common_topology_transactions SET valid_until = ${Some(effectiveTs)} WHERE store_id=$storeIndex AND (" ++
-          removals
-            .intercalate(
-              sql" OR "
-            ) ++ sql") AND valid_from < $effectiveTs AND valid_until is null").asUpdate
-      }
+    def removalForMapping(
+        mapping: MappingHash,
+        serialO: Option[PositiveInt],
+        txHashes: Set[TxHash],
+    ): SQLActionBuilderChain = if (serialO.isEmpty && txHashes.isEmpty)
+      throw new IllegalArgumentException(
+        s"At least one of serialO or txHashes must be defined for removal when passing $mapping"
+      )
+    else {
+      val txConditions = (txHashes.map(txHash => sql"tx_hash=${txHash.hash}") ++ serialO
+        .map(serial => sql"serial_counter <= $serial")
+        .toList).toList.intercalate(sql" OR ")
+      sql"(mapping_key_hash=${mapping.hash} AND (" ++ txConditions ++ sql"))"
+    }
 
-    val insertAdditions =
-      additions.zipWithIndex
-        .grouped(1000)
-        .toSeq
-        .map { tx =>
-          insertSignedTransaction[(GenericValidatedTopologyTransaction, Int)] {
-            case (vtx, batchIdx) =>
-              TransactionEntry(
-                sequenced,
-                effective,
-                batchIdx = batchIdx,
-                Option.when(
-                  vtx.rejectionReason.nonEmpty || vtx.expireImmediately
-                )(effective),
-                vtx.transaction,
-                vtx.rejectionReason.map(_.asString300),
-              )
-          }(tx)
+    val queries =
+      DBIOUtil
+        .batchedSequentialTraverse(batchingConfig.maxTopologyUpdateBatchSize)(removes.toSeq) {
+          case (bulkIdx, items) =>
+            logger.debug(s"Processing removal batch $bulkIdx")
+            removalSql(items.map { case (mappingHash, (serialO, txHashes)) =>
+              removalForMapping(mappingHash, serialO, txHashes).toActionBuilder
+            })
+        }
+        .flatMap { _ =>
+          DBIOUtil.batchedSequentialTraverse(batchingConfig.maxTopologyUpdateBatchSize)(
+            additions.zipWithIndex
+          ) { case (bulkIdx, items) =>
+            logger.debug(s"Processing addition batch $bulkIdx")
+            insertSignedTransaction[(GenericValidatedTopologyTransaction, Int)] {
+              case (vtx, batchIdx) =>
+                TransactionEntry(
+                  sequenced,
+                  effective,
+                  batchIdx = batchIdx,
+                  Option.when(
+                    vtx.rejectionReason.nonEmpty || vtx.expireImmediately
+                  )(effective),
+                  vtx.transaction,
+                  vtx.rejectionReason.map(_.asString300),
+                )
+            }(items).map(_ => ())
+          }
         }
 
+    // this will perform a fold left starting with mapping removals before inserting anything
     storage.update_(
-      DBIO
-        .seq((updateRemovals ++ insertAdditions)*)
-        .transactionally
+      queries.transactionally
         .withTransactionIsolation(TransactionIsolation.Serializable),
       operationName = "update-topology-transactions",
     )
+
   }
 
   override def bulkInsert(
@@ -217,34 +237,26 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
               )
           (next.validFrom.value, newBatchIdx, (next, newBatchIdx) +: acc)
       }
-    val prepared = txWithIdx.reverse.grouped(1000)
-    def go(
-        bidx: Int,
-        iterator: Iterator[Seq[TxWithIdx]],
-        prev: DBIOAction[Unit, NoStream, Effect.Write] = DBIO.successful(()),
-    ): DBIOAction[Unit, NoStream, Effect.Write] = prev.flatMap { _ =>
-      iterator.nextOption().fold(DBIO.successful(()): DBIOAction[Unit, NoStream, Effect.Write]) {
-        elems =>
-          logger.debug(s"Bulk inserting batch ${bidx + 1}")
-          go(
-            bidx + 1,
-            iterator,
-            insertSignedTransaction[TxWithIdx] { case (tx, idx) =>
-              TransactionEntry(
-                sequenced = tx.sequenced,
-                validFrom = tx.validFrom,
-                batchIdx = idx,
-                validUntil = tx.validUntil,
-                signedTx = tx.transaction,
-                rejectionReason = tx.rejectionReason,
-              )
-            }(elems).map(_ => ()),
-          )
+    val prepared = txWithIdx.reverse
+
+    val updates =
+      DBIOUtil.batchedSequentialTraverse(batchingConfig.maxTopologyWriteBatchSize)(prepared) {
+        case (bidx, elems) =>
+          logger.debug(s"Bulk inserting batch $bidx")
+          insertSignedTransaction[TxWithIdx] { case (tx, idx) =>
+            TransactionEntry(
+              sequenced = tx.sequenced,
+              validFrom = tx.validFrom,
+              batchIdx = idx,
+              validUntil = tx.validUntil,
+              signedTx = tx.transaction,
+              rejectionReason = tx.rejectionReason,
+            )
+          }(elems)
       }
-    }
 
     storage.update_(
-      go(0, prepared).transactionally
+      updates.transactionally
         .withTransactionIsolation(TransactionIsolation.Serializable),
       operationName = "bulk-insert",
     )
@@ -615,7 +627,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[GenericStoredTopologyTransaction]] = {
-    logger.debug(s"Querying for transaction at $asOfExclusive: $transaction")
+    logger.debug(s"Querying for transaction at $asOfExclusive: ${transaction.hash}")
 
     findStoredSql(asOfExclusive, transaction.transaction, includeRejected = includeRejected).map(
       _.result.lastOption
@@ -631,7 +643,9 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
   ): FutureUnlessShutdown[Option[GenericStoredTopologyTransaction]] = {
     val rpv = TopologyTransaction.protocolVersionRepresentativeFor(protocolVersion)
 
-    logger.debug(s"Querying for transaction $transaction with protocol version $protocolVersion")
+    logger.debug(
+      s"Querying for transaction ${transaction.hash} with protocol version $protocolVersion"
+    )
 
     findStoredSql(
       asOfExclusive,
@@ -670,7 +684,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
   // Insert helper shared by bootstrap and update.
   private def insertSignedTransaction[T](toTxEntry: T => TransactionEntry)(
       transactions: Seq[T]
-  ): SqlStreamingAction[Vector[Int], Int, slick.dbio.Effect.Write]#ResultAction[
+  ): storage.api.DBIOAction[
     Int,
     NoStream,
     Effect.Write,

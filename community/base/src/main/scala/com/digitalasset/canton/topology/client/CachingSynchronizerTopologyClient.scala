@@ -8,6 +8,7 @@ import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.caching.ScaffeineCache.TracedAsyncLoadingCache
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, ProcessingTimeout}
+import com.digitalasset.canton.crypto.SigningKeysWithThreshold
 import com.digitalasset.canton.data.{
   CantonTimestamp,
   SynchronizerPredecessor,
@@ -364,7 +365,7 @@ private class ForwardingTopologySnapshotClient(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[PackageId, VettedPackage]] = parent.loadVettedPackages(participant)
 
-  override def loadVettedPackages(participants: Seq[ParticipantId])(implicit
+  override def loadVettedPackages(participants: Set[ParticipantId])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[ParticipantId, Map[PackageId, VettedPackage]]] =
     parent.loadVettedPackages(participants)
@@ -436,10 +437,10 @@ private class ForwardingTopologySnapshotClient(
   )(implicit traceContext: TraceContext) =
     parent.loadBatchActiveParticipantsOf(parties, loadParticipantStates)
 
-  override def partyAuthorization(party: PartyId)(implicit
+  override def signingKeysWithThreshold(party: PartyId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[PartyKeyTopologySnapshotClient.PartyAuthorizationInfo]] =
-    parent.partyAuthorization(party)
+  ): FutureUnlessShutdown[Option[SigningKeysWithThreshold]] =
+    parent.signingKeysWithThreshold(party)
 
   override def synchronizerUpgradeOngoing()(implicit
       traceContext: TraceContext
@@ -518,7 +519,7 @@ class CachingTopologySnapshot(
       cache = cachingConfigs.packageVettingCache.buildScaffeine(),
       loader = implicit traceContext => x => parent.loadVettedPackages(x),
       allLoader =
-        Some(implicit traceContext => participants => parent.loadVettedPackages(participants.toSeq)),
+        Some(implicit traceContext => participants => parent.loadVettedPackages(participants.toSet)),
     )(logger, "packageVettingCache")
 
   private val mediatorsCache =
@@ -557,18 +558,18 @@ class CachingTopologySnapshot(
       Option[FutureUnlessShutdown[Seq[DynamicSynchronizerParametersWithValidity]]]
     ](None)
 
-  private val partyAuthorizationsCache: TracedAsyncLoadingCache[
+  private val signingKeysWithThresholdCache: TracedAsyncLoadingCache[
     FutureUnlessShutdown,
     PartyId,
-    Option[PartyKeyTopologySnapshotClient.PartyAuthorizationInfo],
+    Option[SigningKeysWithThreshold],
   ] = ScaffeineCache.buildTracedAsync[
     FutureUnlessShutdown,
     PartyId,
-    Option[PartyKeyTopologySnapshotClient.PartyAuthorizationInfo],
+    Option[SigningKeysWithThreshold],
   ](
     cache = cachingConfigs.partyCache.buildScaffeine(),
-    loader = implicit traceContext => party => parent.partyAuthorization(party),
-  )(logger, "partyAuthorizationsCache")
+    loader = implicit traceContext => party => parent.signingKeysWithThreshold(party),
+  )(logger, "signingKeysWithThresholdCache")
 
   private val synchronizerUpgradeCache =
     new AtomicReference[
@@ -613,10 +614,10 @@ class CachingTopologySnapshot(
   ): FutureUnlessShutdown[Map[PackageId, VettedPackage]] =
     packageVettingCache.get(participant)
 
-  override def loadVettedPackages(participants: Seq[ParticipantId])(implicit
+  override def loadVettedPackages(participants: Set[ParticipantId])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[ParticipantId, Map[PackageId, VettedPackage]]] =
-    getAllBatched(participants)(packageVettingCache.getAll(_)(traceContext))
+    getAllBatched(participants.toSeq)(packageVettingCache.getAll(_)(traceContext))
 
   private[client] def loadUnvettedPackagesOrDependenciesUsingLoader(
       participant: ParticipantId,
@@ -712,10 +713,10 @@ class CachingTopologySnapshot(
       parent.listDynamicSynchronizerParametersChanges(),
     )
 
-  override def partyAuthorization(party: PartyId)(implicit
+  override def signingKeysWithThreshold(party: PartyId)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[PartyKeyTopologySnapshotClient.PartyAuthorizationInfo]] =
-    partyAuthorizationsCache.get(party)
+  ): FutureUnlessShutdown[Option[SigningKeysWithThreshold]] =
+    signingKeysWithThresholdCache.get(party)
 
   private def getAllBatched[K, V](
       keys: Seq[K]

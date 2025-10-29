@@ -198,15 +198,35 @@ class TopologyTransactionAuthorizationValidator[+PureCrypto <: CryptoPureApi](
     val namespaceAuthorizations = permissibleSig.namespaces.map { ns =>
       // This succeeds because loading of uid is requested in AuthorizationKeys.requiredForCheckingAuthorization
       val check = tryGetAuthorizationCheckForNamespace(ns)
-      val keysUsed = check.keysSupportingAuthorization(
+      val keysUsedFromAuthorizationGraph: Set[SigningPublicKey] = check.keysSupportingAuthorization(
+        unvalidatedSigningKeysCoveringHash,
+        toValidate.mapping.code,
+      )
+
+      // Mappings may define a key that authorizes the mappings primary namespace (ie. mapping.namespace)
+      val selfAuthorizingKeysUsed = toValidate.selectMapping[KeyMapping].flatMap {
+        _.transaction.mapping.namespaceKeyForSelfAuthorization.filter(key =>
+          // consider the key ONLY if a signature with that key has been provided.
+          // the validity check of that signature will be done later.
+          unvalidatedSigningKeysCoveringHash.contains(key.fingerprint) &&
+            // AND its fingerprint matches the namespace's fingerprint (it authorizes THAT namespace)
+            key.fingerprint == ns.fingerprint
+        )
+      }
+
+      val selfAuthorizingKeyAuthorizesNamespace = selfAuthorizingKeysUsed.nonEmpty
+      val allKeysUsed =
+        keysUsedFromAuthorizationGraph ++ selfAuthorizingKeysUsed.map(Set(_)).getOrElse(Set.empty)
+      val keysFromAuthGraphAuthorizeNamespace = check.existsAuthorizedKeyIn(
         unvalidatedSigningKeysCoveringHash,
         toValidate.mapping.code,
       )
       val keysAuthorizeNamespace =
-        check.existsAuthorizedKeyIn(unvalidatedSigningKeysCoveringHash, toValidate.mapping.code)
-      ns -> (keysAuthorizeNamespace, keysUsed)
+        keysFromAuthGraphAuthorizeNamespace || selfAuthorizingKeyAuthorizesNamespace
+      ns -> (keysAuthorizeNamespace, allKeysUsed)
     }.toMap
 
+    // TODO(i28555): Simplify/refactor this block of code and below
     val extraKeyAuthorizations =
       // assume extra keys are not found
       permissibleSig.extraKeys
@@ -225,7 +245,11 @@ class TopologyTransactionAuthorizationValidator[+PureCrypto <: CryptoPureApi](
             .select[TopologyChangeOp.Replace, PartyToKeyMapping]
             .toList
             .flatMap(_.mapping.signingKeys)
-          (otk ++ ptk).collect {
+          val p2p = toValidate
+            .select[TopologyChangeOp.Replace, PartyToParticipant]
+            .toList
+            .flatMap(_.mapping.partySigningKeys)
+          (otk ++ ptk ++ p2p).collect {
             case k: SigningPublicKey
                 // only consider the public key as "found" if:
                 // * it's required and
@@ -252,8 +276,14 @@ class TopologyTransactionAuthorizationValidator[+PureCrypto <: CryptoPureApi](
       logger.debug(
         s"Authorization details for ${toValidate.mapping.code}=${toValidate.transaction.hash}\n" +
           s"  Required: $requiredAuth\n" +
-          s"  Provided for namespaces:" + renderAuthorizations(namespaceAuthorizations) + "\n" +
-          s"  Provided for extraKeys: " + renderAuthorizations(extraKeyAuthorizations) + "\n" +
+          s"  Provided for namespaces:" + renderAuthorizations(
+            namespaceAuthorizations,
+            requiredAuth.referenced.namespaces.map(_.fingerprint),
+          ) + "\n" +
+          s"  Provided for extraKeys: " + renderAuthorizations(
+            extraKeyAuthorizations,
+            requiredAuth.referenced.extraKeys,
+          ) + "\n" +
           s"  All keys used for authorization: ${allKeysUsedForAuthorization.keySet}" + (
             if (superfluousKeys.nonEmpty) s"\n  Superfluous keys: ${superfluousKeys.mkString(", ")}"
             else ""
@@ -422,7 +452,8 @@ class TopologyTransactionAuthorizationValidator[+PureCrypto <: CryptoPureApi](
       }
 
   private def renderAuthorizations[A](
-      auths: Map[A, (Boolean, Set[SigningPublicKey])]
+      auths: Map[A, (Boolean, Set[SigningPublicKey])],
+      required: Set[Fingerprint],
   ): String = {
     val authorizingKeys = auths
       .collect {
@@ -432,7 +463,12 @@ class TopologyTransactionAuthorizationValidator[+PureCrypto <: CryptoPureApi](
       val report = authorizingKeys
         .map { case (auth, fullyAuthorized, keys) =>
           val status = if (fullyAuthorized) "fully" else "partially"
-          s"$auth $status authorized by keys ${keys.map(_.id)}"
+          val (requiredSig, permissibleSig) = keys.partition(c => required.contains(c.fingerprint))
+          val fst = s"$auth $status authorized by keys ${requiredSig.map(c => c.id).mkString(", ")}"
+          if (permissibleSig.nonEmpty)
+            fst + s" (and permissible keys ${permissibleSig.map(c => c.id).mkString(", ")})"
+          else
+            fst
         }
         .mkString("\n    ")
       "\n    " + report
