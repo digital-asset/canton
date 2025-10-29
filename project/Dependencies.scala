@@ -7,8 +7,8 @@ import scala.util.chaining.scalaUtilChainingOps
 object Dependencies {
 
   val daml_libraries_version = metabuild.BuildInfo.daml_libraries_version
-  val daml_language_versions = metabuild.BuildInfo.daml_language_versions
   val daml_compiler_version = metabuild.BuildInfo.daml_compiler_version
+  val dpm_registry = metabuild.BuildInfo.dpm_registry
   val use_custom_daml_version = metabuild.BuildInfo.use_custom_daml_version
 
   lazy val osClassifier: String =

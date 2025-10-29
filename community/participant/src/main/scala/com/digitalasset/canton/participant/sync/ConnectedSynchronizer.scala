@@ -70,7 +70,6 @@ import com.digitalasset.canton.participant.traffic.{
   ParticipantTrafficControlSubscriber,
   TrafficCostEstimator,
 }
-import com.digitalasset.canton.participant.util.DAMLe.PackageResolver
 import com.digitalasset.canton.participant.util.{DAMLe, TimeOfChange}
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.CostEstimationHints
@@ -96,14 +95,9 @@ import com.digitalasset.canton.topology.processing.{
 }
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.*
+import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.util.{
-  ContractHasher,
-  ContractValidator,
-  ErrorUtil,
-  FutureUnlessShutdownUtil,
-  MonadUtil,
-}
 import com.digitalasset.daml.lf.engine.Engine
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
@@ -113,8 +107,6 @@ import scala.concurrent.{ExecutionContext, Future}
 
 /** A connected synchronizer from the synchronization service.
   *
-  * @param synchronizerId
-  *   The identifier of the connected synchronizer.
   * @param synchronizerHandle
   *   A synchronizer handle providing sequencer clients.
   * @param participantId
@@ -142,7 +134,7 @@ class ConnectedSynchronizer(
     identityPusher: ParticipantTopologyDispatcher,
     topologyProcessor: TopologyTransactionProcessor,
     missingKeysAlerter: MissingKeysAlerter,
-    sequencerConnectionListener: SequencerConnectionSuccessorListener,
+    val sequencerConnectionListener: SequencerConnectionSuccessorListener,
     reassignmentCoordination: ReassignmentCoordination,
     commandProgressTracker: CommandProgressTracker,
     messageDispatcherFactory: MessageDispatcher.Factory[MessageDispatcher],
@@ -508,7 +500,6 @@ class ConnectedSynchronizer(
         SequencedTime(resubscriptionTs),
         EffectiveTime(resubscriptionTs),
         ApproximateTime(resubscriptionTs),
-        potentialTopologyChange = true,
       )
       // now, compute epsilon at resubscriptionTs and update client
       topologyClient.updateHead(
@@ -517,7 +508,6 @@ class ConnectedSynchronizer(
           resubscriptionTs.plus(staticSynchronizerParameters.topologyChangeDelay.duration)
         ),
         ApproximateTime(resubscriptionTs),
-        potentialTopologyChange = true,
       )
     }
 

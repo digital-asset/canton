@@ -7,6 +7,7 @@ import cats.Eval
 import cats.data.EitherT
 import cats.implicits.toBifunctorOps
 import cats.syntax.either.*
+import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
@@ -1067,6 +1068,24 @@ class CantonSyncService(
           SyncServiceError.SyncServiceUnknownSynchronizer
             .Error(config.synchronizerAlias): SyncServiceError
         )
+
+      // Try to retrieve and store missing sequencer ids
+      _ <- connectionIdToUpdate.toOption
+        .traverse_(connectionsManager.retrieveAndStoreMissingSequencerIds)
+        .leftMap(err =>
+          SyncServiceError.SyncServiceInternalError
+            .Failure(
+              config.synchronizerAlias.toString,
+              new RuntimeException(s"Unable to retrieve and store missing sequencer ids: $err"),
+            )
+        )
+
+      // If successor exists, will ensure that connections are updated (e.g., if sequencers are added or removed)
+      _ <- EitherT.liftF(
+        connectionIdToUpdate.toOption
+          .flatMap(connectedSynchronizersLookup.get)
+          .traverse_(_.sequencerConnectionListener.init())
+      )
     } yield ()
 
   /** Migrates contracts from a source synchronizer to target synchronizer by re-associating them in

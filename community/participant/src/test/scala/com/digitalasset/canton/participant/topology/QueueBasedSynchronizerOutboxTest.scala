@@ -31,7 +31,10 @@ import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
-import com.digitalasset.canton.topology.transaction.TopologyTransaction.GenericTopologyTransaction
+import com.digitalasset.canton.topology.transaction.TopologyTransaction.{
+  GenericTopologyTransaction,
+  TxHash,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.{
@@ -165,8 +168,7 @@ class QueueBasedSynchronizerOutboxTest
           .update(
             sequenced = SequencedTime.MinValue,
             effective = EffectiveTime.MinValue,
-            removeMapping = Map.empty,
-            removeTxs = Set.empty,
+            removals = Map.empty,
             additions = Seq(ValidatedTopologyTransaction(rootCert)),
           )
     } yield (target, manager, handle, client)
@@ -216,13 +218,12 @@ class QueueBasedSynchronizerOutboxTest
                 EffectiveTime(ts),
                 additions = List(ValidatedTopologyTransaction(x, rejections.next())),
                 // dumbed down version of how to "append" ValidatedTopologyTransactions:
-                removeMapping = Option
+                removals = Option
                   .when(x.operation == TopologyChangeOp.Remove)(
-                    x.mapping.uniqueKey -> x.serial
+                    x.mapping.uniqueKey -> (x.serial.some, Set.empty[TxHash])
                   )
                   .toList
                   .toMap,
-                removeTxs = Set.empty,
               )
               .flatMap(_ =>
                 targetClient
@@ -231,7 +232,6 @@ class QueueBasedSynchronizerOutboxTest
                     EffectiveTime(ts),
                     SequencerCounter(3),
                     if (rejections.isEmpty) Seq(x) else Seq.empty,
-                    DefaultTestIdentities.synchronizerId,
                   )
               )
           else FutureUnlessShutdown.unit
@@ -447,8 +447,9 @@ class QueueBasedSynchronizerOutboxTest
         (target, manager, handle, client) <-
           mk(
             transactions.size,
-            rejections =
-              Iterator.continually(Some(TopologyTransactionRejection.Authorization.NotAuthorized)),
+            rejections = Iterator.continually(
+              Some(TopologyTransactionRejection.Authorization.NotAuthorizedByNamespaceKey)
+            ),
           )
         _ <- outboxConnected(manager, handle, client, target)
         res <- push(manager, transactions)
