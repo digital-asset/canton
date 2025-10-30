@@ -1,0 +1,4 @@
+# For full set of descriptions see
+# https://www.elastic.co/guide/en/logstash/current/logstash-settings-file.html
+
+http.host: "0.0.0.0"

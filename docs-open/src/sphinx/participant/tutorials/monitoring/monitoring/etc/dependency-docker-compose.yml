@@ -1,0 +1,47 @@
+x-logging: &logging
+  driver: gelf
+  options:
+    # Should be able to use "udp://logstash:12201"
+    gelf-address: "udp://host.docker.internal:12201"
+
+services:
+
+  logstash:
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  postgres:
+    logging:
+      <<: *logging
+    depends_on:
+      logstash:
+        condition: service_started
+
+  participant1:
+    logging:
+      <<: *logging
+    depends_on:
+      synchronizer0:
+        condition: service_started
+      logstash:
+        condition: service_started
+
+  participant2:
+    logging:
+      <<: *logging
+    depends_on:
+      synchronizer0:
+        condition: service_started
+      logstash:
+        condition: service_started
+
+  kibana:
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  grafana:
+    depends_on:
+      prometheus:
+        condition: service_started

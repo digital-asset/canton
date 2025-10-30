@@ -1,0 +1,9 @@
+# Create with `docker network create monitoring`
+# Note that `external: false` will fail the docker-compose execution if the network `monitoring` already exists
+
+version: "3.8"
+
+networks:
+  default:
+    name: monitoring
+    external: false

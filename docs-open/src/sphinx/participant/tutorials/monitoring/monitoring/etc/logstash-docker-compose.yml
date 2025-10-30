@@ -1,0 +1,13 @@
+services:
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.5.1
+    hostname: logstash
+    container_name: logstash
+    expose:
+      - 12201/udp
+    volumes:
+      - ./pipeline.yml:/usr/share/logstash/config/pipeline.yml
+      - ./logstash.yml:/usr/share/logstash/config/logstash.yml
+      - ./logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+    ports:
+      - "12201:12201/udp"

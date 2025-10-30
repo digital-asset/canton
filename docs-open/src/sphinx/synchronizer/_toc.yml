@@ -1,0 +1,113 @@
+root: index
+subtrees:
+  - hidden: False
+    titlesonly: True
+    entries:
+      - title: "Overview"
+        file: overview/index
+
+      - title: "Tutorials"
+        file: tutorials/index
+
+      - title: "How Tos"
+        file: howtos/index
+        subtrees:
+          - hidden: False
+            titlesonly: True
+            entries:
+              - title: "Download"
+                file: howtos/download/index
+                subtrees:
+                  - hidden: False
+                    titlesonly: True
+                    entries:
+                      - file: howtos/download/docker
+
+              - title: "Install"
+                file: howtos/install/index
+
+              - title: "Configure"
+                file: howtos/configure/index
+                subtrees:
+                  - hidden: False
+                    titlesonly: True
+                    entries:
+                      - file: howtos/configure/apis
+                      - file: howtos/configure/storage
+                      - file: howtos/configure/sequencer_backend
+
+              - title: "Secure"
+                file: howtos/secure/index
+                subtrees:
+                  - hidden: False
+                    titlesonly: True
+                    entries:
+                      - file: howtos/secure/apis
+                      - file: howtos/secure/limits
+                      - file: howtos/secure/key_management
+
+              - title: "Optimize"
+                file: howtos/optimize/index
+                subtrees:
+                  - hidden: False
+                    titlesonly: True
+                    entries:
+                      - file: howtos/optimize/sequencer
+                      - file: howtos/optimize/orderer
+                      - file: howtos/optimize/mediator
+
+              - title: "Observe"
+                file: howtos/observe/index
+                subtrees:
+                  - hidden: False
+                    titlesonly: True
+                    entries:
+                      - file: howtos/observe/observe
+                      - file: howtos/observe/sequencer_health
+                      - file: howtos/observe/mediator_inspection
+                      - file: howtos/observe/mediator_health
+
+              - title: "Operate"
+                file: howtos/operate/index
+                subtrees:
+                  - hidden: False
+                    titlesonly: True
+                    entries:
+                      - file: howtos/operate/bootstrap
+                      - file: howtos/operate/dynamic_params
+                      - file: howtos/operate/connectivity
+                      - file: howtos/operate/ha
+                      - file: howtos/operate/traffic
+                      - file: howtos/operate/new_nodes
+                      - file: howtos/operate/pruning
+
+              - title: "Upgrade"
+                file: howtos/upgrade/index
+                subtrees:
+                  - hidden: False
+                    titlesonly: True
+                    entries:
+                      - file: howtos/upgrade/upgrade
+                      - file: howtos/upgrade/logical_sync_migration
+
+              - title: "Decommission"
+                file: howtos/decommission/index
+
+              - title: "Recover"
+                file: howtos/recover/index
+
+              - title: "Troubleshoot"
+                file: howtos/troubleshoot/index
+
+      - title: "Explanations"
+        file: explanations/index
+        subtrees:
+          - hidden: False
+            titlesonly: True
+            entries:
+              - file: explanations/synchronizer-ha
+              - file: explanations/logical_sync_migration
+              - file: explanations/bft_orderer_arch
+
+      - title: "Reference"
+        file: reference/index

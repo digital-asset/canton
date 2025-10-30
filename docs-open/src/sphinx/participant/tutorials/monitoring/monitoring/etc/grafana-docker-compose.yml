@@ -1,0 +1,12 @@
+services:
+  grafana:
+    image: grafana/grafana:9.3.1-ubuntu
+    container_name: grafana
+    hostname: grafana
+    volumes:
+      - ./grafana.ini:/etc/grafana/grafana.ini
+      - ./grafana-datasources.yml:/etc/grafana/provisioning/datasources/default.yml
+      - ./grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/default.yml
+      - ./grafana-message-count-dashboard.json:/var/lib/grafana/dashboards/grafana-message-count-dashboard.json
+    ports:
+      - 3000:3000

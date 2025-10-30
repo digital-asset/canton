@@ -1,0 +1,219 @@
+root: index
+subtrees:
+  - hidden: False
+    titlesonly: True
+    entries:
+      - title: "Overview"
+        file: overview/index
+
+      - title: "Tutorials"
+        file: tutorials/index
+        subtrees:
+          - hidden: False
+            titlesonly: True
+            entries:
+              - file: tutorials/install
+              - file: tutorials/kms_driver_guide
+              - file: tutorials/monitoring/example_monitoring_setup
+
+      - title: "How Tos"
+        file: howtos/index
+        subtrees:
+          - hidden: False
+            titlesonly: True
+            entries:
+              - title: "Download"
+                file: howtos/download/index
+                subtrees:
+                  - hidden: False
+                    titlesonly: True
+                    entries:
+                      - file: howtos/download/release
+                      - file: howtos/download/docker
+
+              - title: "Install"
+                file: howtos/install/index
+                subtrees:
+                  - hidden: False
+                    titlesonly: True
+                    entries:
+                      - file: howtos/install/release
+                      - file: howtos/install/docker
+
+
+              - title: "Configure"
+                file: howtos/configure/index
+                subtrees:
+                  - hidden: False
+                    titlesonly: True
+                    entries:
+                      - file: howtos/configure/general/command_line
+                      - file: howtos/configure/general/conf_file
+                      - file: howtos/configure/general/declarative_conf
+                      - file: howtos/configure/identity/identity
+                      - file: howtos/configure/storage/storage
+                      - file: howtos/configure/storage/postgres
+                      - file: howtos/configure/apis/apis
+                      - file: howtos/configure/apis/admin_api
+                      - file: howtos/configure/apis/ledger_api
+                      - file: howtos/configure/apis/json_api
+                      - file: howtos/configure/parameters/parameters
+
+              - title: "Secure"
+                file: howtos/secure/index
+                subtrees:
+                  - hidden: False
+                    titlesonly: True
+                    entries:
+                      - file: howtos/secure/apis/tls
+                      - file: howtos/secure/apis/jwt
+                      - file: howtos/secure/apis/limits
+                      - file: howtos/secure/limits/resource_limits
+                      - file: howtos/secure/keys/key_management
+                      - file: howtos/secure/keys/key_restrictions
+                      - file: howtos/secure/keys/namespace_key
+                      - title: "Key management service (KMS) configuration"
+                        file: howtos/secure/kms/kms
+                        subtrees:
+                        - hidden: False
+                          titlesonly: True
+                          entries:
+                            - title: "Configure a KMS"
+                              file: howtos/secure/kms/configuration/kms_configuration
+                              subtrees:
+                                - hidden: False
+                                  titlesonly: True
+                                  entries:
+                                    - file: howtos/secure/kms/configuration/kms_aws_config
+                                    - file: howtos/secure/kms/configuration/kms_gcp_config
+                                    - file: howtos/secure/kms/configuration/kms_driver_config
+                        - hidden: False
+                          titlesonly: True
+                          entries:
+                            - title: "Select a KMS mode of operation"
+                              file: howtos/secure/kms/mode/kms_mode
+                              subtrees:
+                                - hidden: False
+                                  titlesonly: True
+                                  entries:
+                                    - file: howtos/secure/kms/mode/encrypted_key_storage
+                                    - file: howtos/secure/kms/mode/external_key_storage
+                        - hidden: False
+                          titlesonly: True
+                          entries:
+                            - title: "Migrate to a KMS"
+                              file: howtos/secure/kms/migration/kms_migration
+                              subtrees:
+                                - hidden: False
+                                  titlesonly: True
+                                  entries:
+                                    - file: howtos/secure/kms/migration/encrypted_key_storage_migration
+                                    - file: howtos/secure/kms/migration/external_key_storage_migration
+                        - hidden: False
+                          titlesonly: True
+                          entries:
+                            - title: "Rotate keys with KMS"
+                              file: howtos/secure/kms/key_rotation/kms_key_rotation
+                              subtrees:
+                                - hidden: False
+                                  titlesonly: True
+                                  entries:
+                                    - file: howtos/secure/kms/key_rotation/rotate_wrapper_key
+                                    - file: howtos/secure/kms/key_rotation/rotate_external_keys
+              - title: "Optimize"
+                file: howtos/optimize/index
+                subtrees:
+                  - hidden: False
+                    titlesonly: True
+                    entries:
+                      - file: howtos/optimize/performance
+                      - file: howtos/optimize/storage
+                      - file: howtos/optimize/caching
+                      - file: howtos/optimize/batching
+                      - file: howtos/optimize/session_keys
+
+              - title: "Observe"
+                file: howtos/observe/index
+                subtrees:
+                  - hidden: False
+                    titlesonly: True
+                    entries:
+                      - file: howtos/observe/health
+                      - file: howtos/observe/logging
+                      - file: howtos/observe/metrics
+                      - file: howtos/observe/tracing
+                      - file: howtos/observe/datadog
+                      - file: howtos/observe/commitments
+                      - file: howtos/observe/monitoring
+
+              - title: "Operate"
+                file: howtos/operate/index
+                subtrees:
+                  - hidden: False
+                    titlesonly: True
+                    entries:
+                      - file: howtos/operate/identity/manual_identity_init
+                      - file: howtos/operate/console/console
+                      - file: howtos/operate/synchronizers/connectivity
+                      - file: howtos/operate/ha/ha
+                      - file: howtos/operate/packages/packages
+                      - file: howtos/operate/pruning/pruning
+                      - file: howtos/operate/parties/parties
+                      - file: howtos/operate/parties/party_replication
+                      - file: howtos/operate/parties/decentralized_parties
+                      - file: howtos/operate/parties/external_parties
+                      - file: howtos/operate/users/users
+                      - file: howtos/operate/traffic/node_traffic
+                      - file: howtos/operate/identity_management
+
+              - title: "Upgrade"
+                file: howtos/upgrade/index
+
+              - title: "Decommission"
+                file: howtos/decommission/index
+
+              - title: "Recover"
+                file: howtos/recover/index
+                subtrees:
+                  - hidden: False
+                    titlesonly: True
+                    entries:
+                      - file: howtos/recover/repairing
+                      - file: howtos/recover/backup-restore
+
+              - title: "Troubleshoot"
+                file: howtos/troubleshoot/index
+                subtrees:
+                  - hidden: False
+                    titlesonly: True
+                    entries:
+                      - file: howtos/troubleshoot/troubleshooting_guide
+                      - file: howtos/troubleshoot/FAQ
+                      - file: howtos/troubleshoot/commitments
+                      - file: howtos/troubleshoot/tls
+
+      - title: "Explanations"
+        file: explanations/index
+        subtrees:
+          - hidden: False
+            titlesonly: True
+            entries:
+              - file: explanations/participant-architecture
+              - file: explanations/overview-ha
+              - file: explanations/participant-ha
+              - file: explanations/security
+              - file: explanations/repairing
+
+      - title: "Reference"
+        file: reference/index
+        subtrees:
+          - hidden: False
+            titlesonly: True
+            entries:
+              - title: "Error Codes"
+                file: reference/error_codes
+              - file: reference/console
+              - file: reference/versioning
+              - file: reference/crypto_schemes
+              - file: reference/metrics
+              - file: reference/automatic_pruning
