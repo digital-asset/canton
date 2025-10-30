@@ -1,0 +1,55 @@
+Daml LF type; JSON Type; Example
+`Int`; $`string` (number accepted as input) [#js_number]_  |br| range  [-9223372036854775808, 9223372036854775807]$; 1234567890
+`Decimal`; $`string` (number accepted as input) [#js_number]_ |br|
+range:  [–(10³⁸–1)÷10¹⁰,(10³⁸–1)÷10¹⁰] |br|
+format: ``-?[0-9]{1,28}(\.[0-9]{1,10})?``
+$; "1234.56"
+`Timestamp`; `string` ISO 8601 timestamp(:code:`yyyy-mm-ddThh:mm:ss.ssssssZ`) [#timestamp]_ ; "2023-04-06T04:30:23.1234569Z"
+`Date`; `string` ISO 8601 date (:code:`yyyy-mm-dd`); "2023-04-06"
+`Unit`; :code:`{}` empty JSON Object; :code:`{}`
+`Text`; `string`; "my text value"
+`Bool`; boolean; false
+`ContractId`; `string`; "1234:56:7890"
+`Party`; `string`; "Alice:1234567890"
+`Record`; JSON `object` |br| :code:`{"prop1":val1, ..., "propN":valV}`;$
+.. code-block::
+
+    {
+        "field1Label":{ /*value of field1*/},
+        "field2Label": { /*value of field2*/},
+        /*...*/
+    }
+
+$
+`List`; JSON array; :code:`[1,7,3,4,5]`
+`TextMap`; JSON `object` |br|  :code:`{"key1":"val1", ..., "keyn":"valn"}`; :code:`{"key1":"value1", "key2":"value2"}`
+`Variant`; $
+.. code-block::
+
+   {
+    "tag": "<constructor_name>",
+    "value": "<variant_value>"
+   }
+
+$;$
+.. code-block::
+
+   data Location
+     = InHand
+     ; InAccount Account
+       deriving (Eq, Show)
+
+.. code-block::
+
+   {
+    "tag": "InAccount",
+        "value": {
+            "number": "CH-1234567890",
+            "bank": { }
+        }
+   }
+
+$
+`Optional`; JSON `value` when defined or `null` when empty; null
+`Enum`; `string` enum value name; :code:`Red` (for Daml :code:`data Color = Red | Green | Blue`)
+
