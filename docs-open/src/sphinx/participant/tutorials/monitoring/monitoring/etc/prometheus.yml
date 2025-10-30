@@ -1,0 +1,23 @@
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 1m
+
+scrape_configs:
+
+  - job_name: canton
+    static_configs:
+      - targets:
+          - participant1:10013
+          - participant2:10023
+
+  - job_name: cadvisor
+    static_configs:
+      - targets:
+          - cadvisor:8080
+
+    # Exclude container labels by default
+    # curl cadvisor:8080/metrics to see all available labels
+    metric_relabel_configs:
+      - regex: "container_label_.*"
+        action: labeldrop

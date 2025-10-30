@@ -1,0 +1,17 @@
+services:
+  participant2:
+    image: digitalasset/canton-open-source:2.5.1
+    container_name: participant2
+    hostname: participant2
+    volumes:
+      - ./participant2.conf:/canton/etc/participant2.conf
+      - ./participant2.bootstrap:/canton/etc/participant2.bootstrap
+    command: daemon --log-profile container --config etc/participant2.conf --bootstrap etc/participant2.bootstrap
+    expose:
+      - "10021"
+      - "10022"
+      - "10023"
+    ports:
+      - "10021:10021"
+      - "10022:10022"
+      - "10023:10023"

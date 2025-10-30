@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:17.5-bullseye
+    hostname: postgres
+    container_name: postgres
+    environment:
+      - POSTGRES_USER=pguser
+      - POSTGRES_PASSWORD=pgpass
+    volumes:
+      - ../etc/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql
+    expose:
+      - "5432"
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: "pg_isready -U postgres"
+      interval: 5s
+      timeout: 5s
+      retries: 5

@@ -16,7 +16,10 @@ Template for a bigger topic
 #### Impact and Migration
 
 ### Minor Improvements
-
+- ApiRequestLogger now also used by Ledger JSON Api. Changes:
+    - Redundant Request TID removed from logs.
+    - Additional CLI options added: `--log-access`, `--log-access-errors`...
+    - Additional config options added: `debugInProcessRequests`, `prefixGrpcAddresses`
 - ParticipantRepairService.ExportAcsOld and ImportAcsOld are deprecated. Instead use ParticipantRepairService.ExportAcs and ImportAcs respectively as a direct replacement. For party replication use PartyManagementService.ExportPartyAcs and ImportPartyAcs instead.
 
 ### Preview Features
