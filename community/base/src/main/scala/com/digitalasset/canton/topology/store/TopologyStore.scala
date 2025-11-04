@@ -4,8 +4,6 @@
 package com.digitalasset.canton.topology.store
 
 import cats.Monoid
-import cats.data.EitherT
-import cats.implicits.catsSyntaxParallelTraverse1
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
@@ -13,9 +11,9 @@ import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.CantonRequireTypes.{String185, String300}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{BatchingConfig, ProcessingTimeout}
+import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.parallelInstanceFutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -57,6 +55,7 @@ import com.digitalasset.canton.version.{
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.NotUsed
+import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
 
 import scala.collection.mutable
@@ -443,6 +442,13 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
       includeRejected: Boolean,
   )(implicit traceContext: TraceContext): Source[GenericStoredTopologyTransaction, NotUsed]
 
+  /** Yields a hash corresponding to the contents of the respective
+    * [[findEssentialStateAtSequencedTime]], with `includeRejected = true`
+    */
+  def findEssentialStateHashAtSequencedTime(
+      asOfInclusive: SequencedTime
+  )(implicit materializer: Materializer, traceContext: TraceContext): FutureUnlessShutdown[Hash]
+
   /** Checks whether the given signed topology transaction has signatures (at this point still
     * unvalidated) from signing keys, for which there aren't yet signatures in the store.
     */
@@ -738,10 +744,6 @@ object UnknownOrUnvettedPackages {
 
     }
 
-  def unknown(participantId: ParticipantId, packageId: PackageId): UnknownOrUnvettedPackages =
-    empty.copy(unknown = Map(participantId -> Set(packageId)))
-  def unvetted(participantId: ParticipantId, packageId: PackageId): UnknownOrUnvettedPackages =
-    empty.copy(unvetted = Map(participantId -> Set(packageId)))
   def unvetted(
       participantId: ParticipantId,
       packageIds: Set[PackageId],
@@ -759,17 +761,13 @@ final case class UnknownOrUnvettedPackages(
 }
 
 trait PackageDependencyResolver {
-
-  def packageDependencies(packageId: PackageId)(implicit
+  def packageDependencies(packages: Set[PackageId])(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, (PackageId, ParticipantId), Set[PackageId]]
+  ): Either[(ParticipantId, Set[PackageId]), Set[PackageId]]
+}
 
-  def packageDependencies(packages: List[PackageId])(implicit
-      traceContext: TraceContext,
-      ec: ExecutionContext,
-  ): EitherT[FutureUnlessShutdown, (PackageId, ParticipantId), Set[PackageId]] =
-    packages
-      .parTraverse(packageDependencies)
-      .map(_.flatten.toSet -- packages)
-
+object NoPackageDependencies extends PackageDependencyResolver {
+  override def packageDependencies(packages: Set[PackageId])(implicit
+      traceContext: TraceContext
+  ): Either[(ParticipantId, Set[PackageId]), Set[PackageId]] = Right(Set.empty[PackageId])
 }

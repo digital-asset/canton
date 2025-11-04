@@ -14,7 +14,7 @@ import com.digitalasset.canton.integration.tests.ledgerapi.auth.ServiceCallConte
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixture
 import com.digitalasset.canton.integration.tests.ledgerapi.services.TestCommands
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
-import com.digitalasset.canton.logging.{NamedLoggerFactory, SuppressionRule}
+import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, SuppressionRule}
 import io.circe.syntax.EncoderOps
 import monocle.macros.syntax.lens.*
 import org.apache.pekko.http.scaladsl.model.{StatusCodes, Uri}
@@ -74,28 +74,37 @@ class JsonRequestLoggingTest
             }
         } yield result,
         { logSeq =>
-          // all logs should have the same "trace-id"
-          val traceIds = logSeq.map(_.mdc.get("trace-id")).toSet.size
-          if (traceIds > 1) {
-            fail(
-              s"Expected all log entries to have the same trace-id, found: $logSeq"
-            )
+          val expectedLogsRegex = Seq(
+            "Request POST /v2/users by http.* received a message",
+            "Request POST /v2/users by http.* auth claims",
+            "Request .*CreateUser by in-process-grpc.* auth claims",
+            "Request .*CreateUser by in-process-grpc.* received a message",
+            "Request .*CreateUser by in-process-grpc.* sending response",
+            "Request .*CreateUser by in-process-grpc.* succeeded\\(OK\\)",
+            "Request .*CreateUser by in-process-grpc.* completed",
+            "Request POST /v2/users by http.* 200 Ok",
+          )
+
+          // Assert all expected logs are logged in order
+          val (_, relevantLogs) = expectedLogsRegex.foldLeft(logSeq -> Seq.empty[LogEntry]) {
+            case ((remainingSeq, relevantLogsAcc), nextExpectedLogRegex) =>
+              val remainingWithFirstEntryMatchingRegex =
+                remainingSeq.dropWhile(!_.message.matches(s".*$nextExpectedLogRegex.*"))
+              val logMatchingRegex = remainingWithFirstEntryMatchingRegex.headOption.toList
+
+              if (logMatchingRegex.isEmpty)
+                fail(
+                  s"Expected to find log matching regex in the remaining log sequence: $nextExpectedLogRegex but none found in $remainingSeq"
+                )
+
+              val newRemainingSeq = remainingWithFirstEntryMatchingRegex.tail
+              val newRelevantLogs = relevantLogsAcc ++ logMatchingRegex
+
+              newRemainingSeq -> newRelevantLogs
           }
-          logSeq.map(_.mdc.get("trace-id")).toSet.size should be(1)
-          // total 8 log messages
-          logSeq.size should be(8)
-          // 3 messages are from http
-          logSeq.count(_.message.contains("http:")) should be(3)
-          // the rest from grpc
-          logSeq.count(_.message.contains("in-process-grpc:")) should be(5)
-          // one http and one grpc message for the request
-          logSeq.count(_.message.contains("received a message")) should be(2)
-          // one http and one grpc message for the claims
-          logSeq.count(_.message.contains("Claims")) should be(2)
-          // one grpc success
-          logSeq.count(_.message.contains("succeeded(OK)")) should be(1)
-          // one http success
-          logSeq.count(_.message.contains("200 Ok")) should be(1)
+
+          // all logs should have the same "trace-id"
+          relevantLogs.map(_.mdc.get("trace-id").value).toSet.size should be(1)
         },
       )
     }

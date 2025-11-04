@@ -275,3 +275,7 @@ You won’t see the new `comment` field in the output yet. To display it, modify
 
 The, execute the `npm run scenario` once again.
 
+Related
+=======
+
+A :ref:`TypeScript <tutorial-canton-and-the-json-ledger-api-ts-websocket>` version is also available that demonstrates how to create a JSON Ledger API client for use in a web browser.
