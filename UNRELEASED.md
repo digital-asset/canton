@@ -9,6 +9,17 @@ schedule, i.e. if you add an entry effective at or after the first
 header, prepend the new date header that corresponds to the
 Wednesday after your change.
 
+## until 2025-11-05 (Exclusive)
+- [Topology] Committed `NamespaceDelegation` transactions with the `Remove` operations cannot be re-created with a `Replace` operation anymore.
+- [Topology] Upgrades of participant permissions in the `PartyToParticipant` mapping now require the authorization of both the party and respective participant.
+             For backwards compatibility, existing transactions in the genesis block do NOT require the authorization of participants for permission upgrades.
+- BREAKING [API limits] Generalised the stream limits into concurrent call limits. Instead of
+  `public-api.stream.limits`, we now have `<any-api>.limits.active`, which limits streams
+  and requests. This is true for the Ledger API as well. The old stream limit configuration
+  of the Ledger API has been removed.
+- The topology outbox now supports backpressure. This means that topology requests will start to be rejected
+  if the topology outbox is full. The size of the outbox can be configured via
+  ```canton.<type>.<name>.topology.max-unsent-topology-queue-size = 100 (default)```
 ## until 2025-10-29 (Exclusive)
 - A level of nesting in the Http Ledger API configuration has been eliminated. Now the `address`,
   `port`, `portFile`, `pathPrefix`, as well as `requestTimeout` are set directly on the `http-ledger-api` like so:
@@ -699,3 +710,18 @@ Following types are now encoded as strings:
 - A default value is provided for the ``transaction_format`` field inside of ``SubmitAndWaitForTransactionRequest``.
   You can now omit this field in both grpc and json requests, and get behavior consistent with the 3.2 version of
  Canton. This means you will receive a flat transaction with event visibility dictated by all ``act_as`` and ``read_as`` parties.
+
+## Compatibility
+
+The following Canton protocol versions are supported:
+
+| Dependency                 | Version                    |
+|----------------------------|----------------------------|
+| Canton protocol versions   | PROTOCOL_VERSIONS          |
+
+Canton has been tested against the following versions of its dependencies:
+
+| Dependency                 | Version                    |
+|----------------------------|----------------------------|
+| Java Runtime               | JAVA_VERSION               |
+| Postgres                   | POSTGRES_VERSION           |

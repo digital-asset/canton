@@ -45,7 +45,10 @@ import com.digitalasset.canton.topology.store.{
   ValidatedTopologyTransaction,
 }
 import com.digitalasset.canton.topology.transaction.*
-import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllButNamespaceDelegations
+import com.digitalasset.canton.topology.transaction.DelegationRestriction.{
+  CanSignAllButNamespaceDelegations,
+  CanSignAllMappings,
+}
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
@@ -849,6 +852,13 @@ class TestingOwnerWithKeys(
         Namespace(namespaceKey.fingerprint),
         key2,
         CanSignAllButNamespaceDelegations,
+      )
+    )
+    val ns1k1 = mkAdd(
+      NamespaceDelegation.tryCreate(
+        Namespace(key1.fingerprint),
+        key1,
+        CanSignAllMappings,
       )
     )
     val seq_okm_k2 = mkAddMultiKey(

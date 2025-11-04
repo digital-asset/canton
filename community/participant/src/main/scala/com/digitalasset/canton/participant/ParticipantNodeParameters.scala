@@ -35,6 +35,7 @@ final case class ParticipantNodeParameters(
     doNotAwaitOnCheckingIncomingCommitments: Boolean,
     disableOptionalTopologyChecks: Boolean,
     commitmentCheckpointInterval: PositiveDurationSeconds,
+    commitmentMismatchDebugging: Boolean,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters {
   override def dontWarnOnDeprecatedPV: Boolean = protocolConfig.dontWarnOnDeprecatedPV
@@ -63,6 +64,7 @@ object ParticipantNodeParameters {
       exitOnFatalFailures = true,
       watchdog = None,
       startupMemoryCheckConfig = StartupMemoryCheckConfig(ReportingLevel.Warn),
+      dispatchQueueBackpressureLimit = NonNegativeInt.tryCreate(10),
     ),
     activationFrequencyForWarnAboutConsistencyChecks = 1000L,
     adminWorkflow = AdminWorkflowConfig(
@@ -90,5 +92,6 @@ object ParticipantNodeParameters {
     doNotAwaitOnCheckingIncomingCommitments = false,
     disableOptionalTopologyChecks = false,
     commitmentCheckpointInterval = PositiveDurationSeconds.ofMinutes(1),
+    commitmentMismatchDebugging = false,
   )
 }
