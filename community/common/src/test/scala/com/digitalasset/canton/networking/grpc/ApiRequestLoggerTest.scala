@@ -141,7 +141,7 @@ final class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecu
   }
 
   private def assertClientFailure(
-      clientCompletion: Future[_],
+      clientCompletion: Future[?],
       serverStatus: Status,
       serverTrailers: Metadata = new Metadata(),
       clientCause: Throwable = null,
@@ -234,7 +234,7 @@ final class ApiRequestLoggerTest extends AnyWordSpec with BaseTest with HasExecu
     val channel: ManagedChannel =
       InProcessChannelBuilder
         .forName(ChannelName)
-        .intercept(TraceContextGrpc.clientInterceptor)
+        .intercept(TraceContextGrpc.clientInterceptor())
         .build()
 
     val client: HelloServiceGrpc.HelloServiceStub = HelloServiceGrpc.stub(channel)

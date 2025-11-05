@@ -317,7 +317,7 @@ trait PrettyInstances {
 
   implicit val prettyPort: Pretty[Port] = prettyOfString(_.unwrap.toString)
 
-  implicit val prettyRefinedNumeric: Pretty[RefinedNumeric[_]] = prettyOfString(_.unwrap.toString)
+  implicit val prettyRefinedNumeric: Pretty[RefinedNumeric[?]] = prettyOfString(_.unwrap.toString)
 
   implicit val prettyServingStatus: Pretty[ServingStatus] = prettyOfClass(
     param("status", _.name().singleQuoted)

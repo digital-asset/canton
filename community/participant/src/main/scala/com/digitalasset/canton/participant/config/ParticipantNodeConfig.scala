@@ -136,7 +136,7 @@ object ParticipantNodeConfig {
         DeprecatedConfigUtils.MovedConfigPath("http-ledger-api.server", "http-ledger-api")
       )
 
-      override def deprecatePath: List[DeprecatedConfigUtils.DeprecatedConfigPath[_]] = List(
+      override def deprecatePath: List[DeprecatedConfigUtils.DeprecatedConfigPath[?]] = List(
         DeprecatedConfigUtils
           .DeprecatedConfigPath[Boolean]("http-ledger-api.server", "3.4.0")
       )
@@ -273,12 +273,10 @@ final case class LedgerApiServerConfig(
       TopologyAwarePackageSelectionConfig.Default,
     maxTokenLifetime: NonNegativeDuration = config.NonNegativeDuration(5.minutes),
     jwksCacheConfig: JwksCacheConfig = JwksCacheConfig(),
+    limits: Option[ActiveRequestLimitsConfig] = None,
 ) extends ServerConfig // We can't currently expose enterprise server features at the ledger api anyway
     {
-
-  // LAPI server does not use the canonical server builder, so doesn't support the stream limits using stream limit config
-  override val stream: Option[StreamLimitConfig] = None
-
+  override val name: String = "ledger-api"
   lazy val clientConfig: FullClientConfig =
     FullClientConfig(address, port, tls.map(_.clientConfig))
 
@@ -388,6 +386,10 @@ object TestingTimeServiceConfig {
   *   Checkpoint interval for commitments. Smaller intervals lead to less resource-intensive crash
   *   recovery, at the cost of more frequent DB writing of checkpoints. Regardless of this
   *   checkpoint interval, checkpointing is also performed at reconciliation interval boundaries.
+  * @param commitmentMismatchDebugging
+  *   Enables fine-grained logs of the changes the ACS commitment processor applies. It also enables
+  *   consistency checks in the ACS commitment processor. Should only be enabled for debugging
+  *   purposes, and never in prod.
   */
 final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -424,6 +426,7 @@ final case class ParticipantNodeParameterConfig(
     doNotAwaitOnCheckingIncomingCommitments: Boolean = false,
     commitmentCheckpointInterval: config.PositiveDurationSeconds =
       config.PositiveDurationSeconds.ofMinutes(1),
+    commitmentMismatchDebugging: Boolean = false,
 ) extends LocalNodeParametersConfig
     with UniformCantonConfigValidation
 
