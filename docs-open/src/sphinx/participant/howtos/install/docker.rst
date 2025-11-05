@@ -83,7 +83,7 @@ To run a participant console with custom configuration:
           storage.type = memory
           admin-api.port = 5012
           ledger-api.port = 5011
-          http-ledger-api.server.port = 5013
+          http-ledger-api.port = 5013
         }" \
         --rm -it \
         europe-docker.pkg.dev/da-images/public-unstable/docker/canton-participant:3.5.0-ad-hoc.20251021.17321.0.v2cdf1644 \

@@ -21,6 +21,7 @@ import sbtbuildinfo.BuildInfoPlugin.autoImport.*
 import sbtide.Keys.ideExcludedDirectories
 import sbtprotoc.ProtocPlugin.autoImport.{AsProtocPlugin, PB}
 import scalafix.sbt.ScalafixPlugin
+import scalafix.sbt.ScalafixPlugin.autoImport.scalafix
 import scoverage.ScoverageKeys.*
 import wartremover.WartRemover
 import wartremover.WartRemover.autoImport.*
@@ -1743,28 +1744,39 @@ object BuildCommon {
         .enablePlugins(DamlPlugin)
         .settings(
           sharedCommunitySettings,
+          Test / PB.targets := Seq(
+            // build java codegen too
+            PB.gens.java -> (Test / sourceManaged).value / "protobuf",
+            // build scala codegen with java conversions
+            scalapb.gen(
+              javaConversions = true,
+              flatPackage = false,
+            ) -> (Test / sourceManaged).value / "protobuf",
+          ),
           libraryDependencies ++= Seq(
-            circe_parser,
             circe_generic_extras,
-            upickle,
-            ujson_circe,
-            tapir_json_circe,
-            tapir_pekko_http_server,
-            tapir_openapi_docs,
-            tapir_asyncapi_docs,
+            circe_parser,
+            circe_yaml % Test,
             daml_lf_api_type_signature,
             daml_lf_transaction_test_lib,
+            daml_libs_scala_scalatest_utils % Test,
             daml_observability_pekko_http_metrics,
             daml_timer_utils,
-            pekko_http,
             icu4j_version,
-            sttp_apiscpec_openapi_circe_yaml,
-            sttp_apiscpec_asyncapi_circe_yaml,
-            scalapb_json4s,
-            daml_libs_scala_scalatest_utils % Test,
+            pekko_http,
             pekko_stream_testkit % Test,
-            circe_yaml % Test,
             protostuff_parser % Test,
+            scalapb_json4s,
+            scalapb_runtime,
+            scalapb_runtime_grpc,
+            sttp_apiscpec_asyncapi_circe_yaml,
+            sttp_apiscpec_openapi_circe_yaml,
+            tapir_asyncapi_docs,
+            tapir_json_circe,
+            tapir_openapi_docs,
+            tapir_pekko_http_server,
+            ujson_circe,
+            upickle,
           ),
           coverageEnabled := false,
           Test / damlCodeGeneration := Seq(

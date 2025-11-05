@@ -44,6 +44,7 @@ Canton documentation
   sdk/tutorials/app-dev/external_signing_submission_part_2
   sdk/tutorials/json-api/canton_and_the_json_ledger_api
   sdk/tutorials/json-api/canton_and_the_json_ledger_api_ts
+  sdk/tutorials/json-api/canton_and_the_json_ledger_api_ts_websocket
 
   sdk/sdlc-howtos/applications/develop/manage-daml-packages
   sdk/sdlc-howtos/applications/develop/manage-daml-parties

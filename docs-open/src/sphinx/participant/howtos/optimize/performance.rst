@@ -376,7 +376,7 @@ It is possible to turn off rate limiting at the gRPC Ledger API level:
 
 .. _tuning_stream_api_limits:
 
-**Number of Open Streams**: Similarly to the Ledger API, the number of open streams on the Admin API and the Sequencer API can be configured using the ``stream.limits`` section of the configuration:
+**Number of Open Streams**: Similarly to the Ledger API, the number of open streams on the Admin API and the Sequencer API can be configured using the ``limits.active`` section of the configuration:
 
 .. literalinclude:: CANTON/community/app/src/test/resources/documentation-snippets/sequencer-api-limits.conf
 

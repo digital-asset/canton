@@ -766,6 +766,12 @@ object DocsOpenBuild {
         if (checkRes == 0) {
           val matchingLines = Process(checkCmd).!! // `!!` captures the output as a string
           log.error(s"Found matches running '${checkCmd.mkString(" ")}':\n$matchingLines")
+          if (matchingLines.contains("document isn't included in any toctree")) {
+            log.error(
+              s"""Some warnings are due to RST files not being included in any toctree.
+                 |RST files must be added in both the appropriate `_toc.yml` file *and* in sphix/index.rst.""".stripMargin
+            )
+          }
         }
         throw new IllegalStateException(
           s"Please check the log: $sphinxLogPath contains issues, or the rg command failed (exit code: $checkRes)"
