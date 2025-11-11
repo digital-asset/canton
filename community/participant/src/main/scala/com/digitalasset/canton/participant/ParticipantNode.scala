@@ -471,6 +471,7 @@ class ParticipantNodeBootstrap(
           indexedStringStore,
           persistentState.map(_.acsCounterParticipantConfigStore).value,
           parameters,
+          arguments.config.topology,
           synchronizerConnectionConfigStore,
           (staticSynchronizerParameters: StaticSynchronizerParameters) =>
             SynchronizerCrypto(crypto, staticSynchronizerParameters),

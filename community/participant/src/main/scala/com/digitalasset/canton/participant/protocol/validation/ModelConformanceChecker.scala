@@ -93,7 +93,7 @@ class ModelConformanceChecker(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ErrorWithSubTransaction[ViewEffect], Result] = {
-    val CommonData(transactionId, ledgerTime, preparationTime) = commonData
+    val CommonData(updateId, ledgerTime, preparationTime) = commonData
 
     // Previous checks in Phase 3 ensure that all the root views are sent to the same
     // mediator, and that they all have the same correct root hash, and therefore the
@@ -126,7 +126,7 @@ class ModelConformanceChecker(
       .parTraverse { case (view, effects, viewPos, submittingParticipantO) =>
         for {
           wfTxE <- checkView(
-            transactionId,
+            updateId,
             view,
             viewPos,
             mediator,
@@ -188,7 +188,7 @@ class ModelConformanceChecker(
             // TODO(i14473): Handle failures to merge a transaction while preserving transparency
             ErrorUtil.internalError(
               new IllegalStateException(
-                s"Model conformance check failure when merging transaction $transactionId: $mergeError"
+                s"Model conformance check failure when merging transaction $updateId: $mergeError"
               )
             )
           )
@@ -198,11 +198,11 @@ class ModelConformanceChecker(
       NonEmpty.from(errors) match {
         case None =>
           wftxO match {
-            case Some(wftx) => Right(Result(transactionId, wftx))
+            case Some(wftx) => Right(Result(updateId, wftx))
             case _ =>
               ErrorUtil.internalError(
                 new IllegalStateException(
-                  s"Model conformance check for transaction $transactionId completed successfully but without a valid transaction"
+                  s"Model conformance check for transaction $updateId completed successfully but without a valid transaction"
                 )
               )
           }
@@ -289,7 +289,7 @@ class ModelConformanceChecker(
   }
 
   private def checkView(
-      transactionId: UpdateId,
+      updateId: UpdateId,
       view: TransactionView,
       viewPosition: ViewPosition,
       mediator: MediatorGroupRecipient,
@@ -355,7 +355,7 @@ class ModelConformanceChecker(
       absolutizationData = transactionTreeFactory.cantonContractIdVersion match {
         case _: CantonContractIdV1Version => ContractIdAbsolutizationDataV1
         case _: CantonContractIdV2Version =>
-          ContractIdAbsolutizationDataV2(transactionId, metadata.ledgerTime)
+          ContractIdAbsolutizationDataV2(updateId, metadata.ledgerTime)
       }
       absolutizer = new ContractIdAbsolutizer(hashOps, absolutizationData)
 
@@ -658,7 +658,7 @@ object ModelConformanceChecker {
   }
 
   final case class Result(
-      transactionId: UpdateId,
+      updateId: UpdateId,
       suffixedTransaction: WellFormedTransaction[WithSuffixesAndMerged],
   )
 

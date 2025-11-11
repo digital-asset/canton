@@ -607,6 +607,7 @@ class SequencerNodeBootstrap(
                 synchronizerPredecessor = None,
                 crypto.pureCrypto,
                 parameters,
+                arguments.config.topology,
                 clock,
                 crypto.staticSynchronizerParameters,
                 futureSupervisor,

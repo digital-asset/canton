@@ -810,6 +810,42 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
   }
 
   @Explanation(
+    "This error indicates that the confirming threshold is higher than the number of hosting nodes, which will result in a non functional party."
+  )
+  @Resolution("Decrease the threshold or increase the number of hosting nodes.")
+  object ConfirmingThresholdCannotBeReached
+      extends ErrorCode(
+        id = "TOPOLOGY_CONFIRMING_THRESHOLD_CANNOT_BE_REACHED",
+        ErrorCategory.InvalidGivenCurrentSystemStateResourceExists,
+      ) {
+    final case class Reject(threshold: PositiveInt, numberOfHostingNodes: Int)(implicit
+        override val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            s"Tried to set a confirming threshold (${threshold.value}) above the number of hosting nodes ($numberOfHostingNodes)."
+        )
+        with TopologyManagerError
+  }
+
+  @Explanation(
+    "This error indicates that the signing threshold is higher than the number of signing keys, which will result in a non functional party."
+  )
+  @Resolution("Decrease the threshold or increase the number of signing keys.")
+  object SigningThresholdCannotBeReached
+      extends ErrorCode(
+        id = "TOPOLOGY_SIGNING_THRESHOLD_CANNOT_BE_REACHED",
+        ErrorCategory.InvalidGivenCurrentSystemStateResourceExists,
+      ) {
+    final case class Reject(threshold: PositiveInt, numberOfSigningKeys: Int)(implicit
+        override val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            s"Tried to set a signing threshold (${threshold.value}) above the number of signing keys ($numberOfSigningKeys)."
+        )
+        with TopologyManagerError
+  }
+
+  @Explanation(
     "This error indicates that the partyId to allocate is the same as an already existing admin party."
   )
   @Resolution("Submit the topology transaction with a changed partyId.")

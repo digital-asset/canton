@@ -222,7 +222,7 @@ object DamlPlugin extends AutoPlugin {
             _,
           )
         )
-        updateDamlDependencies(damlCompilerVersion.value)
+        // updateDamlDependencies(damlCompilerVersion.value)
       },
       damlUpdateFixedDars := {
         val sourceDirectory = damlDarOutput.value
@@ -327,7 +327,7 @@ object DamlPlugin extends AutoPlugin {
   }
 
   private def updateDamlDependencies(damlVersion: String): Unit = {
-    val reg = """^\d+\.\d+\.\d+-\w+\.\d{8}\.\d+\.\d+\.v([a-f0-9]{8})$""".r
+    val reg = """^\d+\.\d+\.\d+(-\w+\.\d{8}\.\d+\.\d+\.v([a-f0-9]{8})|)$""".r
 
     val commitSha = damlVersion match {
       case reg(hash) => hash

@@ -1015,7 +1015,7 @@ final class RepairService(
           roots = ImmArray.from(nodeIds.take(txNodes.size)),
         )
       ),
-      updateId = randomTransactionId(syncCrypto),
+      updateId = randomUpdateId(syncCrypto),
       contractAuthenticationData = contractAuthenticationData,
       representativePackageIds = RepresentativePackageIds.from(representativePackageIds),
       synchronizerId = repair.synchronizer.psid.logical,
@@ -1172,7 +1172,7 @@ final class RepairService(
           repairCountersToAllocate,
         )
       )
-    } yield RepairRequest(synchronizer, randomTransactionId(syncCrypto), repairCounters)
+    } yield RepairRequest(synchronizer, randomUpdateId(syncCrypto), repairCounters)
   }
 
   /** Read the ACS state for each contract in cids
