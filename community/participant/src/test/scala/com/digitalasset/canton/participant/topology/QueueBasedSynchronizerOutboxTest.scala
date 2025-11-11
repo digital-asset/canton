@@ -145,6 +145,7 @@ class QueueBasedSynchronizerOutboxTest
       defaultStaticSynchronizerParameters,
       store = target,
       packageDependencyResolver = NoPackageDependencies,
+      topologyConfig = TopologyConfig(),
       timeouts = timeouts,
       futureSupervisor = futureSupervisor,
       loggerFactory = loggerFactory,

@@ -20,7 +20,11 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, H
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.{CommonMockMetrics, LedgerApiServerMetrics}
 import com.digitalasset.canton.participant.ledger.api.LedgerApiJdbcUrl
-import com.digitalasset.canton.participant.store.ContractStore
+import com.digitalasset.canton.participant.store.{
+  ContractStore,
+  LedgerApiContractStore,
+  LedgerApiContractStoreImpl,
+}
 import com.digitalasset.canton.platform.IndexComponentTest.TestServices
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.config.{IndexServiceConfig, ServerRole}
@@ -44,7 +48,7 @@ import com.digitalasset.canton.util.PekkoUtil.{FutureQueue, IndexingFutureQueue}
 import com.digitalasset.canton.{BaseTest, HasExecutorService}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.engine.{Engine, EngineConfig}
-import com.digitalasset.daml.lf.language.{LanguageMajorVersion, LanguageVersion}
+import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder}
 import org.scalatest.Suite
 
@@ -113,13 +117,11 @@ trait IndexComponentTest
     // this mimics protocol processing that stores contracts and retrieves their internal contract ids afterward
     testServices.participantContractStore
       .storeContracts(contracts)
-      .failOnShutdown("storing contracts")
       .flatMap(_ =>
         testServices.participantContractStore
           .lookupBatchedNonCachedInternalIds(
             contracts.map(_.contractId)
           )
-          .failOnShutdown("retrieving internal contract ids")
       )
       .map { internalContractIds =>
         update match {
@@ -147,7 +149,7 @@ trait IndexComponentTest
     implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
 
     val engine = new Engine(
-      EngineConfig(LanguageVersion.StableVersions(LanguageMajorVersion.V2))
+      EngineConfig(LanguageVersion.stableRange)
     )
     val mutableLedgerEndCache = MutableLedgerEndCache()
     val stringInterningView = new StringInterningView(loggerFactory)
@@ -175,7 +177,7 @@ trait IndexComponentTest
                 loggerFactory = loggerFactory,
               )
           )
-        participantContractStore <-
+        contractStore <-
           ResourceOwner
             .forCloseable(() =>
               ContractStore.create(
@@ -186,6 +188,7 @@ trait IndexComponentTest
                 loggerFactory = loggerFactory,
               )
             )
+        participantContractStore = LedgerApiContractStoreImpl(contractStore, loggerFactory)
         (inMemoryState, updaterFlow) <- LedgerApiServerInternals.createInMemoryStateAndUpdater(
           participantId = participantId,
           commandProgressTracker = CommandProgressTracker.NoOp,
@@ -312,6 +315,6 @@ object IndexComponentTest {
       indexResource: Resource[Any],
       index: IndexService,
       indexer: FutureQueue[Update],
-      participantContractStore: ContractStore,
+      participantContractStore: LedgerApiContractStore,
   )
 }

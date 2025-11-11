@@ -95,7 +95,7 @@ You can run the JSON Ledger API alongside any ledger exposing the gRPC Ledger AP
 
     Alternatively open the web browser and navigate to address:
 
-        `<http:://localhost:8080/docs/openapi>`_
+        `<http://localhost:8080/docs/openapi>`_
 
     You should see yaml file contents that starts with:
 

@@ -8,6 +8,7 @@ import sbtlicensereport.SbtLicenseReport.autoImportImpl.*
 import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.{headerResources, headerSources}
 import org.scalafmt.sbt.ScalafmtPlugin
 import pl.project13.scala.sbt.JmhPlugin
+import pl.project13.scala.sbt.JmhPlugin.JmhKeys.Jmh
 import sbt.Keys.*
 import sbt.Tests.{Group, SubProcess}
 import sbt.{File, *}
@@ -609,6 +610,8 @@ object BuildCommon {
       `community-participant`,
       `community-testing`,
       `community-integration-testing`,
+      `daml-script-tests`,
+      microbench,
       `sequencer-driver-api`,
       `sequencer-driver-api-conformance-tests`,
       `sequencer-driver-lib`,
@@ -1196,6 +1199,45 @@ object BuildCommon {
         // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
         // runtime errors while testing and none have been found so far, so this should be fine for now
         dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.0.1",
+      )
+
+    lazy val microbench = project
+      .in(file("community/microbench"))
+      .enablePlugins(JmhPlugin)
+      .settings(
+        sharedCantonCommunitySettings,
+        // See #23185: Prevent large string allocation during JMH fat-jar generation (prevent potential OOM errors)
+        // by ensuring this task never runs in assembly plugin in debug mode.
+        assembly / logLevel := Level.Info,
+        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.0.1",
+        Compile / compile / wartremoverErrors ~= (_.filterNot(
+          _.clazz == "com.digitalasset.canton.EnforceVisibleForTesting"
+        )),
+        // to find the correct classpath https://stackoverflow.com/a/30056340
+        Test / fork := true,
+        // to produce the Jmh resources needed before running the scalatest that calls the Jmh runner
+        (Test / testOnly) := (Test / testOnly)
+          .dependsOn(Jmh / compile)
+          .evaluated,
+      )
+      .dependsOn(
+        `community-app` % "compile->test",
+        `community-synchronizer` % "compile->test",
+        `community-testing`,
+      )
+
+    // Keep as separate sub-project due to possible dependency problems with daml_script_runner protobuf dependencies
+    lazy val `daml-script-tests` = project
+      .in(file("community/daml-script-tests"))
+      .dependsOn(
+        `community-app` % "compile->compile;test->test"
+      )
+      .settings(
+        sharedCantonCommunitySettings,
+        libraryDependencies ++= Seq(
+          daml_script_runner % Test
+        ),
+        addProtobufFilesToHeaderCheck(Compile),
       )
 
     lazy val `kms-driver-api` = project

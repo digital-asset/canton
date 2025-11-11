@@ -127,6 +127,7 @@ class StoreBasedSynchronizerOutboxTest
       defaultStaticSynchronizerParameters,
       store = target,
       packageDependencyResolver = NoPackageDependencies,
+      topologyConfig = TopologyConfig(),
       timeouts = timeouts,
       futureSupervisor = futureSupervisor,
       loggerFactory.append("store", "Synchronizer"),
