@@ -98,7 +98,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LfPartyId, ProtoDeserializationError, ReassignmentCounter}
 import com.google.common.annotations.VisibleForTesting
 
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.{Map, SortedMap, SortedSet}
@@ -223,6 +223,7 @@ class AcsCommitmentProcessor private (
     doNotAwaitOnCheckingIncomingCommitments: Boolean,
     commitmentCheckpointInterval: PositiveDurationSeconds,
     commitmentMismatchDebugging: Boolean,
+    commitmentProcessorNrAcsChangesBehindToTriggerCatchUp: Option[PositiveInt],
 )(implicit ec: ExecutionContext)
     extends AcsChangeListener
     with FlagCloseable
@@ -351,6 +352,10 @@ class AcsCommitmentProcessor private (
   // duration over the skip window
   private lazy val lastCommitmentsComputeTimes: DurationResizableRingBuffer =
     new DurationResizableRingBuffer(0)
+
+  // keeps track of the number of acs changes enqueued on the publish queue but not yet processed
+  // used to trigger catch-up mode when the number of changes is too high
+  private lazy val nrAcsChangesOnPublishQueue: AtomicInteger = new AtomicInteger(0)
 
   // multi-sets of activations / deactivations in the last interval
   // maintained only if mismatchDebugging is true
@@ -956,83 +961,90 @@ class AcsCommitmentProcessor private (
         }
       } yield ()
 
+    // we will imminently add an acs change to the queue
+    nrAcsChangesOnPublishQueue.incrementAndGet()
+
     // On the `publishQueue`, obtain the running commitment, the reconciliation parameters, and topology snapshot,
     // and check whether this is a replay of something we've already seen. If not, then do publish the change,
     // which runs on the `dbQueue`.
     val fut = publishQueue
       .executeUS(
-        for {
-          // During crash recovery, it should be that only in tests could we have the situation where we replay
-          // ACS changes while the ledger end lags behind the replayed change timestamp. In normal processing,
-          // we publish ACS changes only after the ledger end has moved, which should mean that all topology events
-          // for a given timestamp have been processed before processing the ACS change for the same timestamp.
-          //
-          // In that former case, when the ledger end lags behind, the topology client may be able to serve
-          // the intervals and snapshots for re-published ACS changes only after some messages have been processed,
-          // which may include ACS commitments that go through the same queue. Therefore, we serialize the access to
-          // the DB only after having obtained the reconciliation intervals and topology snapshot.
-          _ <-
-            if (runningCommitments.watermark >= toc) {
-              logger.debug(s"ACS change at $toc is a replay, treating it as a no-op")
-              // This is a replay of an already processed ACS change, ignore
-              FutureUnlessShutdown.unit
-            } else {
+        {
+          // we're processing one acs change from the queue, thus removing it
+          nrAcsChangesOnPublishQueue.decrementAndGet().discard
+          for {
+            // During crash recovery, it should be that only in tests could we have the situation where we replay
+            // ACS changes while the ledger end lags behind the replayed change timestamp. In normal processing,
+            // we publish ACS changes only after the ledger end has moved, which should mean that all topology events
+            // for a given timestamp have been processed before processing the ACS change for the same timestamp.
+            //
+            // In that former case, when the ledger end lags behind, the topology client may be able to serve
+            // the intervals and snapshots for re-published ACS changes only after some messages have been processed,
+            // which may include ACS commitments that go through the same queue. Therefore, we serialize the access to
+            // the DB only after having obtained the reconciliation intervals and topology snapshot.
+            _ <-
+              if (runningCommitments.watermark >= toc) {
+                logger.debug(s"ACS change at $toc is a replay, treating it as a no-op")
+                // This is a replay of an already processed ACS change, ignore
+                FutureUnlessShutdown.unit
+              } else {
 
-              for {
-                acsChange <- acsChangeF()
-                reconciliationIntervals <- getReconciliationIntervals(toc.timestamp)
-                periodEndO = reconciliationIntervals.tickBefore(toc.timestamp)
+                for {
+                  acsChange <- acsChangeF()
+                  reconciliationIntervals <- getReconciliationIntervals(toc.timestamp)
+                  periodEndO = reconciliationIntervals.tickBefore(toc.timestamp)
 
-                processPeriodEnd <- periodEndO.traverse_ { crtPeriodEnd =>
-                  // This is merely the last period end that we have queued to process, but it does not necessarily mean that
-                  // we have computed and stored the local commitments at endOfLastPeriod.
-                  // However, [[processCompletedPeriod]] has an immutable snapshot at time endOfLastPeriod, so it is safe
-                  // to update the running commitments irrespective of the status of the local commitments.
-                  val prevPeriodEnd = endOfLastPeriod
-                  // Check whether this ACS change timestamp pushes us to a new commitment period; if so, the previous one is completed
-                  val completedPeriod = reconciliationIntervals
-                    .commitmentPeriodPrecedingFixedLowerBound(crtPeriodEnd, prevPeriodEnd)
-                  for {
-                    // checkpoint if needed
-                    _ <- checkpoint(
-                      completedPeriod,
-                      runningCommitments,
-                    )
+                  processPeriodEnd <- periodEndO.traverse_ { crtPeriodEnd =>
+                    // This is merely the last period end that we have queued to process, but it does not necessarily mean that
+                    // we have computed and stored the local commitments at endOfLastPeriod.
+                    // However, [[processCompletedPeriod]] has an immutable snapshot at time endOfLastPeriod, so it is safe
+                    // to update the running commitments irrespective of the status of the local commitments.
+                    val prevPeriodEnd = endOfLastPeriod
+                    // Check whether this ACS change timestamp pushes us to a new commitment period; if so, the previous one is completed
+                    val completedPeriod = reconciliationIntervals
+                      .commitmentPeriodPrecedingFixedLowerBound(crtPeriodEnd, prevPeriodEnd)
+                    for {
+                      // checkpoint if needed
+                      _ <- checkpoint(
+                        completedPeriod,
+                        runningCommitments,
+                      )
 
-                    res <- completedPeriod match {
-                      case Some(commitmentPeriod) =>
-                        endOfLastPeriod = Some(commitmentPeriod.toInclusive)
-                        // do not chain: make sure it gets scheduled, but don't wait for it to be executed
+                      res <- completedPeriod match {
+                        case Some(commitmentPeriod) =>
+                          endOfLastPeriod = Some(commitmentPeriod.toInclusive)
+                          // do not chain: make sure it gets scheduled, but don't wait for it to be executed
 
-                        // Important: the running commitments must have been updated with the changes up to but not including
-                        // the current ACS change at toc.timestamp, because updating commitments happens on the "publish queue" in
-                        // increasing order of changes
-                        // If the current ACS change moves us past a reconciliation boundary t, it is critical for correctness
-                        // to first snapshot the running commitments before updating them. Otherwise, we lose the
-                        // ability to compute the commitments at the reconciliation boundary t.
-                        // Also, we need to ensure that we take the snapshot before we schedule the processing of the completed
-                        // period, otherwise the snapshot for the period might not have all updates.
-                        val dbQueueRes = dbQueue.executeUS(
-                          processCompletedPeriod(runningCommitments.snapshot())(
-                            commitmentPeriod
-                          ),
-                          s"process completed period as a result of time of change $toc",
-                        )
-                        dbQueueRes
-                      case None =>
-                        logger.debug(
-                          s"The change $acsChange at $toc does not lead to a new commitment period."
-                        )
-                        FutureUnlessShutdown.unit
-                    }
-                  } yield res
-                }
+                          // Important: the running commitments must have been updated with the changes up to but not including
+                          // the current ACS change at toc.timestamp, because updating commitments happens on the "publish queue" in
+                          // increasing order of changes
+                          // If the current ACS change moves us past a reconciliation boundary t, it is critical for correctness
+                          // to first snapshot the running commitments before updating them. Otherwise, we lose the
+                          // ability to compute the commitments at the reconciliation boundary t.
+                          // Also, we need to ensure that we take the snapshot before we schedule the processing of the completed
+                          // period, otherwise the snapshot for the period might not have all updates.
+                          val dbQueueRes = dbQueue.executeUS(
+                            processCompletedPeriod(runningCommitments.snapshot())(
+                              commitmentPeriod
+                            ),
+                            s"process completed period as a result of time of change $toc",
+                          )
+                          dbQueueRes
+                        case None =>
+                          logger.debug(
+                            s"The change $acsChange at $toc does not lead to a new commitment period."
+                          )
+                          FutureUnlessShutdown.unit
+                      }
+                    } yield res
+                  }
 
-                // Add the changes to the running commitments regardless of whether the change leads to a new period
-                _ = updateRunningCommitments(toc, acsChange)
-              } yield processPeriodEnd
-            }
-        } yield (),
+                  // Add the changes to the running commitments regardless of whether the change leads to a new period
+                  _ = updateRunningCommitments(toc, acsChange)
+                } yield processPeriodEnd
+              }
+          } yield ()
+        },
         s"publish ACS change at $toc",
       )
 
@@ -1842,13 +1854,19 @@ class AcsCommitmentProcessor private (
           // other contracts than the ones we share with it.
           // Also, it's not the case when there are delays in the record order publisher that make the participant slow
           // in observing time advance, but not actually slow in computing commitments.
-          // Thus, we only enter catch-up mode if the participant is actually falling behind, i.e., metrics.compute,
-          // which represents processing commitments * nr commitments per period, approaches the interval length.
+          // Thus, we only enter catch-up mode if:
+          // - the participant is actually falling behind, i.e., metrics.compute, which represents
+          // processing commitments * nr commitments per period, approaches the interval length;
+          // - or if the publish queue is large, indicating that the participant is behind in ingesting acs changes,
+          // thus will skip commitment computations to ingest changes faster and be up-to-date
           sortedReconciliationIntervals.intervals.headOption.flatMap(interval =>
             lastCommitmentsComputeTimes
               .averageDuration()
               .fold[Option[CantonTimestamp]](None)(avgDuration =>
-                if (avgDuration > interval.intervalLength.duration)
+                if (
+                  avgDuration > interval.intervalLength.duration || commitmentProcessorNrAcsChangesBehindToTriggerCatchUp
+                    .exists(nrChanges => nrAcsChangesOnPublishQueue.get() > nrChanges.value)
+                )
                   catchUpTimestamp
                 else None
               )
@@ -2421,6 +2439,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       doNotAwaitOnCheckingIncomingCommitments: Boolean,
       commitmentCheckpointInterval: PositiveDurationSeconds,
       commitmentMismatchDebugging: Boolean = false,
+      commitmentProcessorNrAcsChangesBehindToTriggerCatchUp: Option[PositiveInt] = None,
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
@@ -2483,6 +2502,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
         doNotAwaitOnCheckingIncomingCommitments,
         commitmentCheckpointInterval,
         commitmentMismatchDebugging,
+        commitmentProcessorNrAcsChangesBehindToTriggerCatchUp,
       )
       // We trigger the processing of the buffered commitments, but we do not wait for it to complete here,
       // because, if processing buffered required topology updates that go through the same queue, we'd create a deadlock.

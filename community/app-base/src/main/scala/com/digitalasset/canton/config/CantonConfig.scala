@@ -494,6 +494,8 @@ final case class CantonConfig(
         disableOptionalTopologyChecks = participantConfig.topology.disableOptionalTopologyChecks,
         commitmentCheckpointInterval = participantParameters.commitmentCheckpointInterval,
         commitmentMismatchDebugging = participantParameters.commitmentMismatchDebugging,
+        commitmentProcessorNrAcsChangesBehindToTriggerCatchUp =
+          participantParameters.commitmentProcessorNrAcsChangesBehindToTriggerCatchUp,
       )
     }
 

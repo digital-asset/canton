@@ -6,7 +6,7 @@ package com.digitalasset.canton.topology.client
 import cats.data.EitherT
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.{ProcessingTimeout, TopologyConfig}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{
@@ -121,6 +121,7 @@ class StoreBasedSynchronizerTopologyClient(
     val staticSynchronizerParameters: StaticSynchronizerParameters,
     store: TopologyStore[TopologyStoreId.SynchronizerStore],
     packageDependenciesResolver: PackageDependencyResolver,
+    topologyConfig: TopologyConfig,
     override val timeouts: ProcessingTimeout,
     override protected val futureSupervisor: FutureSupervisor,
     val loggerFactory: NamedLoggerFactory,
@@ -253,9 +254,20 @@ class StoreBasedSynchronizerTopologyClient(
 
     synchronizerTimeTracker.get match {
       case Some(timeTracker) =>
-        timeTracker.awaitTick(effectiveTimestamp.value) match {
-          case Some(future) =>
-            future.foreach { _ =>
+        if (topologyConfig.useTimeProofsToObserveEffectiveTime)
+          timeTracker.awaitTick(effectiveTimestamp.value) match {
+            case Some(future) =>
+              future.foreach { _ =>
+                updateHead(
+                  sequencedTimestamp,
+                  effectiveTimestamp,
+                  ApproximateTime(effectiveTimestamp.value),
+                  potentialTopologyChange = true,
+                )
+                logIfNoPendingTopologyChanges()
+              }
+            case None =>
+              // the effective timestamp has already been witnessed
               updateHead(
                 sequencedTimestamp,
                 effectiveTimestamp,
@@ -263,17 +275,7 @@ class StoreBasedSynchronizerTopologyClient(
                 potentialTopologyChange = true,
               )
               logIfNoPendingTopologyChanges()
-            }
-          case None =>
-            // the effective timestamp has already been witnessed
-            updateHead(
-              sequencedTimestamp,
-              effectiveTimestamp,
-              ApproximateTime(effectiveTimestamp.value),
-              potentialTopologyChange = true,
-            )
-            logIfNoPendingTopologyChanges()
-        }
+          }
       case None =>
         logger.warn("Not advancing the time using the time tracker as it's unavailable")
     }

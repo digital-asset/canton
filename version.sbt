@@ -1,1 +1,1 @@
-ThisBuild / version := sys.env.getOrElse("RELEASE_SUFFIX", "3.4.4-SNAPSHOT")
+ThisBuild / version := sys.env.getOrElse("RELEASE_SUFFIX", "3.4.8-SNAPSHOT")

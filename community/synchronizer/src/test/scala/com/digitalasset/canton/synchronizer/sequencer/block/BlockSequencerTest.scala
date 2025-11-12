@@ -11,6 +11,7 @@ import com.digitalasset.canton.config.{
   CachingConfigs,
   DefaultProcessingTimeouts,
   ProcessingTimeout,
+  TopologyConfig,
 }
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
@@ -121,6 +122,7 @@ class BlockSequencerTest
       defaultStaticSynchronizerParameters,
       topologyStore,
       StoreBasedSynchronizerTopologyClient.NoPackageDependencies,
+      topologyConfig = TopologyConfig(),
       DefaultProcessingTimeouts.testing,
       FutureSupervisor.Noop,
       loggerFactory,
