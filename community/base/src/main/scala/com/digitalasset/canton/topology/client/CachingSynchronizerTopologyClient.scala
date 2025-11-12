@@ -7,7 +7,12 @@ import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.caching.ScaffeineCache.TracedAsyncLoadingCache
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, ProcessingTimeout}
+import com.digitalasset.canton.config.{
+  BatchingConfig,
+  CachingConfigs,
+  ProcessingTimeout,
+  TopologyConfig,
+}
 import com.digitalasset.canton.crypto.SigningKeysWithThreshold
 import com.digitalasset.canton.data.{
   CantonTimestamp,
@@ -421,6 +426,7 @@ object CachingSynchronizerTopologyClient {
       packageDependencyResolver: PackageDependencyResolver,
       cachingConfigs: CachingConfigs,
       batchingConfig: BatchingConfig,
+      topologyConfig: TopologyConfig,
       timeouts: ProcessingTimeout,
       futureSupervisor: FutureSupervisor,
       loggerFactory: NamedLoggerFactory,
@@ -437,6 +443,7 @@ object CachingSynchronizerTopologyClient {
         staticSynchronizerParameters,
         store,
         packageDependencyResolver,
+        topologyConfig,
         timeouts,
         futureSupervisor,
         loggerFactory,

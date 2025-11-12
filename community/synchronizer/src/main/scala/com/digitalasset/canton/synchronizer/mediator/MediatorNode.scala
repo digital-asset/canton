@@ -608,6 +608,7 @@ class MediatorNodeBootstrap(
               synchronizerPredecessor = None,
               crypto.pureCrypto,
               arguments.parameterConfig,
+              arguments.config.topology,
               arguments.clock,
               staticSynchronizerParameters,
               arguments.futureSupervisor,

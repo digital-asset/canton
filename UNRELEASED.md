@@ -64,6 +64,9 @@ Impacted commands:
 - `participant.parties.find_party_max_deactivation_offset`
 - `participant.parties.find_highest_offset_by_timestamp`
 
+### Removal of automatic recomputation of contract ids upon ACS import
+The ability to recompute contract ids upon ACS import has been removed.
+
 ## Compatibility
 
 The following Canton protocol and Ethereum sequencer contract versions are supported:
