@@ -131,7 +131,7 @@ class JsonV2Tests
       val darPath = JarResourceUtils
         .resourceFile(
           TestModels.daml_lf_encoder_test_dar(
-            LanguageVersion.stableRange.max.pretty
+            LanguageVersion.stableLfVersionsRange.max.pretty
           )
         )
         .toPath
@@ -693,7 +693,7 @@ class JsonV2Tests
         )
 
         def generateHex(length: Int): String =
-          RandomStringUtils.random(length, "0123456789abcdef").toLowerCase
+          RandomStringUtils.insecure.next(length, "0123456789abcdef").toLowerCase
 
         val randomTraceId = generateHex(32)
 

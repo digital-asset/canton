@@ -27,7 +27,7 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory}
-import com.digitalasset.canton.participant.CommunityParticipantNodeBootstrapFactory
+import com.digitalasset.canton.participant.ParticipantNodeBootstrapFactoryImpl
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeBootstrapFactoryImpl
 import com.digitalasset.canton.synchronizer.sequencer.SequencerNodeBootstrapFactoryImpl
 import com.digitalasset.canton.version.{ProtocolVersionCompatibility, ReleaseVersion}
@@ -320,7 +320,7 @@ class NegativeRemoteDumpIntegrationTest
         config,
         CommunityCantonEdition,
         testingConfigInternal,
-        CommunityParticipantNodeBootstrapFactory,
+        ParticipantNodeBootstrapFactoryImpl,
         SequencerNodeBootstrapFactoryImpl,
         MediatorNodeBootstrapFactoryImpl,
         loggerFactory,

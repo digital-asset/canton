@@ -23,6 +23,7 @@ import sbtide.Keys.ideExcludedDirectories
 import sbtprotoc.ProtocPlugin.autoImport.{AsProtocPlugin, PB}
 import scalafix.sbt.ScalafixPlugin
 import scalafix.sbt.ScalafixPlugin.autoImport.scalafix
+import Scala3Migration.onScalaVersion
 import scoverage.ScoverageKeys.*
 import wartremover.WartRemover
 import wartremover.WartRemover.autoImport.*
@@ -41,7 +42,7 @@ object BuildCommon {
       addCommandAlias("checkDamlProjectVersions", alsoTest("damlCheckProjectVersions")) ++
         addCommandAlias(
           "updateDamlProjectVersions",
-          alsoTest("damlUpdateProjectVersions") + ";damlUpdateDependencies",
+          alsoTest("damlUpdateProjectVersions") + ";updateJavaDamlDependencies",
         ) ++
         addCommandAlias("checkLicenseHeaders", alsoTest("headerCheck")) ++
         addCommandAlias("createLicenseHeaders", alsoTest("headerCreate")) ++
@@ -71,6 +72,7 @@ object BuildCommon {
       Seq(
         organization := "com.digitalasset.canton",
         scalaVersion := scala_version,
+        crossScalaVersions := Seq(scala_version, scala3_version),
         resolvers := resolvers.value ++ Option.when(Dependencies.use_custom_daml_version)(
           sbt.librarymanagement.Resolver.mavenLocal // conditionally enable local maven repo for custom Daml jars
         ),
@@ -446,6 +448,8 @@ object BuildCommon {
     case PathList("LICENSE") => MergeStrategy.last
     case PathList("buf.yaml") => MergeStrategy.discard
     case PathList("scala", "tools", "nsc", "doc", "html", _*) => MergeStrategy.discard
+    case PathList("scala", "reflect", "Selectable.class" | "Selectable$.class") =>
+      MergeStrategy.last
     case PathList("META-INF", "io.netty.versions.properties") => MergeStrategy.first
     case "reflect.properties" => MergeStrategy.first
     case PathList("org", "checkerframework", _ @_*) => MergeStrategy.first
@@ -467,10 +471,15 @@ object BuildCommon {
           "Log4j2Plugins.dat",
         ) =>
       MergeStrategy.first
+    // TODO(#10617) remove when no longer needed
+    case (PathList("org", "apache", "pekko", "stream", "scaladsl", broadcasthub, _*))
+        if broadcasthub.startsWith("BroadcastHub") =>
+      MergeStrategy.first
     case "META-INF/versions/9/module-info.class" => MergeStrategy.discard
     case path if path.contains("module-info.class") => MergeStrategy.discard
     case PathList("org", "jline", _ @_*) => MergeStrategy.first
-    case "META-INF/FastDoubleParser-LICENSE" => MergeStrategy.first
+    case PathList("META-INF", "FastDoubleParser-LICENSE") => MergeStrategy.first
+    case PathList("META-INF", "FastDoubleParser-NOTICE") => MergeStrategy.first
     // complains about okio.kotlin_module clash
     case PathList("META-INF", "okio.kotlin_module") => MergeStrategy.last
     case x => oldStrategy(x)
@@ -485,7 +494,7 @@ object BuildCommon {
     scalacOptions += "-Wconf:src=src_managed/.*:silent", // Ignore warnings in generated code
   )
 
-  lazy val sharedCommunitySettings = sharedSettings ++ JvmRulesPlugin.damlRepoHeaderSettings
+  lazy val sharedCommunitySettings = sharedSettings ++ HouseRules.damlRepoHeaderSettings
 
   lazy val cantonWarts = {
     val prefix = "com.digitalasset.canton."
@@ -539,7 +548,7 @@ object BuildCommon {
 
   lazy val sharedCantonCommunitySettings = Def.settings(
     sharedCantonSettings,
-    JvmRulesPlugin.damlRepoHeaderSettings,
+    HouseRules.damlRepoHeaderSettings,
     Compile / bufLintCheck := (Compile / bufLintCheck)
       .dependsOn(DamlProjects.`google-common-protos-scala` / PB.unpackDependencies)
       .value,
@@ -606,8 +615,10 @@ object BuildCommon {
       `community-participant`,
       `community-testing`,
       `community-integration-testing`,
-      `daml-script-tests`,
       microbench,
+      `daml-script-tests`,
+      `performance-driver`,
+      performance,
       `sequencer-driver-api`,
       `sequencer-driver-api-conformance-tests`,
       `sequencer-driver-lib`,
@@ -616,6 +627,7 @@ object BuildCommon {
       `slick-fork`,
       `wartremover-extension`,
       `wartremover-annotations`,
+      `pekko-fork`,
       `magnolify-addon`,
       `scalatest-addon`,
       `demo`,
@@ -635,14 +647,13 @@ object BuildCommon {
       `ledger-json-client`,
       `ledger-api-tools`,
       `ledger-api-string-interning-benchmark`,
-      `transcode`,
       `conformance-testing`,
       `ledger-api-bench-tool`,
       `ledger-test-tool-suites-2-1`,
       `ledger-test-tool-suites-2-dev`,
       `ledger-test-tool-2-1`,
       `ledger-test-tool-2-dev`,
-      `enterprise-upgrading-integration-tests`,
+      `upgrading-integration-tests`,
     )
 
     // Project for utilities that are also used outside of the Canton repo
@@ -670,7 +681,7 @@ object BuildCommon {
           shapeless,
           slick,
         ),
-        JvmRulesPlugin.damlRepoHeaderSettings,
+        HouseRules.damlRepoHeaderSettings,
       )
 
     lazy val `daml-grpc-utils` = project
@@ -838,7 +849,7 @@ object BuildCommon {
         addFilesToHeaderCheck("*.sh", "../pack", Compile),
         addFilesToHeaderCheck("*.daml", "../test/daml", Compile),
         addFilesToHeaderCheck("*.sh", ".", Test),
-        JvmRulesPlugin.damlRepoHeaderSettings,
+        HouseRules.damlRepoHeaderSettings,
       )
 
     lazy val `community-app-base` = project
@@ -946,6 +957,7 @@ object BuildCommon {
       .enablePlugins(DamlPlugin)
       .dependsOn(
         blake2b,
+        `pekko-fork` % "compile->compile;test->test",
         `community-base`,
         `wartremover-annotations`,
         `community-testing` % "test->test",
@@ -1137,8 +1149,8 @@ object BuildCommon {
         // This library contains a lot of testing helpers that previously existing in testing scope
         // As such, in order to minimize the diff when creating this library, the same rules that
         // applied to `test` scope are used here. This can be reviewed in the future.
-        scalacOptions --= JvmRulesPlugin.scalacOptionsToDisableForTests,
-        Compile / compile / wartremoverErrors := JvmRulesPlugin.wartremoverErrorsForTestScope,
+        scalacOptions --= HouseRules.scalacOptionsToDisableForTests,
+        Compile / compile / wartremoverErrors := HouseRules.wartremoverErrorsForTestScope,
       )
 
     lazy val `community-integration-testing` = project
@@ -1167,8 +1179,8 @@ object BuildCommon {
         // This library contains a lot of testing helpers that previously existing in testing scope
         // As such, in order to minimize the diff when creating this library, the same rules that
         // applied to `test` scope are used here. This can be reviewed in the future.
-        scalacOptions --= JvmRulesPlugin.scalacOptionsToDisableForTests,
-        Compile / compile / wartremoverErrors := JvmRulesPlugin.wartremoverErrorsForTestScope,
+        scalacOptions --= HouseRules.scalacOptionsToDisableForTests,
+        Compile / compile / wartremoverErrors := HouseRules.wartremoverErrorsForTestScope,
 
         // TODO(i12761): package individual libraries instead of uber JARs for external consumption
         UberLibrary.assemblySettings("community-integration-testing-lib"),
@@ -1233,6 +1245,41 @@ object BuildCommon {
         ),
         addProtobufFilesToHeaderCheck(Compile),
       )
+
+    lazy val `performance-driver` = project
+      .in(file("community/performance-driver"))
+      .dependsOn(`community-app` % "compile->compile;test->test")
+      .enablePlugins(DamlPlugin)
+      .settings(
+        sharedCantonCommunitySettings,
+        libraryDependencies ++= Seq(
+          logback_classic % Runtime,
+          logback_core % Runtime,
+          scala_logging,
+          scalatest % Test,
+          scalacheck % Test,
+          scalatestScalacheck % Test,
+          cats_scalacheck % Test,
+          mockito_scala % Test,
+          scalatestMockito % Test,
+          cats,
+          cats_law % Test,
+        ),
+        Compile / damlEnableJavaCodegen := true,
+        Compile / damlBuildOrder := Seq("main/daml/main", "main/daml/script"),
+        Compile / damlCodeGeneration := Seq(
+          (
+            (Compile / sourceDirectory).value / "daml",
+            (Compile / damlDarOutput).value / "PerformanceTest.dar",
+            "com.digitalasset.canton.performance.model",
+          )
+        ),
+      )
+
+    lazy val performance = project
+      .in(file("performance"))
+      .dependsOn(`performance-driver`, `community-app` % "compile->compile;test->test")
+      .settings(sharedCantonCommunitySettings)
 
     lazy val `kms-driver-api` = project
       .in(file("community/kms-driver-api"))
@@ -1408,20 +1455,44 @@ object BuildCommon {
       .dependsOn(`wartremover-annotations`)
       .settings(
         sharedSettings,
-        libraryDependencies ++= Seq(
-          cats,
-          grpc_stub,
-          mockito_scala % Test,
-          scalapb_runtime_grpc,
-          scalatestMockito % Test,
-          scalatest % Test,
-          wartremover_dep,
-        ),
+        Test / scalacOptions ++= onScalaVersion(
+          scala213 = Seq("-Wconf:msg=synchronized not selected from this instance:silent"),
+          scala3 = Seq("-Wconf:msg=A pure expression does nothing in statement position:silent"),
+        ).value,
+        libraryDependencies ++= onScalaVersion(
+          shared = Seq(
+            cats,
+            grpc_stub,
+            scalapb_runtime_grpc,
+            scalatestMockito % Test,
+            scalatest % Test,
+            wartremover_dep,
+          ),
+          scala213 = Seq(mockito_scala % Test),
+          scala3 = Seq(smockito),
+        ).value,
       )
 
     lazy val `wartremover-annotations` = project
       .in(file("community/lib/wartremover-annotations"))
       .settings(sharedSettings)
+
+    // TODO(#10617) remove when no longer needed
+    lazy val `pekko-fork` = project
+      .in(file("community/lib/pekko"))
+      .disablePlugins(BufPlugin, ScalafixPlugin, ScalafmtPlugin, JavaFormatterPlugin, WartRemover)
+      .settings(
+        sharedSettings,
+        libraryDependencies ++= Seq(
+          pekko_stream,
+          pekko_stream_testkit % Test,
+          pekko_slf4j,
+          scalatest % Test,
+        ),
+        // Exclude to apply our license header to any Scala files
+        headerSources / excludeFilter := "*.scala",
+        coverageEnabled := false,
+      )
 
     lazy val `magnolify-addon` = project
       .in(file("community/lib/magnolify"))
@@ -1756,12 +1827,12 @@ object BuildCommon {
         .in(file("community/ledger/ledger-json-api"))
         .dependsOn(
           `ledger-api-core` % "compile->compile;test->test",
-          `transcode`,
           `ledger-common` % "test->test",
           `community-testing` % "test->test",
         )
         .enablePlugins(DamlPlugin)
         .settings(
+          scalacOptions += "-Ytasty-reader",
           sharedCommunitySettings,
           Test / PB.targets := Seq(
             // build java codegen too
@@ -1781,6 +1852,7 @@ object BuildCommon {
             daml_libs_scala_scalatest_utils % Test,
             daml_observability_pekko_http_metrics,
             daml_timer_utils,
+            fastparse % Runtime, // transcode dependency
             icu4j_version,
             pekko_http,
             pekko_stream_testkit % Test,
@@ -1794,6 +1866,9 @@ object BuildCommon {
             tapir_json_circe,
             tapir_openapi_docs,
             tapir_pekko_http_server,
+            transcode_daml_lf,
+            transcode_codec_json,
+            transcode_codec_proto_scala,
             ujson_circe,
             upickle,
           ),
@@ -1915,27 +1990,6 @@ object BuildCommon {
         Test / fork := false,
       )
 
-    lazy val `transcode` =
-      project
-        .in(file("community/ledger/transcode/"))
-        .settings(
-          sharedCommunitySettings,
-          scalacOptions --= DamlProjects.removeCompileFlagsForDaml
-            // needed for foo.bar.{this as that} imports
-            .filterNot(_ == "-Xsource:3"),
-          libraryDependencies ++= Seq(
-            daml_lf_language,
-            "com.lihaoyi" %% "ujson" % "4.0.2",
-            scalatest % Test,
-            daml_lf_archive_reader % Test,
-          ),
-        )
-        .dependsOn(
-          DamlProjects.`ledger-api`,
-          `community-testing` % Test,
-          `community-common` % Test,
-        )
-
     lazy val `ledger-api-bench-tool` = project
       .in(file("community/ledger-api-bench-tool"))
       .dependsOn(
@@ -1956,7 +2010,7 @@ object BuildCommon {
         ),
         sharedSettings,
         coverageEnabled := false,
-        JvmRulesPlugin.damlRepoHeaderSettings,
+        HouseRules.damlRepoHeaderSettings,
         Compile / damlDarLfVersion := "2.dev",
         Compile / damlEnableJavaCodegen := true,
         Compile / damlCodeGeneration := Seq(
@@ -2003,7 +2057,7 @@ object BuildCommon {
           Def.settings(additionalSetting.toSeq*),
           Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
           Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
-          scalacOptions --= JvmRulesPlugin.scalacOptionsToDisableForTests,
+          scalacOptions --= HouseRules.scalacOptionsToDisableForTests,
           // 2.1 tests will fail to compile with a 2.1 dar, so we exclude them from the test suite
           if (lfVersion != "2.dev")
             Seq(
@@ -2039,6 +2093,8 @@ object BuildCommon {
           sharedSettings,
           Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
           Compile / unmanagedResourceDirectories += baseDirectory.value / ".." / "src" / "main" / "resources",
+          // See #23185: Prevent potential OOM by setting info log level when conformance tests trigger assembly
+          assembly / logLevel := Level.Info,
           assembly / mainClass := Some("com.daml.ledger.api.testtool.Main"),
           assembly / assemblyJarName := s"ledger-api-test-tool-$lfVersion-${version.value}.jar",
           assembly / assemblyMergeStrategy := {
@@ -2079,11 +2135,10 @@ object BuildCommon {
       )
 
     // TODO(#25385): Consider extracting this integration test setup into its own sbt file due to its size
-    lazy val `enterprise-upgrading-integration-tests` = project
+    lazy val `upgrading-integration-tests` = project
       .in(file("community/upgrading-integration-tests"))
       .dependsOn(
-        `community-app` % "test->test",
-        `ledger-api-core` % "test->test",
+        `community-app` % "test->test"
       )
       .enablePlugins(DamlPlugin)
       .settings(

@@ -33,6 +33,9 @@ Template for a bigger topic
 
 ## Bugfixes
 
+- Fixed a bug preventing automatic synchronization of protocol feature flags.
+Automatic synchronization can be disabled by setting `parameters.auto-sync-protocol-feature-flags = false` in the participant's configuration object.
+
 ### (YY-nnn, Severity): Title
 
 #### Issue Description
@@ -69,7 +72,7 @@ The ability to recompute contract ids upon ACS import has been removed.
 
 ## Compatibility
 
-The following Canton protocol and Ethereum sequencer contract versions are supported:
+The following Canton protocol versions are supported:
 
 | Dependency                 | Version                    |
 |----------------------------|----------------------------|

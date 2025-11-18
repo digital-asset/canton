@@ -20,6 +20,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.GroupAddressResolver
 import com.digitalasset.canton.sequencing.client.SequencedEventValidator
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType.TopologyTransaction
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.{Acknowledgment, Send}
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
@@ -110,6 +111,13 @@ final class BlockChunkProcessor(
 
     for {
       validatedSequencedSubmissions <- validatedSequencedSubmissionsF
+      pendingTopologyTimestamps =
+        state.pendingTopologyTimestamps ++ validatedSequencedSubmissions.collect {
+          case submission
+              if submission.submissionRequest.content.requestType == TopologyTransaction =>
+            submission.sequencingTimestamp
+        }
+
       acksValidationResult <- acksValidationResultF
       (acksByMember, invalidAcks) = acksValidationResult
 
@@ -156,6 +164,7 @@ final class BlockChunkProcessor(
           lastChunkTsOfSuccessfulEvents,
           lastSequencerEventTimestamp.orElse(state.latestSequencerEventTimestamp),
           finalInFlightAggregationsWithAggregationExpiry,
+          pendingTopologyTimestamps,
         )
     } yield (newState, chunkUpdate)
   }
@@ -221,6 +230,7 @@ final class BlockChunkProcessor(
       state: BlockUpdateGeneratorImpl.State,
       height: Long,
       tickAtLeastAt: CantonTimestamp,
+      groupRecipient: Either[AllMembersOfSynchronizer.type, SequencersOfSynchronizer.type],
   )(implicit ec: ExecutionContext, tc: TraceContext): FutureUnlessShutdown[(State, ChunkUpdate)] = {
     // The block orderer requests a topology tick to advance the topology processor's time knowledge
     //  whenever it assesses that it may need to retrieve an up-to-date topology snapshot at a certain
@@ -264,9 +274,9 @@ final class BlockChunkProcessor(
       _ = logger.debug(
         s"Obtained topology snapshot for topology tick at $tickSequencingTimestamp after processing block $height"
       )
-      sequencerRecipients <-
+      recipients <-
         GroupAddressResolver.resolveGroupsToMembers(
-          Set(SequencersOfSynchronizer),
+          Set(groupRecipient.fold(_ => AllMembersOfSynchronizer, _ => SequencersOfSynchronizer)),
           snapshot.ipsSnapshot,
         )
     } yield {
@@ -293,7 +303,7 @@ final class BlockChunkProcessor(
             protocolVersion = protocolVersion,
           ),
           sequencingTime = tickSequencingTimestamp,
-          deliverToMembers = sequencerRecipients(SequencersOfSynchronizer),
+          deliverToMembers = recipients(groupRecipient.merge),
           batch = Batch.empty(protocolVersion),
           submissionTraceContext = TraceContext.createNew("emit_tick"),
           trafficReceiptO = None,

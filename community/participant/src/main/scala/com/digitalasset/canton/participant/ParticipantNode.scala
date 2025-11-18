@@ -48,6 +48,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   InFlightSubmissionTracker,
 }
 import com.digitalasset.canton.participant.pruning.{AcsCommitmentProcessor, PruningProcessor}
+import com.digitalasset.canton.participant.replica.ParticipantReplicaManager
 import com.digitalasset.canton.participant.scheduler.ParticipantPruningScheduler
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.Active
@@ -96,8 +97,8 @@ class ParticipantNodeBootstrap(
       ParticipantNodeParameters,
       ParticipantMetrics,
     ],
+    replicaManager: ParticipantReplicaManager,
     engine: Engine,
-    cantonSyncServiceFactory: CantonSyncService.Factory[CantonSyncService],
     resourceManagementServiceFactory: Eval[ParticipantSettingsStore] => ResourceManagementService,
     replicationServiceFactory: Storage => ServerServiceDefinition,
     ledgerApiServerBootstrapUtils: LedgerApiServerBootstrapUtils,
@@ -687,7 +688,7 @@ class ParticipantNodeBootstrap(
             .map(_.topologyManager)
 
         // Sync Service
-        sync = cantonSyncServiceFactory.create(
+        sync = CantonSyncService.create(
           participantId,
           synchronizerRegistry,
           synchronizerConnectionConfigStore,
@@ -695,6 +696,7 @@ class ParticipantNodeBootstrap(
           persistentState,
           ephemeralState,
           syncPersistentStateManager,
+          replicaManager,
           packageService,
           new PartyOps(activeTopologyManagerGetter, loggerFactory),
           topologyDispatcher,
@@ -708,9 +710,7 @@ class ParticipantNodeBootstrap(
           resourceManagementService,
           parameters,
           pruningProcessor,
-          schedulers,
           arguments.metrics,
-          exitOnFatalFailures = arguments.parameterConfig.exitOnFatalFailures,
           sequencerInfoLoader,
           arguments.futureSupervisor,
           loggerFactory,
@@ -724,6 +724,9 @@ class ParticipantNodeBootstrap(
           connectedSynchronizerHealth.set(sync.connectedSynchronizerHealth)
           connectedSynchronizerEphemeralHealth.set(sync.ephemeralHealth)
           connectedSynchronizerSequencerClientHealth.set(sync.sequencerClientHealth)
+          connectedSynchronizerSequencerConnectionPoolHealthRef.set(
+            sync.sequencerConnectionPoolHealth
+          )
           connectedSynchronizerAcsCommitmentProcessorHealth.set(sync.acsCommitmentProcessorHealth)
         }
 
@@ -898,6 +901,13 @@ class ParticipantNodeBootstrap(
   override protected def mkNodeHealthService(
       storage: Storage
   ): (DependenciesHealthService, LivenessHealthService) = {
+    val constantSoftDependencies = Seq(
+      connectedSynchronizerHealth,
+      connectedSynchronizerEphemeralHealth,
+      connectedSynchronizerSequencerClientHealth,
+      connectedSynchronizerAcsCommitmentProcessorHealth,
+    )
+
     val readiness = DependenciesHealthService(
       "participant",
       logger,
@@ -905,11 +915,9 @@ class ParticipantNodeBootstrap(
       criticalDependencies = storage +: crypto.toList,
       // The sync service won't be reporting Ok until the node is initialized, but that shouldn't prevent traffic from
       // reaching the node
-      Seq(
-        connectedSynchronizerHealth,
-        connectedSynchronizerEphemeralHealth,
-        connectedSynchronizerSequencerClientHealth,
-        connectedSynchronizerAcsCommitmentProcessorHealth,
+      softDependencies = Eval.always(
+        constantSoftDependencies ++
+          connectedSynchronizerSequencerConnectionPoolHealthRef.get.apply()
       ),
     )
     val liveness = LivenessHealthService.alwaysAlive(logger, timeouts)
@@ -950,6 +958,9 @@ class ParticipantNodeBootstrap(
       SequencerClient.healthName,
       timeouts,
     )
+
+  private val connectedSynchronizerSequencerConnectionPoolHealthRef =
+    new AtomicReference[() => Seq[HealthQuasiComponent]](() => Seq.empty)
 
   private lazy val connectedSynchronizerAcsCommitmentProcessorHealth: MutableHealthComponent =
     MutableHealthComponent(

@@ -10,7 +10,13 @@ import com.digitalasset.canton.data.{CantonTimestamp, LogicalUpgradeTime}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.sequencing.protocol.{
+  AllMembersOfSynchronizer,
+  GroupRecipient,
+  SequencerDeliverError,
+  SequencersOfSynchronizer,
+}
+import com.digitalasset.canton.synchronizer.block.BlockEvents.TickTopology
 import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.*
 import com.digitalasset.canton.synchronizer.block.data.{BlockEphemeralState, BlockInfo}
 import com.digitalasset.canton.synchronizer.block.{BlockEvents, LedgerBlockEvent, RawLedgerBlock}
@@ -86,8 +92,12 @@ object BlockUpdateGenerator {
       chunkIndex: Int,
       events: NonEmpty[Seq[Traced[LedgerBlockEvent]]],
   ) extends BlockChunk
-  final case class TopologyTickChunk(blockHeight: Long, tickAtLeastAt: CantonTimestamp)
-      extends BlockChunk
+  final case class TopologyTickChunk(
+      blockHeight: Long,
+      tickAtLeastAt: CantonTimestamp,
+      groupRecipient: Either[AllMembersOfSynchronizer.type, SequencersOfSynchronizer.type],
+  ) extends BlockChunk
+  final case class MaybeTopologyTickChunk(blockHeight: Long) extends BlockChunk
   final case class EndOfBlock(blockHeight: Long) extends BlockChunk
 }
 
@@ -98,7 +108,7 @@ class BlockUpdateGeneratorImpl(
     rateLimitManager: SequencerRateLimitManager,
     orderingTimeFixMode: OrderingTimeFixMode,
     sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
-    maxBytesToDecompress: MaxBytesToDecompress,
+    useTimeProofsToObserveEffectiveTime: Boolean,
     metrics: SequencerMetrics,
     protected val loggerFactory: NamedLoggerFactory,
     memberValidator: SequencerMemberValidator,
@@ -108,6 +118,8 @@ class BlockUpdateGeneratorImpl(
     with Spanning {
   import BlockUpdateGenerator.*
   import BlockUpdateGeneratorImpl.*
+
+  private val epsilon = synchronizerSyncCryptoApi.staticSynchronizerParameters.topologyChangeDelay
 
   private val blockChunkProcessor =
     new BlockChunkProcessor(
@@ -137,6 +149,8 @@ class BlockUpdateGeneratorImpl(
       val ledgerBlockEvents = block.events.mapFilter { tracedEvent =>
         withSpan("BlockUpdateGenerator.extractBlockEvents") { implicit traceContext => _ =>
           logger.trace("Extracting event from raw block")
+          // TODO(i29003): Defer decompression to addSnapshotsAndValidateSubmissions
+          val maxBytesToDecompress = MaxBytesToDecompress.HardcodedDefault
           LedgerBlockEvent.fromRawBlockEvent(protocolVersion, maxBytesToDecompress)(
             tracedEvent.value
           ) match {
@@ -165,9 +179,15 @@ class BlockUpdateGeneratorImpl(
       Traced(
         BlockEvents(
           block.blockHeight,
+          CantonTimestamp.assertFromLong(block.baseSequencingTimeMicrosFromEpoch),
           ledgerBlockEvents,
-          tickTopologyAtLeastAt =
-            block.tickTopologyAtMicrosFromEpoch.map(CantonTimestamp.assertFromLong),
+          tickTopology = block.tickTopologyAtMicrosFromEpoch.map { case (micros, broadcast) =>
+            TickTopology(
+              CantonTimestamp.assertFromLong(micros),
+              (if (broadcast) Left(AllMembersOfSynchronizer)
+               else Right(SequencersOfSynchronizer)),
+            )
+          },
         )
       )(blockTraceContext)
     }(tracedBlock.traceContext, tracer)
@@ -179,7 +199,11 @@ class BlockUpdateGeneratorImpl(
     metrics.block.height.updateValue(blockHeight)
 
     val tickChunk =
-      blockEvents.tickTopologyAtLeastAt.map(TopologyTickChunk(blockHeight, _))
+      if (useTimeProofsToObserveEffectiveTime)
+        blockEvents.tickTopology.map { case TickTopology(micros, recipient) =>
+          TopologyTickChunk(blockHeight, micros, recipient)
+        }
+      else Some(MaybeTopologyTickChunk(blockHeight))
 
     // We must start a new chunk whenever the chunk processing advances lastSequencerEventTimestamp,
     //  otherwise the logic for retrieving a topology snapshot or traffic state could deadlock.
@@ -222,8 +246,25 @@ class BlockUpdateGeneratorImpl(
         FutureUnlessShutdown.pure(newState -> update)
       case NextChunk(height, index, chunksEvents) =>
         blockChunkProcessor.processDataChunk(state, height, index, chunksEvents)
-      case TopologyTickChunk(blockHeight, tickAtLeastAt) =>
-        blockChunkProcessor.emitTick(state, blockHeight, tickAtLeastAt)
+      case TopologyTickChunk(blockHeight, tickAtLeastAt, groupRecipient) =>
+        blockChunkProcessor.emitTick(state, blockHeight, tickAtLeastAt, groupRecipient)
+      case MaybeTopologyTickChunk(blockHeight) =>
+        val (activeTopologyTimestamps, pendingTopologyTimestamps) = state.pendingTopologyTimestamps
+          .partition(_ + epsilon < state.lastBlockTs.immediateSuccessor)
+        val newState = state.copy(pendingTopologyTimestamps = pendingTopologyTimestamps)
+
+        activeTopologyTimestamps.maxOption match {
+          // if there is a pending potential topology transaction whose sequencing timestamp is after the activation time of the
+          // most recent newly active topology transaction in this block, it acts as a tick too, so no need for a dedicated tick event
+          case Some(timestamp) if !pendingTopologyTimestamps.exists(_ > timestamp + epsilon) =>
+            blockChunkProcessor.emitTick(
+              newState,
+              blockHeight,
+              timestamp,
+              Left(AllMembersOfSynchronizer),
+            )
+          case _ => FutureUnlessShutdown.pure((newState, ChunkUpdate.noop))
+        }
     }
 }
 
@@ -234,6 +275,8 @@ object BlockUpdateGeneratorImpl {
       lastChunkTs: CantonTimestamp,
       latestSequencerEventTimestamp: Option[CantonTimestamp],
       inFlightAggregations: InFlightAggregations,
+      // The sequencing times of potential topology transactions that are not yet effective
+      pendingTopologyTimestamps: Vector[CantonTimestamp] = Vector.empty,
   )
 
   private[update] final case class SequencedValidatedSubmission(

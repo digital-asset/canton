@@ -3,10 +3,11 @@ import sbt.*
 import wartremover.Wart
 import wartremover.WartRemover.autoImport.*
 import wartremover.contrib.ContribWart
+import Scala3Migration.onScalaVersion
 
 /** Settings for all JVM projects in this build. Contains compiler flags, settings for tests, etc.
   */
-object JvmRulesPlugin extends AutoPlugin {
+object HouseRules extends AutoPlugin {
   private val enableUnusedSymbolsChecks = true // Can be turned to false during development
 
   override def trigger = allRequirements
@@ -77,37 +78,46 @@ object JvmRulesPlugin extends AutoPlugin {
   def unlessWartsAreDisabledWithSystemProperty[A](a: A, as: A*): Seq[A] =
     if (wartsDisabledWithSystemProperty) Seq.empty else a +: as
 
-  lazy val scalaOptionsForCompileScope = unlessWartsAreDisabledWithSystemProperty(
-    "-feature",
-    "-unchecked",
-    "-deprecation",
-    "-Xlint:_,-unused",
-    "-Xmacro-settings:materialize-derivations",
-    "-Xfatal-warnings",
-    "-Wconf:cat=unused-imports:info", // reports unused-imports without counting them as warnings, and without causing -Werror to fail.
-    "-Wnonunit-statement", // Warns about any interesting expression whose value is ignored because it is followed by another expression
-    "-Ywarn-numeric-widen",
-    "-Vimplicits",
-    "-Vtype-diffs",
-    "-Xsource:3-cross",
-  )
+  lazy val scalaOptionsForCompileScope: Def.Initialize[Seq[String]] =
+    onScalaVersion(
+      shared = unlessWartsAreDisabledWithSystemProperty(
+        "-feature",
+        "-unchecked",
+        "-deprecation",
+        "-Xmacro-settings:materialize-derivations",
+        "-Xfatal-warnings",
+        "-Wnonunit-statement", // Warns about any interesting expression whose value is ignored because it is followed by another expression
+      ),
+      scala213 = unlessWartsAreDisabledWithSystemProperty(
+        "-Xlint:_,-unused",
+        "-Wconf:cat=unused-imports:info", // reports unused-imports without counting them as warnings, and without causing -Werror to fail.
+        "-Ywarn-numeric-widen",
+        "-Vimplicits",
+        "-Vtype-diffs",
+        "-Xsource:3-cross",
+      ),
+      scala3 = Seq("-Ykind-projector"),
+    )
 
-  lazy val unusedSymbolsChecks: Seq[String] =
+  lazy val unusedSymbolsChecks: Def.Initialize[Seq[String]] =
     if (enableUnusedSymbolsChecks)
-      Seq(
-        "-Ywarn-dead-code",
-        "-Ywarn-value-discard", // Gives a warning for functions declared as returning Unit, but the body returns a value
-        "-Ywarn-unused:imports",
-        // Not enabled patvars
-        "-Ywarn-unused:privates",
-        "-Ywarn-unused:locals",
-        "-Ywarn-unused:params",
-        "-Ywarn-unused:nowarn",
+      onScalaVersion(
+        shared = Seq(
+          // Gives a warning for functions declared as returning Unit, but the body returns a value
+          "-Wvalue-discard",
+          "-Wunused:imports",
+          // Not enabled patvars
+          "-Wunused:privates",
+          "-Wunused:locals",
+          "-Wunused:params",
+          "-Wunused:nowarn",
+        ),
+        scala213 = Seq("-Wdead-code"),
       )
-    else Seq.empty
+    else Def.setting(Seq.empty)
 
   lazy val scalacOptionsToDisableForTests = Seq(
-    "-Ywarn-value-discard",
+    "-Wvalue-discard",
     "-Wnonunit-statement",
   ) // disable value discard and non-unit statement checks on tests
 
@@ -177,9 +187,13 @@ object JvmRulesPlugin extends AutoPlugin {
     Seq(
       javacOptions ++= Seq("-encoding", "UTF-8", "-Werror"),
       scalacOptions ++= Seq("-encoding", "UTF-8", "-language:postfixOps"),
-      scalacOptions ++= scalaOptionsForCompileScope ++ unusedSymbolsChecks,
+      scalacOptions ++= scalaOptionsForCompileScope.value ++ unusedSymbolsChecks.value,
       Test / scalacOptions --= scalacOptionsToDisableForTests,
-      addCompilerPlugin("org.typelevel" % "kind-projector" % "0.13.3" cross CrossVersion.full),
+      libraryDependencies ++= onScalaVersion(
+        scala213 = Seq(
+          compilerPlugin(("org.typelevel" %% "kind-projector" % "0.13.3").cross(CrossVersion.full))
+        )
+      ).value,
       Compile / compile / wartremoverErrors ++= wartremoverErrorsForCompileScope,
       Test / compile / wartremoverErrors := wartremoverErrorsForTestScope,
       // Disable wart checks on generated code
