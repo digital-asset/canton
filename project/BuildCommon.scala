@@ -467,10 +467,6 @@ object BuildCommon {
           "Log4j2Plugins.dat",
         ) =>
       MergeStrategy.first
-    // TODO(#10617) remove when no longer needed
-    case (PathList("org", "apache", "pekko", "stream", "scaladsl", broadcasthub, _*))
-        if broadcasthub.startsWith("BroadcastHub") =>
-      MergeStrategy.first
     case "META-INF/versions/9/module-info.class" => MergeStrategy.discard
     case path if path.contains("module-info.class") => MergeStrategy.discard
     case PathList("org", "jline", _ @_*) => MergeStrategy.first
@@ -620,7 +616,6 @@ object BuildCommon {
       `slick-fork`,
       `wartremover-extension`,
       `wartremover-annotations`,
-      `pekko-fork`,
       `magnolify-addon`,
       `scalatest-addon`,
       `demo`,
@@ -951,7 +946,6 @@ object BuildCommon {
       .enablePlugins(DamlPlugin)
       .dependsOn(
         blake2b,
-        `pekko-fork` % "compile->compile;test->test",
         `community-base`,
         `wartremover-annotations`,
         `community-testing` % "test->test",
@@ -1428,23 +1422,6 @@ object BuildCommon {
     lazy val `wartremover-annotations` = project
       .in(file("community/lib/wartremover-annotations"))
       .settings(sharedSettings)
-
-    // TODO(#10617) remove when no longer needed
-    lazy val `pekko-fork` = project
-      .in(file("community/lib/pekko"))
-      .disablePlugins(BufPlugin, ScalafixPlugin, ScalafmtPlugin, JavaFormatterPlugin, WartRemover)
-      .settings(
-        sharedSettings,
-        libraryDependencies ++= Seq(
-          pekko_stream,
-          pekko_stream_testkit % Test,
-          pekko_slf4j,
-          scalatest % Test,
-        ),
-        // Exclude to apply our license header to any Scala files
-        headerSources / excludeFilter := "*.scala",
-        coverageEnabled := false,
-      )
 
     lazy val `magnolify-addon` = project
       .in(file("community/lib/magnolify"))

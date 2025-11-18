@@ -22,16 +22,7 @@ object Dependencies {
   lazy val scala_version = "2.13.16"
   lazy val scala_version_short = "2.13"
 
-  // TODO(#10617) We have cloned pekko's BroadcastHub implementation in
-  //  The changes from the clone have been upstreamed in https://github.com/apache/pekko/pull/1841.
-  //  When updating pekko, check whether the update includes the above fix (probably only in 1.2.x)
-  //  If it is included, remove the clone. Otherwise, make sure to update the clone as well,
-  //  including the tests in community/lib/pekko/src/main/scala/pekko
   lazy val pekko_version = resolveDependency("org.apache.pekko", "pekko-actor").revision
-  assert(
-    pekko_version == "1.1.5",
-    s"check the clone community/lib/pekko/src/main/scala/pekko/stream/scaladsl/BroadcastHub.scala is up-to-date vs https://github.com/apache/pekko/blob/v$pekko_version/stream/src/main/scala/org/apache/pekko/stream/scaladsl/Hub.scala#L396",
-  )
   lazy val pekko_http_version = resolveDependency("org.apache.pekko", "pekko-http").revision
 
   lazy val ammonite_version = "3.0.1"
