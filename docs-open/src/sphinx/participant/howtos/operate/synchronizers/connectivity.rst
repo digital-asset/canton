@@ -44,7 +44,7 @@ To connect a Participant Node to a Sequencer by reference (local or :ref:`remote
 2. Set Optional Sequencer Connection Validation. This parameter determines how thoroughly the provided Sequencer connections
 are validated before being persisted.
 
-.. TODO(#25904): Add link to the refence doc of ``SequencerConnectionValidation``
+.. TODO(#25904): Add link to the reference doc of ``SequencerConnectionValidation``
 
 .. snippet:: participant_connectivity
     .. success:: val sequencerConnectionValidation = com.digitalasset.canton.sequencing.SequencerConnectionValidation.Active
@@ -55,10 +55,11 @@ are validated before being persisted.
     .. hidden:: val sequencerReference = sequencer1
     .. hidden::  val participantReference: com.digitalasset.canton.console.ParticipantReference = participant1
     .. success:: participantReference.synchronizers.connect_local(sequencerReference, synchronizerAlias, validation = sequencerConnectionValidation)
-    .. assert:: { participantReference.health.ping(participant1); true }
+    .. assert:: { participantReference.health.ping(participantReference); true }
     .. hidden::  participantReference.synchronizers.disconnect_all()
+    .. hidden::  val participantReference: com.digitalasset.canton.console.ParticipantReference = participant2
 
-4. List the connected Synchronizers to verify that the connection is listed. See :ref:`inspect connections <connectivity_participant_inspect_connections>`
+4. List the connected Synchronizers to verify that the connection is listed. See :ref:`inspect connections <connectivity_participant_inspect_connections>`.
 
 .. _connectivity_participant_connect_remote:
 
@@ -87,7 +88,7 @@ such that the client can verify the Sequencer's public API TLS certificate. The 
     .. success:: participantReference.synchronizers.connect("mysynchronizer", connection = sequencerUrl, certificatesPath = certificatesPath)
     .. assert:: { participantReference.health.ping(participantReference); true }
 
-4. List the connected Synchronizers to verify that the connection is listed. See :ref:`inspect connections <connectivity_participant_inspect_connections>`
+4. List the connected Synchronizers to verify that the connection is listed. See :ref:`inspect connections <connectivity_participant_inspect_connections>`.
 
 
 .. _connectivity_participant_connect_bft:
@@ -101,17 +102,26 @@ To enhance reliability and security, you can connect to multiple Sequencers of t
 
 .. snippet:: participant_connectivity
     .. hidden:: participantReference.synchronizers.disconnect_all()
+    .. hidden::  val participantReference: com.digitalasset.canton.console.ParticipantReference = participant3
     .. hidden:: val sequencer1Address = sequencer1.config.publicApi.address
     .. hidden:: val sequencer2Address = sequencer2.config.publicApi.address
+    .. hidden:: val sequencer3Address = sequencer3.config.publicApi.address
     .. hidden:: val sequencer1Port = sequencer1.config.publicApi.port
     .. hidden:: val sequencer2Port = sequencer2.config.publicApi.port
+    .. hidden:: val sequencer3Port = sequencer3.config.publicApi.port
     .. success:: val sequencer1Url = s"http://${sequencer1Address}:${sequencer1Port}"
     .. success:: val sequencer2Url = s"http://${sequencer2Address}:${sequencer2Port}"
+    .. success:: val sequencer3Url = s"https://${sequencer3Address}:${sequencer3Port}"
+    .. success:: val sequencer3Certificate = com.digitalasset.canton.util.BinaryFileUtil.tryReadByteStringFromFile(certificatesPath)
 
 2. Create the Sequencer connections.
 
 .. snippet:: participant_connectivity
-    .. success:: val connections = Seq(GrpcSequencerConnection.tryCreate(sequencer1Url, sequencerAlias = "sequencer1"), GrpcSequencerConnection.tryCreate(sequencer2Url, sequencerAlias = "sequencer2"))
+    .. success:: val connections = Seq(
+         GrpcSequencerConnection.tryCreate(sequencer1Url, sequencerAlias = "sequencer1"),
+         GrpcSequencerConnection.tryCreate(sequencer2Url, sequencerAlias = "sequencer2"),
+         GrpcSequencerConnection.tryCreate(sequencer3Url, sequencerAlias = "sequencer3", customTrustCertificates = Some(sequencer3Certificate)),
+       )
 
 
 3. Configure the Sequencer trust threshold by setting the minimum number of Sequencers that must agree before a message is considered valid.
@@ -126,9 +136,19 @@ For example, setting the threshold to 2:
 .. snippet:: participant_connectivity
     .. success:: val sequencerTrustThreshold = 2
 
+4. [Specific to the connection pool] Configure the Sequencer liveness margin; this sets the number of Sequencer connections, in addition to ``sequencerTrustThreshold``-many, from which we attempt to read messages.
+
+- Default: 0
+- Higher values increase the resilience to Sequencer delays or failures, but having (``sequencerTrustThreshold`` + ``sequencerLivenessMargin`` > number of connections) provides no benefit.
+
+For example, setting the liveness margin to 1:
+
+.. snippet:: participant_connectivity
+    .. success:: val sequencerLivenessMargin = 1
+
 .. _configure_request_amplification:
 
-4. Configure submission request amplification: define how often the client should try to send a submission request that is eligible for deduplication.
+5. Configure submission request amplification: define how often the client should try to send a submission request that is eligible for deduplication.
 
 - Higher values increase the chance of a submission request being accepted by the system, but also increase the load on the Sequencers.
 - Default: ``SubmissionRequestAmplification.NoAmplification``
@@ -140,14 +160,20 @@ In this example, I want to ensure that submission requests are sent to two Seque
 .. snippet:: participant_connectivity
     .. success:: val submissionRequestAmplification = SubmissionRequestAmplification(factor = 2, patience = 0.seconds)
 
-5. Connect using the ``connect_bft`` command.
+6. Connect using the ``connect_bft`` command.
 
 .. snippet:: participant_connectivity
-    .. success:: participantReference.synchronizers.connect_bft(connections, synchronizerAlias, sequencerTrustThreshold = sequencerTrustThreshold, submissionRequestAmplification = submissionRequestAmplification)
+    .. success:: participantReference.synchronizers.connect_bft(
+         connections,
+         synchronizerAlias,
+         sequencerTrustThreshold = sequencerTrustThreshold,
+         sequencerLivenessMargin = sequencerLivenessMargin,
+         submissionRequestAmplification = submissionRequestAmplification,
+       )
     .. success:: participantReference.synchronizers.list_registered()
-    .. assert:: { participant1.health.ping(participant1); true }
+    .. assert:: { participantReference.health.ping(participantReference); true }
 
-6. List the connected Synchronizers to verify that the connection is listed. See :ref:`inspect connections <connectivity_participant_inspect_connections>`
+7. List the connected Synchronizers to verify that the connection is listed. See :ref:`inspect connections <connectivity_participant_inspect_connections>`.
 
 
 .. _connectivity_participant_inspect_connections:
@@ -187,6 +213,21 @@ You can modify the Sequencer trust threshold to control how many Sequencers must
 
 .. snippet:: participant_connectivity
     .. success::  participantReference.synchronizers.modify("mysynchronizer", _.tryWithSequencerTrustThreshold(1))
+
+2. Verify the updated configuration using:
+
+.. snippet:: participant_connectivity
+    .. success::  participantReference.synchronizers.config("mysynchronizer")
+
+
+[Specific to the connection pool] Update Sequencer liveness margin
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+You can modify the Sequencer liveness margin to control the resilience to faulty Sequencers.
+
+1. Update the configuration with the new liveness margin:
+
+.. snippet:: participant_connectivity
+    .. success::  participantReference.synchronizers.modify("mysynchronizer", _.withSequencerLivenessMargin(0))
 
 2. Verify the updated configuration using:
 

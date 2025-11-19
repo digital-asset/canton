@@ -8,7 +8,6 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.Storage
@@ -34,7 +33,6 @@ import com.digitalasset.canton.synchronizer.sequencing.traffic.{
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.SequencerId
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import io.opentelemetry.api.trace
@@ -124,8 +122,6 @@ abstract class BlockSequencerFactory(
       clock: Clock,
       rateLimitManager: SequencerRateLimitManager,
       orderingTimeFixMode: OrderingTimeFixMode,
-      sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
-      maxBytesToDecompress: MaxBytesToDecompress,
       synchronizerLoggerFactory: NamedLoggerFactory,
       runtimeReady: FutureUnlessShutdown[Unit],
   )(implicit
@@ -193,7 +189,6 @@ abstract class BlockSequencerFactory(
       synchronizerSyncCryptoApi: SynchronizerCryptoClient,
       futureSupervisor: FutureSupervisor,
       trafficConfig: SequencerTrafficConfig,
-      sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
       runtimeReady: FutureUnlessShutdown[Unit],
       sequencerSnapshot: Option[SequencerSnapshot] = None,
       authenticationServices: Option[AuthenticationServices] = None,
@@ -241,8 +236,6 @@ abstract class BlockSequencerFactory(
     val synchronizerLoggerFactory =
       loggerFactory.append("psid", synchronizerSyncCryptoApi.psid.toString)
 
-    val maxBytesToDecompress = MaxBytesToDecompress.Default
-
     for {
       initialBlockHeight <- FutureUnlessShutdown(Future.successful(initialBlockHeight))
       _ <- balanceManager.initialize
@@ -282,8 +275,6 @@ abstract class BlockSequencerFactory(
         clock,
         rateLimitManager,
         orderingTimeFixMode,
-        sequencingTimeLowerBoundExclusive,
-        maxBytesToDecompress,
         synchronizerLoggerFactory,
         runtimeReady,
       )

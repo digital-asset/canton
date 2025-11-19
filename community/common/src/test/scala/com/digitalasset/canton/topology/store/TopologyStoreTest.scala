@@ -619,6 +619,16 @@ trait TopologyStoreTest
               filterParty = `fred::p2Namepsace`.uid.toProtoPrimitive,
               filterParticipant = p1Id.uid.toProtoPrimitive,
             )
+            onlyParticipant2ViaParticipantFilter <- inspectKnownParties(
+              store,
+              ts6,
+              filterParticipant = "participant2",
+            )
+            onlyParticipant2ViaPartyFilter <- inspectKnownParties(
+              store,
+              ts6,
+              filterParty = "participant2",
+            )
             onlyParticipant3 <- inspectKnownParties(store, ts6, filterParticipant = "participant3")
             neitherParty <- inspectKnownParties(store, ts6, "fred::canton", "participant3")
           } yield {
@@ -683,6 +693,12 @@ trait TopologyStoreTest
             )
             onlyFred shouldBe Set(ptp_fred_p1.mapping.partyId)
             fredFullySpecified shouldBe Set(ptp_fred_p1.mapping.partyId)
+            onlyParticipant2ViaParticipantFilter shouldBe Set(
+              dtc_p2_synchronizer1.mapping.participantId.adminParty
+            )
+            onlyParticipant2ViaPartyFilter shouldBe Set(
+              dtc_p2_synchronizer1.mapping.participantId.adminParty
+            )
             onlyParticipant3 shouldBe Set() // p3 cannot appear as OTK3 is only a proposal
             neitherParty shouldBe Set.empty
           }
@@ -806,6 +822,119 @@ trait TopologyStoreTest
             initialHash shouldBe expectedInitialHash
             ts1Hash shouldBe expectedTs1Hash
           }
+        }
+
+        "able to find latest vetted packages changes in order" in {
+          val store = mk(da_vp123_physicalSynchronizerId, "case9a")
+
+          def toParticipantIds(
+              vps: StoredTopologyTransactions[TopologyChangeOp, VettedPackages]
+          ): Seq[ParticipantId] =
+            vps.result.map(_.mapping.participantId)
+
+          def isNotSortedNaively(
+              vps: StoredTopologyTransactions[TopologyChangeOp, VettedPackages]
+          ): Assertion = {
+            val naiveKeys = toParticipantIds(vps).map(id => id.uid.toProtoPrimitive)
+            val keys = toParticipantIds(vps).map(id =>
+              id.uid.identifier.toProtoPrimitive
+                -> id.uid.namespace.toProtoPrimitive
+            )
+            naiveKeys.sorted should not equal keys.sorted
+          }
+
+          def isSorted(
+              vps: StoredTopologyTransactions[TopologyChangeOp, VettedPackages]
+          ): Assertion = {
+            val keys = toParticipantIds(vps).map(id =>
+              id.uid.identifier.toProtoPrimitive
+                -> id.uid.namespace.toProtoPrimitive
+            )
+            keys.sorted should equal(keys)
+          }
+
+          def findLatestPagedVettingChanges(
+              store: TopologyStore[TopologyStoreId.SynchronizerStore],
+              participantsFilter: Option[NonEmpty[Set[ParticipantId]]],
+              participantStartExclusive: Option[ParticipantId],
+              pageLimit: Int,
+          ): FutureUnlessShutdown[
+            StoredTopologyTransactions[TopologyChangeOp.Replace, VettedPackages]
+          ] =
+            store
+              .findPositiveTransactions(
+                asOf = CantonTimestamp.MaxValue,
+                asOfInclusive = true,
+                isProposal = false,
+                types = Seq(VettedPackages.code),
+                filterUid = participantsFilter.map(_.toSeq.map(_.uid)),
+                filterNamespace = None,
+                pagination = Some((participantStartExclusive.map(_.uid), pageLimit)),
+              )
+              .map(_.collectOfMapping[VettedPackages])
+
+          for {
+            _ <- update(
+              store,
+              ts1,
+              add = Seq(vp_vp3_synchronizer1, vp_vp2_synchronizer1, vp_vp1_synchronizer1),
+            )
+
+            vettedPackagesAll <- findLatestPagedVettingChanges(
+              store = store,
+              participantsFilter = None,
+              participantStartExclusive = None,
+              pageLimit = 1000,
+            )
+
+            vettedPackagesOnly2 <- findLatestPagedVettingChanges(
+              store = store,
+              participantsFilter = None,
+              participantStartExclusive = None,
+              pageLimit = 2,
+            )
+
+            vettedPackagesBounded <- findLatestPagedVettingChanges(
+              store = store,
+              participantsFilter = None,
+              participantStartExclusive = Some(vp3Id),
+              pageLimit = 1000,
+            )
+
+            vettedPackagesUserSpecified <- findLatestPagedVettingChanges(
+              store = store,
+              participantsFilter = Some(NonEmpty(Set, vp2Id, vp3Id)),
+              participantStartExclusive = None,
+              pageLimit = 1000,
+            )
+
+            vettedPackagesUserSpecifiedBounded <- findLatestPagedVettingChanges(
+              store = store,
+              participantsFilter = Some(NonEmpty(Set, vp2Id, vp3Id)),
+              participantStartExclusive = Some(vp3Id),
+              pageLimit = 1000,
+            )
+          } yield {
+            vettedPackagesAll.result should have length 3
+            isSorted(vettedPackagesAll)
+            isNotSortedNaively(vettedPackagesAll)
+
+            vettedPackagesOnly2.result should have length 2
+            isSorted(vettedPackagesOnly2)
+            toParticipantIds(vettedPackagesOnly2) should equal(Seq(vp3Id, vp2Id))
+
+            vettedPackagesBounded.result should have length 2
+            isSorted(vettedPackagesBounded)
+            toParticipantIds(vettedPackagesBounded) should equal(Seq(vp2Id, vp1Id))
+
+            vettedPackagesUserSpecified.result should have length 2
+            isSorted(vettedPackagesUserSpecified)
+            toParticipantIds(vettedPackagesUserSpecified) should equal(Seq(vp3Id, vp2Id))
+
+            vettedPackagesUserSpecifiedBounded.result should have length 1
+            toParticipantIds(vettedPackagesUserSpecifiedBounded) should equal(Seq(vp2Id))
+          }
+
         }
 
         "able to find positive transactions" in {

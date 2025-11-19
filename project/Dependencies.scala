@@ -20,9 +20,19 @@ object Dependencies {
     Array(ExclusionRule("org.slf4j"), ExclusionRule("ch.qos.logback"))
 
   lazy val scala_version = "2.13.16"
+  lazy val scala3_version = "3.3.6"
   lazy val scala_version_short = "2.13"
 
+  // TODO(#10617) We have cloned pekko's BroadcastHub implementation in
+  //  The changes from the clone have been upstreamed in https://github.com/apache/pekko/pull/1841.
+  //  When updating pekko, check whether the update includes the above fix (probably only in 1.2.x)
+  //  If it is included, remove the clone. Otherwise, make sure to update the clone as well,
+  //  including the tests in community/lib/pekko/src/main/scala/pekko
   lazy val pekko_version = resolveDependency("org.apache.pekko", "pekko-actor").revision
+  assert(
+    pekko_version == "1.1.5",
+    s"check the clone community/lib/pekko/src/main/scala/pekko/stream/scaladsl/BroadcastHub.scala is up-to-date vs https://github.com/apache/pekko/blob/v$pekko_version/stream/src/main/scala/org/apache/pekko/stream/scaladsl/Hub.scala#L396",
+  )
   lazy val pekko_http_version = resolveDependency("org.apache.pekko", "pekko-http").revision
 
   lazy val ammonite_version = "3.0.1"
@@ -85,9 +95,10 @@ object Dependencies {
   lazy val swagger_parser_version = "2.1.22"
   lazy val tapir_client_version = "1.9.11"
   lazy val tapir_version = "1.11.7"
-  lazy val testcontainers_version = "1.19.7"
+  lazy val testcontainers_version = "2.0.2"
   lazy val tink_version = "1.12.0"
   lazy val toxiproxy_java_version = "2.1.7"
+  lazy val transcode_version = "0.1.1-main.20251112.144.829.v5cc568a"
   lazy val upickle_version = "4.0.2"
 
   lazy val reflections = "org.reflections" % "reflections" % reflections_version
@@ -176,6 +187,9 @@ object Dependencies {
     "org.scalatestplus" %% "scalacheck-1-18" % (scalatest_version + ".0")
   lazy val mockito_scala = "org.mockito" %% "mockito-scala" % mockito_scala_version
   lazy val scalatestMockito = "org.scalatestplus" %% "mockito-3-4" % ("3.2.10.0")
+
+  // As an alternative to `mockito-scala`, available on Scala 3
+  lazy val smockito = "com.bdmendes" %% "smockito" % "2.2.1"
 
   lazy val jupiter_interface = "net.aichler" % "jupiter-interface" % "0.9.0"
   lazy val junit_interface = "com.github.sbt" % "junit-interface" % "0.13.3"
@@ -271,7 +285,8 @@ object Dependencies {
   lazy val slick_hikaricp = "com.typesafe.slick" %% "slick-hikaricp" % slick_version
 
   lazy val testcontainers = "org.testcontainers" % "testcontainers" % testcontainers_version
-  lazy val testcontainers_postgresql = "org.testcontainers" % "postgresql" % testcontainers_version
+  lazy val testcontainers_postgresql =
+    "org.testcontainers" % "testcontainers-postgresql" % testcontainers_version
 
   lazy val sttp = "com.softwaremill.sttp.client3" %% "core" % sttp_version
 
@@ -346,6 +361,7 @@ object Dependencies {
 
   // Transcode dependencies
   lazy val upickle = "com.lihaoyi" %% "upickle" % upickle_version
+  lazy val fastparse = "com.lihaoyi" %% "fastparse" % "3.1.1"
 
   // We have to exclude conflicting parser version
   lazy val ujson_circe =
@@ -399,7 +415,6 @@ object Dependencies {
     "com.daml" %% "test-evidence-tag" % daml_libraries_version
   lazy val daml_test_evidence_generator_scalatest =
     "com.daml" %% "test-evidence-generator" % daml_libraries_version
-  lazy val daml_lf_archive_reader = "com.daml" %% "daml-lf-archive-reader" % daml_libraries_version
   lazy val daml_lf_engine = "com.daml" %% "daml-lf-engine" % daml_libraries_version
   lazy val daml_lf_transaction = "com.daml" %% "daml-lf-transaction" % daml_libraries_version
   lazy val daml_non_empty = "com.daml" %% "nonempty" % daml_libraries_version
@@ -444,6 +459,23 @@ object Dependencies {
     "com.daml" % "ledger-api-value-java-proto" % daml_libraries_version
   lazy val daml_ledger_api_value_scala =
     "com.daml" %% "ledger-api-value-scalapb" % daml_libraries_version
+
+  lazy val transcode_daml_lf =
+    ("com.daml" %% "transcode-daml-lf-daml3.5" % transcode_version)
+      .cross(CrossVersion.for2_13Use3)
+      .exclude("com.lihaoyi", "fastparse_3")
+
+  lazy val transcode_codec_json =
+    ("com.daml" %% "transcode-codec-json" % transcode_version)
+      .cross(CrossVersion.for2_13Use3)
+      .exclude("com.lihaoyi", "ujson_3")
+      .exclude("com.lihaoyi", "upickle-core_3")
+      .exclude("com.lihaoyi", "fastparse_3")
+
+  lazy val transcode_codec_proto_scala =
+    ("com.daml" %% "transcode-codec-proto-scala-daml3.5" % transcode_version)
+      .cross(CrossVersion.for2_13Use3)
+      .exclude("com.lihaoyi", "fastparse_3")
 
   lazy val fasterjackson_core = resolveDependency("com.fasterxml.jackson.core", "jackson-core")
   lazy val google_protobuf_java = resolveDependency("com.google.protobuf", "protobuf-java")

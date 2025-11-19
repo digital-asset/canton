@@ -149,7 +149,7 @@ trait IndexComponentTest
     implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
 
     val engine = new Engine(
-      EngineConfig(LanguageVersion.stableRange)
+      EngineConfig(LanguageVersion.stableLfVersionsRange)
     )
     val mutableLedgerEndCache = MutableLedgerEndCache()
     val stringInterningView = new StringInterningView(loggerFactory)
@@ -225,7 +225,7 @@ trait IndexComponentTest
           loggerFactory = loggerFactory,
           dataSourceProperties = IndexerConfig.createDataSourcePropertiesForTesting(indexerConfig),
           highAvailability = HaConfig(),
-          indexSericeDbDispatcher = Some(dbSupport.dbDispatcher),
+          indexSericeDbDispatcher = None,
           clock = clock,
           reassignmentOffsetPersistence = NoOpReassignmentOffsetPersistence,
           postProcessor = (_, _) => Future.unit,

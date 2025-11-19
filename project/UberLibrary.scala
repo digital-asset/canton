@@ -3,7 +3,9 @@
 
 import sbt.*
 import sbt.Keys.*
+import sbt.librarymanagement.InclExclRule
 
+import org.apache.ivy.core.module.descriptor.ExcludeRule
 import sbtassembly.AssemblyPlugin.autoImport.*
 
 // TODO(i12761): remove when closed
@@ -21,10 +23,14 @@ object UberLibrary {
         if !dependency.getModuleConfigurations.exists(List("plugin", "test").contains)
         revisionId = dependency.getDependencyRevisionId
         org = revisionId.getOrganisation if org != thisOrg
-        name = revisionId.getName
-        version = revisionId.getRevision
-      } yield ModuleID(org, name, version)
+      } yield ModuleID(org, revisionId.getName, revisionId.getRevision)
+        .withExclusions(dependency.getAllExcludeRules.toVector.map(toExclIncRule))
     }
+
+  private def toExclIncRule(rule: ExcludeRule): InclExclRule = {
+    val moduleId = rule.getId.getModuleId
+    InclExclRule(moduleId.getOrganisation, moduleId.getName)
+  }
 
   private def copy(outputOf: TaskKey[File], to: SettingKey[File]): Def.Initialize[Task[File]] =
     Def.task {

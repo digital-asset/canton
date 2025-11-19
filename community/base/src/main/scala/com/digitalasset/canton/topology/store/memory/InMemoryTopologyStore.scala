@@ -280,6 +280,7 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
       asOfExclusive: CantonTimestamp,
       filterParty: String,
       filterParticipant: String,
+      limit: Int,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Set[PartyId]] = {
 
     def filter(entry: TopologyStoreEntry): Boolean =
@@ -293,11 +294,16 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
         // is of type Replace
         entry.operation == TopologyChangeOp.Replace
 
-    val mappings =
-      blocking(synchronized(topologyTransactionStore.toSeq)).filter(filter).map(_.mapping)
+    val transactions = blocking(synchronized(topologyTransactionStore.toSeq))
+    val mappings = transactions.filter(filter).map(_.mapping)
 
     FutureUnlessShutdown.pure(
-      TopologyStore.determineValidParties(mappings, filterParty, filterParticipant)
+      TopologyStore.determineValidParties(
+        mappings,
+        filterParty,
+        filterParticipant,
+        limit,
+      )
     )
 
   }
@@ -364,8 +370,17 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
       types: Seq[TopologyMapping.Code],
       filterUid: Option[NonEmpty[Seq[UniqueIdentifier]]],
       filterNamespace: Option[NonEmpty[Seq[Namespace]]],
+      pagination: Option[(Option[UniqueIdentifier], Int)] = None,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[PositiveStoredTopologyTransactions] =
-    findTransactionsInStore(asOf, asOfInclusive, isProposal, types, filterUid, filterNamespace).map(
+    findTransactionsInStore(
+      asOf,
+      asOfInclusive,
+      isProposal,
+      types,
+      filterUid,
+      filterNamespace,
+      pagination,
+    ).map(
       _.collectOfType[TopologyChangeOp.Replace]
     )
 
@@ -388,6 +403,7 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
       types: Seq[TopologyMapping.Code],
       filterUid: Option[NonEmpty[Seq[UniqueIdentifier]]],
       filterNamespace: Option[NonEmpty[Seq[Namespace]]],
+      pagination: Option[(Option[UniqueIdentifier], Int)] = None,
   ): FutureUnlessShutdown[GenericStoredTopologyTransactions] = {
     val timeFilter = asOfFilter(asOf, asOfInclusive)
     def pathFilter(mapping: TopologyMapping): Boolean =
@@ -397,15 +413,40 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
         mapping.maybeUid.exists(uid => filterUid.exists(_.contains(uid))) ||
         filterNamespace.exists(_.contains(mapping.namespace))
       }
+
+    implicit val orderingUid = UniqueIdentifier.orderingIdentifierThenNamespace
+    implicit val orderingParticipantId = ParticipantId.orderingIdentifierThenNamespace
+
+    def paginationFilter(mapping: TopologyMapping): Boolean = {
+      val participantStartExclusive = pagination.flatMap(_._1)
+      val matchesPage =
+        participantStartExclusive.forall(bound => mapping.maybeUid.exists(_ > bound))
+      matchesPage
+    }
+
     filteredState(
       blocking(synchronized(topologyTransactionStore.toSeq)),
       entry => {
         timeFilter(entry.from.value, entry.until.map(_.value)) &&
         types.contains(entry.mapping.code) &&
         pathFilter(entry.mapping) &&
-        entry.transaction.isProposal == isProposal
+        entry.transaction.isProposal == isProposal &&
+        paginationFilter(entry.mapping)
       },
-    )
+    ).map { transactions =>
+      pagination match {
+        case None => transactions
+        case Some((_, pageLimit)) =>
+          StoredTopologyTransactions(
+            transactions
+              .collectOfMapping[VettedPackages]
+              .collectLatestByUniqueKey
+              .result
+              .sortBy(_.mapping.participantId)
+              .take(pageLimit)
+          )
+      }
+    }
   }
 
   override def findFirstSequencerStateForSequencer(
@@ -631,7 +672,7 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
       TopologyStore.filterInitialParticipantDispatchingTransactions(
         participantId,
         synchronizerId,
-        res.map(_.toStoredTransaction).toSeq,
+        res.map(_.transaction).toSeq,
       )
     )
   }

@@ -14,9 +14,12 @@ lazy val `community-integration-testing` = CommunityProjects.`community-integrat
 lazy val `community-integration-testing-lib` = CommunityProjects.`community-integration-testing-lib`
 lazy val `daml-script-tests` = CommunityProjects.`daml-script-tests`
 lazy val microbench = CommunityProjects.microbench
+lazy val `performance-driver` = CommunityProjects.`performance-driver`
+lazy val performance = CommunityProjects.performance
 lazy val demo = CommunityProjects.demo
 lazy val blake2b = CommunityProjects.blake2b
 lazy val `slick-fork` = CommunityProjects.`slick-fork`
+lazy val `pekko-fork` = CommunityProjects.`pekko-fork`
 lazy val `magnolify-addon` = CommunityProjects.`magnolify-addon`
 lazy val `scalatest-addon` = CommunityProjects.`scalatest-addon`
 lazy val `util-external` = CommunityProjects.`util-external`
@@ -52,15 +55,14 @@ lazy val `ledger-json-client` = CommunityProjects.`ledger-json-client`
 lazy val `ledger-api-tools` = CommunityProjects.`ledger-api-tools`
 lazy val `ledger-api-string-interning-benchmark` =
   CommunityProjects.`ledger-api-string-interning-benchmark`
-lazy val `transcode` = CommunityProjects.`transcode`
 lazy val `ledger-api-bench-tool` = CommunityProjects.`ledger-api-bench-tool`
 lazy val `ledger-test-tool-suites-2-1` = CommunityProjects.`ledger-test-tool-suites-2-1`
 lazy val `ledger-test-tool-suites-2-dev` = CommunityProjects.`ledger-test-tool-suites-2-dev`
 lazy val `ledger-test-tool-2-1` = CommunityProjects.`ledger-test-tool-2-1`
 lazy val `ledger-test-tool-2-dev` = CommunityProjects.`ledger-test-tool-2-dev`
 lazy val `conformance-testing` = CommunityProjects.`conformance-testing`
-lazy val `enterprise-upgrading-integration-tests` =
-  CommunityProjects.`enterprise-upgrading-integration-tests`
+lazy val `upgrading-integration-tests` =
+  CommunityProjects.`upgrading-integration-tests`
 
 lazy val root = (project in file("."))
   .disablePlugins(WartRemover)

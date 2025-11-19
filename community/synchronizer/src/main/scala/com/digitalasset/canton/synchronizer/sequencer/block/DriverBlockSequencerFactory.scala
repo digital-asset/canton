@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.sequencer.block
 
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.Storage
@@ -27,7 +26,6 @@ import com.digitalasset.canton.synchronizer.sequencer.{
 import com.digitalasset.canton.synchronizer.sequencing.traffic.store.TrafficPurchasedStore
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.SequencerId
-import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.digitalasset.canton.version.ProtocolVersion
 import com.typesafe.scalalogging.LazyLogging
 import io.opentelemetry.api.trace.Tracer
@@ -44,6 +42,7 @@ class DriverBlockSequencerFactory[C](
     sequencerDriverFactory: SequencerDriverFactory { type ConfigType = C },
     config: C,
     blockSequencerConfig: BlockSequencerConfig,
+    useTimeProofsToObserveEffectiveTime: Boolean,
     health: Option[SequencerHealthConfig],
     storage: Storage,
     protocolVersion: ProtocolVersion,
@@ -104,8 +103,6 @@ class DriverBlockSequencerFactory[C](
       clock: Clock,
       rateLimitManager: SequencerRateLimitManager,
       orderingTimeFixMode: OrderingTimeFixMode,
-      sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
-      maxBytesToDecompress: MaxBytesToDecompress,
       synchronizerLoggerFactory: NamedLoggerFactory,
       runtimeReady: FutureUnlessShutdown[Unit],
   )(implicit
@@ -122,6 +119,7 @@ class DriverBlockSequencerFactory[C](
       store,
       sequencerStore,
       blockSequencerConfig,
+      useTimeProofsToObserveEffectiveTime,
       balanceStore,
       storage,
       futureSupervisor,
@@ -129,11 +127,10 @@ class DriverBlockSequencerFactory[C](
       clock,
       rateLimitManager,
       orderingTimeFixMode,
-      sequencingTimeLowerBoundExclusive,
+      sequencingTimeLowerBoundExclusive = nodeParameters.sequencingTimeLowerBoundExclusive,
       nodeParameters.processingTimeouts,
       nodeParameters.loggingConfig.eventDetails,
       nodeParameters.loggingConfig.api.printer,
-      maxBytesToDecompress,
       metrics,
       synchronizerLoggerFactory,
       exitOnFatalFailures = nodeParameters.exitOnFatalFailures,
@@ -148,6 +145,7 @@ object DriverBlockSequencerFactory extends LazyLogging {
       driverVersion: Int,
       rawConfig: ConfigCursor,
       blockSequencerConfig: BlockSequencerConfig,
+      useTimeProofsToObserveEffectiveTime: Boolean,
       health: Option[SequencerHealthConfig],
       storage: Storage,
       protocolVersion: ProtocolVersion,
@@ -172,6 +170,7 @@ object DriverBlockSequencerFactory extends LazyLogging {
       driverFactory,
       config,
       blockSequencerConfig,
+      useTimeProofsToObserveEffectiveTime,
       health,
       storage,
       protocolVersion,
@@ -189,6 +188,7 @@ object DriverBlockSequencerFactory extends LazyLogging {
       driverVersion: Int,
       config: C,
       blockSequencerConfig: BlockSequencerConfig,
+      useTimeProofsToObserveEffectiveTime: Boolean,
       health: Option[SequencerHealthConfig],
       storage: Storage,
       protocolVersion: ProtocolVersion,
@@ -201,6 +201,7 @@ object DriverBlockSequencerFactory extends LazyLogging {
       getSequencerDriverFactory(driverName, driverVersion),
       config,
       blockSequencerConfig,
+      useTimeProofsToObserveEffectiveTime,
       health,
       storage,
       protocolVersion,

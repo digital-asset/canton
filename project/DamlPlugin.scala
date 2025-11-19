@@ -72,7 +72,8 @@ object DamlPlugin extends AutoPlugin {
     val damlExcludeFromCodegen =
       settingKey[Seq[String]]("To be excluded from code gen")
 
-    val damlUpdateDependencies = taskKey[Unit]("Update daml_dependencies.json file")
+    val updateJavaDamlDependencies = taskKey[Unit]("Update daml_dependencies.json file")
+    val checkJavaDamlDependencies = taskKey[Unit]("Check daml_dependencies.json file is up to date")
 
     lazy val baseDamlPluginSettings: Seq[Def.Setting[_]] = Seq(
       sourceGenerators += damlGenerateCode.taskValue,
@@ -269,8 +270,10 @@ object DamlPlugin extends AutoPlugin {
     damlFixedDars := Seq(),
     damlProjectVersionOverride := None,
     damlEnableProjectVersionOverride := true,
-    damlUpdateDependencies :=
-      updateDamlDependencies(damlCompilerVersion.value, streams.value.log),
+    updateJavaDamlDependencies :=
+      runUpdateJavaDamlDependencies(damlCompilerVersion.value),
+    checkJavaDamlDependencies :=
+      runCheckJavaDamlDependencies(damlCompilerVersion.value),
   )
 
   override lazy val projectSettings: Seq[Def.Setting[_]] =
@@ -369,22 +372,16 @@ object DamlPlugin extends AutoPlugin {
     }
   }
 
-  private def updateDamlDependencies(damlVersion: String, log: Logger): Unit = {
-    val reg = """^\d+\.\d+\.\d+-\w+\.\d{8}\.\d+\.\d+\.v([a-f0-9]{8})$""".r
-
-    val commitSha = damlVersion match {
-      case reg(hash) => hash
-      case _ => throw new MessageOnlyException(s"can not parse daml version $damlVersion")
-    }
-
+  private def javaDamlDependencies(damlVersion: String): Map[String, String] = {
     val githubRawUrl =
-      s"https://raw.githubusercontent.com/digital-asset/daml/$commitSha/sdk/maven_install_2.13.json"
+      s"https://raw.githubusercontent.com/digital-asset/daml/internal-$damlVersion/sdk/maven_install_2.13.json"
     Try(scala.io.Source.fromURL(githubRawUrl).getLines().mkString("\n")) match {
       case Failure(exception) =>
-        log.warn(s"Failed to fetch maven_install.json from the daml repo: $exception")
+        throw new MessageOnlyException(
+          s"Failed to fetch maven_install.json from the daml repo: $exception"
+        )
       case Success(content) =>
         import io.circe.parser._, io.circe.generic.auto._, io.circe.syntax._
-        import better.files._
 
         case class Artifact(version: String)
         case class Artifacts(artifacts: Map[String, Artifact])
@@ -393,10 +390,28 @@ object DamlPlugin extends AutoPlugin {
           case Left(err) =>
             throw new MessageOnlyException(s"Failed to parse daml repo maven json file: $err")
           case Right(deps) =>
-            file"daml_dependencies.json".writeText(
-              deps.artifacts.mapValues(_.version).asJson.spaces2SortKeys
-            )
+            deps.artifacts.mapValues(_.version)
         }
+    }
+  }
+
+  private def runUpdateJavaDamlDependencies(damlVersion: String): Unit = {
+    import io.circe.syntax._
+    import better.files._
+    file"daml_dependencies.json".writeText(javaDamlDependencies(damlVersion).asJson.spaces2SortKeys)
+  }
+
+  private def runCheckJavaDamlDependencies(damlVersion: String): Unit = {
+    import better.files._
+    io.circe.parser
+      .decode[Map[String, String]](file"daml_dependencies.json".contentAsString) match {
+      case Left(err) =>
+        throw new MessageOnlyException(s"Failed to parse daml_dependencies.json: $err")
+      case Right(deps) =>
+        if (deps != javaDamlDependencies(damlVersion))
+          throw new MessageOnlyException(
+            s"daml_dependencies.json does not match the expected content for Daml version $damlVersion. Please run `sbt updateJavaDamlDependencies` to update it."
+          )
     }
   }
 

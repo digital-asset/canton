@@ -400,6 +400,10 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
       )
 
     val p2pGrpcConnectionState = new P2PGrpcConnectionState(thisBftNodeId, logger)
+    val config = BftBlockOrdererConfig(
+      epochLength = epochLength,
+      availabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning = 100,
+    )
 
     SimulationInitializer(
       {
@@ -421,11 +425,9 @@ trait BftOrderingSimulationTest extends AnyFlatSpec with BftSequencerBaseTest {
             BftOrderingMessage
           ]](
             thisBftNodeId,
-            BftBlockOrdererConfig(
-              availabilityNumberOfAttemptsOfDownloadingOutputFetchBeforeWarning = 100
-            ),
+            config,
             initialApplicationHeight,
-            epochLength,
+            EpochLength(config.epochLength),
             stores,
             orderingTopologyProvider,
             new SimulationBlockSubscription(thisBftNodeId, sendQueue),

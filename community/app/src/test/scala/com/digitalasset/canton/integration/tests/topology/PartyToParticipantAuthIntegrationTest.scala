@@ -145,8 +145,8 @@ trait PartyToParticipantAuthIntegrationTest
       .loneElement
 
     result.item.partyId shouldBe partyId
-    result.item.partySigningKeys shouldBe protocolSigningKeys
-    result.item.participants shouldBe hostingParticipants
+    result.item.partySigningKeys.toSeq should contain theSameElementsAs protocolSigningKeys
+    result.item.participants should contain theSameElementsAs hostingParticipants
   }
 
   "PartyToParticipant auth mechanism" should {
@@ -263,7 +263,7 @@ trait PartyToParticipantAuthIntegrationTest
           createContractWithSigningKey(participant1, partyId, namespaceKey)
         },
         _.errorMessage should include(
-          "Received 0 valid signatures (1 invalid)"
+          "Received 0 valid signatures from distinct keys (1 invalid)"
         ),
       )
     }
