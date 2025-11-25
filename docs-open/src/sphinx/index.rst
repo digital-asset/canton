@@ -11,7 +11,6 @@ Canton documentation
   :caption: Overview
 
   overview/overview/canton
-  overview/tutorials/canton-demo
   overview/explanations/index
   overview/explanations/canton/overview
   overview/explanations/canton/protocol
