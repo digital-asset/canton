@@ -1583,6 +1583,21 @@ final case class PartyToParticipant private (
       )
     )
 
+  @VisibleForTesting
+  def tryCopy(
+      party: PartyId = partyId,
+      threshold: PositiveInt = threshold,
+      participants: Seq[HostingParticipant] = participants,
+      partySigningKeysWithThreshold: Option[SigningKeysWithThreshold] =
+        partySigningKeysWithThreshold,
+  ): PartyToParticipant =
+    PartyToParticipant.tryCreate(
+      party,
+      threshold,
+      participants,
+      partySigningKeysWithThreshold,
+    )
+
   override def namespace: Namespace = partyId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(partyId.uid)
 

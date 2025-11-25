@@ -1005,8 +1005,11 @@ private[sync] class SynchronizerConnectionsManager(
                 )
               ).discard
             case Success(UnlessShutdown.Outcome(CloseReason.ClientShutdown)) =>
-              logger.info(s"$synchronizerAlias disconnected because sequencer client was closed")
-              disconnectSynchronizer(synchronizerAlias).discard
+              if (!connectedSynchronizer.isClosing) {
+                logger.info(s"$synchronizerAlias disconnected because sequencer client was closed.")
+                // Only disconnect from the synchronizer, if the client wasn't shut down because of an explicit disconnect from the synchronizer.
+                disconnectSynchronizer(synchronizerAlias).discard
+              }
             case Success(UnlessShutdown.AbortedDueToShutdown) =>
               logger.info(s"$synchronizerAlias disconnected because of shutdown")
               disconnectSynchronizer(synchronizerAlias).discard
@@ -1062,13 +1065,14 @@ private[sync] class SynchronizerConnectionsManager(
   /** Disconnect the given synchronizer from the sync service. */
   def disconnectSynchronizer(
       synchronizerAlias: SynchronizerAlias
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] = {
-    resolveReconnectAttempts(synchronizerAlias)
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
     connectQueue.executeE(
-      EitherT.fromEither(performSynchronizerDisconnect(synchronizerAlias)),
+      {
+        resolveReconnectAttempts(synchronizerAlias)
+        EitherT.fromEither(performSynchronizerDisconnect(synchronizerAlias))
+      },
       s"disconnect from $synchronizerAlias",
     )
-  }
 
   def logout(synchronizerAlias: SynchronizerAlias)(implicit
       traceContext: TraceContext

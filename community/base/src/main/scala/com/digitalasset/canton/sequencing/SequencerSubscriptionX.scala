@@ -78,6 +78,9 @@ class SequencerSubscriptionX[HandlerError] private[sequencing] (
             ErrorUtil
               .invalidState(s"Close reason 'TransportChange' cannot happen on a pool connection")
 
+          case reason @ Success(SubscriptionCloseReason.TokenExpiration) =>
+            giveUp(reason)
+
           case Success(_: SubscriptionCloseReason.SubscriptionError) if parent.isClosing =>
             giveUp(Success(SubscriptionCloseReason.Shutdown))
 
@@ -124,7 +127,7 @@ class SequencerSubscriptionX[HandlerError] private[sequencing] (
   // TODO(i28761): Warn after some delay or number of failures
   // LostSequencerSubscription.Warn(connection.attributes.sequencerId).discard
 
-  // stop the current subscription, do not retry, and propagate the failure upstream
+  // stop the current subscription, do not retry, and propagate the reason upstream
   private def giveUp(
       reason: Try[SubscriptionCloseReason[HandlerError]]
   )(implicit traceContext: TraceContext): Unit = {
@@ -151,6 +154,9 @@ class SequencerSubscriptionX[HandlerError] private[sequencing] (
         logger.info("Closing sequencer subscription due to handler shutdown")
       // If we reach here, it is due to a concurrent closing of the subscription (see above) and a subscription
       // error. Again, we don't need to explicitly close the connection.
+
+      case Success(SubscriptionCloseReason.TokenExpiration) =>
+        logger.debug("Sequencer subscription was closed by the server due to a token expiration")
 
       case Success(SubscriptionCloseReason.HandlerError(exception: ApplicationHandlerException)) =>
         logger.error(

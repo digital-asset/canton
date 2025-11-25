@@ -397,6 +397,9 @@ object TestingTimeServiceConfig {
   *   commitment computation is slow. If set, the participant triggers catch-up if it's behind in
   *   processing incoming commitments, and it's behind in processing ACS changes, regardless of
   *   whether its commitment computation is slow or not.
+  * @param autoSyncProtocolFeatureFlags
+  *   When true (default), protocol feature flags will be automatically updated when the node
+  *   connects to a synchronizer.
   */
 final case class ParticipantNodeParameterConfig(
     adminWorkflow: AdminWorkflowConfig = AdminWorkflowConfig(),
@@ -435,6 +438,7 @@ final case class ParticipantNodeParameterConfig(
       config.PositiveDurationSeconds.ofMinutes(1),
     commitmentMismatchDebugging: Boolean = false,
     commitmentProcessorNrAcsChangesBehindToTriggerCatchUp: Option[PositiveInt] = None,
+    autoSyncProtocolFeatureFlags: Boolean = true,
 ) extends LocalNodeParametersConfig
     with UniformCantonConfigValidation
 

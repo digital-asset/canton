@@ -1,4 +1,4 @@
-sdk-version: 3.4.4
+sdk-version: 3.4.8
 name: tests-Token
 data-dependencies: 
 - ../../../scala-2.13/resource_managed/test/tests-Holding-v1-1.0.0.dar

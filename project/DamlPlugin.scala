@@ -222,7 +222,7 @@ object DamlPlugin extends AutoPlugin {
             _,
           )
         )
-        // updateDamlDependencies(damlCompilerVersion.value)
+        updateDamlDependencies(damlCompilerVersion.value)
       },
       damlUpdateFixedDars := {
         val sourceDirectory = damlDarOutput.value
@@ -327,19 +327,12 @@ object DamlPlugin extends AutoPlugin {
   }
 
   private def updateDamlDependencies(damlVersion: String): Unit = {
-    val reg = """^\d+\.\d+\.\d+(-\w+\.\d{8}\.\d+\.\d+\.v([a-f0-9]{8})|)$""".r
-
-    val commitSha = damlVersion match {
-      case reg(hash) => hash
-      case _ => throw new IllegalArgumentException(s"can not parse version $damlVersion")
-    }
-
     val githubRawUrl =
-      s"https://raw.githubusercontent.com/digital-asset/daml/$commitSha/sdk/maven_install_2.13.json"
+      s"https://raw.githubusercontent.com/digital-asset/daml/internal-$damlVersion/sdk/maven_install_2.13.json"
     Try(scala.io.Source.fromURL(githubRawUrl).getLines().mkString("\n")) match {
       case Failure(exception) =>
-        println(
-          s"WARNING: Failed to fetch maven_install.json from the daml repo: ${exception.getMessage}"
+        throw new MessageOnlyException(
+          s"Failed to fetch maven_install.json from the daml repo: ${exception.getMessage}"
         )
       case Success(content) =>
         import io.circe._, io.circe.parser._, io.circe.generic.auto._, io.circe.syntax._
@@ -350,7 +343,7 @@ object DamlPlugin extends AutoPlugin {
 
         decode[Artifacts](content) match {
           case Left(err) =>
-            throw new RuntimeException(s"Failed to parse daml repo maven json file: $err")
+            throw new MessageOnlyException(s"Failed to parse daml repo maven json file: $err")
           case Right(deps) =>
             file"daml_dependencies.json".writeText(
               deps.artifacts.mapValues(_.version).asJson.spaces2SortKeys

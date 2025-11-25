@@ -44,7 +44,8 @@ import com.digitalasset.canton.participant.config.{
   TestingTimeServiceConfig,
 }
 import com.digitalasset.canton.participant.store.{
-  ContractStore,
+  LedgerApiContractStore,
+  LedgerApiContractStoreImpl,
   ParticipantNodePersistentState,
   ParticipantPruningStore,
   PruningOffsetServiceImpl,
@@ -109,7 +110,7 @@ class LedgerApiServer(
     cantonParameterConfig: ParticipantNodeParameters,
     testingTimeService: Option[TimeServiceBackend],
     adminTokenDispenser: CantonAdminTokenDispenser,
-    participantContractStore: Eval[ContractStore],
+    participantContractStore: Eval[LedgerApiContractStore],
     participantPruningStore: Eval[ParticipantPruningStore],
     enableCommandInspection: Boolean,
     tracerProvider: TracerProvider,
@@ -603,7 +604,9 @@ object LedgerApiServer {
       cantonParameterConfig = parameters,
       testingTimeService = ledgerTestingTimeService,
       adminTokenDispenser = adminTokenDispenser,
-      participantContractStore = participantNodePersistentState.map(_.contractStore),
+      participantContractStore = participantNodePersistentState.map(state =>
+        LedgerApiContractStoreImpl(state.contractStore, loggerFactory)
+      ),
       participantPruningStore = participantNodePersistentState.map(_.pruningStore),
       enableCommandInspection = config.ledgerApi.enableCommandInspection,
       tracerProvider = tracerProvider,
