@@ -1,3 +1,62 @@
+*.pyc
+log
+log.txt
+.idea/*
+!.idea/runConfigurations
+.bin
+*.swp
+.ensime*
+.DS_Store
+/.sbt
+/.ivy2
+/test-reports
+/.ci_credentials
+*~
+tmp
+gen-*.conf
+.circleci/_config.yml
+canton-dump-*.zip
+.daml
+.direnv
+todo-out
+.test_demo
+*.swo
+project/metals.sbt
+/theory/merkle-tree/src/output
+/theory/merkle-tree/paper/output
+benchmark*.dat
+/enterprise/synchronizer/out/
+/docker_eth_log/
+/docker_fabric_log/
+canton-performance.tar.gz
+sbt_output
+test-full-class-names.log
+classpath.txt
+/docs-open/src/replication/workdir
+canton_repo_paths
+embed_reference.json
+
+# PerformanceRunnerRecorder
+/replay
+/replay-*
+
+# nightly performance tests
+/nightly-tests
+/data
+
+# Memory usage recording
+/track
+
+# BSP
+.bsp
+.envrc.private
+
+# VS Code
+.vscode/settings.json
+
+# tests
+dars
+
 # IDE specific files
 .metals/
 .vscode/
@@ -9,6 +68,4 @@ metals.sbt
 
 # sbt build artifacts
 project/project/project/
-project/project/target/
-project/target/
 target/

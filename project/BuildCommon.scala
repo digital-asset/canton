@@ -300,48 +300,6 @@ object BuildCommon {
         val darOutput = (`community-common` / Compile / damlDarOutput).value
         packDars(darOutput, "dars")
       }
-      // here, we copy the demo artefacts manually over into the packaged artefact
-      // this way we can avoid to add the dependency to javaFX which is only required
-      // for the demo
-      // also, we hard code paths and can't use sbt references, as this would create a circular dependency
-      // between app and demo.
-      val demoArtefacts = {
-        val path = new File(Seq("community", "demo", "src", "pack").mkString(s"${Path.sep}"))
-        (path ** "*").get
-          .filter { f =>
-            f.isFile && !f.isHidden
-          }
-          .get
-          .map { f =>
-            (f, IO.relativize(path, f).get)
-          }
-      }
-      // manually copy the demo jars into the release artefact
-      val demoJars = {
-        val path =
-          Seq("community", "demo", "target", s"scala-$scala_version_short").mkString(s"${Path.sep}")
-        (new File(path) * "*.jar").get.map { f =>
-          (f, s"demo${Path.sep}lib${Path.sep}${f.getName}")
-        }
-      }
-      // manually copy the demo dars into the release artefact
-      val demoDars = {
-        val path = Seq(
-          "community",
-          "demo",
-          "target",
-          s"scala-$scala_version_short",
-          "resource_managed",
-          "main",
-        )
-          .mkString(s"${Path.sep}")
-        packDars(new File(path), s"demo${Path.sep}dars")
-      }
-      // manually copy the demo source daml code into the release artefact
-      val demoSource = {
-        val path = Seq("community", "demo", "src", "main", "daml").mkString(s"${Path.sep}")
-        packDamlSources(new File(path), s"demo${Path.sep}daml")
-      }
       if (bundlePack.value.contains(enterpriseGeneratedPack)) {
         log.info("Adding version info to demo files")
         runCommand(f"bash ./release/add-release-version.sh ${version.value}", log)
@@ -421,7 +379,7 @@ object BuildCommon {
       log.info("Invoking bundle generator")
       // add license to package
       val renames =
-        releaseNotes ++ licenseFiles ++ demoSource ++ demoDars ++ demoJars ++ demoArtefacts ++ damlSampleSource ++ damlSampleDars ++ apiFiles
+        releaseNotes ++ licenseFiles ++ damlSampleSource ++ damlSampleDars ++ apiFiles
       val args =
         bundlePack.value ++ renames.flatMap(x => Seq("-r", x._1.toString, x._2))
       // build the canton fat-jar
@@ -470,10 +428,6 @@ object BuildCommon {
           "plugins",
           "Log4j2Plugins.dat",
         ) =>
-      MergeStrategy.first
-    // TODO(#10617) remove when no longer needed
-    case (PathList("org", "apache", "pekko", "stream", "scaladsl", broadcasthub, _*))
-        if broadcasthub.startsWith("BroadcastHub") =>
       MergeStrategy.first
     case "META-INF/versions/9/module-info.class" => MergeStrategy.discard
     case path if path.contains("module-info.class") => MergeStrategy.discard
@@ -577,8 +531,6 @@ object BuildCommon {
   lazy val sharedAppPack = Seq(
     "-l",
     "community/app/src/pack",
-    "-c",
-    "community/demo/src/pack",
     "-r",
     "README-release.md",
     "README.md",
@@ -627,10 +579,8 @@ object BuildCommon {
       `slick-fork`,
       `wartremover-extension`,
       `wartremover-annotations`,
-      `pekko-fork`,
       `magnolify-addon`,
       `scalatest-addon`,
-      `demo`,
       `base-errors`,
       `daml-adjustable-clock`,
       `daml-tls`,
@@ -957,11 +907,11 @@ object BuildCommon {
       .enablePlugins(DamlPlugin)
       .dependsOn(
         blake2b,
-        `pekko-fork` % "compile->compile;test->test",
         `community-base`,
         `wartremover-annotations`,
         `community-testing` % "test->test",
         `wartremover-extension` % "test->test",
+        `mock-kms-driver` % Test,
         DamlProjects.`bindings-java`,
       )
       .settings(
@@ -978,6 +928,9 @@ object BuildCommon {
           opentelemetry_instrumentation_runtime_metrics,
           pekko_slf4j, // not used at compile time, but required by com.digitalasset.canton.util.PekkoUtil.createActorSystem
           pekko_http, // used for http health service
+          pekko_stream,
+          pekko_http_testkit % Test,
+          pekko_stream_testkit % Test,
           slick,
           tink,
         ),
@@ -1477,23 +1430,6 @@ object BuildCommon {
       .in(file("community/lib/wartremover-annotations"))
       .settings(sharedSettings)
 
-    // TODO(#10617) remove when no longer needed
-    lazy val `pekko-fork` = project
-      .in(file("community/lib/pekko"))
-      .disablePlugins(BufPlugin, ScalafixPlugin, ScalafmtPlugin, JavaFormatterPlugin, WartRemover)
-      .settings(
-        sharedSettings,
-        libraryDependencies ++= Seq(
-          pekko_stream,
-          pekko_stream_testkit % Test,
-          pekko_slf4j,
-          scalatest % Test,
-        ),
-        // Exclude to apply our license header to any Scala files
-        headerSources / excludeFilter := "*.scala",
-        coverageEnabled := false,
-      )
-
     lazy val `magnolify-addon` = project
       .in(file("community/lib/magnolify"))
       .settings(
@@ -1517,48 +1453,6 @@ object BuildCommon {
         libraryDependencies += scalatest,
         // Exclude to apply our license header to any Scala files
         headerSources / excludeFilter := "*.scala",
-      )
-
-    lazy val `demo` = project
-      .in(file("community/demo"))
-      .enablePlugins(DamlPlugin)
-      .dependsOn(
-        `community-app` % "compile->compile;test->test",
-        `community-admin-api` % "test->test",
-      )
-      .settings(
-        sharedCantonCommunitySettings,
-        libraryDependencies ++= Seq(
-          scalafx,
-          scalatest % Test,
-          scalacheck % Test,
-          scalatestScalacheck % Test,
-          mockito_scala % Test,
-          scalatestMockito % Test,
-        ) ++ javafx_all,
-        Compile / damlEnableJavaCodegen := true,
-        Compile / damlCodeGeneration := Seq(
-          (
-            (Compile / sourceDirectory).value / "daml" / "doctor",
-            (Compile / damlDarOutput).value / "doctor.dar",
-            "com.digitalasset.canton.demo.model.doctor",
-          ),
-          (
-            (Compile / sourceDirectory).value / "daml" / "ai-analysis",
-            (Compile / damlDarOutput).value / "ai-analysis.dar",
-            "com.digitalasset.canton.demo.model.ai",
-          ),
-        ),
-        Compile / damlBuildOrder := Seq(
-          "bank",
-          "medical-records",
-          "health-insurance",
-          "doctor",
-          "ai-analysis",
-        ),
-        addProtobufFilesToHeaderCheck(Compile),
-        addFilesToHeaderCheck("*.sh", "../pack", Compile),
-        addFilesToHeaderCheck("*.daml", "daml", Compile),
       )
 
     lazy val `base-errors` = project
