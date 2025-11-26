@@ -43,6 +43,7 @@ import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractValidator, ErrorUtil, RoseTree}
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
@@ -179,23 +180,12 @@ class ModelConformanceChecker(
     }
 
     val resultFE = findValidSubtransactions(rootViewsWithInfo).map { case (errors, viewsTxs) =>
-      val (views, effects, txs) = viewsTxs.unzip3
+      val (_views, effects, txs) = viewsTxs.unzip3
 
-      val wftxO = NonEmpty.from(txs).flatMap { txsNE =>
-        WellFormedTransaction
-          .merge(txsNE)
-          .leftMap(mergeError =>
-            // TODO(i14473): Handle failures to merge a transaction while preserving transparency
-            ErrorUtil.internalError(
-              new IllegalStateException(
-                s"Model conformance check failure when merging transaction $updateId: $mergeError"
-              )
-            )
-          )
-          .toOption
-      }
+      val (wftxO, mergeErrorOO) = NonEmpty.from(txs).map(WellFormedTransaction.merge(_)).separate
+      val mergeErrorO = mergeErrorOO.flatten.map(MergeError.apply)
 
-      NonEmpty.from(errors) match {
+      NonEmpty.from(errors ++ mergeErrorO) match {
         case None =>
           wftxO match {
             case Some(wftx) => Right(Result(updateId, wftx))
@@ -655,6 +645,10 @@ object ModelConformanceChecker {
           .mkShow("\n")
       )
     )
+  }
+
+  final case class MergeError(cause: String) extends Error {
+    override protected def pretty: Pretty[MergeError] = prettyOfParam(_.cause.unquoted)
   }
 
   final case class Result(

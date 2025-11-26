@@ -496,6 +496,7 @@ final case class CantonConfig(
         commitmentMismatchDebugging = participantParameters.commitmentMismatchDebugging,
         commitmentProcessorNrAcsChangesBehindToTriggerCatchUp =
           participantParameters.commitmentProcessorNrAcsChangesBehindToTriggerCatchUp,
+        autoSyncProtocolFeatureFlags = participantParameters.autoSyncProtocolFeatureFlags,
       )
     }
 

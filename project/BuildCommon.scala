@@ -2003,6 +2003,8 @@ object BuildCommon {
           sharedSettings,
           Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
           Compile / unmanagedResourceDirectories += baseDirectory.value / ".." / "src" / "main" / "resources",
+          // See #23185: Prevent potential OOM by setting info log level when conformance tests trigger assembly
+          assembly / logLevel := Level.Info,
           assembly / mainClass := Some("com.daml.ledger.api.testtool.Main"),
           assembly / assemblyJarName := s"ledger-api-test-tool-$lfVersion-${version.value}.jar",
           assembly / assemblyMergeStrategy := {
@@ -2046,8 +2048,7 @@ object BuildCommon {
     lazy val `enterprise-upgrading-integration-tests` = project
       .in(file("community/upgrading-integration-tests"))
       .dependsOn(
-        `community-app` % "test->test",
-        `ledger-api-core` % "test->test",
+        `community-app` % "test->test"
       )
       .enablePlugins(DamlPlugin)
       .settings(

@@ -534,7 +534,9 @@ class ParticipantNodeBootstrap(
                 clock = clock,
                 commandProgressTracker = commandProgressTracker,
                 ledgerApiStore = persistentState.map(_.ledgerApiStore),
-                contractStore = persistentState.map(_.contractStore),
+                contractStore = persistentState.map(state =>
+                  LedgerApiContractStoreImpl(state.contractStore, loggerFactory)
+                ),
                 ledgerApiIndexerConfig = LedgerApiIndexerConfig(
                   storageConfig = config.storage,
                   processingTimeout = parameters.processingTimeouts,

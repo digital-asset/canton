@@ -338,6 +338,10 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
         import env.*
 
         val partyE = cpn.parties.external.enable("Party")
+        val currentP2P = cpn.topology.party_to_participant_mappings
+          .list(synchronizer1Id, filterParty = partyE.filterString)
+          .loneElement
+          .item
 
         // Change cpn to observation rights
         val newPTP = TopologyTransaction(
@@ -350,6 +354,7 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
               Seq(
                 HostingParticipant(cpn, ParticipantPermission.Observation, false)
               ),
+              partySigningKeysWithThreshold = currentP2P.partySigningKeysWithThreshold,
             )
             .value,
           protocolVersion = testedProtocolVersion,
