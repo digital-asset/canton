@@ -96,6 +96,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
   SequencerNodeConfig,
   SequencerNodeParameterConfig,
   SequencerNodeParameters,
+  TimeAdvancingTopologyConfig,
 }
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
@@ -519,6 +520,7 @@ final case class CantonConfig(
         maxConfirmationRequestsBurstFactor =
           sequencerNodeConfig.parameters.maxConfirmationRequestsBurstFactor,
         asyncWriter = sequencerNodeConfig.parameters.asyncWriter.toParameters,
+        timeAdvancingTopology = sequencerNodeConfig.parameters.timeAdvancingTopology,
         unsafeEnableOnlinePartyReplication =
           sequencerNodeConfig.parameters.unsafeEnableOnlinePartyReplication,
         requestLimits = sequencerNodeConfig.publicApi.limits,
@@ -1123,6 +1125,8 @@ object CantonConfig {
         : ConfigReader[SequencerNodeParameterConfig] = {
       implicit val asyncWriterConfigReader: ConfigReader[AsyncWriterConfig] =
         deriveReader[AsyncWriterConfig]
+      implicit val timeAdvancingTopologyConfigReader: ConfigReader[TimeAdvancingTopologyConfig] =
+        deriveReader[TimeAdvancingTopologyConfig]
       deriveReader[SequencerNodeParameterConfig]
     }
     lazy implicit final val SequencerHealthConfigReader: ConfigReader[SequencerHealthConfig] =
@@ -1820,6 +1824,8 @@ object CantonConfig {
         : ConfigWriter[SequencerNodeParameterConfig] = {
       implicit val asyncWriterConfigWriter: ConfigWriter[AsyncWriterConfig] =
         deriveWriter[AsyncWriterConfig]
+      implicit val timeAdvancingTopologyConfigWriter: ConfigWriter[TimeAdvancingTopologyConfig] =
+        deriveWriter[TimeAdvancingTopologyConfig]
       deriveWriter[SequencerNodeParameterConfig]
     }
     lazy implicit final val SequencerHealthConfigWriter: ConfigWriter[SequencerHealthConfig] =

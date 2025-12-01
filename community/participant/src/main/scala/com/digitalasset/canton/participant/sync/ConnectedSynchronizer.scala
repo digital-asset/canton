@@ -526,7 +526,6 @@ class ConnectedSynchronizer(
         SequencedTime(resubscriptionTs),
         EffectiveTime(resubscriptionTs),
         ApproximateTime(resubscriptionTs),
-        potentialTopologyChange = true,
       )
       // now, compute epsilon at resubscriptionTs and update client
       topologyClient.updateHead(
@@ -535,7 +534,6 @@ class ConnectedSynchronizer(
           resubscriptionTs.plus(staticSynchronizerParameters.topologyChangeDelay.duration)
         ),
         ApproximateTime(resubscriptionTs),
-        potentialTopologyChange = true,
       )
     }
 
@@ -883,9 +881,9 @@ class ConnectedSynchronizer(
       _waitForReplay <- FutureUnlessShutdown.outcomeF(
         timeTracker.awaitTick(clock.now).getOrElse(Future.unit)
       )
-
+      approximateSnapshot <- topologyClient.currentSnapshotApproximation
       _params <- synchronizeWithClosing(functionFullName)(
-        topologyClient.currentSnapshotApproximation.findDynamicSynchronizerParametersOrDefault(
+        approximateSnapshot.findDynamicSynchronizerParametersOrDefault(
           staticSynchronizerParameters.protocolVersion
         )
       )

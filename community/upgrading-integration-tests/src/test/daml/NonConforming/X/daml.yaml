@@ -1,4 +1,4 @@
-sdk-version: 3.4.8
+sdk-version: 3.4.9
 module-prefixes: !java.util.LinkedHashMap
    NonConforming-1.0.0: NonConformingV1
    NonConforming-2.0.0: NonConformingV2

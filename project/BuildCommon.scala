@@ -468,7 +468,8 @@ object BuildCommon {
     case "META-INF/versions/9/module-info.class" => MergeStrategy.discard
     case path if path.contains("module-info.class") => MergeStrategy.discard
     case PathList("org", "jline", _ @_*) => MergeStrategy.first
-    case "META-INF/FastDoubleParser-LICENSE" => MergeStrategy.first
+    case PathList("META-INF", "FastDoubleParser-LICENSE") => MergeStrategy.first
+    case PathList("META-INF", "FastDoubleParser-NOTICE") => MergeStrategy.first
     // complains about okio.kotlin_module clash
     case PathList("META-INF", "okio.kotlin_module") => MergeStrategy.last
     case x => oldStrategy(x)

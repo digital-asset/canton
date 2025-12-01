@@ -42,7 +42,7 @@ final case class TopologyConfig(
     validateInitialTopologySnapshot: Boolean = true,
     disableOptionalTopologyChecks: Boolean = false,
     dispatchQueueBackpressureLimit: NonNegativeInt = defaultMaxUnsentTopologyQueueSize,
-    useTimeProofsToObserveEffectiveTime: Boolean = true,
+    useTimeProofsToObserveEffectiveTime: Boolean = false,
 ) extends UniformCantonConfigValidation
 
 object TopologyConfig {

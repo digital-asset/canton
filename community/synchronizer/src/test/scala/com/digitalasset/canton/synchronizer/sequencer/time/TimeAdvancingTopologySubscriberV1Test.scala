@@ -29,7 +29,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   MessageId,
   Recipients,
 }
-import com.digitalasset.canton.synchronizer.sequencer.time.TimeAdvancingTopologySubscriber.TimeAdvanceBroadcastMaxSequencingTimeWindow
+import com.digitalasset.canton.synchronizer.sequencer.config.TimeAdvancingTopologyConfig
 import com.digitalasset.canton.time.{Clock, SimClock}
 import com.digitalasset.canton.topology.client.{
   SynchronizerTopologyClientWithInit,
@@ -51,9 +51,9 @@ import org.scalatest.wordspec.AnyWordSpec
 import java.time.Duration
 import scala.concurrent.ExecutionContext
 
-class TimeAdvancingTopologySubscriberTest extends AnyWordSpec with BaseTest {
+class TimeAdvancingTopologySubscriberV1Test extends AnyWordSpec with BaseTest {
 
-  import TimeAdvancingTopologySubscriberTest.*
+  import TimeAdvancingTopologySubscriberV1Test.*
 
   // To avoid context-switching and test entire code paths
   implicit private val executionContext: ExecutionContext = directExecutionContext
@@ -65,7 +65,7 @@ class TimeAdvancingTopologySubscriberTest extends AnyWordSpec with BaseTest {
       val ts = CantonTimestamp.Epoch
 
       val subscriber =
-        new TimeAdvancingTopologySubscriber(
+        new TimeAdvancingTopologySubscriberV1(
           clock,
           mock[SequencerClient],
           mock[SynchronizerTopologyClientWithInit],
@@ -118,12 +118,14 @@ class TimeAdvancingTopologySubscriberTest extends AnyWordSpec with BaseTest {
         )
       when(snapshot.sequencerGroup()).thenReturn(FutureUnlessShutdown.pure(Some(sequencerGroup)))
       val topologyClient = mock[SynchronizerTopologyClientWithInit]
-      when(topologyClient.currentSnapshotApproximation).thenReturn(snapshot)
+      when(topologyClient.currentSnapshotApproximation).thenReturn(
+        FutureUnlessShutdown.pure(snapshot)
+      )
       val staticSynchronizerParameters = BaseTest.defaultStaticSynchronizerParametersWith()
       when(topologyClient.staticSynchronizerParameters).thenReturn(staticSynchronizerParameters)
 
       val subscriber =
-        new TimeAdvancingTopologySubscriber(
+        new TimeAdvancingTopologySubscriberV1(
           clock,
           sequencerClient,
           topologyClient,
@@ -163,7 +165,8 @@ class TimeAdvancingTopologySubscriberTest extends AnyWordSpec with BaseTest {
         .send(
           batch = eqTo(expectedBatch),
           topologyTimestamp = eqTo(None),
-          maxSequencingTime = eqTo(ts2.plus(TimeAdvanceBroadcastMaxSequencingTimeWindow.duration)),
+          maxSequencingTime =
+            eqTo(ts2.plus(TimeAdvancingTopologyConfig.defaultMaxSequencingTimeWindow.asJava)),
           messageId = any[MessageId],
           aggregationRule = eqTo(expectedAggregationRule),
           callback = eqTo(SendCallback.empty),
@@ -192,12 +195,14 @@ class TimeAdvancingTopologySubscriberTest extends AnyWordSpec with BaseTest {
         )
       )
       val topologyClient = mock[SynchronizerTopologyClientWithInit]
-      when(topologyClient.currentSnapshotApproximation).thenReturn(snapshot)
+      when(topologyClient.currentSnapshotApproximation).thenReturn(
+        FutureUnlessShutdown.pure(snapshot)
+      )
       val staticSynchronizerParameters = BaseTest.defaultStaticSynchronizerParametersWith()
       when(topologyClient.staticSynchronizerParameters).thenReturn(staticSynchronizerParameters)
 
       val subscriber =
-        new TimeAdvancingTopologySubscriber(
+        new TimeAdvancingTopologySubscriberV1(
           clock,
           mock[SequencerClient],
           topologyClient,
@@ -232,7 +237,9 @@ class TimeAdvancingTopologySubscriberTest extends AnyWordSpec with BaseTest {
         )
       when(snapshot.sequencerGroup()).thenReturn(FutureUnlessShutdown.pure(Some(sequencerGroup)))
       val topologyClient = mock[SynchronizerTopologyClientWithInit]
-      when(topologyClient.currentSnapshotApproximation).thenReturn(snapshot)
+      when(topologyClient.currentSnapshotApproximation).thenReturn(
+        FutureUnlessShutdown.pure(snapshot)
+      )
 
       val mockSequencerClient = mock[SequencerClient]
       when(
@@ -248,7 +255,7 @@ class TimeAdvancingTopologySubscriberTest extends AnyWordSpec with BaseTest {
       ).thenReturn(EitherTUtil.unitUS)
 
       val subscriber =
-        new TimeAdvancingTopologySubscriber(
+        new TimeAdvancingTopologySubscriberV1(
           mock[Clock],
           mockSequencerClient,
           topologyClient,
@@ -279,10 +286,12 @@ class TimeAdvancingTopologySubscriberTest extends AnyWordSpec with BaseTest {
         )
       when(snapshot.sequencerGroup()).thenReturn(FutureUnlessShutdown.pure(Some(sequencerGroup)))
       val topologyClient = mock[SynchronizerTopologyClientWithInit]
-      when(topologyClient.currentSnapshotApproximation).thenReturn(snapshot)
+      when(topologyClient.currentSnapshotApproximation).thenReturn(
+        FutureUnlessShutdown.pure(snapshot)
+      )
 
       val subscriber =
-        new TimeAdvancingTopologySubscriber(
+        new TimeAdvancingTopologySubscriberV1(
           mock[Clock],
           sequencerClient,
           topologyClient,
@@ -308,7 +317,7 @@ class TimeAdvancingTopologySubscriberTest extends AnyWordSpec with BaseTest {
   }
 }
 
-object TimeAdvancingTopologySubscriberTest {
+object TimeAdvancingTopologySubscriberV1Test {
   private val aPhysicalSynchronizerId =
     PhysicalSynchronizerId(
       SynchronizerId.tryFromString("id::default"),

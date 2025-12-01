@@ -702,19 +702,74 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       .map(res => res.result.map(TopologyStore.Change.selectChange).distinct)
   }
 
-  override def maxTimestamp(sequencedTime: SequencedTime, includeRejected: Boolean)(implicit
+  override def maxTimestamp(
+      sequencedTime: SequencedTime,
+      includeRejected: Boolean,
+  )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[(SequencedTime, EffectiveTime)]] = {
-    logger.debug(s"Querying max timestamp")
+    logger.debug(s"Querying max timestamp as of ${sequencedTime.value}")
 
-    val query = buildQueryForTransactions(
+    // Note: this query uses the index idx_common_topology_transactions_max_timestamp
+    val query = buildQueryForMetadata[(SequencedTime, EffectiveTime)](
+      "sequenced, valid_from",
       sql" AND sequenced <= ${sequencedTime.value} ",
       includeRejected = includeRejected,
-      limit = storage.limit(1),
-      orderBy = " ORDER BY valid_from DESC",
+      orderBy = " ORDER BY sequenced DESC",
     )
-    toStoredTopologyTransactions(storage.query(query, operationName = functionFullName))
-      .map(_.result.headOption.map(tx => (tx.sequenced, tx.validFrom)))
+    storage
+      .query(query, operationName = functionFullName)
+      .map(_.headOption)
+  }
+
+  override def latestTopologyChangeTimestamp()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[(SequencedTime, EffectiveTime)]] = {
+    logger.debug(s"Querying latest topology change timestamp")
+
+    // Note: this query uses the index idx_common_topology_transactions_max_timestamp
+    val query = buildQueryForMetadata[(SequencedTime, EffectiveTime)](
+      "sequenced, valid_from",
+      sql" AND sequenced <= ${CantonTimestamp.MaxValue} AND not is_proposal ",
+      includeRejected = false,
+      orderBy = " ORDER BY sequenced DESC",
+    )
+    storage
+      .query(query, operationName = functionFullName)
+      .map(_.headOption)
+  }
+
+  override def findTopologyIntervalForTimestamp(
+      timestamp: CantonTimestamp
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[(EffectiveTime, Option[EffectiveTime])]] = {
+    logger.debug(s"Querying for topology interval for $timestamp")
+
+    // Note: these queries use the index idx_common_topology_transactions_effective_changes
+    val lowerBoundQuery = buildQueryForMetadata[EffectiveTime](
+      "valid_from",
+      sql" AND valid_from < $timestamp AND not is_proposal",
+      includeRejected = false,
+      orderBy = " ORDER BY valid_from desc",
+    )
+    val upperBoundQuery = buildQueryForMetadata[EffectiveTime](
+      "valid_from",
+      sql" AND valid_from >= $timestamp AND not is_proposal",
+      includeRejected = false,
+      orderBy = " ORDER BY valid_from asc",
+    )
+    val lowerBoundF = storage
+      .query(lowerBoundQuery, operationName = functionFullName + "-lower")
+      .map(_.headOption)
+    val upperBoundF = storage
+      .query(upperBoundQuery, operationName = functionFullName + "-upper")
+      .map(_.headOption)
+
+    for {
+      lower <- lowerBoundF
+      upper <- upperBoundF
+    } yield lower.map(_ -> upper)
   }
 
   override def findDispatchingTransactionsAfter(
@@ -1067,6 +1122,19 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
           .when(!includeRejected)(sql" AND rejection_reason IS NULL")
           .toList ++ sql" #$orderBy #$limit"
     query.as[QueryResultWithId[A]]
+  }
+
+  private def buildQueryForMetadata[T: GetResult](
+      selectColumns: String,
+      subQuery: SQLActionBuilder,
+      orderBy: String,
+      includeRejected: Boolean,
+  ): DbAction.ReadTransactional[Vector[T]] = {
+    val query =
+      sql"SELECT #$selectColumns FROM common_topology_transactions WHERE store_id = $storeIndex" ++
+        subQuery ++ (if (!includeRejected) sql" AND rejection_reason IS NULL"
+                     else sql"") ++ sql" #$orderBy #${storage.limit(1)}"
+    query.as[T]
   }
 
   private def toStoredTopologyTransactions(
