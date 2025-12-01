@@ -1,9 +1,9 @@
-sdk-version: 3.4.8
+sdk-version: 3.4.9
 build-options: 
 - --target=2.dev
 name: JsonEncodingTestDev
 source: JsonEncodingTest.daml
-version: 3.4.9
+version: 3.4.10
 dependencies: 
 - daml-prim
 - daml-stdlib

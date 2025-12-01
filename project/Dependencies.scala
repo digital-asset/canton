@@ -94,7 +94,7 @@ object Dependencies {
   lazy val swagger_parser_version = "2.1.22"
   lazy val tapir_client_version = "1.9.11"
   lazy val tapir_version = "1.11.7"
-  lazy val testcontainers_version = "1.19.7"
+  lazy val testcontainers_version = "2.0.2"
   lazy val tink_version = "1.12.0"
   lazy val toxiproxy_java_version = "2.1.7"
   lazy val upickle_version = "4.0.2"
@@ -280,7 +280,8 @@ object Dependencies {
   lazy val slick_hikaricp = "com.typesafe.slick" %% "slick-hikaricp" % slick_version
 
   lazy val testcontainers = "org.testcontainers" % "testcontainers" % testcontainers_version
-  lazy val testcontainers_postgresql = "org.testcontainers" % "postgresql" % testcontainers_version
+  lazy val testcontainers_postgresql =
+    "org.testcontainers" % "testcontainers-postgresql" % testcontainers_version
 
   lazy val sttp = "com.softwaremill.sttp.client3" %% "core" % sttp_version
 

@@ -1,4 +1,4 @@
-sdk-version: 3.4.8
+sdk-version: 3.4.9
 module-prefixes: !java.util.LinkedHashMap
    dvp-assets-1.0.0: DvpAssetsV1
 build-options: 

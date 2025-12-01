@@ -278,9 +278,28 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
     * @param includeRejected
     *   whether to include rejected transactions
     */
-  def maxTimestamp(sequencedTime: SequencedTime, includeRejected: Boolean)(implicit
+  def maxTimestamp(
+      sequencedTime: SequencedTime,
+      includeRejected: Boolean,
+  )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[(SequencedTime, EffectiveTime)]]
+
+  /** Returns the timestamps of the latest accepted topology change (non-proposal and non-rejected),
+    * in the store.
+    */
+  def latestTopologyChangeTimestamp()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[(SequencedTime, EffectiveTime)]]
+
+  /** Returns the closest effective time before exclusive and after inclusive the provided
+    * timestamp.
+    */
+  def findTopologyIntervalForTimestamp(
+      timestamp: CantonTimestamp
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[(EffectiveTime, Option[EffectiveTime])]]
 
   /** returns the current dispatching watermark
     *

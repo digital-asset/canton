@@ -379,8 +379,8 @@ abstract class SequencerClientImpl(
       )
 
       if (replayEnabled) {
-        val syncCryptoApi = syncCryptoClient.currentSnapshotApproximation
         val resF = for {
+          syncCryptoApi <- EitherT.liftF(syncCryptoClient.currentSnapshotApproximation)
           costO <- EitherT.liftF(
             trafficStateController.flatTraverse(_.computeCost(batch, syncCryptoApi.ipsSnapshot))
           )
@@ -444,11 +444,10 @@ abstract class SequencerClientImpl(
             )
           })
 
-        // Snapshot used both for cost computation and signing the submission request
-        val syncCryptoApi = syncCryptoClient.currentSnapshotApproximation
-        val snapshot = syncCryptoApi.ipsSnapshot
-
         val resF = for {
+          // Snapshot used both for cost computation and signing the submission request
+          syncCryptoApi <- EitherT.liftF(syncCryptoClient.currentSnapshotApproximation)
+          snapshot = syncCryptoApi.ipsSnapshot
           cost <- EitherT.liftF(
             trafficStateController.flatTraverse(_.computeCost(batch, snapshot))
           )
@@ -919,10 +918,11 @@ abstract class SequencerClientImpl(
     if (LogicalUpgradeTime.canProcessKnowingPredecessor(synchronizerPredecessor, timestamp)) {
       val request = AcknowledgeRequest(member, timestamp, protocolVersion)
       for {
+        approximateSnapshot <- EitherT.liftF(syncCryptoClient.currentSnapshotApproximation)
         signedRequest <- requestSigner.signRequest(
           request,
           HashPurpose.AcknowledgementSignature,
-          Some(syncCryptoClient.currentSnapshotApproximation),
+          Some(approximateSnapshot),
         )
         result <-
           if (config.useNewConnectionPool) {

@@ -965,21 +965,29 @@ abstract class EventStorageBackendTemplate(
         WHERE
           event_sequential_id > $fromExclusiveSeqId AND
           event_sequential_id <= $toInclusiveSeqId AND
+          internal_contract_id IS NOT NULL AND
           event_type = ${PersistentEventType.ConsumingExercise.asInt}
         """
-      .asVectorOf(long("internal_contract_id").?)(connection)
+      .asVectorOf(long("internal_contract_id"))(connection)
     val divulgedAndTransientContracts = SQL"""
         SELECT internal_contract_id
         FROM lapi_events_various_witnessed
         WHERE
           event_sequential_id > $fromExclusiveSeqId AND
           event_sequential_id <= $toInclusiveSeqId AND
-          event_type = ${PersistentEventType.WitnessedCreate.asInt}
+          internal_contract_id IS NOT NULL AND
+          event_type = ${PersistentEventType.WitnessedCreate.asInt} AND
+          NOT EXISTS (
+            SELECT 1
+            FROM lapi_events_activate_contract
+            WHERE
+              lapi_events_activate_contract.internal_contract_id = lapi_events_various_witnessed.internal_contract_id AND
+              lapi_events_activate_contract.event_sequential_id > lapi_events_various_witnessed.event_sequential_id
+          )
         """
-      .asVectorOf(long("internal_contract_id").?)(connection)
+      .asVectorOf(long("internal_contract_id"))(connection)
     archivals.iterator
       .++(divulgedAndTransientContracts.iterator)
-      .flatten
       .toSet
   }
 

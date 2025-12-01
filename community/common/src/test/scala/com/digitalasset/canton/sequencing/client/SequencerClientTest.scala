@@ -2012,7 +2012,7 @@ final class SequencerClientTest
       val topologyClient = mock[SynchronizerTopologyClient]
       val mockTopologySnapshot = mock[TopologySnapshot]
       when(topologyClient.currentSnapshotApproximation(any[TraceContext]))
-        .thenReturn(mockTopologySnapshot)
+        .thenReturn(FutureUnlessShutdown.pure(mockTopologySnapshot))
       when(
         mockTopologySnapshot.findDynamicSynchronizerParametersOrDefault(
           any[ProtocolVersion],

@@ -28,6 +28,8 @@ trait SequencerParameters {
   *   How many confirmation requests can be sent in a burst before the rate limit kicks in.
   * @param asyncWriter
   *   Whether the sequencer writes are async or sync
+  * @param timeAdvancingTopology
+  *   How the sequencer should send time advancing broadcasts after topology transactions
   * @param unsafeEnableOnlinePartyReplication
   *   Whether to enable online party replication sequencer channels. Unsafe as still under
   *   development.
@@ -39,6 +41,7 @@ final case class SequencerNodeParameters(
     protocol: CantonNodeParameters.Protocol,
     maxConfirmationRequestsBurstFactor: PositiveDouble,
     asyncWriter: AsyncWriterParameters,
+    timeAdvancingTopology: TimeAdvancingTopologyConfig,
     unsafeEnableOnlinePartyReplication: Boolean = false,
     sequencerApiLimits: Map[String, NonNegativeInt] = Map.empty,
     warnOnUndefinedLimits: Boolean = true,
