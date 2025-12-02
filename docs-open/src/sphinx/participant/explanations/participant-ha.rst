@@ -3,8 +3,6 @@
 ..
    SPDX-License-Identifier: Apache-2.0
 
-.. enterprise-only::
-
 .. _ha_participant_arch:
 
 Active-Passive Participant Node Configuration

@@ -59,10 +59,6 @@ If the proposal already exists on the network, the new signatures are merged int
 signatures are present, the topology transaction is accepted and added to the state. Because of this, the signature
 of the external party can also be omitted when uploading the topology transaction to the second participant.
 
-The hash of topology transactions is deterministic. Therefore, the same topology transaction can be created without
-actually sharing the topology transaction between the different actors. The only requirement is that the content of
-the transaction is the same, which at least requires knowledge of the external party's public key and the participant ids.
-
 Distribute Topology Transactions Using the Ledger
 =================================================
 

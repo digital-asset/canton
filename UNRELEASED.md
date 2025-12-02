@@ -33,6 +33,10 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
 - Batching configuration now allows setting different parallelism for pruning (currently only for Sequencer pruning):
   New option `canton.sequencers.sequencer.parameters.batching.pruning-parallelism` (defaults to `2`) can be used
   separately from the general `canton.sequencers.sequencer.parameters.batching.parallelism` setting.
+- Made the config option `...topology.use-time-proofs-to-observe-effective-time` work and changed the default to `false`.
+  Disabling this option activates a more robust time advancement broadcast mechanism on the sequencers,
+  which however still does not tolerate crashes or big gaps in block sequencing times. The parameters can be configured
+  in the sequencer via `canton.sequencers.<sequencer>.parameters.time-advancing-topology`.
 
 ### Preview Features
 - preview feature
@@ -75,6 +79,16 @@ Impacted commands:
 
 ### Removal of automatic recomputation of contract ids upon ACS import
 The ability to recompute contract ids upon ACS import has been removed.
+
+### Online party replication *breaking change*
+The online party replication status command now returns a status in a very different, "vector-status" format
+rather than the old "oneof" style.
+
+Impacted Command:
+- `participant.parties.get_add_party_status`
+
+Impacted gRPC endpoint:
+- `com.digitalasset.canton.admin.participant.v30.PartyManagementService.GetAddPartyStatus` response type
 
 ## Compatibility
 

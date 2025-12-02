@@ -41,7 +41,7 @@ certificates of the Java runtime will be used. An example would be:
 
 .. todo::
     `#22917: Fix broken literalinclude <https://github.com/DACH-NY/canton/issues/22917>`_
-    literalinclude:: CANTON/enterprise/app/src/test/scala/com/digitalasset/canton/integration/tests/MultiSynchronizerIntegrationTests.scala
+    literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/MultiSynchronizerIntegrationTests.scala
     start-after: architecture-handbook-entry-begin: TlsConnect
     end-before: architecture-handbook-entry-end: TlsConnect
     dedent:

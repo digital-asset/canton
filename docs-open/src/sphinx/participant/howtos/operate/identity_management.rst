@@ -278,15 +278,15 @@ There are 3 possible configurations:
 
 1. Use the node name as the node identifier
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/config-node-identifier.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/config-node-identifier.conf
 
 2. Explicitly set a name
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/explicit-node-identifier.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/explicit-node-identifier.conf
 
 3. Generate a random name
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/random-node-identifier.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/random-node-identifier.conf
 
 Identity Setup Guide
 ~~~~~~~~~~~~~~~~~~~~

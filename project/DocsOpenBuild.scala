@@ -132,13 +132,13 @@ object DocsOpenBuild {
   lazy val snippetTestClassRegex: Regex =
     """(?s)class\s+([A-Za-z0-9_]+)\s*extends\s+SnippetGenerator\s*\(\s*(?:File\s*\(\s*"([^"]+)"|.*?source\s*=\s*File\s*\(\s*"([^"]+)").*?\)""".r
 
-  def buildRstToTestMap(`enterprise-app`: Project): Def.Initialize[Task[Map[String, String]]] =
+  def buildRstToTestMap(`community-app`: Project): Def.Initialize[Task[Map[String, String]]] =
     Def.task {
       val log = streams.value.log
       val logPrefix = "[docs-open|generate][buildRstToTestMap]"
 
       val testsDir =
-        (`enterprise-app` / baseDirectory).value / "src" / "test" / "scala" / "com" / "digitalasset" / "canton" / "integration" / "tests"
+        (`community-app` / baseDirectory).value / "src" / "test" / "scala" / "com" / "digitalasset" / "canton" / "integration" / "tests"
       val generatorFile = testsDir / "docs" / "SphinxDocumentationGenerator.scala"
       val packagePrefix = "com.digitalasset.canton.integration.tests.docs."
       val pathPrefix = "docs-open/src/sphinx/"
@@ -248,8 +248,7 @@ object DocsOpenBuild {
   def generateReferenceJson(
       embed_reference_json: SettingKey[File],
       communityAppSourceDirectory: SettingKey[File],
-      enterpriseAppSourceDirectory: SettingKey[File],
-      enterpriseAppTarget: SettingKey[File],
+      communityAppTarget: SettingKey[File],
       communityIntegrationTestingSourceDirectory: SettingKey[File],
   ): Def.Initialize[Task[File]] = Def.task {
     val log = streams.value.log
@@ -262,12 +261,11 @@ object DocsOpenBuild {
     val outFile = (Compile / embed_reference_json).value
     outFile.getParentFile.mkdirs()
     val appSourceDir = communityAppSourceDirectory.value
-    val enterpriseAppSourceDir = enterpriseAppSourceDirectory.value
     val communityIntegrationTestingSourceDir =
       communityIntegrationTestingSourceDirectory.value
     val scriptPath =
       ((Compile / resourceDirectory).value / "console-reference.canton").getPath
-    val targetDirectory = enterpriseAppTarget.value
+    val targetDirectory = communityAppTarget.value
     val releaseDirectory = targetDirectory / "release" / "canton"
     val generateReferenceJsonConf = target.value / "generateReferenceJsonConf"
     IO.delete(generateReferenceJsonConf)
@@ -280,7 +278,7 @@ object DocsOpenBuild {
       simpleConfig,
     )
     IO.copyFile(
-      enterpriseAppSourceDir / "test" / "resources" / "distributed-single-synchronizer-topology.conf",
+      appSourceDir / "test" / "resources" / "distributed-single-synchronizer-topology.conf",
       distributedConfig,
     )
     IO.copyDirectory(

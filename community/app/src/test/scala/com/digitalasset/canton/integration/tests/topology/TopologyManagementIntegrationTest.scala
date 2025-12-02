@@ -1671,6 +1671,7 @@ trait TopologyManagementIntegrationTest
               ParticipantPermission.Confirmation,
             )
           ),
+          partySigningKeysWithThreshold = None,
         )
         .value
 
@@ -1797,6 +1798,7 @@ trait TopologyManagementIntegrationTest
               ParticipantPermission.Submission,
             ),
           ),
+          partySigningKeysWithThreshold = None,
         )
         .value
 
@@ -1838,7 +1840,11 @@ trait TopologyManagementIntegrationTest
 
       // Load them to P1 and P2
       participant1.topology.transactions.load(p2SignedPreparedTx2, TopologyStoreId.Authorized)
-      participant2.topology.transactions.load(p2SignedPreparedTx2, TopologyStoreId.Authorized)
+      // We can't load to P2 to authorized store. They need to go directly into Synchronizer store
+      // as otherwise the state processor check will complain because the serial doesn't start at the right
+      // place
+      participant2.topology.transactions
+        .load(p2SignedPreparedTx2, TopologyStoreId.Synchronizer(sequencer1.synchronizer_id))
 
       eventually() {
         // Observe that Max is hosted on P1 with confirmation and P2 with submission

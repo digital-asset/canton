@@ -33,7 +33,7 @@ but resulting in different ids due to the new namespace key:
 
 .. todo::
     `#22917: Fix broken literalinclude <https://github.com/DACH-NY/canton/issues/22917>`_
-    literalinclude:: CANTON/enterprise/app/src/test/scala/com/digitalasset/canton/integration/tests/security/kms/KmsMigrationWithNewNamespaceIntegrationTest.scala
+    literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/security/kms/KmsMigrationWithNewNamespaceIntegrationTest.scala
     language: scala
     start-after: user-manual-entry-begin: KmsRecreatePartiesInNewParticipantNewNs
     end-before: user-manual-entry-end: KmsRecreatePartiesInNewParticipantNewNs
@@ -43,7 +43,7 @@ Secondly, you should migrate your DARs to the new Participant:
 
 .. todo::
     `#22917: Fix broken literalinclude <https://github.com/DACH-NY/canton/issues/22917>`_
-    literalinclude:: CANTON/enterprise/app/src/test/scala/com/digitalasset/canton/integration/tests/security/kms/KmsMigrationWithNewNamespaceIntegrationTest.scala
+    literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/security/kms/KmsMigrationWithNewNamespaceIntegrationTest.scala
     language: scala
     start-after: user-manual-entry-begin: KmsMigrateDarsNewNs
     end-before: user-manual-entry-end: KmsMigrateDarsNewNs
@@ -54,7 +54,7 @@ rewrite the party ids mentioned in those contracts to match the new party ids. Y
 
 .. todo::
     `#22917: Fix broken literalinclude <https://github.com/DACH-NY/canton/issues/22917>`_
-    literalinclude:: CANTON/enterprise/app/src/test/scala/com/digitalasset/canton/integration/tests/security/kms/KmsMigrationWithNewNamespaceIntegrationTest.scala
+    literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/security/kms/KmsMigrationWithNewNamespaceIntegrationTest.scala
     language: scala
     start-after: user-manual-entry-begin: KmsMigrateACSofPartiesNewNs
     end-before: user-manual-entry-end: KmsMigrateACSofPartiesNewNs

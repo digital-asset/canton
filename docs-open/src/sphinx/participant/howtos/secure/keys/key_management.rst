@@ -156,7 +156,7 @@ you can do so by setting the following configurations.
 
 To disable **session encryption keys**:
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/session-key-cache.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/session-key-cache.conf
    :language: scala
    :start-after: user-manual-entry-begin: SessionEncryptionKeyConfigDisable
    :end-before: user-manual-entry-end: SessionEncryptionKeyConfigDisable
@@ -164,7 +164,7 @@ To disable **session encryption keys**:
 
 To disable **session signing keys**:
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/session-key-cache.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/session-key-cache.conf
    :language: scala
    :start-after: user-manual-entry-begin: SessionSigningKeyConfigDisable
    :end-before: user-manual-entry-end: SessionSigningKeyConfigDisable

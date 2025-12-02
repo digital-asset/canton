@@ -101,8 +101,6 @@ The bottom line is that a Canton system can scale out horizontally if
 commands involve only a small number of participants and synchronizers.
 
 
-.. enterprise-only::
-
 Node Scaling
 ------------
 
@@ -406,7 +404,7 @@ and the ``SequencerClient`` connects to one of them. However, there is a possibi
 can become overwhelmed and struggle to keep up with the incoming messages. To address this issue, a configuration
 parameter called ``maximum-in-flight-event-batches`` is available:
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/documentation-snippets/sequencer-client-throttling.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/documentation-snippets/sequencer-client-throttling.conf
 
 By setting the ``maximum-in-flight-event-batches`` parameter, you can control the maximum number of event batches
 that the system processes concurrently. This configuration helps prevent overload and ensures that the
@@ -438,7 +436,7 @@ While the latency added is only a few ms, it does make a difference during devel
 Therefore, the default setting is ``low-latency``. A production deployment with high throughput demand should choose the
 ``high-throughput`` setting by configuring:
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/documentation-snippets/high-throughput-sequencer.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/documentation-snippets/high-throughput-sequencer.conf
 
 There are additional parameters that can in theory be fine-tuned, but we recommend to leave the defaults and use either
 high-throughput or low-latency. In our experience, a high-throughput sequencer can handle several thousand submissions

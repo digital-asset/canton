@@ -8,12 +8,10 @@
 Configure a Google Cloud Provider (GCP) KMS
 ===========================================
 
-.. enterprise-only::
-
 Like other Canton capabilities, GCP KMS configuration is enabled within a Canton
 node's configuration file. A KMS for GCP is configured in the following way:
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/encrypted-store-enabled-tagged.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/encrypted-store-enabled-tagged.conf
    :language: none
    :start-after: user-manual-entry-begin: GcpKmsConfig
    :end-before: user-manual-entry-end: GcpKmsConfig
