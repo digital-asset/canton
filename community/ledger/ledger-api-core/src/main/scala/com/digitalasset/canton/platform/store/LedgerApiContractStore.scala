@@ -1,11 +1,14 @@
 // Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.participant.store
+package com.digitalasset.canton.platform.store
 
+import com.daml.metrics.Timed
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
+import com.digitalasset.canton.participant.store.{ContractStore, PersistedContractInstance}
 import com.digitalasset.canton.protocol.{ContractInstance, LfContractId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
@@ -40,6 +43,7 @@ trait LedgerApiContractStore {
 final case class LedgerApiContractStoreImpl(
     participantContractStore: ContractStore,
     loggerFactory: NamedLoggerFactory,
+    metrics: LedgerApiServerMetrics,
 )(implicit ec: ExecutionContext)
     extends LedgerApiContractStore
     with NamedLogging {
@@ -47,34 +51,48 @@ final case class LedgerApiContractStoreImpl(
   def lookupPersisted(id: LfContractId)(implicit
       traceContext: TraceContext
   ): Future[Option[PersistedContractInstance]] =
-    failOnShutdown(
-      participantContractStore
-        .lookupPersisted(id)
-    )
+    Timed
+      .future(
+        metrics.contractStore.lookupPersisted,
+        failOnShutdown(
+          participantContractStore
+            .lookupPersisted(id)
+        ),
+      )
 
   def lookupBatchedNonCached(internalContractIds: Iterable[Long])(implicit
       traceContext: TraceContext
   ): Future[Map[Long, PersistedContractInstance]] =
-    failOnShutdown(
-      participantContractStore
-        .lookupBatchedNonCached(internalContractIds)
+    Timed.future(
+      metrics.contractStore.lookupBatched,
+      failOnShutdown(
+        participantContractStore
+          .lookupBatchedNonCached(internalContractIds)
+      ),
     )
 
   def lookupBatchedNonCachedInternalIds(contractIds: Iterable[LfContractId])(implicit
       traceContext: TraceContext
   ): Future[Map[LfContractId, Long]] =
-    failOnShutdown(
-      participantContractStore
-        .lookupBatchedNonCachedInternalIds(contractIds)
+    Timed.future(
+      metrics.contractStore.lookupBatchedInternalIds,
+      failOnShutdown(
+        participantContractStore
+          .lookupBatchedNonCachedInternalIds(contractIds)
+      ),
     )
 
   def lookupBatchedNonCachedContractIds(internalContractIds: Iterable[Long])(implicit
       traceContext: TraceContext
   ): Future[Map[Long, LfContractId]] =
-    failOnShutdown(
-      participantContractStore
-        .lookupBatchedNonCachedContractIds(internalContractIds)
-    )
+    Timed
+      .future(
+        metrics.contractStore.lookupBatchedContractIds,
+        failOnShutdown(
+          participantContractStore
+            .lookupBatchedNonCachedContractIds(internalContractIds)
+        ),
+      )
 
   def storeContracts(contracts: Seq[ContractInstance])(implicit
       traceContext: TraceContext
