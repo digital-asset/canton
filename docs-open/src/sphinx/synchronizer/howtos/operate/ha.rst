@@ -38,7 +38,7 @@ you can instead configure a synchronizer manager node and bootstrap the synchron
 
 Mediator nodes can be defined in the same manner as Canton participants and synchronizers.
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/external-mediators.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/external-mediators.conf
    :start-after: user-manual-entry-begin: ExternalMediatorNode
    :end-before: user-manual-entry-end: ExternalMediatorNode
    :dedent:
@@ -87,7 +87,7 @@ Deploy multiple sequencer nodes for the synchronizer with the following configur
 
     Starting from Canton 2.4.0, sequencer high availability is enabled by default when using supported storage.
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/external-ha-sequencers.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/external-ha-sequencers.conf
    :start-after: user-manual-entry-begin: SequencerHAConfig
    :end-before: user-manual-entry-end: SequencerHAConfig
 
@@ -102,7 +102,7 @@ will come online once the shared database has a sufficient state for starting.
 As these nodes are likely running in separate processes you could run this command entirely externally using a remote
 administration configuration.
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/external-ha-sequencers-remote-admin.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/external-ha-sequencers-remote-admin.conf
    :start-after: user-manual-entry-begin: SequencerHARemoteConfig
    :end-before: user-manual-entry-end: SequencerHARemoteConfig
 

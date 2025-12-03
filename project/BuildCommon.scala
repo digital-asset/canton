@@ -111,6 +111,8 @@ object BuildCommon {
       Global / excludeLintKeys += `community-app` / Compile / damlCompileDirectory,
       Global / excludeLintKeys += `community-app` / Compile / damlDarLfVersion,
       Global / excludeLintKeys += `community-app` / Compile / useVersionedDarName,
+      Global / excludeLintKeys += `community-app` / autoAPIMappings,
+      Global / excludeLintKeys += `community-app` / Test / run / trapExit,
       Global / excludeLintKeys ++= (CommunityProjects.allProjects ++ DamlProjects.allProjects)
         .map(
           _ / autoAPIMappings
@@ -688,6 +690,7 @@ object BuildCommon {
         `community-integration-testing` % Test,
         `sequencer-driver-api-conformance-tests` % Test,
         `mock-kms-driver` % Test,
+        `performance-driver` % Test,
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -710,6 +713,7 @@ object BuildCommon {
           better_files,
           monocle_macro,
           scala_logging,
+          sttp,
         ),
         // core packaging commands
         bundlePack := sharedAppPack ++ Seq(
@@ -773,6 +777,11 @@ object BuildCommon {
             "com.digitalasset.canton.http.json.tests.user",
           ),
           (
+            (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "model-tests",
+            (Test / damlDarOutput).value / "model-tests-1.0.0.dar",
+            "com.digitalasset.canton.http.json.tests.iou",
+          ),
+          (
             (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "Upgrades" / "Iface",
             (Test / damlDarOutput).value / "ifoo-0.0.1.dar",
             "com.digitalasset.canton.http.json.tests.upgrades.v1",
@@ -800,6 +809,8 @@ object BuildCommon {
         addFilesToHeaderCheck("*.daml", "../test/daml", Compile),
         addFilesToHeaderCheck("*.sh", ".", Test),
         HouseRules.damlRepoHeaderSettings,
+        // Allow to exit the systematic testing generator app
+        (Test / run / trapExit) := false,
       )
 
     lazy val `community-app-base` = project
@@ -911,7 +922,7 @@ object BuildCommon {
         `wartremover-annotations`,
         `community-testing` % "test->test",
         `wartremover-extension` % "test->test",
-        `mock-kms-driver` % Test,
+        `mock-kms-driver` % "test->test",
         DamlProjects.`bindings-java`,
       )
       .settings(
@@ -1201,7 +1212,7 @@ object BuildCommon {
 
     lazy val `performance-driver` = project
       .in(file("community/performance-driver"))
-      .dependsOn(`community-app` % "compile->compile;test->test")
+      .dependsOn(`community-app-base` % "compile->compile;test->test")
       .enablePlugins(DamlPlugin)
       .settings(
         sharedCantonCommunitySettings,
@@ -1222,7 +1233,7 @@ object BuildCommon {
         Compile / damlBuildOrder := Seq("main/daml/main", "main/daml/script"),
         Compile / damlCodeGeneration := Seq(
           (
-            (Compile / sourceDirectory).value / "daml",
+            (Compile / sourceDirectory).value / "daml" / "main",
             (Compile / damlDarOutput).value / "PerformanceTest.dar",
             "com.digitalasset.canton.performance.model",
           )

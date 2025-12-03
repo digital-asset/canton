@@ -24,7 +24,7 @@ You can control how long a session encryption key remains active by adjusting th
 values in your configuration. To globally increase the lifetime of session encryption keys,
 increase the ``expire-after-timeout`` for both the ``sender-cache`` and ``receiver-cache``.
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/session-key-cache.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/session-key-cache.conf
    :language: scala
    :start-after: user-manual-entry-begin: SessionEncryptionKeyConfig
    :end-before: user-manual-entry-end: SessionEncryptionKeyConfig
@@ -39,7 +39,7 @@ and the ``key-eviction-period``. The ``key-eviction-period`` should always be lo
 and at least as long as the sum of ``confirmation_response_timeout`` and ``mediator_reaction_timeout``, as configured
 in the :externalref:`dynamic Synchronizer parameters <dynamic_synchronizer_parameters>`.
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/session-key-cache.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/session-key-cache.conf
    :language: scala
    :start-after: user-manual-entry-begin: SessionSigningKeyConfig
    :end-before: user-manual-entry-end: SessionSigningKeyConfig

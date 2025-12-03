@@ -93,7 +93,7 @@ The following code snippet demonstrates the last two steps:
 
 .. todo::
     `#22917: Fix broken literalinclude <https://github.com/DACH-NY/canton/issues/22917>`_
-    literalinclude:: CANTON/enterprise/app/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/ParticipantOffboardingIntegrationTest.scala
+    literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/ParticipantOffboardingIntegrationTest.scala
     language: scala
     start-after: user-manual-entry-begin: OffboardParticipant
     end-before: user-manual-entry-end: OffboardParticipant

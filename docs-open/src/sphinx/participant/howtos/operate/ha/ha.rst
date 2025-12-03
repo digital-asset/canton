@@ -10,8 +10,6 @@
     For participant: load balancer configuration in front of gRPC Ledger API to route to active instance.
     Link to explanation on HA architecture.
 
-.. enterprise-only::
-
 .. _ha_user_manual:
 
 High Availability Usage
@@ -45,7 +43,7 @@ Manual trigger of a fail-over
 Fail-over from the active to a passive replica is done automatically when the active replica has a failure, but one can also initiate a graceful fail-over
 with the following command:
 
-.. literalinclude:: CANTON/enterprise/app/src/test/scala/com/digitalasset/canton/integration/tests/ReplicatedParticipantTest.scala
+.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/ReplicatedParticipantTest.scala
    :language: scala
    :start-after: user-manual-entry-begin: SetPassive
    :end-before: user-manual-entry-end: SetPassive
@@ -68,7 +66,7 @@ administering the logical participant, as they will simply be pointed at the loa
 Participants should be configured to expose an "IsActive" health status on our health HTTP server using the following
 monitoring configuration:
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/health-check-is-active.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/health-check-is-active.conf
    :start-after: user-manual-entry-begin: IsActiveHealthCheck
    :end-before: user-manual-entry-end: IsActiveHealthCheck
 

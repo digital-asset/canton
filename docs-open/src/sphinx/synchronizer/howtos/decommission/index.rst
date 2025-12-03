@@ -45,7 +45,7 @@ Disconnecting all nodes from the sequencer to be decommissioned
 
 .. todo::
     `#22917: Fix broken literalinclude <https://github.com/DACH-NY/canton/issues/22917>`_
-    literalinclude:: CANTON/enterprise/app/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/SequencerOffboardingIntegrationTest.scala
+    literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/SequencerOffboardingIntegrationTest.scala
     language: scala
     start-after: user-manual-entry-begin: SequencerOffboardingSwitchAwayMediator
     end-before: user-manual-entry-end: SequencerOffboardingSwitchAwayMediator
@@ -56,7 +56,7 @@ Disconnecting all nodes from the sequencer to be decommissioned
 
 .. todo::
     `#22917: Fix broken literalinclude <https://github.com/DACH-NY/canton/issues/22917>`_
-    literalinclude:: CANTON/enterprise/app/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/SequencerOffboardingIntegrationTest.scala
+    literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/SequencerOffboardingIntegrationTest.scala
     language: scala
     start-after: user-manual-entry-begin: SequencerOffboardingSwitchAwayParticipant
     end-before: user-manual-entry-end: SequencerOffboardingSwitchAwayParticipant
@@ -84,7 +84,7 @@ In that case, owner-to-key mappings must be removed for the keys it exclusively 
 
 .. todo::
     `#22917: Fix broken literalinclude <https://github.com/DACH-NY/canton/issues/22917>`_
-    literalinclude:: CANTON/enterprise/app/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/SequencerOffboardingIntegrationTest.scala
+    literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/SequencerOffboardingIntegrationTest.scala
     language: scala
     start-after: user-manual-entry-begin: SequencerOffboardingRemoveExclusiveKeys
     end-before: user-manual-entry-end: SequencerOffboardingRemoveExclusiveKeys
@@ -114,7 +114,7 @@ This means ensuring that at least one mediator remains on the synchronizer.
 
 .. todo::
     `#22917: Fix broken literalinclude <https://github.com/DACH-NY/canton/issues/22917>`_
-    literalinclude:: CANTON/enterprise/app/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/MediatorOffboardingIntegrationTest.scala
+    literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/offboarding/MediatorOffboardingIntegrationTest.scala
     language: scala
     start-after: user-manual-entry-begin: OffboardMediator
     end-before: user-manual-entry-end: OffboardMediator

@@ -14,11 +14,6 @@ import scala.util.control.NonFatal
 
 object DamlPlugin extends AutoPlugin {
 
-  sealed trait Codegen
-  object Codegen {
-    object Java extends Codegen
-  }
-
   object autoImport {
     val damlCompilerVersion =
       settingKey[String]("The Daml version to use for DAR and code generation")
@@ -83,7 +78,12 @@ object DamlPlugin extends AutoPlugin {
       damlDarOutput := resourceManaged.value,
       damlDarLfVersion := "",
       damlDependencies := Seq(),
-      damlJavaCodegenOutput := sourceManaged.value / "daml-codegen-java",
+      damlJavaCodegenOutput := {
+        val config = configuration.value.name
+        val targetDir = target.value
+        if (config == "compile") targetDir / "daml-codegen-java"
+        else targetDir / s"$config-daml-codegen-java"
+      },
       damlBuildOrder := Seq(),
       damlCodeGeneration := Seq(),
       damlEnableJavaCodegen := true,
@@ -97,36 +97,28 @@ object DamlPlugin extends AutoPlugin {
         val javaOutputDirectory = damlJavaCodegenOutput.value
         val cacheDirectory = streams.value.cacheDirectory
         val log = streams.value.log
-        val enableJavaCodegen = damlEnableJavaCodegen.value
         val excludeFromCodegen = damlExcludeFromCodegen.value
-        val depResolution = dependencyResolution.value
 
-        val cache = FileFunction.cached(cacheDirectory, FileInfo.hash) { input =>
-          val codegens =
-            if (enableJavaCodegen) Seq((Codegen.Java, javaOutputDirectory)) else Seq.empty
-          codegens.foreach { case (_, outputDirectory) => IO.delete(outputDirectory) }
-          settings
-            .filter { case (_, _, packageName) => !excludeFromCodegen.contains(packageName) }
-            .flatMap { case (damlProjectDirectory, darFile, packageName) =>
-              codegens
-                .flatMap { case (codegen, outputDirectory) =>
-                  generateCode(
-                    log,
-                    damlProjectDirectory,
-                    darFile,
-                    packageName,
-                    codegen,
-                    outputDirectory,
-                    damlCompilerVersion.value,
-                    damlUseCustomVersion.value,
-                    csrCacheDirectory.value,
-                    depResolution,
-                  )
-                }
-            }
-            .toSet
-        }
-        cache(settings.map(_._2).toSet).toSeq
+        if (damlEnableJavaCodegen.value) {
+          val cache = FileFunction.cached(cacheDirectory, FileInfo.hash) { input =>
+            IO.delete(javaOutputDirectory)
+            settings
+              .filter { case (_, _, packageName) => !excludeFromCodegen.contains(packageName) }
+              .flatMap { case (damlPackageDirectory, darFile, packageName) =>
+                generateCode(
+                  log,
+                  damlPackageDirectory,
+                  darFile,
+                  if (packageName.contains("java")) packageName else s"$packageName.java",
+                  "codegen-java",
+                  javaOutputDirectory,
+                  damlCompilerVersion.value,
+                )
+              }
+              .toSet
+          }
+          cache(settings.map(_._2).toSet).toSeq
+        } else Seq.empty
       },
       managedSourceDirectories += damlJavaCodegenOutput.value,
       damlBuild := {
@@ -300,6 +292,7 @@ object DamlPlugin extends AutoPlugin {
           "override-components" -> Map(
             "damlc" -> Map("version" -> damlVersion).asJava,
             "daml-script" -> Map("version" -> damlVersion).asJava,
+            "codegen-java" -> Map("version" -> damlVersion).asJava,
           ).asJava
         ).asJava
         // write package configuration file
@@ -490,12 +483,11 @@ object DamlPlugin extends AutoPlugin {
       "-Wupgrade-interfaces",
       "-Wupgrade-exceptions",
     )
-    val packageRootOpts = Seq("--package-root", projectBuildDirectory.toString)
     val outputOpts = Seq("--output", outputDar.getAbsolutePath)
     val targetOpts = if (outputLfVersion.isEmpty) Seq.empty else Seq("--target", outputLfVersion)
 
     runCommand(
-      Seq("dpm", "build") ++ buildOptions ++ packageRootOpts ++ outputOpts ++ targetOpts,
+      Seq("dpm", "build") ++ buildOptions ++ outputOpts ++ targetOpts,
       projectBuildDirectory,
       extraEnv = Seq("DAML_VERSION" -> damlVersion),
     )(failureMessage = s"dpm build failed [$originalDamlProjectFile]")
@@ -519,24 +511,21 @@ object DamlPlugin extends AutoPlugin {
     finally writer.close()
   }
 
-  /** Calls the Daml Codegen for the provided DAR file (hence, is suitable to use in a
+  /** Calls the dpm Codegen for the provided DAR file (hence, is suitable to use in a
     * sourceGenerator task)
     */
   def generateCode(
       log: Logger,
-      damlProjectDirectory: File,
+      damlPackageDirectory: File,
       darFile: File,
-      basePackageName: String,
-      language: Codegen,
-      managedSourceDir: File,
+      packageName: String,
+      codegen: String,
+      outputDir: File,
       damlVersion: String,
-      damlUseCustomVersion: Boolean,
-      cacheDirectory: File,
-      dependencyResolution: DependencyResolution,
   ): Seq[File] = {
     require(
-      damlProjectDirectory.exists,
-      s"supplied daml project directory must exist [${damlProjectDirectory.absolutePath}]",
+      damlPackageDirectory.exists,
+      s"supplied daml package directory must exist [${damlPackageDirectory.absolutePath}]",
     )
 
     if (!darFile.exists())
@@ -544,67 +533,19 @@ object DamlPlugin extends AutoPlugin {
         s"Codegen asked to generate code from nonexistent file: $darFile"
       )
 
-    val (packageName, suffix, extraArgs) = language match {
-      case Codegen.Java =>
-        (
-          basePackageName + (if (!basePackageName.contains("java")) ".java" else ""),
-          "java",
-          Seq("java"),
-        )
-    }
+    log.debug(s"Running $codegen for $darFile into $outputDir")
 
-    val codegenModule = ModuleID(
-      "com.daml",
-      "codegen-jvm-main",
-      damlVersion,
-    )
+    val outputOpts = Seq("--output-directory", outputDir.getAbsolutePath)
 
-    val codegenJarPath = if (damlUseCustomVersion) {
-      // Custom daml versions are already expected to exist locally in the specified daml head path
-      val damlHeadPath = Seq(
-        ".m2",
-        "repository",
-        "com",
-        "daml",
-        "codegen-jvm-main",
-        damlVersion,
-        s"codegen-jvm-main-$damlVersion.jar",
-      )
-      damlHeadPath.foldLeft(better.files.File(System.getProperty("user.home")))(_ / _).toJava
-    } else {
-      dependencyResolution
-        .retrieve(codegenModule, None, cacheDirectory, log)
-        .fold(
-          err => {
-            throw new MessageOnlyException(
-              s"Failed to resolve codegen jar for $codegenModule: $err"
-            )
-          },
-          files => {
-            if (files.isEmpty) {
-              throw new MessageOnlyException(
-                s"Failed to resolve codegen jar for $codegenModule: no files found"
-              )
-            }
-            files.head
-          },
-        )
-    }
+    // run the dpm process using the working directory of the daml.yaml file
+    runCommand(
+      Seq("dpm", codegen) ++ outputOpts ++ Seq(s"${darFile.getAbsolutePath}=$packageName"),
+      damlPackageDirectory,
+      extraEnv = Seq("DAML_VERSION" -> damlVersion),
+    )(failureMessage = s"dpm $codegen failed [${darFile.getName}]")
 
-    log.debug(s"Running $language-codegen for $darFile into $managedSourceDir")
-
-    // run the daml process using the working directory of the daml.yaml project file
-    val result = runCommand(
-      "java" +: "-jar" +: codegenJarPath.getAbsolutePath.toString +: (extraArgs ++ Seq(
-        s"${darFile.getAbsolutePath}=$packageName",
-        s"--output-directory=${managedSourceDir.getAbsolutePath}",
-      )),
-      damlProjectDirectory,
-      extraEnv = Seq.empty,
-    )(failureMessage = s"java -jar $codegenJarPath failed [${darFile.getName}]")
-
-    // return all generated scala files
-    (managedSourceDir ** s"*.$suffix").get
+    // return all generated java files
+    (outputDir ** s"*.java").get
   }
 
   private def runCommand(command: Seq[String], workingDir: File, extraEnv: Seq[(String, String)])(

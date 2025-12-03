@@ -20,7 +20,7 @@ Configuring Canton to run with a KMS Driver is done similarly to other KMS provi
 
 For example, for a Participant named `participant1`:
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/aws-kms-driver.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/aws-kms-driver.conf
     :language: none
     :start-after: user-manual-entry-begin: AwsKmsDriverConfig
     :end-before: user-manual-entry-end: AwsKmsDriverConfig
@@ -34,7 +34,7 @@ as the bridge between Canton and the target KMS.
 
 Run Canton with your driver `.jar` on its class path:
 
-``java -cp driver.jar:canton.jar com.digitalasset.canton.CantonEnterpriseApp -c canton.conf # further canton arguments``
+``java -cp driver.jar:canton.jar com.digitalasset.canton.CantonCommunityApp -c canton.conf # further canton arguments``
 
 For guidance on developing and deploying your own KMS Driver in Canton, refer to the
 :ref:`Canton KMS Driver developer guide <kms_driver_guide>`. This guide includes instructions for building a

@@ -28,7 +28,7 @@ called the **wrapper key**, to encrypt and decrypt the stored, private keys.
 To enable encrypted private key storage with a KMS using envelope encryption,
 we must add the following configuration and restart the node.
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/encrypted-store-enabled-tagged.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/encrypted-store-enabled-tagged.conf
    :language: none
    :start-after: user-manual-entry-begin: PrivateKeyStoreConfig
    :end-before: user-manual-entry-end: PrivateKeyStoreConfig
@@ -53,8 +53,6 @@ record its identifier, taking into account the following requirements.
 AWS KMS wrapper key requirements
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. enterprise-only::
-
 Supported values for identifying the wrapper key:
 
 - Key ID: ``1234abcd-12ab-34cd-56ef-1234567890ab``
@@ -69,8 +67,6 @@ this means:
 
 GCP KMS wrapper key requirements
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. enterprise-only::
 
 Supported values for identifying the wrapper key:
 
@@ -97,7 +93,7 @@ With the key created and its ID in hand, you must explicitly add the ID to the c
 
 .. _wrapper_key_config:
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/encrypted-store-enabled-tagged.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/encrypted-store-enabled-tagged.conf
    :language: none
    :start-after: user-manual-entry-begin: KmsKeyConfig
    :end-before: user-manual-entry-end: KmsKeyConfig
@@ -105,7 +101,7 @@ With the key created and its ID in hand, you must explicitly add the ID to the c
 An example configuration that puts together both AWS KMS and envelope encryption with a
 manually generated wrapper key is shown below:
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/encrypted-store-enabled-tagged.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/encrypted-store-enabled-tagged.conf
    :language: none
    :start-after: user-manual-entry-begin: EncryptedStoreConfigSynchronizerAwsKms
    :end-before: user-manual-entry-end: EncryptedStoreConfigSynchronizerAwsKms

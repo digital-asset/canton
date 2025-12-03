@@ -974,6 +974,8 @@ class ConnectedSynchronizer(
                 submitterMetadata,
                 contractIds,
                 targetSynchronizer,
+                overrideSourceValidationPkgIds = Map.empty,
+                overrideTargetValidationPkgIds = Map.empty,
               ),
             sourceTopology.unwrap,
           )
@@ -1195,6 +1197,9 @@ object ConnectedSynchronizer {
           doNotAwaitOnCheckingIncomingCommitments =
             parameters.doNotAwaitOnCheckingIncomingCommitments,
           commitmentCheckpointInterval = parameters.commitmentCheckpointInterval,
+          commitmentMismatchDebugging = parameters.commitmentMismatchDebugging,
+          commitmentProcessorNrAcsChangesBehindToTriggerCatchUp =
+            parameters.commitmentProcessorNrAcsChangesBehindToTriggerCatchUp,
         )
         topologyProcessor <- topologyProcessorFactory.create(
           acsCommitmentProcessor.scheduleTopologyTick

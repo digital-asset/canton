@@ -25,7 +25,7 @@ project/metals.sbt
 /theory/merkle-tree/src/output
 /theory/merkle-tree/paper/output
 benchmark*.dat
-/enterprise/synchronizer/out/
+/community/synchronizer/out/
 /docker_eth_log/
 /docker_fabric_log/
 canton-performance.tar.gz

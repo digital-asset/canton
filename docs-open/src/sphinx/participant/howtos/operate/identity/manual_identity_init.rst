@@ -20,7 +20,7 @@ Manual initialization is useful in the following circumstances:
 
 To disable the automatic initialization of a Participant Node, add the following to the configuration:
 
-.. literalinclude:: CANTON/enterprise/app/src/test/resources/participant1-manual-init.conf
+.. literalinclude:: CANTON/community/app/src/test/resources/participant1-manual-init.conf
    :start-after: user-manual-entry-begin: ManualParticipantNodeIdentityConfig
    :end-before: user-manual-entry-end: ManualParticipantNodeIdentityConfig
    :dedent:
@@ -58,7 +58,7 @@ initialize a Participant Node as follows:
 
 Wait for the Participant Node to initialize:
 
-.. literalinclude:: CANTON/enterprise/app/src/test/scala/com/digitalasset/canton/integration/tests/upgrade/MajorUpgradeUtils.scala
+.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/upgrade/MajorUpgradeUtils.scala
    :language: scala
    :start-after: user-manual-entry-begin: WaitForParticipantInitialization
    :end-before: user-manual-entry-end: WaitForParticipantInitialization

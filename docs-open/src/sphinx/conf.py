@@ -54,7 +54,6 @@ sys.path.insert(0, COMMUNITY_LIB_DIR)
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'canton_enterprise_only',
     'more_named_targets',
     'pygments_daml_lexer',
     'ref',
