@@ -292,7 +292,7 @@ object DamlPlugin extends AutoPlugin {
           "override-components" -> Map(
             "damlc" -> Map("version" -> damlVersion).asJava,
             "daml-script" -> Map("version" -> damlVersion).asJava,
-            "codegen-java" -> Map("version" -> damlVersion).asJava,
+            "codegen" -> Map("version" -> damlVersion).asJava,
           ).asJava
         ).asJava
         // write package configuration file

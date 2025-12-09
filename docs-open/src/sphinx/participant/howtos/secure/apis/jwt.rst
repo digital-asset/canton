@@ -133,6 +133,40 @@ You can determine if the use of privileged tokens should result in granting of t
 or the ``wildcard`` access levels by adding a definition of the ``access-level`` key and setting it to
 ``Admin`` or ``Wildcard`` respectively. The ``Admin`` is the default.
 
+Configure JWKS cache expiration
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The JWKS cache stores recently obtained public keys, which reduces the need for expensive, repeated calls to
+the JWKS HTTP endpoint. Keys are kept in the cache for a default period of 5 minutes. After this time, a key is evicted,
+and the participant must contact the JWKS address again to retrieve the latest keys. You can modify this behavior
+by setting:
+
+.. literalinclude:: CANTON/community/app/src/test/resources/documentation-snippets/jwks-cache.conf
+
+Similar parameter can also be set on the ``admin-api``.
+
+
+Configure maximum time-to-live of JWT tokens
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To improve security against JWT token theft or loss, it is recommended to use tokens with a very short expiration time,
+ideally between 5 and 15 minutes. Further details on this topic are available in the documentation on the importance of
+:externalref:`short-lived tokens<access-token-expiration>`.
+
+You can enforce a policy for short-lived tokens for a participant by configuring a ``max-token-lifetime`` parameter.
+If a presented token lacks an ``exp`` (expiration) field, or if its calculated time-to-live is greater than this
+configured maximum, the authentication layer will deny access.
+
+.. literalinclude:: CANTON/community/app/src/test/resources/documentation-snippets/max-token-lifetime.conf
+
+Similar parameter can also be set on the ``admin-api``.
+
+.. note::
+   The rejection is based only on the remaining time-to-live of the token. Consequently, a token originally valid for
+   24 hours could still be used successfully if presented within the last 5 minutes of its lifetime, assuming a
+   ``max-token-lifetime`` setting of 5 minutes.
+
+
 Configure remote console for JWT authorization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 

@@ -185,7 +185,8 @@ object HouseRules extends AutoPlugin {
 
   override def projectSettings =
     Seq(
-      javacOptions ++= Seq("-encoding", "UTF-8", "-Werror"),
+      javacOptions ++= Seq("-encoding", "UTF-8"),
+      Compile / compile / javacOptions += "-Werror", // only for compile task, but not for doc task
       scalacOptions ++= Seq("-encoding", "UTF-8", "-language:postfixOps"),
       scalacOptions ++= scalaOptionsForCompileScope.value ++ unusedSymbolsChecks.value,
       Test / scalacOptions --= scalacOptionsToDisableForTests,

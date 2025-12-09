@@ -242,7 +242,7 @@ Update request amplification
 eligible submission requests to multiple Sequencers to overcome message loss in faulty Sequencers.
 
 .. snippet:: participant_connectivity
-    .. success::  participantReference.synchronizers.modify("mysynchronizer", _.withSubmissionRequestAmplification(SubmissionRequestAmplification.NoAmplification))
+    .. success::  participantReference.synchronizers.modify("mysynchronizer", _.withSubmissionRequestAmplification(SubmissionRequestAmplification.NoAmplification.toInternal))
 
 2. Same as above, verify the updated configuration using ``config`` command.
 
