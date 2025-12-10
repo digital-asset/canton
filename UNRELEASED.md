@@ -37,6 +37,11 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
   Disabling this option activates a more robust time advancement broadcast mechanism on the sequencers,
   which however still does not tolerate crashes or big gaps in block sequencing times. The parameters can be configured
   in the sequencer via `canton.sequencers.<sequencer>.parameters.time-advancing-topology`.
+- LedgerAPI ListKnownParties supports an optional prefix filter argument filterParty.
+  The respective JSON API endpoint now additionally supports `identity-provider-id` as
+  an optional argument, as well as `filter-party`.
+- Protect the admin participant from self lock-out. It is now impossible for an admin to remove own admin rights or
+  delete itself.
 
 ### Preview Features
 - preview feature
@@ -104,3 +109,7 @@ Canton has been tested against the following versions of its dependencies:
 |----------------------------|----------------------------|
 | Java Runtime               | JAVA_VERSION               |
 | Postgres                   | POSTGRES_VERSION           |
+
+## update to GRPC 1.77.0
+
+removes [CVE-2025-58057](https://github.com/advisories/GHSA-3p8m-j85q-pgmj) from security reports.

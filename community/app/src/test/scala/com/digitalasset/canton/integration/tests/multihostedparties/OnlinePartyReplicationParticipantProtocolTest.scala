@@ -6,14 +6,14 @@ package com.digitalasset.canton.integration.tests.multihostedparties
 import cats.syntax.parallel.*
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
+import com.digitalasset.canton.config.ConsoleCommandTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.config.{ConsoleCommandTimeout, DbConfig}
 import com.digitalasset.canton.crypto.TestHash
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.examples.java.cycle as M
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
-import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.sequencer.channel.SequencerChannelProtocolTestExecHelpers
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -65,7 +65,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
     with SequencerChannelProtocolTestExecHelpers
     with HasCycleUtils {
   registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.H2](
+    new UseBftSequencer(
       loggerFactory,
       sequencerGroups = MultiSynchronizer(
         Seq(Set("sequencer1"), Set("sequencer2")).map(_.map(InstanceName.tryCreate))
@@ -414,6 +414,11 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
       targetCantonContracts.size shouldBe sourceContractIds.size
   }
 }
+
+// final class OnlinePartyReplicationParticipantProtocolTestH2
+//   extends OnlinePartyReplicationParticipantProtocolTest {
+//   registerPlugin(new UseH2(loggerFactory))
+// }
 
 final class OnlinePartyReplicationParticipantProtocolTestPostgres
     extends OnlinePartyReplicationParticipantProtocolTest {

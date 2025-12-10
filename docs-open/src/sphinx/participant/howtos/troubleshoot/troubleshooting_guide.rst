@@ -328,7 +328,11 @@ Common patterns from the canton log:
 
      * ``PERMISSION_DENIED(7,0): Claims do not authorize to act as party``
 
-          The log line contains the name of the missing claim, but not the actual claims. When using tokens based on user names (`Audience Based Tokens <https://docs.daml.com/app-dev/authorization.html#audience-based-tokens>`_ and `Scope Based Tokens <https://docs.daml.com/app-dev/authorization.html#scope-based-tokens>`_), consult the user management service to see whether you need to grant more rights to the user. When using tokens based on party names (`Custom Claims Access Tokens <https://docs.daml.com/app-dev/authorization.html#custom-daml-claims-access-tokens>`_), debug the token in `JWT.IO <https://jwt.io/#debugger-io>`_.
+          The log line contains the name of the missing claim, but not the actual claims. When using
+          :externalref:`Audience Based Tokens<audience-based-tokens>` and
+          :externalref:`Scope Based Tokens<scope-based-tokens>` consult the user management service to see whether you
+          need to grant more rights to the user. In either case debug the token to see if it contains the expected elements
+          using `JWT.IO <https://jwt.io/#debugger-io>`_.
 
 Disconnections
 --------------
@@ -656,3 +660,111 @@ The following guidelines are helpful to make this approach successful:
      * **Don't make assumptions up front** of which difference may or may not cause the problem. For example, if you are making the assumption that the problem is not caused by TLS, you may save one iteration, if you are right. But you will take a long detour, if you are wrong.
 
      * Do not assume that the problem is caused by a single difference between the two deployments. It could very well be that a **combination of differences** is needed to **reproduce the problem**.
+
+Self lock-out
+-------------
+
+Canton prohibits self lock-out by making sure that a participant admin cannot deactivate itself, delete itself or take away its own participant rights.
+In an unlikely event that a self lock-out happens, an administrator has a number of tools that facilitate regaining control of the participant node:
+
+    * configure a temporary admin user
+    * configure a temporary Canton Admin Token
+    * use the declarative api to to add an admin user
+    * use a bootstrap script to add an admin user
+
+.. _configure_a_temporary_admin_user:
+
+Configure a temporary admin user
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Add a temporary participant admin by appending the following entry to the command line or making an equivalent entry in the configuration file:
+
+.. code::
+
+    -C canton.participants.<participant>.ledger-api.user-management-service.additional-admin-user-id=temporary-admin
+
+Mint a JWT token for the `temporary-admin` in your IAM system. Use the obtained token to create a permanent participant admin. You can do it
+for instance by issuing a curl request to the participant's http endpoint:
+
+.. code::
+
+    curl \
+      -H "Authorization: Bearer <JWT-token>" \
+      -d '{
+          "rights" : [
+            {
+              "kind": {
+                "ParticipantAdmin" : {
+                  "value": {}
+                }
+              }
+            }
+          ],
+          "user" : {
+            "id" : "<permanent-participant-admin>",
+            "identityProviderId" : "",
+            "isDeactivated" : false,
+            "metadata" : null,
+            "primaryParty" : ""
+          }
+      }'
+    "http://<http-ledger-api.address>:<http-ledger-api.port>/v2/users"
+
+When done remove the now redundant `temporary-admin` configuration.
+
+Configure a temporary Canton Admin Token
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Configuring a Canton Admin Token should be considered an exceptional measure and you should revert the configuration as
+soon as you add a permanent participant admin user.
+
+Generate a random string and add the following options to the canton command line:
+
+.. code::
+
+    -C canton.participants.<participant>.ledger-api.admin-token-config.fixed-admin-token=<generated-random-string> \
+    -C canton.participants.<participant>.ledger-api.admin-token-config.admin-claim=true \
+    -C canton.parameters.non-standard-config=true
+
+Alternatively, make an equivalent entry in the participant's config file. Then, use the generated random string as
+a JWT token to issue a curl command that creates a permanent participant admin. You can use the curl formulation from
+:ref:`the previous chapter <configure_a_temporary_admin_user>`
+
+Use the declarative api to to add an admin user
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Configure an additional participant admin using the declarative api, which is available as a preview feature:
+
+.. code::
+
+    canton.parameters.non-standard-config = true
+    canton.parameters.enable-alpha-state-via-config = yes
+    canton.participants.<participant>.ledger-api.admin-token-config.admin-claim=true
+    canton.participants.<participant>.alpha-dynamic {
+      users = [
+        {
+          user = "<permanent-participant-admin>",
+          is-deactivated = false,
+          rights = {
+            participant-admin = true
+          }
+        }
+      ]
+    }
+
+.. note::
+    Declarative api requires setting the `non-standard-config` and `admin-token-config.admin-claims` flags that allow
+    it operate with the authority of the internal canton admin.
+
+Use a bootstrap script to add an admin user
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Create an additional participant admin in a bootstrap script:
+
+.. code::
+
+    <participant>.ledger_api.users.create(id="<permanent-participant-admin>", participantAdmin=true)
+
+.. note::
+    Bootstrap script requires setting the `non-standard-config` and `admin-token-config.admin-claims` flags that allow
+    it operate with the authority of the internal canton admin.

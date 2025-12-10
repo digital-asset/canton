@@ -1,3 +1,5 @@
+.. _error-categories-inventory_TransientServerFailure:
+
 TransientServerFailure
 ========================================================================================================================
     **Category id**: 1
@@ -12,6 +14,8 @@ TransientServerFailure
 
     **Retry strategy**: Retry quickly in load balancer.
 
+
+.. _error-categories-inventory_ContentionOnSharedResources:
 
 ContentionOnSharedResources
 ========================================================================================================================
@@ -28,6 +32,8 @@ ContentionOnSharedResources
     **Retry strategy**: Retry quickly (indefinitely or limited), but do not retry in load balancer.
 
 
+.. _error-categories-inventory_DeadlineExceededRequestStateUnknown:
+
 DeadlineExceededRequestStateUnknown
 ========================================================================================================================
     **Category id**: 3
@@ -42,6 +48,8 @@ DeadlineExceededRequestStateUnknown
 
     **Retry strategy**: Retry for a limited number of times with deduplication.
 
+
+.. _error-categories-inventory_SystemInternalAssumptionViolated:
 
 SystemInternalAssumptionViolated
 ========================================================================================================================
@@ -58,6 +66,8 @@ SystemInternalAssumptionViolated
     **Retry strategy**: Retry after operator intervention.
 
 
+.. _error-categories-inventory_AuthInterceptorInvalidAuthenticationCredentials:
+
 AuthInterceptorInvalidAuthenticationCredentials
 ========================================================================================================================
     **Category id**: 6
@@ -72,6 +82,8 @@ AuthInterceptorInvalidAuthenticationCredentials
 
     **Retry strategy**: Retry after application operator intervention.
 
+
+.. _error-categories-inventory_InsufficientPermission:
 
 InsufficientPermission
 ========================================================================================================================
@@ -88,6 +100,8 @@ InsufficientPermission
     **Retry strategy**: Retry after application operator intervention.
 
 
+.. _error-categories-inventory_UnredactedSecurityAlert:
+
 UnredactedSecurityAlert
 ========================================================================================================================
     **Category id**: 5
@@ -102,6 +116,8 @@ UnredactedSecurityAlert
 
     **Retry strategy**: Errors in this category are non-retryable.
 
+
+.. _error-categories-inventory_SecurityAlert:
 
 SecurityAlert
 ========================================================================================================================
@@ -118,6 +134,8 @@ SecurityAlert
     **Retry strategy**: Errors in this category are non-retryable.
 
 
+.. _error-categories-inventory_InvalidIndependentOfSystemState:
+
 InvalidIndependentOfSystemState
 ========================================================================================================================
     **Category id**: 8
@@ -132,6 +150,8 @@ InvalidIndependentOfSystemState
 
     **Retry strategy**: Retry after application operator intervention.
 
+
+.. _error-categories-inventory_InvalidGivenCurrentSystemStateOther:
 
 InvalidGivenCurrentSystemStateOther
 ========================================================================================================================
@@ -148,6 +168,8 @@ InvalidGivenCurrentSystemStateOther
     **Retry strategy**: Retry after application operator intervention.
 
 
+.. _error-categories-inventory_InvalidGivenCurrentSystemStateResourceExists:
+
 InvalidGivenCurrentSystemStateResourceExists
 ========================================================================================================================
     **Category id**: 10
@@ -162,6 +184,8 @@ InvalidGivenCurrentSystemStateResourceExists
 
     **Retry strategy**: Inspect resource failure and retry after resource failure has been resolved (depends on type of resource and application).
 
+
+.. _error-categories-inventory_InvalidGivenCurrentSystemStateResourceMissing:
 
 InvalidGivenCurrentSystemStateResourceMissing
 ========================================================================================================================
@@ -178,6 +202,8 @@ InvalidGivenCurrentSystemStateResourceMissing
     **Retry strategy**: Inspect resource failure and retry after resource failure has been resolved (depends on type of resource and application).
 
 
+.. _error-categories-inventory_InvalidGivenCurrentSystemStateSeekAfterEnd:
+
 InvalidGivenCurrentSystemStateSeekAfterEnd
 ========================================================================================================================
     **Category id**: 12
@@ -186,12 +212,14 @@ InvalidGivenCurrentSystemStateSeekAfterEnd
 
     **Default log level**: INFO
 
-    **Description**: This error is only used by the Ledger API server in connection with invalid offsets.
+    **Description**: The request failed because it resulted in an operation beyond the current upper bound (or 'end') defined by the system's state. For example, supplying a ledger offset which is larger than the current ledger end, or a record time that is in the future.
 
-    **Resolution**: Expectation: this error is only used by the Ledger API server in connection with invalid offsets.
+    **Resolution**: Resolution can occur naturally as the system progresses. The requested operation may become valid eventually once the system's state has advanced further. For example, when new ledger entries are added. If however the situation does not resolve as expected, operator intervention may be required.
 
-    **Retry strategy**: Retry after application operator intervention.
+    **Retry strategy**: Wait and retry. For example, retry a limited number of times with potentially increasing backoff. Hint: Inspect the retryable value of the error code to decide on the particular retry duration.
 
+
+.. _error-categories-inventory_BackgroundProcessDegradationWarning:
 
 BackgroundProcessDegradationWarning
 ========================================================================================================================
@@ -208,6 +236,8 @@ BackgroundProcessDegradationWarning
     **Retry strategy**: Not an API error, therefore not retryable.
 
 
+.. _error-categories-inventory_InternalUnsupportedOperation:
+
 InternalUnsupportedOperation
 ========================================================================================================================
     **Category id**: 14
@@ -218,6 +248,6 @@ InternalUnsupportedOperation
 
     **Description**: This error category is used to signal that an unimplemented code-path has been triggered by a client or participant operator request. This error is exposed on the API with grpc-status UNIMPLEMENTED without any details for security reasons
 
-    **Resolution**: This error is caused by a ledger-level misconfiguration or by an implementation bug. Resolution requires participant operator intervention.
+    **Resolution**: This error is caused by a ledger-level misconfiguration or by an implementation bug. Resolution requires node operator intervention.
 
     **Retry strategy**: Errors in this category are non-retryable.

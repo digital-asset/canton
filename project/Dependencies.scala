@@ -11,6 +11,15 @@ object Dependencies {
   val dpm_registry = metabuild.BuildInfo.dpm_registry
   val use_custom_daml_version = metabuild.BuildInfo.use_custom_daml_version
 
+  // Our Google artifact registry where we publish the Canton library JARs
+  val daArtifactRegistry = {
+    val registry = sys.env.getOrElse(
+      "GOOGLE_ARTIFACT_REGISTRY",
+      "europe-maven.pkg.dev/da-images-dev/playground-maven",
+    )
+    MavenRepository("da-artifact-registry", s"artifactregistry://$registry")
+  }
+
   lazy val osClassifier: String =
     if (sys.props("os.name").contains("Mac")) "osx" else sys.props("os.name").toLowerCase
 
@@ -35,7 +44,7 @@ object Dependencies {
   lazy val cats_law_version = "2.9.0"
   lazy val cats_scalacheck_version = "0.3.2"
   lazy val cats_version = "2.9.0"
-  lazy val checkerFramework_version = "3.28.0"
+  lazy val checkerFramework_version = "3.47.0"
   lazy val chimney_version = "1.4.0"
   lazy val circe_version = "0.14.2"
   lazy val circe_yaml_version = "1.15.0" // added to override snakeYaml vulnerability

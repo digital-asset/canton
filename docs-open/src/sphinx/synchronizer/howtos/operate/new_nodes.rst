@@ -36,7 +36,8 @@ BFT Sequencer
 
 #. Set up new connections in either or both directions for all Sequencers using the following commands:
 
-    .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/sequencer/bftordering/BftOrderingDynamicOnboardingIntegrationTest.scala
+
+    .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/util/OnboardsNewSequencerNode.scala
        :language: scala
        :start-after: user-manual-entry-begin: BftSequencerAddPeerEndpoint
        :end-before: user-manual-entry-end: BftSequencerAddPeerEndpoint

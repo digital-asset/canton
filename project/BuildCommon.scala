@@ -6,6 +6,7 @@ import better.files.{File as BetterFile, *}
 import com.lightbend.sbt.JavaFormatterPlugin
 import sbtlicensereport.SbtLicenseReport.autoImportImpl.*
 import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.{headerResources, headerSources}
+import org.latestbit.sbt.gcs.GcsPlugin.autoImport.*
 import org.scalafmt.sbt.ScalafmtPlugin
 import pl.project13.scala.sbt.JmhPlugin
 import pl.project13.scala.sbt.JmhPlugin.JmhKeys.Jmh
@@ -31,6 +32,7 @@ import wartremover.WartRemover.autoImport.*
 import java.nio.file.StandardOpenOption
 import scala.collection.compat.toOptionCompanionExtension
 import scala.language.postfixOps
+import scala.util.control.NonFatal
 
 object BuildCommon {
 
@@ -76,6 +78,7 @@ object BuildCommon {
         resolvers := resolvers.value ++ Option.when(Dependencies.use_custom_daml_version)(
           sbt.librarymanagement.Resolver.mavenLocal // conditionally enable local maven repo for custom Daml jars
         ),
+        publish / skip := true,
         ideExcludedDirectories := Seq(
           baseDirectory.value / "target"
         ),
@@ -84,13 +87,7 @@ object BuildCommon {
         // TODO (i20606) We should find versions of libraries that do not need this workaround
         libraryDependencySchemes += "io.circe" %% "circe-parser" % VersionScheme.Always,
         libraryDependencySchemes += "io.circe" %% "circe-yaml" % VersionScheme.Always,
-        /*
-        The default JDK is the latest stable (21 in August 2025) but we target the previous LTS (17)
-        for backwards compatibility (see `contributing/runtime-versions.md`).
-         */
-        scalacOptions ++= Seq("--release", "17"),
-        javacOptions ++= Seq("--release", "17"),
-        javacOptions ++= Seq("-proc:full"),
+        versionScheme := Some("semver-spec"),
       )
     )
 
@@ -100,6 +97,9 @@ object BuildCommon {
       name := "canton",
       // Reload on build changes
       Global / onChangedBuildSource := ReloadOnSourceChanges,
+      // credentials to publish to Google Artifact Registry
+      Global / googleCredentialsFile := sys.env.get("GOOGLE_CREDENTIALS_FILE").map(file),
+      Global / googleCredentialsDisable := googleCredentialsFile.value.isEmpty,
       // allow setting number of tasks via environment
       Global / concurrentRestrictions ++= sys.env
         .get("MAX_CONCURRENT_SBT_TEST_TASKS")
@@ -448,9 +448,38 @@ object BuildCommon {
     ignoreScalacOptionsWithPathsInIncrementalCompilation,
     ideExcludedDirectories += target.value,
     scalacOptions += "-Wconf:src=src_managed/.*:silent", // Ignore warnings in generated code
+    /*
+    The default JDK is the latest stable (21 in August 2025) but we target the previous LTS (17)
+    for backwards compatibility (see `contributing/runtime-versions.md`).
+     */
+    Compile / scalacOptions ++= Seq("--release", "17"),
+    Compile / javacOptions ++= Seq("--release", "17"),
+    Compile / compile / javacOptions += "-proc:full",
+    publish / skip := true,
   )
 
-  lazy val sharedCommunitySettings = sharedSettings ++ HouseRules.damlRepoHeaderSettings
+  // Publish JAR of individual projects, to be consumed as Java/Scala libs
+  lazy val publishLibSettings = Def.settings(
+    HouseRules.damlRepoHeaderSettings,
+    publishTo := {
+      val googleDisabled = (Global / googleCredentialsDisable).value
+      val ver = version.value
+      val baseDir = (ThisBuild / baseDirectory).value
+      if (!googleDisabled && !ver.contains("-SNAPSHOT"))
+        Some(daArtifactRegistry)
+      else {
+        // Test publication to a local directory
+        // This is useful to test the publish task graph, including doc generation
+        Some(Resolver.file("local-bundle", baseDir / "target" / "bundle"))
+      }
+    },
+    // Some links are broken because of the modularization, as they refer to classes in downstream projects
+    // This is allowed by unidoc, which computes the scaladoc of all projects at once
+    // However, to build the doc JAR of individual projects, we need to allow missing links
+    Compile / doc / scalacOptions += "-no-link-warnings",
+  )
+
+  lazy val sharedCommunitySettings = Def.settings(sharedSettings, publishLibSettings)
 
   lazy val cantonWarts = {
     val prefix = "com.digitalasset.canton."
@@ -483,7 +512,9 @@ object BuildCommon {
   }
 
   // applies to all Canton-based sub-projects (descendants of util-external, excluding util-external itself)
-  lazy val sharedCantonSettingsExternal: Seq[Def.Setting[_]] = sharedSettings ++ cantonWarts ++ Seq(
+  lazy val sharedCantonSettingsExternal: Seq[Def.Setting[_]] = Def.settings(
+    sharedSettings,
+    cantonWarts,
     // Ignore daml codegen generated files from code coverage
     coverageExcludedFiles := formatCoverageExcludes(
       """
@@ -491,20 +522,21 @@ object BuildCommon {
         |.*sbt-buildinfo.BuildInfo
         |.*daml-codegen.*
       """
-    )
+    ),
   )
 
   // applies to all Canton-based sub-projects (descendants of util-external)
   // this is split from sharedCantonSettingsExternal because util-external does not depend on community-testing
   // which contains the LogReporter
-  lazy val sharedCantonSettings: Seq[Def.Setting[_]] = sharedCantonSettingsExternal ++ Seq(
+  lazy val sharedCantonSettings: Seq[Def.Setting[_]] = Def.settings(
+    sharedCantonSettingsExternal,
     // Enable logging of begin and end of test cases, test suites, and test runs.
-    Test / testOptions += Tests.Argument("-C", "com.digitalasset.canton.LogReporter")
+    Test / testOptions += Tests.Argument("-C", "com.digitalasset.canton.LogReporter"),
   )
 
   lazy val sharedCantonCommunitySettings = Def.settings(
     sharedCantonSettings,
-    HouseRules.damlRepoHeaderSettings,
+    publishLibSettings,
     Compile / bufLintCheck := (Compile / bufLintCheck)
       .dependsOn(DamlProjects.`google-common-protos-scala` / PB.unpackDependencies)
       .value,
@@ -569,7 +601,8 @@ object BuildCommon {
       `community-participant`,
       `community-testing`,
       `community-integration-testing`,
-      microbench,
+      // TODO (i29705) removed as jmh code generation was possibly causing oom errors
+      // microbench,
       `daml-script-tests`,
       `performance-driver`,
       performance,
@@ -617,6 +650,8 @@ object BuildCommon {
       )
       .settings(
         sharedCantonSettingsExternal,
+        publishLibSettings,
+        publish / skip := false,
         libraryDependencies ++= Seq(
           cats,
           daml_non_empty,
@@ -633,7 +668,6 @@ object BuildCommon {
           shapeless,
           slick,
         ),
-        HouseRules.damlRepoHeaderSettings,
       )
 
     lazy val `daml-grpc-utils` = project
@@ -643,6 +677,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
+        publish / skip := false,
         libraryDependencies ++= Seq(
           grpc_api,
           scalapb_runtime_grpc,
@@ -658,6 +693,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings ++ cantonWarts,
+        publish / skip := false,
         libraryDependencies ++= Seq(
           better_files,
           daml_lf_data,
@@ -730,6 +766,9 @@ object BuildCommon {
             val oldStrategy = (ThisBuild / assemblyMergeStrategy).value
             oldStrategy(x)
         },
+        // See #23185: Prevent large string allocation during JMH fat-jar generation (prevent potential OOM errors)
+        // by ensuring this task never runs in assembly plugin in debug mode.
+        assembly / logLevel := Level.Info,
         assembly / mainClass := Some("com.digitalasset.canton.CantonCommunityApp"),
         assembly / assemblyJarName := s"canton-open-source-${version.value}.jar",
         // Explicit set the Daml project dependency to common
@@ -852,6 +891,7 @@ object BuildCommon {
       )
       .settings(
         sharedCantonCommunitySettings,
+        publish / skip := false,
         libraryDependencies ++= Seq(
           aws_kms,
           aws_sts,
@@ -1074,6 +1114,7 @@ object BuildCommon {
       .dependsOn(`util-external`, `base-errors` % "compile->compile;test->test")
       .settings(
         sharedCantonCommunitySettings,
+        publish / skip := false,
         libraryDependencies ++= Seq(
           scalapb_runtime // not sufficient to include only through the `common` dependency - race conditions ensue
         ),
@@ -1125,7 +1166,6 @@ object BuildCommon {
       )
       .settings(
         sharedCantonCommunitySettings,
-
         // The dependency override is needed because `community-testing` depends transitively on
         // `scalatest` and `community-app-base` depends transitively on `ammonite`, which in turn
         // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
@@ -1154,9 +1194,9 @@ object BuildCommon {
 
     // TODO(i12761): package individual libraries instead of uber JARs for external consumption
     lazy val `community-integration-testing-lib` = project
-      .settings(sharedCantonCommunitySettings)
-      .settings(UberLibrary.of(`community-integration-testing`))
       .settings(
+        sharedCantonCommunitySettings,
+        UberLibrary.of(`community-integration-testing`),
         Compile / packageDoc := {
           // TODO(i12766): producing an empty file because there are errors in running the `doc` task
           val destination = (Compile / packageDoc / artifactPath).value
@@ -1194,6 +1234,7 @@ object BuildCommon {
         `community-app` % "compile->test",
         `community-synchronizer` % "compile->test",
         `community-testing`,
+        `ledger-api-core`,
       )
 
     // Keep as separate sub-project due to possible dependency problems with daml_script_runner protobuf dependencies
@@ -1277,14 +1318,14 @@ object BuildCommon {
 
     // TODO(i12761): package individual libraries instead of uber JARs for external consumption
     lazy val `kms-driver-testing-lib` = project
-      .settings(sharedCantonCommunitySettings)
-      .settings(UberLibrary.of(`kms-driver-testing`))
       .settings(
+        sharedCantonCommunitySettings,
+        UberLibrary.of(`kms-driver-testing`),
         // The dependency override is needed because `community-testing` depends transitively on
         // `scalatest` and `community-app-base` depends transitively on `ammonite`, which in turn
         // depend on incompatible versions of `scala-xml` -- not ideal but only causes possible
         // runtime errors while testing and none have been found so far, so this should be fine for now
-        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.0.1"
+        dependencyOverrides += "org.scala-lang.modules" %% "scala-xml" % "2.0.1",
       )
 
     lazy val `aws-kms-driver` = project
@@ -1439,7 +1480,7 @@ object BuildCommon {
 
     lazy val `wartremover-annotations` = project
       .in(file("community/lib/wartremover-annotations"))
-      .settings(sharedSettings)
+      .settings(sharedCommunitySettings, publish / skip := false)
 
     lazy val `magnolify-addon` = project
       .in(file("community/lib/magnolify"))
@@ -1474,6 +1515,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings ++ cantonWarts,
+        publish / skip := false,
         libraryDependencies ++= Seq(
           cats,
           slf4j_api,
@@ -1494,6 +1536,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings ++ cantonWarts,
+        publish / skip := false,
         libraryDependencies ++= Seq(
           commons_io,
           grpc_netty_shaded,
@@ -1516,7 +1559,10 @@ object BuildCommon {
     lazy val `ledger-common-dars` =
       project
         .in(file("community/ledger/ledger-common-dars"))
-        .settings(sharedCommunitySettings, addFilesToHeaderCheck("*.daml", "daml", Compile))
+        .settings(
+          sharedCommunitySettings,
+          addFilesToHeaderCheck("*.daml", "daml", Compile),
+        )
 
     lazy val `ledger-common` = project
       .in(file("community/ledger/ledger-common"))
@@ -1530,6 +1576,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings, // Upgrade to sharedCantonSettings when com.digitalasset.canton.concurrent.Threading moved out of community-base
+        publish / skip := false,
         Compile / PB.targets := Seq(
           PB.gens.java -> (Compile / sourceManaged).value / "protobuf",
           scalapb.gen(flatPackage = false) -> (Compile / sourceManaged).value / "protobuf",
@@ -2279,7 +2326,8 @@ object BuildCommon {
         WartRemover,
       )
       .settings(
-        sharedSettings,
+        sharedCommunitySettings,
+        publish / skip := false,
         scalacOptions --= removeCompileFlagsForDaml,
         // we restrict the compilation to a few files that we actually need, skipping the large majority ...
         excludeFilter := HiddenFileFilter || "scalapb.proto",
@@ -2364,6 +2412,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
+        publish / skip := false,
         scalacOptions --= removeCompileFlagsForDaml,
         Compile / bufLintCheck := (Compile / bufLintCheck)
           .dependsOn(
@@ -2403,6 +2452,7 @@ object BuildCommon {
       )
       .settings(
         sharedCommunitySettings,
+        publish / skip := false,
         compileOrder := CompileOrder.JavaThenScala,
         scalacOptions ++= removeCompileFlagsForDaml,
         crossPaths := false, // Without this, the Java tests are not executed
@@ -2415,6 +2465,7 @@ object BuildCommon {
           scalacheck % Test,
           scalatestScalacheck % Test,
           slf4j_api,
+          checkerFramework,
         ),
       )
   }

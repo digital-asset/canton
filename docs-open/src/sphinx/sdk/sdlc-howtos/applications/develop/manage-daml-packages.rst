@@ -10,12 +10,12 @@ How to upload and query Daml packages
 
 Canton Participant Node exposes a package management service that allows uploading and discovery of the Daml packages.
 This guide explains how to programmatically manipulate the packages using the JSON Ledger API, which is described using
-:brokenref:`OpenAPI specifications<json-api-v2-openapi>`.
+:subsiteref:`OpenAPI specifications <reference-json-api-openapi>`.
 
-To learn about the Daml packages, see :brokenref:'DAR files and Daml packages' in the key concepts section.
+To learn about the Daml packages, see :subsiteref:`Daml packages and archive (.dar) files <daml-packages-and-daml-archive-files>`.
 
 Refer to the package management section in the operational guide to learn how to upload packages and inspected them
-using :brokenref:`the Canton console<getting-started-with-packages>`.
+using :externalref:`the Canton console <manage-daml-packages-and-archives>`.
 
 Prerequisites
 =============
@@ -45,7 +45,7 @@ and extract the package ID of your project's main package.
 
 .. code-block:: sh
 
-    daml damlc inspect-dar --json .daml/dist/mymodel-1.0.0.dar | jq '.main_package_id'
+    dpm damlc inspect-dar --json .daml/dist/mymodel-1.0.0.dar | jq '.main_package_id'
 
 The damlc responds with the package ID:
 

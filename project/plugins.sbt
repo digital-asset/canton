@@ -62,3 +62,6 @@ libraryDependencies += "org.apache.commons" % "commons-compress" % "1.27.1"
 
 // For testing openapi mapping
 addSbtPlugin("org.openapitools" % "sbt-openapi-generator" % "7.12.0")
+
+// To publish JARs to Google Artifact Registry
+addSbtPlugin("org.latestbit" % "sbt-gcs-plugin" % "1.16.1")
