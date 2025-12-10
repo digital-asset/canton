@@ -57,7 +57,7 @@ object Dependencies {
   lazy val grpc_version = grpc_protobuf.revision
   lazy val opentelemetry_instrumentation_grpc_version = s"$opentelemetry_version-alpha"
   lazy val opentelemetry_instrumentation_runtime_metrics_version = s"$opentelemetry_version-alpha"
-  lazy val opentelemetry_proto_version = "1.7.1-alpha"
+  lazy val opentelemetry_proto_version = "1.8.0-alpha"
   lazy val opentelemetry_sdk_autoconfigure_version = s"$opentelemetry_version-alpha"
   lazy val opentelemetry_version = "1.12.0"
   lazy val oracle_version = "19.18.0.0"
@@ -88,7 +88,7 @@ object Dependencies {
   // Note that later versions of testcontainers (e.g. 1.19.7 give problems with Oracle when running the data continuity tests"
   lazy val testcontainers_version = "1.15.1"
 
-  lazy val tink_version = "1.3.0"
+  lazy val tink_version = "1.12.0"
   lazy val toxiproxy_java_version = "2.1.7"
   lazy val web3j_version = "4.9.7"
 
@@ -253,7 +253,7 @@ object Dependencies {
   lazy val opentelemetry_otlp =
     "io.opentelemetry" % "opentelemetry-exporter-otlp-trace" % opentelemetry_version
   lazy val opentelemetry_proto =
-    "io.opentelemetry" % "opentelemetry-proto" % opentelemetry_proto_version
+    "io.opentelemetry.proto" % "opentelemetry-proto" % opentelemetry_proto_version
 
   lazy val opentelemetry_instrumentation_grpc =
     "io.opentelemetry.instrumentation" % "opentelemetry-grpc-1.6" % opentelemetry_instrumentation_grpc_version
