@@ -15,7 +15,11 @@ Template for a bigger topic
 #### Impact and Migration
 
 ### Minor Improvements
-- improvement
+- Protect the admin participant from self lock-out. It is now impossible for an admin to remove own admin rights or
+  delete itself.
+- LedgerAPI ListKnownParties supports an optional prefix filter argument filterParty.
+  The respective JSON API endpoint now additionally supports `identity-provider-id` as
+  an optional argument, as well as `filter-party`.
 
 ### Preview Features
 - preview feature

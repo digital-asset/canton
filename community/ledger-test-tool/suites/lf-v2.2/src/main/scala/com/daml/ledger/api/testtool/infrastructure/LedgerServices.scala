@@ -556,7 +556,11 @@ private final case class LedgerServicesJson(
     ): Future[ListKnownPartiesResponse] =
       clientCall(
         JsPartyManagementService.listKnownPartiesEndpoint,
-        PagedList((), Some(request.pageSize), Some(request.pageToken)),
+        PagedList(
+          (None, None): (Option[String], Option[String]),
+          Some(request.pageSize),
+          Some(request.pageToken),
+        ),
       )
 
     override def allocateParty(request: AllocatePartyRequest): Future[AllocatePartyResponse] =
