@@ -15,6 +15,7 @@ import com.digitalasset.canton.ledger.participant.state.{
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.pruning
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.RunningCommitments
+import com.digitalasset.canton.platform.store.interning.MockStringInterning
 import com.digitalasset.canton.protocol.messages.CommitmentPeriod
 import com.digitalasset.canton.protocol.{ExampleTransactionFactory, LfContractId}
 import com.digitalasset.canton.time.PositiveSeconds
@@ -72,15 +73,21 @@ class AcsCommitmentMultiHostedPartyTrackerTest
     List("Alice::1", "Bob::2", "Carol::3", "Danna::4", "Ed::5")
       .map(LfPartyId.assertFromString)
 
+  private val stringInterning = new MockStringInterning
+
   private def mk(): AcsCommitmentMultiHostedPartyTracker =
-    new AcsCommitmentMultiHostedPartyTracker(localId, timeouts, loggerFactory)
+    new AcsCommitmentMultiHostedPartyTracker(localId, timeouts, loggerFactory, stringInterning)
 
   private def buildPartyTracker(
       party: LfPartyId,
       threshold: Int,
-      participant: Seq[ParticipantId],
+      participants: Seq[ParticipantId],
   ): MultiHostedPartyTracker =
-    new MultiHostedPartyTracker(party, new AtomicInteger(threshold), mutable.Set(participant*))
+    new MultiHostedPartyTracker(
+      stringInterning.party.internalize(party),
+      new AtomicInteger(threshold),
+      mutable.Set.from(participants),
+    )
 
   /** this check if map contains a given party tracker, for a given period */
   private def checkIfMapContains(
@@ -93,7 +100,8 @@ class AcsCommitmentMultiHostedPartyTrackerTest
       case None =>
         fail(s"$period was not present in the AcsCommitmentMultiHostedPartyTracker's map")
       case Some(partyTrackerSet) =>
-        val party = partyTrackerSet.find(_.partyId == partyTracker.partyId)
+        val party =
+          partyTrackerSet.find(_.partyId == partyTracker.partyId)
         party match {
           case None =>
             fail(
@@ -119,7 +127,7 @@ class AcsCommitmentMultiHostedPartyTrackerTest
       case None =>
         fail(s"$period was not present in the AcsCommitmentMultiHostedPartyTracker's map")
       case Some(partyTrackerSet) =>
-        val party = partyTrackerSet.find(_.partyId == partyId)
+        val party = partyTrackerSet.find(_.partyId == stringInterning.party.internalize(partyId))
         party match {
           case None =>
             ()

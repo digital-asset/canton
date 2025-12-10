@@ -84,14 +84,14 @@ class ConsoleEnvironment(
 
   def consoleLogger: Logger = super.noTracingLogger
 
+  private lazy val health_ = new CantonHealthAdministration(this)
   @Help.Summary("Environment health inspection")
   @Help.Group("Health")
-  private lazy val health_ = new CantonHealthAdministration(this)
   def health: CantonHealthAdministration = health_
 
+  protected lazy val global_secret_ = new GlobalSecretKeyAdministration(this, loggerFactory)
   @Help.Summary("Global secret operations")
   @Help.Group("Secret keys")
-  protected lazy val global_secret_ = new GlobalSecretKeyAdministration(this, loggerFactory)
   // Overridden in TestEnvironment
   private[canton] def global_secret: GlobalSecretKeyAdministration = throw new RuntimeException(
     "Supported only in tests"
@@ -148,13 +148,16 @@ class ConsoleEnvironment(
       // due to the use of reflection to grab the help-items, i need to write the following, repetitive stuff explicitly
       val subItems =
         if (participants.local.nonEmpty)
-          participants.local.headOption.toList.flatMap(p =>
-            Help.getItems(p, baseTopic = Seq("$participant"), scope = scope)
+          Help.getItemsForClass[LocalParticipantReference](
+            baseTopic = Seq("$participant"),
+            scope = scope,
           )
         else if (participants.remote.nonEmpty)
-          participants.remote.headOption.toList.flatMap(p =>
-            Help.getItems(p, baseTopic = Seq("$participant"), scope = scope)
-          )
+          Help
+            .getItemsForClass[RemoteParticipantReference](
+              baseTopic = Seq("$participant"),
+              scope = scope,
+            )
         else Seq()
       Help.Item("$participant", None, Summary(""), Description(""), Topic(Seq()), subItems)
     }
