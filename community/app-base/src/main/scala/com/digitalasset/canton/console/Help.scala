@@ -140,7 +140,12 @@ object Help {
       scope: Set[FeatureFlag],
   ): Option[Item] =
     memberDescription(member)
-      .filter { case (summary, _, _, _) => scope.contains(summary.flag) }
+      .filter { case (summary, _, _, _) =>
+        val isVisibleForTesting =
+          member.annotations.exists(_.toString.contains("VisibleForTesting"))
+
+        scope.contains(summary.flag) && !isVisibleForTesting
+      }
       .map { case (summary, description, topic, group) =>
         val methodName = member.name.toString
         val info = member.info

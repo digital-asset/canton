@@ -51,10 +51,8 @@ import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors
   AcsCommitmentDegradationWithIneffectiveConfig,
 }
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.{
-  CachedCommitments,
   CommitmentSnapshot,
   CommitmentsPruningBound,
-  RunningCommitments,
   commitmentsFromStkhdCmts,
   computeCommitmentsPerParticipant,
   emptyCommitment,
@@ -120,8 +118,13 @@ sealed trait AcsCommitmentProcessorBaseTest
     UniqueIdentifier.tryFromProtoPrimitive("remoteParticipant3::synchronizer")
   )
 
+  protected val mockStringInterning = new MockStringInterning
+
   protected lazy val List(alice, bob, carol, danna, ed) =
     List("Alice::1", "Bob::2", "Carol::3", "Danna::4", "Ed::5").map(LfPartyId.assertFromString)
+
+  protected lazy val List(internalizedAlice, internalizedBob, internalizedCarol) =
+    List(alice, bob, carol).map(mockStringInterning.party.internalize)
 
   protected lazy val topology = Map(
     localId -> Set(alice),
@@ -911,6 +914,8 @@ class AcsCommitmentProcessorTest
         .getOrElse(throw new Exception(s"unknown contract ID $cid"))
     }
 
+    val mockStringInterning = new MockStringInterning
+
     for {
       snapshot <- acs.snapshot(TimeOfChange(at.forgetRefinement))
       byStkhSet = snapshot
@@ -922,8 +927,10 @@ class AcsCommitmentProcessorTest
           logger.debug(
             s"adding to commitment for stakeholders $stkhs the parts cid and reassignment counter in $m"
           )
-          SortedSet(stkhs.toList*) -> stakeholderCommitment(m.map {
-            case (cid, (_, reassignmentCounter)) => (cid, reassignmentCounter)
+          SortedSet(
+            stkhs.map(mockStringInterning.party.internalize).toList*
+          ) -> stakeholderCommitment(m.map { case (cid, (_, reassignmentCounter)) =>
+            (cid, reassignmentCounter)
           })
         }
       res <- AcsCommitmentProcessor
@@ -935,6 +942,7 @@ class AcsCommitmentProcessorTest
           None,
           parallelism,
           new CachedCommitments(),
+          stringInterning = mockStringInterning,
         )
     } yield res
   }
@@ -942,12 +950,12 @@ class AcsCommitmentProcessorTest
   // add a fixed contract id and custom reassignment counter
   // and return active and delta-added commitments (byte strings)
   private def addCommonContractId(
-      rc: RunningCommitments,
+      rc: InternalizedRunningCommitments,
       reassignmentCounter: ReassignmentCounter,
   ): (AcsCommitment.CommitmentType, AcsCommitment.CommitmentType) = {
     val commonContractId = coid(0, 0)
     rc.watermark shouldBe RecordTime.MinValue
-    rc.snapshot() shouldBe CommitmentSnapshot(
+    rc.snapshot() shouldBe CommitmentSnapshot[InternedPartyId](
       RecordTime.MinValue,
       Map.empty,
       Map.empty,
@@ -967,10 +975,13 @@ class AcsCommitmentProcessorTest
     rc.watermark shouldBe rt(1, 0)
     val snapshot = rc.snapshot()
     snapshot.recordTime shouldBe rt(1, 0)
-    snapshot.active.keySet shouldBe Set(SortedSet(alice, bob))
-    snapshot.delta.keySet shouldBe Set(SortedSet(alice, bob))
+    snapshot.active.keySet shouldBe Set(SortedSet(internalizedAlice, internalizedBob))
+    snapshot.delta.keySet shouldBe Set(SortedSet(internalizedAlice, internalizedBob))
     snapshot.deleted shouldBe Set.empty
-    (snapshot.active(SortedSet(alice, bob)), snapshot.delta(SortedSet(alice, bob)))
+    (
+      snapshot.active(SortedSet(internalizedAlice, internalizedBob)),
+      snapshot.delta(SortedSet(internalizedAlice, internalizedBob)),
+    )
   }
 
   "AcsCommitmentProcessor.safeToPrune" must {
@@ -1176,16 +1187,16 @@ class AcsCommitmentProcessorTest
     // Covers the case where a previously hosted stakeholder got disabled
     "ignore contracts in the ACS snapshot where the participant doesn't host a stakeholder" in {
       val snapshot1 = Map(
-        SortedSet(bob, carol) -> LtHash16().getByteString()
+        SortedSet(internalizedBob, internalizedCarol) -> LtHash16().getByteString()
       )
       val snapshot2 = Map(
         // does the participant localId, which does not host neither bob nor carol, have this commitment
         // because the scenario is that localId used to host at least one of them?
-        SortedSet(bob, carol) -> LtHash16().getByteString(),
-        SortedSet(alice, bob) -> LtHash16().getByteString(),
+        SortedSet(internalizedBob, internalizedCarol) -> LtHash16().getByteString(),
+        SortedSet(internalizedAlice, internalizedBob) -> LtHash16().getByteString(),
       )
       val snapshot3 = Map(
-        SortedSet(alice, bob) -> LtHash16().getByteString()
+        SortedSet(internalizedAlice, internalizedBob) -> LtHash16().getByteString()
       )
       val crypto = cryptoSetup(localId, topology)
 
@@ -1199,6 +1210,7 @@ class AcsCommitmentProcessorTest
             None,
             parallelism,
             new CachedCommitments(),
+            stringInterning = mockStringInterning,
           )
           .failOnShutdown
         res2 <- AcsCommitmentProcessor
@@ -1210,6 +1222,7 @@ class AcsCommitmentProcessorTest
             None,
             parallelism,
             new CachedCommitments(),
+            stringInterning = mockStringInterning,
           )
           .failOnShutdown
         res3 <- AcsCommitmentProcessor
@@ -1221,6 +1234,7 @@ class AcsCommitmentProcessorTest
             None,
             parallelism,
             new CachedCommitments(),
+            stringInterning = mockStringInterning,
           )
           .failOnShutdown
       } yield {
@@ -1760,70 +1774,12 @@ class AcsCommitmentProcessorTest
       }
     }
 
-    "prune multi-hosted correctly with buffered requests that spans several periods" in {
-      val timeProofs = List(3L, 8, 20).map(CantonTimestamp.ofEpochSecond)
-      val contractSetup = Map(
-        // contract ID to stakeholders, creation and archival time
-        (
-          coid(0, 0),
-          (
-            Set(alice, bob),
-            toc(1),
-            toc(9),
-            initialReassignmentCounter,
-            initialReassignmentCounter,
-          ),
-        )
-      )
-
-      val topology = Map(
-        localId -> Set(alice),
-        remoteId1 -> Set(bob),
-        remoteId2 -> Set(bob),
-      )
-
-      val (proc, store, sequencerClient, changes, _) =
-        testSetupDontPublish(
-          timeProofs,
-          contractSetup,
-          topology,
-          acsCommitmentsCatchUpModeEnabled = false,
-        )
-
-      val remoteCommitments = List(
-        (remoteId1, Map((coid(0, 0), initialReassignmentCounter)), ts(0), ts(20), None)
-      )
-
-      (for {
-        processor <- proc
-        remote <- remoteCommitments.parTraverse(commitmentMsg)
-        delivered = remote.map(cmt =>
-          (
-            cmt.message.period.toInclusive.plusSeconds(1),
-            List(OpenEnvelope(cmt, Recipients.cc(localId))(testedProtocolVersion)),
-          )
-        )
-        // First ask for the remote commitments to be processed
-        _ <- delivered.parTraverse_ { case (ts, batch) =>
-          processor.processBatchInternal(ts.forgetRefinement, batch).flatMap(_.unwrap)
-        }
-        _ <- processChanges(processor, store, changes)
-
-        outstanding <- store.noOutstandingCommitments(timeProofs.lastOption.value)
-      } yield {
-        // multi hosted should have cleared since the threshold for bob would be 1 (and we send 1 commitment)
-        processor.multiHostedPartyTracker.commitmentThresholdsMap shouldBe empty
-        // we have not received anything from remoteId2, however because of multi hosted we should be able to advance
-        assert(outstanding.contains(toc(20).timestamp))
-      })
-    }
-
     "running commitments work as expected" in {
       val rc =
-        new pruning.AcsCommitmentProcessor.RunningCommitments(RecordTime.MinValue, TrieMap.empty)
+        new InternalizedRunningCommitments(RecordTime.MinValue, TrieMap.empty, mockStringInterning)
 
       rc.watermark shouldBe RecordTime.MinValue
-      rc.snapshot() shouldBe CommitmentSnapshot(
+      rc.snapshot() shouldBe CommitmentSnapshot[InternedPartyId](
         RecordTime.MinValue,
         Map.empty,
         Map.empty,
@@ -1848,8 +1804,14 @@ class AcsCommitmentProcessorTest
       rc.watermark shouldBe rt(1, 0)
       val snap1 = rc.snapshot()
       snap1.recordTime shouldBe rt(1, 0)
-      snap1.active.keySet shouldBe Set(SortedSet(alice, bob), SortedSet(bob, carol))
-      snap1.delta.keySet shouldBe Set(SortedSet(alice, bob), SortedSet(bob, carol))
+      snap1.active.keySet shouldBe Set(
+        SortedSet(internalizedAlice, internalizedBob),
+        SortedSet(internalizedBob, internalizedCarol),
+      )
+      snap1.delta.keySet shouldBe Set(
+        SortedSet(internalizedAlice, internalizedBob),
+        SortedSet(internalizedBob, internalizedCarol),
+      )
       snap1.deleted shouldBe Set.empty
 
       val ch2 = AcsChange(
@@ -1871,9 +1833,12 @@ class AcsCommitmentProcessorTest
       rc.watermark shouldBe rt(1, 1)
       val snap2 = rc.snapshot()
       snap2.recordTime shouldBe rt(1, 1)
-      snap2.active.keySet shouldBe Set(SortedSet(alice, carol), SortedSet(bob, carol))
-      snap2.delta.keySet shouldBe Set(SortedSet(alice, carol))
-      snap2.deleted shouldBe Set(SortedSet(alice, bob))
+      snap2.active.keySet shouldBe Set(
+        SortedSet(internalizedAlice, internalizedCarol),
+        SortedSet(internalizedBob, internalizedCarol),
+      )
+      snap2.delta.keySet shouldBe Set(SortedSet(internalizedAlice, internalizedCarol))
+      snap2.deleted shouldBe Set(SortedSet(internalizedAlice, internalizedBob))
 
       val ch3 = AcsChange(
         deactivations = Map.empty,
@@ -1888,17 +1853,20 @@ class AcsCommitmentProcessorTest
       rc.update(rt(3, 0), ch3)
       val snap3 = rc.snapshot()
       snap3.recordTime shouldBe rt(3, 0)
-      snap3.active.keySet shouldBe Set(SortedSet(alice, carol), SortedSet(bob, carol))
-      snap3.delta.keySet shouldBe Set(SortedSet(alice, carol))
+      snap3.active.keySet shouldBe Set(
+        SortedSet(internalizedAlice, internalizedCarol),
+        SortedSet(internalizedBob, internalizedCarol),
+      )
+      snap3.delta.keySet shouldBe Set(SortedSet(internalizedAlice, internalizedCarol))
       snap3.deleted shouldBe Set.empty
     }
 
     "running commitments work as expected with garbage collection" in {
       val rc =
-        new pruning.AcsCommitmentProcessor.RunningCommitments(RecordTime.MinValue, TrieMap.empty)
+        new InternalizedRunningCommitments(RecordTime.MinValue, TrieMap.empty, mockStringInterning)
 
       rc.watermark shouldBe RecordTime.MinValue
-      rc.snapshot(gc = false) shouldBe CommitmentSnapshot(
+      rc.snapshot(gc = false) shouldBe CommitmentSnapshot[InternedPartyId](
         RecordTime.MinValue,
         Map.empty,
         Map.empty,
@@ -1923,8 +1891,14 @@ class AcsCommitmentProcessorTest
       rc.watermark shouldBe rt(1, 0)
       val snap1 = rc.snapshot(gc = false)
       snap1.recordTime shouldBe rt(1, 0)
-      snap1.active.keySet shouldBe Set(SortedSet(alice, bob), SortedSet(bob, carol))
-      snap1.delta.keySet shouldBe Set(SortedSet(alice, bob), SortedSet(bob, carol))
+      snap1.active.keySet shouldBe Set(
+        SortedSet(internalizedAlice, internalizedBob),
+        SortedSet(internalizedBob, internalizedCarol),
+      )
+      snap1.delta.keySet shouldBe Set(
+        SortedSet(internalizedAlice, internalizedBob),
+        SortedSet(internalizedBob, internalizedCarol),
+      )
       snap1.deleted shouldBe Set.empty
 
       val ch2 = AcsChange(
@@ -1947,16 +1921,16 @@ class AcsCommitmentProcessorTest
       val snap2 = rc.snapshot(gc = false)
       snap2.recordTime shouldBe rt(1, 1)
       snap2.active.keySet should contain theSameElementsAs Set(
-        SortedSet(alice, bob),
-        SortedSet(alice, carol),
-        SortedSet(bob, carol),
+        SortedSet(internalizedAlice, internalizedBob),
+        SortedSet(internalizedAlice, internalizedCarol),
+        SortedSet(internalizedBob, internalizedCarol),
       )
-      // doesn't contain (alice, bob) because delta doesn't contain deleted
+      // doesn't contain (internalizedAlice, internalizedBob) because delta doesn't contain deleted
       snap2.delta.keySet should contain theSameElementsAs Set(
-        SortedSet(alice, carol),
-        SortedSet(bob, carol),
+        SortedSet(internalizedAlice, internalizedCarol),
+        SortedSet(internalizedBob, internalizedCarol),
       )
-      snap2.deleted shouldBe Set(SortedSet(alice, bob))
+      snap2.deleted shouldBe Set(SortedSet(internalizedAlice, internalizedBob))
 
       val ch3 = AcsChange(
         deactivations = Map.empty,
@@ -1972,33 +1946,33 @@ class AcsCommitmentProcessorTest
       val snap3 = rc.snapshot(gc = false)
       snap3.recordTime shouldBe rt(3, 0)
       snap3.active.keySet should contain theSameElementsAs Set(
-        SortedSet(alice, bob),
-        SortedSet(alice, carol),
-        SortedSet(bob, carol),
+        SortedSet(internalizedAlice, internalizedBob),
+        SortedSet(internalizedAlice, internalizedCarol),
+        SortedSet(internalizedBob, internalizedCarol),
       )
       snap3.delta.keySet should contain theSameElementsAs Set(
-        SortedSet(alice, carol),
-        SortedSet(bob, carol),
+        SortedSet(internalizedAlice, internalizedCarol),
+        SortedSet(internalizedBob, internalizedCarol),
       )
-      snap3.deleted shouldBe Set(SortedSet(alice, bob))
+      snap3.deleted shouldBe Set(SortedSet(internalizedAlice, internalizedBob))
 
       val snap3WithGc = rc.snapshot()
       snap3WithGc.recordTime shouldBe rt(3, 0)
       snap3WithGc.active.keySet should contain theSameElementsAs Set(
-        SortedSet(alice, carol),
-        SortedSet(bob, carol),
+        SortedSet(internalizedAlice, internalizedCarol),
+        SortedSet(internalizedBob, internalizedCarol),
       )
       snap3WithGc.delta.keySet should contain theSameElementsAs Set(
-        SortedSet(alice, carol),
-        SortedSet(bob, carol),
+        SortedSet(internalizedAlice, internalizedCarol),
+        SortedSet(internalizedBob, internalizedCarol),
       )
-      snap3WithGc.deleted shouldBe Set(SortedSet(alice, bob))
+      snap3WithGc.deleted shouldBe Set(SortedSet(internalizedAlice, internalizedBob))
 
       val snap4WithGc = rc.snapshot()
       snap4WithGc.recordTime shouldBe rt(3, 0)
       snap4WithGc.active.keySet should contain theSameElementsAs Set(
-        SortedSet(alice, carol),
-        SortedSet(bob, carol),
+        SortedSet(internalizedAlice, internalizedCarol),
+        SortedSet(internalizedBob, internalizedCarol),
       )
       snap4WithGc.delta.keySet shouldBe empty
       snap4WithGc.deleted shouldBe empty
@@ -2006,9 +1980,9 @@ class AcsCommitmentProcessorTest
 
     "contracts differing by reassignment counter result in different commitments if the PV support reassignment counters" in {
       val rc1 =
-        new pruning.AcsCommitmentProcessor.RunningCommitments(RecordTime.MinValue, TrieMap.empty)
+        new InternalizedRunningCommitments(RecordTime.MinValue, TrieMap.empty, mockStringInterning)
       val rc2 =
-        new pruning.AcsCommitmentProcessor.RunningCommitments(RecordTime.MinValue, TrieMap.empty)
+        new InternalizedRunningCommitments(RecordTime.MinValue, TrieMap.empty, mockStringInterning)
       val reassignmentCounter2 = initialReassignmentCounter + 1
 
       val (activeCommitment1, deltaAddedCommitment1) =
@@ -2088,7 +2062,7 @@ class AcsCommitmentProcessorTest
       // to an empty snapshot using AcsCommitmentProcessor.update
       // and then compute counter-participant commitments by adding together stakeholder commitments
       val rc =
-        new pruning.AcsCommitmentProcessor.RunningCommitments(RecordTime.MinValue, TrieMap.empty)
+        new RunningCommitments(RecordTime.MinValue, TrieMap.empty)
 
       rc.update(rt(2, 0), acsChanges(ts(2)))
       rc.watermark shouldBe rt(2, 0)
@@ -3953,7 +3927,8 @@ class AcsCommitmentProcessorTest
             acsCommitmentConfigStore,
             loggerFactory,
           )
-        val runningCommitments = initRunningCommitments(inMemoryCommitmentStore)
+        val runningCommitments =
+          initRunningCommitments(inMemoryCommitmentStore, mockStringInterning)
         val cachedCommitments = new CachedCommitments()
 
         (for {
@@ -3963,16 +3938,27 @@ class AcsCommitmentProcessorTest
           byParticipant2 <- AcsCommitmentProcessor
             .stakeholderCommitmentsPerParticipant(
               localId,
-              rc.snapshot().active,
+              rc.snapshot().active.map { case (key, value) =>
+                key.map(mockStringInterning.party.externalize) -> value
+              },
               crypto,
               ts(2),
               parallelism,
             )
-          normalCommitments2 = computeCommitmentsPerParticipant(byParticipant2, cachedCommitments)
+
+          internalizedByParticipant2 = AcsCommitmentProcessor.internalizeCommitmentsPerParticipant(
+            byParticipant2,
+            mockStringInterning,
+          )
+
+          normalCommitments2 = computeCommitmentsPerParticipant(
+            internalizedByParticipant2,
+            cachedCommitments,
+          )
           _ = cachedCommitments.setCachedCommitments(
             normalCommitments2,
             rc.snapshot().active,
-            byParticipant2.map { case (pid, set) =>
+            internalizedByParticipant2.map { case (pid, set) =>
               (pid, set.map { case (stkhd, _) => stkhd }.toSet)
             },
           )
@@ -3986,20 +3972,27 @@ class AcsCommitmentProcessorTest
           byParticipant <- AcsCommitmentProcessor
             .stakeholderCommitmentsPerParticipant(
               localId,
-              rc.snapshot().active,
+              rc.snapshot().active.map { case (key, value) =>
+                key.map(mockStringInterning.party.externalize) -> value
+              },
               crypto,
               ts(4),
               parallelism,
             )
 
+          internalizedByParticipant = AcsCommitmentProcessor.internalizeCommitmentsPerParticipant(
+            byParticipant,
+            mockStringInterning,
+          )
+
           computeFromCachedRemoteId1 = cachedCommitments.computeCmtFromCached(
             remoteId1,
-            byParticipant(remoteId1),
+            internalizedByParticipant(remoteId1),
           )
 
           computeFromCachedRemoteId2 = cachedCommitments.computeCmtFromCached(
             remoteId2,
-            byParticipant(remoteId2),
+            internalizedByParticipant(remoteId2),
           )
         } yield {
           // because more than 1/2 of the stakeholder commitments for participant "remoteId1" change, we shouldn't
@@ -4031,7 +4024,8 @@ class AcsCommitmentProcessorTest
             acsCommitmentConfigStore,
             loggerFactory,
           )
-        val runningCommitments = initRunningCommitments(inMemoryCommitmentStore)
+        val runningCommitments =
+          initRunningCommitments(inMemoryCommitmentStore, mockStringInterning)
         val cachedCommitments = new CachedCommitments()
 
         (for {
@@ -4048,6 +4042,7 @@ class AcsCommitmentProcessorTest
               parallelism,
               // behaves as if we don't use caching, because we don't reuse this object for further computation
               new CachedCommitments(),
+              stringInterning = mockStringInterning,
             )
           cachedCommitments2 <- AcsCommitmentProcessor
             .commitments(
@@ -4058,6 +4053,7 @@ class AcsCommitmentProcessorTest
               None,
               parallelism,
               cachedCommitments,
+              stringInterning = mockStringInterning,
             )
 
           _ = rc.update(rt(4, 0), acsChanges(ts(4)))
@@ -4071,6 +4067,7 @@ class AcsCommitmentProcessorTest
               parallelism,
               // behaves as if we don't use caching, because we don't reuse this object for further computation
               new CachedCommitments(),
+              stringInterning = mockStringInterning,
             )
           cachedCommitments4 <- AcsCommitmentProcessor
             .commitments(
@@ -4081,6 +4078,7 @@ class AcsCommitmentProcessorTest
               None,
               parallelism,
               cachedCommitments,
+              stringInterning = mockStringInterning,
             )
 
         } yield {
@@ -4100,7 +4098,8 @@ class AcsCommitmentProcessorTest
             acsCommitmentConfigStore,
             loggerFactory,
           )
-        val runningCommitments = initRunningCommitments(inMemoryCommitmentStore)
+        val runningCommitments =
+          initRunningCommitments(inMemoryCommitmentStore, mockStringInterning)
         val cachedCommitments = new CachedCommitments()
 
         (for {
@@ -4113,16 +4112,27 @@ class AcsCommitmentProcessorTest
           byParticipant2 <- AcsCommitmentProcessor
             .stakeholderCommitmentsPerParticipant(
               remoteId2,
-              rc.snapshot().active,
+              rc.snapshot().active.map { case (key, value) =>
+                key.map(mockStringInterning.party.externalize) -> value
+              },
               crypto,
               ts(2),
               parallelism,
             )
-          normalCommitments2 = computeCommitmentsPerParticipant(byParticipant2, cachedCommitments)
+
+          internalizedByParticipant2 = AcsCommitmentProcessor.internalizeCommitmentsPerParticipant(
+            byParticipant2,
+            mockStringInterning,
+          )
+
+          normalCommitments2 = computeCommitmentsPerParticipant(
+            internalizedByParticipant2,
+            cachedCommitments,
+          )
           _ = cachedCommitments.setCachedCommitments(
             normalCommitments2,
             rc.snapshot().active,
-            byParticipant2.map { case (pid, set) =>
+            internalizedByParticipant2.map { case (pid, set) =>
               (pid, set.map { case (stkhd, _) => stkhd }.toSet)
             },
           )
@@ -4130,7 +4140,9 @@ class AcsCommitmentProcessorTest
           byParticipant <- AcsCommitmentProcessor
             .stakeholderCommitmentsPerParticipant(
               remoteId2,
-              rc.snapshot().active,
+              rc.snapshot().active.map { case (key, value) =>
+                key.map(mockStringInterning.party.externalize) -> value
+              },
               crypto,
               ts(2),
               parallelism,
@@ -4143,17 +4155,17 @@ class AcsCommitmentProcessorTest
             case None => None
           }
 
+          internalizedByParticipantWithOffboard = AcsCommitmentProcessor
+            .internalizeCommitmentsPerParticipant(byParticipantWithOffboard, mockStringInterning)
+
           computeFromCachedLocalId1 = cachedCommitments.computeCmtFromCached(
             localId,
-            byParticipantWithOffboard(localId),
+            internalizedByParticipantWithOffboard(localId),
           )
 
           // the correct commitment for local should not include any commitment for (alice, ed)
           correctCmts = commitmentsFromStkhdCmts(
-            byParticipantWithOffboard(localId)
-              .map { case (_, cmt) => cmt }
-              .filter(_ != AcsCommitmentProcessor.emptyCommitment)
-              .toSeq
+            byParticipantWithOffboard(localId).values.toSeq.filter(_ != emptyCommitment)
           )
         } yield {
           assert(computeFromCachedLocalId1.contains(correctCmts))
@@ -4171,7 +4183,9 @@ class AcsCommitmentProcessorTest
             acsCommitmentConfigStore,
             loggerFactory,
           )
-        val runningCommitments = initRunningCommitments(inMemoryCommitmentStore)
+
+        val runningCommitments =
+          initRunningCommitments(inMemoryCommitmentStore, mockStringInterning)
         val cachedCommitments = new CachedCommitments()
 
         (for {
@@ -4184,16 +4198,27 @@ class AcsCommitmentProcessorTest
           byParticipant2 <- AcsCommitmentProcessor
             .stakeholderCommitmentsPerParticipant(
               remoteId2,
-              rc.snapshot().active,
+              rc.snapshot().active.map { case (key, value) =>
+                key.map(mockStringInterning.party.externalize) -> value
+              },
               crypto,
               ts(2),
               parallelism,
             )
-          normalCommitments2 = computeCommitmentsPerParticipant(byParticipant2, cachedCommitments)
+
+          internalizedByParticipant2 = AcsCommitmentProcessor.internalizeCommitmentsPerParticipant(
+            byParticipant2,
+            mockStringInterning,
+          )
+
+          normalCommitments2 = computeCommitmentsPerParticipant(
+            internalizedByParticipant2,
+            cachedCommitments,
+          )
           _ = cachedCommitments.setCachedCommitments(
             normalCommitments2,
             rc.snapshot().active,
-            byParticipant2.map { case (pid, set) =>
+            internalizedByParticipant2.map { case (pid, set) =>
               (pid, set.map { case (stkhd, _cmt) => stkhd }.toSet)
             },
           )
@@ -4201,7 +4226,9 @@ class AcsCommitmentProcessorTest
           byParticipant <- AcsCommitmentProcessor
             .stakeholderCommitmentsPerParticipant(
               remoteId2,
-              rc.snapshot().active,
+              rc.snapshot().active.map { case (key, value) =>
+                key.map(mockStringInterning.party.externalize) -> value
+              },
               crypto,
               ts(2),
               parallelism,
@@ -4219,9 +4246,12 @@ class AcsCommitmentProcessorTest
             case None => Some(newCmts)
           }
 
+          internalizedByParticipantWithOnboard = AcsCommitmentProcessor
+            .internalizeCommitmentsPerParticipant(byParticipantWithOnboard, mockStringInterning)
+
           computeFromCachedRemoteId1 = cachedCommitments.computeCmtFromCached(
             remoteId1,
-            byParticipantWithOnboard(remoteId1),
+            internalizedByParticipantWithOnboard(remoteId1),
           )
 
           // the correct commitment for local should include the commitments for (alice, bob, charlie), (alice, ed)

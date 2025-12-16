@@ -104,7 +104,20 @@ sealed abstract class OpenSslOfflineRootKeyDemoExampleIntegrationTest
   }
 }
 
-final class OpenSslOfflineRootKeyDemoExampleIntegrationTestH2
+final class OpenSslOfflineRootKeyDemoExampleIntegrationTestEc256
     extends OpenSslOfflineRootKeyDemoExampleIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))
+  ExampleIntegrationTest.ensureSystemProperties(
+    "canton-examples.init-script" -> "openssl-example-ec256.sh",
+    "canton-examples.openssl-signature-algorithm" -> "ecdsa256",
+  )
+}
+
+final class OpenSslOfflineRootKeyDemoExampleIntegrationTestEd25519
+    extends OpenSslOfflineRootKeyDemoExampleIntegrationTest {
+  registerPlugin(new UseH2(loggerFactory))
+  ExampleIntegrationTest.ensureSystemProperties(
+    "canton-examples.init-script" -> "openssl-example-ed25519.sh",
+    "canton-examples.openssl-signature-algorithm" -> "ed25519",
+  )
 }
