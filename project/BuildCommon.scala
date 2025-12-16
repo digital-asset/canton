@@ -17,7 +17,7 @@ import sbt.internal.util.ManagedLogger
 import sbt.nio.Keys.*
 import sbtassembly.AssemblyKeys.*
 import sbtassembly.AssemblyPlugin.autoImport.assembly
-import sbtassembly.{MergeStrategy, PathList}
+import sbtassembly.{CustomMergeStrategy, MergeStrategy, PathList}
 import sbtbuildinfo.BuildInfoPlugin
 import sbtbuildinfo.BuildInfoPlugin.autoImport.*
 import sbtide.Keys.ideExcludedDirectories
@@ -331,7 +331,7 @@ object BuildCommon {
       }
       //  here, we copy the protobuf files of community manually
       val ledgerApiProto: Seq[(File, String)] = packProtobufSourceFiles(
-        "community" / "ledger-api",
+        "community" / "ledger-api-proto",
         "ledger-api",
       )
       val communityBaseProto: Seq[(File, String)] = packProtobufSourceFiles(
@@ -392,17 +392,6 @@ object BuildCommon {
         log,
       )
     }
-
-  class RenameMergeStrategy(target: String) extends MergeStrategy {
-    override def name: String = s"Rename to $target"
-
-    override def apply(
-        tempDir: File,
-        path: String,
-        files: Seq[File],
-    ): Either[String, Seq[(File, String)]] =
-      Right(files.map(_ -> target))
-  }
 
   def mergeStrategy(oldStrategy: String => MergeStrategy): String => MergeStrategy = {
     case PathList("LICENSE") => MergeStrategy.last
@@ -477,6 +466,13 @@ object BuildCommon {
     // This is allowed by unidoc, which computes the scaladoc of all projects at once
     // However, to build the doc JAR of individual projects, we need to allow missing links
     Compile / doc / scalacOptions += "-no-link-warnings",
+  )
+
+  // settings for Java only project
+  // it removes the _2.13 suffix in the artifact name and the dependency to scala-library
+  lazy val javaOnlySettings = Def.settings(
+    crossPaths := false,
+    autoScalaLibrary := false,
   )
 
   lazy val sharedCommunitySettings = Def.settings(sharedSettings, publishLibSettings)
@@ -759,7 +755,7 @@ object BuildCommon {
         ),
         additionalBundleSources := Seq.empty,
         assemblyMergeStrategy := {
-          case "LICENSE-open-source-bundle.txt" => new RenameMergeStrategy("LICENSE-DA.txt")
+          case "LICENSE-open-source-bundle.txt" => CustomMergeStrategy.rename(_ => "LICENSE-DA.txt")
           // this file comes in multiple flavors, from io.get-coursier:interface and from org.scala-lang.modules:scala-collection-compat. Since the content differs it is resolve this explicitly with this MergeStrategy.
           case path if path.endsWith("scala-collection-compat.properties") => MergeStrategy.first
           case x =>
@@ -879,7 +875,7 @@ object BuildCommon {
       .enablePlugins(BuildInfoPlugin)
       .dependsOn(
         DamlProjects.`daml-jwt`,
-        DamlProjects.`ledger-api`,
+        DamlProjects.`ledger-api-scala`,
         `daml-tls`,
         `util-observability`,
         `community-admin-api`,
@@ -910,6 +906,7 @@ object BuildCommon {
           chimneyJavaConversion,
           circe_core,
           circe_generic,
+          circe_parser,
           flyway.excludeAll(ExclusionRule("org.apache.logging.log4j")),
           flyway_postgres,
           grpc_inprocess,
@@ -1141,6 +1138,7 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           cats,
           cats_law,
+          circe_parser,
           daml_metrics_test_lib,
           jul_to_slf4j,
           mockito_scala,
@@ -1535,7 +1533,9 @@ object BuildCommon {
         `wartremover-annotations`,
       )
       .settings(
-        sharedCommunitySettings ++ cantonWarts,
+        sharedCantonSettingsExternal,
+        publishLibSettings,
+        HouseRules.damlRepoHeaderSettings,
         publish / skip := false,
         libraryDependencies ++= Seq(
           commons_io,
@@ -1551,8 +1551,9 @@ object BuildCommon {
 
     lazy val `daml-adjustable-clock` = project
       .in(file("base/adjustable-clock"))
+      .dependsOn(`wartremover-annotations`)
       .settings(
-        sharedCommunitySettings,
+        sharedCantonCommunitySettings,
         coverageEnabled := false,
       )
 
@@ -1567,7 +1568,9 @@ object BuildCommon {
     lazy val `ledger-common` = project
       .in(file("community/ledger/ledger-common"))
       .dependsOn(
-        DamlProjects.`ledger-api`,
+        `wartremover-annotations`,
+        `community-testing` % "test",
+        DamlProjects.`ledger-api-scala`,
         DamlProjects.`daml-jwt`,
         DamlProjects.`bindings-java` % "test->test",
         `util-observability` % "compile->compile;test->test",
@@ -1575,7 +1578,7 @@ object BuildCommon {
         `util-external`,
       )
       .settings(
-        sharedCommunitySettings, // Upgrade to sharedCantonSettings when com.digitalasset.canton.concurrent.Threading moved out of community-base
+        sharedCantonCommunitySettings,
         publish / skip := false,
         Compile / PB.targets := Seq(
           PB.gens.java -> (Compile / sourceManaged).value / "protobuf",
@@ -1945,13 +1948,13 @@ object BuildCommon {
     lazy val `ledger-api-bench-tool` = project
       .in(file("community/ledger-api-bench-tool"))
       .dependsOn(
+        `wartremover-annotations`,
         `ledger-api-core`,
         `ledger-common` % "compile->compile;compile->test",
         `community-base`,
         `community-app` % "test->test",
         `daml-adjustable-clock`,
       )
-      .disablePlugins(WartRemover) // TODO(i12064): enable WartRemover
       .enablePlugins(DamlPlugin)
       .settings(
         libraryDependencies ++= Seq(
@@ -1960,7 +1963,7 @@ object BuildCommon {
           circe_core,
           circe_yaml,
         ),
-        sharedSettings,
+        sharedCantonCommunitySettings,
         coverageEnabled := false,
         HouseRules.damlRepoHeaderSettings,
         Compile / damlDarLfVersion := "2.dev",
@@ -2289,7 +2292,8 @@ object BuildCommon {
       `daml-jwt`,
       `google-common-protos-scala`,
       `ledger-api-value`,
-      `ledger-api`,
+      `ledger-api-proto`,
+      `ledger-api-scala`,
       `bindings-java`,
     )
 
@@ -2298,17 +2302,22 @@ object BuildCommon {
 
     lazy val `daml-jwt` = project
       .in(file("base/daml-jwt"))
-      .disablePlugins(WartRemover)
+      .dependsOn(
+        CommunityProjects.`wartremover-annotations`
+      )
       .settings(
-        sharedCommunitySettings,
+        sharedCantonSettingsExternal,
+        HouseRules.damlRepoHeaderSettings,
         scalacOptions += "-Wconf:src=src_managed/.*:silent",
         libraryDependencies ++= Seq(
           auth0_java,
           auth0_jwks,
-          daml_libs_struct_spray_json,
           scalatest % Test,
           scalaz_core,
           slf4j_api,
+          circe_core,
+          circe_generic,
+          circe_parser,
         ),
         coverageEnabled := false,
       )
@@ -2369,13 +2378,11 @@ object BuildCommon {
     lazy val `ledger-api-value` = project
       .in(file("community/lib/ledger-api-value"))
       .dependsOn(
-        `google-common-protos-scala`
-      )
-      .disablePlugins(
-        BufPlugin
+        CommunityProjects.`wartremover-annotations`,
+        `google-common-protos-scala`,
       )
       .settings(
-        sharedSettings,
+        sharedCantonCommunitySettings,
         // we restrict the compilation to a few files that we actually need, skipping the large majority ...
         excludeFilter := HiddenFileFilter || "scalapb.proto",
         PB.generate / includeFilter := "value.proto",
@@ -2399,13 +2406,58 @@ object BuildCommon {
         ),
       )
 
-    lazy val `ledger-api` = project
-      .in(file("community/ledger-api"))
+    lazy val `ledger-api-proto` = project
+      .in(file("community/ledger-api-proto"))
       .dependsOn(
+        CommunityProjects.`wartremover-annotations`,
         `google-common-protos-scala`,
         `ledger-api-value`,
       )
       .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+      )
+      .settings(
+        sharedCantonCommunitySettings,
+        javaOnlySettings,
+        publish / skip := false,
+        Compile / bufLintCheck := (Compile / bufLintCheck)
+          .dependsOn(
+            // these proto files are loaded by buf.work.yaml
+            `google-common-protos-scala` / PB.unpackDependencies,
+            `ledger-api-value` / PB.unpackDependencies,
+          )
+          .value,
+        Compile / PB.targets := Seq(
+          // build java codegen too
+          PB.gens.java -> (Compile / sourceManaged).value,
+          PB.gens.plugin("doc") -> (Compile / sourceManaged).value,
+        ),
+        Compile / PB.protocOptions := Seq(
+          // the generated file can be found in src_managed, if another location is needed this can be specified via the --doc_out flag
+          "--doc_opt=" + file("community/docs/rst_lapi.tmpl") + "," + "proto-docs.rst"
+        ),
+        Compile / unmanagedResources += (ThisBuild / baseDirectory).value / "community/ledger-api-proto/VERSION",
+        coverageEnabled := false,
+        libraryDependencies ++= Seq(
+          daml_ledger_api_value % "protobuf",
+          daml_ledger_api_value_java,
+          google_common_protos % "protobuf",
+          google_common_protos,
+          google_protobuf_java,
+          google_protobuf_java_util,
+          grpc_services % "protobuf",
+          grpc_services,
+          protoc_gen_doc asProtocPlugin (),
+        ),
+        addProtobufFilesToHeaderCheck(Compile),
+      )
+
+    lazy val `ledger-api-scala` = project
+      .in(file("community/ledger-api-scala"))
+      .dependsOn(`google-common-protos-scala`, `ledger-api-proto`)
+      .disablePlugins(
+        BufPlugin,
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,
@@ -2414,48 +2466,32 @@ object BuildCommon {
         sharedCommunitySettings,
         publish / skip := false,
         scalacOptions --= removeCompileFlagsForDaml,
-        Compile / bufLintCheck := (Compile / bufLintCheck)
-          .dependsOn(
-            `google-common-protos-scala` / PB.unpackDependencies,
-            `ledger-api-value` / PB.unpackDependencies,
-          )
-          .value,
+        Compile / PB.protoSources ++= (`ledger-api-proto` / Compile / PB.protoSources).value,
         Compile / PB.targets := Seq(
-          // build java codegen too
-          PB.gens.java -> (Compile / sourceManaged).value,
           // build scala codegen with java conversions
           scalapb.gen(
             javaConversions = true,
             flatPackage = false,
-          ) -> (Compile / sourceManaged).value,
-          PB.gens.plugin("doc") -> (Compile / sourceManaged).value,
+          ) -> (Compile / sourceManaged).value
         ),
-        Compile / PB.protocOptions := Seq(
-          // the generated file can be found in src_managed, if another location is needed this can be specified via the --doc_out flag
-          "--doc_opt=" + file("community/docs/rst_lapi.tmpl") + "," + "proto-docs.rst"
-        ),
-        Compile / unmanagedResources += (ThisBuild / baseDirectory).value / "community/ledger-api/VERSION",
         coverageEnabled := false,
         libraryDependencies ++= Seq(
           daml_ledger_api_value_scala,
           scalapb_runtime,
           scalapb_runtime_grpc,
-          protoc_gen_doc asProtocPlugin (),
         ),
         addProtobufFilesToHeaderCheck(Compile),
       )
 
     lazy val `bindings-java` = project
       .in(file("community/bindings-java"))
-      .dependsOn(
-        `ledger-api`
-      )
+      .dependsOn(`ledger-api-proto`)
       .settings(
         sharedCommunitySettings,
         publish / skip := false,
         compileOrder := CompileOrder.JavaThenScala,
-        scalacOptions ++= removeCompileFlagsForDaml,
-        crossPaths := false, // Without this, the Java tests are not executed
+        // The main artifact is Java only, even though some tests are written in Scala
+        javaOnlySettings,
         libraryDependencies ++= Seq(
           fasterjackson_core,
           daml_ledger_api_value_java,
