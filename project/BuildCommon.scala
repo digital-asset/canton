@@ -2421,6 +2421,7 @@ object BuildCommon {
           scalacheck % Test,
           scalatestScalacheck % Test,
           slf4j_api,
+          checkerFramework,
         ),
       )
   }

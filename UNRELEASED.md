@@ -58,3 +58,7 @@ Canton has been tested against the following versions of its dependencies:
 |----------------------------|----------------------------|
 | Java Runtime               | JAVA_VERSION               |
 | Postgres                   | POSTGRES_VERSION           |
+
+## Upgrade GRPC to 1.77.0
+
+prevent report of CVE-2025-58057.
