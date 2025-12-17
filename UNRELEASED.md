@@ -26,7 +26,7 @@ Template for a bigger topic
     - Additional CLI options added: `--log-access`, `--log-access-errors`...
     - Additional config options added: `debugInProcessRequests`, `prefixGrpcAddresses`
 - ParticipantRepairService.ExportAcsOld and ImportAcsOld are deprecated. Instead use ParticipantRepairService.ExportAcs and ImportAcs respectively as a direct replacement. For party replication use PartyManagementService.ExportPartyAcs and ImportPartyAcs instead.
-- Removed `packageDependencyCache` from `caching` configuration.
+- `package-dependency-cache` field in `caching` configuration is deprecated. It can be removed safely from node configurations.
 - The `generateExternalPartyTopology` endpoint on the Ledger API now returns a single `PartyToParticipant` topology transaction to onboard the party.
 The transaction contains signing threshold and signing keys. This effectively deprecate the usage of `PartyToKeyMapping`.
 For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMapping`, the keys from `PartyToParticipant` take precedence.

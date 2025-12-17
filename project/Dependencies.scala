@@ -426,7 +426,6 @@ object Dependencies {
     "com.daml" %% "pekko-http-metrics" % daml_libraries_version
   lazy val daml_executors = "com.daml" %% "executors" % daml_libraries_version
   lazy val daml_timer_utils = "com.daml" %% "timer-utils" % daml_libraries_version
-  lazy val daml_libs_struct_spray_json = "com.daml" %% "struct-spray-json" % daml_libraries_version
   lazy val daml_libs_scala_scalatest_utils =
     "com.daml" %% "scalatest-utils" % daml_libraries_version
   lazy val daml_libs_scala_ledger_resources =

@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.indexer.parallel
 
 import com.daml.executors.executors.{NamedExecutor, QueueAwareExecutor}
 import com.daml.metrics.DatabaseMetrics
-import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.Update.{
@@ -50,6 +49,7 @@ import com.digitalasset.canton.time.SimClock
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
 import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
+import com.digitalasset.canton.{HasExecutionContext, RepairCounter}
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.{Ref, Time}
@@ -76,7 +76,10 @@ class ParallelIndexerSubscriptionSpec
     extends AnyFlatSpec
     with ScalaFutures
     with Matchers
+    with HasExecutionContext
     with NamedLogging {
+
+  private def myExecutionContext = implicitly[ExecutionContext]
 
   implicit private val DbDtoEqual: org.scalactic.Equality[DbDto] = ScalatestEqualityHelpers.DbDtoEq
   implicit val traceContext: TraceContext = TraceContext.empty
@@ -93,7 +96,7 @@ class ParallelIndexerSubscriptionSpec
     ledger_offset = 1,
     recorded_at = 0,
     submission_id = null,
-    party = Some("party"),
+    party = Some(Ref.Party.assertFromString("party")),
     typ = "accept",
     rejection_reason = None,
     is_local = Some(true),
@@ -140,7 +143,7 @@ class ParallelIndexerSubscriptionSpec
     source_synchronizer_id = None,
     reassignment_counter = None,
     reassignment_id = None,
-    representative_package_id = "",
+    representative_package_id = Ref.PackageId.assertFromString("p"),
     notPersistedContractId = hashCid("1"),
     internal_contract_id = 1,
     create_key_hash = None,
@@ -175,8 +178,8 @@ class ParallelIndexerSubscriptionSpec
     reassignment_counter = None,
     contract_id = hashCid("1"),
     internal_contract_id = None,
-    template_id = "",
-    package_id = "",
+    template_id = Ref.NameTypeConRef.assertFromString("#p:m:t"),
+    package_id = Ref.PackageId.assertFromString("p"),
     stakeholders = Set.empty,
     ledger_effective_time = None,
   )
@@ -216,7 +219,7 @@ class ParallelIndexerSubscriptionSpec
     completion_offset = 1,
     record_time = 0,
     publication_time = 0,
-    user_id = "",
+    user_id = Ref.UserId.assertFromString("user"),
     submitters = Set.empty,
     command_id = "",
     update_id = None,
@@ -353,6 +356,12 @@ class ParallelIndexerSubscriptionSpec
       lastStringInterningId = 26,
       lastPublicationTime = previousPublicationTime,
     )
+    val filter = DbDto.IdFilter(
+      0,
+      Ref.NameTypeConRef.assertFromString("#p:m:t"),
+      Ref.Party.assertFromString("party"),
+      first_per_sequential_id = false,
+    )
     val ledgerEndCache = MutableLedgerEndCache()
     val result = ParallelIndexerSubscription.seqMapper(
       internize = _.zipWithIndex.map(x => x._2 -> x._2.toString).take(2),
@@ -368,21 +377,21 @@ class ParallelIndexerSubscriptionSpec
         batch = Vector(
           someParty,
           someEventActivate,
-          DbDto.IdFilter(0, "", "", first_per_sequential_id = false).activateStakeholder,
-          DbDto.IdFilter(0, "", "", first_per_sequential_id = false).activateWitness,
+          filter.activateStakeholder,
+          filter.activateWitness,
           DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L),
           someCompletion,
           someParty,
           someEventDeactivate,
-          DbDto.IdFilter(0, "", "", first_per_sequential_id = false).deactivateStakeholder,
-          DbDto.IdFilter(0, "", "", first_per_sequential_id = false).deactivateWitness,
+          filter.deactivateStakeholder,
+          filter.deactivateWitness,
           someEventDeactivate,
-          DbDto.IdFilter(0, "", "", first_per_sequential_id = false).deactivateStakeholder,
-          DbDto.IdFilter(0, "", "", first_per_sequential_id = false).deactivateWitness,
+          filter.deactivateStakeholder,
+          filter.deactivateWitness,
           DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L),
           someParty,
           someEventWitnessed,
-          DbDto.IdFilter(0, "", "", first_per_sequential_id = false).variousWitness,
+          filter.variousWitness,
           DbDto.TransactionMeta(emptyByteArray, 1, 0L, 0L, someSynchronizerId, 0L, 0L),
           someParty,
         ),
@@ -1015,6 +1024,7 @@ class ParallelIndexerSubscriptionSpec
       lastActivations,
       mockDbDispatcher(new TestConnection),
       resolveInternalContractIds,
+      myExecutionContext,
       metrics,
       logger,
     )(inBatch)
@@ -1112,6 +1122,7 @@ class ParallelIndexerSubscriptionSpec
         },
         "zero",
         mockDbDispatcher(connection),
+        myExecutionContext,
         metrics,
         logger,
       )(inBatch)
@@ -1171,6 +1182,7 @@ class ParallelIndexerSubscriptionSpec
     val outBatchF =
       ParallelIndexerSubscription.ingestTail(
         storeLedgerEndF,
+        myExecutionContext,
         logger,
       )(
         traceContext
@@ -1464,6 +1476,7 @@ class ParallelIndexerSubscriptionSpec
         updateInMemoryState = _ => updateInMemoryStatePromise.success(()),
         aggregatedLedgerEnd = aggregatedLedgerEnd,
         logger = loggerFactory.getTracedLogger(this.getClass),
+        executionContext = myExecutionContext,
       )(implicitly)(input)
       .futureValue shouldBe input
     ledgerEndStoredPromise.future.isCompleted shouldBe true
@@ -1503,6 +1516,7 @@ class ParallelIndexerSubscriptionSpec
         updateInMemoryState = _ => updateInMemoryStatePromise.success(()),
         aggregatedLedgerEnd = aggregatedLedgerEnd,
         logger = loggerFactory.getTracedLogger(this.getClass),
+        executionContext = myExecutionContext,
       )(implicitly)(input)
       .futureValue shouldBe input
     ledgerEndStoredPromise.future.isCompleted shouldBe false
@@ -1535,6 +1549,7 @@ class ParallelIndexerSubscriptionSpec
             ParallelIndexerSubscription.monotonicityValidator(
               initialOffset = None,
               loadPreviousState = _ => Future.successful(None),
+              executionContext = myExecutionContext,
             )(logger)
           )
           .runWith(TestSink.probe)
@@ -1562,6 +1577,7 @@ class ParallelIndexerSubscriptionSpec
             ParallelIndexerSubscription.monotonicityValidator(
               initialOffset = Some(Offset.tryFromLong(2)),
               loadPreviousState = _ => Future.successful(None),
+              executionContext = myExecutionContext,
             )(logger)
           )
           .runWith(TestSink.probe)
@@ -1591,6 +1607,7 @@ class ParallelIndexerSubscriptionSpec
             ParallelIndexerSubscription.monotonicityValidator(
               initialOffset = None,
               loadPreviousState = _ => Future.successful(None),
+              executionContext = myExecutionContext,
             )(logger)
           )
           .runWith(TestSink.probe[(Offset, Update)])
@@ -1627,6 +1644,7 @@ class ParallelIndexerSubscriptionSpec
                     )
                   )
                 ),
+              executionContext = myExecutionContext,
             )(logger)
           )
           .runWith(TestSink.probe[(Offset, Update)])
@@ -1656,6 +1674,7 @@ class ParallelIndexerSubscriptionSpec
             ParallelIndexerSubscription.monotonicityValidator(
               initialOffset = None,
               loadPreviousState = _ => Future.successful(None),
+              executionContext = myExecutionContext,
             )(logger)
           )
           .runWith(TestSink.probe[(Offset, Update)])
@@ -1692,6 +1711,7 @@ class ParallelIndexerSubscriptionSpec
                     )
                   )
                 ),
+              executionContext = myExecutionContext,
             )(logger)
           )
           .runWith(TestSink.probe[(Offset, Update)])
@@ -1715,6 +1735,7 @@ class ParallelIndexerSubscriptionSpec
             ParallelIndexerSubscription.monotonicityValidator(
               initialOffset = None,
               loadPreviousState = _ => Future.successful(None),
+              executionContext = myExecutionContext,
             )(logger)
           )
           .runWith(TestSink.probe[(Offset, Update)])
@@ -1734,7 +1755,6 @@ class ParallelIndexerSubscriptionSpec
         val offsetsUpdates: Vector[(Offset, Update)] = Vector(
           offset(1L) -> repairUpdate(CantonTimestamp.ofEpochSecond(10), RepairCounter(15L))
         )
-
         val testSink = Source(offsetsUpdates)
           .via(
             ParallelIndexerSubscription.monotonicityValidator(
@@ -1750,6 +1770,7 @@ class ParallelIndexerSubscriptionSpec
                     )
                   )
                 ),
+              executionContext = myExecutionContext,
             )(logger)
           )
           .runWith(TestSink.probe[(Offset, Update)])
@@ -1775,6 +1796,7 @@ class ParallelIndexerSubscriptionSpec
             ParallelIndexerSubscription.monotonicityValidator(
               initialOffset = None,
               loadPreviousState = _ => Future.successful(None),
+              executionContext = myExecutionContext,
             )(logger)
           )
           .runWith(TestSink.probe[(Offset, Update)])
@@ -1794,7 +1816,6 @@ class ParallelIndexerSubscriptionSpec
         val offsetsUpdates: Vector[(Offset, Update)] = Vector(
           offset(1L) -> floatingUpdate(CantonTimestamp.ofEpochSecond(10))
         )
-
         val testSink = Source(offsetsUpdates)
           .via(
             ParallelIndexerSubscription.monotonicityValidator(
@@ -1807,6 +1828,7 @@ class ParallelIndexerSubscriptionSpec
                     )
                   )
                 ),
+              executionContext = myExecutionContext,
             )(logger)
           )
           .runWith(TestSink.probe[(Offset, Update)])

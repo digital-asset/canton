@@ -19,14 +19,14 @@ import com.digitalasset.daml.lf.data.Ref.{
 import scala.concurrent.{Future, blocking}
 
 class DomainStringIterators(
-    val parties: Iterator[String],
-    val templateIds: Iterator[String],
+    val parties: Iterator[Party],
+    val templateIds: Iterator[NameTypeConRef],
     val synchronizerIds: Iterator[SynchronizerId],
-    val packageIds: Iterator[String],
-    val userIds: Iterator[String],
-    val participantIds: Iterator[String],
-    val choiceNames: Iterator[String],
-    val interfaceIds: Iterator[String],
+    val packageIds: Iterator[PackageId],
+    val userIds: Iterator[UserId],
+    val participantIds: Iterator[ParticipantId],
+    val choiceNames: Iterator[ChoiceName],
+    val interfaceIds: Iterator[Identifier],
 )
 
 trait InternizingStringInterningView {
@@ -41,9 +41,12 @@ trait InternizingStringInterningView {
     *   returned as a interned-id and raw, prefixed string pairs.
     *
     * @note
-    *   This method is thread-safe.
+    *   This method is thread-safe. This method should be called from Indexer, which maintains
+    *   consistency between StringInterning view and persistence.
     */
-  def internize(domainStringIterators: DomainStringIterators): Iterable[(Int, String)]
+  private[platform] def internize(
+      domainStringIterators: DomainStringIterators
+  ): Iterable[(Int, String)]
 }
 
 trait UpdatingStringInterningView {
@@ -64,7 +67,7 @@ trait UpdatingStringInterningView {
     *
     * @note
     *   This method is NOT thread-safe and should not be called concurrently with itself or
-    *   [[InternizingStringInterningView.internize]].
+    *   InternizingStringInterningView.internize.
     */
   def update(lastStringInterningId: Option[Int])(
       loadPrefixedEntries: LoadStringInterningEntries
@@ -178,7 +181,9 @@ class StringInterningView(override protected val loggerFactory: NamedLoggerFacto
       from = _.toString,
     )
 
-  override def internize(domainStringIterators: DomainStringIterators): Iterable[(Int, String)] =
+  override private[platform] def internize(
+      domainStringIterators: DomainStringIterators
+  ): Iterable[(Int, String)] =
     blocking(synchronized {
       val allPrefixedStrings =
         domainStringIterators.parties.map(PartyPrefix + _) ++

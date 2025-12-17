@@ -144,7 +144,7 @@ The following demonstrates these steps using two participants:
     .. success:: val synchronizerId = source.synchronizers.id_of("mysynchronizer")
 
 
-a) Create party
+1. Create party
 ^^^^^^^^^^^^^^^
 
 :ref:`Create a party<party-management>` Alice:
@@ -162,7 +162,7 @@ a) Create party
     :externalref:`namespace<topology-namespaces>`, or create an :externalref:`external party <tutorial_onboard_external_party>`.
 
 
-b) Vet packages
+2. Vet packages
 ^^^^^^^^^^^^^^^
 
 :ref:`Vet packages<package_vetting>` on the target participant(s) **before** proceeding.
@@ -176,7 +176,7 @@ b) Vet packages
 .. _multi-hosting-authorization:
 
 
-c) Multi-host party
+3. Multi-host party
 ^^^^^^^^^^^^^^^^^^^
 
 Party Alice needs to agree to be hosted on the target participant.
@@ -185,7 +185,7 @@ Because the source participant owns party Alice, you need to issue the
 party-to-participant mapping topology transaction on the ``source`` participant.
 
 Authorize hosting update on the source participant
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+""""""""""""""""""""""""""""""""""""""""""""""""""
 
 .. tabs::
 
@@ -216,7 +216,7 @@ Authorize hosting update on the source participant
 
 
 Authorize hosting update on the target participant
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+""""""""""""""""""""""""""""""""""""""""""""""""""
 
 To complete the process, also the target participant needs to agree to newly
 host Alice. Therefore, you need to issue the **same** party-to-participant mapping
@@ -252,8 +252,8 @@ packages on a ``newTarget`` participant. Then, perform the replication again usi
 the original ``source`` and ``newTarget`` participants.
 
 
-c') Replicate party with simultaneous confirmation threshold change
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+3.a Replicate party with simultaneous confirmation threshold change (Variant to 3)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. note::
 
@@ -364,8 +364,8 @@ These are the steps, which you must perform in **the exact order** they are list
     adjustments. Test thoroughly in a test environment before production use.
 
 
-a) Example scenario
-^^^^^^^^^^^^^^^^^^^
+Scenario description
+^^^^^^^^^^^^^^^^^^^^
 
 The following steps show how to replicate party ``alice`` from the ``source``
 participant to a new ``target`` participant on the synchronizer ``mysynchronizer``.
@@ -407,7 +407,7 @@ The ``source`` can be any participant already hosting the party.
     .. hidden:: source.dars.upload("dars/CantonExamples.dar")
 
 
-b) Vet packages
+1. Vet packages
 ^^^^^^^^^^^^^^^
 
 Ensure the target participant :ref:`vets all packages<package_vetting>` associated with
@@ -431,7 +431,7 @@ Hence, upload the missing DAR package to the ``target`` participant.
         .map(r => (r.context.storeId, r.item.participantId))
 
 
-c) Stop pruning
+2. Stop pruning
 ^^^^^^^^^^^^^^^
 
 Stop any, :externalref:`automatic or manual pruning<participant-node-pruning-howto>`
@@ -450,7 +450,7 @@ Clear the pruning schedule, disabling the automatic pruning on the ``source`` no
     .. success:: source.pruning.clear_schedule()
 
 
-d) Authorize new hosting on the target participant
+3. Authorize new hosting on the target participant
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 First, have the ``target`` participant agree to host party Alice with the desired
@@ -469,14 +469,14 @@ participant permission (*observation* in this example).
           requiresPartyToBeOnboarded = true
         )
 
-e) Disconnect target participant from all synchronizers
+4. Disconnect target participant from all synchronizers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. snippet:: offline_party_replication
     .. success:: target.synchronizers.disconnect_all()
 
 
-f) Authorize new hosting for the party
+5. Authorize new hosting for the party
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To later *find* the ledger offset of the topology transaction which authorizes the new
@@ -521,7 +521,7 @@ have party Alice agree to be hosted on it.
             )
 
 
-g) Export ACS
+6. Export ACS
 ^^^^^^^^^^^^^
 
 Export Alice's ACS from the ``source`` participant.
@@ -543,13 +543,13 @@ it in the export file named ``party_replication.alice.acs.gz``.
         )
 
 
-h) Back up target participant
+7. Back up target participant
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. warning:: **Please back up the target participant before importing the ACS!**
 
 
-i) Import ACS
+8. Import ACS
 ^^^^^^^^^^^^^
 
 Import Alice's ACS in the ``target`` participant:
@@ -558,7 +558,7 @@ Import Alice's ACS in the ``target`` participant:
     .. success:: target.parties.import_party_acs("party_replication.alice.acs.gz")
 
 
-j) Reconnect target participant to synchronizer
+9. Reconnect target participant to synchronizer
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To later *find* the ledger offset of the topology transaction where the new hosting
@@ -584,30 +584,56 @@ Now, reconnect that ``target`` participant to the synchronizer.
        ))
 
 
-k) Clear the participant's onboarding flag
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+10. Clear the participant's onboarding flag
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-After the ``target`` participant has completed the ACS import and has reconnected to the
-synchronizer, it must clear the onboarding flag, to signal to the party that it is now
-ready to assume the responsibilities of a hosting participant.
+After the ``target`` participant has completed the ACS import and reconnected to the
+synchronizer, you must clear the onboarding flag. This signals that the participant
+is fully ready to host the party.
 
-The following command schedules the onboarding flag clearance at the appropriate time.
+There is a dedicated command to accomplish the onboarding flag clearance. It will issue
+the topology transaction to clear the flag for you, but only when it is safe to do so.
 
-Note that we use the previously taken ``targetLedgerEnd`` as the starting point on the
-ledger to find the effective party-to-participant mapping transaction that has activated
-the party ``alice`` on the ``target`` participant.
+The following command uses the ``targetLedgerEnd`` captured in the previous step as the
+starting point to internally locate the effective party-to-participant mapping transaction
+that has activated ``alice`` on the ``target`` participant.
 
 .. snippet:: offline_party_replication
-    .. success:: target.parties.clear_party_onboarding_flag(alice, synchronizerId, targetLedgerEnd)
+    .. success:: val flagStatus = target.parties
+        .clear_party_onboarding_flag(alice, synchronizerId, targetLedgerEnd)
+    .. assert:: flagStatus.isInstanceOf[FlagSet]
+
+The command returns the onboarding flag clearance status:
+
+- ``FlagNotSet``: The onboarding flag is cleared. Proceed to the next step.
+- ``FlagSet``: The onboarding flag is still set. Removal is safe
+  only after the indicated timestamp.
+
+If the onboarding flag is still set and you have called this command for the first time,
+it has internally created a schedule to trigger the onboarding flag clearance at the
+appropriate time. This happens in the background.
+
+However, because this command is idempotent, you *may* call it repeatedly. Thus, you
+*may* also poll this command until it confirms that the onboarding flag has been cleared.
+The following snippet demonstrates how this command can be polled.
+
+.. snippet:: offline_party_replication
+    .. success:: utils.retry_until_true(timeout = 2.minutes, maxWaitPeriod = 1.minutes) {
+          val flagStatus = target.parties
+            .clear_party_onboarding_flag(alice, synchronizerId, targetLedgerEnd)
+          flagStatus match {
+           case FlagSet(_) => false
+           case FlagNotSet => true
+          }
+        }
 
 .. note::
 
-    You may call the ``clear_party_onboarding_flag`` command with the same arguments
-    repeatedly; its result will eventually indicate that the onboarding flag has been cleared.
+    The ``timeout`` is based on the default *decision timeout* of 1 minute.
 
 
-l) Re-enable automatic pruning
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+11. Re-enable automatic pruning
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If automatic pruning was previously enabled on the ``source`` participant, you must re-enable it now.
 
@@ -617,7 +643,7 @@ Use this command, providing the original configuration parameters that you recor
     .. success:: source.pruning.set_schedule("0 0 20 * * ?", 2.hours, 30.days)
 
 
-m) Summary
-^^^^^^^^^^
+Summary
+^^^^^^^
 
 You have successfully multi-hosted Alice on ``source`` and ``target`` participants.

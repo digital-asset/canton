@@ -94,7 +94,7 @@ This tutorial interacts with the ``InteractiveSubmissionService``, a service ava
 
 .. toggle::
 
-      .. literalinclude:: CANTON/community/ledger-api/src/main/protobuf/com/daml/ledger/api/v2/interactive/interactive_submission_service.proto
+      .. literalinclude:: CANTON/community/ledger-api-proto/src/main/protobuf/com/daml/ledger/api/v2/interactive/interactive_submission_service.proto
 
 .. _canton_externally_signing_tutorial_python_instructions:
 

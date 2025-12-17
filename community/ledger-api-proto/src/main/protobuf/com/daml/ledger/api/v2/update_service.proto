@@ -17,7 +17,7 @@ option java_package = "com.daml.ledger.api.v2";
 
 // Allows clients to read updates (transactions, (un)assignments, topology events) from the ledger.
 //
-// ``GetUpdates`` and ``GetUpdateTrees`` provide a comprehensive stream of updates/changes
+// ``GetUpdates`` provides a comprehensive stream of updates/changes
 // which happened on the virtual shared ledger. These streams are indexed with ledger
 // offsets, which are strictly increasing.
 // The virtual shared ledger consist of changes happening on multiple synchronizers which are
@@ -65,16 +65,7 @@ message GetUpdatesRequest {
   reserved 4;
   reserved "verbose";
 
-  // Must be unset for GetUpdateTrees request.
-  // Optional for backwards compatibility for GetUpdates request: defaults to an UpdateFormat where:
-  //
-  // - include_transactions.event_format.filters_by_party = the filter.filters_by_party on this request
-  // - include_transactions.event_format.filters_for_any_party = the filter.filters_for_any_party on this request
-  // - include_transactions.event_format.verbose = the same flag specified on this request
-  // - include_transactions.transaction_shape = TRANSACTION_SHAPE_ACS_DELTA
-  // - include_reassignments.filter = the same filter specified on this request
-  // - include_reassignments.verbose = the same flag specified on this request
-  // - include_topology_events.include_participant_authorization_events.parties = all the parties specified in filter
+  // Required
   UpdateFormat update_format = 5;
 }
 

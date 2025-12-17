@@ -32,7 +32,7 @@ Hashing Scheme Version
 The hashing algorithm as a whole is versioned. This enables updates to accommodate changes in the underlying Daml format,
 or, for instance, to the way the protocol verifies signatures. The implementation must respect the specification of the version it implements.
 
-.. literalinclude:: CANTON/community/ledger-api/src/main/protobuf/com/daml/ledger/api/v2/interactive/interactive_submission_service.proto
+.. literalinclude:: CANTON/community/ledger-api-proto/src/main/protobuf/com/daml/ledger/api/v2/interactive/interactive_submission_service.proto
     :start-after: [docs-entry-start: HashingSchemeVersion]
     :end-before: [docs-entry-end: HashingSchemeVersion]
     :caption: Hashing Scheme Versions
@@ -55,7 +55,7 @@ The encoding version is decoupled from the LF version and implementations should
 However, new LF versions may introduce new fields in nodes or new node types. For that reason, the protobuf representation of a node is
 versioned to accommodate those future changes. In practice, every new Daml language version results in a new hashing version.
 
-.. literalinclude:: CANTON/community/ledger-api/src/main/protobuf/com/daml/ledger/api/v2/interactive/interactive_submission_service.proto
+.. literalinclude:: CANTON/community/ledger-api-proto/src/main/protobuf/com/daml/ledger/api/v2/interactive/interactive_submission_service.proto
     :start-after: [docs-entry-start: DamlTransaction.Node]
     :end-before: [docs-entry-end: DamlTransaction.Node]
     :caption: Versioned Daml Transaction Node
@@ -534,7 +534,7 @@ Identifier
 Transaction
 ===========
 
-A transaction is a forest (list of trees). It is represented with a following protobuf message found `here <https://github.com/digital-asset/daml/blob/ba14c4430b8345e7f0f8b20c3feead2b88c90fb8/sdk/canton/community/ledger-api/src/main/protobuf/com/daml/ledger/api/v2/interactive/interactive_submission_service.proto#L283-L315>`_.
+A transaction is a forest (list of trees). It is represented with a following protobuf message found `here <https://github.com/digital-asset/daml/blob/ba14c4430b8345e7f0f8b20c3feead2b88c90fb8/sdk/canton/community/ledger-api-proto/src/main/protobuf/com/daml/ledger/api/v2/interactive/interactive_submission_service.proto#L283-L315>`_.
 
 The encoding function for a transaction is
 

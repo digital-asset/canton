@@ -3,11 +3,10 @@
 
 package com.digitalasset.canton.http.json
 
-import com.daml.scalautil.ExceptionOps.*
-import scalaz.{Show, \/}
-import spray.json.{JsValue, JsonParser, JsonWriter, enrichAny as `sj enrichAny`}
+import io.circe.*
+import scalaz.Show
 
-object SprayJson {
+object Circe {
   sealed abstract class Error extends Product with Serializable
   final case class JsonReaderError(value: String, message: String) extends Error
   final case class JsonWriterError(value: Any, message: String) extends Error
@@ -31,10 +30,7 @@ object SprayJson {
     }
   }
 
-  def parse(str: String): JsonReaderError \/ JsValue =
-    \/.attempt(JsonParser(str))(e => JsonReaderError(str, e.description))
-
-  def encodeUnsafe[A: JsonWriter](a: A): JsValue =
-    a.toJson
+  def parse(str: String): Either[JsonReaderError, Json] =
+    parser.parse(str).left.map(e => JsonReaderError(str, e.getMessage))
 
 }
