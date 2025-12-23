@@ -246,6 +246,9 @@ object Dependencies {
     ),
   )
 
+  // When updating opentelemetry, check that the workaround implemented in
+  // com.digitalasset.canton.telemetry.UnsetSpanEndingThreadReferenceSpanProcessor
+  // a) is still needed, and if yes, b) still works.
   lazy val opentelemetry_api = resolveDependency("io.opentelemetry", "opentelemetry-api")
   lazy val opentelemetry_sdk = resolveDependency("io.opentelemetry", "opentelemetry-sdk")
   lazy val opentelemetry_sdk_autoconfigure =
