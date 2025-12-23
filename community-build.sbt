@@ -63,6 +63,38 @@ lazy val `conformance-testing` = CommunityProjects.`conformance-testing`
 lazy val `upgrading-integration-tests` =
   CommunityProjects.`upgrading-integration-tests`
 
+lazy val `scalatest-utils` = DamlProjects.`scalatest-utils`
+lazy val `scala-utils` = DamlProjects.`scala-utils`
+lazy val `nonempty` = DamlProjects.`nonempty`
+lazy val `nonempty-cats` = DamlProjects.`nonempty-cats`
+lazy val `rs-grpc-bridge` = DamlProjects.`rs-grpc-bridge`
+lazy val `rs-grpc-pekko` = DamlProjects.`rs-grpc-pekko`
+lazy val `logging-entries` = DamlProjects.`logging-entries`
+lazy val `contextualized-logging` = DamlProjects.`contextualized-logging`
+lazy val `daml-resources` = DamlProjects.`daml-resources`
+lazy val `resources-pekko` = DamlProjects.`resources-pekko`
+lazy val `resources-grpc` = DamlProjects.`resources-grpc`
+lazy val `ledger-resources` = DamlProjects.`ledger-resources`
+lazy val `timer-utils` = DamlProjects.`timer-utils`
+lazy val `crypto` = DamlProjects.`crypto`
+lazy val `safe-proto` = DamlProjects.`safe-proto`
+lazy val `nameof` = DamlProjects.`nameof`
+lazy val `testing-utils` = DamlProjects.`testing-utils`
+lazy val `grpc-test-utils` = DamlProjects.`grpc-test-utils`
+lazy val `rs-grpc-testing-utils` = DamlProjects.`rs-grpc-testing-utils`
+lazy val `test-evidence-tag` = DamlProjects.`test-evidence-tag`
+lazy val `test-evidence-generator` = DamlProjects.`test-evidence-generator`
+lazy val `test-evidence-scalatest` = DamlProjects.`test-evidence-scalatest`
+lazy val `sample-service` = DamlProjects.`sample-service`
+lazy val `ports` = DamlProjects.`ports`
+lazy val `http-test-utils` = DamlProjects.`http-test-utils`
+lazy val `struct-spray-json` = DamlProjects.`struct-spray-json`
+lazy val `concurrent` = DamlProjects.`concurrent`
+lazy val `executors` = DamlProjects.`executors`
+lazy val `observability-metrics` = DamlProjects.`observability-metrics`
+lazy val `observability-tracing` = DamlProjects.`observability-tracing`
+lazy val `observability-pekko-http-metrics` = DamlProjects.`observability-pekko-http-metrics`
+
 lazy val root = (project in file("."))
   .disablePlugins(WartRemover)
   .aggregate((CommunityProjects.allProjects ++ DamlProjects.allProjects).toSeq.map(_.project)*)

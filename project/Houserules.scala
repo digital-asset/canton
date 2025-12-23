@@ -1,3 +1,9 @@
+import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.*
+import de.heikoseeberger.sbtheader.{
+  LineCommentCreator,
+  CommentStyle => HeaderCommentStyle,
+  FileType => HeaderFileType,
+}
 import sbt.Keys.*
 import sbt.*
 import wartremover.Wart
@@ -11,19 +17,7 @@ object HouseRules extends AutoPlugin {
   private val enableUnusedSymbolsChecks = true // Can be turned to false during development
 
   override def trigger = allRequirements
-  override def requires = sbt.plugins.JvmPlugin
-
-  import de.heikoseeberger.sbtheader.HeaderPlugin.autoImport.{
-    HeaderLicense,
-    HeaderPattern,
-    headerLicense,
-    headerMappings,
-  }
-  import de.heikoseeberger.sbtheader.{
-    LineCommentCreator,
-    CommentStyle => HeaderCommentStyle,
-    FileType => HeaderFileType,
-  }
+  override def requires = sbt.plugins.JvmPlugin && de.heikoseeberger.sbtheader.HeaderPlugin
 
   lazy val cantonRepoHeaderSettings = Seq(
     // Configure sbt-header to manage license notices in files

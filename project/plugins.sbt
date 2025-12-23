@@ -64,3 +64,6 @@ addSbtPlugin("org.openapitools" % "sbt-openapi-generator" % "7.12.0")
 
 // To publish JARs to Google Artifact Registry
 addSbtPlugin("org.latestbit" % "sbt-gcs-plugin" % "1.16.1")
+
+// To sign artifacts
+addSbtPlugin("com.github.sbt" % "sbt-pgp" % "2.3.1")

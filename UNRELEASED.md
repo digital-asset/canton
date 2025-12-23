@@ -42,6 +42,12 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
   an optional argument, as well as `filter-party`.
 - Protect the admin participant from self lock-out. It is now impossible for an admin to remove own admin rights or
   delete itself.
+- *BREAKING* The default OTLP gRPC port that the Canton connects to in order to export the traces has been changed from
+  4318 to 4317. This aligns the default configuration of Canton with the default configuration of the OpenTelemetry
+  Collector. This change affects only the users who have configured an OTLP trace export through
+  ```
+  canton.monitoring.tracing.tracer.exporter.type=otlp
+  ```
 
 ### Preview Features
 - preview feature

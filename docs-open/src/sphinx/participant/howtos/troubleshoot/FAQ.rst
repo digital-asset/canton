@@ -131,22 +131,23 @@ How do I write data to a file and how do I read it back?
 Why is Canton complaining about my database version?
 ----------------------------------------------------
 
-Postgres
-~~~~~~~~
+As a general policy, Canton is tested against and supports
+`currently maintained PostgreSQL releases <https://www.postgresql.org/support/versioning/>`__.
 
-Canton is tested with the following PostgreSQL releases:  12, 13, 14, and 15.
-Newer PostgreSQL releases may not have been tested. The recommended version
-is 12. Canton WARNs when a higher version is encountered. By default,
-Canton does not start when the PostgreSQL version is below 10.
+However, the latest major PostgreSQL releases may not be supported immediately. New versions
+occasionally introduce non-obvious issues that require stabilization and testing within the
+Canton environment.
 
-Oracle
-~~~~~~
+**Recommendations and Constraints:**
 
-Canton Enterprise additionally supports using Oracle for storage. Only Oracle 19 has been tested, so by default Canton
-will not start if the Oracle version is not 19.
-
-Note that Canton's version checks use the ``v$$version`` table so, for the version check to succeed,
-this table must exist and the database user must have ``SELECT`` privileges on the table.
+* **Recommended Version:** Use the latest PostgreSQL version that has been explicitly verified
+  for your specific Canton release.
+* **Verification:** To check which versions have been tested, please refer to the
+  **Release Notes** for your specific Canton version.
+* **Version Warnings:** Canton will issue a ``WARN`` log if it detects a PostgreSQL version
+  newer than those officially tested.
+* **Minimum Requirement:** By default, Canton will not start if the PostgreSQL version is
+  older than version 10.
 
 Using non-standard database versions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

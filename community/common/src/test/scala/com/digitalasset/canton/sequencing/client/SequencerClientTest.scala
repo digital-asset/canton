@@ -11,7 +11,6 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config as cantonConfig
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeInt,
   NonNegativeLong,
@@ -114,6 +113,7 @@ import com.digitalasset.canton.topology.DefaultTestIdentities.{
 }
 import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
+import com.digitalasset.canton.util.Mutex
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.version.{
   IgnoreInSerializationTestExhaustivenessCheck,
@@ -133,7 +133,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicLong, AtomicReference}
 import scala.annotation.tailrec
 import scala.concurrent.duration.{Duration, DurationInt}
-import scala.concurrent.{ExecutionContext, Future, Promise, blocking}
+import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.jdk.CollectionConverters.*
 import scala.jdk.DurationConverters.ScalaDurationOps
 import scala.util.{Failure, Success}
@@ -396,6 +396,7 @@ final class SequencerClientTest
         val counter = new AtomicInteger(0)
         val maxSeenCounter = new AtomicInteger(0)
         val maxSequencerCounter = new AtomicLong(0L)
+        val lock = Mutex()
         val env = factory.create(
           initializeCounterAllocatorTo = Some(SequencerCounter(0)),
           options = SequencerClientConfig(
@@ -413,9 +414,10 @@ final class SequencerClientTest
               logger.debug(s"Processing batch of events $firstSc to $lastSc")
               HandlerResult.asynchronous(
                 FutureUnlessShutdown.outcomeF(Future {
-                  blocking {
-                    maxSeenCounter.synchronized {
-                      maxSeenCounter.set(Math.max(counter.incrementAndGet(), maxSeenCounter.get()))
+                  {
+                    lock.exclusive {
+                      val incrementedCounter = counter.incrementAndGet()
+                      maxSeenCounter.updateAndGet(_.max(incrementedCounter)).discard
                     }
                   }
                   Threading.sleep(100)
@@ -1876,9 +1878,9 @@ final class SequencerClientTest
       SequencerConnectionXPoolConfig(
         connections = NonEmpty(Seq, connection.config),
         trustThreshold = PositiveInt.one,
-        minRestartConnectionDelay = cantonConfig.NonNegativeFiniteDuration.Zero,
-        maxRestartConnectionDelay = cantonConfig.NonNegativeFiniteDuration.Zero,
-        warnConnectionValidationDelay = cantonConfig.NonNegativeFiniteDuration.Zero,
+        minRestartConnectionDelay = NonNegativeFiniteDuration.Zero,
+        maxRestartConnectionDelay = NonNegativeFiniteDuration.Zero,
+        warnConnectionValidationDelay = NonNegativeFiniteDuration.Zero,
       )
 
     override def updateConfig(newConfig: SequencerConnectionXPool.SequencerConnectionXPoolConfig)(

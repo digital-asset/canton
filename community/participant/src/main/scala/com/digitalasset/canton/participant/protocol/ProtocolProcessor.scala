@@ -74,7 +74,7 @@ import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
-import scala.concurrent.{ExecutionContext, blocking}
+import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success}
 
 /** The [[ProtocolProcessor]] orchestrates Phase 3, 4, and 7 of the synchronization protocol. For
@@ -330,6 +330,7 @@ abstract class ProtocolProcessor[
           tracked.changeIdHash,
           inFlightSubmission.messageId,
           newTrackingData,
+          maxSequencingTime,
         )
         .map(_ => tracked.onDefinitiveFailure)
 
@@ -1838,7 +1839,9 @@ abstract class ProtocolProcessor[
 }
 
 object ProtocolProcessor {
+
   private val approvalContradictionCheckIsEnabled = new AtomicReference[Boolean](true)
+  private val lock = new Mutex()
   private val testsAllowedToDisableApprovalContradictionCheck = Seq(
     "LedgerAuthorizationReferenceIntegrationTestDefault",
     "LedgerAuthorizationBftOrderingIntegrationTestDefault",
@@ -1865,8 +1868,8 @@ object ProtocolProcessor {
 
     val logger = loggerFactory.getLogger(this.getClass)
 
-    blocking {
-      synchronized {
+    {
+      lock.exclusive {
         logger.info("Disabling approval contradiction check")
         approvalContradictionCheckIsEnabled.set(false)
         try {

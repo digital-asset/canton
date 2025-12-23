@@ -60,7 +60,6 @@ object Dependencies {
   lazy val jakarta_annotation_api_version = "1.3.5"
   lazy val log4j_version = "2.23.1"
   lazy val logback_version = "1.5.3"
-  lazy val logstash_version = "6.6"
   lazy val magnolia_version = "1.1.10"
   lazy val magnolifyScalacheck_version = "0.6.2"
   lazy val magnolifyShared_version = "0.6.2"
@@ -98,7 +97,7 @@ object Dependencies {
   lazy val testcontainers_version = "2.0.2"
   lazy val tink_version = "1.12.0"
   lazy val toxiproxy_java_version = "2.1.7"
-  lazy val transcode_version = "0.1.1-main.20251112.144.829.v5cc568a"
+  lazy val transcode_version = "3.5.0-snapshot.20251205.150.903.vc31b0a4"
   lazy val upickle_version = "4.0.2"
 
   lazy val reflections = "org.reflections" % "reflections" % reflections_version
@@ -111,6 +110,7 @@ object Dependencies {
 
   lazy val scala_collection_contrib =
     "org.scala-lang.modules" %% "scala-collection-contrib" % scala_collections_contrib_version
+  lazy val scala_compiler = "org.scala-lang" % "scala-compiler" % scala_version
   lazy val scala_reflect = "org.scala-lang" % "scala-reflect" % scala_version
   lazy val shapeless = "com.chuusai" %% "shapeless" % shapeless_version
 
@@ -119,6 +119,7 @@ object Dependencies {
   // ammonite requires the full scala version including patch number
   lazy val ammonite = "com.lihaoyi" % "ammonite" % ammonite_version cross CrossVersion.full
   lazy val pprint = "com.lihaoyi" %% "pprint" % pprint_version
+  lazy val lihaoyi_sourcecode_2 = resolveDependency("com.lihaoyi", "sourcecode_2.13")
 
   lazy val h2 = "com.h2database" % "h2" % h2_version
   lazy val postgres = "org.postgresql" % "postgresql" % postgres_version
@@ -126,6 +127,7 @@ object Dependencies {
   lazy val flyway_postgres = "org.flywaydb" % "flyway-database-postgresql" % flyway_version
 
   // Picked up automatically by the scalapb compiler. Contains common dependencies such as protocol buffers like google/protobuf/timestamp.proto
+  lazy val scalapb_lenses = resolveDependency("com.thesamet.scalapb", "lenses")
   lazy val scalapb_runtime =
     "com.thesamet.scalapb" %% "scalapb-runtime" % scalapb.compiler.Version.scalapbVersion % "protobuf"
   lazy val scalapb_runtime_grpc =
@@ -138,6 +140,10 @@ object Dependencies {
 
   lazy val javax_annotations =
     "javax.annotation" % "javax.annotation-api" % javax_annotations_version
+
+  lazy val google_findbugs = resolveDependency("com.google.code.findbugs", "jsr305")
+  lazy val reactivestreams = resolveDependency("org.reactivestreams", "reactive-streams")
+  lazy val spray_json = resolveDependency("io.spray", "spray-json_2.13")
 
   lazy val grpc_protobuf = "io.grpc" % "grpc-protobuf" % grpc_version
 
@@ -160,6 +166,7 @@ object Dependencies {
   lazy val gson = "com.google.code.gson" % "gson" % gson_version
   lazy val gson_fire = "io.gsonfire" % "gson-fire" % gson_fire_version
 
+  lazy val grpc_core = "io.grpc" % "grpc-protobuf" % grpc_version
   lazy val grpc_stub = "io.grpc" % "grpc-stub" % grpc_version
   lazy val grpc_services = "io.grpc" % "grpc-services" % grpc_version
   lazy val grpc_api = "io.grpc" % "grpc-api" % grpc_version
@@ -183,10 +190,18 @@ object Dependencies {
   lazy val scalacheck = "org.scalacheck" %% "scalacheck" % scalacheck_version
   lazy val scalatest = "org.scalatest" %% "scalatest" % scalatest_version
   lazy val scalaz_core = "org.scalaz" %% "scalaz-core" % scalaz_version
+  lazy val scalaz_scalacheck_binding = resolveDependency("org.scalaz", "scalaz-scalacheck-binding")
   lazy val scalatestScalacheck =
     "org.scalatestplus" %% "scalacheck-1-18" % (scalatest_version + ".0")
   lazy val mockito_scala = "org.mockito" %% "mockito-scala" % mockito_scala_version
   lazy val scalatestMockito = "org.scalatestplus" %% "mockito-3-4" % ("3.2.10.0")
+
+  lazy val scalatest_compatible = resolveDependency("org.scalatest", "scalatest-compatible")
+  lazy val scalatest_wordspec = resolveDependency("org.scalatest", "scalatest-wordspec_2.13")
+  lazy val scalatest_shouldmatchers =
+    resolveDependency("org.scalatest", "scalatest-shouldmatchers_2.13")
+
+  lazy val scalactic = resolveDependency("org.scalactic", "scalactic")
 
   // As an alternative to `mockito-scala`, available on Scala 3
   lazy val smockito = "com.bdmendes" %% "smockito" % "2.2.1"
@@ -211,7 +226,7 @@ object Dependencies {
 
   // used for condition evaluation in logback
   lazy val janino = "org.codehaus.janino" % "janino" % janino_version
-  lazy val logstash = "net.logstash.logback" % "logstash-logback-encoder" % logstash_version
+  lazy val logstash = resolveDependency("net.logstash.logback", "logstash-logback-encoder")
 
   lazy val cats = "org.typelevel" %% "cats-core" % cats_version
   lazy val cats_law = "org.typelevel" %% "cats-laws" % cats_law_version
@@ -251,8 +266,16 @@ object Dependencies {
     ),
   )
 
+  // When updating opentelemetry, check that the workaround implemented in
+  // com.digitalasset.canton.telemetry.UnsetSpanEndingThreadReferenceSpanProcessor
+  // a) is still needed, and if yes, b) still works.
   lazy val opentelemetry_api = resolveDependency("io.opentelemetry", "opentelemetry-api")
   lazy val opentelemetry_sdk = resolveDependency("io.opentelemetry", "opentelemetry-sdk")
+  lazy val opentelemetry_context = resolveDependency("io.opentelemetry", "opentelemetry-context")
+  lazy val opentelemetry_sdk_metrics =
+    resolveDependency("io.opentelemetry", "opentelemetry-sdk-metrics")
+  lazy val opentelemetry_sdk_testing =
+    resolveDependency("io.opentelemetry", "opentelemetry-sdk-testing")
   lazy val opentelemetry_sdk_autoconfigure =
     resolveDependency("io.opentelemetry", "opentelemetry-sdk-extension-autoconfigure")
   lazy val opentelemetry_exporter_zipkin =
@@ -283,6 +306,8 @@ object Dependencies {
   lazy val slick =
     "com.typesafe.slick" %% "slick" % slick_version excludeAll (incompatibleLogging: _*)
   lazy val slick_hikaricp = "com.typesafe.slick" %% "slick-hikaricp" % slick_version
+
+  lazy val typesafe_config = resolveDependency("com.typesafe", "config")
 
   lazy val testcontainers = "org.testcontainers" % "testcontainers" % testcontainers_version
   lazy val testcontainers_postgresql =
@@ -409,45 +434,15 @@ object Dependencies {
   lazy val daml_script_runner = "com.daml" %% "daml-script-runner" % daml_libraries_version
   lazy val daml_lf_data = "com.daml" %% "daml-lf-data" % daml_libraries_version
   lazy val daml_lf_language = "com.daml" %% "daml-lf-language" % daml_libraries_version
-  lazy val daml_libs_scala_contextualized_logging =
-    "com.daml" %% "contextualized-logging" % daml_libraries_version
-  lazy val daml_test_evidence_tag =
-    "com.daml" %% "test-evidence-tag" % daml_libraries_version
-  lazy val daml_test_evidence_generator_scalatest =
-    "com.daml" %% "test-evidence-generator" % daml_libraries_version
   lazy val daml_lf_engine = "com.daml" %% "daml-lf-engine" % daml_libraries_version
   lazy val daml_lf_transaction = "com.daml" %% "daml-lf-transaction" % daml_libraries_version
-  lazy val daml_non_empty = "com.daml" %% "nonempty" % daml_libraries_version
-  lazy val daml_nonempty_cats = "com.daml" %% "nonempty-cats" % daml_libraries_version
-  lazy val daml_metrics = "com.daml" %% "metrics" % daml_libraries_version
-  lazy val daml_tracing = "com.daml" %% "tracing" % daml_libraries_version
 
-  lazy val daml_observability_pekko_http_metrics =
-    "com.daml" %% "pekko-http-metrics" % daml_libraries_version
-  lazy val daml_executors = "com.daml" %% "executors" % daml_libraries_version
-  lazy val daml_timer_utils = "com.daml" %% "timer-utils" % daml_libraries_version
-  lazy val daml_libs_scala_scalatest_utils =
-    "com.daml" %% "scalatest-utils" % daml_libraries_version
-  lazy val daml_libs_scala_ledger_resources =
-    "com.daml" %% "ledger-resources" % daml_libraries_version
-  lazy val daml_rs_grpc_pekko = "com.daml" %% "rs-grpc-pekko" % daml_libraries_version
   lazy val daml_lf_encoder = "com.daml" %% "daml-lf-encoder" % daml_libraries_version
   lazy val daml_lf_api_type_signature =
     "com.daml" %% "daml-lf-api-type-signature" % daml_libraries_version
-  lazy val daml_rs_grpc_bridge = "com.daml" % "rs-grpc-bridge" % daml_libraries_version
   // Daml testing libs
-  lazy val daml_libs_scala_ports = "com.daml" %% "ports" % daml_libraries_version
-  lazy val daml_http_test_utils = "com.daml" %% "http-test-utils" % daml_libraries_version
-  lazy val daml_testing_utils = "com.daml" %% "testing-utils" % daml_libraries_version
-  lazy val daml_metrics_test_lib = "com.daml" %% "metrics-test-lib" % daml_libraries_version
   lazy val daml_lf_transaction_test_lib =
     "com.daml" %% "daml-lf-transaction-test-lib" % daml_libraries_version
-  lazy val daml_rs_grpc_testing_utils =
-    "com.daml" %% "rs-grpc-testing-utils" % daml_libraries_version
-  lazy val daml_observability_tracing_test_lib =
-    "com.daml" %% "tracing-test-lib" % daml_libraries_version
-  lazy val daml_libs_scala_grpc_test_utils =
-    "com.daml" %% "grpc-test-utils" % daml_libraries_version
   lazy val daml_lf_parser =
     "com.daml" %% "daml-lf-parser" % daml_libraries_version
   lazy val daml_lf_archive_encoder =
@@ -460,7 +455,7 @@ object Dependencies {
     "com.daml" %% "ledger-api-value-scalapb" % daml_libraries_version
 
   lazy val transcode_daml_lf =
-    ("com.daml" %% "transcode-daml-lf-daml3.5" % transcode_version)
+    ("com.daml" %% "transcode-daml-lf" % transcode_version)
       .cross(CrossVersion.for2_13Use3)
       .exclude("com.lihaoyi", "fastparse_3")
 
@@ -472,7 +467,7 @@ object Dependencies {
       .exclude("com.lihaoyi", "fastparse_3")
 
   lazy val transcode_codec_proto_scala =
-    ("com.daml" %% "transcode-codec-proto-scala-daml3.5" % transcode_version)
+    ("com.daml" %% "transcode-codec-proto-scala" % transcode_version)
       .cross(CrossVersion.for2_13Use3)
       .exclude("com.lihaoyi", "fastparse_3")
 
