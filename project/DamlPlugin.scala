@@ -369,6 +369,12 @@ object DamlPlugin extends AutoPlugin {
     val githubRawUrl =
       s"https://raw.githubusercontent.com/digital-asset/daml/internal-$damlVersion/sdk/maven_install_2.13.json"
     Try(scala.io.Source.fromURL(githubRawUrl).getLines().mkString("\n")) match {
+      // Try(
+      //  scala.io.Source
+      //    .fromFile("/home/dylanthinnes/root/main/sdk/maven_install_2.13.json")
+      //    .getLines()
+      //    .mkString("\n")
+      // ) match {
       case Failure(exception) =>
         throw new MessageOnlyException(
           s"Failed to fetch maven_install.json from the daml repo: $exception"

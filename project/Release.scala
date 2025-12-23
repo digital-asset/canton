@@ -1,8 +1,10 @@
 import sbt.Keys.streams
+import sbt.internal.sona.Sona
 import sbt.internal.util.ManagedLogger
-import sbt.{IO, Setting, complete, inputKey}
+import sbt.*
 
 import cats.syntax.either._
+import scala.util.Properties
 
 object Release {
   private val SemVerDigitsRegex = """(0|[1-9]\d*)"""
@@ -221,5 +223,54 @@ object Release {
         fixReleaseToProtocolVersion(releaseToProtocolVersionArgs)
       }
     )
+  }
+
+  private def isStableOrReleaseCandidate(version: String): Boolean = {
+    val (major, minor, patch, suffix) =
+      parseSemver(version).valueOr(e => throw new IllegalArgumentException(e))
+    val RCSuffix = "[Rr][Cc][0-9]{1,3}".r
+    suffix.isEmpty || suffix.exists {
+      case RCSuffix() => true
+      case _ => false
+    }
+  }
+
+  def sonatypeCredentialsEnv: Option[Credentials] =
+    for {
+      username <- sys.env.get("MAVEN_USERNAME")
+      password <- sys.env.get("MAVEN_PASSWORD")
+    } yield Credentials(
+      "Sonatype Nexus Repository Manager",
+      Sona.host,
+      username,
+      password,
+    )
+
+  val publishToSonatypeDetails = "Publish libraries to Sonatype repository (Maven Central)"
+  val publishToSonatype = Command.command(
+    "publishToSonatype",
+    publishToSonatypeDetails,
+    publishToSonatypeDetails,
+  ) { state =>
+    val version = state
+      .getSetting(ThisBuild / Keys.version)
+      .getOrElse(throw new IllegalStateException("ThisBuild / version is missing"))
+    if (!isStableOrReleaseCandidate(version)) {
+      state.log.info(s"Skipping publishing to Sonatype for unstable version $version")
+      state
+    } else {
+      def checkEnv(name: String): Unit = Properties.envOrNone(name).orElse {
+        throw new MessageOnlyException(s"Missing environment variable $name.")
+      }
+      checkEnv("MAVEN_USERNAME")
+      checkEnv("MAVEN_PASSWORD")
+      checkEnv("gpg_code_signing")
+      List(
+        "set ThisBuild / BuildCommon.publishToSonatypeEnabled := true",
+        "publishSigned",
+        "sonaRelease",
+        "set ThisBuild / BuildCommon.publishToSonatypeEnabled := false",
+      ) ::: state
+    }
   }
 }
