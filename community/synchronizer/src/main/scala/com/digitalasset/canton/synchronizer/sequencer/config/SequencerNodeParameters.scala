@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.config
 
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble}
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.config.{ActiveRequestLimitsConfig, ProcessingTimeout}
 import com.digitalasset.canton.environment.{
   CantonNodeParameters,
@@ -46,6 +46,7 @@ final case class SequencerNodeParameters(
     sequencerApiLimits: Map[String, NonNegativeInt] = Map.empty,
     warnOnUndefinedLimits: Boolean = true,
     requestLimits: Option[ActiveRequestLimitsConfig] = None,
+    maxAuthTokensPerMember: PositiveInt = PositiveInt.tryCreate(25),
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters
     with HasProtocolCantonNodeParameters
