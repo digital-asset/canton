@@ -43,7 +43,7 @@ import com.digitalasset.canton.topology.{
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
-import com.digitalasset.canton.util.{PekkoUtil, ResourceUtil}
+import com.digitalasset.canton.util.{Mutex, PekkoUtil, ResourceUtil}
 import com.digitalasset.canton.version.{
   ProtocolVersion,
   ProtocolVersionCompatibility,
@@ -59,7 +59,7 @@ import org.scalatest.Assertions.fail
 import org.scalatest.matchers.should.Matchers
 
 import scala.collection.concurrent.TrieMap
-import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future, Promise, blocking}
+import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future, Promise}
 import scala.util.Random
 
 trait ConnectionPoolTestHelpers {
@@ -517,26 +517,23 @@ protected object ConnectionPoolTestHelpers {
 
   protected class CreatedConnections {
     private val connectionsMap = TrieMap[Int, InternalSequencerConnectionX]()
-
+    private val lock = new Mutex()
     def apply(index: Int): InternalSequencerConnectionX = connectionsMap.apply(index)
 
     def add(index: Int, connection: InternalSequencerConnectionX): Unit =
-      blocking {
-        synchronized {
-          connectionsMap.updateWith(index) {
-            case Some(_) => throw new IllegalStateException("Connection already exists")
-            case None => Some(connection)
-          }
+      lock.exclusive {
+        connectionsMap.updateWith(index) {
+          case Some(_) => throw new IllegalStateException("Connection already exists")
+          case None => Some(connection)
         }
       }
 
-    def snapshotAndClear(): Map[Int, InternalSequencerConnectionX] = blocking {
-      synchronized {
+    def snapshotAndClear(): Map[Int, InternalSequencerConnectionX] =
+      lock.exclusive {
         val snapshot = connectionsMap.readOnlySnapshot().toMap
         connectionsMap.clear()
         snapshot
       }
-    }
 
     def size: Int = connectionsMap.size
   }
