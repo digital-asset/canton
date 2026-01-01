@@ -508,7 +508,7 @@ object BuildCommon {
       wartremoverErrors += Wart.custom(s"${prefix}GlobalExecutionContext"),
       // NonUnitForEach is too aggressive for integration tests where we often ignore the result of console commands
       Compile / compile / wartremoverErrors += Wart.custom(s"${prefix}NonUnitForEach"),
-      wartremoverErrors += Wart.custom(s"${prefix}RequireBlocking"),
+      Compile / compile / wartremoverErrors += Wart.custom(s"${prefix}RequireBlocking"),
       // In tests, we often serialize protos directly
       Compile / compile / wartremoverErrors += Wart.custom(s"${prefix}ProtobufToByteString"),
       wartremoverErrors += Wart.custom(s"${prefix}SynchronizedFuture"),

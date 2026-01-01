@@ -1279,7 +1279,7 @@ class RichSequencerClientImpl(
   private val handlerIdle: AtomicReference[Promise[Unit]] = new AtomicReference(
     Promise.successful(())
   )
-  private val handlerIdleLock: Object = new Object
+  private val handlerIdleLock = new Mutex()
 
   override protected def subscribeAfterInternal(
       priorTimestamp: CantonTimestamp,
@@ -1688,12 +1688,11 @@ class RichSequencerClientImpl(
     private def signalHandler(
         eventHandler: SequencedApplicationHandler[ClosedEnvelope]
     )(implicit traceContext: TraceContext): Unit = synchronizeWithClosingSync(functionFullName) {
-      val isIdle = blocking {
-        handlerIdleLock.synchronized {
+      val isIdle =
+        handlerIdleLock.exclusive {
           val oldPromise = handlerIdle.getAndUpdate(p => if (p.isCompleted) Promise() else p)
           oldPromise.isCompleted
         }
-      }
       if (isIdle) {
         val handlingF = handleReceivedEventsUntilEmpty(eventHandler)
         addToFlushAndLogError("invoking the application handler")(
@@ -1711,9 +1710,8 @@ class RichSequencerClientImpl(
         import scala.jdk.CollectionConverters.*
         val handlerEvents = javaEventList.asScala.toSeq
 
-        def stopHandler(): Unit = blocking {
-          handlerIdleLock.synchronized(handlerIdle.get().success(()).discard)
-        }
+        def stopHandler(): Unit =
+          handlerIdleLock.exclusive(handlerIdle.get().success(()).discard)
 
         processEventBatch(eventHandler, handlerEvents).value
           .transformWith {
@@ -1726,8 +1724,8 @@ class RichSequencerClientImpl(
               FutureUnlessShutdown.unit
           }
       } else {
-        val stillBusy = blocking {
-          handlerIdleLock.synchronized {
+        val stillBusy =
+          handlerIdleLock.exclusive {
             val idlePromise = handlerIdle.get()
             if (sequencerAggregator.eventQueue.isEmpty) {
               // signalHandler must not be executed here, because that would lead to lost signals.
@@ -1736,7 +1734,6 @@ class RichSequencerClientImpl(
             // signalHandler must not be executed here, because that would lead to duplicate invocations.
             !idlePromise.isCompleted
           }
-        }
 
         if (stillBusy) {
           handleReceivedEventsUntilEmpty(eventHandler)
