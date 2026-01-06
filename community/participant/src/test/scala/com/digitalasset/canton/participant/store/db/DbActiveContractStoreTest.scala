@@ -111,10 +111,12 @@ trait DbActiveContractStoreTest extends AsyncWordSpec with BaseTest with ActiveC
       val ts = CantonTimestamp.assertFromInstant(Instant.parse("2019-04-04T10:00:00.00Z"))
       val ts1 = ts.addMicros(1)
 
+      val tocExclusive = TimeOfChange(ts.immediatePredecessor, rc)
       val toc1 = TimeOfChange(ts, rc)
       val toc2 = TimeOfChange(ts1, rc1)
 
-      val many = (1 to 70000).toList.map(n =>
+      val nrContracts = 100_000
+      val many = (1 to nrContracts).toList.map(n =>
         ExampleTransactionFactory.suffixedId(n % (2 ^ 16), n / (2 ^ 16))
       )
       for {
@@ -131,11 +133,34 @@ trait DbActiveContractStoreTest extends AsyncWordSpec with BaseTest with ActiveC
           )(acs.archiveContracts(_, toc2))
         )("assign many in chunks")
 
-        manyChanges <- acs.changesBetween(toc1, toc2)
+        largeLimit = PositiveInt.tryCreate(2 * nrContracts) // activations and deactivations
+        smallLimit = PositiveInt.tryCreate(100)
+        (manyChanges, manyChangesReturnedSize) <- acs.changesBetween(
+          tocExclusive,
+          toc2,
+          largeLimit,
+        )
+        (notSoManyChanges, notSoManyChangesReturnedSize) <- acs.changesBetween(
+          tocExclusive,
+          toc2,
+          smallLimit,
+        )
       } yield {
-        manyChanges.flatMap { case (_, changes) =>
+        val manyChangesSize = manyChanges.flatMap { case (_, changes) =>
           changes.deactivations.keys ++ changes.activations.keys
-        }.size shouldBe many.size.toLong
+        }.size
+        manyChangesSize shouldBe largeLimit.value
+        notSoManyChanges.flatMap { case (_, changes) =>
+          changes.deactivations.keys ++ changes.activations.keys
+        }.size shouldBe nrContracts
+        notSoManyChangesReturnedSize shouldBe nrContracts
+        manyChanges
+          .flatMap { case (_, changes) => changes.deactivations }
+          .toSet
+          .intersect(notSoManyChanges.flatMap { case (_, changes) => changes.deactivations }.toSet)
+          .size shouldBe notSoManyChanges.flatMap { case (_, changes) =>
+          changes.deactivations
+        }.size
       }
     }
   }
