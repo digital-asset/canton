@@ -25,7 +25,7 @@ object Dependencies {
   lazy val pekko_http_version = pekko_http.revision
   lazy val ammonite_version = "2.5.9"
   lazy val awaitility_version = "4.2.0"
-  lazy val aws_version = "2.29.5"
+  lazy val aws_version = "2.41.1"
   lazy val better_files_version = "3.9.1"
   lazy val bouncy_castle_version = "1.70"
   lazy val cats_law_version = "2.9.0"
