@@ -2060,8 +2060,8 @@ object BuildCommon {
           DamlProjects.`grpc-test-utils`,
           DamlProjects.`test-evidence-tag`,
         )
-        .disablePlugins(WartRemover)
         .settings(
+          sharedCantonCommunitySettings,
           libraryDependencies ++= Seq(
             munit,
             sttp_pekko_backend,
@@ -2069,7 +2069,6 @@ object BuildCommon {
             tapir_sttp_client,
           ),
           compileOrder := CompileOrder.JavaThenScala,
-          sharedSettings,
           Def.settings(additionalSetting.toSeq*),
           Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
           Test / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
@@ -2100,13 +2099,11 @@ object BuildCommon {
       Project(
         s"ledger-test-tool-$lfVersion".replace('.', '-'),
         file(s"community/ledger-test-tool/tool/lf-v$lfVersion"),
-      ).dependsOn(
-        ledgerTestToolSuites
-      ).disablePlugins(WartRemover)
+      ).dependsOn(ledgerTestToolSuites)
         .enablePlugins(DamlPlugin)
         .settings(
           compileOrder := CompileOrder.JavaThenScala,
-          sharedSettings,
+          sharedCantonCommunitySettings,
           Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
           Compile / unmanagedResourceDirectories += baseDirectory.value / ".." / "src" / "main" / "resources",
           // See #23185: Prevent potential OOM by setting info log level when conformance tests trigger assembly
@@ -2380,7 +2377,6 @@ object BuildCommon {
       `test-evidence-tag`,
       `ports`,
       `http-test-utils`,
-      `struct-spray-json`,
       `observability-metrics`,
       `observability-tracing`,
       `observability-pekko-http-metrics`,
@@ -2460,7 +2456,6 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           scalatest_shouldmatchers % Test,
           scalatest_wordspec % Test,
-          spray_json,
         ),
       )
 
@@ -2477,7 +2472,6 @@ object BuildCommon {
           pekko_actor,
           pekko_stream,
           slf4j_api,
-          spray_json,
         ),
       )
 
@@ -2738,26 +2732,6 @@ object BuildCommon {
         libsScalaSettings
       )
 
-    lazy val `struct-spray-json` = project
-      .in(file("base/struct-json/struct-spray-json"))
-      .disablePlugins(WartRemover)
-      .settings(
-        libsScalaSettings,
-        libraryDependencies ++= Seq(
-          google_protobuf_java,
-          grpc_api,
-          grpc_protobuf,
-          grpc_stub,
-          scalapb_lenses,
-          scalapb_runtime,
-          scalapb_runtime_grpc,
-          scalatest % Test,
-          scalatest_shouldmatchers % Test,
-          scalatest_wordspec % Test,
-          spray_json,
-        ),
-      )
-
     lazy val `concurrent` = project
       .in(file("base/concurrent"))
       .disablePlugins(WartRemover)
@@ -2901,10 +2875,7 @@ object BuildCommon {
 
     lazy val `daml-jwt` = project
       .in(file("base/daml-jwt"))
-      .dependsOn(
-        `struct-spray-json`,
-        CommunityProjects.`wartremover-annotations`,
-      )
+      .dependsOn(CommunityProjects.`wartremover-annotations`)
       .settings(
         sharedCantonSettingsExternal,
         publishCommunitySettings,

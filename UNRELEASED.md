@@ -18,6 +18,7 @@ Template for a bigger topic
 #### Impact and Migration
 
 ### Minor Improvements
+- Added a new configuration parameter for session signing keys, `toleranceShiftDuration`, and updated `cutOffDuration` to allow a zero duration.
 - Ledger JSON Api changes:
   - extra fields in JSON objects are no longer tolerated,
   - All JSON values are optional by default upon decoding (this is not reflected in the openapi spec yet, but written comments should reflect the optionality),

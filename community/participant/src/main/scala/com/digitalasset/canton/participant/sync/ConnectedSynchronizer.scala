@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.participant.sync
@@ -207,6 +207,7 @@ class ConnectedSynchronizer(
     TransactionConfirmationRequestFactory(
       participantId,
       psid,
+      clock,
     )(
       synchronizerCrypto.crypto.pureCrypto,
       contractHasher,
@@ -232,6 +233,7 @@ class ConnectedSynchronizer(
       psid,
       participantId,
       trafficStateController,
+      clock,
       loggerFactory,
     )
   }
@@ -296,6 +298,7 @@ class ConnectedSynchronizer(
     contractValidator,
     seedGenerator,
     sequencerClient,
+    clock,
     timeouts,
     Source(staticSynchronizerParameters.protocolVersion),
     loggerFactory,
@@ -315,6 +318,7 @@ class ConnectedSynchronizer(
     contractValidator,
     seedGenerator,
     sequencerClient,
+    clock,
     timeouts,
     Target(staticSynchronizerParameters.protocolVersion),
     loggerFactory,

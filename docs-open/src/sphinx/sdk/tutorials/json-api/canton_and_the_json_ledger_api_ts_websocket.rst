@@ -1,5 +1,5 @@
 ..
-   Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+   Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 ..
    SPDX-License-Identifier: Apache-2.0
 
@@ -28,19 +28,6 @@ Before starting, ensure you have the following installed:
 
 - **Node.js and npm** — Download from https://nodejs.org/en/download/. Recommended version: `18.20.x` or later.
 - **Dpm** — Install following :externalref:`these instructions<dpm-install>`
-
-.. parsed-literal::
-
-    curl -sSL https://get.digitalasset.com/install/install.sh | sh -s |release|
-
-Verify the installation by running:
-
-.. code-block::
-
-    dpm version --active
-
-You should see a version equal to or later than |version|.
-
 - **Canton** — Includes pre-built examples. See the :externalref:`Canton demo<demo>` for details.
 
 Example TypeScript Project with WebSockets

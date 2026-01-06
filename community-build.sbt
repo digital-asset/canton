@@ -88,7 +88,6 @@ lazy val `test-evidence-scalatest` = DamlProjects.`test-evidence-scalatest`
 lazy val `sample-service` = DamlProjects.`sample-service`
 lazy val `ports` = DamlProjects.`ports`
 lazy val `http-test-utils` = DamlProjects.`http-test-utils`
-lazy val `struct-spray-json` = DamlProjects.`struct-spray-json`
 lazy val `concurrent` = DamlProjects.`concurrent`
 lazy val `executors` = DamlProjects.`executors`
 lazy val `observability-metrics` = DamlProjects.`observability-metrics`

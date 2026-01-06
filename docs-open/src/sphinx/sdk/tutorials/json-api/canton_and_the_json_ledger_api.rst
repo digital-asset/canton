@@ -1,5 +1,5 @@
 ..
-   Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+   Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 ..
    SPDX-License-Identifier: Apache-2.0
 
@@ -32,13 +32,6 @@ Before running the project, ensure you have the following installed:
 
 - A Bash-compatible terminal (e.g., macOS Terminal, Git Bash, etc.)
 - **Dpm** — Install following :externalref:`these instructions<dpm-install>`
-
-.. parsed-literal::
-
-    curl -sSL https://get.digitalasset.com/install/install.sh | sh -s |release|
-
-    (check installed dpm version by entering in bash console :code:`dpm version --active`, it should be at least |version|)
-
 - `canton` — Canton release with installation and examples, check :externalref:`Canton demo<demo>` for details
 - `curl` — command-line HTTP client: https://github.com/curl/curl (installation: https://curl.se/download.html)
 - (Optional) `jq` — command-line JSON processor: https://github.com/jqlang/jq (installation: https://jqlang.org/download/)
