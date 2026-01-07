@@ -1,5 +1,5 @@
 ..
-   Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+   Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 ..
    SPDX-License-Identifier: Apache-2.0
 
@@ -69,7 +69,7 @@ The following command rotates a single key of ``myNode``:
 
 .. todo:: <https://github.com/DACH-NY/canton/issues/27699>
    Update the commands and docs so that one can actually pause in between and take a backup.
-                 
+
 .. _deleting-canton-keys:
 
 Generate and activate keys

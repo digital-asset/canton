@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 package com.digitalasset.canton.integration.tests.security.kms
@@ -78,7 +78,7 @@ class MockKmsDriverSessionSigningKeysIntegrationTestPostgres
     Set.empty
 
   override protected lazy val protectedNodes: Set[String] =
-    Set("sequencer1")
+    Set("participant1", "participant2", "mediator1", "sequencer1")
 
   setupPlugins(
     // TODO(#25069): Add persistence to mock KMS driver to support auto-init = false
