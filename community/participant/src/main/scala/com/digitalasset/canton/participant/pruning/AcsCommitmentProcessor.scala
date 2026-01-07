@@ -539,6 +539,154 @@ class AcsCommitmentProcessor private (
   ): Unit =
     publishInternal(PublishTickData.Regular(toc, () => FutureUnlessShutdown.pure(acsChange)))
 
+  @VisibleForTesting
+  private[pruning] def addChange(
+      change: AcsChange,
+      activations: mutable.Map[LfContractId, ContractStakeholdersAndReassignmentCounter],
+      deactivations: mutable.Map[LfContractId, ContractStakeholdersAndReassignmentCounter],
+  )(implicit traceContext: TraceContext): Unit = {
+    change.activations.foreach { case (cid, stakeholdersAndCounter) =>
+      val previousActivation =
+        activations.put(cid, stakeholdersAndCounter)
+      previousActivation.foreach { prev =>
+        ErrorUtil.invalidState(
+          s"Activations contains duplicate contract id $cid: old=$prev, new=$stakeholdersAndCounter"
+        )
+      }
+    }
+
+    change.deactivations.foreach { case (cid, stakeholdersAndCounter) =>
+      val prevActivation = activations.remove(cid)
+      if (prevActivation.isEmpty) {
+        val previousDeactivation = deactivations.put(cid, stakeholdersAndCounter)
+        if (previousDeactivation.isDefined) {
+          ErrorUtil.invalidState(
+            s"Deactivations contains duplicate contract id, $cid"
+          )
+        }
+      }
+    }
+  }
+
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  @VisibleForTesting
+  // assumes the input to be sorted by recordtime
+  private[pruning] def collapseAndPublishAcsChanges(
+      acsChanges: NonEmpty[Seq[(RecordTime, AcsChange)]]
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Seq[(RecordTime, AcsChange)]] = {
+
+    def previousBoundary(timestamp: CantonTimestamp, intervalLength: Long) =
+      CantonTimestamp.ofEpochSecond(
+        Math.multiplyExact(
+          Math.floorDiv(timestamp.getEpochSecond, intervalLength),
+          intervalLength,
+        )
+      )
+
+    var prevToc = TimeOfChange(CantonTimestamp.MinValue)
+    val firstAcsChangeTimestamp =
+      acsChanges.head1._1.timestamp
+    var prevCheckpointBoundary =
+      previousBoundary(firstAcsChangeTimestamp, commitmentCheckpointInterval.duration.toSeconds)
+    var prevIntervalBoundary = CantonTimestamp.MinValue
+    val res = List.newBuilder[(RecordTime, AcsChange)]
+
+    // Activations and deactivations are keyed by cid only. For well-formed
+    // changes, we shouldn't need to add the reassignment counter to the key. The reason is that the tuple
+    // (cid, toc, changeType - activation/deactivation) is unique. At an extreme, we could have the changes
+    // (c1, toc1, act), (c1, toc1, deact), (c1, toc2, act), (c1, toc2, deact), (c1, toc3, act) etc. As we accumulate
+    // and collapse changes, we should never be in the situation where we have in a map a tuple (cid, counter) and
+    // want to add another one (cid, anotherCounter). That's because there should be another change in between that cancels
+    // out (cid, counter). For example, if (cid, counter) is an activation, and (cid, anotherCounter) is also an activation,
+    // then there should have been a deactivation in between, oherwise we'd have a double activation. A similar argument holds
+    // for deactivations.
+    // However, we will emit an exception if the changes within the same reconciliation interval or checkpoint interval
+    // are not well-formed.
+    val activations = scala.collection.mutable.Map
+      .empty[LfContractId, ContractStakeholdersAndReassignmentCounter]
+    val deactivations = scala.collection.mutable.Map
+      .empty[LfContractId, ContractStakeholdersAndReassignmentCounter]
+
+    def crossesCheckpointOrInterval(
+        toc: TimeOfChange
+    )(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Boolean] =
+      for {
+        reconciliationIntervals <- getReconciliationIntervals(
+          toc.timestamp
+        )
+        reconIntervalLength = reconciliationIntervals.intervals.headOption.map(
+          _.intervalLength.duration.toSeconds
+        )
+      } yield {
+        if (prevIntervalBoundary == CantonTimestamp.MinValue) {
+          reconIntervalLength.foreach(len =>
+            prevIntervalBoundary = previousBoundary(firstAcsChangeTimestamp, len)
+          )
+        }
+        val crossesCheckpoint =
+          if (
+            toc.timestamp > prevCheckpointBoundary
+              .plusSeconds(commitmentCheckpointInterval.duration.toSeconds)
+          ) {
+            prevCheckpointBoundary =
+              previousBoundary(toc.timestamp, commitmentCheckpointInterval.duration.toSeconds)
+            true
+          } else false
+        val crossesInterval = reconIntervalLength.exists { len =>
+          if (toc.timestamp > prevIntervalBoundary.plusSeconds(len)) {
+            prevIntervalBoundary = previousBoundary(toc.timestamp, len)
+            true
+          } else false
+        }
+        crossesCheckpoint || crossesInterval
+      }
+
+    // need to create a collapsed change even if empty, because it pushes us over a checkpoint or interval boundary
+    // and that's when we need to checkpoint running commitments and compute commitments
+    def createCollapsedChange() =
+      new AcsChange(activations.toMap, deactivations.toMap)
+
+    val processChanges = MonadUtil
+      .sequentialTraverse(acsChanges) { case (toc, acsChange) =>
+        for {
+          startNewChange <- crossesCheckpointOrInterval(
+            toc.toTimeOfChange
+          )
+        } yield {
+          if (startNewChange) {
+            // toc "crosses" a reconciliation boundary, so we sum up changes so far as taking place at prevToc,
+            // and publish it as an ACS change.
+            // The logic is the same as when we decide we've completed a period,and snapshot the running commitments
+            // before adding a new change
+            val collapsedAcsChange = createCollapsedChange()
+            res += (RecordTime.fromTimeOfChange(prevToc) -> collapsedAcsChange)
+            activations.clear()
+            deactivations.clear()
+          }
+          addChange(acsChange, activations, deactivations)
+          prevToc = toc.toTimeOfChange
+        }
+      }
+    for {
+      _ <- processChanges
+    } yield {
+      val collapsedAcsChange = createCollapsedChange()
+      res += (RecordTime.fromTimeOfChange(prevToc) -> collapsedAcsChange)
+      res.result()
+    }
+  }
+
+  override def publish(acsChanges: NonEmpty[Seq[(RecordTime, AcsChange)]])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] =
+    collapseAndPublishAcsChanges(acsChanges).map(changes =>
+      changes.foreach { case (rt, change) =>
+        publishInternal(PublishTickData.Regular(rt, () => FutureUnlessShutdown.pure(change)))
+      }
+    )
+
   override def publish(
       toc: RecordTime,
       acsChangeFactoryO: Option[AcsChangeFactory],
@@ -908,7 +1056,7 @@ class AcsCommitmentProcessor private (
         // store running commitments for checkpointing
         _ <-
           if (
-            toc.timestamp >= lastCheckpointTs.plusSeconds(
+            toc.timestamp > lastCheckpointTs.plusSeconds(
               commitmentCheckpointInterval.duration.toSeconds
             )
           ) {
