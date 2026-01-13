@@ -546,12 +546,39 @@ class AcsCommitmentProcessor private (
       deactivations: mutable.Map[LfContractId, ContractStakeholdersAndReassignmentCounter],
   )(implicit traceContext: TraceContext): Unit = {
     change.activations.foreach { case (cid, stakeholdersAndCounter) =>
-      val previousActivation =
-        activations.put(cid, stakeholdersAndCounter)
-      previousActivation.foreach { prev =>
-        ErrorUtil.invalidState(
-          s"Activations contains duplicate contract id $cid: old=$prev, new=$stakeholdersAndCounter"
-        )
+      deactivations.get(cid) match {
+        case None =>
+          val previousActivation =
+            activations.put(cid, stakeholdersAndCounter)
+          previousActivation.foreach { prev =>
+            ErrorUtil.invalidState(
+              s"Activations contains duplicate contract id $cid: old=$prev, new=$stakeholdersAndCounter"
+            )
+          }
+        case Some(previousCounter) =>
+          // we have a prior deactivation for the same cid that was not cleared by a previous activation (otherwise it
+          // wouldn't be in deactivations)
+          if (previousCounter.reassignmentCounter == stakeholdersAndCounter.reassignmentCounter) {
+            // the prior uncleared deactivation is cleared by this later activation
+            // shouldn't happen in a well-formed list of activations and deactivations (for non-transient contracts?), but
+            // we'll accept it, because we do see it in party replication
+            logger.info(
+              s"Activation of $cid was preceded by a deactivation for $cid with the same reassignment counter ${stakeholdersAndCounter.reassignmentCounter}"
+            )
+            // it's fine to remove the cid now because there are no concurrent calls to addChange, so the maps should be in
+            // the same state as when we checked the condition
+            deactivations.remove(cid).discard
+          } else {
+            // the prior deactivation is for the same cid but with a different reassignment counter; in this case, we can't clear
+            // the cid, but we'll log the event and add the activation to the map
+            val previousActivation =
+              activations.put(cid, stakeholdersAndCounter)
+            previousActivation.foreach { prev =>
+              ErrorUtil.invalidState(
+                s"Activations contains duplicate contract id $cid: old=$prev, new=$stakeholdersAndCounter"
+              )
+            }
+          }
       }
     }
 
@@ -2334,12 +2361,29 @@ class AcsCommitmentProcessor private (
       )
       counterParticipantsNE = NonEmpty.from(participants)
       _ <- counterParticipantsNE.fold(FutureUnlessShutdown.unit)(counterParticipants =>
-        splitPeriod.fold(FutureUnlessShutdown.unit)(period =>
-          store.markOutstanding(
-            period,
-            counterParticipants,
-          )
-        )
+        splitPeriod.fold(FutureUnlessShutdown.unit) { periods =>
+          MonadUtil
+            .batchedSequentialTraverse[
+              CommitmentPeriod,
+              FutureUnlessShutdown,
+              Unit,
+            ](
+              batchingConfig.parallelism,
+              batchingConfig.maxItemsInBatch,
+            )(periods.forgetNE.toSeq) { chunk =>
+              NonEmpty.from(chunk) match {
+                case Some(chunkNE) =>
+                  store
+                    .markOutstanding(
+                      chunkNE.toSet,
+                      counterParticipants,
+                    )
+                    .map(_ => Seq(()))
+                case None => FutureUnlessShutdown.pure(Seq.empty[Unit])
+              }
+            }
+            .map(_ => ())
+        }
       )
     } yield ()
 

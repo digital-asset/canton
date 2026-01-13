@@ -11,6 +11,7 @@ package com.digitalasset.canton.config
 import cats.data.Validated
 import cats.syntax.either.*
 import cats.syntax.functor.*
+import ch.qos.logback.classic.Level
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.metrics.api.MetricQualification
 import com.daml.metrics.{HistogramDefinition, MetricsFilterConfig}
@@ -525,6 +526,7 @@ final case class CantonConfig(
           sequencerNodeConfig.parameters.unsafeEnableOnlinePartyReplication,
         requestLimits = sequencerNodeConfig.publicApi.limits,
         maxAuthTokensPerMember = sequencerNodeConfig.publicApi.maxAuthTokensPerMember,
+        progressSupervisor = sequencerNodeConfig.parameters.progressSupervisor,
       )
     }
 
@@ -1226,6 +1228,21 @@ object CantonConfig {
           deriveReader[ApiLoggingConfig]
         implicit val gcLoggingConfigReader: ConfigReader[GCLoggingConfig] =
           deriveReader[GCLoggingConfig]
+        implicit val logbackLogLevelReader: ConfigReader[Level] = (cur: ConfigCursor) =>
+          cur.asString.flatMap { s =>
+            Try {
+              Level.toLevel(s)
+            }.toOption match {
+              case Some(level) => Right(level)
+              case None =>
+                val failureReason =
+                  CannotConvert(s, "ch.qos.logback.classic.Level", s"Log level is not valid: $s")
+                Left(ConfigReaderFailures(ConvertFailure(failureReason, cur)))
+            }
+          }
+
+        implicit val startupLoggingConfigReader: ConfigReader[StartupLoggingConfig] =
+          deriveReader[StartupLoggingConfig]
         deriveReader[LoggingConfig]
       }
       deriveReader[MonitoringConfig]
@@ -1349,6 +1366,8 @@ object CantonConfig {
       deriveReader[CantonFeatures]
     lazy implicit final val cantonWatchdogConfigReader: ConfigReader[WatchdogConfig] =
       deriveReader[WatchdogConfig]
+    lazy implicit final val progressSupervisorConfigReader: ConfigReader[ProgressSupervisorConfig] =
+      deriveReader[ProgressSupervisorConfig]
 
     lazy implicit final val reportingLevelReader
         : ConfigReader[StartupMemoryCheckConfig.ReportingLevel] =
@@ -1918,6 +1937,10 @@ object CantonConfig {
       lazy implicit val loggingConfigWriter: ConfigWriter[LoggingConfig] = {
         implicit val gcLoggingConfigWriter: ConfigWriter[GCLoggingConfig] =
           deriveWriter[GCLoggingConfig]
+        implicit val logLevelConfigWriter: ConfigWriter[Level] = (value: Level) =>
+          ConfigValueFactory.fromAnyRef(value.levelStr)
+        implicit val startupLoggingConfigWriter: ConfigWriter[StartupLoggingConfig] =
+          deriveWriter[StartupLoggingConfig]
         deriveWriter[LoggingConfig]
       }
       deriveWriter[MonitoringConfig]
@@ -2020,6 +2043,9 @@ object CantonConfig {
       deriveWriter[CantonFeatures]
     lazy implicit final val cantonWatchdogConfigWriter: ConfigWriter[WatchdogConfig] =
       deriveWriter[WatchdogConfig]
+    lazy implicit final val cantonProgressSupervisorConfigWriter
+        : ConfigWriter[ProgressSupervisorConfig] =
+      deriveWriter[ProgressSupervisorConfig]
 
     lazy implicit final val reportingLevelWriter
         : ConfigWriter[StartupMemoryCheckConfig.ReportingLevel] =

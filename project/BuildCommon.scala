@@ -763,6 +763,9 @@ object BuildCommon {
             val oldStrategy = (ThisBuild / assemblyMergeStrategy).value
             oldStrategy(x)
         },
+        // See #23185: Prevent large string allocation during JMH fat-jar generation (prevent potential OOM errors)
+        // by ensuring this task never runs in assembly plugin in debug mode.
+        assembly / logLevel := Level.Info,
         assembly / mainClass := Some("com.digitalasset.canton.CantonCommunityApp"),
         assembly / assemblyJarName := s"canton-open-source-${version.value}.jar",
         // Explicit set the Daml project dependency to common

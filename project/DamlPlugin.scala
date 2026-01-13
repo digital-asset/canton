@@ -187,15 +187,13 @@ object DamlPlugin extends AutoPlugin {
           damlEnableProjectVersionOverride.value,
           damlProjectVersionOverride.value.getOrElse(version.value),
         )
-        val damlProjectFiles = (damlSourceDirectory.value ** "daml.yaml").get
 
-        damlProjectFiles.foreach(
-          checkProjectVersions(
-            projectVersionOverride,
-            damlCompilerVersion.value,
-            _,
-          )
-        )
+        forAllDamlProjects(
+          baseDirectory.value,
+          damlSourceDirectory.value,
+          damlCompilerVersion.value,
+          projectVersionOverride,
+        )(checkProjectVersions)
       },
       damlUpdateProjectVersions := {
         // With Daml 0.13.56 characters are no longer allowed in project versions as
@@ -209,19 +207,18 @@ object DamlPlugin extends AutoPlugin {
         }
 
         val overrideVersion = damlProjectVersionOverride.value
-        val damlProjectFiles = (damlSourceDirectory.value ** "daml.yaml").get
-
         val projectVersionOverride = ProjectVersionOverride(
           damlEnableProjectVersionOverride.value,
           overrideVersion.getOrElse(projectVersion),
         )
-        damlProjectFiles.foreach(
-          updateProjectVersions(
-            projectVersionOverride,
-            damlCompilerVersion.value,
-            _,
-          )
-        )
+
+        forAllDamlProjects(
+          baseDirectory.value,
+          damlSourceDirectory.value,
+          damlCompilerVersion.value,
+          projectVersionOverride,
+        )(updateProjectVersions)
+
         updateDamlDependencies(damlCompilerVersion.value)
       },
       damlUpdateFixedDars := {
@@ -262,6 +259,32 @@ object DamlPlugin extends AutoPlugin {
   override lazy val projectSettings: Seq[Def.Setting[_]] =
     inConfig(Compile)(baseDamlPluginSettings) ++
       inConfig(Test)(baseDamlPluginSettings)
+
+  /** Helper to traverse both main Daml projects and example/test Daml projects applying the
+    * appropriate override rules.
+    */
+  private def forAllDamlProjects(
+      baseDirectory: File,
+      sourceDirectory: File,
+      damlVersion: String,
+      mainProjectVersionOverride: ProjectVersionOverride,
+  )(
+      action: (ProjectVersionOverride, String, File) => Unit
+  ): Unit = {
+    // 1. Main Daml Sources (Update SDK version AND Project Version)
+    val mainDamlFiles = (sourceDirectory ** "daml.yaml").get
+    mainDamlFiles.foreach(
+      action(mainProjectVersionOverride, damlVersion, _)
+    )
+
+    // 2. Example/Test Sources (Update SDK version ONLY)
+    // We pass DoNotOverride so that the 'version' field in these yamls remains untouched
+    val exampleDamlFiles = (baseDirectory / "src" / "pack" ** "daml.yaml").get ++
+      (baseDirectory / "src" / "test" / "resources" ** "daml.yaml").get
+    exampleDamlFiles.foreach(
+      action(ProjectVersionOverride.DoNotOverride, damlVersion, _)
+    )
+  }
 
   /** Verify that the versions in the daml.yaml file match what is being used in the sbt project. If
     * a mismatch is found a [[sbt.internal.MessageOnlyException]] will be thrown.
