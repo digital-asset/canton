@@ -395,7 +395,8 @@ object BuildCommon {
     case "META-INF/versions/9/module-info.class" => MergeStrategy.discard
     case path if path.contains("module-info.class") => MergeStrategy.discard
     case PathList("org", "jline", _ @_*) => MergeStrategy.first
-    case "META-INF/FastDoubleParser-LICENSE" => MergeStrategy.first
+    case PathList("META-INF", "FastDoubleParser-LICENSE") => MergeStrategy.first
+    case PathList("META-INF", "FastDoubleParser-NOTICE") => MergeStrategy.first
     case x => oldStrategy(x)
   }
 
@@ -1250,6 +1251,7 @@ object BuildCommon {
           postgres,
           h2,
           flyway,
+          flyway_oracle,
           oracle,
           anorm,
           scalapb_runtime_grpc,

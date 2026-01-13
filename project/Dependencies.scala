@@ -34,10 +34,11 @@ object Dependencies {
   lazy val checkerFramework_version = "3.28.0"
   lazy val chimney_version = "0.6.1"
   lazy val circe_version = "0.14.2"
+  lazy val circe_yaml_version = "1.15.0" // added to override snakeYaml vulnerability
   lazy val concurrency_limits_version = "0.3.6"
   lazy val dropwizard_version = "4.2.25"
   lazy val fabric_sdk_version = "2.2.13"
-  lazy val flyway_version = "9.15.2"
+  lazy val flyway_version = "9.22.3"
   lazy val gcp_kms_version = "2.55.0"
   lazy val h2_version = "2.1.210"
   lazy val janino_version = "3.1.4"
@@ -118,6 +119,7 @@ object Dependencies {
   lazy val h2 = "com.h2database" % "h2" % h2_version
   lazy val postgres = "org.postgresql" % "postgresql" % postgres_version
   lazy val flyway = "org.flywaydb" % "flyway-core" % flyway_version
+  lazy val flyway_oracle = "org.flywaydb" % "flyway-database-oracle" % flyway_version
   lazy val oracle = "com.oracle.database.jdbc" % "ojdbc8" % oracle_version
 
   // Picked up automatically by the scalapb compiler. Contains common dependencies such as protocol buffers like google/protobuf/timestamp.proto
@@ -217,7 +219,7 @@ object Dependencies {
   lazy val circe_generic_extras =
     "io.circe" %% "circe-generic-extras" % circe_version exclude ("com.chuusai", s"shapeless_$scala_version_short")
   lazy val circe_parser = "io.circe" %% "circe-parser" % circe_version
-  lazy val circe_yaml = "io.circe" %% "circe-yaml" % circe_version
+  lazy val circe_yaml = "io.circe" %% "circe-yaml" % circe_yaml_version
 
   lazy val tink = "com.google.crypto.tink" % "tink" % tink_version excludeAll (
     ExclusionRule(
