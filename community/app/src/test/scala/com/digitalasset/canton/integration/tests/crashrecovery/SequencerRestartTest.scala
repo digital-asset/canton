@@ -52,6 +52,7 @@ import com.digitalasset.canton.integration.plugins.{
 }
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   EnvironmentSetupPlugin,
   IsolatedEnvironments,
@@ -108,6 +109,7 @@ abstract class BaseSynchronizerRestartTest
       .withSetup { _ =>
         postgresDumpRestore = PostgresDumpRestore(postgresPlugin, forceLocal = false)
       }
+      .addConfigTransform(ConfigTransforms.enableSequencerProgressSupervisor)
 
   protected def networkBootstrapper(implicit
       env: TestConsoleEnvironment

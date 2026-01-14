@@ -135,6 +135,7 @@ class GrpcSequencerServiceTest
       override def maxConfirmationRequestsBurstFactor: PositiveDouble =
         PositiveDouble.tryCreate(1e-6)
       override def processingTimeouts: ProcessingTimeout = timeouts
+      override def maxSubscriptionsPerMember: PositiveInt = PositiveInt.three
     }
 
     val maxItemsInTopologyBatch = 5

@@ -421,6 +421,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
           availableUpToInclusive = availableUpToInclusive,
         ),
         FutureSupervisor.Noop,
+        progressSupervisorO = None,
         SequencerTrafficConfig(),
         sequencingTimeLowerBoundExclusive =
           SequencerNodeParameterConfig.DefaultSequencingTimeLowerBoundExclusive,

@@ -561,7 +561,11 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
   lazy val eventsBufferEnabled: Boolean = bufferedEventsMaxMemory.toLong > 0L
 
   protected val eventsBuffer =
-    new EventsBuffer(bufferedEventsMaxMemory, loggerFactory, sequencerMetrics.eventBuffer)
+    new EventsBuffer(
+      bufferedEventsMaxMemory,
+      loggerFactory,
+      sequencerMetrics,
+    )
 
   /** In case of single instance sequencer we can use in-memory fanout buffer for events */
   final def bufferEvents(
@@ -739,7 +743,8 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
                 ReadEventPayloads(events)
               )
             } else {
-              // No events to read, advance the read watermark to the latest event's timestamp in the buffer
+              // No events to read for the member,
+              // only advance the read watermark to the latest event's timestamp in the buffer
               // Note that if fromExclusive > cache.lastOption.timestamp, we keep the watermark unchanged
               // not to move it backwards and potentially read events twice
               FutureUnlessShutdown.pure(

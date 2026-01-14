@@ -15,11 +15,7 @@ Template for a bigger topic
 #### Impact and Migration
 
 ### Minor Improvements
-- Protect the admin participant from self lock-out. It is now impossible for an admin to remove own admin rights or
-  delete itself.
-- LedgerAPI ListKnownParties supports an optional prefix filter argument filterParty.
-  The respective JSON API endpoint now additionally supports `identity-provider-id` as
-  an optional argument, as well as `filter-party`.
+- improvement
 
 ### Preview Features
 - preview feature
@@ -58,7 +54,3 @@ Canton has been tested against the following versions of its dependencies:
 |----------------------------|----------------------------|
 | Java Runtime               | JAVA_VERSION               |
 | Postgres                   | POSTGRES_VERSION           |
-
-## Upgrade GRPC to 1.77.0
-
-prevent report of CVE-2025-58057.

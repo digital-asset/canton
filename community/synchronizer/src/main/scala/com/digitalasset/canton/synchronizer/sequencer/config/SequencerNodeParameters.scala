@@ -11,10 +11,12 @@ import com.digitalasset.canton.environment.{
   HasProtocolCantonNodeParameters,
 }
 import com.digitalasset.canton.synchronizer.block.AsyncWriterParameters
+import com.digitalasset.canton.synchronizer.sequencer.ProgressSupervisorConfig
 
 trait SequencerParameters {
   def maxConfirmationRequestsBurstFactor: PositiveDouble
   def processingTimeouts: ProcessingTimeout
+  def maxSubscriptionsPerMember: PositiveInt
 }
 
 /** Parameters for a SequencerNode. We "merge" parameters that are valid for all nodes (i.e.
@@ -33,8 +35,12 @@ trait SequencerParameters {
   * @param unsafeEnableOnlinePartyReplication
   *   Whether to enable online party replication sequencer channels. Unsafe as still under
   *   development.
-  * @param streamLimits
-  *   optional stream limit configs
+  * @param requestLimits
+  *   optional stream limit for the number of active requests or streams
+  * @param maxAuthTokensPerMember
+  *   maximum number of auth tokens and nonces per member
+  * @param maxSubscriptionsPerMember
+  *   maximum number of subscriptions per member
   */
 final case class SequencerNodeParameters(
     general: CantonNodeParameters.General,
@@ -47,6 +53,8 @@ final case class SequencerNodeParameters(
     warnOnUndefinedLimits: Boolean = true,
     requestLimits: Option[ActiveRequestLimitsConfig] = None,
     maxAuthTokensPerMember: PositiveInt = PositiveInt.tryCreate(25),
+    maxSubscriptionsPerMember: PositiveInt = PositiveInt.tryCreate(5),
+    progressSupervisor: Option[ProgressSupervisorConfig] = None,
 ) extends CantonNodeParameters
     with HasGeneralCantonNodeParameters
     with HasProtocolCantonNodeParameters

@@ -306,6 +306,11 @@ object ServerSubscriptionCloseReason {
   case object TokenExpired extends TransientCloseReason {
     override def description: String = "Subscription token has expired"
   }
+
+  case object TooManySubscriptions extends TransientCloseReason {
+    override def description: String = "Too many open subscriptions for member"
+  }
+
 }
 
 @VisibleForTesting
