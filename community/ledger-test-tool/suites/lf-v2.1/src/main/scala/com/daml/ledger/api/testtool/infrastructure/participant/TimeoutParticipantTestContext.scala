@@ -688,6 +688,12 @@ class TimeoutParticipantTestContext(timeoutScaleFactor: Double, delegate: Partic
   ): Future[Vector[CompletionStreamResponse.CompletionResponse]] =
     delegate.completions(within, request)
 
+  def completions(
+      take: Int,
+      request: CompletionStreamRequest,
+  ): Future[Vector[CompletionStreamResponse.CompletionResponse]] =
+    delegate.completions(take, request)
+
   override def completionStreamRequest(from: Long)(
       parties: Party*
   ): CompletionStreamRequest = delegate.completionStreamRequest(from)(parties*)

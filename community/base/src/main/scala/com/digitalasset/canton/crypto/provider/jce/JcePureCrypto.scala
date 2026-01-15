@@ -801,11 +801,10 @@ object JcePureCrypto {
         sender.min(receiver)
       }
 
-    lazy val signingDurationOpt: Option[FiniteDuration] = config.kms.flatMap { kms =>
-      Option.when(kms.sessionSigningKeys.enabled)(
-        kms.sessionSigningKeys.keyEvictionPeriod.underlying
+    lazy val signingDurationOpt: Option[FiniteDuration] =
+      Option.when(config.sessionSigningKeys.enabled)(
+        config.sessionSigningKeys.keyEvictionPeriod.underlying
       )
-    }
 
     lazy val minimumPrivateKeyCacheDuration =
       Seq(encryptionDurationOpt, signingDurationOpt).flatten.minOption

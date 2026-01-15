@@ -1,7 +1,7 @@
 import java.io.File
 import BufPlugin.autoImport.bufLintCheck
 import DamlPlugin.autoImport.*
-import Dependencies.{daml_lf_language, *}
+import Dependencies.*
 import better.files.{File as BetterFile, *}
 import com.lightbend.sbt.JavaFormatterPlugin
 import sbtlicensereport.SbtLicenseReport.autoImportImpl.*
@@ -129,19 +129,7 @@ object BuildCommon {
         // This is necessary in order to override the dependencies of an adhoc
         // Daml snapshot release
         dependencyOverrides := dependencyOverrides.value ++ Seq(
-          Dependencies.daml_script_runner,
-          Dependencies.daml_lf_data,
-          Dependencies.daml_lf_language,
-          Dependencies.daml_lf_engine,
-          Dependencies.daml_lf_transaction,
-          Dependencies.daml_lf_encoder,
-          Dependencies.daml_lf_api_type_signature,
-          Dependencies.daml_lf_transaction_test_lib,
-          Dependencies.daml_lf_parser,
-          Dependencies.daml_lf_archive_encoder,
-          Dependencies.daml_ledger_api_value,
-          Dependencies.daml_ledger_api_value_java,
-          Dependencies.daml_ledger_api_value_scala,
+          Dependencies.daml_script_runner
         ),
         ideExcludedDirectories := Seq(
           baseDirectory.value / "target"
@@ -152,6 +140,7 @@ object BuildCommon {
         libraryDependencySchemes += "io.circe" %% "circe-parser" % VersionScheme.Always,
         libraryDependencySchemes += "io.circe" %% "circe-yaml" % VersionScheme.Always,
         versionScheme := Some("semver-spec"),
+        PB.protocVersion := protobuf_version,
       )
     )
 
@@ -181,7 +170,7 @@ object BuildCommon {
         .map(
           _ / autoAPIMappings
         ),
-      Global / excludeLintKeys += Global / damlCodeGeneration,
+      Global / excludeLintKeys += Global / damlJavaCodegen,
       Global / excludeLintKeys ++= DamlProjects.allProjects.map(_ / wartremoverErrors),
       Global / excludeLintKeys += Compile / ideExcludedDirectories,
       Global / excludeLintKeys += Test / ideExcludedDirectories,
@@ -431,11 +420,24 @@ object BuildCommon {
         "lib/google/rpc",
       )
 
-      val ledgerApiValueProtosRoot =
-        (DamlProjects.`ledger-api-value` / target).value / "protobuf_external"
-      val ledgerApiValueProto: Seq[(File, String)] = packProtobufDependencyFiles(
-        BetterFile(ledgerApiValueProtosRoot.toString),
-        "ledger-api",
+      val damlLfSnapshotProto: Seq[(File, String)] = packProtobufSourceFiles(
+        "community" / "daml-lf" / "snapshot",
+        "snapshot",
+      )
+
+      val damlLfArchiveProto: Seq[(File, String)] = packProtobufSourceFiles(
+        "community" / "daml-lf" / "archive",
+        "archive",
+      )
+
+      val damlLfTransactionProto: Seq[(File, String)] = packProtobufSourceFiles(
+        "community" / "daml-lf" / "transaction",
+        "transaction",
+      )
+
+      val damlLfLedgerApiValueProto: Seq[(File, String)] = packProtobufSourceFiles(
+        "community" / "daml-lf" / "ledger-api-value",
+        "ledger-api-value",
       )
 
       val sampleServiceProto: Seq[(File, String)] = packProtobufSourceFiles(
@@ -445,7 +447,8 @@ object BuildCommon {
 
       val apiFiles =
         ledgerApiProto ++ communityBaseProto ++ communityParticipantProto ++ communityAdminProto ++ communitySynchronizerProto ++
-          scalapbProto ++ googleRpcProtos ++ ledgerApiValueProto ++ communityJsonApiOpenapi ++ sampleServiceProto
+          scalapbProto ++ googleRpcProtos ++ damlLfLedgerApiValueProto ++ communityJsonApiOpenapi ++ sampleServiceProto ++
+          damlLfSnapshotProto ++ damlLfArchiveProto ++ damlLfTransactionProto
 
       log.info("Invoking bundle generator")
       // add license to package
@@ -477,6 +480,8 @@ object BuildCommon {
     case PathList("org", "apache", "logging", _*) => MergeStrategy.first
     case PathList("ch", "qos", "logback", _*) => MergeStrategy.first
     case PathList("com", "daml", "ledger", "api", "v1", "package.proto") => MergeStrategy.first
+    case PathList("com", "daml", "ledger", "api", "scalapb", "package.proto") => MergeStrategy.first
+    case PathList("com", "daml", "ledger", "api", "v2", _*) => MergeStrategy.first
     case PathList(
           "META-INF",
           "org",
@@ -680,6 +685,14 @@ object BuildCommon {
       `ledger-common-dars`,
       `ledger-common-dars-lf-v2-1`,
       `ledger-common-dars-lf-v2-dev`,
+      `transcode-schema`,
+      `transcode-daml-lf`,
+      `transcode-codec-json`,
+      `transcode-codec-proto-java`,
+      `transcode-codec-proto-scala`,
+      `transcode-daml-examples`,
+      `transcode-test-conformance`,
+      `transcode-test-utils`,
       `ledger-api-core`,
       `ledger-json-api`,
       `ledger-json-client`,
@@ -745,6 +758,7 @@ object BuildCommon {
         `daml-grpc-utils`,
         DamlProjects.`nonempty-cats`,
         DamlProjects.`contextualized-logging`,
+        DamlProjects.`daml-lf-data`,
         DamlProjects.`observability-metrics`,
         DamlProjects.`observability-tracing`,
       )
@@ -753,7 +767,6 @@ object BuildCommon {
         publish / skip := false,
         libraryDependencies ++= Seq(
           better_files,
-          daml_lf_data,
           logback_classic,
           logback_core,
           scala_logging,
@@ -804,6 +817,7 @@ object BuildCommon {
           scala_logging,
           sttp,
         ),
+        excludeTranscodeConflictingDependencies,
         // core packaging commands
         bundlePack := sharedAppPack ++ Seq(
           "-r",
@@ -826,7 +840,6 @@ object BuildCommon {
         assembly / assemblyJarName := s"canton-open-source-${version.value}.jar",
         // Explicit set the Daml project dependency to common
         Test / damlDependencies := (`community-common` / Compile / damlBuild).value :+ (`ledger-common` / Test / resourceDirectory).value / "test-models" / "model-tests-1.15.dar",
-        Test / damlEnableJavaCodegen := true,
         Test / damlBuildOrder := Seq(
           "daml/JsonApiTest/Upgrades/Iface",
           "daml/JsonApiTest/Upgrades/V1",
@@ -836,7 +849,7 @@ object BuildCommon {
           "SubViews/Iface",
           "SubViews/Main",
         ),
-        Test / damlCodeGeneration := Seq(
+        Test / damlJavaCodegen := Seq(
           (
             (Test / sourceDirectory).value / "daml" / "CantonTest",
             (Test / damlDarOutput).value / "CantonTests-3.4.0.dar",
@@ -898,6 +911,14 @@ object BuildCommon {
             "com.digitalasset.canton.http.json.tests.upgrades.v3",
           ),
         ),
+        Test / damlTsCodegen := Seq(
+          (
+            (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "model-tests",
+            (Test / damlDarOutput).value / "model-tests-1.0.0.dar",
+          )
+        ),
+        // LedgerJsonApiDemoExampleIntegrationTest needs codegen-js output
+        Test / fullClasspath := (Test / fullClasspath).dependsOn(Test / damlGenerateTs).value,
         Test / useVersionedDarName := true,
         Test / damlEnableProjectVersionOverride := false,
         addProtobufFilesToHeaderCheck(Compile),
@@ -923,6 +944,7 @@ object BuildCommon {
           jul_to_slf4j,
           pureconfig_cats,
         ),
+        excludeTranscodeConflictingDependencies,
       )
 
     // The purpose of this module is to collect `compile`-scoped classes shared by `community-testing` (which
@@ -936,8 +958,12 @@ object BuildCommon {
       .enablePlugins(BuildInfoPlugin)
       .dependsOn(
         DamlProjects.`daml-jwt`,
-        DamlProjects.`nonempty-cats`,
+        DamlProjects.`daml-lf-transaction`,
         DamlProjects.`ledger-api-scala`,
+        DamlProjects.`nonempty-cats`,
+        DamlProjects.executors,
+        DamlProjects.`rs-grpc-bridge`,
+        DamlProjects.`rs-grpc-pekko`,
         `daml-tls`,
         `util-observability`,
         `community-admin-api`,
@@ -946,9 +972,6 @@ object BuildCommon {
         `slick-fork`,
         `scalatest-addon` % "compile->test",
         `kms-driver-api`,
-        DamlProjects.`rs-grpc-bridge`,
-        DamlProjects.`rs-grpc-pekko`,
-        DamlProjects.`executors`,
       )
       .settings(
         sharedCantonCommunitySettings,
@@ -957,7 +980,6 @@ object BuildCommon {
           aws_sts,
           gcp_kms,
           grpc_netty_shaded,
-          daml_lf_transaction,
           better_files,
           bouncycastle_bcpkix_jdk15on,
           bouncycastle_bcprov_jdk15on,
@@ -967,6 +989,7 @@ object BuildCommon {
           circe_core,
           circe_generic,
           circe_parser,
+          commons_compress,
           flyway.excludeAll(ExclusionRule("org.apache.logging.log4j")),
           flyway_postgres,
           grpc_inprocess,
@@ -1014,6 +1037,11 @@ object BuildCommon {
       .in(file("community/common"))
       .enablePlugins(DamlPlugin)
       .dependsOn(
+        DamlProjects.`bindings-java`,
+        DamlProjects.`daml-lf-api-type-signature`,
+        DamlProjects.`daml-lf-engine`,
+        DamlProjects.`daml-lf-transaction-test-lib` % "test->compile",
+        DamlProjects.`testing-utils` % "test->compile",
         blake2b,
         `community-base`,
         `wartremover-annotations`,
@@ -1021,15 +1049,12 @@ object BuildCommon {
         `wartremover-extension` % "test->test",
         `mock-kms-driver` % "test->test",
         DamlProjects.`bindings-java`,
-        DamlProjects.`testing-utils` % Test,
       )
       .settings(
         sharedCantonCommunitySettings,
         libraryDependencies ++= Seq(
           awaitility % Test,
           cats_scalacheck % Test,
-          daml_lf_transaction_test_lib % Test,
-          daml_lf_engine,
           grpc_inprocess % Test,
           h2,
           opentelemetry_instrumentation_grpc,
@@ -1050,8 +1075,7 @@ object BuildCommon {
           scalapb.gen(flatPackage = true) -> (Test / sourceManaged).value / "protobuf"
         ),
         Test / bufLintCheck := {}, // disable linting for protobuf files in tests
-        Compile / damlEnableJavaCodegen := true,
-        Compile / damlCodeGeneration := Seq(
+        Compile / damlJavaCodegen := Seq(
           (
             (Compile / sourceDirectory).value / "daml" / "CantonExamples",
             (Compile / damlDarOutput).value / "CantonExamples.dar",
@@ -1101,11 +1125,14 @@ object BuildCommon {
     lazy val `community-participant` = project
       .in(file("community/participant"))
       .dependsOn(
+        DamlProjects.`daml-jwt`,
+        DamlProjects.`daml-lf-archive-encoder` % "test->compile",
+        DamlProjects.`daml-lf-encoder` % "test->compile",
+        DamlProjects.`daml-lf-parser` % "test->compile",
+        DamlProjects.`test-evidence-generator` % "test->test",
+        DamlProjects.`test-evidence-tag` % "test->test",
         `community-common` % "test->test",
         `ledger-json-api` % "compile->compile;test->test",
-        DamlProjects.`daml-jwt`,
-        DamlProjects.`test-evidence-generator` % Test,
-        DamlProjects.`test-evidence-tag` % Test,
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -1114,9 +1141,6 @@ object BuildCommon {
           cats,
           chimney,
           grpc_inprocess,
-          daml_lf_encoder % Test,
-          daml_lf_parser % Test,
-          daml_lf_archive_encoder % Test,
           logback_classic % Runtime,
           logback_core % Runtime,
           pekko_stream,
@@ -1127,6 +1151,7 @@ object BuildCommon {
           scalatest % Test,
           scalatestScalacheck % Test,
         ),
+        excludeTranscodeConflictingDependencies,
         Compile / PB.targets := Seq(
           scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
         ),
@@ -1144,8 +1169,7 @@ object BuildCommon {
             |com\.digitalasset\.canton\.participant\.protocol\.v0\..*
       """
         ),
-        Compile / damlEnableJavaCodegen := true,
-        Compile / damlCodeGeneration := Seq(
+        Compile / damlJavaCodegen := Seq(
           (
             (Compile / sourceDirectory).value / "daml" / "canton-builtin-admin-workflow-ping",
             (Compile / resourceDirectory).value / "dar" / "canton-builtin-admin-workflow-ping.dar",
@@ -1190,9 +1214,9 @@ object BuildCommon {
     lazy val `community-testing` = project
       .in(file("community/testing"))
       .dependsOn(
+        DamlProjects.`observability-metrics` % "compile->test",
         `community-base`,
         `magnolify-addon` % "compile->test",
-        DamlProjects.`observability-metrics` % "compile->test",
       )
       .settings(
         sharedCommunitySettings,
@@ -1237,6 +1261,7 @@ object BuildCommon {
           opentelemetry_proto,
           circe_yaml,
         ),
+        excludeTranscodeConflictingDependencies,
 
         // This library contains a lot of testing helpers that previously existing in testing scope
         // As such, in order to minimize the diff when creating this library, the same rules that
@@ -1255,6 +1280,7 @@ object BuildCommon {
       .settings(
         sharedCantonCommunitySettings,
         UberLibrary.of(`community-integration-testing`),
+        excludeTranscodeConflictingDependencies,
         Compile / packageDoc := {
           // TODO(i12766): producing an empty file because there are errors in running the `doc` task
           val destination = (Compile / packageDoc / artifactPath).value
@@ -1274,6 +1300,7 @@ object BuildCommon {
       .enablePlugins(JmhPlugin)
       .settings(
         sharedCantonCommunitySettings,
+        excludeTranscodeConflictingDependencies,
         // See #23185: Prevent large string allocation during JMH fat-jar generation (prevent potential OOM errors)
         // by ensuring this task never runs in assembly plugin in debug mode.
         assembly / logLevel := Level.Info,
@@ -1306,6 +1333,7 @@ object BuildCommon {
         libraryDependencies ++= Seq(
           daml_script_runner % Test
         ),
+        excludeTranscodeConflictingDependencies,
         addProtobufFilesToHeaderCheck(Compile),
       )
 
@@ -1328,9 +1356,9 @@ object BuildCommon {
           cats,
           cats_law % Test,
         ),
-        Compile / damlEnableJavaCodegen := true,
+        excludeTranscodeConflictingDependencies,
         Compile / damlBuildOrder := Seq("main/daml/main", "main/daml/script"),
-        Compile / damlCodeGeneration := Seq(
+        Compile / damlJavaCodegen := Seq(
           (
             (Compile / sourceDirectory).value / "daml" / "main",
             (Compile / damlDarOutput).value / "PerformanceTest.dar",
@@ -1342,7 +1370,7 @@ object BuildCommon {
     lazy val performance = project
       .in(file("performance"))
       .dependsOn(`performance-driver`, `community-app` % "compile->compile;test->test")
-      .settings(sharedCantonCommunitySettings)
+      .settings(sharedCantonCommunitySettings, excludeTranscodeConflictingDependencies)
 
     lazy val `kms-driver-api` = project
       .in(file("community/kms-driver-api"))
@@ -1631,16 +1659,22 @@ object BuildCommon {
       .dependsOn(
         `wartremover-annotations`,
         `community-testing` % "test",
-        DamlProjects.`ledger-api-scala`,
+        DamlProjects.`bindings-java` % "test->test",
+        DamlProjects.`daml-jwt`,
+        DamlProjects.`daml-lf-data`,
+        DamlProjects.`daml-lf-engine`,
+        DamlProjects.`daml-lf-transaction`,
         DamlProjects.`daml-jwt`,
         DamlProjects.`bindings-java` % "test->test",
+        DamlProjects.`ledger-api-value`,
+        DamlProjects.`ledger-api-scala`,
+        DamlProjects.`ledger-resources`,
+        DamlProjects.`ports` % "test->compile",
+        DamlProjects.`rs-grpc-bridge`,
+        DamlProjects.`rs-grpc-pekko`,
         `util-observability` % "compile->compile;test->test",
         `ledger-common-dars-lf-v2-1` % "test",
         `util-external`,
-        DamlProjects.`rs-grpc-bridge`,
-        DamlProjects.`rs-grpc-pekko`,
-        DamlProjects.`ledger-resources`,
-        DamlProjects.`ports` % Test,
       )
       .settings(
         sharedCantonCommunitySettings,
@@ -1652,10 +1686,6 @@ object BuildCommon {
         Test / unmanagedResourceDirectories += (`ledger-common-dars-lf-v2-1` / Compile / resourceManaged).value,
         addProtobufFilesToHeaderCheck(Compile),
         libraryDependencies ++= Seq(
-          daml_lf_data,
-          daml_lf_engine,
-          daml_lf_transaction,
-          daml_ledger_api_value_java,
           slf4j_api,
           grpc_api,
           grpc_netty_shaded,
@@ -1683,11 +1713,10 @@ object BuildCommon {
         )
 
     def ledgerCommonDarsSharedSettings(lfVersion: String) = Seq(
-      Compile / damlEnableJavaCodegen := true,
       Compile / damlSourceDirectory := baseDirectory.value / ".." / "src",
       Compile / useVersionedDarName := true,
       Compile / damlEnableProjectVersionOverride := false,
-      Compile / damlCodeGeneration := (for (
+      Compile / damlJavaCodegen := (for (
         name <- Seq(
           "model",
           "model_iface",
@@ -1796,23 +1825,122 @@ object BuildCommon {
       } toSeq
     }
 
+    lazy val `transcode-schema` = project
+      .in(file("community/transcode/schema"))
+      .settings(
+        sharedCommunitySettings,
+        publish / skip := false,
+        scalaVersion := scala3_version,
+        libraryDependencies ++= Seq(
+          boopickle,
+          fastparse,
+          semver,
+          zioTest % Test,
+          zioTestSbt % Test,
+        ),
+      )
+
+    lazy val `transcode-daml-lf` = project
+      .in(file("community/transcode/daml-lf"))
+      .dependsOn(
+        `transcode-schema`,
+        `transcode-daml-examples` % Test,
+        `transcode-test-conformance` % Test,
+        DamlProjects.`daml-lf-language`,
+        DamlProjects.`daml-lf-archive` % Test,
+      )
+      .settings(
+        sharedCommunitySettings,
+        publish / skip := false,
+        scalaVersion := scala3_version,
+        libraryDependencies ++= Seq(zioTest % Test, zioTestSbt % Test),
+      )
+
+    lazy val `transcode-codec-json` = project
+      .in(file("community/transcode/codec-json"))
+      .dependsOn(`transcode-schema`, `transcode-test-utils` % Test)
+      .settings(
+        sharedCommunitySettings,
+        publish / skip := false,
+        scalaVersion := scala3_version,
+        libraryDependencies ++= Seq(ujson, zioTest % Test, zioTestSbt % Test),
+      )
+
+    lazy val `transcode-codec-proto-java` = project
+      .in(file("community/transcode/codec-proto-java"))
+      .dependsOn(
+        `transcode-schema`,
+        `transcode-test-utils` % Test,
+        DamlProjects.`ledger-api-value`,
+      )
+      .settings(
+        sharedCommunitySettings,
+        publish / skip := false,
+        scalaVersion := scala3_version,
+        libraryDependencies ++= Seq(zioTest % Test, zioTestSbt % Test),
+      )
+
+    lazy val `transcode-codec-proto-scala` = project
+      .in(file("community/transcode/codec-proto-scala"))
+      .dependsOn(
+        `transcode-schema`,
+        `transcode-test-utils` % Test,
+        DamlProjects.`ledger-api-value`,
+      )
+      .settings(
+        sharedCommunitySettings,
+        publish / skip := false,
+        scalaVersion := scala3_version,
+        libraryDependencies ++= Seq(zioTest % Test, zioTestSbt % Test),
+      )
+
+    lazy val `transcode-daml-examples` = project
+      .in(file("community/transcode/daml-examples"))
+      .enablePlugins(DamlPlugin)
+      .settings(
+        sharedCommunitySettings,
+        scalaVersion := scala3_version,
+        Compile / damlEnableProjectVersionOverride := false,
+        Compile / damlBuildOrder := Seq("examples-interfaces", "examples"),
+      )
+
+    lazy val `transcode-test-conformance` = project
+      .in(file("community/transcode/test-conformance"))
+      .dependsOn(`transcode-schema`)
+      .settings(
+        sharedCommunitySettings,
+        scalaVersion := scala3_version,
+        libraryDependencies ++= Seq(os_lib, sourcecode),
+      )
+
+    lazy val `transcode-test-utils` = project
+      .in(file("community/transcode/test-utils"))
+      .dependsOn(`transcode-daml-lf`, `transcode-schema`, `transcode-test-conformance`)
+      .settings(
+        sharedCommunitySettings,
+        scalaVersion := scala3_version,
+        libraryDependencies ++= Seq(zioTest),
+      )
+
     lazy val `ledger-api-core` = project
       .in(file("community/ledger/ledger-api-core"))
       .dependsOn(
+        DamlProjects.`daml-jwt`,
+        DamlProjects.`daml-lf-parser`,
+        DamlProjects.`daml-lf-encoder`,
+        DamlProjects.`grpc-test-utils` % "test->compile",
+        DamlProjects.`http-test-utils` % "test->compile",
+        DamlProjects.`observability-metrics` % "test->compile",
+        DamlProjects.`observability-tracing` % "test->compile;test->test",
+        DamlProjects.ports,
+        DamlProjects.`rs-grpc-testing-utils` % "test->compile",
+        DamlProjects.`test-evidence-generator` % "test->test",
+        DamlProjects.`timer-utils`,
         `base-errors` % "test->test",
         `daml-tls` % "test->test",
         `ledger-common` % "compile->compile;test->test",
         `community-common` % "compile->compile;test->test",
         `daml-adjustable-clock` % "test->test",
-        DamlProjects.`daml-jwt`,
-        DamlProjects.`timer-utils`,
-        DamlProjects.`grpc-test-utils`,
-        DamlProjects.`ports`,
-        DamlProjects.`http-test-utils` % Test,
-        DamlProjects.`rs-grpc-testing-utils` % Test,
-        DamlProjects.`observability-metrics` % "test->test",
-        DamlProjects.`observability-tracing` % "test->test",
-        DamlProjects.`test-evidence-generator` % Test,
       )
       .settings(
         sharedCantonCommunitySettings,
@@ -1828,9 +1956,6 @@ object BuildCommon {
           flyway_postgres,
           grpc_inprocess,
           anorm,
-          daml_lf_archive_encoder % Test,
-          daml_lf_encoder % Test,
-          daml_lf_parser % Test,
           scalapb_json4s % Test,
         ),
         Test / parallelExecution := true,
@@ -1843,17 +1968,22 @@ object BuildCommon {
       project
         .in(file("community/ledger/ledger-json-api"))
         .dependsOn(
+          DamlProjects.`daml-lf-api-type-signature`,
+          DamlProjects.`scalatest-utils` % "test->compile",
+          DamlProjects.`timer-utils`,
+          DamlProjects.`observability-pekko-http-metrics`,
           `ledger-api-core` % "compile->compile;test->test",
           `ledger-common` % "test->test",
           `community-testing` % "test->test",
-          DamlProjects.`scalatest-utils` % Test,
-          DamlProjects.`timer-utils`,
-          DamlProjects.`observability-pekko-http-metrics`,
+          `transcode-daml-lf`,
+          `transcode-codec-json`,
+          `transcode-codec-proto-scala`,
+          DamlProjects.`daml-lf-transaction-test-lib` % "test->compile",
         )
         .enablePlugins(DamlPlugin)
         .settings(
           scalacOptions += "-Ytasty-reader",
-          sharedCommunitySettings,
+          sharedCantonCommunitySettings,
           Test / PB.targets := Seq(
             // build java codegen too
             PB.gens.java -> (Test / sourceManaged).value / "protobuf",
@@ -1867,8 +1997,6 @@ object BuildCommon {
             circe_generic_extras,
             circe_parser,
             circe_yaml % Test,
-            daml_lf_transaction_test_lib,
-            fastparse % Runtime, // transcode dependency
             icu4j_version,
             pekko_http,
             pekko_stream_testkit % Test,
@@ -1882,14 +2010,19 @@ object BuildCommon {
             tapir_json_circe,
             tapir_openapi_docs,
             tapir_pekko_http_server,
-            transcode_daml_lf,
-            transcode_codec_json,
-            transcode_codec_proto_scala,
             ujson_circe,
             upickle,
           ),
+          // replace transcode Scala 3 dependencies with Scala 2 versions
+          // some downstream projects depend on those libs transitively
+          libraryDependencies ++= Seq(
+            fastparse % Runtime,
+            os_lib % Runtime,
+            sourcecode % Runtime,
+          ),
+          excludeTranscodeConflictingDependencies,
           coverageEnabled := false,
-          Test / damlCodeGeneration := Seq(
+          Test / damlJavaCodegen := Seq(
             (
               (Test / sourceDirectory).value / "daml" / "v2_1",
               (Test / damlDarOutput).value / "JsonEncodingTest.dar",
@@ -1969,6 +2102,7 @@ object BuildCommon {
           magnolifyScalacheck % Test,
           swagger_parser % Test,
         ),
+        excludeTranscodeConflictingDependencies,
         openApiInputSpec := (baseDirectory.value.getParentFile / "ledger-json-api" / "src/test/resources" / "json-api-docs" / "openapi.yaml").toString,
         openApiConfigFile := (baseDirectory.value.getParentFile / "ledger-json-client" / "config.yaml").toString,
         openApiOutputDir := (Test / sourceManaged).value.getPath,
@@ -2015,6 +2149,7 @@ object BuildCommon {
         `community-base`,
         `community-app` % "test->test",
         `daml-adjustable-clock`,
+        DamlProjects.`observability-pekko-http-metrics`,
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -2024,12 +2159,12 @@ object BuildCommon {
           circe_core,
           circe_yaml,
         ),
+        excludeTranscodeConflictingDependencies,
         sharedCantonCommunitySettings,
         coverageEnabled := false,
         HouseRules.damlRepoHeaderSettings,
         Compile / damlDarLfVersion := "2.dev",
-        Compile / damlEnableJavaCodegen := true,
-        Compile / damlCodeGeneration := Seq(
+        Compile / damlJavaCodegen := Seq(
           (
             (Compile / sourceDirectory).value / "daml" / "benchtool",
             (Compile / damlDarOutput).value / "benchtool-tests.dar",
@@ -2068,6 +2203,7 @@ object BuildCommon {
             pekko_stream,
             tapir_sttp_client,
           ),
+          excludeTranscodeConflictingDependencies,
           compileOrder := CompileOrder.JavaThenScala,
           Def.settings(additionalSetting.toSeq*),
           Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
@@ -2104,6 +2240,7 @@ object BuildCommon {
         .settings(
           compileOrder := CompileOrder.JavaThenScala,
           sharedCantonCommunitySettings,
+          excludeTranscodeConflictingDependencies,
           Compile / unmanagedSourceDirectories += baseDirectory.value / ".." / "src",
           Compile / unmanagedResourceDirectories += baseDirectory.value / ".." / "src" / "main" / "resources",
           // See #23185: Prevent potential OOM by setting info log level when conformance tests trigger assembly
@@ -2133,6 +2270,7 @@ object BuildCommon {
       )
       .settings(
         sharedCantonCommunitySettings,
+        excludeTranscodeConflictingDependencies,
         // Allow to exit the systematic testing generator app
         (Test / run / trapExit) := false,
         Test / run := (Test / run)
@@ -2156,8 +2294,7 @@ object BuildCommon {
       .enablePlugins(DamlPlugin)
       .settings(
         sharedCantonCommunitySettings,
-        Test / damlEnableJavaCodegen := true,
-        Test / damlExcludeFromCodegen := Seq("com.digitalasset.canton.damltests.nonconforming.x"),
+        excludeTranscodeConflictingDependencies,
         Test / useVersionedDarName := true,
         Test / damlEnableProjectVersionOverride := false,
         Test / damlBuildOrder := Seq(
@@ -2174,7 +2311,7 @@ object BuildCommon {
           "daml/Systematic/Baz/V2",
           "daml/Systematic/Foo",
         ),
-        Test / damlCodeGeneration := Seq(
+        Test / damlJavaCodegen := Seq(
           (
             (Test / sourceDirectory).value / "daml" / "CantonUpgrade" / "If",
             (Test / damlDarOutput).value / "UpgradeIf-1.0.0.dar",
@@ -2199,11 +2336,6 @@ object BuildCommon {
             (Test / sourceDirectory).value / "daml" / "NonConforming" / "V2",
             (Test / damlDarOutput).value / "NonConforming-2.0.0.dar",
             "com.digitalasset.canton.damltests.nonconforming.v2",
-          ),
-          (
-            (Test / sourceDirectory).value / "daml" / "NonConforming" / "X",
-            (Test / damlDarOutput).value / "NonConformingX-1.0.0.dar",
-            "com.digitalasset.canton.damltests.nonconforming.x",
           ),
           (
             (Test / sourceDirectory).value / "daml" / "AppUpgrade" / "V1",
@@ -2383,10 +2515,23 @@ object BuildCommon {
       `concurrent`,
       `executors`,
       `sample-service`,
+      `daml-lf-data`,
+      `daml-lf-repl`,
+      `daml-lf-ide-ledger`,
+      `daml-lf-data-scalacheck`,
+      `daml-lf-language`,
+      `daml-lf-transaction`,
+      `daml-lf-archive`,
+      `daml-lf-stable-packages`,
+      `daml-lf-validation`,
+      `daml-lf-snapshot-proto`,
+      `daml-lf-interpreter`,
+      `daml-lf-engine`,
+      `daml-lf-transaction-test-lib`,
+      `daml-lf-parser`,
+      `daml-lf-encoder`,
+      `daml-lf-archive-encoder`,
     )
-
-    lazy val removeCompileFlagsForDaml =
-      Seq("-Xsource:3", "-deprecation", "-Xfatal-warnings", "-Ywarn-unused", "-Ywarn-value-discard")
 
     lazy val libsScalaSettings = Def.settings(
       sharedCommunitySettings,
@@ -2908,7 +3053,6 @@ object BuildCommon {
       .settings(
         sharedCommunitySettings,
         publish / skip := false,
-        scalacOptions --= removeCompileFlagsForDaml,
         // we restrict the compilation to a few files that we actually need, skipping the large majority ...
         excludeFilter := HiddenFileFilter || "scalapb.proto",
         PB.generate / includeFilter := "status.proto" || "code.proto" || "error_details.proto" || "health.proto",
@@ -2944,37 +3088,639 @@ object BuildCommon {
         ),
       )
 
-    // this project exists solely for the purpose of extracting value.proto
-    // from the jar file built in the daml repository
     lazy val `ledger-api-value` = project
-      .in(file("community/lib/ledger-api-value"))
+      .in(file("community/daml-lf/ledger-api-value"))
+      .disablePlugins(WartRemover)
       .dependsOn(
-        CommunityProjects.`wartremover-annotations`,
-        `google-common-protos-scala`,
+        `google-common-protos-scala`
       )
       .settings(
-        sharedCantonCommunitySettings,
-        // we restrict the compilation to a few files that we actually need, skipping the large majority ...
-        excludeFilter := HiddenFileFilter || "scalapb.proto",
-        PB.generate / includeFilter := "value.proto",
-        dependencyOverrides ++= Seq(),
-        // compile proto files that we've extracted here
-        Compile / PB.protoSources ++= Seq(target.value / "protobuf_external"),
-        Compile / PB.targets ++= Seq(
-          PB.gens.plugin("doc") -> (Compile / sourceManaged).value
+        libsScalaSettings,
+        scalacOptions += "-Wconf:src=protobuf/.*:silent",
+        javacOptions += "-Xlint:-options",
+        publish / skip := false,
+        Compile / bufLintCheck := {},
+        coverageEnabled := false,
+        Compile / PB.targets := Seq(
+          PB.gens.java -> (Compile / sourceManaged).value,
+          scalapb.gen(
+            flatPackage = false,
+            javaConversions = true,
+          ) -> (Compile / sourceManaged).value / "protobuf",
+          PB.gens.plugin("doc") -> (Compile / sourceManaged).value,
         ),
+        Compile / packageBin / packageOptions +=
+          Package.ManifestAttributes(
+            "ScalaPB-Options-Proto" -> "com/daml/ledger/api/v2/value.proto"
+          ),
         Compile / PB.protocOptions := Seq(
           // the generated file can be found in src_managed, if another location is needed this can be specified via the --doc_out flag
-          "--doc_opt=" + file("community/docs/rst_lapi_value.tmpl") + "," + "proto-docs.rst"
+          "--doc_opt=" + file("community/docs/rst_lapi_value.tmpl") + "," + "proto-docs.rst.inc"
         ),
-        coverageEnabled := false,
-        // skip header check
-        headerSources / excludeFilter := HiddenFileFilter || "*",
-        headerResources / excludeFilter := HiddenFileFilter || "*",
+        addProtobufFilesToHeaderCheck(Compile),
         libraryDependencies ++= Seq(
-          daml_ledger_api_value % "protobuf",
-          protoc_gen_doc asProtocPlugin (),
+          protoc_gen_doc asProtocPlugin ()
         ),
+      )
+
+    val lf_scalaopts_stricter = List(
+      // doesn't allow advance features of the language without explict import
+      // (higherkinds, implicits)
+      "-feature",
+      "-encoding",
+      "UTF-8",
+      // more detailed type errors
+      "-explaintypes",
+      // more detailed information about type-erasure related warnings
+      "-unchecked",
+      // warn if using deprecated stuff
+      "-deprecation",
+      // better error reporting for pureconfig
+      "-Xmacro-settings:materialize-derivations",
+      "-Xfatal-warnings",
+      // "-Xlint:valpattern"
+      "-Ywarn-dead-code",
+      // Warn about implicit conversion between numerical types
+      "-Ywarn-numeric-widen",
+      // Gives a warning for functions declared as returning Unit, but the body returns a value
+      "-Ywarn-value-discard",
+      "-Ywarn-unused:imports",
+      "-Ywarn-unused:nowarn",
+      "-Ywarn-unused",
+      "-Xlint:_",
+      "-Xlint:-pattern-shadow",
+    )
+
+    lazy val damlWarts: List[wartremover.Wart] = List(
+      // DirectGrpcServiceInvocation prevents direct invocation of gRPC services through a stub, but this is often useful in tests
+      Wart.AnyVal,
+      Wart.ArrayEquals,
+      Wart.Enumeration,
+      Wart.ExplicitImplicitTypes,
+      Wart.LeakingSealed,
+      Wart.Option2Iterable,
+      Wart.Return,
+    )
+
+    lazy val `daml-lf-data` = project
+      .in(file("community/daml-lf/data"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        scalacOptions := lf_scalaopts_stricter,
+        // javaOnlySettings,
+        wartremoverErrors := damlWarts,
+        publish / skip := false,
+        coverageEnabled := false,
+        libraryDependencies ++= Seq(
+          google_protobuf_java,
+          guava,
+        ),
+        addProtobufFilesToHeaderCheck(Compile),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+      )
+      .dependsOn(
+        nameof,
+        `scala-utils`,
+        `crypto`,
+        `logging-entries`,
+      )
+      .settings()
+
+    lazy val `daml-lf-repl` = project
+      .in(file("community/daml-lf/repl"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        scalacOptions := lf_scalaopts_stricter,
+        // javaOnlySettings,
+        wartremoverErrors := damlWarts,
+        publish / skip := false,
+        coverageEnabled := false,
+        libraryDependencies ++= Seq(
+          jline
+        ),
+        addProtobufFilesToHeaderCheck(Compile),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+      )
+      .dependsOn(
+        `contextualized-logging`,
+        // "//daml-lf/archive:daml_lf_archive_reader",
+        `daml-lf-archive`,
+        `daml-lf-data`,
+        `daml-lf-interpreter`,
+        `daml-lf-language`,
+        `daml-lf-parser`,
+        `daml-lf-transaction`,
+        `daml-lf-validation`,
+      )
+      .settings()
+
+    lazy val `daml-lf-ide-ledger` = project
+      .in(file("community/daml-lf/ide-ledger"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        scalacOptions := lf_scalaopts_stricter,
+        // javaOnlySettings,
+        wartremoverErrors := damlWarts,
+        publish / skip := false,
+        coverageEnabled := false,
+        libraryDependencies ++= Seq(
+          google_protobuf_java
+        ),
+        addProtobufFilesToHeaderCheck(Compile),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+      )
+      .dependsOn(
+        `contextualized-logging`,
+        `scala-utils`,
+        `daml-lf-data`,
+        `daml-lf-engine`,
+        `daml-lf-interpreter`,
+        `daml-lf-language`,
+        `daml-lf-transaction`,
+      )
+      .settings()
+
+    lazy val `daml-lf-data-scalacheck` = project
+      .in(file("community/daml-lf/data-scalacheck"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        scalacOptions := lf_scalaopts_stricter,
+        // javaOnlySettings,
+        wartremoverErrors := damlWarts,
+        publish / skip := false,
+        coverageEnabled := false,
+        libraryDependencies ++= Seq(
+          scalacheck,
+          scalaz_core,
+        ),
+        addProtobufFilesToHeaderCheck(Compile),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+      )
+      .dependsOn(
+        nameof,
+        `daml-lf-data`,
+      )
+      .settings()
+
+    lazy val `daml-lf-language` = project
+      .in(file("community/daml-lf/language"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        scalacOptions := lf_scalaopts_stricter,
+        wartremoverErrors := damlWarts,
+        // javaOnlySettings,
+        publish / skip := false,
+        coverageEnabled := false,
+        libraryDependencies ++= Seq(
+          google_protobuf_java
+        ),
+        addProtobufFilesToHeaderCheck(Compile),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+      )
+      .dependsOn(
+        nameof,
+        `daml-lf-data`,
+      )
+
+    lazy val `daml-lf-transaction` = project
+      .in(file("community/daml-lf/transaction"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        scalacOptions := lf_scalaopts_stricter,
+        wartremoverErrors := damlWarts,
+        // javaOnlySettings,
+        publish / skip := false,
+        coverageEnabled := false,
+        libraryDependencies ++= Seq(
+          google_common_protos % "protobuf",
+          google_common_protos,
+          google_protobuf_java,
+        ),
+        Compile / bufLintCheck := {},
+        Compile / PB.targets := List(PB.gens.java -> (Compile / sourceManaged).value),
+        addProtobufFilesToHeaderCheck(Compile),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+      )
+      .dependsOn(
+        `daml-lf-data`,
+        `daml-lf-language`,
+        `crypto`,
+        `safe-proto`,
+        `scala-utils`,
+      )
+
+    lazy val `daml-lf-archive` = project
+      .in(file("community/daml-lf/archive"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        scalacOptions := lf_scalaopts_stricter,
+        wartremoverErrors := damlWarts,
+        // javaOnlySettings,
+        publish / skip := false,
+        coverageEnabled := false,
+        libraryDependencies ++= List(
+          google_common_protos % "protobuf",
+          google_common_protos,
+          google_protobuf_java,
+        ),
+        Compile / bufLintCheck := {},
+        Compile / PB.targets := List(PB.gens.java -> (Compile / sourceManaged).value),
+        addProtobufFilesToHeaderCheck(Compile),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+      )
+      .dependsOn(
+        `daml-lf-data`,
+        `daml-lf-language`,
+        `crypto`,
+        `safe-proto`,
+        `scala-utils`,
+      )
+
+    lazy val `daml-lf-stable-packages` = project
+      .in(file("community/daml-lf/stable-packages"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        Compile / resourceGenerators += DamlPlugin.damlStablePackagesManifest.taskValue,
+        organization := "com.daml",
+        scalacOptions := lf_scalaopts_stricter,
+        wartremoverErrors := damlWarts,
+        // javaOnlySettings,
+        publish / skip := false,
+        coverageEnabled := false,
+        libraryDependencies ++= List(
+          google_protobuf_java
+        ),
+        Compile / PB.targets := List(PB.gens.java -> (Compile / sourceManaged).value),
+        addProtobufFilesToHeaderCheck(Compile),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+      )
+      .dependsOn(
+        `daml-lf-archive`,
+        `daml-lf-data`,
+        `daml-lf-language`,
+      )
+
+    lazy val `daml-lf-validation` = project
+      .in(file("community/daml-lf/validation"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        scalacOptions := lf_scalaopts_stricter,
+        wartremoverErrors := damlWarts,
+        // javaOnlySettings,
+        publish / skip := false,
+        coverageEnabled := false,
+        libraryDependencies ++= List(
+          google_protobuf_java
+        ),
+        Compile / PB.targets := List(PB.gens.java -> (Compile / sourceManaged).value),
+        addProtobufFilesToHeaderCheck(Compile),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+      )
+      .dependsOn(
+        `daml-lf-archive`,
+        `daml-lf-data`,
+        `daml-lf-language`,
+        `daml-lf-stable-packages`,
+      )
+
+    // Isolate protobuf and snapshot into separate projects, so that we can
+    // accomodate the following dependency structure:
+    // * `daml-lf-snapshot` depends on `daml-lf-engine`, `daml-lf-snapshot-protos`
+    // * `daml-lf-engine` depends on `daml-lf-snapshot-protos`
+    // If these were both under the same project, we'd have a recursive-lazy value error.
+    lazy val `daml-lf-snapshot-proto` = project
+      .in(file("community/daml-lf/snapshot"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        Compile / bufLintCheck := {},
+        Compile / PB.targets := List(PB.gens.java -> (Compile / sourceManaged).value),
+        Compile / scalaSource := baseDirectory.value / "nonexistent",
+        target := baseDirectory.value / "target" / "proto",
+        addProtobufFilesToHeaderCheck(Compile),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+        libraryDependencies ++= Seq(
+          google_common_protos % "protobuf",
+          google_common_protos,
+        ),
+      )
+
+    lazy val `daml-lf-snapshot` = project
+      .in(file("community/daml-lf/snapshot"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .dependsOn(
+        `daml-lf-engine`,
+        `daml-lf-snapshot-proto`,
+        `daml-lf-data`,
+        `daml-lf-language`,
+        `daml-lf-stable-packages`,
+        `daml-lf-transaction`,
+        `daml-lf-validation`,
+        `contextualized-logging`,
+        crypto,
+        nameof,
+        `scala-utils`,
+      )
+      .settings(
+        sharedCommunitySettings,
+        target := baseDirectory.value / "target" / "scala",
+        addProtobufFilesToHeaderCheck(Compile),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+        libraryDependencies ++= Seq(
+        ),
+      )
+
+    lazy val `daml-lf-interpreter` = project
+      .in(file("community/daml-lf/interpreter"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        scalacOptions := lf_scalaopts_stricter,
+        wartremoverErrors := damlWarts,
+        // javaOnlySettings,
+        publish / skip := false,
+        coverageEnabled := false,
+        libraryDependencies ++= List(
+          google_protobuf_java,
+          org_apache_commons_commons_text,
+          org_typelevel_paiges_core,
+          scalaz_core,
+          spray_json,
+        ),
+        addProtobufFilesToHeaderCheck(Compile),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+      )
+      .dependsOn(
+        `daml-lf-data`,
+        `daml-lf-language`,
+        `daml-lf-stable-packages`,
+        `daml-lf-transaction`,
+        `daml-lf-validation`,
+        `contextualized-logging`,
+        crypto,
+        nameof,
+        `scala-utils`,
+      )
+
+    lazy val `daml-lf-engine` = project
+      .in(file("community/daml-lf/engine"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        scalacOptions := lf_scalaopts_stricter,
+        wartremoverErrors := damlWarts,
+        // javaOnlySettings,
+        publish / skip := false,
+        coverageEnabled := false,
+        libraryDependencies ++= List(
+          cats,
+          google_protobuf_java,
+          org_apache_commons_commons_text,
+          org_typelevel_paiges_core,
+          scalaz_core,
+        ),
+        Compile / bufLintCheck := {},
+        Compile / PB.targets := List(PB.gens.java -> (Compile / sourceManaged).value),
+        addProtobufFilesToHeaderCheck(Compile),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+      )
+      .dependsOn(
+        `daml-lf-archive`,
+        `daml-lf-data`,
+        `daml-lf-interpreter`,
+        `daml-lf-language`,
+        `daml-lf-stable-packages`,
+        `daml-lf-transaction`,
+        `daml-lf-validation`,
+        `daml-lf-snapshot-proto`,
+        `contextualized-logging`,
+        nameof,
+        `scala-utils`,
+      )
+
+    lazy val `daml-lf-api-type-signature` = project
+      .in(file("community/daml-lf/api-type-signature"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        scalacOptions := Seq.empty,
+        wartremoverErrors := damlWarts,
+        // javaOnlySettings,
+        publish / skip := false,
+        coverageEnabled := false,
+        libraryDependencies ++= List(
+          google_protobuf_java,
+          shapeless,
+          scalacheck,
+          scala_logging,
+          scalaz_core,
+          scalaz_scalacheck_binding,
+        ),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+      )
+      .dependsOn(
+        `daml-lf-archive`,
+        `daml-lf-data`,
+        `daml-lf-data-scalacheck`,
+        `daml-lf-transaction`,
+        `nonempty`,
+      )
+
+    lazy val `daml-lf-transaction-test-lib` = project
+      .in(file("community/daml-lf/transaction-test-lib"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        scalacOptions := lf_scalaopts_stricter,
+        wartremoverErrors := damlWarts,
+        // javaOnlySettings,
+        publish / skip := false,
+        coverageEnabled := false,
+        libraryDependencies ++= List(
+          google_protobuf_java,
+          shapeless,
+          scalacheck,
+          scalaz_core,
+          scalaz_scalacheck_binding,
+        ),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+      )
+      .dependsOn(
+        `daml-lf-api-type-signature`,
+        `daml-lf-data`,
+        `daml-lf-data-scalacheck`,
+        `daml-lf-transaction`,
+      )
+
+    lazy val `daml-lf-parser` = project
+      .in(file("community/daml-lf/parser"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        scalacOptions := lf_scalaopts_stricter,
+        wartremoverErrors := damlWarts,
+        // javaOnlySettings,
+        publish / skip := false,
+        coverageEnabled := false,
+        libraryDependencies ++= List(
+          google_protobuf_java,
+          shapeless,
+          scalacheck,
+          scalaz_core,
+          scalaz_scalacheck_binding,
+          scala_lang_modules_scala_parser_combinators,
+        ),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+      )
+      .dependsOn(
+        `daml-lf-data`,
+        `daml-lf-language`,
+        `daml-lf-stable-packages`,
+        `scala-utils`,
+      )
+
+    lazy val `daml-lf-encoder` = project
+      .in(file("community/daml-lf/encoder"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        scalacOptions := lf_scalaopts_stricter,
+        wartremoverErrors := damlWarts,
+        // javaOnlySettings,
+        publish / skip := false,
+        coverageEnabled := false,
+        libraryDependencies ++= List(
+          google_protobuf_java,
+          scalaz_core,
+        ),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+      )
+      .dependsOn(
+        `daml-lf-archive`,
+        `daml-lf-archive-encoder`,
+        `daml-lf-data`,
+        `daml-lf-language`,
+        `daml-lf-validation`,
+        `daml-lf-parser`,
+        crypto,
+        `safe-proto`,
+      )
+
+    lazy val `daml-lf-archive-encoder` = project
+      .in(file("community/daml-lf/archive/encoder"))
+      .disablePlugins(
+        ScalafixPlugin,
+        ScalafmtPlugin,
+        WartRemover,
+      )
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        scalacOptions := lf_scalaopts_stricter,
+        wartremoverErrors := damlWarts,
+        // javaOnlySettings,
+        publish / skip := false,
+        coverageEnabled := false,
+        libraryDependencies ++= List(
+          google_protobuf_java,
+          scalaz_core,
+        ),
+        Test / compile / skip := true, // TODO(#30144): Enable tests
+      )
+      .dependsOn(
+        `daml-lf-archive`,
+        `daml-lf-data`,
       )
 
     lazy val `ledger-api-proto` = project
@@ -3011,8 +3757,6 @@ object BuildCommon {
         Compile / unmanagedResources += (ThisBuild / baseDirectory).value / "community/ledger-api-proto/VERSION",
         coverageEnabled := false,
         libraryDependencies ++= Seq(
-          daml_ledger_api_value % "protobuf",
-          daml_ledger_api_value_java,
           google_common_protos % "protobuf",
           google_common_protos,
           google_protobuf_java,
@@ -3026,7 +3770,7 @@ object BuildCommon {
 
     lazy val `ledger-api-scala` = project
       .in(file("community/ledger-api-scala"))
-      .dependsOn(`google-common-protos-scala`, `ledger-api-proto`)
+      .dependsOn(`google-common-protos-scala`, `ledger-api-proto`, `ledger-api-value`)
       .disablePlugins(
         BufPlugin,
         ScalafixPlugin,
@@ -3036,7 +3780,6 @@ object BuildCommon {
       .settings(
         sharedCommunitySettings,
         publish / skip := false,
-        scalacOptions --= removeCompileFlagsForDaml,
         Compile / PB.protoSources ++= (`ledger-api-proto` / Compile / PB.protoSources).value,
         Compile / PB.targets := Seq(
           // build scala codegen with java conversions
@@ -3047,7 +3790,6 @@ object BuildCommon {
         ),
         coverageEnabled := false,
         libraryDependencies ++= Seq(
-          daml_ledger_api_value_scala,
           scalapb_runtime,
           scalapb_runtime_grpc,
         ),
@@ -3056,7 +3798,7 @@ object BuildCommon {
 
     lazy val `bindings-java` = project
       .in(file("community/bindings-java"))
-      .dependsOn(`ledger-api-proto`)
+      .dependsOn(`ledger-api-proto`, `ledger-api-value`)
       .settings(
         sharedCommunitySettings,
         publish / skip := false,
@@ -3066,7 +3808,6 @@ object BuildCommon {
         Compile / doc / javacOptions += "-Xdoclint:-missing",
         libraryDependencies ++= Seq(
           fasterjackson_core,
-          daml_ledger_api_value_java,
           junit_interface % Test,
           jupiter_interface % Test,
           scalatest % Test,

@@ -527,6 +527,10 @@ trait ParticipantTestContext extends UserManagementTestContext {
       within: NonNegativeFiniteDuration,
       request: CompletionStreamRequest,
   ): Future[Vector[CompletionStreamResponse.CompletionResponse]]
+  def completions(
+      take: Int,
+      request: CompletionStreamRequest,
+  ): Future[Vector[CompletionStreamResponse.CompletionResponse]]
 
   def completionStreamRequest(from: Long = referenceOffset)(
       parties: Party*

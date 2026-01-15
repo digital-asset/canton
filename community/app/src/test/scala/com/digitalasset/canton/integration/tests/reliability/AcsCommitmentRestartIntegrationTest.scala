@@ -101,8 +101,9 @@ trait AcsCommitmentRestartIntegrationTest
       LedgerApiStore
         .initialize(
           storageConfig = participant.config.storage,
+          storage = None,
           ledgerParticipantId = LedgerParticipantId.assertFromString("fakeid"),
-          legderApiDatabaseConnectionTimeout = LedgerApiServerConfig().databaseConnectionTimeout,
+          ledgerApiDatabaseConnectionTimeout = LedgerApiServerConfig().databaseConnectionTimeout,
           ledgerApiPostgresDataSourceConfig = PostgresDataSourceConfig(),
           timeouts = timeouts,
           loggerFactory = loggerFactory,

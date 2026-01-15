@@ -456,7 +456,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
       if (signingKeys.nonEmpty)
         s"signed by ${signingKeys.mkString(", ")}"
       else ""
-    logger.debug(
+    logger.info(
       show"Attempting to build, sign, and $op $mapping with serial $serial $signingKeyString"
     )
     for {

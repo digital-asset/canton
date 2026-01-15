@@ -18,6 +18,7 @@ Template for a bigger topic
 #### Impact and Migration
 
 ### Minor Improvements
+- Changed the path for `crypto.kms.session-signing-keys` (deprecated) to `crypto.session-signing-keys` so that session signing key configuration is no longer directly tied to a KMS. However, session signing keys can still only be enabled when using a KMS provider or when running with `non-standard-config=true`.
 - Added a new configuration parameter for session signing keys, `toleranceShiftDuration`, and updated `cutOffDuration` to allow a zero duration.
 - Ledger JSON Api changes:
   - extra fields in JSON objects are no longer tolerated,
@@ -49,6 +50,23 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
   ```
   canton.monitoring.tracing.tracer.exporter.type=otlp
   ```
+- On Ledger API interface subscriptions, the `CreatedEvent.interface_views` now returns the ID of the package containing
+  the interface implementation that was used to compute the specific interface view as `InterfaceView.implementation_package_id`.
+- *BREAKING* The Postgres configuration of the indexer is separated from the Postgres configuration of the lapi server
+  (`canton.participants.<participant>.ledger-api.postgres-data-source`).
+  The new parameter `canton.participants.<participant>.parameters.ledger-api-server.indexer.postgres-data-source` should
+  be used instead.
+- Added network timeout and client_connection_check_interval for db operations in the lapi server and indexer to avoid
+  hanging connections for Postgres (see PostgresDataSourceConfig). The defaults are 60 seconds network timeout and
+  5 seconds client_connection_check_interval for the lapi server, and 20 seconds network timeout and
+  5 seconds client_connection_check_interval for the indexer. These values can be configured via the new configuration parameters
+  `canton.participants.<participant>.ledger-api.postgres-data-source.network-timeout` for network timeout of the lapi
+  server and `canton.participants.<participant>.parameters.ledger-api-server.indexer.postgres-data-source.client-connection-check-interval`
+  for the client_connection_check_interval of the indexer.
+- We have changed the way that OffsetCheckpoints are populated to always generate at least one when an open-ended
+  updates or completions stream is requested. An OffsetCheckpoint can have offset equal to the exclusive start for which
+  the stream is requested. This ensures that checkpoints are visible even when there are no updates, and the stream was
+  requested to begin exclusively from the ledger end.
 
 ### Preview Features
 - preview feature
@@ -120,3 +138,5 @@ Canton has been tested against the following versions of its dependencies:
 ## update to GRPC 1.77.0
 
 removes [CVE-2025-58057](https://github.com/advisories/GHSA-3p8m-j85q-pgmj) from security reports.
+
+

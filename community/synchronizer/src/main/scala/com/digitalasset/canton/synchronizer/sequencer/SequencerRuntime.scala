@@ -134,7 +134,7 @@ class SequencerRuntime(
 
   override protected def timeouts: ProcessingTimeout = localNodeParameters.processingTimeouts
 
-  def psid: PhysicalSynchronizerId = physicalIndexedSynchronizer.synchronizerId
+  def psid: PhysicalSynchronizerId = physicalIndexedSynchronizer.psid
 
   def initialize()(implicit
       traceContext: TraceContext

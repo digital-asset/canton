@@ -25,6 +25,7 @@ class SequencerBlockStoreTestInMemory
         sequencerId,
         blockSequencerMode = true,
         loggerFactory,
+        timeouts,
         sequencerMetrics = SequencerMetrics.noop("db-sequencer-block-store-test"),
       )
 

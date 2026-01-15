@@ -1369,6 +1369,14 @@ final class SingleParticipantTestContext private[participant] (
       .within(within.toScala)
       .map(_.map(_.completionResponse))
 
+  override def completions(
+      take: Int,
+      request: CompletionStreamRequest,
+  ): Future[Vector[CompletionStreamResponse.CompletionResponse]] =
+    new StreamConsumer[CompletionStreamResponse](
+      services.commandCompletion.completionStream(request, _)
+    ).take(take).map(_.map(_.completionResponse))
+
   override def completionStreamRequest(from: Long = referenceOffset)(
       parties: Party*
   ): CompletionStreamRequest =

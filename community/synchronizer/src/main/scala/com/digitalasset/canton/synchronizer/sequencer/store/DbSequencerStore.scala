@@ -16,7 +16,12 @@ import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.caching.ScaffeineCache.TracedAsyncLoadingCache
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, ProcessingTimeout}
+import com.digitalasset.canton.config.{
+  BatchAggregatorConfig,
+  BatchingConfig,
+  CachingConfigs,
+  ProcessingTimeout,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{
   CloseContext,
@@ -922,7 +927,61 @@ class DbSequencerStore(
         }
     }
 
+  private val concurrentEventReaderBatchProcessor = new BatchAggregator.Processor[
+    (
+        /*memberId */ SequencerMemberId,
+        /* memberRegisteredFrom */ CantonTimestamp,
+        /* fromExclusiveO */ Option[CantonTimestamp],
+        /*limit */ Int,
+    ),
+    ReadEvents,
+  ] {
+    override def kind: String = "SequencerStore.readEvents"
+
+    override def logger: TracedLogger = DbSequencerStore.this.logger
+
+    override def executeBatch(
+        items: NonEmpty[
+          Seq[Traced[(SequencerMemberId, CantonTimestamp, Option[CantonTimestamp], Int)]]
+        ]
+    )(implicit
+        traceContext: TraceContext,
+        callerCloseContext: CloseContext,
+    ): FutureUnlessShutdown[immutable.Iterable[ReadEvents]] =
+      if (items.sizeIs > 1)
+        ErrorUtil.invalidArgument(s"received a batch with more than 1 element: $items")
+      else {
+        val Traced((memberId, memberRegisteredFrom, fromExclusiveO, limit)) = items.head1
+        readEventsFromStore(memberId, memberRegisteredFrom, fromExclusiveO, limit).map(Seq(_))
+      }
+
+    override val prettyItem
+        : Pretty[(SequencerMemberId, CantonTimestamp, Option[CantonTimestamp], Int)] =
+      Pretty.adHocPrettyInstance
+  }
+  private val concurrentEventReaderLimiter =
+    BatchAggregator(
+      processor = concurrentEventReaderBatchProcessor,
+      // allow more tasks to be already scheduled on the DB executor to reduce dispatching latency
+      BatchAggregatorConfig(
+        maximumInFlight = batchingConfig.parallelism * PositiveInt.two,
+        maximumBatchSize = PositiveInt.one,
+      ),
+    )
+
   override protected def readEventsInternal(
+      memberId: SequencerMemberId,
+      memberRegisteredFrom: CantonTimestamp,
+      fromTimestampExclusiveO: Option[CantonTimestamp],
+      limit: Int,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[ReadEvents] =
+    concurrentEventReaderLimiter.run(
+      (memberId, memberRegisteredFrom, fromTimestampExclusiveO, limit)
+    )
+
+  private def readEventsFromStore(
       memberId: SequencerMemberId,
       memberRegisteredFrom: CantonTimestamp,
       fromTimestampExclusiveO: Option[CantonTimestamp],

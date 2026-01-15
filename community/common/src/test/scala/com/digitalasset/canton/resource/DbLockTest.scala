@@ -41,9 +41,9 @@ trait DbLockTest extends FixtureAsyncWordSpec with BaseTest with HasExecutorServ
 
   private lazy val ds = DbLockedConnection
     .createDataSource(
-      setup.config.config,
-      1,
-      PositiveFiniteDuration.tryOfSeconds(10),
+      baseDbConfig = setup.config.config,
+      poolSize = 1,
+      connectionTimeout = PositiveFiniteDuration.tryOfSeconds(10),
     )
     .valueOrFail("Failed to create datasource")
 
@@ -289,15 +289,15 @@ class DbLockTestPostgres extends DbLockTest {
     setup.storage.profile match {
       case profile: DbStorage.Profile.Postgres =>
         new DbLockPostgres(
-          profile,
-          db,
-          lockId,
-          lockMode,
-          lockConfig,
-          DefaultProcessingTimeouts.testing,
-          clock,
-          loggerFactory,
-          Eval.now(false),
+          profile = profile,
+          database = db,
+          lockId = lockId,
+          mode = lockMode,
+          config = lockConfig,
+          timeouts = DefaultProcessingTimeouts.testing,
+          clock = clock,
+          loggerFactory = loggerFactory,
+          executorShuttingDown = Eval.now(false),
         )(executorService)
       case _ => fail("Database profile must be a Postgres profile")
     }

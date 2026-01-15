@@ -112,6 +112,7 @@ object JsSchema {
       interfaceId: Identifier,
       viewStatus: com.google.rpc.status.Status,
       viewValue: Option[Json],
+      implementationPackageId: Option[String],
   )
   object JsReassignmentEvent {
     sealed trait JsReassignmentEvent

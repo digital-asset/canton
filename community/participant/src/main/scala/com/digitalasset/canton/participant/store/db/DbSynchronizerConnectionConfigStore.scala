@@ -211,7 +211,9 @@ class DbSynchronizerConnectionConfigStore private[store] (
       case None =>
         getAllFor(synchronizerAlias) match {
           case Right(existingConfigs)
-              if existingConfigs.exists(c => c.config == config && c.configuredPSId.isDefined) =>
+              if existingConfigs.exists(c =>
+                c.config == config && c.configuredPSId.isDefined && c.predecessor == synchronizerPredecessor
+              ) =>
             logger.debug(
               s"Not adding connection for ($synchronizerAlias, $configuredPSId) to the store because ($synchronizerAlias, ${existingConfigs
                   .map(_.configuredPSId)}) already exists"
@@ -336,10 +338,10 @@ class DbSynchronizerConnectionConfigStore private[store] (
                 )
               )
 
-            case Some((existingConfig, _, _, _)) =>
+            case Some((existingConfig, _, _, existingPredecessor)) =>
               EitherT.fromEither[DBIO](
                 Either.cond(
-                  existingConfig == config,
+                  existingConfig == config && existingPredecessor == synchronizerPredecessor,
                   (),
                   ConfigAlreadyExists(alias, configuredPSId): Error,
                 )

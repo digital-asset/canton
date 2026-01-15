@@ -12,6 +12,7 @@ import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.resource.DbStorage.DbAction.{All, ReadTransactional}
 import com.digitalasset.canton.tracing.TraceContext
 
+import java.sql.Connection
 import scala.concurrent.ExecutionContext
 
 /** DbStorage instance for idempotency testing where we run each write action twice. */
@@ -45,4 +46,10 @@ class DbStorageIdempotency(
     }
 
   override def isActive: Boolean = underlying.isActive
+
+  override def runJdbcWrite[T](
+      traceContext: TraceContext,
+      body: Connection => T,
+  ): FutureUnlessShutdown[T] =
+    underlying.runJdbcWrite(traceContext, body)
 }

@@ -111,7 +111,7 @@ class InMemoryPhysicalSyncPersistentState(
 
   override val topologyStore =
     new InMemoryTopologyStore(
-      SynchronizerStore(physicalSynchronizerIdx.synchronizerId),
+      SynchronizerStore(psid),
       staticSynchronizerParameters.protocolVersion,
       loggerFactory,
       timeouts,

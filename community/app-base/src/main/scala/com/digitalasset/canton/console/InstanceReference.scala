@@ -45,6 +45,7 @@ import com.digitalasset.canton.synchronizer.mediator.{
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData.{
   OrderingTopology,
   PeerNetworkStatus,
+  WriteReadiness,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc.P2PGrpcNetworking.P2PEndpoint
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
@@ -1268,6 +1269,14 @@ abstract class SequencerReference(
       consoleEnvironment.run {
         runner.adminCommand(
           SequencerBftAdminCommands.GetPeerNetworkStatus(endpoints.map(_.map(toInternal)))
+        )
+      }
+
+    @Help.Summary("Get write readiness")
+    def get_write_readiness(): WriteReadiness =
+      consoleEnvironment.run {
+        runner.adminCommand(
+          SequencerBftAdminCommands.GetWriteReadiness
         )
       }
 

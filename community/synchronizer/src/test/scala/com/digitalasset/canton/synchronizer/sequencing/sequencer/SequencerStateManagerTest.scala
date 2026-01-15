@@ -350,6 +350,7 @@ class SequencerStateManagerTest
         sequencer1,
         blockSequencerMode = true,
         loggerFactory,
+        timeouts = timeouts,
         sequencerMetrics = SequencerMetrics.noop("sequencer-state-manager-test"),
       ),
       loggerFactory,

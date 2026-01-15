@@ -115,7 +115,7 @@ trait PhysicalSyncPersistentState extends NamedLogging with AutoCloseable {
   def topologyManager: SynchronizerTopologyManager
   def synchronizerOutboxQueue: SynchronizerOutboxQueue
 
-  lazy val psid: PhysicalSynchronizerId = physicalSynchronizerIdx.synchronizerId
+  lazy val psid: PhysicalSynchronizerId = physicalSynchronizerIdx.psid
 }
 
 object LogicalSyncPersistentState {

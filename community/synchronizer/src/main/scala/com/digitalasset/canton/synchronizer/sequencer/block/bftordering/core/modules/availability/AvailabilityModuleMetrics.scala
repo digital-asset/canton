@@ -28,10 +28,13 @@ private[availability] object AvailabilityModuleMetrics {
   )(implicit mc: MetricsContext): Unit = {
     import metrics.availability.*
 
-    requested.proposals.updateValue(state.toBeProvidedToConsensus.size)
-    requested.batches.updateValue(
-      state.toBeProvidedToConsensus.map(_.maxBatchesPerProposal.toInt).sum
-    )
+    val (requestsCount, requestedBatches) =
+      state.nextToBeProvidedToConsensus.maxBatchesPerProposal
+        .map(maxBatchesPerProposal => (1, maxBatchesPerProposal.toInt))
+        .getOrElse((0, 0))
+
+    requested.proposals.updateValue(requestsCount)
+    requested.batches.updateValue(requestedBatches)
 
     val readyForConsensusMc = mc.withExtraLabels(dissemination.labels.ReadyForConsensus -> "true")
     locally {

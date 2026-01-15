@@ -31,7 +31,7 @@ import scala.concurrent.Future
  * - sequencers: only emit time proofs
  * - participants: time is not signalled to the indexer
  */
-class UpgradeTimeOldSynchronizerIntegrationTest
+final class UpgradeTimeOldSynchronizerIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with EntitySyntax

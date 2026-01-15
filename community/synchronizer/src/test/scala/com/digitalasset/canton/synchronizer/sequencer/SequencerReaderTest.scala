@@ -136,6 +136,7 @@ class SequencerReaderTest
       sequencerMember = topologyClientMember,
       blockSequencerMode = true,
       loggerFactory = loggerFactory,
+      timeouts = timeouts,
       sequencerMetrics = sequencerMetrics,
     )
     val instanceIndex: Int = 0
