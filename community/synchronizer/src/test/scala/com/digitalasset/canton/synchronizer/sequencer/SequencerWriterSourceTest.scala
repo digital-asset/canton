@@ -139,6 +139,7 @@ class SequencerWriterSourceTest
           sequencerMember,
           blockSequencerMode = blockSequencerMode,
           loggerFactory = loggerFactory,
+          timeouts = timeouts,
           sequencerMetrics = SequencerMetrics.noop("sequencer-writer-source-test"),
         )(
           ec

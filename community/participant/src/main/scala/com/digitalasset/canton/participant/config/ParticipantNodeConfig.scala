@@ -6,10 +6,10 @@ package com.digitalasset.canton.participant.config
 import cats.syntax.option.*
 import com.daml.jwt.JwtTimestampLeeway
 import com.digitalasset.canton.config
+import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.config.RequireTypes.*
 import com.digitalasset.canton.config.manual.CantonConfigValidatorDerivation
-import com.digitalasset.canton.config.{ReplicationConfig, *}
 import com.digitalasset.canton.http.JsonApiConfig
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.participant.admin.AdminWorkflowConfig
@@ -31,6 +31,7 @@ import com.digitalasset.canton.platform.config.{
 }
 import com.digitalasset.canton.platform.indexer.IndexerConfig
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
+import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.store.PrunableByTimeParameters
 import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
@@ -438,6 +439,7 @@ final case class ParticipantNodeParameterConfig(
       config.PositiveDurationSeconds.ofMinutes(1),
     commitmentMismatchDebugging: Boolean = false,
     commitmentProcessorNrAcsChangesBehindToTriggerCatchUp: Option[PositiveInt] = None,
+    commitmentReduceParallelism: NonNegativeInt = NonNegativeInt.one,
     autoSyncProtocolFeatureFlags: Boolean = true,
 ) extends LocalNodeParametersConfig
     with UniformCantonConfigValidation
@@ -459,6 +461,7 @@ final case class ParticipantStoreConfig(
     pruningMetricUpdateInterval: Option[config.PositiveDurationSeconds] =
       config.PositiveDurationSeconds.ofHours(1L).some,
     journalPruning: JournalPruningConfig = JournalPruningConfig(),
+    safeToPruneCommitmentState: Option[SafeToPruneCommitmentState] = None,
 ) extends UniformCantonConfigValidation
 object ParticipantStoreConfig {
   implicit val participantStoreConfigCantonConfigValidator

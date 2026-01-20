@@ -901,7 +901,8 @@ class BlockSequencerStateManager(
 
   private def isAddressingThisSequencer(outcome: SubmissionOutcome): Boolean =
     outcome match {
-      case x: DeliverableSubmissionOutcome => x.deliverToMembers.contains(sequencerId)
+      case x: DeliverableSubmissionOutcome =>
+        x.deliverToMembers.contains(sequencerId) || x.submission.batch.isBroadcast
       case _ => false
     }
 
@@ -933,6 +934,8 @@ object BlockSequencerStateManager {
       .awaitUS(s"Reading the head of the $synchronizerId sequencer state")(store.readHead)
       .map { headBlockO =>
         val headBlock = headBlockO.getOrElse(BlockEphemeralState.empty)
+        // required to prevent warnings on earlier events that we won't be processing
+        progressSupervisorO.foreach(_.ignoreTimestampsBefore(headBlock.latestBlock.lastTs))
         new AtomicReference[HeadState]({
           logger.debug(
             s"Initialized the block sequencer with head block ${headBlock.latestBlock}"

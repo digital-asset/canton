@@ -96,17 +96,6 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
         filter = entry => hashes.contains(entry.hash),
       ).map(_.collectLatestByTxHash.result.map(_.transaction))
 
-  override def findProposalsByTxHash(
-      asOfExclusive: EffectiveTime,
-      hashes: NonEmpty[Set[TxHash]],
-  )(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] =
-    findFilter(
-      asOfExclusive,
-      entry => hashes.contains(entry.hash) && entry.transaction.isProposal,
-    )
-
   private def findFilter(
       asOfExclusive: EffectiveTime,
       filter: TopologyStoreEntry => Boolean,
@@ -197,6 +186,23 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
       }
     }
     FutureUnlessShutdown.unit
+  }
+
+  override def fetchAllDescending(uids: Set[UniqueIdentifier], nss: Set[Namespace])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[GenericStoredTopologyTransactions] = {
+
+    val items = topologyTransactionStore
+      .filter(entry =>
+        entry.rejected.isEmpty &&
+          (entry.mapping.maybeUid.exists(uids.contains) ||
+            (entry.mapping.maybeUid.isEmpty && nss.contains(entry.mapping.namespace)))
+      )
+      .sortBy(c => (c.from.value, c.batchIdx))
+      .reverse
+      .map(_.toStoredTransaction)
+      .toSeq
+    FutureUnlessShutdown.pure(StoredTopologyTransactions(items))
   }
 
   override def bulkInsert(
@@ -384,8 +390,17 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
       types: Seq[TopologyMapping.Code],
       filterUid: Option[NonEmpty[Seq[UniqueIdentifier]]],
       filterNamespace: Option[NonEmpty[Seq[Namespace]]],
+      pagination: Option[(Option[UniqueIdentifier], Int)] = None,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[NegativeStoredTopologyTransactions] =
-    findTransactionsInStore(asOf, asOfInclusive, isProposal, types, filterUid, filterNamespace).map(
+    findTransactionsInStore(
+      asOf,
+      asOfInclusive,
+      isProposal,
+      types,
+      filterUid,
+      filterNamespace,
+      pagination,
+    ).map(
       _.collectOfType[TopologyChangeOp.Remove]
     )
 
@@ -396,7 +411,7 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
       types: Seq[TopologyMapping.Code],
       filterUid: Option[NonEmpty[Seq[UniqueIdentifier]]],
       filterNamespace: Option[NonEmpty[Seq[Namespace]]],
-      pagination: Option[(Option[UniqueIdentifier], Int)] = None,
+      pagination: Option[(Option[UniqueIdentifier], Int)],
   ): FutureUnlessShutdown[GenericStoredTopologyTransactions] = {
     val timeFilter = asOfFilter(asOf, asOfInclusive)
     def pathFilter(mapping: TopologyMapping): Boolean =

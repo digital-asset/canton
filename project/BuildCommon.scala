@@ -899,6 +899,7 @@ object BuildCommon {
           chimneyJavaConversion,
           circe_core,
           circe_generic,
+          commons_compress,
           flyway.excludeAll(ExclusionRule("org.apache.logging.log4j")),
           flyway_postgres,
           opentelemetry_instrumentation_hikari,

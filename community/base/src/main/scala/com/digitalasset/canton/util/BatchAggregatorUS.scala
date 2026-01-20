@@ -64,7 +64,7 @@ object BatchAggregatorUS {
         maximumBatchSize = maximumBatchSize.unwrap,
       )
 
-    case BatchAggregatorConfig.NoBatching =>
+    case _: BatchAggregatorConfig.NoBatching =>
       new NoOpBatchAggregatorUS[A, B](processor.executeSingle(_)(_, _, _))
   }
 

@@ -469,6 +469,7 @@ object Dependencies {
     resolveDependency("com.google.api.grpc", "proto-google-common-protos")
 
   lazy val commons_io = resolveDependency("commons-io", "commons-io")
+  lazy val commons_compress = resolveDependency("org.apache.commons", "commons-compress")
   lazy val auth0_java = resolveDependency("com.auth0", "java-jwt")
   lazy val auth0_jwks = resolveDependency("com.auth0", "jwks-rsa")
   lazy val guava = resolveDependency("com.google.guava", "guava")

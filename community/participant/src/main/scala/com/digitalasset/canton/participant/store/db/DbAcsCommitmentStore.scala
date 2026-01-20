@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.Eval
-import cats.syntax.apply.*
 import cats.syntax.traverse.*
 import com.daml.nameof.NameOf
 import com.daml.nameof.NameOf.functionFullName
@@ -28,6 +27,7 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.protocol.messages.AcsCommitment.HashedCommitmentType
+import com.digitalasset.canton.protocol.messages.CommitmentPeriodState.CommitmentPeriodStateInOutstanding
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   CommitmentPeriod,
@@ -37,6 +37,8 @@ import com.digitalasset.canton.protocol.messages.{
 import com.digitalasset.canton.resource.DbStorage.Implicits.BuilderChain.toSQLActionBuilderChain
 import com.digitalasset.canton.resource.DbStorage.{DbAction, SQLActionBuilderChain}
 import com.digitalasset.canton.resource.{DbParameterUtils, DbStorage, DbStore}
+import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
+import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState.SafeToPruneCommitmentStateRequiresChecks
 import com.digitalasset.canton.serialization.DeterministicEncoding
 import com.digitalasset.canton.store.db.{DbDeserializationException, DbPrunableByTimeSynchronizer}
 import com.digitalasset.canton.store.{IndexedString, IndexedSynchronizer}
@@ -290,7 +292,7 @@ class DbAcsCommitmentStore(
   override def markPeriod(
       counterParticipant: ParticipantId,
       periods: NonEmpty[Set[CommitmentPeriod]],
-      matchingState: CommitmentPeriodState,
+      matchingState: CommitmentPeriodStateInOutstanding,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
@@ -375,37 +377,59 @@ class DbAcsCommitmentStore(
     )
 
   override def noOutstandingCommitments(
-      beforeOrAt: CantonTimestamp
+      beforeOrAt: CantonTimestamp,
+      safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[CantonTimestamp]] =
+  ): FutureUnlessShutdown[Option[CantonTimestamp]] = {
+    val effectiveSafeToPruneCommitmentState =
+      safeToPruneCommitmentState.getOrElse(SafeToPruneCommitmentState.Match)
     for {
       computed <- lastComputedAndSent
-      adjustedTsOpt = computed.map(_.forgetRefinement.min(beforeOrAt))
-      ignores <- acsCounterParticipantConfigStore
-        .getAllActiveNoWaitCounterParticipants(
-          Seq(indexedSynchronizer.synchronizerId),
-          Seq.empty,
-        )
-      participantFilter = buildParticipantFilter(
-        "counter_participant",
-        NonEmpty.from(ignores.map(_.participantId)),
-        in = false,
-      )
-      outstandingOpt <- adjustedTsOpt.traverse { ts =>
-        val query: SQLActionBuilder =
-          (sql"""select from_exclusive, to_inclusive from par_outstanding_acs_commitments
+      adjustedPruningTsOpt = computed.map(_.forgetRefinement.min(beforeOrAt))
+
+      unsafePeriods <- effectiveSafeToPruneCommitmentState match {
+        case SafeToPruneCommitmentState.All =>
+          FutureUnlessShutdown.pure(Seq.empty[(CantonTimestamp, CantonTimestamp)])
+        case other: SafeToPruneCommitmentStateRequiresChecks =>
+          for {
+            ignores <- acsCounterParticipantConfigStore
+              .getAllActiveNoWaitCounterParticipants(
+                Seq(indexedSynchronizer.synchronizerId),
+                Seq.empty,
+              )
+            participantFilter = buildParticipantFilter(
+              "counter_participant",
+              NonEmpty.from(ignores.map(_.participantId)),
+              in = false,
+            )
+            outstandingPeriods <- adjustedPruningTsOpt.traverse { ts =>
+              val unsafeStateFilter = other match {
+                case SafeToPruneCommitmentState.Match =>
+                  sql"matching_state != ${CommitmentPeriodState.Matched}"
+                case SafeToPruneCommitmentState.MatchOrMismatch =>
+                  sql"matching_state != ${CommitmentPeriodState.Matched} and matching_state != ${CommitmentPeriodState.Mismatched}"
+              }
+
+              val query: SQLActionBuilder =
+                (sql"""select from_exclusive, to_inclusive from par_outstanding_acs_commitments
                where synchronizer_idx=$indexedSynchronizer
                and from_exclusive < $ts
-               and matching_state != ${CommitmentPeriodState.Matched}""" ++ participantFilter).toActionBuilder
-        storage.query(
-          query
-            .as[(CantonTimestamp, CantonTimestamp)]
-            .withTransactionIsolation(Serializable),
-          operationName = "commitments: compute no outstanding",
-        )
+               and """ ++ unsafeStateFilter ++ participantFilter).toActionBuilder
+
+              storage.query(
+                query
+                  .as[(CantonTimestamp, CantonTimestamp)]
+                  .withTransactionIsolation(Serializable),
+                operationName = "commitments: compute no outstanding",
+              )
+            }
+          } yield outstandingPeriods.getOrElse(Seq.empty)
       }
-    } yield (adjustedTsOpt, outstandingOpt).mapN(AcsCommitmentStore.latestCleanPeriod)
+
+    } yield adjustedPruningTsOpt.map(AcsCommitmentStore.latestCleanPeriod(_, unsafePeriods))
+
+  }
 
   override def searchComputedBetween(
       start: CantonTimestamp,
