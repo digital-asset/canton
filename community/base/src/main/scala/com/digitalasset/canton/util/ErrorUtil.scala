@@ -150,4 +150,12 @@ object ErrorUtil {
     if (condition) FutureUnlessShutdown.unit
     else internalErrorAsyncShutdown(new IllegalStateException(message))
 
+  /** Indicates an illegal argument by logging an ERROR and returning a failed future with an
+    * [[java.lang.IllegalArgumentException]]
+    */
+  def invalidArgumentAsyncShutdown(message: => String)(implicit
+      loggingContext: ErrorLoggingContext
+  ): FutureUnlessShutdown[Nothing] =
+    internalErrorAsyncShutdown(new IllegalArgumentException(message))
+
 }

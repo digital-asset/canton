@@ -771,24 +771,30 @@ class TopologyAdministrationGroup(
       }
 
     @Help.Summary(
-      "Download the upgrade state for a sequencer (intended for logical synchronizer upgrade)"
+      "Download the topology upgrade state for a sequencer (intended for logical synchronizer upgrade)"
     )
     @Help.Description(
       """Download the topology snapshot which includes the entire history of topology transactions
         |to initialize a sequencer for a logical synchronizer upgrade.
         |
         |A logical synchronizer upgrade must be ongoing for this call to succeed.
+        |Parameters:
+        |- topologyStore: Optional, if the node only has one active synchronizer store, it will
+        |                 be detected automatically. If the node has more than one active
+        |                 synchronizer store, as can be the case for participants, the desired
+        |                 topology store must be set explicitly.
         """
     )
     def logical_upgrade_state(
-        timeout: NonNegativeDuration = timeouts.unbounded
+        topologyStore: Option[TopologyStoreId.Synchronizer] = None,
+        timeout: NonNegativeDuration = timeouts.unbounded,
     ): ByteString =
       consoleEnvironment.run {
         val responseObserver = new ByteStringStreamObserver[LogicalUpgradeStateResponse](_.chunk)
 
         def call: ConsoleCommandResult[Context.CancellableContext] =
           adminCommand(
-            TopologyAdminCommands.Read.LogicalUpgradeState(responseObserver)
+            TopologyAdminCommands.Read.LogicalUpgradeState(topologyStore, responseObserver)
           )
 
         processResult(

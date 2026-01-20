@@ -176,8 +176,9 @@ object ParticipantNodePersistentState extends HasLoggerName {
       ledgerApiStore <-
         LedgerApiStore.initialize(
           storageConfig = storageConfig,
+          storage = Some(storage),
           ledgerParticipantId = ledgerParticipantId,
-          legderApiDatabaseConnectionTimeout = ledgerApiServerConfig.databaseConnectionTimeout,
+          ledgerApiDatabaseConnectionTimeout = ledgerApiServerConfig.databaseConnectionTimeout,
           ledgerApiPostgresDataSourceConfig = ledgerApiServerConfig.postgresDataSource,
           timeouts = timeouts,
           loggerFactory = loggerFactory,

@@ -16,9 +16,15 @@ import java.time.Duration
 
 /** Ensures that no participant can onboard on the new synchronizer before the upgrade time.
   */
-abstract class LSUParticipantOnboardingDuringLSUIntegrationTest extends LSUBase {
+final class LSUParticipantOnboardingDuringLSUIntegrationTest extends LSUBase {
+  registerPlugin(
+    new UseBftSequencer(
+      loggerFactory,
+      MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
+    )
+  )
 
-  override protected def testName: String = "logical-synchronizer-upgrade"
+  override protected def testName: String = "lsu-participant-onboarding-during-lsu"
 
   registerPlugin(new UsePostgres(loggerFactory))
 
@@ -73,14 +79,4 @@ abstract class LSUParticipantOnboardingDuringLSUIntegrationTest extends LSUBase 
       waitForTargetTimeOnSequencer(sequencer2, environment.clock.now)
     }
   }
-}
-
-final class LSUParticipantOnboardingDuringLSUBftOrderingIntegrationTest
-    extends LSUParticipantOnboardingDuringLSUIntegrationTest {
-  registerPlugin(
-    new UseBftSequencer(
-      loggerFactory,
-      MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
-    )
-  )
 }

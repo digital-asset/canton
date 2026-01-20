@@ -30,7 +30,7 @@ class KmsDriverConfigTest extends BaseTestWordSpec {
           .valueOrFail("retrieve participant config")
 
       participantConfig.crypto.kms.valueOrFail("no KMS config") match {
-        case KmsConfig.Driver(_, config, _, _, _) =>
+        case KmsConfig.Driver(_, config, _, _) =>
           val driverConfig =
             driverFactory.configReader.from(config).valueOrFail("failed to parse driver config")
           driverConfig shouldBe TestKmsDriverConfig(username = username, password = password)

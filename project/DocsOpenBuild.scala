@@ -661,7 +661,7 @@ object DocsOpenBuild {
     val preprocessed = target.value / "preprocessed-sphinx"
     val filesToCopy = Map(
       (DamlProjects.`ledger-api-proto` / Compile / sourceManaged).value / "proto-docs.rst" -> preprocessed / "sdk" / "reference" / "lapi-proto-docs.rst",
-      (DamlProjects.`ledger-api-value` / Compile / sourceManaged).value / "proto-docs.rst" -> preprocessed / "sdk" / "reference" / "lapi-value-proto-docs.rst.inc",
+      (DamlProjects.`ledger-api-value` / Compile / sourceManaged).value / "proto-docs.rst.inc" -> preprocessed / "sdk" / "reference" / "lapi-value-proto-docs.rst.inc",
     )
 
     val postProcessScript = file("community/docs/post-process.sh")

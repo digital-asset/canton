@@ -14,6 +14,7 @@ import com.digitalasset.canton.auth.AuthInterceptor
 import com.digitalasset.canton.config.{
   ApiLoggingConfig,
   ServerAuthRequirementConfig,
+  TlsClientCertificate,
   TlsClientConfig,
   TlsServerConfig,
 }
@@ -52,6 +53,7 @@ import javax.net.ssl.SSLContext
 import scala.concurrent.Future
 import scala.util.Using
 
+@SuppressWarnings(Array("com.digitalasset.canton.DirectGrpcServiceInvocation"))
 class HttpService(
     startSettings: JsonApiConfig,
     httpsConfiguration: Option[TlsServerConfig],
@@ -197,14 +199,12 @@ object HttpService extends NoTracing {
     buildSSLContext(keyStore)
   }
 
-  // TODO(i22574): Remove OptionPartial and Null warts in HttpService
-  @SuppressWarnings(Array("org.wartremover.warts.Null"))
   def buildSSLContext(keyStore: KeyStore): SSLContext = {
     import java.security.SecureRandom
     import javax.net.ssl.{KeyManagerFactory, SSLContext, TrustManagerFactory}
 
     val keyManagerFactory = KeyManagerFactory.getInstance("SunX509")
-    keyManagerFactory.init(keyStore, null)
+    keyManagerFactory.init(keyStore, emptyPassword)
 
     val trustManagerFactory = TrustManagerFactory.getInstance("SunX509")
     trustManagerFactory.init(keyStore)
@@ -259,24 +259,32 @@ object HttpService extends NoTracing {
       engine
     }
 
-  // TODO(i22574): Remove OptionPartial and Null warts in HttpService
-  @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
   private def buildKeyStore(config: TlsServerConfig): KeyStore = buildKeyStore(
     config.certChainFile.pemStream,
     config.privateKeyFile.pemFile.unwrap.toPath,
-    config.trustCollectionFile.get.pemStream,
+    config.trustCollectionFile
+      .getOrElse(sys.error("unexpected empty value for trustCollectionFile"))
+      .pemStream,
   )
 
-  // TODO(i22574): Remove OptionPartial and Null warts in HttpService
-  @SuppressWarnings(Array("org.wartremover.warts.OptionPartial"))
-  private def buildKeyStore(config: TlsClientConfig): KeyStore = buildKeyStore(
-    config.clientCert.get.certChainFile.pemStream,
-    config.clientCert.get.privateKeyFile.pemFile.unwrap.toPath,
-    config.trustCollectionFile.get.pemStream,
-  )
+  private def buildKeyStore(config: TlsClientConfig): KeyStore = {
+    val clientCert: TlsClientCertificate =
+      config.clientCert.getOrElse(sys.error("unexpected empty value for clientCert"))
+    buildKeyStore(
+      clientCert.certChainFile.pemStream,
+      clientCert.privateKeyFile.pemFile.unwrap.toPath,
+      config.trustCollectionFile
+        .getOrElse(sys.error("unexpected empty value for trustCollectionFile"))
+        .pemStream,
+    )
+  }
 
-  // TODO(i22574): Remove OptionPartial and Null warts in HttpService
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
+  private def emptyLoadStoreParameter: Null = null
+
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
+  private def emptyPassword: Null = null
+
   private def buildKeyStore(
       certFile: InputStream,
       privateKeyFile: Path,
@@ -291,10 +299,10 @@ object HttpService extends NoTracing {
     val privateKey = loadPrivateKey(privateKeyFile)
 
     val keyStore = KeyStore.getInstance("PKCS12")
-    keyStore.load(null)
+    keyStore.load(emptyLoadStoreParameter)
     keyStore.setCertificateEntry(alias, cert)
     keyStore.setCertificateEntry(alias, caCert)
-    keyStore.setKeyEntry(alias, privateKey, null, Array(cert, caCert))
+    keyStore.setKeyEntry(alias, privateKey, emptyPassword, Array(cert, caCert))
     keyStore.setCertificateEntry("trusted-ca", caCert)
     keyStore
   }

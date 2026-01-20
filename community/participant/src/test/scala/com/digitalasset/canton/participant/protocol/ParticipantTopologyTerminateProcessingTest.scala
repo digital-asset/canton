@@ -71,7 +71,7 @@ class ParticipantTopologyTerminateProcessingTest
     psid1.protocolVersion,
   )
   private def synchronizerPredecessor(upgradeTime: CantonTimestamp) =
-    SynchronizerPredecessor(psid1, upgradeTime)
+    SynchronizerPredecessor(psid1, upgradeTime, isLateUpgrade = false)
 
   private def mk(
       store: TopologyStore[TopologyStoreId.SynchronizerStore] = mkStore,

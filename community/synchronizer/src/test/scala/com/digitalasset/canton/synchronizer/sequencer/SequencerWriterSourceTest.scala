@@ -9,7 +9,7 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, SequencingTimeBound}
 import com.digitalasset.canton.lifecycle.{
   AsyncCloseable,
   AsyncOrSyncCloseable,
@@ -139,6 +139,7 @@ class SequencerWriterSourceTest
           sequencerMember,
           blockSequencerMode = blockSequencerMode,
           loggerFactory = loggerFactory,
+          timeouts = timeouts,
           sequencerMetrics = SequencerMetrics.noop("sequencer-writer-source-test"),
         )(
           ec
@@ -192,7 +193,7 @@ class SequencerWriterSourceTest
         testedProtocolVersion,
         SequencerMetrics.noop(suiteName),
         blockSequencerMode = blockSequencerMode,
-        sequencingTimeLowerBoundExclusive = sequencingTimeLowerBoundExclusive,
+        SequencingTimeBound(sequencingTimeLowerBoundExclusive),
       )(executorService, implicitly[TraceContext], implicitly[ErrorLoggingContext])
         .toMat(Sink.ignore)(Keep.both),
       errorLogMessagePrefix = "Writer flow failed",

@@ -49,7 +49,9 @@ class LogicalSynchronizerUpgradeCallbackImpl(
 
   def registerCallback(
       successor: SynchronizerSuccessor
-  )(implicit traceContext: TraceContext): Unit =
+  )(implicit traceContext: TraceContext): Unit = {
+    implicit val logger = LSU.Logger(loggerFactory, getClass, successor)
+
     if (registered.compareAndSet(None, Some(successor))) {
       logger.info(s"Registering callback for upgrade of $psid to ${successor.psid}")
 
@@ -76,6 +78,7 @@ class LogicalSynchronizerUpgradeCallbackImpl(
       logger.info(
         s"Not registering callback for upgrade of $psid to ${successor.psid} because it was already done"
       )
+  }
 
   override def unregisterCallback(): Unit = registered.set(None)
 }
