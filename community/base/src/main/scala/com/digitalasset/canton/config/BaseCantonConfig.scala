@@ -20,8 +20,8 @@ object BaseCantonConfig {
     lazy implicit val batchAggregatorConfigReader: ConfigReader[BatchAggregatorConfig] = {
       implicit val batching: ConfigReader[BatchAggregatorConfig.Batching] =
         deriveReader[BatchAggregatorConfig.Batching]
-      implicit val noBatching: ConfigReader[BatchAggregatorConfig.NoBatching.type] =
-        deriveReader[BatchAggregatorConfig.NoBatching.type]
+      implicit val noBatching: ConfigReader[BatchAggregatorConfig.NoBatching] =
+        deriveReader[BatchAggregatorConfig.NoBatching]
       deriveReader[BatchAggregatorConfig]
     }
 
@@ -46,8 +46,8 @@ object BaseCantonConfig {
     lazy implicit val batchAggregatorConfigWriter: ConfigWriter[BatchAggregatorConfig] = {
       implicit val batching: ConfigWriter[BatchAggregatorConfig.Batching] =
         deriveWriter[BatchAggregatorConfig.Batching]
-      implicit val noBatching: ConfigWriter[BatchAggregatorConfig.NoBatching.type] =
-        deriveWriter[BatchAggregatorConfig.NoBatching.type]
+      implicit val noBatching: ConfigWriter[BatchAggregatorConfig.NoBatching] =
+        deriveWriter[BatchAggregatorConfig.NoBatching]
       deriveWriter[BatchAggregatorConfig]
     }
 

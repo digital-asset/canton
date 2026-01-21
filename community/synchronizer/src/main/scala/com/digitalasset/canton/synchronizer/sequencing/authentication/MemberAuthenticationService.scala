@@ -121,11 +121,7 @@ class MemberAuthenticationService(
       value <- EitherT
         .fromEither(
           ignoreExpired(
-            store.fetchAndRemoveNonce(member, providedNonce).map { n =>
-              val latency = clock.now.toEpochMilli - n.generatedAt.toEpochMilli
-              logger.info(s"Latency for nonce usage by $member: $latency ms")
-              n
-            }
+            store.fetchAndRemoveNonce(member, providedNonce)
           ).toRight(MissingNonce(member): AuthenticationError)
         )
         .mapK(FutureUnlessShutdown.outcomeK)

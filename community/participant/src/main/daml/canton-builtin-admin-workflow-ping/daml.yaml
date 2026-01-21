@@ -1,4 +1,4 @@
-sdk-version: 3.4.10
+sdk-version: 3.4.11-snapshot.20260114.14381.0.va4e7d401
 build-options: 
 - --target=2.2
 name: canton-builtin-admin-workflow-ping

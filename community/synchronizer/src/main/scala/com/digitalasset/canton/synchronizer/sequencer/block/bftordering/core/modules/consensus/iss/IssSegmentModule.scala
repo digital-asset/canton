@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss
 
 import com.daml.metrics.api.MetricsContext
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.SyncCryptoError
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -45,7 +46,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Module,
   ModuleRef,
 }
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 
@@ -449,7 +450,11 @@ class IssSegmentModule[E <: Env[E]](
             Some(prePrepare.message.stored)
         }
       case StorePrepares(prepares) =>
-        pipeToSelfWithFutureTracking(epochStore.addPreparesAtomically(prepares)) {
+        pipeToSelfWithFutureTracking(
+          epochStore.addPreparesAtomically(
+            NonEmpty.from(prepares.map(Traced(_))).getOrElse(abort("No prepares to store"))
+          )
+        ) {
           case Failure(exception) =>
             Some(ConsensusSegment.Internal.AsyncException(exception))
           case Success(_) =>
@@ -581,7 +586,7 @@ class IssSegmentModule[E <: Env[E]](
     pipeToSelfWithFutureTracking(
       epochStore.addOrderedBlockAtomically(
         commitCertificate.prePrepare,
-        commitCertificate.commits,
+        commitCertificate.commits.map(Traced(_)),
       )
     ) {
       case Failure(exception) => Some(ConsensusSegment.Internal.AsyncException(exception))

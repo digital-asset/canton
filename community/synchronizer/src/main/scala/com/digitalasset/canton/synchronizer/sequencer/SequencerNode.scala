@@ -773,17 +773,15 @@ class SequencerNodeBootstrap(
           }
           progressSupervisorO = parameters.progressSupervisor.filter(_.enabled).map {
             supervisorConfig =>
-              logger.info("Progress supervisor enabled for sequencer")
+              logger.info(
+                s"Progress supervisor enabled for this sequencer with action: ${supervisorConfig.warnAction}"
+              )
               val warningState: AtomicBoolean = new AtomicBoolean(false)
-              new ProgressSupervisor(
-                logLevel = Level.DEBUG,
-                logAfter = supervisorConfig.stuckDetectionTimeout.duration,
-                futureSupervisor = futureSupervisor,
-                loggerFactory = loggerFactory,
-                warnAction = {
+              def warnAction(): Unit = supervisorConfig.warnAction match {
+                case ProgressSupervisorConfig.EnableDebugLogging =>
                   if (warningState.compareAndSet(false, true)) {
                     logger.error(
-                      s"Sequencer looks to be stuck, switching logging level from ${NodeLoggingUtil.originalRootLoggerLevel} to DEBUG for ${supervisorConfig.logAtDebugLevelDuration} seconds..."
+                      s"Sequencer looks to be stuck, switching logging level from ${NodeLoggingUtil.originalRootLoggerLevel} to DEBUG for ${supervisorConfig.logAtDebugLevelDuration}..."
                     )
                     logger.warn(s"Stack traces:\n${StackTraceUtil.formatStackTrace()}")
                     NodeLoggingUtil.setLevel(level = "DEBUG")
@@ -808,7 +806,19 @@ class SequencerNodeBootstrap(
                       "Not triggering progress monitor again as we are already in warning state"
                     )
                   }
-                },
+                case ProgressSupervisorConfig.RestartSequencer =>
+                  com.digitalasset.canton.error.FatalError.exitOnFatalError(
+                    "Sequencer looks to be stuck, taking the poison pill...",
+                    logger,
+                  )
+              }
+
+              new ProgressSupervisor(
+                logLevel = Level.DEBUG,
+                logAfter = supervisorConfig.stuckDetectionTimeout.duration,
+                futureSupervisor = futureSupervisor,
+                loggerFactory = loggerFactory,
+                warnAction = warnAction(),
               )
           }
           sequencer <- EitherT

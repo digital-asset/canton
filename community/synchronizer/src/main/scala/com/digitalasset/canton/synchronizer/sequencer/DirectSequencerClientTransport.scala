@@ -213,6 +213,8 @@ class DirectSequencerClientTransport(
 
     val source = (progressSupervisorO match {
       case Some(progressSupervisor) =>
+        // required to prevent warnings on earlier events that we won't be reading again
+        request.timestamp.foreach(progressSupervisor.ignoreTimestampsBefore(_)(traceContext))
         Source
           .futureSource(sourceF)
           .map { eventOrError =>

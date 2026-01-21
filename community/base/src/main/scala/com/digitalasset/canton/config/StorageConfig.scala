@@ -146,7 +146,8 @@ object BatchingConfig {
   private val defaultBatchingParallelism: PositiveInt = PositiveNumeric.tryCreate(8)
   private val defaultLedgerApiPruningBatchSize: PositiveInt = PositiveNumeric.tryCreate(50000)
   private val defaultMaxAcsImportBatchSize: PositiveNumeric[Int] = PositiveNumeric.tryCreate(1000)
-  private val defaultAggregator: BatchAggregatorConfig.Batching = BatchAggregatorConfig.Batching()
+  private val defaultAggregator: BatchAggregatorConfig.Batching =
+    BatchAggregatorConfig.Batching()
   private val defaultContractStoreAggregator: BatchAggregatorConfig.Batching =
     BatchAggregatorConfig.Batching(
       maximumInFlight = PositiveNumeric.tryCreate(5),

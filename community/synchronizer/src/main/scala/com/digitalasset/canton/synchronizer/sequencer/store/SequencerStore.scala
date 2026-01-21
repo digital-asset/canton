@@ -16,7 +16,12 @@ import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.{
+  CloseContext,
+  FlagCloseable,
+  FutureUnlessShutdown,
+  HasCloseContext,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
@@ -439,7 +444,11 @@ trait SequencerMemberValidator {
 /** Persistence for the Sequencer. Writers are expected to create a [[SequencerWriterStore]] which
   * may delegate to this underlying store through an appropriately managed storage instance.
   */
-trait SequencerStore extends SequencerMemberValidator with NamedLogging with AutoCloseable {
+trait SequencerStore
+    extends SequencerMemberValidator
+    with NamedLogging
+    with AutoCloseable
+    with HasCloseContext { self: FlagCloseable =>
 
   protected implicit val executionContext: ExecutionContext
 
@@ -461,6 +470,8 @@ trait SequencerStore extends SequencerMemberValidator with NamedLogging with Aut
   protected def sequencerMember: Member
 
   protected def batchingConfig: BatchingConfig
+
+  protected def timeouts: ProcessingTimeout
 
   protected def sequencerMetrics: SequencerMetrics
 
@@ -1064,6 +1075,7 @@ object SequencerStore {
           sequencerMember,
           blockSequencerMode = blockSequencerMode,
           loggerFactory,
+          timeouts,
           sequencerMetrics = sequencerMetrics,
         )
       case dbStorage: DbStorage =>

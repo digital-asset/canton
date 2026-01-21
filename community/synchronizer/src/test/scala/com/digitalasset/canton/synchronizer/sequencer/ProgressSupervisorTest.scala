@@ -88,5 +88,18 @@ class ProgressSupervisorTest extends AsyncWordSpec with BaseTest with HasExecuto
         warnCount shouldBe 0
       }
     }
+
+    "not trigger below the lower bound" in {
+      val (futureSupervisor, progressSupervisor, warnActionCounter) = make()
+      progressSupervisor.arm(CantonTimestamp.Epoch)
+      // this should cancel the previous arm/disarm calls and prevent any new ones below the bound
+      progressSupervisor.ignoreTimestampsBefore(CantonTimestamp.Epoch.plusMillis(1))
+      progressSupervisor.disarm(CantonTimestamp.Epoch.plusMillis(1))
+      Threading.sleep(2000)
+      progressSupervisor.disarm(CantonTimestamp.Epoch)
+      val warnCount = warnActionCounter.get()
+      futureSupervisor.stop()
+      warnCount shouldBe 0
+    }
   }
 }

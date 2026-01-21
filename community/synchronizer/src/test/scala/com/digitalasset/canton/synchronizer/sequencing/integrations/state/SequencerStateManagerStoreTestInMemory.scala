@@ -17,6 +17,7 @@ class SequencerStateManagerStoreTestInMemory extends SequencerStateManagerStoreT
           SequencerId(DefaultTestIdentities.physicalSynchronizerId.uid),
           true,
           loggerFactory,
+          timeouts,
           SequencerMetrics.noop(getClass.getName),
         ),
       )

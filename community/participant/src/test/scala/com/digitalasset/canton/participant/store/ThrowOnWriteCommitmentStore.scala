@@ -11,6 +11,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.event.RecordTime
 import com.digitalasset.canton.participant.store.AcsCommitmentStore.ReinitializationStatus
 import com.digitalasset.canton.protocol.messages.AcsCommitment.HashedCommitmentType
+import com.digitalasset.canton.protocol.messages.CommitmentPeriodState.CommitmentPeriodStateInOutstanding
 import com.digitalasset.canton.protocol.messages.{
   AcsCommitment,
   CommitmentPeriod,
@@ -18,6 +19,7 @@ import com.digitalasset.canton.protocol.messages.{
   SignedProtocolMessage,
 }
 import com.digitalasset.canton.pruning.{PruningPhase, PruningStatus}
+import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -56,7 +58,7 @@ class ThrowOnWriteCommitmentStore()(override implicit val ec: ExecutionContext)
   override def markPeriod(
       counterParticipant: ParticipantId,
       period: NonEmpty[Set[CommitmentPeriod]],
-      matchingState: CommitmentPeriodState,
+      matchingState: CommitmentPeriodStateInOutstanding,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     incrementCounterAndErr()
 
@@ -89,7 +91,8 @@ class ThrowOnWriteCommitmentStore()(override implicit val ec: ExecutionContext)
     FutureUnlessShutdown.pure(None)
 
   override def noOutstandingCommitments(
-      beforeOrAt: CantonTimestamp
+      beforeOrAt: CantonTimestamp,
+      safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[CantonTimestamp]] =

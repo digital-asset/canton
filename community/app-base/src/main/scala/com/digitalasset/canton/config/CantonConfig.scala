@@ -66,6 +66,7 @@ import com.digitalasset.canton.platform.config.{
   TopologyAwarePackageSelectionConfig,
 }
 import com.digitalasset.canton.pureconfigutils.SharedConfigReaders.catchConvertError
+import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationTokenManagerConfig,
   AuthenticationTokenManagerExponentialBackoffConfig,
@@ -498,6 +499,7 @@ final case class CantonConfig(
         commitmentMismatchDebugging = participantParameters.commitmentMismatchDebugging,
         commitmentProcessorNrAcsChangesBehindToTriggerCatchUp =
           participantParameters.commitmentProcessorNrAcsChangesBehindToTriggerCatchUp,
+        commitmentReduceParallelism = participantParameters.commitmentReduceParallelism,
         autoSyncProtocolFeatureFlags = participantParameters.autoSyncProtocolFeatureFlags,
       )
     }
@@ -1306,6 +1308,9 @@ object CantonConfig {
       implicit val participantStoreConfigReader: ConfigReader[ParticipantStoreConfig] = {
         implicit val journalPruningConfigReader: ConfigReader[JournalPruningConfig] =
           deriveReader[JournalPruningConfig]
+        implicit val safeToPruneCommitmentStateConfigReader
+            : ConfigReader[SafeToPruneCommitmentState] =
+          SafeToPruneCommitmentState.reader
         deriveReader[ParticipantStoreConfig]
       }
       implicit val adminWorkflowConfigReader: ConfigReader[AdminWorkflowConfig] =
@@ -1366,6 +1371,9 @@ object CantonConfig {
       deriveReader[CantonFeatures]
     lazy implicit final val cantonWatchdogConfigReader: ConfigReader[WatchdogConfig] =
       deriveReader[WatchdogConfig]
+    lazy implicit final val progressSupervisorWarnActionConfigReader
+        : ConfigReader[ProgressSupervisorConfig.WarnAction] =
+      deriveEnumerationReader[ProgressSupervisorConfig.WarnAction]
     lazy implicit final val progressSupervisorConfigReader: ConfigReader[ProgressSupervisorConfig] =
       deriveReader[ProgressSupervisorConfig]
 
@@ -1983,6 +1991,9 @@ object CantonConfig {
       implicit val participantStoreConfigWriter: ConfigWriter[ParticipantStoreConfig] = {
         implicit val journalPruningConfigWriter: ConfigWriter[JournalPruningConfig] =
           deriveWriter[JournalPruningConfig]
+        implicit val safeToPruneCommitmentStateConfigWriter
+            : ConfigWriter[SafeToPruneCommitmentState] =
+          SafeToPruneCommitmentState.writer
         deriveWriter[ParticipantStoreConfig]
       }
       implicit val adminWorkflowConfigWriter: ConfigWriter[AdminWorkflowConfig] =
@@ -2043,6 +2054,9 @@ object CantonConfig {
       deriveWriter[CantonFeatures]
     lazy implicit final val cantonWatchdogConfigWriter: ConfigWriter[WatchdogConfig] =
       deriveWriter[WatchdogConfig]
+    lazy implicit final val cantonProgressSupervisorWarnActionWriter
+        : ConfigWriter[ProgressSupervisorConfig.WarnAction] =
+      deriveEnumerationWriter[ProgressSupervisorConfig.WarnAction]
     lazy implicit final val cantonProgressSupervisorConfigWriter
         : ConfigWriter[ProgressSupervisorConfig] =
       deriveWriter[ProgressSupervisorConfig]
