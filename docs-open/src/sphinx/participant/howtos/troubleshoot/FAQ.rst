@@ -147,7 +147,7 @@ Canton environment.
 * **Version Warnings:** Canton will issue a ``WARN`` log if it detects a PostgreSQL version
   newer than those officially tested.
 * **Minimum Requirement:** By default, Canton will not start if the PostgreSQL version is
-  older than version 10.
+  older than version 14.
 
 Using non-standard database versions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

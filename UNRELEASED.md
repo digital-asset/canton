@@ -17,11 +17,21 @@ Template for a bigger topic
 
 #### Impact and Migration
 
+- JSON Ledger API OpenAPI/AsyncAPI spec corrections
+  - Fields not marked as required in the Ledger API `.proto` specification are now also optional in the OpenAPI/AsyncAPI specifications.
+    If your client code is using code generated using previous versions of these specifications, it may not compile or function correctly with the new version. To migrate:
+      - If you prefer not to update your code, continue using the previous specification versions as the JSON API server preserves backward compatibility.
+      - If you want to use new endpoints, features or leverage the new less strict spec, migrate to the new OpenAPI/AsyncAPI specifications as follows:
+        - Java clients: No changes are needed if you use the `OpenAPI Generator`. Otherwise, potentially optionality of fields should be handled appropriately for other code generators.
+        - TypeScript clients: Update your code to handle optional fields, using the `!` or `??` operators as appropriate.
+  - From Canton 3.5 onwards, OpenAPI/AsyncAPI specification files are suffixed with the Canton version (e.g., `openapi-3.5.0.yaml`).
+  - Canton 3.5 is compatible with OpenAPI specification files from version 3.4.0 to 3.5.0 (inclusive).
+
 ### Minor Improvements
+- Changed the path for `crypto.kms.session-signing-keys` (deprecated) to `crypto.session-signing-keys` so that session signing key configuration is no longer directly tied to a KMS. However, session signing keys can still only be enabled when using a KMS provider or when running with `non-standard-config=true`.
 - Added a new configuration parameter for session signing keys, `toleranceShiftDuration`, and updated `cutOffDuration` to allow a zero duration.
 - Ledger JSON Api changes:
-  - extra fields in JSON objects are no longer tolerated,
-  - All JSON values are optional by default upon decoding (this is not reflected in the openapi spec yet, but written comments should reflect the optionality),
+    - The Ledger JSON API server now enforces that only fields marked as required by the Ledger API OpenAPI/AsyncAPI specification are mandatory in request payloads.
 - ApiRequestLogger now also used by Ledger JSON Api. Changes:
     - Redundant Request TID removed from logs.
     - Additional CLI options added: `--log-access`, `--log-access-errors`...
@@ -49,6 +59,25 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
   ```
   canton.monitoring.tracing.tracer.exporter.type=otlp
   ```
+- On Ledger API interface subscriptions, the `CreatedEvent.interface_views` now returns the ID of the package containing
+  the interface implementation that was used to compute the specific interface view as `InterfaceView.implementation_package_id`.
+- *BREAKING* The Postgres configuration of the indexer is separated from the Postgres configuration of the lapi server
+  (`canton.participants.<participant>.ledger-api.postgres-data-source`).
+  The new parameter `canton.participants.<participant>.parameters.ledger-api-server.indexer.postgres-data-source` should
+  be used instead.
+- Added network timeout and client_connection_check_interval for db operations in the lapi server and indexer to avoid
+  hanging connections for Postgres (see PostgresDataSourceConfig). The defaults are 60 seconds network timeout and
+  5 seconds client_connection_check_interval for the lapi server, and 20 seconds network timeout and
+  5 seconds client_connection_check_interval for the indexer. These values can be configured via the new configuration parameters
+  `canton.participants.<participant>.ledger-api.postgres-data-source.network-timeout` for network timeout of the lapi
+  server and `canton.participants.<participant>.parameters.ledger-api-server.indexer.postgres-data-source.client-connection-check-interval`
+  for the client_connection_check_interval of the indexer.
+- We have changed the way that OffsetCheckpoints are populated to always generate at least one when an open-ended
+  updates or completions stream is requested. An OffsetCheckpoint can have offset equal to the exclusive start for which
+  the stream is requested. This ensures that checkpoints are visible even when there are no updates, and the stream was
+  requested to begin exclusively from the ledger end.
+
+* Additional metrics for the ACS commitment processor: `daml.participant.sync.commitments.last-incoming-received`, `daml.participant.sync.commitments.last-incoming-processed`, `daml.participant.sync.commitments.last-locally-completed`, and `daml.participant.sync.commitments.last-locally-checkpointed`.
 
 ### Preview Features
 - preview feature
@@ -120,3 +149,5 @@ Canton has been tested against the following versions of its dependencies:
 ## update to GRPC 1.77.0
 
 removes [CVE-2025-58057](https://github.com/advisories/GHSA-3p8m-j85q-pgmj) from security reports.
+
+

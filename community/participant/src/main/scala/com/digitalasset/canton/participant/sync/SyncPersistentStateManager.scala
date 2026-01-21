@@ -186,7 +186,7 @@ class SyncPersistentStateManager(
         )
         _ = logger.debug(s"Discovered existing state for $psid")
       } yield {
-        val synchronizerId = persistentState.physicalSynchronizerIdx.synchronizerId
+        val synchronizerId = persistentState.psid
 
         val previous = physicalPersistentStates.putIfAbsent(synchronizerId, persistentState)
         if (previous.isDefined)
@@ -239,33 +239,35 @@ class SyncPersistentStateManager(
     * Must not be called concurrently with itself or other methods of this class.
     */
   def lookupOrCreatePersistentState(
-      synchronizerAlias: SynchronizerAlias,
-      physicalSynchronizerIdx: IndexedPhysicalSynchronizer,
-      indexedTopologyStoreId: IndexedTopologyStoreId,
-      synchronizerIdx: IndexedSynchronizer,
+      psid: PhysicalSynchronizerId,
       synchronizerParameters: StaticSynchronizerParameters,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SynchronizerRegistryError, SyncPersistentState] =
     lock.withWriteLockHandle { implicit writeLockHandle =>
-      val logical =
-        logicalPersistentStates.getOrElse(
-          synchronizerIdx.synchronizerId,
-          createLogicalPersistentState(synchronizerIdx),
-        )
-      val physical =
-        physicalPersistentStates.getOrElse(
-          physicalSynchronizerIdx.synchronizerId,
-          createPhysicalPersistentState(
-            physicalSynchronizerIdx,
-            indexedTopologyStoreId,
-            synchronizerParameters,
-            logical,
-          ),
-        )
       for {
+        physicalSynchronizerIdx <- EitherT.right(getPhysicalSynchronizerIdx(psid))
+        indexedTopologyStoreId <- EitherT.right(getSynchronizerTopologyStoreId(psid))
+        synchronizerIdx <- EitherT.right(getSynchronizerIdx(psid.logical))
+        logical =
+          logicalPersistentStates.getOrElse(
+            synchronizerIdx.synchronizerId,
+            createLogicalPersistentState(synchronizerIdx),
+          )
+        physical = {
+          physicalPersistentStates.getOrElse(
+            physicalSynchronizerIdx.psid,
+            createPhysicalPersistentState(
+              physicalSynchronizerIdx,
+              indexedTopologyStoreId,
+              synchronizerParameters,
+              logical,
+            ),
+          )
+        }
+
         _ <- checkAndUpdateSynchronizerParameters(
-          synchronizerAlias,
+          psid,
           physical.parameterStore,
           synchronizerParameters,
         )
@@ -278,7 +280,7 @@ class SyncPersistentStateManager(
           // or it was absent, and therefore putIfAbsent will set it.
           .discard
         physicalPersistentStates
-          .putIfAbsent(physical.physicalSynchronizerIdx.synchronizerId, physical)
+          .putIfAbsent(physical.psid, physical)
           // since we have the write lock, either `physical` already came from the Map,
           // and therefore setting it again is a noop,
           // or it was absent, and therefore putIfAbsent will set it.
@@ -306,7 +308,7 @@ class SyncPersistentStateManager(
     )
 
   private def checkAndUpdateSynchronizerParameters(
-      alias: SynchronizerAlias,
+      psid: PhysicalSynchronizerId,
       parameterStore: SynchronizerParameterStore,
       newParameters: StaticSynchronizerParameters,
   )(implicit
@@ -318,7 +320,7 @@ class SyncPersistentStateManager(
       _ <- oldParametersO match {
         case None =>
           // Store the parameters
-          logger.debug(s"Storing synchronizer parameters for synchronizer $alias: $newParameters")
+          logger.debug(s"Storing synchronizer parameters for synchronizer $psid: $newParameters")
           EitherT.right[SynchronizerRegistryError](parameterStore.setParameters(newParameters))
         case Some(oldParameters) =>
           EitherT.cond[FutureUnlessShutdown](
@@ -443,10 +445,11 @@ class SyncPersistentStateManager(
         clock,
         synchronizerCryptoFactory(staticSynchronizerParameters),
         parameters,
+        topologyConfig,
         packageMetadataView,
         ledgerApiStore,
         logicalSyncPersistentState,
-        psidLoggerFactory(physicalSynchronizerIdx.synchronizerId),
+        psidLoggerFactory(physicalSynchronizerIdx.psid),
         futureSupervisor,
       )
 

@@ -107,13 +107,14 @@ trait SyncCryptoTest
       sessionSigningKeys: SessionSigningKeysConfig
   ): CryptoConfig =
     cryptoConfig
+      .focus(_.sessionSigningKeys)
+      .replace(sessionSigningKeys)
       .focus(_.kms)
       .replace(
         Some(
           Driver(
             "mock",
             ConfigValueFactory.fromAnyRef(0),
-            sessionSigningKeys = sessionSigningKeys,
           )
         )
       )

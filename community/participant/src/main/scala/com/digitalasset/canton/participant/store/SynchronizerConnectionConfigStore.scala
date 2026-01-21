@@ -176,7 +176,7 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
   ): Either[Error, Unit] =
     (configuredPSId.toOption, synchronizerPredecessor)
       .mapN((_, _))
-      .map { case (psid, SynchronizerPredecessor(predecessorPSId, _)) =>
+      .map { case (psid, SynchronizerPredecessor(predecessorPSId, _, _)) =>
         Either.cond(
           psid.logical == predecessorPSId.logical,
           (),

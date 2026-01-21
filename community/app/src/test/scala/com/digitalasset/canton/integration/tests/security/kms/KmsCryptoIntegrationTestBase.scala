@@ -5,13 +5,7 @@ package com.digitalasset.canton.integration.tests.security.kms
 
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{
-  CryptoConfig,
-  CryptoProvider,
-  KmsConfig,
-  NonNegativeFiniteDuration,
-  PrivateKeyStoreConfig,
-}
+import com.digitalasset.canton.config.{CryptoProvider, KmsConfig, NonNegativeFiniteDuration}
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.bootstrap.InitializedSynchronizer
@@ -71,16 +65,6 @@ trait KmsCryptoIntegrationTestBase extends TopologyManagementHelper {
   override lazy val environmentDefinition: EnvironmentDefinition =
     environmentBaseConfig
       .addConfigTransforms(otherConfigTransforms*)
-      .addConfigTransform(
-        ConfigTransforms.setCrypto(
-          CryptoConfig(
-            provider = CryptoProvider.Kms,
-            kms = Some(kmsConfig),
-            privateKeyStore = PrivateKeyStoreConfig(None),
-          ),
-          (name: String) => protectedNodes.contains(name),
-        )
-      )
       .withSetup { implicit env =>
         import env.*
 

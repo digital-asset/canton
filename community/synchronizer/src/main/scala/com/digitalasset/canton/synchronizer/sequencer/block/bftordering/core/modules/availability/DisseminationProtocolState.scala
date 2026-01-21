@@ -115,10 +115,19 @@ final class DisseminationProtocolState(
       mutable.SortedMap.empty,
     var batchesReadyForOrdering: mutable.LinkedHashMap[BatchId, DisseminatedBatchMetadata] =
       mutable.LinkedHashMap(),
-    val toBeProvidedToConsensus: mutable.Queue[ToBeProvidedToConsensus] = mutable.Queue(),
+    var nextToBeProvidedToConsensus: NextToBeProvidedToConsensus =
+      NextToBeProvidedToConsensus.First,
     var lastProposalTime: Option[CantonTimestamp] = None,
     val disseminationQuotas: BatchDisseminationNodeQuotaTracker =
       new BatchDisseminationNodeQuotaTracker,
 )
 
-final case class ToBeProvidedToConsensus(forBlock: BlockNumber, maxBatchesPerProposal: Short)
+final case class NextToBeProvidedToConsensus(
+    forBlock: BlockNumber,
+    maxBatchesPerProposal: Option[
+      Short
+    ], // `None` means no actual proposal request from consensus yet
+)
+object NextToBeProvidedToConsensus {
+  val First: NextToBeProvidedToConsensus = NextToBeProvidedToConsensus(BlockNumber.First, None)
+}

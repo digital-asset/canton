@@ -454,6 +454,7 @@ final case class CantonConfig(
         commitmentMismatchDebugging = participantParameters.commitmentMismatchDebugging,
         commitmentProcessorNrAcsChangesBehindToTriggerCatchUp =
           participantParameters.commitmentProcessorNrAcsChangesBehindToTriggerCatchUp,
+        commitmentReduceParallelism = participantParameters.commitmentReduceParallelism,
         autoSyncProtocolFeatureFlags = participantParameters.autoSyncProtocolFeatureFlags,
       )
     }
@@ -750,8 +751,21 @@ object CantonConfig {
         deriveReader[KmsConfig.Driver]
       implicit val kmsConfigReader: ConfigReader[KmsConfig] =
         deriveReader[KmsConfig]
-      implicit val cryptoReader: ConfigReader[CryptoConfig] =
-        deriveReader[CryptoConfig]
+      implicit val cryptoReader: ConfigReader[CryptoConfig] = {
+
+        implicit val deprecatedFields: DeprecatedFieldsFor[CryptoConfig] =
+          new DeprecatedFieldsFor[CryptoConfig] {
+            override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
+              DeprecatedConfigUtils.MovedConfigPath(
+                "kms.session-signing-keys",
+                since = "3.5.0",
+                to = Seq("session-signing-keys"),
+              )
+            )
+          }
+
+        deriveReader[CryptoConfig].applyDeprecations
+      }
     }
 
     lazy implicit final val sequencerTestingInterceptorReader

@@ -120,9 +120,9 @@ object IndexedSynchronizer extends IndexedStringFromDb[IndexedSynchronizer, Sync
 }
 
 final case class IndexedPhysicalSynchronizer private (
-    synchronizerId: PhysicalSynchronizerId,
+    psid: PhysicalSynchronizerId,
     index: Int,
-) extends IndexedString.Impl[PhysicalSynchronizerId](synchronizerId) {
+) extends IndexedString.Impl[PhysicalSynchronizerId](psid) {
   require(
     index > 0,
     s"Illegal index $index. The index must be positive to prevent clashes with participant event log ids.",

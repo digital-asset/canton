@@ -164,7 +164,7 @@ object LedgerApiIndexer {
               connectionTimeout =
                 ledgerApiIndexerConfig.serverConfig.databaseConnectionTimeout.underlying,
             ),
-          postgres = ledgerApiIndexerConfig.serverConfig.postgresDataSource,
+          postgres = ledgerApiIndexerConfig.indexerConfig.postgresDataSource,
         ),
         ledgerApiIndexerConfig.indexerHaConfig,
         Some(ledgerApiStore.value.ledgerApiDbSupport.dbDispatcher),

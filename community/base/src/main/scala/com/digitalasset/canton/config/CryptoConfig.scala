@@ -70,6 +70,8 @@ final case class EncryptionSchemeConfig(
   *   the password-based key derivation function configuration
   * @param kms
   *   optional support for a KMS
+  * @param sessionSigningKeys
+  *   session signing keys' configuration
   * @param privateKeyStore
   *   private key store configuration to allow for encrypted key storage
   */
@@ -81,5 +83,7 @@ final case class CryptoConfig(
     hash: CryptoSchemeConfig[HashAlgorithm] = CryptoSchemeConfig(),
     pbkdf: CryptoSchemeConfig[PbkdfScheme] = CryptoSchemeConfig(),
     kms: Option[KmsConfig] = None,
+    // TODO(#27529): Enable after the topology snapshot problem has been fixed
+    sessionSigningKeys: SessionSigningKeysConfig = SessionSigningKeysConfig.disabled,
     privateKeyStore: PrivateKeyStoreConfig = PrivateKeyStoreConfig(),
 )

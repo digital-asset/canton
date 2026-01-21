@@ -87,6 +87,7 @@ object Dependencies {
   lazy val scopt_version = "4.1.0"
   lazy val shapeless_version = "2.3.7"
   lazy val slf4j_version = "2.0.6"
+  lazy val zio_version = "2.1.7"
 
   // if you update the slick version, please also update our forked code in community/lib/slick and community/base/slick/util
   lazy val slick_version = "3.5.2"
@@ -97,8 +98,10 @@ object Dependencies {
   lazy val testcontainers_version = "2.0.2"
   lazy val tink_version = "1.12.0"
   lazy val toxiproxy_java_version = "2.1.7"
-  lazy val transcode_version = "3.5.0-snapshot.20251205.150.903.vc31b0a4"
   lazy val upickle_version = "4.0.2"
+
+  lazy val org_apache_commons_commons_text = "org.apache.commons" % "commons-text" % "1.10.0"
+  lazy val org_typelevel_paiges_core = "org.typelevel" %% "paiges-core" % "0.4.2"
 
   lazy val reflections = "org.reflections" % "reflections" % reflections_version
   lazy val pureconfig_core =
@@ -110,6 +113,8 @@ object Dependencies {
 
   lazy val scala_collection_contrib =
     "org.scala-lang.modules" %% "scala-collection-contrib" % scala_collections_contrib_version
+  lazy val scala_lang_modules_scala_parser_combinators =
+    "org.scala-lang.modules" %% "scala-parser-combinators" % "1.1.2"
   lazy val scala_compiler = "org.scala-lang" % "scala-compiler" % scala_version
   lazy val scala_reflect = "org.scala-lang" % "scala-reflect" % scala_version
   lazy val shapeless = "com.chuusai" %% "shapeless" % shapeless_version
@@ -143,6 +148,7 @@ object Dependencies {
 
   lazy val google_findbugs = resolveDependency("com.google.code.findbugs", "jsr305")
   lazy val reactivestreams = resolveDependency("org.reactivestreams", "reactive-streams")
+  lazy val spray_json = resolveDependency("io.spray", "spray-json_2.13")
 
   lazy val grpc_protobuf = "io.grpc" % "grpc-protobuf" % grpc_version
 
@@ -253,17 +259,6 @@ object Dependencies {
 
   lazy val circe_parser = "io.circe" %% "circe-parser" % circe_version
   lazy val circe_yaml = "io.circe" %% "circe-yaml" % circe_yaml_version
-
-  lazy val tink = "com.google.crypto.tink" % "tink" % tink_version excludeAll (
-    ExclusionRule(
-      organization = "com.google.guava",
-      name = "guava-jdk5",
-    ),
-    ExclusionRule(
-      organization = "com.amazonaws",
-      name = "aws-java-sdk-kms",
-    ),
-  )
 
   // When updating opentelemetry, check that the workaround implemented in
   // com.digitalasset.canton.telemetry.UnsetSpanEndingThreadReferenceSpanProcessor
@@ -384,8 +379,25 @@ object Dependencies {
     "io.swagger.parser.v3" % "swagger-parser" % swagger_parser_version
 
   // Transcode dependencies
-  lazy val upickle = "com.lihaoyi" %% "upickle" % upickle_version
+  lazy val boopickle = "io.suzaku" %% "boopickle" % "1.5.0"
   lazy val fastparse = "com.lihaoyi" %% "fastparse" % "3.1.1"
+  lazy val os_lib = "com.lihaoyi" %% "os-lib" % "0.10.3"
+  lazy val semver = "org.semver4j" % "semver4j" % "5.3.0"
+  lazy val sourcecode = "com.lihaoyi" %% "sourcecode" % "0.4.2"
+  lazy val ujson = "com.lihaoyi" %% "ujson" % upickle_version
+  lazy val upickle = "com.lihaoyi" %% "upickle" % upickle_version
+  lazy val zioTest = "dev.zio" %% "zio-test" % zio_version
+  lazy val zioTestSbt = "dev.zio" %% "zio-test-sbt" % zio_version
+
+  // Transcode is written in Scala 3 and it depends on Scala 3 libraries
+  // For a 2.13 project to depend on transcode it needs to resolve the conflicting Scala 2.13/3 dependencies
+  lazy val excludeTranscodeConflictingDependencies = Keys.excludeDependencies ++= Seq(
+    ExclusionRule("com.lihaoyi", "fastparse_3"),
+    ExclusionRule("com.lihaoyi", "os-lib_3"),
+    ExclusionRule("com.lihaoyi", "sourcecode_3"),
+    ExclusionRule("com.lihaoyi", "ujson_3"),
+    ExclusionRule("com.lihaoyi", "upickle-core_3"),
+  )
 
   // We have to exclude conflicting parser version
   lazy val ujson_circe =
@@ -431,44 +443,8 @@ object Dependencies {
   }
 
   lazy val daml_script_runner = "com.daml" %% "daml-script-runner" % daml_libraries_version
-  lazy val daml_lf_data = "com.daml" %% "daml-lf-data" % daml_libraries_version
-  lazy val daml_lf_language = "com.daml" %% "daml-lf-language" % daml_libraries_version
-  lazy val daml_lf_engine = "com.daml" %% "daml-lf-engine" % daml_libraries_version
-  lazy val daml_lf_transaction = "com.daml" %% "daml-lf-transaction" % daml_libraries_version
 
-  lazy val daml_lf_encoder = "com.daml" %% "daml-lf-encoder" % daml_libraries_version
-  lazy val daml_lf_api_type_signature =
-    "com.daml" %% "daml-lf-api-type-signature" % daml_libraries_version
-  // Daml testing libs
-  lazy val daml_lf_transaction_test_lib =
-    "com.daml" %% "daml-lf-transaction-test-lib" % daml_libraries_version
-  lazy val daml_lf_parser =
-    "com.daml" %% "daml-lf-parser" % daml_libraries_version
-  lazy val daml_lf_archive_encoder =
-    "com.daml" %% "daml-lf-archive-encoder" % daml_libraries_version
-  lazy val daml_ledger_api_value =
-    "com.daml" % "ledger-api-value-proto" % daml_libraries_version
-  lazy val daml_ledger_api_value_java =
-    "com.daml" % "ledger-api-value-java-proto" % daml_libraries_version
-  lazy val daml_ledger_api_value_scala =
-    "com.daml" %% "ledger-api-value-scalapb" % daml_libraries_version
-
-  lazy val transcode_daml_lf =
-    ("com.daml" %% "transcode-daml-lf" % transcode_version)
-      .cross(CrossVersion.for2_13Use3)
-      .exclude("com.lihaoyi", "fastparse_3")
-
-  lazy val transcode_codec_json =
-    ("com.daml" %% "transcode-codec-json" % transcode_version)
-      .cross(CrossVersion.for2_13Use3)
-      .exclude("com.lihaoyi", "ujson_3")
-      .exclude("com.lihaoyi", "upickle-core_3")
-      .exclude("com.lihaoyi", "fastparse_3")
-
-  lazy val transcode_codec_proto_scala =
-    ("com.daml" %% "transcode-codec-proto-scala" % transcode_version)
-      .cross(CrossVersion.for2_13Use3)
-      .exclude("com.lihaoyi", "fastparse_3")
+  lazy val jline = resolveDependency("org.jline", "jline")
 
   lazy val fasterjackson_core = resolveDependency("com.fasterxml.jackson.core", "jackson-core")
   lazy val google_protobuf_java = resolveDependency("com.google.protobuf", "protobuf-java")
@@ -481,10 +457,13 @@ object Dependencies {
     resolveDependency("com.google.api.grpc", "proto-google-common-protos")
 
   lazy val commons_io = resolveDependency("commons-io", "commons-io")
+  lazy val commons_compress = resolveDependency("org.apache.commons", "commons-compress")
   lazy val auth0_java = resolveDependency("com.auth0", "java-jwt")
   lazy val auth0_jwks = resolveDependency("com.auth0", "jwks-rsa")
   lazy val guava = resolveDependency("com.google.guava", "guava")
   // TODO(#10852) one database library, not two
   lazy val anorm = resolveDependency("org.playframework.anorm", "anorm")
   lazy val scalapb_json4s = resolveDependency("com.thesamet.scalapb", "scalapb-json4s")
+
+  lazy val scalameter = resolveDependency("com.storm-enroute", "scalameter")
 }

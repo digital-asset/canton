@@ -13,8 +13,8 @@ import java.util.concurrent.locks.ReentrantLock
 class Mutex {
   private val lock = new ReentrantLock()
 
-  @deprecated("use harmonize, not synchronize", since = "3.4")
-  def synchronized[T](body: => T): T = sys.error("use harmonize to distinguish")
+  @deprecated("use exclusive, not synchronize", since = "3.4")
+  def synchronized[T](body: => T): T = sys.error("use exclusive to distinguish")
 
   def exclusive[T](f: => T): T = {
     def runAndUnlock() =
@@ -33,7 +33,6 @@ class Mutex {
       }
     }
   }
-
 }
 
 object Mutex {

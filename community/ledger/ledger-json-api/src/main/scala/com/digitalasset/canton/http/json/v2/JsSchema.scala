@@ -51,7 +51,7 @@ object JsSchema {
 
   implicit val config: Configuration = Configuration.default.copy(
     useDefaults = true,
-    strictDecoding = true,
+    strictDecoding = false,
   )
 
   def stringEncoderForEnum[T <: scalapb.GeneratedEnum](): Encoder[T] =
@@ -112,6 +112,7 @@ object JsSchema {
       interfaceId: Identifier,
       viewStatus: com.google.rpc.status.Status,
       viewValue: Option[Json],
+      implementationPackageId: Option[String],
   )
   object JsReassignmentEvent {
     sealed trait JsReassignmentEvent

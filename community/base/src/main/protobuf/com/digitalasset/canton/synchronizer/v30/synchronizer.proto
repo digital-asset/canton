@@ -13,4 +13,8 @@ message SynchronizerPredecessor {
 
   // When the upgrade happened/is supposed to happen.
   google.protobuf.Timestamp upgrade_time = 2;
+
+  // Whether the participant is performing a late synchronizer upgrade.
+  // default: false
+  bool is_late_upgrade = 3;
 }

@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules
 
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin.SequencerBftAdminData.WriteReadiness
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
@@ -37,6 +38,11 @@ object Mempool {
       membership: Membership,
       authenticatedCountIncludingSelf: Int,
   ) extends Message
+
+  sealed trait Admin extends Message
+  object Admin {
+    final case class GetWriteReadiness(reply: WriteReadiness => Unit) extends Admin
+  }
 }
 
 trait Mempool[E <: Env[E]] extends Module[E, Mempool.Message] {

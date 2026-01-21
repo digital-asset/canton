@@ -113,7 +113,7 @@ class InMemorySynchronizerConnectionConfigStore(
             )
             .fold(Either.unit[ConfigAlreadyExists])(existingConfig =>
               Either.cond(
-                config == existingConfig.config,
+                config == existingConfig.config && synchronizerPredecessor == existingConfig.predecessor,
                 (),
                 ConfigAlreadyExists(config.synchronizerAlias, configuredPSId),
               )

@@ -794,7 +794,9 @@ final class SequencerClientTest
 
           val upgradeTime = CantonTimestamp.now()
           val synchronizerPredecessor =
-            Option.when(usePredecessor)(SynchronizerPredecessor(psid, upgradeTime))
+            Option.when(usePredecessor)(
+              SynchronizerPredecessor(psid, upgradeTime, isLateUpgrade = false)
+            )
 
           val env = RichEnvFactory.create(
             psid = nextPSid,

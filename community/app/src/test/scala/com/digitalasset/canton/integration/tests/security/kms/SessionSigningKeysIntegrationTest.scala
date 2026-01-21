@@ -27,11 +27,11 @@ trait SessionSigningKeysIntegrationTest
 
     env.nodes.local.foreach { node =>
       if (protectedNodes.contains(node.name)) {
-        val sessionSigningKeysConfig =
-          node.config.crypto.kms.valueOrFail("no kms config").sessionSigningKeys
+        val sessionSigningKeysConfig = node.config.crypto.sessionSigningKeys
         if (nodesWithSessionSigningKeysDisabled.contains(node.name))
           sessionSigningKeysConfig shouldBe SessionSigningKeysConfig.disabled
         else sessionSigningKeysConfig shouldBe SessionSigningKeysConfig.default
+        node.config.crypto.kms should not be empty
       } else node.config.crypto.kms shouldBe empty
     }
 

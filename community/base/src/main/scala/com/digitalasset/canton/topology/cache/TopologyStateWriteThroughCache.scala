@@ -5,12 +5,18 @@ package com.digitalasset.canton.topology.cache
 
 import cats.syntax.parallel.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.BatchAggregatorConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
-import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, PromiseUnlessShutdown}
+import com.digitalasset.canton.lifecycle.{
+  CloseContext,
+  FlagCloseable,
+  FutureUnlessShutdown,
+  HasCloseContext,
+  PromiseUnlessShutdown,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
@@ -163,6 +169,17 @@ trait TopologyStateLookup extends TopologyStateLookupByNamespace {
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[GenericStoredTopologyTransaction]]
 
+  /** Lookup the history of a uid (excluding proposals) up to the given timestamp */
+  def lookupHistoryForUid(
+      asOf: EffectiveTime,
+      asOfInclusive: Boolean,
+      uid: UniqueIdentifier,
+      transactionType: Code,
+      op: TopologyChangeOp = TopologyChangeOp.Replace,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[GenericStoredTopologyTransaction]]
+
   def lookupForUids(
       asOf: EffectiveTime,
       asOfInclusive: Boolean,
@@ -192,13 +209,14 @@ class TopologyStateWriteThroughCache(
     store: TopologyStore[TopologyStoreId],
     aggregatorConfig: BatchAggregatorConfig,
     maxCacheSize: PositiveInt,
-    val loggerFactory: NamedLoggerFactory,
-    enableConsistencyChecks: Boolean = true,
-)(implicit
-    val ec: ExecutionContext,
-    closeContext: CloseContext,
-) extends TopologyStateLookup
-    with NamedLogging {
+    enableConsistencyChecks: Boolean,
+    override protected val timeouts: ProcessingTimeout,
+    override protected val loggerFactory: NamedLoggerFactory,
+)(implicit ec: ExecutionContext)
+    extends TopologyStateLookup
+    with NamedLogging
+    with FlagCloseable
+    with HasCloseContext {
 
   // maintain last successfully processed timestamp
   private val asOf = new AtomicReference[EffectiveTime](EffectiveTime.MinValue)
@@ -410,10 +428,11 @@ class TopologyStateWriteThroughCache(
         transaction = tx.transaction,
         rejectionReason = tx.rejectionReason.map(_.asString300),
       )
-      logger.debug(s"Adding $toStore")
+      val loggerDebug = TopologyMapping.loggerDebug(tx.transaction.mapping.code)
+      loggerDebug(s"Adding $toStore")
       def expire(toExpire: MaybeUpdatedTx): Unit = {
         val before = toExpire.expireAt(effective)
-        logger.debug("Marking transaction as expired:" + toExpire)
+        loggerDebug("Marking transaction as expired:" + toExpire)
         ErrorUtil.requireState(
           before.isEmpty,
           s"Trying to expire an already expired transaction $toExpire because of\n   $tx",
@@ -460,7 +479,7 @@ class TopologyStateWriteThroughCache(
           case None =>
             // This case might happen if somebody added an authorized transaction with serial > 1
             // It is odd but supported
-            logger.debug("No existing transaction to expire for " + tx.transaction)
+            loggerDebug("No existing transaction to expire for " + tx.transaction)
           case Some(toExpire) =>
             ErrorUtil.requireState(
               toExpire.stored.serial.value <= tx.serial.value,
@@ -545,8 +564,8 @@ class TopologyStateWriteThroughCache(
               // mark this as loaded (this will schedule its eviction later on)
               // loading cannot race with eviction as only items which we have added to fresh can be evicted
               // but we only add them to fresh once they are successfully loaded.
-              val previous = fresh.getAndUpdate(old => key :: old)
-              if (enableConsistencyChecks) {
+              if (enableConsistencyChecks) lock.exclusive {
+                val previous = fresh.getAndUpdate(old => key :: old)
                 // Validate that nothing raced with us. We should not race with anything as the
                 // access via get(..) should guarantee that the same key is not loaded concurrently.
                 // Eviction only happens via fresh / cached, which means we can use that to detect whether
@@ -556,9 +575,12 @@ class TopologyStateWriteThroughCache(
                   s"Detected concurrent loading of items into the fresh cache $key",
                 )
                 ErrorUtil.requireState(
-                  lock.exclusive(!cachedKeys.contains(key)),
+                  !cachedKeys.contains(key),
                   s"Detected concurrent loading of items into the cache $key",
                 )
+              }
+              else {
+                fresh.getAndUpdate(old => key :: old).discard
               }
               loaded
             }
@@ -595,6 +617,17 @@ class TopologyStateWriteThroughCache(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[GenericStoredTopologyTransaction]] =
     get(StateUid(uid)).map(_.filterState(asOf, asOfInclusive, transactionTypes, op))
+
+  override def lookupHistoryForUid(
+      asOf: EffectiveTime,
+      asOfInclusive: Boolean,
+      uid: UniqueIdentifier,
+      transactionType: Code,
+      op: TopologyChangeOp,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[GenericStoredTopologyTransaction]] =
+    get(StateUid(uid)).map(_.history(asOf, asOfInclusive, Set(transactionType), op))
 
   override def lookupForNamespace(
       asOf: EffectiveTime,
@@ -667,7 +700,6 @@ class TopologyStateWriteThroughCache(
         )
         .map(_.stored)
     }
-
 }
 
 object TopologyStateWriteThroughCache {
@@ -735,6 +767,23 @@ object TopologyStateWriteThroughCache {
       } else {
         entries.get().find(filter)
       }
+
+      /** returns the history of the transactions (excluding proposals) up to the timestamp matching
+        * the predicate
+        */
+      def history(
+          asOf: EffectiveTime,
+          asOfInclusive: Boolean,
+          transactionTypes: Set[Code],
+          op: TopologyChangeOp,
+      ): Seq[GenericStoredTopologyTransaction] = entries
+        .get()
+        .filter(tx =>
+          tx.isEffectiveAtOrBefore(asOf, asOfInclusive) && transactionTypes.contains(
+            tx.signed.mapping.code
+          ) && !tx.signed.isProposal && op == tx.signed.operation
+        )
+        .map(_.stored)
 
       def filterState(
           asOf: EffectiveTime,
@@ -805,6 +854,16 @@ object TopologyStateWriteThroughCache {
          tx.validFrom.value <= asOf.value && tx.validUntil.forall(ts => ts.value > asOf.value)
        } else {
          tx.validFrom.value < asOf.value && tx.validUntil.forall(ts => ts.value >= asOf.value)
+       }) && tx.rejectionReason.isEmpty
+    }
+
+    /** is not rejected and effective at or before the given timestamp */
+    def isEffectiveAtOrBefore(asOf: EffectiveTime, asOfInclusive: Boolean): Boolean = {
+      val tx = current.get()
+      (if (asOfInclusive) {
+         tx.validFrom.value <= asOf.value
+       } else {
+         tx.validFrom.value < asOf.value
        }) && tx.rejectionReason.isEmpty
     }
 
