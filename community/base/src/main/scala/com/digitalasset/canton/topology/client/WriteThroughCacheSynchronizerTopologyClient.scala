@@ -8,8 +8,8 @@ import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.caching.ScaffeineCache.TracedAsyncLoadingCache
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{CachingConfigs, ProcessingTimeout, TopologyConfig}
-import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
@@ -202,6 +202,7 @@ class WriteThroughCacheSynchronizerTopologyClient(
   }
 
   override def close(): Unit = {
+    LifeCycle.close(delegate)(logger)
     maxTimestampCache.invalidateAll()
     maxTimestampCache.cleanUp()
   }
@@ -213,7 +214,7 @@ object WriteThroughCacheSynchronizerTopologyClient {
       staticSynchronizerParameters: StaticSynchronizerParameters,
       store: TopologyStore[TopologyStoreId.SynchronizerStore],
       stateLookup: TopologyStateLookup,
-      synchronizerPredecessor: Option[SynchronizerPredecessor],
+      synchronizerUpgradeTime: Option[CantonTimestamp],
       packageDependencyResolver: PackageDependencyResolver,
       cachingConfigs: CachingConfigs,
       topologyConfig: TopologyConfig,
@@ -248,10 +249,8 @@ object WriteThroughCacheSynchronizerTopologyClient {
         futureSupervisor,
         loggerFactory,
       )
-    val synchronizerUpgradeTime =
-      synchronizerPredecessor.map(predecessor => SequencedTime(predecessor.upgradeTime))
     caching
-      .initialize(sequencerSnapshotTimestamp, synchronizerUpgradeTime)
+      .initialize(sequencerSnapshotTimestamp, synchronizerUpgradeTime.map(SequencedTime(_)))
       .map(_ => caching)
   }
 

@@ -118,7 +118,6 @@ class MultiSynchronizerPerformanceRunnerIntegrationTest
     val traderUnassignments = participant1.ledger_api.updates
       .reassignments(
         partyIds = Set(trader),
-        filterTemplates = Seq.empty,
         completeAfter = 100,
         beginOffsetExclusive = ledgerEndInitial,
       )

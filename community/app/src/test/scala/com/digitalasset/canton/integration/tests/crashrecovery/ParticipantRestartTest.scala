@@ -575,7 +575,7 @@ abstract class ParticipantRestartTest
 class ParticipantRestartCausalityIntegrationTest extends ParticipantRestartTest with EntitySyntax {
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P4_S1M1_S1M1_Manual
+    EnvironmentDefinition.P4S2M2Manual
       .addConfigTransforms(ConfigTransforms.updateTargetTimestampForwardTolerance(30.seconds))
       .withSetup { implicit env =>
         NetworkBootstrapper(EnvironmentDefinition.S1M1_S1M1)
@@ -938,7 +938,7 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
   private lazy val reconciliationInterval = PositiveSeconds.tryOfSeconds(1)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S1M1_S1M1_Manual
+    EnvironmentDefinition.P3S2M2_Manual
       .addConfigTransforms(ProgrammableSequencer.configOverride(getClass.toString, loggerFactory))
 
   private def startSynchronizers(synchronizers: Seq[NetworkTopologyDescription])(implicit
@@ -1551,7 +1551,10 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
 
 }
 
-class ParticipantRestartStaticTimeIntegrationTest extends ParticipantRestartTest {
+abstract class ParticipantRestartStaticTimeIntegrationTestBase(
+    alphaMultiSynchronizerSupport: Boolean = false
+) extends ParticipantRestartTest {
+
   private val overrideMaxRequestSize = NonNegativeInt.tryCreate(100 * 1024)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
@@ -1564,6 +1567,9 @@ class ParticipantRestartStaticTimeIntegrationTest extends ParticipantRestartTest
         // without having to wait for the max sequencing time elapsing.
         ConfigTransforms.updateParticipantConfig("participant1")(
           _.focus(_.sequencerClient.overrideMaxRequestSize).replace(Some(overrideMaxRequestSize))
+        ),
+        ConfigTransforms.updateAllParticipantConfigs_(
+          _.focus(_.parameters.alphaMultiSynchronizerSupport).replace(alphaMultiSynchronizerSupport)
         ),
       )
       .withSetup { implicit env =>
@@ -1700,22 +1706,45 @@ class ParticipantRestartStaticTimeIntegrationTest extends ParticipantRestartTest
           )
 
           participant1.repair.purge(daName, Seq(baselineContractId), ignoreAlreadyPurged = false)
-          val (repairOffset, repairRecordTime) = participant1.ledger_api.updates
-            .transactions(Set(party), 1, ledgerEndAfterRestart)
-            .collectFirst { case txWrapper: TransactionWrapper =>
-              (
-                txWrapper.transaction.offset,
-                CantonTimestamp
-                  .fromProtoTimestamp(
-                    txWrapper.transaction.recordTime.value
-                  )
-                  .toOption
-                  .value,
+
+          val (repairOffset, repairRecordTime) = if (alphaMultiSynchronizerSupport) {
+            participant1.ledger_api.updates
+              .reassignments(
+                Set(party),
+                completeAfter = 1,
+                beginOffsetExclusive = ledgerEndAfterRestart,
               )
-            }
-            .value
+              .collectFirst { case unassignedWrapper: UnassignedWrapper =>
+                (
+                  unassignedWrapper.reassignment.offset,
+                  CantonTimestamp
+                    .fromProtoTimestamp(
+                      unassignedWrapper.reassignment.recordTime.value
+                    )
+                    .toOption
+                    .value,
+                )
+              }
+              .value
+          } else {
+            participant1.ledger_api.updates
+              .transactions(Set(party), 1, ledgerEndAfterRestart)
+              .collectFirst { case txWrapper: TransactionWrapper =>
+                (
+                  txWrapper.transaction.offset,
+                  CantonTimestamp
+                    .fromProtoTimestamp(
+                      txWrapper.transaction.recordTime.value
+                    )
+                    .toOption
+                    .value,
+                )
+              }
+              .value
+          }
+
           logger.info(
-            s"Repair finished, one transaction is committed at offset: $repairOffset record-time: $repairRecordTime"
+            s"Repair finished, one update is committed at offset: $repairOffset record-time: $repairRecordTime"
           )
           repairOffset shouldBe ledgerEndAfterRestart + 1
           firstTimeoutRejectionRecordTime shouldBe repairRecordTime
@@ -2124,6 +2153,12 @@ class ParticipantRestartStaticTimeIntegrationTest extends ParticipantRestartTest
     assert(rejects.size == totalSubmissions - accepts.size - synchronousRejectionCount.get())
   }
 }
+
+class ParticipantRestartStaticTimeIntegrationTest
+    extends ParticipantRestartStaticTimeIntegrationTestBase
+
+class ParticipantRestartStaticTimeReassignmentIntegrationTest
+    extends ParticipantRestartStaticTimeIntegrationTestBase(alphaMultiSynchronizerSupport = true)
 
 @nowarn("msg=match may not be exhaustive")
 class ParticipantRestartContractKeyIntegrationTest extends ParticipantRestartTest {

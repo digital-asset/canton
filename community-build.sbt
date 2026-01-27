@@ -112,6 +112,7 @@ lazy val `daml-lf-validation` = DamlProjects.`daml-lf-validation`
 lazy val `daml-lf-snapshot-proto` = DamlProjects.`daml-lf-snapshot-proto`
 lazy val `daml-lf-snapshot` = DamlProjects.`daml-lf-snapshot`
 lazy val `daml-lf-interpreter` = DamlProjects.`daml-lf-interpreter`
+lazy val `daml-lf-interpreter-bench` = DamlProjects.`daml-lf-interpreter-bench`
 lazy val `daml-lf-engine` = DamlProjects.`daml-lf-engine`
 lazy val `daml-lf-parser` = DamlProjects.`daml-lf-parser`
 lazy val `daml-lf-encoder` = DamlProjects.`daml-lf-encoder`

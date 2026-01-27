@@ -650,53 +650,54 @@ final class BftBlockOrderer(
     logger.debug("Beginning async BFT block orderer shutdown")(TraceContext.empty)
 
     // Shutdown the P2P network client portion and module system
-    Seq[AsyncOrSyncCloseable](
-      SyncCloseable(
-        "p2pNetworkManager.close()",
-        p2pNetworkManager.close(),
-      ),
-      SyncCloseable("blockSubscription.close()", blockSubscription.close()),
-      SyncCloseable("epochStore.close()", epochStore.close()),
-      SyncCloseable("outputStore.close()", outputStore.close()),
-      SyncCloseable("availabilityStore.close()", availabilityStore.close()),
-      SyncCloseable("p2pEndpointsStore.close()", p2pEndpointsStore.close()),
-      SyncCloseable("pruningScheduler.close()", pruningScheduler.close()),
-      SyncCloseable("pruningSchedulerStore.close()", pruningSchedulerStore.close()),
-      SyncCloseable("shutdownPekkoActorSystem()", shutdownPekkoActorSystem()),
-    ) ++
-      // Shutdown the dedicated local storage if present
-      Option
-        .when(localStorage != sharedLocalStorage)(
-          SyncCloseable("dedicatedLocalStorage.close()", localStorage.close())
-        )
-        .toList ++
-      // Shutdown the P2P server + connection manager and associated executor
-      Seq[AsyncOrSyncCloseable](
-        SyncCloseable(
-          "p2pGrpcServerManager.close()",
-          p2pGrpcServerManager.close(),
-        ),
-        SyncCloseable("p2pServerGrpcExecutor.shutdown()", p2pServerGrpcExecutor.shutdown()),
-      ) ++
-      // The kill switch ensures that we don't process the remaining contents of the queue buffer
-      standaloneSubscriptionKillSwitchF
-        .map(ks =>
-          SyncCloseable(
-            "standaloneSubscriptionKillSwitch.shutdown()",
-            ks._1.shutdown(),
+    SyncCloseable(
+      "p2pNetworkManager.close()",
+      p2pNetworkManager.close(),
+    ) +:
+      // Shutdown the server-authenticating server-side filter early (as it's also a client of the auth service),
+      //  if authentication is enabled.
+      (maybeServerAuthenticatingFilter.map(_.closeAsync()).getOrElse(Seq.empty) ++
+        Seq[AsyncOrSyncCloseable](
+          SyncCloseable("blockSubscription.close()", blockSubscription.close()),
+          SyncCloseable("epochStore.close()", epochStore.close()),
+          SyncCloseable("outputStore.close()", outputStore.close()),
+          SyncCloseable("availabilityStore.close()", availabilityStore.close()),
+          SyncCloseable("p2pEndpointsStore.close()", p2pEndpointsStore.close()),
+          SyncCloseable("pruningScheduler.close()", pruningScheduler.close()),
+          SyncCloseable("pruningSchedulerStore.close()", pruningSchedulerStore.close()),
+          SyncCloseable("shutdownPekkoActorSystem()", shutdownPekkoActorSystem()),
+        ) ++
+        // Shutdown the dedicated local storage if present
+        Option
+          .when(localStorage != sharedLocalStorage)(
+            SyncCloseable("dedicatedLocalStorage.close()", localStorage.close())
           )
-        )
-        .toList ++
-      // Shutdown the reused Canton member authentication services, if authentication is enabled
-      maybeServerAuthenticatingFilter.map(_.closeAsync()).getOrElse(Seq.empty) ++
-      standaloneServiceRef.get.toList
-        .map(s => SyncCloseable("standaloneServiceRef.close()", s.close())) ++
-      Seq(
-        SyncCloseable(
-          "longRunningExecutor.shutdown()",
-          longRunningExecutor.shutdown(),
-        )
-      )
+          .toList ++
+        // Shutdown the P2P server + connection manager and associated executor
+        Seq[AsyncOrSyncCloseable](
+          SyncCloseable(
+            "p2pGrpcServerManager.close()",
+            p2pGrpcServerManager.close(),
+          ),
+          SyncCloseable("p2pServerGrpcExecutor.shutdown()", p2pServerGrpcExecutor.shutdown()),
+        ) ++
+        // The kill switch ensures that we don't process the remaining contents of the queue buffer
+        standaloneSubscriptionKillSwitchF
+          .map(ks =>
+            SyncCloseable(
+              "standaloneSubscriptionKillSwitch.shutdown()",
+              ks._1.shutdown(),
+            )
+          )
+          .toList ++
+        standaloneServiceRef.get.toList
+          .map(s => SyncCloseable("standaloneServiceRef.close()", s.close())) ++
+        Seq(
+          SyncCloseable(
+            "longRunningExecutor.shutdown()",
+            longRunningExecutor.shutdown(),
+          )
+        ))
   }
 
   override def adminServices: Seq[ServerServiceDefinition] =

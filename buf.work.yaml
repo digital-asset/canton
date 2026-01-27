@@ -10,7 +10,7 @@ directories:
   - community/ledger/ledger-api-core/src/main/protobuf
   - community/lib/google-common-protos-scala/target/protobuf_external
   - community/participant/src/main/protobuf
-  - community/daml-lf/snapshot/src/main/protobuf
+  - community/daml-lf/snapshot-proto/src/main/protobuf
   - community/daml-lf/archive/src/main/protobuf
   - community/daml-lf/transaction/src/main/protobuf
   - community/daml-lf/ledger-api-value/src/main/protobuf

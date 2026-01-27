@@ -343,16 +343,15 @@ Offline party replication steps
 These are the steps, which you must perform in **the exact order** they are listed:
 
 #. **Target: Package Vetting** – Ensure the target participant vets all required packages.
-#. **Source: Stop Pruning** – Turn off automatic pruning on the source participant.
+#. **Source: Data Retention** - Ensure the source participant retains data long enough for the export.
 #. **Target: Authorization** - Target participant authorizes new hosting with the onboarding flag set.
-#. **Target: Disconnect** - Target participant disconnects from all synchronizers.
+#. **Target: Isolation** - Disconnect from all synchronizers and disable auto-reconnect upon restart.
 #. **Source: Party Authorization** - Party authorizes the replication with the onboarding flag set.
 #. **Source: ACS Export** - The participant currently hosting the party exports the ACS.
 #. **Target: Backup** - Back up the target participant before starting the ACS import.
 #. **Target: ACS Import** - The target participant imports the ACS.
 #. **Target: Reconnect** - The target participant reconnects to the synchronizers.
 #. **Target: Onboarding Flag Clearance** - The target participant issues the onboarding flag clearance.
-#. **Source: Resume Pruning** - Reschedule the automatic pruning on the source participant.
 
 .. warning::
 
@@ -431,11 +430,20 @@ Hence, upload the missing DAR package to the ``target`` participant.
         .map(r => (r.context.storeId, r.item.participantId))
 
 
-2. Stop pruning
-^^^^^^^^^^^^^^^
+.. _party-replication-data-retention:
 
-Stop any, :externalref:`automatic or manual pruning<participant-node-pruning-howto>`
-activities on the ``source`` participant.
+2. Data Retention
+^^^^^^^^^^^^^^^^^
+
+Ensure that the retention period on the source participant is long enough to cover the
+entire duration between the following two events:
+
+#. The :ref:`party-to-participant mapping topology transaction becoming effective<party-replication-complete-authorization>`.
+#. The completion of the :ref:`ACS export from the source participant<party-replication-export-acs>`.
+
+If you are unsure whether the current retention period is sufficient, or as an additional precaution,
+you should temporarily disable :externalref:`automatic pruning<participant-node-pruning-howto>`
+on the source participant.
 
 Retrieve the current automatic pruning schedule. This command returns ``None`` if no
 schedule is set.
@@ -448,6 +456,13 @@ Clear the pruning schedule, disabling the automatic pruning on the ``source`` no
 
 .. snippet:: offline_party_replication
     .. success:: source.pruning.clear_schedule()
+
+
+.. warning::
+
+    Manual pruning cannot be programmatically disabled on the ``source`` participant.
+    Coordinate closely with other operators and ensure that no external automation
+    triggers pruning until the :ref:`ACS export is complete<party-replication-export-acs>`.
 
 
 3. Authorize new hosting on the target participant
@@ -469,6 +484,7 @@ participant permission (*observation* in this example).
           requiresPartyToBeOnboarded = true
         )
 
+
 4. Disconnect target participant from all synchronizers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -476,7 +492,22 @@ participant permission (*observation* in this example).
     .. success:: target.synchronizers.disconnect_all()
 
 
-5. Authorize new hosting for the party
+.. _party-replication-disable-auto-reconnect:
+
+5. Disable auto-reconnect on target participant
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Ensure the target participant does not automatically reconnect to the synchronizer upon restart.
+
+.. snippet:: offline_party_replication
+    .. success:: target.synchronizers.config("mysynchronizer")
+    .. success:: target.synchronizers.modify("mysynchronizer", _.copy(manualConnect=true))
+    .. success:: target.synchronizers.config("mysynchronizer")
+
+
+.. _party-replication-complete-authorization:
+
+6. Authorize new hosting for the party
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To later *find* the ledger offset of the topology transaction which authorizes the new
@@ -521,7 +552,9 @@ have party Alice agree to be hosted on it.
             )
 
 
-6. Export ACS
+.. _party-replication-export-acs:
+
+7. Export ACS
 ^^^^^^^^^^^^^
 
 Export Alice's ACS from the ``source`` participant.
@@ -543,14 +576,27 @@ it in the export file named ``party_replication.alice.acs.gz``.
         )
 
 
-7. Back up target participant
+8. Optional: Re-enable automatic pruning
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you previously disabled automatic pruning on the ``source`` participant by following
+the :ref:`data retention step<party-replication-data-retention>`,
+you may now re-enable it.
+
+Run the following command using the original configuration parameters you recorded before disabling the schedule:
+
+.. snippet:: offline_party_replication
+    .. success:: source.pruning.set_schedule("0 0 20 * * ?", 2.hours, 30.days)
+
+
+9. Back up target participant
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. warning:: **Please back up the target participant before importing the ACS!**
 
 
-8. Import ACS
-^^^^^^^^^^^^^
+10. Import ACS
+^^^^^^^^^^^^^^
 
 Import Alice's ACS in the ``target`` participant:
 
@@ -558,8 +604,8 @@ Import Alice's ACS in the ``target`` participant:
     .. success:: target.parties.import_party_acs("party_replication.alice.acs.gz")
 
 
-9. Reconnect target participant to synchronizer
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+11. Reconnect target participant to synchronizer
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To later *find* the ledger offset of the topology transaction where the new hosting
 arrangement on the ``target`` participant has been authorized, take the current ledger
@@ -584,7 +630,18 @@ Now, reconnect that ``target`` participant to the synchronizer.
        ))
 
 
-10. Clear the participant's onboarding flag
+12. Optional: Re-enable auto-reconnect on target participant
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you previously disabled auto-reconnect following the :ref:`earlier step<party-replication-disable-auto-reconnect>`,
+you may now re-enable it. This is only necessary if the target participant was originally
+configured to reconnect automatically upon restart.
+
+.. snippet:: offline_party_replication
+    .. success:: target.synchronizers.modify("mysynchronizer", _.copy(manualConnect=false))
+
+
+13. Clear the participant's onboarding flag
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 After the ``target`` participant has completed the ACS import and reconnected to the
@@ -630,17 +687,6 @@ The following snippet demonstrates how this command can be polled.
 .. note::
 
     The ``timeout`` is based on the default *decision timeout* of 1 minute.
-
-
-11. Re-enable automatic pruning
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-If automatic pruning was previously enabled on the ``source`` participant, you must re-enable it now.
-
-Use this command, providing the original configuration parameters that you recorded before you stopped it.
-
-.. snippet:: offline_party_replication
-    .. success:: source.pruning.set_schedule("0 0 20 * * ?", 2.hours, 30.days)
 
 
 Summary

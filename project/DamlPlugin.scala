@@ -31,8 +31,12 @@ object DamlPlugin extends AutoPlugin {
         "List of directory names used to sort the Daml building by order in this list"
       )
     val damlDarOutput = settingKey[File]("Directory to put generated DAR files in")
-    val damlDarLfVersion =
-      settingKey[String]("Lf version for which to generate DAR files")
+    val damlDarLfVersions =
+      settingKey[Seq[String]](
+        "Lf versions for which to generate DAR files. If more than one is specified, output DARs are suffixed with their LF version."
+      )
+    val damlExtractMainDalf =
+      settingKey[Boolean]("Extract main dalf from output DARs")
     val useVersionedDarName = settingKey[Boolean](
       "If enabled, the output DAR file name is <project-name>-<project-version>.dar otherwise it is <project-name>.dar"
     )
@@ -83,7 +87,8 @@ object DamlPlugin extends AutoPlugin {
       damlSourceDirectory := sourceDirectory.value / "daml",
       damlCompileDirectory := target.value / "daml",
       damlDarOutput := resourceManaged.value,
-      damlDarLfVersion := "",
+      damlDarLfVersions := Seq("default"),
+      damlExtractMainDalf := false,
       damlDependencies := Seq(),
       damlJavaCodegenOutput := codegenOutput(configuration.value, target.value, "java"),
       damlTsCodegenOutput := codegenOutput(configuration.value, target.value, "ts"),
@@ -205,6 +210,31 @@ object DamlPlugin extends AutoPlugin {
       // val a3 = Seq(targetLocation / "stable-packages-manifest-v2.txt")
       a1 ++ a2 // ++ a3
     }
+  }
+
+  def testingDarsFromS3(name: String, sha1sum: String) = Def.task {
+    IO.createDirectory((Test / resourceManaged).value)
+    val resource = (Test / resourceManaged).value / s"$name.dar"
+    val log = streams.value.log
+    if (!resource.exists() || sbt.io.Hash.toHex(sbt.io.Hash(resource)) != sha1sum) {
+      IO.withTemporaryDirectory { dir =>
+        runCommand(
+          command = Seq(
+            "aws",
+            "s3",
+            "cp",
+            s"s3://canton-public-releases/test-artifacts/$name-$sha1sum.dar",
+            resource.getAbsolutePath,
+            "--no-sign-request",
+          ),
+          workingDir = dir,
+          extraEnv = Seq(),
+        )(
+          failureMessage = s"downloading $name-$sha1sum.dar from s3 failed"
+        )
+      }
+    }
+    Seq(resource)
   }
 
   override lazy val buildSettings: Seq[Def.Setting[_]] = Seq(
@@ -476,12 +506,19 @@ object DamlPlugin extends AutoPlugin {
     val streams = Keys.streams.value
     val dependencies = damlDependencies.value
     val outputDirectory = damlDarOutput.value
-    val outputLfVersion = damlDarLfVersion.value
+    val outputLfVersions = damlDarLfVersions.value.toSet
     val buildDirectory = damlCompileDirectory.value
     val sourceDirectory = damlSourceDirectory.value
     val useVersionedDarFileName = useVersionedDarName.value
     val damlVersion = damlCompilerVersion.value
     val buildDependencies = damlBuildOrder.value
+    val shouldExtractMainDalf = damlExtractMainDalf.value
+
+    if (outputLfVersions.isEmpty) {
+      throw new MessageOnlyException(
+        s"DamlPlugin: Cannot have 0 damlDarLfVersions, must specify at least one."
+      )
+    }
 
     def buildOrder(fst: File, snd: File): Boolean = {
       def indexOf(file: File): Int = {
@@ -511,38 +548,46 @@ object DamlPlugin extends AutoPlugin {
     val cacheInput = (
       filesHash,
       outputDirectory.toString,
-      outputLfVersion,
+      outputLfVersions,
       useVersionedDarFileName,
       damlVersion,
+      shouldExtractMainDalf,
     )
     val cacheStore = streams.cacheStoreFactory.make("damlBuild")
     // implicit resolution fails
     val cacheFormat = basicCache(
-      tuple5Format(
+      tuple6Format(
         immSetFormat[HashFileInfo], // source files and dependencies
         StringJsonFormat, // outputDirectory
-        StringJsonFormat, // output lf version
+        immSetFormat(StringJsonFormat), // output lf version
         BooleanJsonFormat, // useVersionedDarFileName
         StringJsonFormat, // daml compiler version
+        BooleanJsonFormat, // shouldExtractMainDalf
       ),
       FileStamp.Formats.seqFileJsonFormatter,
     )
 
     val cachedOutputDars =
-      Cache.cached(cacheStore) { (_: (Set[HashFileInfo], String, String, Boolean, String)) =>
-        // build the daml files in a sorted way, using the build order definition
-        damlProjectFiles.sortWith(buildOrder).map { projectFile =>
-          buildDamlProject(
-            streams.log,
-            sourceDirectory,
-            buildDirectory,
-            outputDirectory,
-            outputLfVersion,
-            useVersionedDarFileName,
-            sourceDirectory.toPath.relativize(projectFile.toPath).toFile,
-            damlVersion,
-          )
-        }
+      Cache.cached(cacheStore) {
+        (_: (Set[HashFileInfo], String, Set[String], Boolean, String, Boolean)) =>
+          // build the daml files in a sorted way, using the build order definition
+          for {
+            projectFile <- damlProjectFiles.sortWith(buildOrder)
+            outputLfVersion <- outputLfVersions.toSeq
+            file <-
+              buildDamlProject(
+                streams.log,
+                sourceDirectory,
+                buildDirectory,
+                outputDirectory,
+                outputLfVersion,
+                outputLfVersions.size > 1,
+                useVersionedDarFileName,
+                sourceDirectory.toPath.relativize(projectFile.toPath).toFile,
+                damlVersion,
+                shouldExtractMainDalf,
+              )
+          } yield file
       }(cacheFormat)
     cachedOutputDars(cacheInput)
   }
@@ -553,10 +598,12 @@ object DamlPlugin extends AutoPlugin {
       buildDirectory: File,
       outputDirectory: File,
       outputLfVersion: String,
+      useLfVersionAsSuffix: Boolean,
       useVersionedDarName: Boolean,
       relativeDamlProjectFile: File,
       damlVersion: String,
-  ): File = {
+      shouldExtractMainDalf: Boolean,
+  ): Seq[File] = {
 
     val originalDamlProjectFile =
       sourceDirectory.toPath.resolve(relativeDamlProjectFile.toPath).toFile
@@ -580,17 +627,28 @@ object DamlPlugin extends AutoPlugin {
 
     val damlYamlMap = readYaml(originalDamlProjectFile)
     val damlProjectName = damlYamlMap.get("name").toString
+    val damlProjectVersion = damlYamlMap.get("version").toString
     val pluginNameSuffix =
       if (damlYamlMap.containsKey("canton-daml-plugin-name-suffix"))
         s"-${damlYamlMap.get("canton-daml-plugin-name-suffix").toString}"
       else
         ""
+
+    val lfVersionSuffix =
+      if (useLfVersionAsSuffix)
+        s"-v${outputLfVersion.replace(".", "")}"
+      else
+        ""
+
     val versionSuffix =
       if (useVersionedDarName)
         s"-${damlYamlMap.get("version").toString}"
       else
         ""
-    val outputDar = outputDirectory / s"$damlProjectName$pluginNameSuffix$versionSuffix.dar"
+    val outputDar =
+      outputDirectory / s"$damlProjectName$pluginNameSuffix$versionSuffix$lfVersionSuffix.dar"
+    val outputDalf =
+      outputDirectory / s"$damlProjectName$pluginNameSuffix$versionSuffix$lfVersionSuffix.dalf"
 
     val processLogger = new BufferedLogger
 
@@ -601,7 +659,8 @@ object DamlPlugin extends AutoPlugin {
       "-Wupgrade-exceptions",
     )
     val outputOpts = Seq("--output", outputDar.getAbsolutePath)
-    val targetOpts = if (outputLfVersion.isEmpty) Seq.empty else Seq("--target", outputLfVersion)
+    val targetOpts =
+      if (outputLfVersion == "default") Seq.empty else Seq("--target", outputLfVersion)
 
     runCommand(
       Seq("dpm", "build") ++ buildOptions ++ outputOpts ++ targetOpts,
@@ -609,7 +668,29 @@ object DamlPlugin extends AutoPlugin {
       extraEnv = Seq("DAML_VERSION" -> damlVersion),
     )(failureMessage = s"dpm build failed [$originalDamlProjectFile]")
 
-    outputDar
+    if (shouldExtractMainDalf) {
+      IO.withTemporaryDirectory { dir =>
+        runCommand(
+          Seq(
+            "unzip",
+            outputDar.getAbsolutePath,
+            s"$damlProjectName-$damlProjectVersion-*/$damlProjectName-$damlProjectVersion-*.dalf",
+          ),
+          workingDir = dir,
+          extraEnv = Seq(),
+        )(failureMessage = s"unzip failed")
+        val extractedFiles = sbt.io
+          .PathFinder(dir)
+          .glob(s"$damlProjectName-$damlProjectVersion-*")
+          .glob(s"$damlProjectName-$damlProjectVersion-*.dalf")
+          .get
+        IO.copyFile(extractedFiles.head, outputDalf)
+      }
+
+      Seq(outputDar, outputDalf)
+    } else {
+      Seq(outputDar)
+    }
   }
 
   private lazy val yamlConfig = new YamlConfig()

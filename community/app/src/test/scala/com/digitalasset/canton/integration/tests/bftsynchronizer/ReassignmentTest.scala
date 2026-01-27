@@ -6,18 +6,12 @@ package com.digitalasset.canton.integration.tests.bftsynchronizer
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.admin.api.client.data.SequencerConnections
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
-import com.digitalasset.canton.integration.plugins.{
-  UseBftSequencer,
-  UsePostgres,
-  UseReferenceBlockSequencer,
-}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
@@ -274,16 +268,14 @@ trait ReassignmentTest extends CommunityIntegrationTest with SharedEnvironment {
   }
 }
 
-class ReassignmentTestReferencePostgres extends ReassignmentTest {
-  registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory, sequencerGroups)
-  )
-}
+//class ReassignmentTestReferencePostgres extends ReassignmentTest {
+//  registerPlugin(new UsePostgres(loggerFactory))
+//  registerPlugin(
+//    new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory, sequencerGroups)
+//  )
+//}
 
-// TODO(#30254): fix flake, then mark as stable again and comment out / remove reference block sequencer variant
-@UnstableTest
-class ReassignmentTestDABFTPostgres extends ReassignmentTest {
+class ReassignmentTestBFTOrderingPostgres extends ReassignmentTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 }

@@ -28,8 +28,23 @@ Template for a bigger topic
   - Canton 3.5 is compatible with OpenAPI specification files from version 3.4.0 to 3.5.0 (inclusive).
 
 ### Minor Improvements
+- Added support for adding table settings for PostgreSQL. One can use a repeatable migration (Flyway feature) in a file
+  provided to Canton externally.
+  - Use the new config `repeatable-migrations-paths` under the `canton.<node_type>.<node>.storage.parameters` configuration section.
+  - The config takes a list of directories where repeatable migration files must be placed, paths must be prefixed with `filesystem:` for Flyway to recognize them.
+  - Example: `canton.sequencers.sequencer1.storage.parameters.repeatable-migrations-paths = ["filesystem:community/common/src/test/resources/test_table_settings"]`.
+  - Only repeatable migrations are allowed in these directories: files with names starting with `R__` and ending with `.sql`.
+  - The files cannot be removed once added, but they can be modified (unlike the `V__` versioned schema migrations), and if modified these will be reapplied on each Canton startup.
+  - The files are applied in lexicographical order.
+  - Example use case: adding `autovacuum_*` settings to existing tables.
+  - Only add idempotent changes in repeatable migrations.
 - Changed the path for `crypto.kms.session-signing-keys` (deprecated) to `crypto.session-signing-keys` so that session signing key configuration is no longer directly tied to a KMS. However, session signing keys can still only be enabled when using a KMS provider or when running with `non-standard-config=true`.
 - Added a new configuration parameter for session signing keys, `toleranceShiftDuration`, and updated `cutOffDuration` to allow a zero duration.
+- Offline root namespace key scripts:
+  - Renamed `prepare-certs.sh` to `prepare-cert.sh`
+  - Changed `assemble-certs.sh` to automatically suffix the generated certificate with a `.cert` extension, similarly to what is being done in `prepare-cert.sh`
+  - Removed the `10-offline-root-namespace-init` example folder as its content is now integrated in the documented how-to: https://docs.digitalasset.com/operate/3.5/howtos/secure/keys/namespace_key.html
+  - Committed the buf image necessary to run the script to the repository (also available in the release artifact), making usage from the open source repo easier
 - Ledger JSON Api changes:
     - The Ledger JSON API server now enforces that only fields marked as required by the Ledger API OpenAPI/AsyncAPI specification are mandatory in request payloads.
 - ApiRequestLogger now also used by Ledger JSON Api. Changes:
@@ -121,15 +136,34 @@ Impacted commands:
 ### Removal of automatic recomputation of contract ids upon ACS import
 The ability to recompute contract ids upon ACS import has been removed.
 
-### Online party replication *breaking change*
-The online party replication status command now returns a status in a very different, "vector-status" format
-rather than the old "oneof" style.
+### Online party replication
 
-Impacted Command:
-- `participant.parties.get_add_party_status`
+Added the file-based online party replication command `participant.parties.add_party_with_acs_async` to
+be used along with `participant.parties.export_party_acs` and instead of the sequencer-channel-based
+`add_party_async` command.
 
-Impacted gRPC endpoint:
-- `com.digitalasset.canton.admin.participant.v30.PartyManagementService.GetAddPartyStatus` response type
+The online party replication status command now returns status in a very different, "vector-status" format
+rather than the old "oneof" style. This impacts the `participant.parties.get_add_party_status` command and
+`com.digitalasset.canton.admin.participant.v30.PartyManagementService.GetAddPartyStatus` gRPC response type.
+
+### Alpha Multi-Synchronizer Support
+
+Adds a new participant node parameter, `alpha-multi-synchronizer-support` (Boolean).
+- **Default (`false`):** Uses standard **Create** and **Archive** events.
+- **Enabled (`true`):** Uses **Assign** and **Unassign** events.
+
+This flag is required in multi-synchronizer environments to preserve the **reassignment counter** of a contract.
+Using the default (Create events) resets this counter to zero.
+
+Note: Multi-synchronizer support is currently in Alpha; most Ledger API consumers may not yet be compatible with
+Assign/Unassign events. Only enable this if your application specifically requires non-zero reassignment counters
+and can process these event types.
+
+### Party replication repair console macro removal
+
+The original party replication, which relied on a silent synchronizer, has been superseded by the offline party
+replication process. As a result, the obsolete repair console macros associated with the old approach have
+been removed.
 
 ## Compatibility
 

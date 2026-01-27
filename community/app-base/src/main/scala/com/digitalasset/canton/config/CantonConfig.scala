@@ -456,6 +456,7 @@ final case class CantonConfig(
           participantParameters.commitmentProcessorNrAcsChangesBehindToTriggerCatchUp,
         commitmentReduceParallelism = participantParameters.commitmentReduceParallelism,
         autoSyncProtocolFeatureFlags = participantParameters.autoSyncProtocolFeatureFlags,
+        alphaMultiSynchronizerSupport = participantParameters.alphaMultiSynchronizerSupport,
       )
     }
 
