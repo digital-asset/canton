@@ -6,7 +6,7 @@ package com.digitalasset.canton.topology.processing
 import cats.data.EitherT
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.topology.TopologyStateProcessor
@@ -20,7 +20,10 @@ import com.digitalasset.canton.topology.store.{
   TopologyStoreId,
 }
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
-import com.digitalasset.canton.topology.transaction.checks.RequiredTopologyMappingChecks
+import com.digitalasset.canton.topology.transaction.checks.{
+  MaybeEmptyTopologyStore,
+  RequiredTopologyMappingChecks,
+}
 import com.digitalasset.canton.topology.transaction.{
   SignedTopologyTransaction,
   TopologyChangeOp,
@@ -65,19 +68,22 @@ class InitialTopologySnapshotValidator(
     validateInitialSnapshot: Boolean,
     override val loggerFactory: NamedLoggerFactory,
     cleanupTopologySnapshot: Boolean = false,
-)(implicit ec: ExecutionContext, materializer: Materializer, closeContext: CloseContext)
+)(implicit ec: ExecutionContext, materializer: Materializer)
     extends NamedLogging {
 
   private val storeIsEmpty = new AtomicBoolean(false)
+  private val maybeEmptyStore = new MaybeEmptyTopologyStore {
+    override def store: TopologyStore[TopologyStoreId] = InitialTopologySnapshotValidator.this.store
+    override def skipLoadingFromStore: Boolean = storeIsEmpty.get()
+  }
   protected val stateProcessor: TopologyStateProcessor =
     TopologyStateProcessor.forInitialSnapshotValidation(
       store,
-      lookup =>
-        new RequiredTopologyMappingChecks(
-          staticSynchronizerParameters,
-          lookup,
-          loggerFactory,
-        ),
+      new RequiredTopologyMappingChecks(
+        maybeEmptyStore,
+        staticSynchronizerParameters,
+        loggerFactory,
+      ),
       pureCrypto,
       loggerFactory,
     )
@@ -145,9 +151,10 @@ class InitialTopologySnapshotValidator(
                 .zipWithIndex
                 .dropWhile { case ((fromInitial, fromStore), _) =>
                   // we don't do a complete == comparison, because the snapshot might contain transactions with superfluous
-                  // signatures that are now filtered out. As long as the hash, validFrom, validUntil, isProposal and rejection reason
+                  // signatures that are now filtered out. As long as the hash, validFrom, validUntil, isProposal and rejection status
+                  // (i.e. just checking whether both transactions are rejected or not without looking at the concrete reasons)
                   // agree between initial and stored topology transaction, we accept the result.
-                  StoredTopologyTransaction.equalIgnoringSignatures(fromInitial, fromStore)
+                  equalIgnoringSignaturesAndRejectionReasonDetails(fromInitial, fromStore)
                 }
                 runWith (Sink.headOption)
             )
@@ -167,6 +174,31 @@ class InitialTopologySnapshotValidator(
         )
       }
     }
+  }
+
+  /** @return
+    *   `true` if both transactions are the same without comparing the signatures and without
+    *   comparing the content of the rejection reason. `false` otherwise.
+    */
+  private def equalIgnoringSignaturesAndRejectionReasonDetails(
+      a: GenericStoredTopologyTransaction,
+      b: GenericStoredTopologyTransaction,
+  ): Boolean = a match {
+    case StoredTopologyTransaction(
+          b.sequenced,
+          b.validFrom,
+          b.validUntil,
+          SignedTopologyTransaction(
+            b.transaction.transaction,
+            _ignoreSignatures,
+            b.transaction.isProposal,
+          ),
+          _ignoreRejectionReason,
+        ) =>
+      // two transactions are considered equal, if all of the fields above are the same,
+      // and if both transactions have been rejected (for whatever reason) or neither has been rejected.
+      a.rejectionReason.isEmpty == b.rejectionReason.isEmpty
+    case _ => false
   }
 
   /** Fix the initial snapshot from mainnet

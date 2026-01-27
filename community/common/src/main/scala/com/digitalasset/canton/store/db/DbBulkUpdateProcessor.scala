@@ -23,7 +23,9 @@ import scala.concurrent.ExecutionContext
 import scala.util.Try
 
 /** Implementation of aggregated bulk update operations for DB stores */
-trait DbBulkUpdateProcessor[A, B] extends BatchAggregator.Processor[A, Try[B]] {
+trait DbBulkUpdateProcessor[A, B]
+    extends BatchAggregator.Processor[A, Try[B]]
+    with DbStorage.Implicits {
 
   protected implicit def executionContext: ExecutionContext
   protected def storage: DbStorage
@@ -39,7 +41,7 @@ trait DbBulkUpdateProcessor[A, B] extends BatchAggregator.Processor[A, Try[B]] {
   protected def bulkUpdateWithCheck(items: NonEmpty[Seq[Traced[A]]], queryBaseName: String)(implicit
       traceContext: TraceContext,
       closeContext: CloseContext,
-  ): FutureUnlessShutdown[immutable.Iterable[Try[B]]] = {
+  ): FutureUnlessShutdown[Iterable[Try[B]]] = {
     val bulkUpdate = bulkUpdateAction(items)
     for {
       updateCounts <- storage.queryAndUpdate(bulkUpdate, s"$queryBaseName update")

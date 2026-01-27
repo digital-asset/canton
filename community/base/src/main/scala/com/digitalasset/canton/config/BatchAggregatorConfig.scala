@@ -11,10 +11,7 @@ import com.digitalasset.canton.config.manual.CantonConfigValidatorDerivation
 sealed trait BatchAggregatorConfig
     extends Product
     with Serializable
-    with UniformCantonConfigValidation {
-
-  def maximumBatchSize: PositiveNumeric[Int]
-}
+    with UniformCantonConfigValidation
 
 object BatchAggregatorConfig {
   implicit val batchAggregatorConfigCantonConfigValidator
@@ -48,18 +45,9 @@ object BatchAggregatorConfig {
     */
   final case class Batching(
       maximumInFlight: PositiveNumeric[Int] = BatchAggregatorConfig.defaultMaximumInFlight,
-      override val maximumBatchSize: PositiveNumeric[Int] =
-        BatchAggregatorConfig.defaultMaximumBatchSize,
+      maximumBatchSize: PositiveNumeric[Int] = BatchAggregatorConfig.defaultMaximumBatchSize,
   ) extends BatchAggregatorConfig
 
-  /** @param maxParallelBatches
-    *   Maximum number of batches to execute in parallel when using runMany.
-    * @param maximumBatchSize
-    *   Maximum number of queries in a batch.
-    */
-  final case class NoBatching(
-      maxParallelBatches: PositiveNumeric[Int] = BatchAggregatorConfig.defaultMaximumInFlight,
-      override val maximumBatchSize: PositiveNumeric[Int] =
-        BatchAggregatorConfig.defaultMaximumBatchSize,
-  ) extends BatchAggregatorConfig
+  final case object NoBatching extends BatchAggregatorConfig
+
 }

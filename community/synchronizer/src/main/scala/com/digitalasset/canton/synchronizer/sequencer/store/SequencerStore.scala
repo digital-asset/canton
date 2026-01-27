@@ -24,7 +24,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
+import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage, ToDbPrimitive}
 import com.digitalasset.canton.sequencing.protocol.{Batch, ClosedEnvelope, MessageId}
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -100,10 +100,9 @@ final case class PayloadId(private val id: CantonTimestamp)
 }
 
 object PayloadId {
-  implicit def payloadIdSetParameter(implicit
-      tsSetParameter: SetParameter[CantonTimestamp]
-  ): SetParameter[PayloadId] =
-    (payloadId, pp) => tsSetParameter(payloadId.unwrap, pp)
+  implicit val payloadIdToDbPrimitive: ToDbPrimitive[PayloadId, CantonTimestamp] = ToDbPrimitive(
+    _.unwrap
+  )
   implicit def payloadIdGetResult(implicit
       tsGetResult: GetResult[CantonTimestamp]
   ): GetResult[PayloadId] =

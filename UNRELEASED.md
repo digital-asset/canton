@@ -15,6 +15,17 @@ Template for a bigger topic
 #### Impact and Migration
 
 ### Minor Improvements
+* Added support for adding table settings for PostgreSQL. One can use a repeatable migration (Flyway feature) in a file
+  provided to Canton externally.
+    * Use the new config `repeatable-migrations-paths` under the `canton.<node_type>.<node>.storage.parameters` configuration section.
+    * The config takes a list of directories where repeatable migration files must be placed, paths must be prefixed with `filesystem:` for Flyway to recognize them.
+    * Example: `canton.sequencers.sequencer1.storage.parameters.repeatable-migrations-paths = ["filesystem:community/common/src/test/resources/test_table_settings"]`.
+    * Only repeatable migrations are allowed in these directories: files with names starting with `R__` and ending with `.sql`.
+    * The files cannot be removed once added, but they can be modified (unlike the `V__` versioned schema migrations), and if modified these will be reapplied on each Canton startup.
+    * The files are applied in lexicographical order.
+    * Example use case: adding `autovacuum_*` settings to existing tables.
+    * Only add idempotent changes in repeatable migrations.
+* KMS operations are now retried on HTTP/2 INTERNAL gRPC exceptions.
 * Logging improvements in sequencer (around event signaller and sequencer reader).
 * Canton startup logging: it is now possible to configure a startup log level, that will reset after a timeout, i.e.:
 ```hocon
@@ -67,10 +78,16 @@ the current participant. The parameter affects all pruning commands, including s
 * Extended the set of characters allowed in user-id in the ledger api to contain brackets: `()`.
   This also makes those characters accepted as part of the `sub` claims in JWT tokens.
 
+* Additional DB indices on the ACS commitment tables to improve performance of commitment pruning. This requires a DB migration.
+
+* Set aggressive TCP keepalive settings on Postgres connections to allow quick HA failover in case of stuck DB connections.
+
+
 ### Preview Features
 - preview feature
 
 ## Bugfixes
+* Fixed an issue that could prevent the `SequencerAggregator` to perform a timely shutdown.
 
 ### (YY-nnn, Severity): Title
 

@@ -11,7 +11,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
-import com.digitalasset.canton.resource.DbStorage.Implicits.setParameterByteString
 import com.digitalasset.canton.resource.DbStorage.Profile.{H2, Postgres}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -61,7 +60,6 @@ import com.digitalasset.canton.{ProtoDeserializationError, RichGeneratedMessage}
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, PositionedResult, SetParameter}
 
-import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 import scala.util.Try
 
@@ -78,6 +76,7 @@ class DbEpochStore(
     with DbStore {
 
   import storage.api.*
+  import storage.converters.*
 
   private val profile = storage.profile
 
@@ -111,6 +110,9 @@ class DbEpochStore(
     parseSignedMessage(_ => Commit.fromProtoConsensusMessage(actualSender = None, _))
   }
 
+  // TODO(#28200): introduce `BatchAggregator#runTogether` that avoids splitting items into different batches
+  //  and use it in `addPrepares` and `addOrderedBlock`
+
   private val insertInProgressPbftMessagesBatchAggregator =
     BatchAggregator(
       new InsertBatchAggregatorProcessor(
@@ -119,19 +121,6 @@ class DbEpochStore(
           runInsertInProgressPbftMessages(seq)
         },
         "In-progress consensus block network message insert",
-        logger,
-      ),
-      batchAggregatorConfig,
-    )
-
-  private val insertFinalPbftMessagesBatchAggregator =
-    BatchAggregator(
-      new InsertBatchAggregatorProcessor(
-        { (seq, traceContext) =>
-          implicit val tc: TraceContext = traceContext
-          runInsertFinalPbftMessages(seq)
-        },
-        "Completed consensus block network message insert",
         logger,
       ),
       batchAggregatorConfig,
@@ -259,21 +248,12 @@ class DbEpochStore(
     }
 
   override def addPreparesAtomically(
-      prepares: NonEmpty[Seq[Traced[SignedMessage[ConsensusMessage.Prepare]]]]
+      prepares: Seq[SignedMessage[ConsensusMessage.Prepare]]
   )(implicit traceContext: TraceContext): PekkoFutureUnlessShutdown[Unit] =
     createFuture(addPreparesActionName, orderingStage = functionFullName) {
-      insertInProgressPbftMessagesBatchAggregator
-        .runInSameBatch(prepares)
-        .fold(
-          maximumBatchSize => {
-            logger.warn(
-              s"Cannot add ${prepares.size} prepares atomically via the batch aggregator " +
-                s"because the maximum batch size is $maximumBatchSize, performing an immediate insert"
-            )
-            runInsertInProgressPbftMessages(prepares.map(_.value))
-          },
-          _.map(_ => ()),
-        )
+      // Cannot use the batch aggregator here as we need to make sure for CFT that all messages end up
+      //  in the same transaction.
+      runInsertInProgressPbftMessages(prepares)
     }
 
   override def addViewChangeMessage[M <: PbftViewChangeMessage](
@@ -290,33 +270,21 @@ class DbEpochStore(
 
   override def addOrderedBlockAtomically(
       prePrepare: SignedMessage[PrePrepare],
-      commitMessages: Seq[Traced[SignedMessage[Commit]]],
+      commitMessages: Seq[SignedMessage[Commit]],
   )(implicit
       traceContext: TraceContext
   ): PekkoFutureUnlessShutdown[Unit] = {
-    val blockMetadata = prePrepare.message.blockMetadata
-    val epochNumber = blockMetadata.epochNumber
-    val blockNumber = blockMetadata.blockNumber
+    val epochNumber = prePrepare.message.blockMetadata.epochNumber
+    val blockNumber = prePrepare.message.blockMetadata.blockNumber
     createFuture(
       addOrderedBlockActionName(epochNumber, blockNumber),
       orderingStage = functionFullName,
     ) {
-      val messages: NonEmpty[Seq[Traced[SignedMessage[PbftNormalCaseMessage]]]] =
-        NonEmpty[Seq.type, Traced[SignedMessage[PbftNormalCaseMessage]], Seq[
-          Traced[SignedMessage[PbftNormalCaseMessage]]
-        ]](Seq, Traced(prePrepare), commitMessages*)
-      insertFinalPbftMessagesBatchAggregator
-        .runInSameBatch(messages)
-        .fold(
-          maximumBatchSize => {
-            logger.warn(
-              s"Cannot add ordered block (epoch: $epochNumber, block: $blockNumber) atomically via the batch aggregator " +
-                s"because the maximum batch size is $maximumBatchSize, performing an immediate insert"
-            )
-            runInsertFinalPbftMessages(messages.map(_.value))
-          },
-          _.map(_ => ()),
-        )
+      val messages: Seq[SignedMessage[PbftNormalCaseMessage]] =
+        commitMessages :++ Seq[SignedMessage[PbftNormalCaseMessage]](prePrepare)
+      // Cannot use the batch aggregator here as we need to make sure for CFT that all messages end up
+      //  in the same transaction.
+      runInsertFinalPbftMessages(messages)
     }
   }
 
@@ -623,7 +591,7 @@ object DbEpochStore {
     )(implicit
         traceContext: TraceContext,
         callerCloseContext: CloseContext,
-    ): FutureUnlessShutdown[immutable.Iterable[Unit]] =
+    ): FutureUnlessShutdown[Iterable[Unit]] =
       exec(items.map(_.value), traceContext)
         .map(_ => Seq.fill(items.size)(()))
 

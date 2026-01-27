@@ -45,8 +45,8 @@ class DbRequestJournalStore(
     extends RequestJournalStore
     with DbStore { self =>
 
-  import DbStorage.Implicits.*
   import storage.api.*
+  import storage.converters.*
 
   implicit val getResultRequestState: GetResult[RequestState] = GetResult { r =>
     val index = r.nextInt()
@@ -80,7 +80,7 @@ class DbRequestJournalStore(
       override def executeBatch(items: NonEmpty[Seq[Traced[RequestData]]])(implicit
           traceContext: TraceContext,
           callerCloseContext: CloseContext,
-      ): FutureUnlessShutdown[immutable.Iterable[Try[Unit]]] =
+      ): FutureUnlessShutdown[Iterable[Try[Unit]]] =
         bulkUpdateWithCheck(items, "DbRequestJournalStore.insert")(traceContext, self.closeContext)
 
       override protected def bulkUpdateAction(items: NonEmpty[Seq[Traced[RequestData]]])(implicit
@@ -243,7 +243,7 @@ class DbRequestJournalStore(
           implicit
           traceContext: TraceContext,
           callerCloseContext: CloseContext,
-      ): FutureUnlessShutdown[immutable.Iterable[Try[Result]]] =
+      ): FutureUnlessShutdown[Iterable[Try[Result]]] =
         bulkUpdateWithCheck(items, "DbRequestJournalStore.replace")(traceContext, self.closeContext)
 
       override protected def bulkUpdateAction(items: NonEmpty[Seq[Traced[ReplaceRequest]]])(implicit
