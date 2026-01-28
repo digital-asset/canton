@@ -198,7 +198,7 @@ class DbInFlightSubmissionStore(
         override def executeBatch(items: NonEmpty[Seq[Traced[SequencedRootHash]]])(implicit
             traceContext: TraceContext,
             callerCloseContext: CloseContext,
-        ): FutureUnlessShutdown[immutable.Iterable[Unit]] = {
+        ): FutureUnlessShutdown[Iterable[Unit]] = {
           def setParams(pp: PositionedParameters)(data: Traced[SequencedRootHash]): Unit = {
             val Traced(SequencedRootHash(rootHash, submission)) = data
             val SequencedSubmission(ts) = submission
@@ -376,7 +376,7 @@ object DbInFlightSubmissionStore {
     )(implicit
         traceContext: TraceContext,
         callerCloseContext: CloseContext,
-    ): FutureUnlessShutdown[immutable.Iterable[Try[Result]]] = {
+    ): FutureUnlessShutdown[Iterable[Try[Result]]] = {
 
       type SubmissionAndCell =
         BulkUpdatePendingCheck[InFlightSubmission[UnsequencedSubmission], Result]
@@ -452,7 +452,6 @@ object DbInFlightSubmissionStore {
         submissions.map(_.value),
         storage.profile,
       ) { pp => submission =>
-        import DbStorage.Implicits.*
         pp >> submission.changeIdHash
         pp >> submission.submissionId.map(SerializableSubmissionId(_))
         pp >> submission.submissionSynchronizerId

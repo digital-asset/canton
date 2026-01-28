@@ -48,7 +48,6 @@ class DbContractStore(
     extends ContractStore
     with DbStore { self =>
 
-  import DbStorage.Implicits.*
   import storage.api.*
   import storage.converters.*
 
@@ -113,7 +112,7 @@ class DbContractStore(
         override def executeBatch(ids: NonEmpty[Seq[Traced[LfContractId]]])(implicit
             traceContext: TraceContext,
             callerCloseContext: CloseContext,
-        ): FutureUnlessShutdown[immutable.Iterable[Option[PersistedContractInstance]]] =
+        ): FutureUnlessShutdown[Iterable[Option[PersistedContractInstance]]] =
           storage.query(lookupQuery(ids.map(_.value)), functionFullName)(
             traceContext,
             callerCloseContext,
@@ -135,7 +134,6 @@ class DbContractStore(
   ): DbAction.ReadOnly[Seq[Option[PersistedContractInstance]]] = {
     import DbStorage.Implicits.BuilderChain.*
 
-    // TODO(#27996): optimize: pass-as-array the parameters instead of variable sized list of params
     val inClause = DbStorage.toInClause("contract_id", ids)
     (contractsBaseQuery ++ sql" where " ++ inClause)
       .as[PersistedContractInstance]
@@ -150,7 +148,6 @@ class DbContractStore(
   private def bulkLookupQuery(
       ids: NonEmpty[Seq[LfContractId]]
   ): DbAction.ReadOnly[immutable.Iterable[PersistedContractInstance]] =
-    // TODO(#27996): optimize: pass-as-array the parameters instead of variable sized list of params
     lookupQuery(ids).map(_.flatten)
 
   override def lookup(
@@ -281,7 +278,7 @@ class DbContractStore(
       override def executeBatch(items: NonEmpty[Seq[Traced[ContractInstance]]])(implicit
           traceContext: TraceContext,
           callerCloseContext: CloseContext,
-      ): FutureUnlessShutdown[immutable.Iterable[Try[Unit]]] =
+      ): FutureUnlessShutdown[Iterable[Try[Unit]]] =
         bulkUpdateWithCheck(items, "DbContractStore.insert")(traceContext, self.closeContext)
 
       override protected def bulkUpdateAction(items: NonEmpty[Seq[Traced[ContractInstance]]])(

@@ -74,28 +74,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       : GetResult[GenericSignedTopologyTransaction] =
     SignedTopologyTransaction.createGetResultSynchronizerTopologyTransaction
 
-  override def fetchAllDescending(uids: Set[UniqueIdentifier], nss: Set[Namespace])(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[GenericStoredTopologyTransactions] = {
-
-    // TODO(#29400) replace this with DbStorage.toInClause after we've merged identifier and namespace
-    val items = uids.map(uid =>
-      sql"(namespace = ${uid.namespace} AND identifier = ${uid.identifier})"
-    ) ++ nss.map(ns => sql"(namespace = $ns AND identifier = ${String185.empty})")
-
-    storage
-      .query(
-        buildQueryForTransactions(
-          sql" AND (" ++ items.intercalate(sql" OR ") ++ sql")",
-          orderBy = " ORDER BY valid_from DESC, batch_idx DESC",
-        ),
-        "fetch-all-topo",
-      )
-      .map(toStoredTopologyTransactions)
-
-  }
-
-  override def findLatestTransactionsAndProposalsByTxHash(hashes: Set[TxHash])(implicit
+  def findLatestTransactionsAndProposalsByTxHash(hashes: Set[TxHash])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] =
     if (hashes.isEmpty) FutureUnlessShutdown.pure(Seq.empty)
@@ -118,6 +97,34 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
         ).map(_.collectLatestByTxHash.result.map(_.transaction))
       }
     }
+
+  override def findProposalsByTxHash(
+      asOfExclusive: EffectiveTime,
+      hashes: NonEmpty[Set[TxHash]],
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Seq[GenericSignedTopologyTransaction]] = {
+    logger.debug(
+      s"Querying proposals for tx hashes ${LoggerUtil.limitForLogging(hashes)} as of $asOfExclusive"
+    )
+    MonadUtil.batchedSequentialTraverse(
+      parallelism = batchingConfig.parallelism,
+      chunkSize = batchingConfig.maxItemsInBatch,
+    )(hashes.toSeq) { batch =>
+      toStoredTopologyTransactions(
+        storage.query(
+          buildFindAsOfExclusiveQuery(
+            asOfExclusive,
+            sql" AND is_proposal = true AND (" ++ batch
+              .map(txHash => sql"tx_hash = ${txHash.hash}")
+              .toList
+              .intercalate(sql" OR ") ++ sql")",
+          ),
+          operationName = "proposalsByTxHash",
+        )
+      ).map(_.result.map(_.transaction))
+    }
+  }
 
   override def findTransactionsForMapping(
       asOfExclusive: EffectiveTime,
@@ -196,15 +203,13 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
             logger.debug(s"Processing addition batch $bulkIdx")
             insertSignedTransaction[(GenericValidatedTopologyTransaction, Int)] {
               case (vtx, batchIdx) =>
-                val validUntil = Option.when(
-                  vtx.rejectionReason.nonEmpty || vtx.expireImmediately
-                )(effective)
-                logger.debug(s"Adding as batch $effective / $validUntil ${vtx.transaction}")
                 TransactionEntry(
                   sequenced,
                   effective,
                   batchIdx = batchIdx,
-                  validUntil,
+                  Option.when(
+                    vtx.rejectionReason.nonEmpty || vtx.expireImmediately
+                  )(effective),
                   vtx.transaction,
                   vtx.rejectionReason.map(_.asString300),
                 )
@@ -458,7 +463,6 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       types: Seq[TopologyMapping.Code],
       filterUid: Option[NonEmpty[Seq[UniqueIdentifier]]],
       filterNamespace: Option[NonEmpty[Seq[Namespace]]],
-      pagination: Option[(Option[UniqueIdentifier], Int)] = None,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[NegativeStoredTopologyTransactions] =
     findTransactionsBatchingUidFilter(
       asOf,
@@ -468,7 +472,6 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       filterUid,
       filterNamespace,
       TopologyChangeOp.Remove.some,
-      pagination,
     ).map(_.collectOfType[TopologyChangeOp.Remove])
 
   override def findFirstSequencerStateForSequencer(sequencerId: SequencerId)(implicit
@@ -897,7 +900,7 @@ class DbTopologyStore[StoreId <: TopologyStoreId](
       filterUid: Option[NonEmpty[Seq[UniqueIdentifier]]],
       filterNamespace: Option[NonEmpty[Seq[Namespace]]],
       filterOp: Option[TopologyChangeOp],
-      pagination: Option[(Option[UniqueIdentifier], Int)],
+      pagination: Option[(Option[UniqueIdentifier], Int)] = None,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[GenericStoredTopologyTransactions] = {

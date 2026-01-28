@@ -20,7 +20,6 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{BatchAggregator, ErrorUtil}
 
-import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 
 class DbTrafficPurchasedStore(
@@ -46,7 +45,7 @@ class DbTrafficPurchasedStore(
       override def executeBatch(items: NonEmpty[Seq[Traced[TrafficPurchased]]])(implicit
           traceContext: TraceContext,
           callerCloseContext: CloseContext,
-      ): FutureUnlessShutdown[immutable.Iterable[Unit]] = {
+      ): FutureUnlessShutdown[Iterable[Unit]] = {
         val uniqueMembers = items.map(_.value.member).distinct
 
         for {

@@ -59,7 +59,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
   fakeIgnoringModule,
   fakeModuleExpectingSilence,
 }
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.TraceContext
 import org.scalatest.wordspec.AnyWordSpec
 
 import scala.util.Random
@@ -244,10 +244,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       // Store a block that will be sent by the serving node.
       val commitCert = aCommitCert()
       context.pipeToSelf(
-        epochStore.addOrderedBlockAtomically(
-          commitCert.prePrepare,
-          commitCert.commits.map(Traced(_)),
-        )
+        epochStore.addOrderedBlockAtomically(commitCert.prePrepare, commitCert.commits)
       )(
         _.map(_ => None).getOrElse(fail("Storing the pre-prepare failed"))
       )

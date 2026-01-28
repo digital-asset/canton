@@ -31,6 +31,7 @@ import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   v30,
 }
+import com.digitalasset.canton.resource.ToDbPrimitive
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -55,7 +56,6 @@ import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 import monocle.Lens
 import monocle.macros.GenLens
-import slick.jdbc.SetParameter
 
 import scala.annotation.nowarn
 import scala.math.Ordering.Implicits.*
@@ -81,9 +81,6 @@ sealed trait TopologyMapping extends Product with Serializable with PrettyPrinti
     * query results.
     */
   def maybeUid: Option[UniqueIdentifier]
-
-  /** The set of Uids referenced by this mapping */
-  def referencedUids: Set[UniqueIdentifier]
 
   /** Returns authorization information
     *
@@ -230,8 +227,7 @@ object TopologyMapping {
         .find(_.toProtoV30 == code)
         .toRight(UnrecognizedEnum("Enumis.TopologyMappingCode", code.value))
 
-    implicit val setParameterTopologyMappingCode: SetParameter[Code] =
-      (v, pp) => pp.setInt(v.dbInt)
+    implicit val topologyMappingCodeToDbPrimitive: ToDbPrimitive[Code, Int] = ToDbPrimitive(_.dbInt)
 
   }
 
@@ -518,8 +514,6 @@ final case class NamespaceDelegation private (
       restriction = restriction.toProtoV30,
     )
 
-  override def referencedUids: Set[UniqueIdentifier] = Set.empty
-
   def canSign(mappingsToSign: Code): Boolean =
     restriction.canSign(mappingsToSign)
 
@@ -677,7 +671,6 @@ final case class DecentralizedNamespaceDefinition private (
     )
 
   override def maybeUid: Option[UniqueIdentifier] = None
-  override def referencedUids: Set[UniqueIdentifier] = Set.empty
 
   override def restrictedToSynchronizer: Option[SynchronizerId] = None
 
@@ -826,7 +819,6 @@ final case class OwnerToKeyMapping private (
 
   override def namespace: Namespace = member.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(member.uid)
-  override def referencedUids: Set[UniqueIdentifier] = Set(member.uid)
 
   override def restrictedToSynchronizer: Option[SynchronizerId] = None
 
@@ -939,7 +931,6 @@ final case class PartyToKeyMapping private (
   override def namespace: Namespace = party.namespace
 
   override def maybeUid: Option[UniqueIdentifier] = Some(party.uid)
-  override def referencedUids: Set[UniqueIdentifier] = Set(party.uid)
 
   override def restrictedToSynchronizer: Option[SynchronizerId] = None
 
@@ -1055,7 +1046,6 @@ final case class SynchronizerTrustCertificate(
 
   override def namespace: Namespace = participantId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(participantId.uid)
-  override def referencedUids: Set[UniqueIdentifier] = Set(participantId.uid, synchronizerId.uid)
 
   override def restrictedToSynchronizer: Option[SynchronizerId] = Some(synchronizerId)
 
@@ -1243,7 +1233,6 @@ final case class ParticipantSynchronizerPermission(
 
   override def namespace: Namespace = participantId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(participantId.uid)
-  override def referencedUids: Set[UniqueIdentifier] = Set(participantId.uid, synchronizerId.uid)
 
   override def restrictedToSynchronizer: Option[SynchronizerId] = Some(synchronizerId)
 
@@ -1335,7 +1324,6 @@ final case class PartyHostingLimits(
 
   override def namespace: Namespace = partyId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(partyId.uid)
-  override def referencedUids: Set[UniqueIdentifier] = Set(partyId.uid, synchronizerId.uid)
 
   override def restrictedToSynchronizer: Option[SynchronizerId] = Some(synchronizerId)
 
@@ -1443,7 +1431,6 @@ final case class VettedPackages private (
 
   override def namespace: Namespace = participantId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(participantId.uid)
-  override def referencedUids: Set[UniqueIdentifier] = Set(participantId.uid)
 
   override def restrictedToSynchronizer: Option[SynchronizerId] = None
 
@@ -1612,8 +1599,7 @@ final case class PartyToParticipant private (
 
   override def namespace: Namespace = partyId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(partyId.uid)
-  override def referencedUids: Set[UniqueIdentifier] =
-    (partyId.uid +: participants.map(_.participantId.uid)).toSet
+
   override def restrictedToSynchronizer: Option[SynchronizerId] = None
 
   def participantIds: Seq[ParticipantId] = participants.map(_.participantId)
@@ -1846,7 +1832,7 @@ final case class SynchronizerParametersState(
 
   override def namespace: Namespace = synchronizerId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(synchronizerId.uid)
-  override def referencedUids: Set[UniqueIdentifier] = Set(synchronizerId.uid)
+
   override def restrictedToSynchronizer: Option[SynchronizerId] = Some(synchronizerId)
 
   override def requiredAuth(
@@ -1907,7 +1893,6 @@ final case class DynamicSequencingParametersState(
 
   override def namespace: Namespace = synchronizerId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(synchronizerId.uid)
-  override def referencedUids: Set[UniqueIdentifier] = Set(synchronizerId.uid)
 
   override def restrictedToSynchronizer: Option[SynchronizerId] = Some(synchronizerId)
 
@@ -1977,8 +1962,6 @@ final case class MediatorSynchronizerState private (
 
   override def namespace: Namespace = synchronizerId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(synchronizerId.uid)
-  override def referencedUids: Set[UniqueIdentifier] =
-    (synchronizerId.uid +: (active.map(_.uid) ++ observers.map(_.uid))).toSet
 
   override def restrictedToSynchronizer: Option[SynchronizerId] = Some(synchronizerId)
 
@@ -2080,8 +2063,7 @@ final case class SequencerSynchronizerState private (
 
   override def namespace: Namespace = synchronizerId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(synchronizerId.uid)
-  override def referencedUids: Set[UniqueIdentifier] =
-    (synchronizerId.uid +: (active.map(_.uid) ++ observers.map(_.uid))).toSet
+
   override def restrictedToSynchronizer: Option[SynchronizerId] = Some(synchronizerId)
 
   override def requiredAuth(
@@ -2168,7 +2150,7 @@ final case class SynchronizerUpgradeAnnouncement(
 
   override def namespace: Namespace = successorSynchronizerId.namespace
   override def maybeUid: Option[UniqueIdentifier] = Some(successorSynchronizerId.uid)
-  override def referencedUids: Set[UniqueIdentifier] = Set(successorSynchronizerId.uid)
+
   override def restrictedToSynchronizer: Option[SynchronizerId] = Some(
     successorSynchronizerId.logical
   )
@@ -2253,7 +2235,7 @@ final case class SequencerConnectionSuccessor(
   override def namespace: Namespace = sequencerId.namespace
 
   override def maybeUid: Option[UniqueIdentifier] = Some(sequencerId.uid)
-  override def referencedUids: Set[UniqueIdentifier] = Set(sequencerId.uid, synchronizerId.uid)
+
   override def requiredAuth(
       previous: Option[TopologyTransaction[TopologyChangeOp, TopologyMapping]]
   ): RequiredAuth = RequiredNamespaces(Set(namespace))

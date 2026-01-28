@@ -12,7 +12,7 @@ import com.digitalasset.canton.config.{
 }
 import com.digitalasset.canton.crypto.SynchronizerCrypto
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
-import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.config.UnsafeOnlinePartyReplicationConfig
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
@@ -121,7 +121,6 @@ class TopologyComponentFactory(
       topologyConfig: TopologyConfig
   )(implicit
       executionContext: ExecutionContext,
-      closeContext: CloseContext,
       materializer: Materializer,
   ): InitialTopologySnapshotValidator =
     new InitialTopologySnapshotValidator(
