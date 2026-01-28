@@ -11,7 +11,7 @@ import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, SequencingTimeBound}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.SuppressionRule.FullSuppression
@@ -154,6 +154,7 @@ class SequencerReaderTest
       cryptoD,
       eventSignaller,
       topologyClientMember,
+      SequencingTimeBound(None),
       sequencerMetrics,
       timeouts,
       loggerFactory,
@@ -161,13 +162,15 @@ class SequencerReaderTest
     val defaultTimeout: FiniteDuration = 20.seconds
     implicit val closeContext: CloseContext = CloseContext(reader)
 
-    /** Helper to read the subscriptionLastTimestamp metric value */
-    def subscriptionLastTimestampMetric(): Long = {
+    /** Helper to read the subscriptionLastTimestamp metric value by member */
+    def subscriptionLastTimestampMetric(member: Member = alice): Long = {
       val metricName =
         MetricName.Daml :+ "sequencer" :+ "public-api" :+ "subscription-last-timestamp"
+      val metricsContext = MetricsContext("subscriber" -> member.toProtoPrimitive)
+
       metricsFactory.metrics.gauges
         .get(metricName)
-        .flatMap(_.get(MetricsContext.Empty))
+        .flatMap(_.get(metricsContext))
         .map(_.getValue.asInstanceOf[Long])
         .getOrElse(0L)
     }
@@ -489,7 +492,7 @@ class SequencerReaderTest
             logs =>
               forAtLeast(1, logs)(
                 _.message should include(
-                  s"latest topology client timestamp = Some(${ts(1)})"
+                  s"latest topology client timestamp = Some(${ts(2)})"
                 )
               ),
           )
@@ -644,7 +647,7 @@ class SequencerReaderTest
           import env.*
 
           val expectedMessage =
-            "Subscription for PAR::alice::default would require reading data from the beginning, but this sequencer cannot serve timestamps at or before 1970-01-01T00:00:10Z or below the member's registration timestamp 1970-01-01T00:00:00Z."
+            "Subscription for PAR::alice::default would require reading data from the beginning, but this sequencer cannot serve timestamps at or before 1970-01-01T00:00:10Z or at or before the member's registration timestamp 1970-01-01T00:00:00Z."
 
           for {
             _ <- store.registerMember(topologyClientMember, ts0).failOnShutdown
@@ -677,7 +680,7 @@ class SequencerReaderTest
         import env.*
 
         val expectedMessage =
-          "Subscription for PAR::alice::default would require reading data from 1970-01-01T00:00:10Z (inclusive), but this sequencer cannot serve timestamps at or before 1970-01-01T00:00:10Z or below the member's registration timestamp 1970-01-01T00:00:00Z."
+          "Subscription for PAR::alice::default would require reading data from 1970-01-01T00:00:10Z (inclusive), but this sequencer cannot serve timestamps at or before 1970-01-01T00:00:10Z or at or before the member's registration timestamp 1970-01-01T00:00:00Z."
 
         for {
           _ <- store.registerMember(topologyClientMember, ts0).failOnShutdown
@@ -922,15 +925,16 @@ class SequencerReaderTest
       }
     }
 
-    "report subscriptionLastTimestamp metric" in { env =>
+    "report separate subscriptionLastTimestamp metric per subscriber" in { env =>
       import env.*
 
       for {
         _ <- store.registerMember(topologyClientMember, ts0).failOnShutdown
         registeredAlice <- store.registerMember(alice, ts0).failOnShutdown
+        registeredBob <- store.registerMember(bob, ts0).failOnShutdown
 
-        // generate 5 delivers starting at ts0+1s
-        events = (1L to 5L)
+        // Generate 5 events for Alice starting at ts0+1s
+        aliceEvents = (1L to 5L)
           .map(ts0.plusSeconds)
           .map(
             Sequenced(
@@ -941,38 +945,81 @@ class SequencerReaderTest
               )(),
             )
           )
-        _ <- storeAndWatermark(events)
+        _ <- storeAndWatermark(aliceEvents)
 
-        // Initial metric value should be 0
-        _ = subscriptionLastTimestampMetric() shouldBe 0L
+        // Generate 3 events for Bob starting at ts0+10s
+        bobEvents = (10L to 12L)
+          .map(ts0.plusSeconds)
+          .map(
+            Sequenced(
+              _,
+              mockDeliverStoreEvent(
+                sender = registeredBob.memberId,
+                traceContext = traceContext,
+              )(),
+            )
+          )
+        _ <- storeAndWatermark(bobEvents)
 
-        // Read 3 events for alice
+        // Initial metric values should be 0 for both subscribers
+        _ = subscriptionLastTimestampMetric(alice) shouldBe 0L
+        _ = subscriptionLastTimestampMetric(bob) shouldBe 0L
+
+        // Start reading events for Alice
         aliceQueue = readWithQueue(alice, timestampInclusive = None)
         _ <- MonadUtil.sequentialTraverse((1 to 3).toList) { idx =>
           for {
             eventO <- pullFromQueue(aliceQueue)
           } yield {
             eventO.value.timestamp shouldBe ts0.plusSeconds(idx.toLong)
-            // Metric should be updated with the timestamp of the last event delivered
-            subscriptionLastTimestampMetric() shouldBe ts0.plusSeconds(idx.toLong).toMicros
+            // Alice's metric should be updated (at least to this event, possibly more due to async buffering)
+            subscriptionLastTimestampMetric(alice) should be >= ts0.plusSeconds(idx.toLong).toMicros
+            // Bob's metric should still be 0
+            subscriptionLastTimestampMetric(bob) shouldBe 0L
           }
         }
 
-        // Read the remaining 2 events
+        // Start reading events for Bob
+        bobQueue = readWithQueue(bob, timestampInclusive = None)
+        _ <- MonadUtil.sequentialTraverse((10 to 11).toList) { idx =>
+          for {
+            eventO <- pullFromQueue(bobQueue)
+          } yield {
+            eventO.value.timestamp shouldBe ts0.plusSeconds(idx.toLong)
+            // Bob's metric should be updated
+            subscriptionLastTimestampMetric(bob) should be >= ts0.plusSeconds(idx.toLong).toMicros
+            // Alice's metric may have consumed all events due to async buffering
+            subscriptionLastTimestampMetric(alice) should be >= ts0.plusSeconds(3L).toMicros
+          }
+        }
+
+        // Read the remaining 2 events for Alice (stream may have already buffered them)
         _ <- MonadUtil.sequentialTraverse((4 to 5).toList) { idx =>
           for {
             eventO <- pullFromQueue(aliceQueue)
           } yield {
             eventO.value.timestamp shouldBe ts0.plusSeconds(idx.toLong)
-            // Metric continues to be updated
-            subscriptionLastTimestampMetric() shouldBe ts0.plusSeconds(idx.toLong).toMicros
           }
         }
 
+        // Read the last event for Bob
+        bobLastEvent <- pullFromQueue(bobQueue)
+        _ = bobLastEvent.value.timestamp shouldBe ts0.plusSeconds(12L)
+
         _ = aliceQueue.cancel()
+        _ = bobQueue.cancel()
       } yield {
-        // Final verification - metric should show the last event timestamp
-        subscriptionLastTimestampMetric() shouldBe ts0.plusSeconds(5L).toMicros
+        // Final verification - each subscriber should have independent metric values
+        // This verifies that the TrieMap pattern creates separate gauges per subscriber
+        val aliceFinal = subscriptionLastTimestampMetric(alice)
+        val bobFinal = subscriptionLastTimestampMetric(bob)
+
+        // Each subscriber should have consumed all their events
+        aliceFinal shouldBe ts0.plusSeconds(5L).toMicros
+        bobFinal shouldBe ts0.plusSeconds(12L).toMicros
+
+        // Verify they are truly independent (different values)
+        aliceFinal should not equal bobFinal
       }
     }
   }

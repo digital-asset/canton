@@ -161,6 +161,7 @@ subtrees:
                       - file: howtos/operate/parties/parties
                       - file: howtos/operate/parties/party_replication
                       - file: howtos/operate/parties/decentralized_parties
+                      - file: howtos/operate/parties/multi-sig-in-canton
                       - file: howtos/operate/parties/external_parties
                       - file: howtos/operate/users/users
                       - file: howtos/operate/traffic/node_traffic

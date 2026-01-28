@@ -203,6 +203,7 @@ object Dependencies {
 
   lazy val scalatest_compatible = resolveDependency("org.scalatest", "scalatest-compatible")
   lazy val scalatest_wordspec = resolveDependency("org.scalatest", "scalatest-wordspec_2.13")
+  lazy val scalatest_flatspec = resolveDependency("org.scalatest", "scalatest-flatspec_2.13")
   lazy val scalatest_shouldmatchers =
     resolveDependency("org.scalatest", "scalatest-shouldmatchers_2.13")
 
@@ -466,4 +467,6 @@ object Dependencies {
   lazy val scalapb_json4s = resolveDependency("com.thesamet.scalapb", "scalapb-json4s")
 
   lazy val scalameter = resolveDependency("com.storm-enroute", "scalameter")
+
+  lazy val jol_core = resolveDependency("org.openjdk.jol", "jol-core")
 }

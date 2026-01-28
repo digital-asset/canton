@@ -600,6 +600,8 @@ object BaseTest {
     case object MultiPartySubmission extends UnsupportedExternalPartyTest
     // TODO(i29530): Support multi root node submissions for external parties
     case object MultiRootNodeSubmission extends UnsupportedExternalPartyTest
+    // TODO(i30256): Synchronizer routing for external parties
+    case object MultiSynchronizerParties extends UnsupportedExternalPartyTest
   }
 
   lazy val testedProtocolVersion: ProtocolVersion = ProtocolVersion.forSynchronizer
