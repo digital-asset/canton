@@ -1,3 +1,0 @@
-[submodule "daml"]
-	path = daml
-	url = git@github.com:digital-asset/daml.git
