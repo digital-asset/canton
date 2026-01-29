@@ -39,7 +39,6 @@ object Dependencies {
   lazy val awaitility_version = "4.2.0"
   lazy val aws_version = "2.41.1"
   lazy val better_files_version = "3.9.2"
-  lazy val bouncy_castle_version = "1.70"
   lazy val cats_law_version = "2.9.0"
   lazy val cats_scalacheck_version = "0.3.2"
   lazy val cats_version = "2.9.0"
@@ -129,10 +128,10 @@ object Dependencies {
   lazy val scalapb_runtime_grpc =
     "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion
 
-  lazy val bouncycastle_bcprov_jdk15on =
-    "org.bouncycastle" % "bcprov-jdk15on" % bouncy_castle_version
-  lazy val bouncycastle_bcpkix_jdk15on =
-    "org.bouncycastle" % "bcpkix-jdk15on" % bouncy_castle_version
+  lazy val bouncycastle_bcprov =
+    resolveDependency("org.bouncycastle", "bcprov-jdk18on")
+  lazy val bouncycastle_bcpkix =
+    resolveDependency("org.bouncycastle", "bcpkix-jdk18on")
 
   lazy val javax_annotations =
     "javax.annotation" % "javax.annotation-api" % javax_annotations_version
