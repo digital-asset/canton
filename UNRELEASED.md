@@ -14,6 +14,10 @@ Template for a bigger topic
 #### Specific Changes
 #### Impact and Migration
 
+### Update to bouncy castle 1.83
+
+fixes CVE-2024-29857 and CVE-2024-34447
+
 ### Minor Improvements
 * Added support for adding table settings for PostgreSQL. One can use a repeatable migration (Flyway feature) in a file
   provided to Canton externally.

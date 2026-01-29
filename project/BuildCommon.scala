@@ -472,6 +472,7 @@ object BuildCommon {
     case PathList("META-INF", "FastDoubleParser-NOTICE") => MergeStrategy.first
     // complains about okio.kotlin_module clash
     case PathList("META-INF", "okio.kotlin_module") => MergeStrategy.last
+    case path if path.endsWith("/OSGI-INF/MANIFEST.MF") => MergeStrategy.first
     case x => oldStrategy(x)
   }
 
@@ -892,8 +893,8 @@ object BuildCommon {
           daml_rs_grpc_bridge,
           daml_rs_grpc_pekko,
           better_files,
-          bouncycastle_bcpkix_jdk15on,
-          bouncycastle_bcprov_jdk15on,
+          bouncycastle_bcpkix,
+          bouncycastle_bcprov,
           cats,
           chimney,
           chimneyJavaConversion,
@@ -1347,8 +1348,8 @@ object BuildCommon {
       .settings(
         sharedSettings,
         libraryDependencies ++= Seq(
-          bouncycastle_bcprov_jdk15on,
-          bouncycastle_bcpkix_jdk15on,
+          bouncycastle_bcprov,
+          bouncycastle_bcpkix,
         ),
         // Exclude to apply our license header to any Java files
         headerSources / excludeFilter := "*.java",
