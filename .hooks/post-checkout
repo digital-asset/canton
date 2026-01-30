@@ -1,5 +1,0 @@
-#!/bin/bash
-
-echo "updating daml submodule"
-git submodule update daml
-
