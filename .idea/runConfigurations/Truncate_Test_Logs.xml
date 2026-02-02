@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Truncate Test Logs" type="SbtRunConfiguration" factoryName="sbt Task" activateToolWindowBeforeRun="false" show_console_on_std_err="false" show_console_on_std_out="false">
+    <option name="allowRunningInParallel" value="false" />
+    <option name="tasks" value="truncateTestLogs" />
+    <option name="useSbtShell" value="true" />
+    <option name="vmparams" value="-Xms512M -Xmx1024M -Xss1M -XX:+CMSClassUnloadingEnabled" />
+    <option name="workingDir" value="$PROJECT_DIR$" />
+    <method v="2" />
+  </configuration>
+</component>

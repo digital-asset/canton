@@ -1,0 +1,28 @@
+# Canton Build Dockerfile
+FROM cimg/base:current
+
+USER root
+# Build arguments
+ARG DAML_VERSION
+ARG DAML_LANGUAGE_VERSION
+ARG NIX_VERSION=2.24.12
+ENV DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC LC_ALL="C.UTF-8" TERM=dumb
+COPY --chown=circleci:circleci ./nix.tar /tmp/
+RUN sed -i 's/GSSAPIAuthentication.*//g' /etc/ssh/ssh_config \
+  && rm -rf /var/lib/apt/lists/* rm -rf /usr/share/doc/* \
+  && mkdir -m 0755 /nix && chown circleci:circleci /nix
+
+USER circleci
+SHELL ["/bin/bash", "-ol", "pipefail", "-c"]
+RUN sh <(curl -fsSL https://releases.nixos.org/nix/nix-${NIX_VERSION}/install) --no-channel-add \
+    && . /home/circleci/.nix-profile/etc/profile.d/nix.sh \
+    && /home/circleci/.nix-profile/bin/nix-collect-garbage --delete-old \
+    && printf 'if [ -d /home/circleci/.nix-profile/etc/profile.d ]; then\n for i in /home/circleci/.nix-profile/etc/profile.d/*.sh; do\n if [ -r $i ]; then\n . $i\n fi\n done\n fi\n' >> /home/circleci/.profile \
+    && printf 'export PATH=${HOME}/.nix-profile/bin:${HOME}/bin:$PATH' >> /home/circleci/.profile
+
+ENV ENV="/etc/profile" HOME="/home/circleci" USER="circleci" LC_ALL="C.UTF-8" \
+  PATH="/home/circleci/bin:/home/circleci/.nix-profile/bin:/home/circleci/.nix-profile/sbin:/home/circleci/.local/bin:/nix/var/nix/profiles/default/bin:/nix/var/nix/profiles/default/sbin:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
+WORKDIR /tmp
+RUN tar xf nix.tar && rm /tmp/nix.tar && bash -xe /tmp/setup-docker-build-container.sh
+
+WORKDIR /home/circleci/project

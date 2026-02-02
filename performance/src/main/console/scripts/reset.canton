@@ -1,0 +1,38 @@
+import com.digitalasset.canton.performance.Connectivity
+import com.digitalasset.canton.performance.model.java => M
+import com.digitalasset.canton.admin.api.client.data.TemplateId.templateIdsFromJava
+
+import scala.jdk.CollectionConverters._
+
+val batchSize = 100
+
+Seq(participant3,participant2,participant1).foreach { participant =>
+    participant.parties.hosted(filterParty="Trader").foreach { party =>
+       val p1 = party.party
+       participant.ledger_api.acs.of_party(p1, filterTemplates = templateIdsFromJava(M.generator.Generator.TEMPLATE_ID)).foreach { gen =>
+          participant.ledger_api.commands.submit_async(Seq(p1), Seq(ledger_api_utils.exercise("Archive", Map(), gen.event)))
+       }
+       participant.ledger_api.javaapi.commands.submit_async(Seq(p1), new M.generator.Generator(p1.toPrim, Seq()).create.commands.asScala.toSeq)
+       participant.ledger_api.acs.of_party(party.party, filterTemplates = templateIdsFromJava(M.dvp.asset.AssetTransfer.TEMPLATE_ID)).grouped(batchSize).foreach { res =>
+         val items = res.toSeq
+         println(s"archiving transfer ${items.length} for ${p1} ")
+         val cmds = items.map(res => ledger_api_utils.exercise("GarbageCollectTransfer", Map("party" -> p1), res.event))
+         participant.ledger_api.commands.submit_async(Seq(p1), cmds)
+       }
+       participant.ledger_api.acs.of_party(party.party, filterTemplates = templateIdsFromJava(M.dvp.asset.Asset.TEMPLATE_ID)).grouped(batchSize).foreach { res =>
+         val items = res.toSeq
+         val cmds = items.filter(_.arguments("owner") == p1.filterString).map(res => ledger_api_utils.exercise("GarbageCollectAsset", Map("party" -> p1), res.event))
+         println(s"archiving asset ${cmds.length}/${items.length} for ${p1} ")
+         if(cmds.nonEmpty) {
+             participant.ledger_api.commands.submit_async(Seq(p1), cmds)
+         }
+       }
+       participant.ledger_api.acs.of_party(party.party, filterTemplates = templateIdsFromJava(M.dvp.trade.Propose.TEMPLATE_ID)).grouped(batchSize).foreach { res =>
+         val items = res.toSeq
+         println(s"archiving propose ${items.length} for ${p1} ")
+         val cmds = items.map(res => ledger_api_utils.exercise("GarbageCollectPropose", Map("party" -> p1), res.event))
+         participant.ledger_api.commands.submit_async(Seq(p1), cmds)
+       }
+    }
+}
+

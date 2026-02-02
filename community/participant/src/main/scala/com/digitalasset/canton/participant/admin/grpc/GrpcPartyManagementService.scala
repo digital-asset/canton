@@ -506,7 +506,6 @@ class GrpcPartyManagementService(
   ): StreamObserver[ImportPartyAcsRequest] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
-    // TODO(#23818): This buffer will contain the whole ACS snapshot.
     val outputStream = new ByteArrayOutputStream()
 
     // TODO(#24610): Deduplicate ImportArgs setting with logic from `ParticipantRepairService.ImportAcs`

@@ -1,0 +1,469 @@
+when:
+  and:
+   - not: << pipeline.parameters.test_to_run_many_times >>
+   - equal: [ "none", << pipeline.parameters.manual_job >>]
+max_auto_reruns: 1
+
+jobs:
+##### The required jobs to build canton
+  - compile:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      filters:
+        tags:
+          only: /^v.*/
+  - package_community:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      is_nightly_workflow: false
+      is_manual: false
+      filters:
+        tags:
+          only: /^v.*/
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+  - package_sequencer_driver_api:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      is_nightly_workflow: false
+      is_manual: false
+      filters:
+        tags:
+          only: /^v.*/
+        branches:
+          only:
+            - main
+            - /^release-line.*/
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+  - package_jsonapi:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      is_nightly_workflow: false
+      is_manual: false
+      filters:
+        tags:
+          only: /^v.*/
+        branches:
+          only:
+            - main
+            - /^release-line.*/
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+  - assembly_ledger_api_test_tool:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      is_nightly_workflow: false
+      is_manual: false
+      filters:
+        tags:
+          only: /^v.*/
+        branches:
+          only:
+            - main
+            - /^release-line.*/
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+  - package_kms_driver:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      is_nightly_workflow: false
+      is_manual: false
+      filters:
+        tags:
+          only: /^v.*/
+        branches:
+          only:
+            - main
+            - /^release-line.*/
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+
+##### Static analysis
+  - verify_circleci_config_and_compliance_label:
+      filters:
+        branches:
+          ignore:
+            - main
+            - /^release-line.*/
+        tags:
+          only: /^v.*/
+  - static_tests:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+  - protobuf_continuity:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      requires:
+        - compile
+  - blackduck:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - blackduck
+      filters:
+        branches:
+          only: /^blackduck.*/
+  - build_systematic_testing_inventory:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+      filters:
+        tags:
+          only: /^v.*/
+        branches:
+          only:
+            - main
+            - /^release-line.*/
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+
+##### Build documentation
+  - build_scaladoc:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      filters:
+        tags:
+          only: /^v.*/
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+  - build_docs:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      filters:
+        tags:
+          only: /^v.*/
+      requires:
+        - package_community
+        - build_scaladoc
+
+##### Tests
+  - test:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      filters:
+        tags:
+          only: /^v.*/
+      test_scala3_migration: true
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+  - test:
+      name: test_protocol_version_35
+      protocol_version: "35"
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      requires:
+        - compile
+  - test:
+      name: test_protocol_version_dev
+      protocol_version: "DEV"
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      filters:
+        branches:
+          only:
+            - main
+            - /^release-line.*/
+        tags:
+          only: /^v.*/
+      requires:
+        - test_protocol_version_35
+  - unstable_test:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      filters:
+        branches:
+          only:
+            - main
+            - /^release-line.*/
+        tags:
+          only: /^v.*/
+      requires:
+        - package_community # optional dependency, introduced to save credits in case of compile errors
+  - variations_test:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      filters:
+        tags:
+          only: /^v.*/
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+# TODO(#16458) enable this test after the first release of Canton 3
+#  - protocol_continuity_test_latest:
+#      context:
+#        - datadog
+#        - artifactory
+#        - aws_kms_testing
+#        - gcp_kms_testing
+#      filters:
+#        tags:
+#          only: /^v.*/
+#      requires:
+#        - compile # optional dependency, introduced to save credits in case of compile errors
+  - scalafix:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      filters:
+        tags:
+          only: /^v.*/
+      requires:
+        - compile
+  - sequential_test:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      filters:
+        tags:
+          only: /^v.*/
+        branches:
+          only:
+            - main
+            - /^release-line.*/
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+        - test # depend on test job to execute the big test jobs sequentially
+  - crash_recovery_test:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      filters:
+        tags:
+          only: /^v.*/
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+  - release_test:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      is_nightly_workflow: false
+      is_manual: false
+      filters:
+        tags:
+          only: /^v.*/
+        branches:
+          only:
+            - main
+            - /^release-line.*/
+      requires:
+        - package_community
+        - package_kms_driver
+  - toxiproxy_test_fast:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      filters:
+        tags:
+          only: /^v.*/
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+
+##### Release
+  - tag_new_releases:
+      filters:
+        branches:
+          # tag new releases, both on release branches and on main
+          only:
+            - main
+            - /release-line-.*/
+  - publish_libraries:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - gpg-signing
+        - maven-mirror
+        - maven-publish
+        - da-images
+      is_nightly_workflow: false
+      is_manual: false
+      requires:
+        - compile
+        - tag_new_releases
+      filters:
+        tags:
+          only: /^v.*/
+        branches:
+          only:
+            - main
+  - publish_release:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      is_nightly_workflow: false
+      is_manual: false
+      requires:
+        - package_community
+        - package_sequencer_driver_api
+        - package_jsonapi
+        - package_kms_driver
+        - assembly_ledger_api_test_tool
+        - build_scaladoc
+        - compile
+        - tag_new_releases
+        - build_systematic_testing_inventory
+      filters:
+        tags:
+          only: /^v.*/
+        branches:
+          only:
+            - main
+  - run_propose_script:
+      name: Update main after release
+      script_argument: "finish_release_process"
+      requires:
+        - publish_libraries
+        - publish_release
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      filters:
+        tags:
+          only: /^v.*/
+        branches:
+          ignore: /.*/   # Do not run on normal commit pushes to branches
+
+### for release-lines we want to run data continuity tests as part of the continuous integration
+  - test_data_continuity_dumps:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      requires:
+        - compile
+
+## Generate and publish data continuity dumps for the releases (will only run within tag's "create" workflow)
+  - generate_data_continuity_dumps:
+      context:
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      is_nightly_workflow: false
+      is_manual: false
+      requires:
+        - compile
+      filters:
+        tags:
+          only: /^v.*/
+        branches:
+          ignore: /.*/   # Do not run on normal commit pushes to branches
+
+  - build_and_publish_docker:
+      context:
+        - da-images
+      is_nightly_workflow: false
+      is_manual: false
+      requires:
+        - package_community
+      filters:
+        tags:
+          only: /^v.*/
+        branches:
+          ignore: /.*/   # Do not run on normal commit pushes to branches

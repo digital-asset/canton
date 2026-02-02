@@ -5,7 +5,7 @@ package com.digitalasset.canton.integration
 
 import com.daml.ledger.javaapi.data.Event
 import com.digitalasset.canton.console.{BufferedProcessLogger, CommandFailure, ParticipantReference}
-import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.{
   BaseTest,
@@ -17,7 +17,6 @@ import org.scalactic.source
 import org.scalactic.source.Position
 import org.scalatest.wordspec.FixtureAnyWordSpec
 import org.scalatest.{Assertion, ConfigMap, Outcome}
-import org.slf4j.event.Level.WARN
 
 import scala.collection.immutable
 import scala.jdk.CollectionConverters.*
@@ -117,15 +116,6 @@ private[integration] trait BaseIntegrationTest
         entry.commandFailureMessage
         succeed
       } *,
-    )
-
-  def suppressPackageIdWarning[A](within: => A): A =
-    loggerFactory.assertLogsSeq(SuppressionRule.Level(WARN))(
-      within,
-      entries =>
-        forAtLeast(1, entries) { e =>
-          e.warningMessage should (include regex "Received an identifier with package ID .*, but expected a package name.")
-        },
     )
 
   /** Similar to [[com.digitalasset.canton.console.commands.ParticipantAdministration#ping]] But

@@ -1,0 +1,169 @@
+package_community:
+  executor: canton-medium-docker
+  parameters:
+    is_nightly_workflow:
+      type: boolean
+    is_manual:
+      type: boolean
+  steps:
+    - checkout:
+        method: blobless
+    - obtain_release_suffix:
+        is_nightly_workflow: << parameters.is_nightly_workflow >>
+        is_manual: << parameters.is_manual >>
+    - package:
+        cmd: "performance-driver/package performance/package community-app/bundle"
+        location: "community/app/target/release"
+    - run:
+        name: "Package performance runner"
+        command: |
+          performance/bundle-performance.sh
+    - run:
+        name: "Remember version info"
+        command: |
+          set -eo pipefail
+          . scripts/daml.sh
+          DAML_VERSION=$(fetch_daml_version $PWD)
+          GIT_SHA=$(git rev-parse HEAD)
+          echo "daml_version=$DAML_VERSION sha=$GIT_SHA" | tee info.properties
+    - persist_to_workspace:
+        root: .
+        paths:
+          - canton-performance.tar.gz
+          - info.properties
+    - cleanup_build_job
+
+package_jsonapi:
+  executor: canton-medium-docker
+  parameters:
+    is_nightly_workflow:
+      type: boolean
+    is_manual:
+      type: boolean
+  steps:
+    - checkout:
+        method: blobless
+    - obtain_release_suffix:
+        is_nightly_workflow: << parameters.is_nightly_workflow >>
+        is_manual: << parameters.is_manual >>
+    - package:
+        cmd: "packageJsonApiDocsArtifacts"
+        location: "./target"
+        artifact_suffix: ".tar.gz"
+    - cleanup_build_job
+
+package_sequencer_driver_api:
+  executor: canton-medium-docker
+  parameters:
+    is_nightly_workflow:
+      type: boolean
+    is_manual:
+      type: boolean
+  steps:
+    - checkout:
+        method: blobless
+    - obtain_release_suffix:
+        is_nightly_workflow: << parameters.is_nightly_workflow >>
+        is_manual: << parameters.is_manual >>
+    # Package `sequencer-driver-lib` and `sequencer-driver-api-conformance-tests` jars, and make pom files.
+    - package:
+        cmd: "sequencer-driver-lib/package sequencer-driver-lib/packageSrc sequencer-driver-lib/packageDoc sequencer-driver-lib/makePom"
+        location: "sequencer-driver-lib/target/scala-2.13"
+        artifact_suffix: ".{jar,pom}"
+    - package:
+        cmd: "sequencer-driver-api-conformance-tests/package sequencer-driver-api-conformance-tests/packageSrc sequencer-driver-api-conformance-tests/packageDoc sequencer-driver-api-conformance-tests/makePom"
+        location: "community/sequencer-driver-api-conformance-tests/target/scala-2.13"
+        artifact_suffix: ".{jar,pom}"
+    - package:
+        cmd: "community-integration-testing-lib/package community-integration-testing-lib/packageSrc community-integration-testing-lib/packageDoc community-integration-testing-lib/makePom"
+        location: "community-integration-testing-lib/target/scala-2.13"
+        artifact_suffix: ".{jar,pom}"
+    - cleanup_build_job
+
+assembly_ledger_api_test_tool:
+  executor: canton-medium-docker
+  parameters:
+    is_nightly_workflow:
+      type: boolean
+    is_manual:
+      type: boolean
+  steps:
+    - checkout:
+        method: blobless
+    - obtain_release_suffix:
+        is_nightly_workflow: << parameters.is_nightly_workflow >>
+        is_manual: << parameters.is_manual >>
+    # Generate ledger-api-test-tool jars.
+    - package:
+        cmd: "ledger-test-tool-2-dev/assembly"
+        location: "community/ledger-test-tool/tool/lf-v2.dev/target/scala-2.13"
+        artifact_suffix: ".jar"
+    - package:
+        cmd: "ledger-test-tool-2-1/assembly"
+        location: "community/ledger-test-tool/tool/lf-v2.1/target/scala-2.13"
+        artifact_suffix: ".jar"
+    - cleanup_build_job
+
+package_kms_driver:
+  executor: canton-medium-docker
+  parameters:
+    is_nightly_workflow:
+      type: boolean
+    is_manual:
+      type: boolean
+  steps:
+    - checkout:
+        method: blobless
+    - obtain_release_suffix:
+        is_nightly_workflow: << parameters.is_nightly_workflow >>
+        is_manual: << parameters.is_manual >>
+    - package:
+        cmd: "kms-driver-api/package kms-driver-api/packageSrc kms-driver-api/packageDoc kms-driver-api/makePom"
+        location: "community/kms-driver-api/target/scala-2.13"
+        artifact_suffix: ".{jar,pom}"
+    - package:
+        cmd: "kms-driver-testing-lib/package kms-driver-testing-lib/packageSrc kms-driver-testing-lib/packageDoc kms-driver-testing-lib/makePom"
+        location: "kms-driver-testing-lib/target/scala-2.13"
+        artifact_suffix: ".{jar,pom}"
+    - package:
+        cmd: "aws-kms-driver/assembly aws-kms-driver/packageSrc aws-kms-driver/packageDoc aws-kms-driver/makePom"
+        location: "community/aws-kms-driver/target/scala-2.13"
+        artifact_suffix: ".{jar,pom}"
+    - package:
+        cmd: "mock-kms-driver/package mock-kms-driver/packageSrc mock-kms-driver/packageDoc mock-kms-driver/makePom"
+        location: "community/mock-kms-driver/target/scala-2.13"
+        artifact_suffix: ".{jar,pom}"
+    - cleanup_build_job
+
+package_sandbox:
+  executor: canton-medium-docker
+  parameters:
+    is_nightly_workflow:
+      type: boolean
+    is_manual:
+      type: boolean
+  steps:
+    - checkout:
+        method: blobless
+    - obtain_release_suffix:
+        is_nightly_workflow: << parameters.is_nightly_workflow >>
+        is_manual: << parameters.is_manual >>
+    - package:
+        cmd: "community-app/bundle"
+        location: "community/app/target/release"
+        artifact_suffix: ".{zip,tar.gz}"
+    - run:
+        name: Upload artifact to JFROG
+        command: |
+          cd tmp-release || exit 1
+          for i in $(find . -type f | sed 's|//|/|g;s/\.\///g'); do
+            ../scripts/ci/publish-to-jfrog.sh -r generic-sandbox ${i} ${@} || exit ${?}
+          done
+    - run:
+        name: Delete artifact from JFROG
+        command: |
+          cd tmp-release || exit 1
+          for i in $(find . -type f | sed 's|//|/|g;s/\.\///g'); do
+            ../scripts/ci/publish-to-jfrog.sh -r generic-sandbox -D ${i} ${@} || exit ${?}
+          done
+    - cleanup_build_job

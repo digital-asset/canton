@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Canton Simple Topology" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="com.digitalasset.canton.CantonCommunityApp" />
+    <module name="canton.community-app.main" />
+    <option name="PROGRAM_PARAMETERS" value="-v --no-tty -c community/app/src/pack/examples/01-simple-topology/simple-topology.conf --bootstrap community/app/src/pack/examples/01-simple-topology/simple-ping.canton" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

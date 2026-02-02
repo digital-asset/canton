@@ -1,0 +1,47 @@
+triggers:
+  - schedule:
+      cron: "15 22 * * *"
+      filters:
+        branches:
+          only:
+            - main
+
+jobs:
+  - compile:
+      context:
+      - datadog
+      - artifactory
+      - azure-self-cache
+      - maven-mirror
+      - da-images
+  - package_community:
+      context:
+      - datadog
+      - artifactory
+      - azure-self-cache
+      - maven-mirror
+      - da-images
+      is_nightly_workflow: false
+      is_manual: false
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+  - build_scaladoc:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+  - replicate_docs:
+      env: prod
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      requires:
+        - package_community
+        - build_scaladoc

@@ -1,0 +1,161 @@
+tag_new_releases:
+  executor: canton-small-docker
+  steps:
+    - checkout:
+        method: blobless
+    - authorize_git
+    - run:
+        name: Tag new releases
+        command: release/tag-new-releases.sh
+    - slack_red_main_with_volunteer
+
+publish_libraries:
+  environment:
+    GOOGLE_ARTIFACT_REGISTRY: europe-maven.pkg.dev/da-images/public-maven-unstable
+  executor: canton-xlarge-docker
+  parameters:
+    is_nightly_workflow:
+      type: boolean
+    is_manual:
+      type: boolean
+  steps:
+    - checkout_and_restore_caches
+    - obtain_release_suffix:
+        is_nightly_workflow: << parameters.is_nightly_workflow >>
+        is_manual: << parameters.is_manual >>
+    - track_cpu_and_memory
+    - publish_libs_to_google_artifact_registry
+    - publish_libs_to_maven_central
+    - slack_red_main_with_volunteer
+
+publish_release:
+  environment:
+    OCI_REGISTRY: europe-docker.pkg.dev
+  executor: canton-large-docker-on-cci
+  parameters:
+    is_nightly_workflow:
+      type: boolean
+    is_manual:
+      type: boolean
+  steps:
+    - attach_workspace:
+        at: /tmp/workspace
+    - checkout:
+        method: blobless
+    - obtain_release_suffix:
+        is_nightly_workflow: << parameters.is_nightly_workflow >>
+        is_manual: << parameters.is_manual >>
+    - publish_release_on_s3
+    - publish_release_on_artifactory:
+        nightly_release: << parameters.is_nightly_workflow >>
+    - publish_release_on_oci_registry:
+        nightly_release: << parameters.is_nightly_workflow >>
+    - run:
+        name: Publish to GitHub releases
+        command: nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "scripts/ci/publish-to-github.sh"
+    - slack_red_main_with_volunteer
+
+build_and_publish_docker:
+  environment:
+    OCI_REGISTRY: europe-docker.pkg.dev
+  executor: canton-large-docker-on-cci
+  parameters:
+    is_nightly_workflow:
+      type: boolean
+    is_manual:
+      type: boolean
+  steps:
+    - attach_workspace:
+        at: /tmp/workspace
+    - checkout:
+        method: blobless
+    - obtain_release_suffix:
+        is_nightly_workflow: << parameters.is_nightly_workflow >>
+        is_manual: << parameters.is_manual >>
+    - setup_remote_docker
+    - build_and_publish_docker_base_image:
+        nightly_release: << parameters.is_nightly_workflow >>
+    - slack_red_main_with_volunteer
+
+publish_canton_open_source_code_drop:
+  parameters:
+    enforce_date:
+      type: boolean
+      default: true
+  executor: canton-xlarge-docker-with-postgres
+  steps:
+    - when:
+        condition: << parameters.enforce_date >>
+        steps:
+          - run:
+              name: Ensure we only sync on Tuesday (as this will become the public weekly snapshot release)
+              command: |
+                if [[ $(date +"%u") -ne 2 ]]; then
+                  # https://support.circleci.com/hc/en-us/articles/360015562253-Conditionally-end-a-running-job-gracefully
+                  circleci-agent step halt
+                fi
+    - checkout: # to get canton private repo code
+        method: blobless
+    - restore_sbt_cache
+    - track_cpu_and_memory
+    - limit_parallel_test_execution
+    - run:
+        name: Pull request of unit-tested canton-community code drop
+        no_output_timeout: 30m
+        command: |
+          export NIX_SSL_CERT_FILE="$(ls -1  /nix/store/*-nss-cacert-*/etc/ssl/certs/ca-bundle.crt)"
+          .ci/nix-exec release/propose-open-source-code-drop.sh \
+                         -t "$GITHUB_TOKEN" \
+                         -c "$EXECUTOR_NUM_CPUS" \
+                         -m "$EXECUTOR_JVM_HEAP_SIZE" \
+                         -s "$EXECUTOR_JVM_METASPACE_SIZE"
+    - slack/notify:
+        message: 'Open-source PR to be merged at https://github.com/digital-asset/canton/pulls/canton-machine'
+        webhook: $SLACK_WEBHOOK_TEAM_CANTON_INTERNAL
+    - store_artifacts:
+        name: Store test logs as artifacts
+        path: public-log/
+        when: always
+        destination: log/
+    - slack_red_main_with_volunteer
+
+run_propose_script:
+  executor: canton-large-docker-on-cci
+  parameters:
+    script_argument:
+      type: string
+      default: ""
+  steps:
+    - checkout_and_restore_caches
+    - authorize_git
+    - setup_dockerhub
+    - setup_docker_engine
+    - run:
+        name: Invoke propose.sh script for release step
+        no_output_timeout: "60m"
+        command: |
+          set +eo pipefail
+          # Setup heap size
+          JAVA_OPTS="$JAVA_OPTS -Xmx$EXECUTOR_JVM_HEAP_SIZE -Xms$EXECUTOR_JVM_HEAP_SIZE -XX:+UseG1GC"
+          # Setup metaspace
+          JAVA_OPTS="$JAVA_OPTS -XX:MaxMetaspaceSize=$EXECUTOR_JVM_METASPACE_SIZE"
+          export SBT_OPTS="-Xmx$EXECUTOR_JVM_HEAP_SIZE"
+          nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "./release/propose.sh << parameters.script_argument >>"
+    - slack_red_main_with_volunteer
+
+publish_release_to_jfrog:
+  executor: canton-small-docker
+  parameters:
+    is_nightly_workflow:
+      type: boolean
+    is_manual:
+      type: boolean
+  steps:
+    - attach_workspace:
+        at: /tmp/workspace
+    - checkout:
+        method: blobless
+    - restore_packaged_release:
+        location: tmp-release
+    - publish_sandbox_to_jfrog
+    - slack_red_main_with_volunteer

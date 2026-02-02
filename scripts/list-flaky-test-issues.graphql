@@ -1,0 +1,15 @@
+{
+  repository(owner: "DACH-NY", name: "canton") {
+    milestone(number: 31) {
+      issues(first: 200, states: [OPEN]) {
+        nodes {
+          ... on Issue {
+            title
+            number
+            body
+          }
+        }
+      }
+    }
+  }
+}

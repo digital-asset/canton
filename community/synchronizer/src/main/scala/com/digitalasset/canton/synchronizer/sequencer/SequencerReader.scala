@@ -990,6 +990,7 @@ object SequencerReader {
     private lazy val postUpgradeTimeOffset: AtomicReference[Option[NonNegativeFiniteDuration]] =
       new AtomicReference(None)
 
+    @nowarn("cat=deprecation")
     def computeAndCacheTimeOffset(
         syncCrypto: SyncCryptoClient[SyncCryptoApi],
         currentTimestamp: CantonTimestamp,

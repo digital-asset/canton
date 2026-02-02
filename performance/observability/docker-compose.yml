@@ -1,0 +1,81 @@
+---
+# Copyright 2022 Digital Asset (Switzerland) GmbH and/or its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+volumes:
+  grafana:
+    name: performance_tests_observability_grafana
+  logs:
+    name: performance_tests_observability_logs
+  prometheus:
+    name: performance_tests_observability_prometheus
+
+services:
+
+  prometheus:
+    # Prometheus LTS version
+    # https://prometheus.io/docs/introduction/release-cycle/
+    image: prom/prometheus:v3.5.0
+    container_name: performance_tests_observability_prometheus
+    command:
+      # Prometheus configuration
+      - --config.file=/etc/prometheus/prometheus.yml
+      # Prometheus data location
+      - --storage.tsdb.path=/prometheus
+      # Enable reload HTTP endpoint
+      - --web.enable-lifecycle
+      # Avoid local disk exhaustion
+      - --storage.tsdb.retention.size=10GB
+      - --storage.tsdb.retention.time=1d
+      - --enable-feature=native-histograms
+    volumes:
+      # Prometheus configuration
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      # Prometheus persistent data
+      - prometheus:/prometheus
+    ports:
+      - 9090:9090
+
+  grafana:
+    # Grafana version
+    # https://github.com/grafana/grafana/blob/main/CHANGELOG.md
+    image: grafana/grafana:9.5.12-ubuntu
+    container_name: performance_tests_observability_grafana
+    volumes:
+      # Grafana configuration
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini
+      # Grafana data sources
+      - ./grafana/datasources.yml:/etc/grafana/provisioning/datasources/default.yml
+      # Grafana dashboard sources
+      - ./grafana/dashboards.yml:/etc/grafana/provisioning/dashboards/default.yml
+      # Grafana dashboards (auto-loading)
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      # Grafana persistent data
+      - grafana:/var/lib/grafana
+    ports:
+      - 3000:3000
+    depends_on:
+      - prometheus
+      - exporter
+
+  exporter:
+    # Prometheus Node Exporter
+    # https://github.com/prometheus/node_exporter/
+    image: prom/node-exporter:v1.4.1
+    container_name: performance_tests_observability_node_exporter
+
+  postgres-exporter:
+    # PostgreSQL Server Exporter
+    # https://github.com/prometheus-community/postgres_exporter/blob/master/CHANGELOG.md
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.14.0
+    container_name: performance_tests_observability_postgres_exporter
+    # The database collector does not work very well with databases that are dropped/restored making the entire exporter die.
+    # Disabling it does not have effect on the Postgres dashboard.
+    command: --no-collector.database
+    environment:
+      DATA_SOURCE_USER: "${OBSERVABILITY_POSTGRES_USER}"
+      DATA_SOURCE_PASS: "${OBSERVABILITY_POSTGRES_PASS}"
+      DATA_SOURCE_URI: "${OBSERVABILITY_POSTGRES_HOST}:5432/postgres"
+      PG_EXPORTER_AUTO_DISCOVER_DATABASES: true
+    volumes: []

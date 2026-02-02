@@ -1,0 +1,112 @@
+# Note: Keep this exceptions list in sync with docs-open/styles/DigitalAsset/accept.txt
+extends: capitalization
+message: "'%s' should use sentence-style capitalization."
+level: error
+scope: heading
+match: $sentence
+indicators:
+  - ":"
+exceptions:
+  - Azure
+  - CLI
+  - Cosmos
+  - Docker
+  - Emmet
+  - gRPC
+  - I
+  - Kubernetes
+  - Linux
+  - macOS
+  - Marketplace
+  - MongoDB
+  - REPL
+  - TypeScript
+  - URLs
+  - Visual Studio
+  - VS
+  - Windows
+  - JSON
+  - Daml
+  - Hoogle
+  - Canton Network Portfolio
+  - Global Synchronizer
+  - Global Synchronizers
+  - Participant Node
+  - Participant Nodes
+  - Super Validator
+  - Super Validators
+  - Synchronizer
+  - Synchronizers
+  - Validator Node
+  - Validator Nodes
+  - Mediator
+  - Sequencer
+  - BFT
+  - ACS
+  - Action
+  - Action Typeclass
+  - Active Contract Set
+  - Active Contract
+  - Archived Contract
+  - App Provider
+  - App User
+  - CC
+  - CC Scan
+  - Canton
+  - Canton Coin
+  - Canton Coin Application
+  - Canton Coin Scan
+  - Canton Coin User
+  - Canton Concepts
+  - Canton Name
+  - Canton Name Service
+  - Canton Network
+  - Canton Network Governance Processes
+  - Canton Protocol
+  - Choice
+  - Choice Observer
+  - Consensus
+  - Consuming Choice
+  - Contract
+  - Contract Key
+  - Controller
+  - Create
+  - Daml Application Provider
+  - Daml Application User
+  - Daml Developer Tools
+  - Daml Driver
+  - Daml Enterprise
+  - Daml Hub
+  - Daml SDK
+  - Daml Scripts
+  - Daml Transaction
+  - Daml-LF
+  - Decentralized Synchronizer Operations Party
+  - Exercise
+  - Flexible Controllers
+  - Global Synchronizer Foundation
+  - Ledger API
+  - Ledger API Authorization
+  - Ledger Action
+  - Maintainer
+  - Navigator
+  - Nonconsuming Choice
+  - Observer
+  - Postconsuming Choice
+  - Preconsuming Choice
+  - Private Contract Store
+  - SV
+  - Sandbox
+  - Signatory
+  - Smart Contract Upgrade
+  - Standard Library
+  - Studio
+  - Subtransaction Privacy
+  - Super Validator Operator
+  - Super Validator Party
+  - Super Validator Rights Owner
+  - Synchronizer
+  - Synchronizer Operator
+  - Template
+  - Validator Operator
+  - Validator Operator Party

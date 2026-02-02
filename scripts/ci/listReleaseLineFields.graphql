@@ -1,0 +1,16 @@
+query {
+    organization(login: "DACH-NY") {
+        projectV2(number: 38) {
+            field(name: "Release Line") {
+                __typename
+                    ...on ProjectV2SingleSelectField {
+                        id
+                        options {
+                            id
+                            name
+                        }
+                    }
+            }
+        }
+    }
+}

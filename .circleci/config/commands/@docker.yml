@@ -1,0 +1,51 @@
+setup_docker_engine:
+  steps:
+    - setup_remote_docker:
+        docker_layer_caching: false
+
+setup_dockerhub:
+  steps:
+    - run:
+        name: Log into Dockerhub
+        command: echo "$DOCKERHUB_PASSWORD" | docker login --username $DOCKERHUB_USERNAME --password-stdin
+
+
+halt_publish_if_not_tuesday:
+  parameters:
+    withdate:
+      type: boolean
+      default: false
+  steps:
+    - run:
+        name: "Abort if we shouldn't publish docker image"
+        command: |
+          # Abort "weekly snapshot release" unless its Tuesday
+          if [[ "<< parameters.withdate >>" == "true" && $(date +"%u") -ne 2 ]]; then
+            # https://support.circleci.com/hc/en-us/articles/360015562253-Conditionally-end-a-running-job-gracefully
+            circleci-agent step halt
+          fi
+
+build_and_publish_docker_base_image:
+  description: Build docker base image
+  parameters:
+    nightly_release:
+      default: false
+      type: boolean
+
+  steps:
+    - docker_log_into_gcr
+    - setup_qemu_and_buildx
+    - run:
+        name: Build and publish docker base image
+        command: ./docker/canton/build_canton_image.sh <<parameters.nightly_release>>
+
+
+setup_qemu_and_buildx:
+  steps:
+    - run:
+        name: Enable QEMU emulation
+        command: |
+          docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+          docker info
+          docker buildx create --name ci-builder --driver docker-container --use
+          docker buildx inspect --bootstrap

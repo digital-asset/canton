@@ -1,0 +1,612 @@
+persist_failure_status:
+  description: |
+    On failure, publish the status variable to the workspace and as an artifact
+  steps:
+    - run:
+        name: Create status files
+        when: always
+        command: |
+          mkdir -p success_status
+          mkdir -p failure_status
+          if [[ "$STATUS" -eq 0 ]]; then
+            echo "Storing success status to success_status/${CIRCLE_JOB}_success.$CIRCLE_NODE_INDEX."
+            echo 0 > "success_status/${CIRCLE_JOB}_success.$CIRCLE_NODE_INDEX"
+          else
+            echo "Storing failure status to failure_status/${CIRCLE_JOB}_failure_code.$CIRCLE_NODE_INDEX."
+            echo "$STATUS" > "failure_status/${CIRCLE_JOB}_failure_code.$CIRCLE_NODE_INDEX"
+          fi
+    - persist_to_workspace:
+        name: Persist status files to the workspace
+        when: always
+        root: .
+        paths:
+          - success_status
+          - failure_status
+    - store_artifacts: # Only failure_status so that users can determine failed jobs from the artifacts view.
+        name: Upload failure status (if any) as an artifact
+        path: failure_status/
+        destination: FAILURE_STATUS/ # capital letters for improved visibility in the UI
+
+persist_jvm_crash_files:
+  description: |
+    Try to save the JVM crash error file and core dump as artifacts
+  steps:
+    - run:
+        name: Copy JVM crash files
+        when: always
+        command: |
+          mkdir -p jvm_crash
+          cp hs_err_pid*.log core.* *.hprof jvm_crash 2>/dev/null || echo "no crash files found"
+    - store_artifacts:
+        name: Upload JVM crash files (if any) as an artifact
+        path: jvm_crash
+
+check_number_of_successes:
+  description: |
+    Fail the build, if the number of files matching "success_status/<<job_name>>_success.*" is lower than min_successes
+  parameters:
+    min_successes:
+      type: integer
+    job_name:
+      type: string
+  steps:
+    - attach_workspace:
+        at: /tmp/workspace
+    - run:
+        when: always
+        name: Fail, if there are fewer than << parameters.min_successes >> successes
+        command: |
+          SUCCESSES="$(ls -1q /tmp/workspace/success_status/<< parameters.job_name >>_success.* 2>/dev/null || true)"
+          # The "if" is needed, because otherwise NUM_SUCCESSES would be set to 1 in case of no successes.
+          if [[ -z $SUCCESSES ]]; then NUM_SUCCESSES=0; else NUM_SUCCESSES="$(wc -l \<<< "$SUCCESSES")"; fi
+          echo "Detected $NUM_SUCCESSES successful nodes, namely:"
+          echo "$SUCCESSES"
+
+          FAILURES="$(ls -1q /tmp/workspace/failure_status/<< parameters.job_name >>_failure_code.* 2>/dev/null || true)"
+          if [[ -z $FAILURES ]]; then NUM_FAILURES=0; else NUM_FAILURES="$(wc -l \<<< "$FAILURES")"; fi
+          echo "Detected $NUM_FAILURES failed nodes, namely:"
+          echo "$FAILURES"
+
+          exit $((NUM_SUCCESSES < << parameters.min_successes >>))
+
+upload_test_reports:
+  steps:
+    - run:
+        when: always
+        name: Group test reports by subproject
+        command: |
+          for subproject in `find . -path "*/target/test-reports" | sed -e 's/^\.\///' -e 's/\/target\/test-reports$//'`
+          do
+            mkdir -p test-reports/"$subproject"
+            # Keep going, if there is no test report.
+            cp -v "$subproject"/target/test-reports/TEST-*.xml test-reports/"$subproject" || true
+          done
+    - store_test_results:
+        path: test-reports
+
+collect_failing_test_data_and_send_to_datadog:
+  steps:
+    - run:
+        when: always
+        name: Send name of each failing test to datadog
+        command: |
+          nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "python3 ./scripts/ci/collect_failing_tests_and_send_to_datadog.py"
+
+post_test_coverage:
+  steps:
+    - execute_sbt_command:
+        cmd: "coverageAggregate"
+    - run:
+        name: Determine test coverage
+        command: |
+          report="target/scala-2.13/scoverage-report/scoverage.xml"
+          coverage=$(grep -om 1 -E "statement-rate=\"[^\"]+\"" "$report" | grep -oE "[[:digit:]]+(\.[[:digit:]]+)?")
+          echo "COVERAGE: $coverage"
+          echo "export coverage=$coverage" >> $BASH_ENV
+    - post_to_datadog:
+        label: "Post test coverage to Datadog"
+        data: "canton.build.test_coverage=$coverage"
+        when: on_success
+
+post_stability_result:
+  steps:
+    - post_to_datadog:
+        label: "Post canton.stability.* metrics to Datadog"
+        data: "canton.stability.successes=$((STATUS == 0)) canton.stability.failures=$((STATUS != 0)) canton.stability.total=1"
+        metric_type: count
+        use_commit_time: false
+
+split_tests_for_parallel_run:
+  description: split tests for parallel execution
+  parameters:
+    test_sub_command:
+      # An SBT sub-command for running tests
+      type: string
+      default: "testOnly"
+    index:
+      type: string
+      default: ""
+    total:
+      type: string
+      default: ""
+    filter:
+      type: string
+  steps:
+    - attach_workspace:
+        at: /tmp/workspace
+    - run:
+        name: Splitting tests
+        command: |
+          TEST_NAMES=/tmp/workspace/test-full-class-names.log
+          echo "[fix negative test times]"
+          # Skipped tests report a negative duration, this leads to garbage-in-garbage-out behavior by the CircleCI test splitter
+          TIMING_DATA_FILE="$CIRCLE_INTERNAL_TASK_DATA/circle-test-results/results.json"
+          if [[ -e $TIMING_DATA_FILE ]]; then
+            cat \<<< $(jq -c '.tests |= map(if .run_time < 0 then .run_time |= 0 else . end)' $TIMING_DATA_FILE) > $TIMING_DATA_FILE
+            cp "$TIMING_DATA_FILE" timing-data.json
+          fi
+
+          index="<< parameters.index >>"
+          total="<< parameters.total >>"
+          if [[ -z $index && -z $total ]]; then
+            extraargs=""
+          else
+            extraargs=" --index=$index --total=$total"
+            echo $extraargs
+          fi
+          echo "[split tests ${extraargs}]"
+          rm -f tests-to-run.txt
+
+          # Set time-default to 5 minutes so that tests with unknown duration get distributed evenly.
+          # (The default for tests with unknown duration would be 1s.)
+          # The tests run command wants to invoke the test runner for each test. That doesn't work for us.
+          # However, what we do instead is we just print the tests it wants to run into a file and pass
+          # that content then to sbt ...
+          cat $TEST_NAMES | << parameters.filter >> | sort | uniq | circleci tests run --command "xargs ./scripts/ci/grab-tests.sh" $extraargs --split-by=timings --timings-type=classname --time-default=5m
+
+          # if we are re-running but don't have anything todo, then the file won't be there and we can halt
+          if [ -e tests-to-run.txt ]; then
+            splitted=$(cat tests-to-run.txt)
+            tests=$(echo $splitted | tr '\n' ' ')
+            count=$(echo $tests | wc -w)
+            echo "We are running $count tests in this batch:"
+            cat \<<< "$splitted"
+            echo "export RUN_SPLITTED_TESTS_CMD=\"<< parameters.test_sub_command >> $tests\"" >> "$BASH_ENV"
+          else
+            echo "re-running this bucket can be aborted, as nothing flaked here"
+            circleci-agent step halt
+          fi
+
+    - store_artifacts:
+        name: Upload timing data
+        path: timing-data.json
+        destination: timing-data.json
+
+limit_parallel_test_execution:
+  parameters:
+    num_tasks:
+      type: string
+      default: "$EXECUTOR_NUM_CPUS"
+  steps:
+    - run:
+        command: echo "export MAX_CONCURRENT_SBT_TEST_TASKS=<< parameters.num_tasks >>" >> $BASH_ENV
+        name: Limit parallel tests
+
+run_tests:
+  parameters:
+    command:
+      # The full command passed to sbt
+      type: string
+    test_sub_command:
+      # An SBT sub-command for running tests
+      type: string
+      default: "testOnly"
+    filter:
+      # Command for filtering test suite names
+      type: string
+    release_path:
+      type: string
+      default: ""
+    timeout:
+      # The timeout + no-output timeout for sbt
+      type: string
+      default: "25m"
+    num_test_buckets:
+      # The number of buckets used to parallelize tests.
+      # Should be a divisor of the number of instances (i.e., $CIRCLE_NODE_TOTAL).
+      # Choose $CIRCLE_NODE_TOTAL to run every test exactly once.
+      # Choose 1 to run every test $CIRCLE_NODE_TOTAL times.
+      # Choose "" to skip test splitting.
+      type: string
+      default: "$CIRCLE_NODE_TOTAL"
+    num_parallel_tasks:
+      type: string
+      default: "$EXECUTOR_NUM_CPUS"
+    execution_context_size:
+      type: string
+      default: "$EXECUTOR_NUM_CPUS"
+    succeed_on_error:
+      type: boolean
+      default: false
+    fail_on_error_in_output:
+      type: boolean
+      default: true
+    override_java_version_for_tests:
+      type: string
+      default: ""
+    skip_cleanup:
+      type: boolean
+      default: false
+    report_to_datadog:
+      default: true
+      type: boolean
+    do_checkout:
+      default: true
+      type: boolean
+    test_scala3_migration:
+      default: false
+      type: boolean
+    collect_postgres_query_stats:
+      default: false
+      type: boolean
+  steps:
+    - when:
+        condition: << parameters.do_checkout >>
+        steps:
+          - checkout_and_restore_caches
+    - when:
+        condition: << parameters.release_path >>
+        steps:
+          - restore_packaged_release:
+              location: << parameters.release_path >>
+    - setup_gcp_kms
+    - when:
+        # Evaluates to true, if num_test_buckets is non-empty.
+        condition: << parameters.num_test_buckets >>
+        steps:
+          - split_tests_for_parallel_run:
+              index: "$((CIRCLE_NODE_INDEX % << parameters.num_test_buckets >>))"
+              total: << parameters.num_test_buckets >>
+              filter: << parameters.filter >>
+              test_sub_command: << parameters.test_sub_command >>
+    - limit_parallel_test_execution:
+        num_tasks: << parameters.num_parallel_tasks >>
+    - run:
+        name: Set CANTON_CRASH_ON_PRETTY_PRINTING_ERRORS=true
+        command: |
+          echo "export CANTON_CRASH_ON_PRETTY_PRINTING_ERRORS=true" >> $BASH_ENV
+    - execute_sbt_command:
+        cmd: << parameters.command >>
+        timeout: << parameters.timeout >>
+        execution_context_size: << parameters.execution_context_size >>
+        succeed_on_error: << parameters.succeed_on_error >>
+        fail_on_error_in_output: << parameters.fail_on_error_in_output >>
+        override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+        log_immediate_flush: "false"
+        # Capture GC logs for test runs. The file will be uploaded as an artifact in the step
+        # `store_track_cpu_and_memory` as part of the `cleanup_test_job` as it lives in the `track` folder.
+        extra_parameters: "-J-Xlog:gc=info,safepoint=info:file=track/GC.log:time"
+    - when:
+        condition: << parameters.test_scala3_migration >>
+        steps:
+          - execute_sbt_command:
+              cmd: "\"++3.3;wartremover-extension/test\""
+              timeout: 5m
+              execution_context_size: << parameters.execution_context_size >>
+              succeed_on_error: << parameters.succeed_on_error >>
+              fail_on_error_in_output: << parameters.fail_on_error_in_output >>
+              override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+              log_immediate_flush: "false"
+    - when:
+        condition: << parameters.collect_postgres_query_stats >>
+        name: Analyze Postgres query plans
+        steps:
+          - execute_sbt_command:
+              cmd: "\"community-common / testOnly / com.digitalasset.canton.integration.tests.manual.PostgresStatsAnalysisTest\""
+              timeout: 5m
+              execution_context_size: << parameters.execution_context_size >>
+              succeed_on_error: << parameters.succeed_on_error >>
+              fail_on_error_in_output: << parameters.fail_on_error_in_output >>
+              override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+              log_immediate_flush: "false"
+    - persist_failure_status
+    - persist_jvm_crash_files
+    - unless:
+        condition: << parameters.skip_cleanup >>
+        steps:
+          - cleanup_test_job:
+              report_to_datadog: << parameters.report_to_datadog >>
+              collect_postgres_query_stats: << parameters.collect_postgres_query_stats >>
+    - when:
+        # Only slack red main, if tests can't fail the job.
+        # Test failures will be reported to datadog as part of cleanup_test_job.
+        condition: << parameters.succeed_on_error >>
+        steps:
+          - slack_red_main_with_volunteer
+
+run_ordinary_tests:
+  parameters:
+    exclude_unstable_tests:
+      type: boolean
+    num_test_buckets:
+      type: string
+      default: "$CIRCLE_NODE_TOTAL"
+    execution_context_size:
+      type: string
+      default: "$EXECUTOR_NUM_CPUS"
+    succeed_on_error:
+      type: boolean
+      default: false
+    override_java_version_for_tests:
+      type: string
+      default: ""
+    num_parallel_tasks:
+      type: string
+      default: "4"
+    test_scala3_migration:
+      default: false
+      type: boolean
+    collect_postgres_query_stats:
+      default: false
+      type: boolean
+  steps:
+    - run_tests:
+        command: &default_test_command_optionally_excluding_unstable_tests
+          "dumpClassPath \"$RUN_SPLITTED_TESTS_CMD<<# parameters.exclude_unstable_tests >> -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest<</ parameters.exclude_unstable_tests >>\" checkErrors"
+        filter: &ordinary_test_filter
+          "grep -v -E \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.manual \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.crashrecovery \
+             -e com\\.digitalasset\\.canton\\.nightly \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.toxiproxy \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.release \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.benchmarks \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.continuity \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.variations \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.upgrade\\.MajorUpgrade.\\*Writer.\\* \
+          "
+          # Tests excluded here are covered by
+          #
+          # - *crash_recovery_test
+          # - nightly_test
+          # - toxiproxy_test*
+          # - release_test
+          # - benchmark
+          # - protocol_continuity_test
+          # - variations_test
+          #
+          # If you update this list, please also go through analogue usages of the `filter` parameter and update them as well.
+        num_test_buckets: << parameters.num_test_buckets >>
+        execution_context_size: << parameters.execution_context_size >>
+        succeed_on_error: << parameters.succeed_on_error >>
+        override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+        num_parallel_tasks: << parameters.num_parallel_tasks >>
+        test_scala3_migration: << parameters.test_scala3_migration >>
+        collect_postgres_query_stats: << parameters.collect_postgres_query_stats >>
+
+run_test_coverage_test:
+  parameters:
+    command:
+      type: string
+    filter:
+      type: string
+      default: *ordinary_test_filter
+    num_test_buckets:
+      type: string
+      default: "$CIRCLE_NODE_TOTAL"
+  steps:
+    - run:
+        name: Disable compiler warts
+        command: |
+          # The coverage instrumentation may introduce new warts which would fail compilation.
+          # Disabling wart checking, as we don't care about warts when measuring coverage.
+          echo "export _JAVA_OPTIONS=-Dcanton-disable-warts=true" >> "$BASH_ENV"
+    - run_tests:
+        command: << parameters.command >>
+        filter: << parameters.filter >>
+        num_test_buckets: << parameters.num_test_buckets >>
+        fail_on_error_in_output: false
+        succeed_on_error: true
+        timeout: "120m"
+    - post_test_coverage
+    - run:
+        name: Create archive with coverage report
+        command: |
+          tar czf coverage_report.tar.gz target/scala-2.13/scoverage-report
+    - store_artifacts:
+        name: Store coverage report as artifact (if any)
+        path: coverage_report.tar.gz
+        destination: coverage-report
+    - slack_red_main_with_volunteer # This is already called as part of run_tests. Need to call it again to catch failures in steps after run_tests.
+
+run_db_tests:
+  parameters:
+    db_name:
+      type: string
+    exclude_unstable_tests:
+      type: boolean
+    num_test_buckets:
+      type: string
+      default: "$CIRCLE_NODE_TOTAL"
+    succeed_on_error:
+      type: boolean
+      default: false
+    override_java_version_for_tests:
+      type: string
+      default: ""
+  steps:
+    - run_tests:
+        command: *default_test_command_optionally_excluding_unstable_tests
+        filter: "grep -E -e << parameters.db_name >>$ |
+                 grep -v -E \
+                   -e com\\.digitalasset\\.canton\\.integration\\.tests\\.manual \
+                   -e com\\.digitalasset\\.canton\\.integration\\.tests\\.crashrecovery \
+                   -e com\\.digitalasset\\.canton\\.nightly \
+                   -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly \
+                   -e com\\.digitalasset\\.canton\\.integration\\.tests\\.toxiproxy \
+                   -e com\\.digitalasset\\.canton\\.integration\\.tests\\.release \
+                   -e com\\.digitalasset\\.canton\\.integration\\.tests\\.benchmarks \
+                   -e com\\.digitalasset\\.canton\\.integration\\.tests\\.continuity \
+                   "
+        num_test_buckets: << parameters.num_test_buckets >>
+        succeed_on_error: << parameters.succeed_on_error >>
+        override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+
+run_crash_recovery_tests:
+  parameters:
+    filter:
+      type: string
+    exclude_unstable_tests:
+      type: boolean
+    num_test_buckets:
+      type: string
+      default: "$CIRCLE_NODE_TOTAL"
+    succeed_on_error:
+      type: boolean
+      default: false
+  steps:
+    - run_tests:
+        command: "dumpClassPath \"$RUN_SPLITTED_TESTS_CMD<<# parameters.exclude_unstable_tests >> -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest<</ parameters.exclude_unstable_tests >>\""
+        filter: << parameters.filter >>
+        # don't fail crash recovery test on errors in output
+        fail_on_error_in_output: false
+        num_parallel_tasks: "1"
+        # explicitly making timeouts larger here, as some crash recovery tests run ~15m and this can lead
+        # to flaky timeouts when two long-running tests run within the same bucket
+        timeout: "35m"
+        num_test_buckets: << parameters.num_test_buckets >>
+        succeed_on_error: << parameters.succeed_on_error >>
+        skip_cleanup: true
+    - run:
+        name: Pack external log files into single file
+        command: find log -name "external-*" | xargs --no-run-if-empty tar cvf log/all-external-jobs.tar
+        when: always
+    - cleanup_test_job:
+        collect_postgres_query_stats: true
+    - when:
+        condition: << parameters.succeed_on_error >>
+        steps:
+          - slack_red_main_with_volunteer # This is already called as part of run_tests. Need to call it again to catch failures in clenaup_test_job.
+
+run_variations_tests:
+  parameters:
+    exclude_unstable_tests:
+      type: boolean
+    num_test_buckets:
+      type: string
+      default: "$CIRCLE_NODE_TOTAL"
+    execution_context_size:
+      type: string
+      default: "$EXECUTOR_NUM_CPUS"
+    succeed_on_error:
+      type: boolean
+      default: false
+    override_java_version_for_tests:
+      type: string
+      default: ""
+  steps:
+    - run_tests:
+        command: *default_test_command_optionally_excluding_unstable_tests
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.variations "
+        num_test_buckets: << parameters.num_test_buckets >>
+        execution_context_size: << parameters.execution_context_size >>
+        succeed_on_error: << parameters.succeed_on_error >>
+        override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+
+set_canton_protocol_version:
+  parameters:
+    protocol_version:
+      type: string
+      default: ""
+  steps:
+    - run:
+        name: Set optionally specified protocol version
+        command: |
+          if [[ -n "<< parameters.protocol_version >>" ]]; then
+            echo "export CANTON_PROTOCOL_VERSION=<< parameters.protocol_version >>" >> $BASH_ENV
+            echo "Canton will use protocol version << parameters.protocol_version >>"
+          fi
+
+set_external_parties:
+  steps:
+    - run:
+        name: Set external parties test mode
+        command: |
+          echo "export CANTON_TEST_EXTERNAL_PARTIES=true" >> $BASH_ENV
+          echo "Canton will use external parties for capable tests"
+
+test_flake_fix_many_times_command:
+  parameters:
+    test_repetitions_per_runner:
+      type: integer
+    test_to_run_many_times:
+      type: string
+    exclude_unstable_tests:
+      type: boolean
+      default: false
+    execution_context_size:
+      type: string
+      default: "$EXECUTOR_NUM_CPUS"
+    succeed_on_error:
+      type: boolean
+      default: false
+  steps:
+    - checkout:
+        method: blobless
+    - run:
+        name: Fetch the test grep filter from the parameter 'test_to_run_many_times'
+        command: |
+          echo "export FLAKY_TEST_GREP_FILTER=<< parameters.test_to_run_many_times >>" >> $BASH_ENV
+    - run:
+        name: Print the test grep filter
+        command: |
+          echo "manual_test_flake_fix_many_times workflow will run the tests with filter $FLAKY_TEST_GREP_FILTER"
+    - run_tests:
+        command: "dumpClassPath \"$RUN_SPLITTED_TESTS_CMD<<# parameters.exclude_unstable_tests >> -- -l UnstableTest<</ parameters.exclude_unstable_tests >>\" checkErrors"
+        test_sub_command: "testManyTimes << parameters.test_repetitions_per_runner >>"
+        filter: |
+          grep -E -e $FLAKY_TEST_GREP_FILTER \
+
+        num_test_buckets: "1"
+        execution_context_size: << parameters.execution_context_size >>
+        succeed_on_error: << parameters.succeed_on_error >>
+
+topology_chaos_test_command:
+  parameters:
+    execution_context_size:
+      type: string
+      default: "$EXECUTOR_NUM_CPUS"
+    run_all_ops_test:
+      type: boolean
+      default: false
+    num_test_buckets:
+      type: string
+      default: "$CIRCLE_NODE_TOTAL"
+  steps:
+    - checkout:
+        method: blobless
+    - run:
+        name: Set the topology chaos test grep filters to manual topology tests
+        command: |
+          if [[ << parameters.run_all_ops_test >> == true ]] ; then
+            echo "export TOPOLOGY_CHAOS_TEST_GREP_INCLUDE_FILTER='com.digitalasset.canton.integration.tests.manual.topology.ChangingTopologyPerformanceIntegrationAllOpsTest'" >> $BASH_ENV
+            echo "export TOPOLOGY_CHAOS_TEST_GREP_EXCLUDE_FILTER='dummy-test-does-not-exist'" >> $BASH_ENV
+          else
+            echo "export TOPOLOGY_CHAOS_TEST_GREP_INCLUDE_FILTER='com.digitalasset.canton.integration.tests.manual.topology'" >> $BASH_ENV
+            echo "export TOPOLOGY_CHAOS_TEST_GREP_EXCLUDE_FILTER='com.digitalasset.canton.integration.tests.manual.topology.ChangingTopologyPerformanceIntegrationAllOpsTest'" >> $BASH_ENV
+          fi
+    - run:
+        name: Print the test grep filters
+        command: |
+          echo "manual_topology_chaos_test workflow will run the tests with include filter \"$TOPOLOGY_CHAOS_TEST_GREP_INCLUDE_FILTER\" and exclude filter \"$TOPOLOGY_CHAOS_TEST_GREP_EXCLUDE_FILTER\""
+    - run_tests:
+        command: "dumpClassPath \"$RUN_SPLITTED_TESTS_CMD\" checkErrors"
+        filter: |
+          grep -E -e $TOPOLOGY_CHAOS_TEST_GREP_INCLUDE_FILTER | grep -v $TOPOLOGY_CHAOS_TEST_GREP_EXCLUDE_FILTER \
+
+        num_test_buckets: << parameters.num_test_buckets >>
+        num_parallel_tasks: "1"
+        execution_context_size: << parameters.execution_context_size >>
+        timeout: "45m"
+

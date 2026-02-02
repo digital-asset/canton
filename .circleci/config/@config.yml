@@ -1,0 +1,290 @@
+version: 2.1
+
+# Equivalent to module imports
+orbs:
+  slack: circleci/slack@3.3.0
+  azure-caching-orb: dach_ny/azure-caching-orb@1.2
+
+parameters:
+  test_to_run_many_times:
+    type: string
+    default: ""
+
+  pv_for_run_many_times:
+    type: enum
+    default: ""
+    enum: [
+      "",
+      "35",
+      "dev"
+    ]
+
+  manual_job:
+    type: enum
+    default: "none"
+    enum: [
+      adhoc-daml-update,
+      blackduck-test,
+      build-canton-local-cache,
+      docs-replication-prod,
+      docs-replication-test,
+      external-parties-tests,
+      generate-data-continuity-dumps,
+      nightly-integration-tests,
+      nightly-test-sequencer,
+      nightly-test-bftordering,
+      open-source-code-drop,
+      override-java-versions-for-tests,
+      performance-runner-test,
+      postgres-conformance-tests,
+      protocol-continuity-tests,
+      release-sandbox,
+      release-test,
+      snapshot-release,
+      stability-crash-recovery-test,
+      stability-sequential-test,
+      stability-test,
+      start-release-process,
+      test-ping,
+      test-protocol-version-35,
+      test-protocol-version-dev,
+      toxiproxy-chaos-test,
+      toxiproxy-slow-test,
+      unstable-test,
+      update-canton-build-docker-image,
+      upload-new-test-artifact-dars,
+      none
+    ]
+
+# Reusable chunks for referencing by tag
+# Keys have no significance to CircleCI
+_postgres_environment: &postgres_environment
+  POSTGRES_USER: test
+  POSTGRES_PASSWORD: test-password
+  POSTGRES_DB: test
+  POSTGRES_INITDB_ARGS: "-A scram-sha-256" # ensures that passwords are required
+_postgres_non_standard_environment: &postgres_non_standard_environment
+  <<: *postgres_environment
+  NON_STANDARD_POSTGRES: yes
+_canton_docker_executor: &canton_docker_executor
+  image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+  auth:
+    username: $DOCKERHUB_USERNAME
+    password: $DOCKERHUB_PASSWORD
+_postgres_docker_executor: &postgres_docker_executor
+  image: digitalasset/query-stats-postgres:17-343483aee440
+  command: >-
+    postgres
+      -c max_connections=1000
+      -c shared_preload_libraries=pg_store_plans,pg_stat_statements
+      -c pg_store_plans.plan_format=json
+      -c pg_store_plans.max=100000
+      -c pg_store_plans.max_plan_length=10240
+      -c pg_stat_statements.max=100000
+  environment:
+    <<: *postgres_environment
+_postgres14_docker_executor: &postgres14_docker_executor
+  image: postgres:14
+  command: "postgres -c max_connections=1000"
+  environment:
+    <<: *postgres_non_standard_environment
+_postgres15_docker_executor: &postgres15_docker_executor
+  image: postgres:15
+  command: "postgres -c max_connections=1000"
+  environment:
+    <<: *postgres_non_standard_environment
+_postgres16_docker_executor: &postgres16_docker_executor
+  image: postgres:16
+  command: "postgres -c max_connections=1000"
+  environment:
+    <<: *postgres_non_standard_environment
+_postgres17_docker_executor: &postgres17_docker_executor
+  image: postgres:17
+  command: "postgres -c max_connections=1000"
+  environment:
+    <<: *postgres_non_standard_environment
+_toxiproxy_docker_executor: &toxiproxy_docker_executor
+  image: ghcr.io/shopify/toxiproxy:2.1.5
+
+# Defines reusable executor environments
+executors:
+  canton-small-docker: # for management tasks - don't use this to compile or test
+    working_directory: /home/circleci/project
+    resource_class: dach_ny/azure_cci_small # 1CPU, 2G RAM
+    docker:
+      - *canton_docker_executor
+    environment:
+      EXECUTOR_NUM_CPUS: 1
+      EXECUTOR_JVM_HEAP_SIZE: 1200M
+      EXECUTOR_JVM_METASPACE_SIZE: 200M
+  canton-medium-docker:
+    working_directory: /home/circleci/project
+    resource_class: dach_ny/azure_cci_medium # 2CPU, 4G RAM
+    docker:
+      - *canton_docker_executor
+    environment:
+      EXECUTOR_NUM_CPUS: 2
+      EXECUTOR_JVM_HEAP_SIZE: 2500M
+      EXECUTOR_JVM_METASPACE_SIZE: 400M
+  canton-large-docker:
+    working_directory: /home/circleci/project
+    resource_class: dach_ny/azure_cci_large # 4CPUs, 8G RAM
+    docker:
+      - *canton_docker_executor
+    environment: &large_docker_env
+      EXECUTOR_NUM_CPUS: 4
+      EXECUTOR_JVM_HEAP_SIZE: 4500M
+      EXECUTOR_JVM_METASPACE_SIZE: 1000M
+      # Assumptions:
+      # - JVM threads: 200M
+      # - JVM code cache: 250M
+      # - JVM other (internal, gc): 400M
+      # - Non-JVM processes: 100M
+  canton-large-docker-with-postgres:
+    working_directory: /home/circleci/project
+    resource_class: dach_ny/azure_cci_large # 4CPUs, 8G RAM
+    docker:
+      - *canton_docker_executor
+      - *postgres_docker_executor
+    environment:
+      <<: [ *large_docker_env, *postgres_environment ]
+  canton-xlarge-docker:
+    working_directory: /home/circleci/project
+    resource_class: dach_ny/azure_cci_xlarge # 8CPUs, 16G RAM
+    docker:
+      - *canton_docker_executor
+    environment: &xlarge_docker_env
+      EXECUTOR_NUM_CPUS: 8
+      # temp reduced by 1G
+      EXECUTOR_JVM_HEAP_SIZE: 6500M
+      # temp increased by 500mb until job scheduling is fixed
+      EXECUTOR_JVM_METASPACE_SIZE: 3100M
+      # Assumptions (as of 27/02/2023):
+      # - JVM Heap: 7700M
+      # - JVM Class (includes Metaspace): 2500M
+      # - JVM Thread: 3400M
+      # - JVM Code: 400M
+      # - JVM other (internal, gc): 1500M
+      # - Savings due to overcommitment: -2100M
+      # - Postgres: 2600M (up to 183 parallel processes)
+      # - Other processes: 100M
+  canton-2xlarge-docker:
+    working_directory: /home/circleci/project
+    resource_class: dach_ny/azure_cci_2xl # 16CPUs, 32G RAM
+    docker:
+      - *canton_docker_executor
+    environment: &xxlarge_docker_env
+      EXECUTOR_NUM_CPUS: 16
+      EXECUTOR_JVM_HEAP_SIZE: 16000M
+      EXECUTOR_JVM_METASPACE_SIZE: 3200M
+  canton-2xlarge-plus-docker:
+    working_directory: /home/circleci/project
+    resource_class: dach_ny/azure_cci_2xl # 20CPUs, 40G RAM
+    docker:
+      - *canton_docker_executor
+    environment: &xxlarge_plus_docker_env
+      EXECUTOR_NUM_CPUS: 16
+      EXECUTOR_JVM_HEAP_SIZE: 16000M
+      EXECUTOR_JVM_METASPACE_SIZE: 12000M
+  canton-xlarge-docker-with-postgres: &canton-xlarge-docker-with-postgres
+    working_directory: /home/circleci/project
+    resource_class: dach_ny/azure_cci_xlarge # 8CPUs, 16G RAM
+    docker:
+      - *canton_docker_executor
+      - *postgres_docker_executor
+    environment:
+      <<: [ *xlarge_docker_env,*postgres_environment ]
+  canton-xlarge-plus-docker-with-postgres:
+    working_directory: /home/circleci/project
+    resource_class: dach_ny/azure_cci_xlarge_plus # request: 8CPU / limit: 16CPU, 16G RAM
+    docker:
+      - *canton_docker_executor
+      - *postgres_docker_executor
+    environment:
+      <<: [ *xlarge_docker_env,*postgres_environment ]
+  canton-xlarge-docker-with-postgres17: &postgres_non_standard
+    <<: *canton-xlarge-docker-with-postgres
+    docker:
+      - *canton_docker_executor
+      - *postgres17_docker_executor
+    environment:
+      <<: [ *xlarge_docker_env, *postgres_non_standard_environment ]
+  canton-xlarge-docker-with-postgres14:
+    <<: *postgres_non_standard
+    docker:
+      - *canton_docker_executor
+      - *postgres14_docker_executor
+  canton-xlarge-docker-with-postgres15:
+    <<: *postgres_non_standard
+    docker:
+      - *canton_docker_executor
+      - *postgres15_docker_executor
+  canton-xlarge-docker-with-postgres16:
+    <<: *postgres_non_standard
+    docker:
+      - *canton_docker_executor
+      - *postgres16_docker_executor
+  canton-2xlarge-plus-docker-with-postgres:
+    working_directory: /home/circleci/project
+    resource_class: dach_ny/azure_cci_2xl # 20CPUs, 40G RAM
+    docker:
+      - *canton_docker_executor
+      - *postgres_docker_executor
+    environment:
+      <<: [ *xxlarge_plus_docker_env, *postgres_environment ]
+
+  canton-2xlarge-docker-with-postgres:
+    working_directory: /home/circleci/project
+    resource_class: dach_ny/azure_cci_2xl # 16CPUs, 32G RAM
+    docker:
+      - *canton_docker_executor
+      - *postgres_docker_executor
+    environment:
+      <<: [ *xxlarge_docker_env, *postgres_environment ]
+
+  canton-xlarge-docker-with-postgres-toxiproxy:
+    working_directory: /home/circleci/project
+    resource_class: dach_ny/azure_cci_xlarge # 8CPUs, 16G RAM
+    docker:
+      - *canton_docker_executor
+      - *postgres_docker_executor
+      - *toxiproxy_docker_executor
+    environment:
+      <<: [ *xlarge_docker_env, *postgres_environment ]
+
+  # added to run on CCI infra instead of azure to allow building docker images
+  canton-large-docker-on-cci:
+    working_directory: /home/circleci/project
+    docker:
+      - *canton_docker_executor
+    environment: &large_docker_env
+      EXECUTOR_NUM_CPUS: 4
+      EXECUTOR_JVM_HEAP_SIZE: 4500M
+      EXECUTOR_JVM_METASPACE_SIZE: 1000M
+
+  xlarge-ubuntu-machine:
+    machine:
+      image: ubuntu-2204:2024.01.1
+      resource_class: xlarge
+    environment:
+      EXECUTOR_NUM_CPUS: 8
+      EXECUTOR_JVM_HEAP_SIZE: 8000M
+      EXECUTOR_JVM_METASPACE_SIZE: 1600M
+  large-ubuntu-machine:
+    machine:
+      image: ubuntu-2204:2024.01.1
+      resource_class: large
+    environment:
+      EXECUTOR_NUM_CPUS: 4
+      EXECUTOR_JVM_HEAP_SIZE: 8000M
+      EXECUTOR_JVM_METASPACE_SIZE: 1600M
+
+  medium-windows-machine:
+    machine:
+      image: 'windows-server-2022-gui:2023.05.1'
+      resource_class: 'windows.medium'
+
+  medium-arm-machine:
+    machine:
+      image: ubuntu-2204:2024.01.1
+      resource_class: 'arm.medium'

@@ -44,7 +44,8 @@ Implementations must use a hashing scheme version supported on the synchronizer 
 ==================  =========================
 Protocol Version    Supported Hashing Schemes
 ==================  =========================
-v33                 v2
+v33                 V2
+v35                 V2, V3
 ==================  =========================
 
 Transaction Nodes
@@ -61,7 +62,7 @@ versioned to accommodate those future changes. In practice, every new Daml langu
     :caption: Versioned Daml Transaction Node
     :dedent: 4
 
-V2
+V3
 ==
 
 General approach
@@ -82,6 +83,11 @@ In particular:
     In Java, unsigned 32-bit and 64-bit integers are represented using their signed counterparts, with the top bit simply being stored in the sign bit
 
 Additionally, this is the java library used under the hood in Canton to serialize and deserialize protobuf: `<https://github.com/protocolbuffers/protobuf/tree/v3.25.5/java>`_
+
+Changes from V2
+---------------
+
+- Addition of an ``max_record_time`` field in :ref:`metadata <metadata_encoding>` to make maximum record time explicit in the signed metadata.
 
 Changes from V1
 ---------------
@@ -712,7 +718,8 @@ or have already been signed indirectly by signing the transaction itself.
         encode(metadata.min_ledger_effective_time) ||
         encode(metadata.max_ledger_effective_time) ||
         encode(metadata.submission_time) ||
-        encode(metadata.disclosed_events)
+        encode(metadata.disclosed_events) ||
+        encode(metadata.max_record_time)
 
 ProcessedDisclosedContract
 --------------------------
@@ -747,7 +754,7 @@ Finally, compute the hash that needs to be signed to commit to the ledger change
 
     fn encode(prepared_transaction):
         0x00000030 || # Hash purpose
-        0x02 || # Hashing Scheme Version
+        0x03 || # Hashing Scheme Version
         hash(transaction) ||
         hash(metadata)
 
@@ -762,7 +769,7 @@ Both the signature along with the ``PreparedTransaction`` must be sent to the AP
 Example
 =======
 
-Example implementation in Python
+Example V2 implementation in Python
 
 .. toggle::
 

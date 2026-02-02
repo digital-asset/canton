@@ -1,0 +1,84 @@
+obtain_release_suffix:
+  parameters:
+    is_nightly_workflow:
+      type: boolean
+    is_manual:
+      type: boolean
+  steps:
+    - run:
+        name: Obtain release suffix
+        command: |
+          suffix="$(.ci/nix-exec ./scripts/ci/obtain-release-suffix.sh <<parameters.is_nightly_workflow>> <<parameters.is_manual>>)"
+          echo "export RELEASE_SUFFIX=\"$suffix\"" | tee -a $BASH_ENV
+
+publish_release_on_s3:
+  steps:
+    - run:
+        name: Publish to S3
+        command: |
+          .ci/nix-exec ./scripts/ci/publish-to-s3.sh
+
+publish_release_on_artifactory:
+  parameters:
+    nightly_release:
+      type: boolean
+      default: false
+  steps:
+    - run:
+        name: Publish to Artifactory
+        command: |
+          .ci/nix-exec ./scripts/ci/publish-to-artifactory.sh << parameters.nightly_release >>
+
+publish_release_on_oci_registry:
+  parameters:
+    nightly_release:
+      type: boolean
+      default: false
+  steps:
+    - run:
+        name: "Set DPM variables"
+        command: |
+          echo "export DPM_REGISTRY_AUTH=~/.docker/config.json" | tee -a $BASH_ENV
+    - run:
+        name: Publish to OCI registry
+        command: nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "scripts/ci/publish-to-oci.sh << parameters.nightly_release >>"
+
+publish_sandbox_to_jfrog:
+  parameters:
+    repository:
+      description : JFROG repo for upload
+      type: string
+      default: generic-sandbox
+  steps:
+    - run:
+        name: Publish to JFROG
+        command: |
+          cd tmp-release || exit 1
+          for i in $(find . -type f | sed 's|//|/|g'); do
+            ../scripts/ci/publish-to-jfrog.sh -r << parameters.repository >> ${i} ${@} || exit ${?}
+          done
+
+publish_libs_to_google_artifact_registry:
+  steps:
+    - setup_gcp_gar
+    - execute_sbt_command:
+        cmd: "publish"
+        # TODO(#29907) re-enable failure on error
+        fail_on_error_in_output: false
+
+setup_gpg:
+  steps:
+    - run:
+        name: Setup GPG
+        command: |
+          key=$(mktemp)
+          echo $gpg_code_signing | base64 --decode > $key
+          gpg --no-tty --quiet --import $key
+
+publish_libs_to_maven_central:
+  steps:
+    - setup_gpg
+    - execute_sbt_command:
+        cmd: "publishToSonatype"
+        # TODO(#29907) re-enable failure on error
+        fail_on_error_in_output: false

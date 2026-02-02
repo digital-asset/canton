@@ -1,0 +1,12 @@
+services:
+  postgres:
+    image: postgres:11
+    command: postgres -c 'max_connections=250'
+    hostname: postgres
+    container_name: postgres
+    env_file: ../../performance/src/main/console/postgres/db.env
+    expose:
+      - "5432"
+    ports:
+      - "5432:5432"
+

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# -*- sh -*-
+
+# prevent commit to local main or master branch
+# see https://gist.github.com/aaronhoffman/ffbfd36928f9336be2436cffe39feaec#file-pre-commit
+
+branch="$(git symbolic-ref HEAD)"
+if [ "$branch" = "refs/heads/main" ]; then
+    echo "pre-commit hook: Can not commit to the local main branch."
+    exit 1
+fi
+if [ "$branch" = "refs/heads/master" ]; then
+    echo "pre-commit hook: Can not commit to the local master branch."
+    exit 1
+fi
+
+exit 0

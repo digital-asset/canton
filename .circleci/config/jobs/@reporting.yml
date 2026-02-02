@@ -1,0 +1,56 @@
+blackduck:
+  executor: canton-large-docker
+  steps:
+    - checkout_and_restore_precompiled_classes:
+        reset_classes_if_requested: true
+    - restore_sbt_cache
+    - track_cpu_and_memory
+    - run:
+        command: |
+          echo "export EXECUTOR_JVM_METASPACE_SIZE=1500M" >> $BASH_ENV
+          echo "export EXECUTOR_JVM_HEAP_SIZE=4000M" >> $BASH_ENV
+      # not using our usual packaging circleci commands for this as we don't need to stash artifacts for later jobs
+    - execute_sbt_command:
+        cmd: "compile community-app/bundle"
+        fail_on_error_in_output: true
+        use_maven_mirror: false
+    - run:
+        name: Run Blackduck Detect
+        no_output_timeout: 30m
+        command: |
+          nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run  bash \<<'EOF'
+            export BDS_JAVA_HOME=$JAVA_HOME
+            # GO_MOD is excluded because the go executable is only available in docker build
+            bash <(curl -s https://raw.githubusercontent.com/DACH-NY/security-blackduck/master/synopsys-detect) \
+            ci-build ${CIRCLE_PROJECT_USERNAME}_${CIRCLE_PROJECT_REPONAME} ${CIRCLE_BRANCH} \
+            --logging.level.com.synopsys.integration=DEBUG  \
+            --detect.tools=DETECTOR \
+            --detect.excluded.detector.types=GO_MOD,NPM \
+            --detect.excluded.directories="daml,project/project/target,**/target/streams" \
+            --detect.notices.report=true \
+            --detect.cleanup=false \
+            --detect.policy.check.fail.on.severities=MAJOR,CRITICAL,BLOCKER \
+            --detect.timeout=3600
+          EOF
+    - run:
+        name: copy blackduck notice file
+        when: always
+        command: |
+          cp $CIRCLE_WORKING_DIRECTORY/*_Black_Duck_Notices_Report.txt $CIRCLE_WORKING_DIRECTORY/NOTICE
+    - store_artifacts:
+        name: Store Black Duck Report
+        path: NOTICE
+        destination: NOTICE
+    - store_artifacts:
+        name: Blackduck Run Artifacts
+        path: /home/circleci/blackduck/runs
+    - save_sbt_cache
+    - cleanup_build_job
+
+nightly_reporting:
+  executor: canton-small-docker
+  steps:
+    - checkout # we need our ci scripts
+    - run:
+        name: report open issues without milestone
+        command: scripts/ci/reporting/report-open-issues-without-milestone.sh

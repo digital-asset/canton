@@ -1,0 +1,222 @@
+# save compiled target directories to cache (so we don't recompile everything again and again)
+save_compiled_classes:
+  steps:
+    - run:
+        name: Creating archive of compiled classes
+        command: |
+          mkdir -p /tmp/classes
+          find . -type d -name target | xargs tar --use-compress-program=".ci/nix-exec pigz" -cf /tmp/classes/classes.tar.gz -H posix
+    - azure-caching-orb/save_to_azure:
+        # In custom orb, name parameter had to be changed to job_name
+        job_name: "Uploading archive with compiled classes to cache - without revision"
+        # Key components:
+        # - classes: fixed prefix for uniqueness
+        # - branch: to prevent re-usage of classes btw. branches
+        # - dependencies: to prevent re-usage of classes with mismatching libraries (this can lead to subtle errors)
+        key: >-
+          classes
+          branch=${CIRCLE_BRANCH}
+          daml=$(checksum project/project/DamlVersions.scala)
+          projectplugins=$(checksum project/project/plugins.sbt)
+          buildprops=$(checksum project/build.properties)
+          buildinfo=$(checksum project/buildinfo.sbt)
+          damlplugin=$(checksum project/DamlPlugin.scala)
+          dependencies=$(checksum project/Dependencies.scala)
+          houserules=$(checksum project/Houserules.scala)
+          plugins=$(checksum project/plugins.sbt)
+          build=$(checksum build.sbt)
+        path: "/tmp/classes"
+    - azure-caching-orb/save_to_azure:
+        # In custom orb, name parameter had to be changed to job_name
+        job_name: "Uploading archive with compiled classes to cache"
+        # Key components:
+        # - classes: fixed prefix for uniqueness
+        # - branch: to prevent re-usage of classes btw. branches
+        # - dependencies: to prevent re-usage of classes with mismatching libraries (this can lead to subtle errors)
+        # - rev: to allow for updating the cache when sources have changed
+        key: >-
+          classes
+          branch=${CIRCLE_BRANCH}
+          daml=$(checksum project/project/DamlVersions.scala)
+          projectplugins=$(checksum project/project/plugins.sbt)
+          buildprops=$(checksum project/build.properties)
+          buildinfo=$(checksum project/buildinfo.sbt)
+          damlplugin=$(checksum project/DamlPlugin.scala)
+          dependencies=$(checksum project/Dependencies.scala)
+          houserules=$(checksum project/Houserules.scala)
+          plugins=$(checksum project/plugins.sbt)
+          build=$(checksum build.sbt)
+          rev=<< pipeline.git.revision >>
+        path: "/tmp/classes"
+
+# restore pre-compiled target directories from cache (so we don't recompile everything again and again)
+checkout_and_restore_precompiled_classes:
+  parameters:
+    reset_classes_if_requested:
+      type: boolean
+      default: false
+  steps:
+    - checkout: # Also required to compute cache keys in the next step
+        method: blobless
+    - azure-caching-orb/restore_from_azure:
+        # In custom orb, name parameter had to be changed to job_name
+        # First, try to download class files from the same revision
+        # Using ":" to add additional cache key
+        # Then, try to download the latest class files produced for the same branch.
+        # Make sure that library versions still match.
+        # Using ":" to add additional cache key
+        # Then, try to download the latest class files produced for the main branch.
+        # Make sure that library versions still match.
+        job_name: "Downloading archive with compiled classes from cache"
+        key: >-
+          classes
+          branch=${CIRCLE_BRANCH}
+          daml=$(checksum project/project/DamlVersions.scala)
+          projectplugins=$(checksum project/project/plugins.sbt)
+          buildprops=$(checksum project/build.properties)
+          buildinfo=$(checksum project/buildinfo.sbt)
+          damlplugin=$(checksum project/DamlPlugin.scala)
+          dependencies=$(checksum project/Dependencies.scala)
+          houserules=$(checksum project/Houserules.scala)
+          plugins=$(checksum project/plugins.sbt)
+          build=$(checksum build.sbt)
+          rev=<< pipeline.git.revision >>
+          :
+          classes
+          branch=${CIRCLE_BRANCH}
+          daml=$(checksum project/project/DamlVersions.scala)
+          projectplugins=$(checksum project/project/plugins.sbt)
+          buildprops=$(checksum project/build.properties)
+          buildinfo=$(checksum project/buildinfo.sbt)
+          damlplugin=$(checksum project/DamlPlugin.scala)
+          dependencies=$(checksum project/Dependencies.scala)
+          houserules=$(checksum project/Houserules.scala)
+          plugins=$(checksum project/plugins.sbt)
+          build=$(checksum build.sbt)
+          :
+          classes
+          branch=main
+          daml=$(checksum project/project/DamlVersions.scala)
+          projectplugins=$(checksum project/project/plugins.sbt)
+          buildprops=$(checksum project/build.properties)
+          buildinfo=$(checksum project/buildinfo.sbt)
+          damlplugin=$(checksum project/DamlPlugin.scala)
+          dependencies=$(checksum project/Dependencies.scala)
+          houserules=$(checksum project/Houserules.scala)
+          plugins=$(checksum project/plugins.sbt)
+          build=$(checksum build.sbt)
+    - run:
+        name: Extracting precompiled classes
+        command: |
+          if [[ << parameters.reset_classes_if_requested >> == true ]] &&
+             grep "^$CIRCLE_BRANCH$" .circleci/branches_to_be_fully_recompiled_in_ci.txt > /dev/null
+          then
+            echo "Do not extract precompiled classes, as a full recompilation has been requested."
+            exit 0
+          fi
+
+          if [[ -e /tmp/classes/classes.tar.gz ]]; then
+            tar --use-compress-program=".ci/nix-exec pigz" -xf /tmp/classes/classes.tar.gz
+          else
+            echo "No precompiled classes found. Skipping..."
+          fi
+
+track_cpu_and_memory:
+  steps:
+    - run:
+        name: Record memory usage
+        command: scripts/ci/record-memory-usage.sh
+        background: true
+
+store_track_cpu_and_memory:
+  steps:
+    - store_artifacts:
+        name: Store the cpu and memory usage
+        path: track
+        destination: track
+
+checkout_and_restore_caches:
+  steps:
+    - checkout_and_restore_precompiled_classes
+    - restore_sbt_cache
+    - track_cpu_and_memory
+
+cleanup_build_job:
+  steps:
+    - store_track_cpu_and_memory
+    - slack_red_main_with_volunteer
+
+cleanup_test_job:
+  parameters:
+    report_to_datadog:
+      default: true
+      type: boolean
+    collect_postgres_query_stats:
+      default: false
+      type: boolean
+  steps:
+    - store_track_cpu_and_memory
+    - upload_test_reports
+    - post_stability_result
+    - when:
+        condition: << parameters.report_to_datadog >>
+        steps:
+          - collect_failing_test_data_and_send_to_datadog
+    - post_log_metrics
+    - run: # Pack logfiles to speedup downloads.
+        name: Pack Logfiles
+        when: always
+        command: |
+          if [[ -d log ]]; then
+            .ci/nix-exec pigz $(find log -not -name "*.gz" -and -not -type "d")
+          fi
+    - store_artifacts:
+        name: Store test logs as artifacts (if any)
+        path: log
+        destination: log
+    - when:
+        condition: << parameters.collect_postgres_query_stats >>
+        steps:
+        - run:
+            name: Dump Postgres query stats (if any)
+            when: always
+            command: |
+              .ci/nix-exec .circleci/dump-pg-query-stats.sh
+        - store_artifacts:
+            name: Store Postgres query stats as artifacts (if any)
+            path: postgres-query-stats.sql.gz
+            destination: postgres/postgres-query-stats.sql.gz
+run_todo_script:
+  steps:
+    - authorize_git
+    - run:
+        name: Run the todo script
+        command: |
+          # .ci/nix-exec intentionally not used because non-pure nix environment is required for running ammonite (amm)
+          nix-shell -I nixpkgs=./nix/nixpkgs.nix --run "amm .circleci/todo-script/src/checkTodos.sc"
+          # save number of open todos so we can push it to datadog
+          if [ -e todo-out/count ]; then
+            open_todos=$(cat todo-out/count)
+          else
+            open_todos=0
+          fi
+          echo "export open_todos=\"$open_todos\"" >> $BASH_ENV
+    - store_artifacts:
+        name: Store todos as artifacts
+        path: todo-out/todos
+        destination: todos
+
+# On a branch will check for controlled files and fail if detected
+# On a PR will check for controlled files and add missing labels automatically
+check_pr_compliance_labels:
+  steps:
+    - run:
+        name: Compliance labels check for PR
+        command: .circleci/check-pr-compliance-labels.sh
+
+check_pr_skip_ci:
+  steps:
+    - run:
+        name: Check whether build should be aborted due to `skip ci` label on PR
+        command: .circleci/abort-if-skip-ci.sh
+

@@ -1,0 +1,21 @@
+FROM postgres:17
+
+RUN set -eux && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+      ca-certificates git build-essential postgresql-server-dev-17 wget unzip && \
+    \
+    # pg_store_plans (community extension)
+    cd /tmp && \
+    wget -O pg_store_plans.zip https://github.com/ossc-db/pg_store_plans/archive/443ff6d9ae12c1c5e2f892bdf018d19830560887.zip && \
+    echo "8ebca6d2503f28cd83f29a90cf57a519f42db48b807a0f871e25bdacb5d6c6f2  pg_store_plans.zip" | sha256sum -c && \
+    unzip pg_store_plans.zip && \
+    mv pg_store_plans-443ff6d9ae12c1c5e2f892bdf018d19830560887 pg_store_plans && \
+    cd /tmp/pg_store_plans && \
+    make USE_PGXS=1 && \
+    make USE_PGXS=1 install && \
+    \
+    # clean up build deps
+    apt-get remove -y ca-certificates git build-essential postgresql-server-dev-17 wget unzip && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/* /tmp/*

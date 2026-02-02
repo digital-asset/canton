@@ -490,6 +490,7 @@ object BuildCommon {
     case PathList("META-INF", "FastDoubleParser-NOTICE") => MergeStrategy.first
     // complains about okio.kotlin_module clash
     case PathList("META-INF", "okio.kotlin_module") => MergeStrategy.last
+    case path if path.endsWith("/OSGI-INF/MANIFEST.MF") => MergeStrategy.first
     case x => oldStrategy(x)
   }
 
@@ -827,6 +828,8 @@ object BuildCommon {
         assembly / logLevel := Level.Info,
         assembly / mainClass := Some("com.digitalasset.canton.CantonCommunityApp"),
         assembly / assemblyJarName := s"canton-open-source-${version.value}.jar",
+        // add the test DARs generated in daml-lf-encoder by DamlLfPlugin
+        Test / managedResources ++= (DamlProjects.`daml-lf-encoder` / Test / resources).value,
         // Explicit set the Daml project dependency to common
         Test / damlDependencies := (`community-common` / Compile / damlBuild).value :+ (`ledger-common` / Test / resourceDirectory).value / "test-models" / "model-tests-1.15.dar",
         Test / damlBuildOrder := Seq(
@@ -973,8 +976,8 @@ object BuildCommon {
           gcp_kms,
           grpc_netty_shaded,
           better_files,
-          bouncycastle_bcpkix_jdk15on,
-          bouncycastle_bcprov_jdk15on,
+          bouncycastle_bcpkix,
+          bouncycastle_bcprov,
           cats,
           chimney,
           chimneyJavaConversion,
@@ -1521,8 +1524,8 @@ object BuildCommon {
       .settings(
         sharedSettings,
         libraryDependencies ++= Seq(
-          bouncycastle_bcprov_jdk15on,
-          bouncycastle_bcpkix_jdk15on,
+          bouncycastle_bcprov,
+          bouncycastle_bcpkix,
         ),
         // Exclude to apply our license header to any Java files
         headerSources / excludeFilter := "*.java",
@@ -1975,7 +1978,6 @@ object BuildCommon {
           DamlProjects.`daml-lf-api-type-signature`,
           DamlProjects.`scalatest-utils` % Test,
           DamlProjects.`timer-utils`,
-          DamlProjects.`observability-pekko-http-metrics`,
           `ledger-api-core` % "compile->compile;test->test",
           `ledger-common` % "test->test",
           `community-testing` % "test->test",
@@ -2153,7 +2155,6 @@ object BuildCommon {
         `community-base`,
         `community-app` % "test->test",
         `daml-adjustable-clock`,
-        DamlProjects.`observability-pekko-http-metrics`,
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -2503,7 +2504,6 @@ object BuildCommon {
       `ledger-resources`,
       `timer-utils`,
       crypto,
-      `safe-proto`,
       nameof,
       `testing-utils`,
       `grpc-test-utils`,
@@ -2515,8 +2515,6 @@ object BuildCommon {
       `http-test-utils`,
       `observability-metrics`,
       `observability-tracing`,
-      `observability-pekko-http-metrics`,
-      `concurrent`,
       `executors`,
       `sample-service`,
       `daml-lf-data`,
@@ -2697,22 +2695,9 @@ object BuildCommon {
         libsScalaSettings,
         publish / skip := false,
         libraryDependencies ++= Seq(
-          bouncycastle_bcprov_jdk15on,
+          bouncycastle_bcprov,
           scalatest % Test,
           slf4j_api,
-        ),
-      )
-
-    lazy val `safe-proto` = project
-      .in(file("base/safe-proto"))
-      .disablePlugins(WartRemover)
-      .settings(
-        libsScalaSettings,
-        publish / skip := false,
-        libraryDependencies ++= Seq(
-          google_protobuf_java,
-          scalatest_shouldmatchers % Test,
-          scalatest_wordspec % Test,
         ),
       )
 
@@ -2884,27 +2869,6 @@ object BuildCommon {
         libsScalaSettings
       )
 
-    lazy val `concurrent` = project
-      .in(file("base/concurrent"))
-      .disablePlugins(WartRemover)
-      .settings(
-        sharedCommunitySettings,
-        organization := "com.daml",
-        libraryDependencies ++= Seq(
-          scalaz_core,
-          shapeless % Test,
-          scalatest % Test,
-          scalatest_compatible % Test,
-          scalatest_shouldmatchers % Test,
-          scalatest_wordspec % Test,
-          scalaz_core % Test,
-          cats % Test,
-          scala_compiler % Test,
-          scala_reflect % Test,
-        ),
-        coverageEnabled := false,
-      )
-
     lazy val `executors` = project
       .in(file("base/executors"))
       .dependsOn(
@@ -2918,8 +2882,7 @@ object BuildCommon {
     lazy val `observability-metrics` = project
       .in(file("base/observability/metrics"))
       .dependsOn(
-        `concurrent`,
-        `scala-utils`,
+        `scala-utils`
       )
       .disablePlugins(WartRemover)
       .settings(
@@ -2951,30 +2914,6 @@ object BuildCommon {
           opentelemetry_sdk % Test,
           opentelemetry_sdk_testing % Test,
           scalatest % Test,
-        ),
-      )
-
-    lazy val `observability-pekko-http-metrics` = project
-      .in(file("base/observability/pekko-http-metrics"))
-      .disablePlugins(WartRemover)
-      .dependsOn(
-        `observability-metrics` % "compile->test;test->compile",
-        `testing-utils`,
-      )
-      .settings(
-        libsScalaSettings,
-        scalacOptions += "-Wconf:msg=lambda-parens:s",
-        Test / scalaSource := baseDirectory.value / "src" / "test" / "suite",
-        Test / scalacOptions ++= Seq("--release", "17"),
-        libraryDependencies ++= Seq(
-          guava,
-          pekko_actor,
-          pekko_http,
-          pekko_http_testkit % Test,
-          pekko_stream,
-          pekko_stream_testkit % Test,
-          scalatest % Test,
-          scalatest_wordspec % Test,
         ),
       )
 
@@ -3348,7 +3287,6 @@ object BuildCommon {
         `daml-lf-language`,
         `daml-lf-parser` % Test,
         `nonempty` % Test,
-        `safe-proto`,
         `scala-utils`,
       )
 
@@ -3394,7 +3332,6 @@ object BuildCommon {
         `daml-lf-data`,
         `daml-lf-language`,
         crypto,
-        `safe-proto`,
         `scala-utils`,
         `scalatest-utils` % Test,
       )
@@ -3763,6 +3700,8 @@ object BuildCommon {
         ),
         // TODO(#30144): replace with @nowarn once the bazel targets are deleted
         Test / scalacOptions ++= Seq("-Wconf:msg=match may not be exhaustive:s"),
+        // Reduce DamlLfPlugin verbosity: prevents "running DamlLFEncoder <big list of files>" from flooding logs.
+        Compile / logLevel := Level.Warn,
       )
       .dependsOn(
         `daml-lf-archive`,
@@ -3772,7 +3711,6 @@ object BuildCommon {
         `daml-lf-validation`,
         `daml-lf-parser`,
         crypto,
-        `safe-proto`,
       )
 
     lazy val `daml-lf-archive-encoder` = project
@@ -3884,6 +3822,7 @@ object BuildCommon {
       )
       .settings(
         sharedCantonCommunitySettings,
+        organization := "com.daml",
         publish / skip := false,
         compileOrder := CompileOrder.JavaThenScala,
         // The main artifact is Java only, even though some tests are written in Scala

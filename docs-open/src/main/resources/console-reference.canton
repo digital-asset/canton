@@ -1,0 +1,119 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates.
+// Proprietary code. All rights reserved.
+
+import io.circe.Encoder
+import io.circe.syntax._
+import com.digitalasset.canton.CantonCommunityApp
+import com.digitalasset.canton.console.{ConsoleEnvironment, Help, ParticipantReferencesExtensions}
+import com.digitalasset.canton.metrics.MetricDoc
+import com.digitalasset.base.error.RpcError
+import com.digitalasset.canton.version.{CantonVersion, ProtocolVersion, ReleaseVersion, ReleaseVersionToProtocolVersions}
+import com.digitalasset.canton.error.generator.{ErrorCodeDocItem, ErrorCodeDocumentationGenerator}
+import com.digitalasset.canton.topology.transaction.TopologyTransaction
+
+implicit val itemEncode: Encoder[Help.Item] =
+Encoder.forProduct7("name", "arguments", "return_type", "summary", "description", "topic", "scope")(
+  i =>
+    (i.name,
+     i.signature.map(_.argsWithTypes.map(parameter => (parameter.name, parameter.tpe))).getOrElse(Seq()),
+     i.signature.map(_.retType).map(t => if (t == "Unit") "" else t).getOrElse(""),
+     i.summary.toString,
+     i.description.toString,
+     i.topic.t.map(_.toString),
+     i.summary.flag.toString))
+
+implicit val errorCodeEncode: Encoder[ErrorCodeDocItem] =
+Encoder.forProduct7("className", "category", "hierarchicalGrouping", "conveyance", "code", "explanation", "resolution")(i =>
+  (i.errorCodeClassName, i.category.toString, i.hierarchicalGrouping.groupings.map(_.docName), i.conveyance, i.code, i.explanation.map(_.explanation), i.resolution.map(_.resolution)))
+
+implicit val metricEncode: Encoder[MetricDoc.Item] =
+Encoder.forProduct6("name", "summary", "description", "type", "qualification", "labels")(ii =>
+  (ii.name, ii.summary, ii.description, ii.metricType, ii.qualification.toString, ii.labelsWithDescription))
+
+implicit val cantonVersionEncode: Encoder[CantonVersion] =
+  Encoder.encodeString.contramap[CantonVersion](_.fullVersion)
+
+val consoleEnv       = CantonCommunityApp.environment.createConsole()
+val topLevelItems    = Help.flattenItemsForManual(consoleEnv.helpItems)
+val participantItems = Help.getItemsFlattenedForManual(participant1, Seq("Participant"))
+val mediatorItems    = Help.getItemsFlattenedForManual(mediator1, Seq("Mediator"))
+val sequencerItems   = Help.getItemsFlattenedForManual(sequencer1, Seq("Sequencer"))
+val participantSeqItems = Help.getItemsFlattenedForManual(new ParticipantReferencesExtensions(Seq.empty), Seq("Multiple Participants"))
+val allItems         = (topLevelItems ++ participantItems ++ mediatorItems ++ sequencerItems ++ participantSeqItems).distinct
+val allItemsF        = allItems.filter(x => x.name != "help" || x.topic.t.length == 1)
+
+val (participantMetrics, sequencerMetrics, mediatorMetrics) = CantonCommunityApp.environment.metricsRegistry.metricsDoc()
+val errorCodes = ErrorCodeDocumentationGenerator.getErrorCodeItems(
+  searchPackagePrefixes = Array("com.digitalasset.canton"),
+  excludePackagePrefixes = Array("com.digitalasset.canton.error.testpackage"),
+)
+
+// Finding protocol versions that are supported by releases
+sealed trait ProtocolVersionStatus {
+  def pv: ProtocolVersion
+  def isBeta: Boolean = this match {
+    case ProtocolVersionStatus.Beta(_) => true
+    case _ => false
+  }
+  override def toString: String = pv.toString
+}
+
+object ProtocolVersionStatus {
+  implicit def ordering: Ordering[ProtocolVersionStatus] =
+    Ordering.by(_.pv)
+  final case class Beta(pv: ProtocolVersion) extends ProtocolVersionStatus
+  final case class Stable(pv: ProtocolVersion) extends ProtocolVersionStatus
+}
+
+val stableMap = ReleaseVersionToProtocolVersions.majorMinorToStableProtocolVersions.view
+  .mapValues(_.map(ProtocolVersionStatus.Stable))
+  .toMap
+
+val betaMap = ReleaseVersionToProtocolVersions.majorMinorToBetaProtocolVersions.view
+  .mapValues(_.map(ProtocolVersionStatus.Beta))
+  .toMap
+
+// For each (major, minor) the list of stable and beta protocol versions
+val majorMinorToProtocolVersions: Map[(Int, Int), List[ProtocolVersionStatus]] =
+  stableMap
+    .foldLeft[Map[(Int, Int), List[ProtocolVersionStatus]]](betaMap) {
+      case (acc, (releaseVersion, protocolVersions)) =>
+        acc + (releaseVersion -> (acc.getOrElse(releaseVersion, Nil) ++ protocolVersions))
+    }
+
+// (major, minor) -> [protocol version]
+val stableAndBetaReleasesToProtocolVersions: List[((Int, Int), List[ProtocolVersionStatus])] =
+  majorMinorToProtocolVersions.toList
+    .sortBy { case (releaseVersion, _) => releaseVersion }
+
+val releaseVersionsToProtocolVersions: List[(String, List[String])] = stableAndBetaReleasesToProtocolVersions
+  .collect { case ((major, minor), protocolVersions) =>
+    s"$major.$minor" -> protocolVersions.sorted.collect {
+      case pv if pv.isBeta => s"${pv.toString}*"
+      case pv => pv.toString
+    }
+  }
+  .filter { case (_, protocolVersions) => protocolVersions.nonEmpty }
+
+val topologyTransactionProtocolVersionToProtobufVersions: List[(String, List[String])] = ProtocolVersion.supported.filterNot(_.isDev).map(pv =>
+  pv.v.toString -> List(TopologyTransaction.protoVersionFor(pv).v.toString)
+)
+
+import io.circe.generic.auto._
+case class MetricsOutput(sequencer: Seq[MetricDoc.Item], mediator: Seq[MetricDoc.Item], participant: Seq[MetricDoc.Item])
+case class Output(
+  console: Seq[Help.Item],
+  metrics: MetricsOutput,
+  errorCodes: Seq[ErrorCodeDocItem],
+  releaseVersionsToProtocolVersions: List[(String, List[String])], // releaseVersion -> [protocolVersion]
+  topologyTransactionProtocolVersionToProtobufVersions: List[(String, List[String])], // Protocol version -> [protobuf version]
+)
+
+val output =
+Output(console = allItemsF,
+       metrics = MetricsOutput(sequencer = sequencerMetrics, mediator = mediatorMetrics, participant = participantMetrics),
+       errorCodes = errorCodes,
+       releaseVersionsToProtocolVersions = releaseVersionsToProtocolVersions,
+       topologyTransactionProtocolVersionToProtobufVersions = topologyTransactionProtocolVersionToProtobufVersions,
+)
+println(output.asJson.spaces2)

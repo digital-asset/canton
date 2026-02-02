@@ -15,41 +15,149 @@ It is a simple extension to the :ref:`onboard external party tutorial <tutorial_
 Prerequisites
 =============
 
-Make sure that you have completed the :ref:`onboard external party tutorial <tutorial_onboard_external_party_lapi>`
-and still have a running Canton example instance.
+First read through the :ref:`onboard external party tutorial <tutorial_onboard_external_party_lapi>`
+to familiarize yourself with the onboarding steps.
 
-Run The Script
-==============
+.. important::
 
-The example script used in the previous tutorial also supports onboarding a multi-hosted external party. It will
-onboard by default on two nodes if invoked with the ``--multi-hosted`` command line argument.
+    This tutorial uses openssl to create keys on the file system, which is not secure for production use.
 
-.. code-block::
-
-    ./examples/08-interactive-submission/external_party_onboarding.sh --multi-hosted
-
-The Details of the Script
-=========================
-
-The flag ``--multi-hosted`` will pass the second participant id into the ``generate-topology`` request through the
+From the artifact directory, start Canton using the command:
 
 .. code-block::
 
-    `"otherConfirmingParticipantUids" : [$OTHER_PARTICIPANT_ID]`
+   # This file will be written by Canton on startup and contain the runtime allocated ports
+   export CANTON_PORTS_FILE=external_party_onboarding_multi_hosted.json
+  ./bin/canton -c examples/08-interactive-submission/interactive-submission.conf --bootstrap examples/08-interactive-submission/bootstrap.canton
 
-field. This will cause the generated topology transaction to include the additional participant id in the hosting
-relation ship. Other options are fields such as ``observingParticipantUids``, ``confirmationThreshold`` and more.
-If not configured, then the confirmation threshold will be set to the number of confirming nodes.
+.. tip::
+    A runnable script ``external_party_onboarding.sh`` located in the ``examples/08-interactive-submission`` directory of the Canton artifact puts together the steps in this tutorial as an example.
+    Run the script with
 
-The generated topology transactions then just need to be uploaded to the Ledger API of the second participant:
+    .. code-block::
 
-.. literalinclude:: CANTON/community/app/src/pack/examples/08-interactive-submission/external_party_onboarding.sh
-   :language: bash
-   :start-after: [begin-external-party-submit-multi-hosted]
-   :end-before: [end-external-party-submit-multi-hosted]
+        ./examples/08-interactive-submission/external_party_onboarding.sh --multi-hosted
 
-In fact, only the party to participant mapping needs to be uploaded. Uploading all topology transactions is not
-necessary but harmless.
+    from the same directory where you started Canton such that the script can find
+    the ``canton_ports.json`` file which contains the port configuration of the running Canton instance, or
+    invoke the script with the hostname and port of the Ledger API using the command line argument ``-p1 <host>:<port>``.
+    Note that the script supports a few command line arguments, which you can see by inspecting the code.
+
+    To obtain a Canton artifact refer to the :ref:`getting started <canton-getting-started>` section.
+
+Multi-Hosted Onboarding
+=======================
+
+The onboarding steps are initially exactly the same as the ones for a :ref:`non multi-hosted party <tutorial_onboard_external_party_lapi_steps>`.
+The only two differences are:
+
+- The :ref:`Create the topology transaction <tutorial_onboard_external_party_lapi_generate_step>` step is modified to include the additional hosting nodes.
+- There is an extra step where the additional hosting nodes approve the hosting relationship.
+
+Initial party setup:
+
+.. snippet:: party_management_multi_hosted
+    .. hidden:: bootstrap.synchronizer_local()
+    .. hidden:: participant1.synchronizers.connect_local(sequencer1, "my-synchronizer")
+    .. hidden:: participant2.synchronizers.connect_local(sequencer1, "my-synchronizer")
+    .. shell(cwd=CANTON):: PARTICIPANT1=$(echo "localhost:"$(jq -r ".participant1.jsonApi" external_party_onboarding_multi_hosted.json))
+    .. shell:: SYNCHRONIZER_ID=$(curl -sS -f -L ${PARTICIPANT1}/v2/state/connected-synchronizers | jq ".connectedSynchronizers[0].synchronizerId")
+    .. shell:: openssl genpkey -algorithm ed25519 -outform DER -out private_key.der
+    .. shell:: openssl pkey -in private_key.der -pubout -outform DER -out public_key.der 2> /dev/null
+    .. shell:: PUBLIC_KEY_BASE64=$(base64 -w 0 -i public_key.der)
+
+We'll multi-host the party on ``PARTICIPANT1`` and ``PARTICIPANT2``.
+
+.. snippet:: party_management_multi_hosted
+    .. shell(cwd=CANTON):: PARTICIPANT2=$(echo "localhost:"$(jq -r ".participant2.jsonApi" external_party_onboarding_multi_hosted.json))
+    .. shell:: OTHER_PARTICIPANT_UIDS=$(curl -sS -f -L ${PARTICIPANT2}/v2/parties/participant-id | jq -r .participantId)
+
+To each hosting node is given ``Confirmation`` or ``Observation`` permission on behalf of the party.
+At least one of the hosting nodes must have ``Confirmation`` permission.
+For details on the relationship between parties and hosting nodes as well as the hosting permissions, see :externalref:`this page <overview_canton_external_parties>`.
+
+.. tabs::
+
+   .. tab:: Confirmation
+
+       .. snippet:: party_management_multi_hosted
+            .. shell:: GENERATE=$(cat << EOF
+            {
+            "synchronizer" : $SYNCHRONIZER_ID,
+            "partyHint" : "Alice",
+            "publicKey" : {
+            "format" : "CRYPTO_KEY_FORMAT_DER_X509_SUBJECT_PUBLIC_KEY_INFO",
+            "keyData": "$PUBLIC_KEY_BASE64",
+            "keySpec" : "SIGNING_KEY_SPEC_EC_CURVE25519"
+            },
+            "otherConfirmingParticipantUids" : ["$OTHER_PARTICIPANT_UIDS"],
+            "confirmationThreshold": 2,
+            }
+            EOF
+            )
+
+       .. important::
+
+            Note the confirmation threshold is set to two in this example.
+            This has :externalref:`implications <overview_canton_external_parties>` on security and availability.
+
+   .. tab:: Observation
+
+       .. snippet:: party_management_multi_hosted
+            .. shell:: GENERATE=$(cat << EOF
+            {
+            "synchronizer" : $SYNCHRONIZER_ID,
+            "partyHint" : "Alice",
+            "publicKey" : {
+            "format" : "CRYPTO_KEY_FORMAT_DER_X509_SUBJECT_PUBLIC_KEY_INFO",
+            "keyData": "$PUBLIC_KEY_BASE64",
+            "keySpec" : "SIGNING_KEY_SPEC_EC_CURVE25519"
+            },
+            "observingParticipantUids" : ["$OTHER_PARTICIPANT_UIDS"]
+            }
+            EOF
+            )
+
+
+Notice the ``otherConfirmingParticipantUids`` and ``observingParticipantUids`` fields set respectively for confirming and observing permissions.
+
+The rest of the onboarding process is similar to single node hosting.
+
+.. snippet:: party_management_multi_hosted
+    .. shell:: ONBOARDING_TX=$(curl -f -sS -d "$GENERATE" -H "Content-Type: application/json" \
+        -X POST ${PARTICIPANT1}/v2/parties/external/generate-topology)
+    .. shell:: PARTY_ID=$(echo $ONBOARDING_TX | jq -r .partyId)
+    .. shell:: TRANSACTIONS=$(echo $ONBOARDING_TX | jq '.topologyTransactions | map({ transaction : .})')
+    .. shell:: PUBLIC_KEY_FINGERPRINT=$(echo $ONBOARDING_TX | jq -r .publicKeyFingerprint)
+    .. shell:: MULTI_HASH=$(echo $ONBOARDING_TX | jq -r .multiHash)
+    .. shell:: echo $MULTI_HASH | base64 --decode > hash_binary.bin
+    .. shell:: openssl pkeyutl -sign -inkey private_key.der -rawin -in hash_binary.bin -out signature.bin -keyform DER
+    .. shell:: SIGNATURE=$(base64 -w 0 < signature.bin)
+    .. shell:: ALLOCATE=$(cat << EOF
+       {
+       "synchronizer" : $SYNCHRONIZER_ID,
+       "onboardingTransactions": $TRANSACTIONS,
+       "multiHashSignatures": [
+       {
+       "format" : "SIGNATURE_FORMAT_CONCAT",
+       "signature": "$SIGNATURE",
+       "signedBy" : "$PUBLIC_KEY_FINGERPRINT",
+       "signingAlgorithmSpec" : "SIGNING_ALGORITHM_SPEC_ED25519"
+       }
+       ]
+       }
+       EOF
+       )
+    .. shell:: curl -sS -f -d "$ALLOCATE" -H "Content-Type: application/json" \
+        -X POST ${PARTICIPANT1}/v2/parties/external/allocate
+
+.. _tutorial_onboard_external_party_lapi_multi_hosted_pn_approves:
+
+Finally, the last step required is to call the allocate endpoint on Participant 2 as well.
+
+.. snippet:: party_management_multi_hosted
+    .. shell:: curl -sS -f -d "$ALLOCATE" -H "Content-Type: application/json" \
+        -X POST ${PARTICIPANT2}/v2/parties/external/allocate
 
 When a party to participant mapping is uploaded through the allocate endpoint which mentions the local validator,
 it will automatically be signed by the local validator and forwarded to the network. If the topology transaction
@@ -59,53 +167,15 @@ If the proposal already exists on the network, the new signatures are merged int
 signatures are present, the topology transaction is accepted and added to the state. Because of this, the signature
 of the external party can also be omitted when uploading the topology transaction to the second participant.
 
-Distribute Topology Transactions Using the Ledger
-=================================================
+This process can be scaled up to any number of hosting nodes.
 
-The described topology transaction distribution process can also be used to avoid passing the topology
-transactions between the different actors for uploading to the Ledger API. Instead, using the Admin API
-of the second participant, the hosting proposal can be listed, as an example, using the console command
-:ref:`list_hosting_proposals <topology.party_to_participant_mappings.list_hosting_proposals>`:
+.. tip::
 
-You can try this out on the Canton console if you have two participants connected to the same synchronizer.
-In the following example, you will use the participant1 to create the hosting proposal for an internal party.
-This way, you don't need to deal with creating signatures for the topology transactions externally. The
-approval of the proposal will be done using participant2.
+    The authorization of the node to host the party can also be :externalref:`performed <howto_external_parties>` by node operators through the Admin API.
 
-First, create a hosting proposal using participant1:
+When allocating multi-hosted parties, the ``allocate`` endpoint is asynchronous, meaning when it returns the party may not be allocated yet.
+To know when the party is ready to be used, you can poll the ``/v2/parties`` endpoint filtering for the party id until it appears in the response.
 
-.. snippet:: external_signing_topology_distribution
-    .. hidden:: bootstrap.synchronizer_local()
-    .. hidden:: participants.all.synchronizers.connect_local(sequencer1, alias = "local")
-    .. success:: participant1.topology.party_to_participant_mappings.propose(
-            com.digitalasset.canton.topology.PartyId.tryCreate("Alice", participant1.id.uid.namespace),
-            newParticipants = Seq(
-                (participant1.id, ParticipantPermission.Confirmation),
-                (participant2.id, ParticipantPermission.Confirmation),
-            ),
-        )
-
-Then, list the proposals on participant2. The new proposal should appear shortly:
-
-.. snippet:: external_signing_topology_distribution
-    .. hidden:: utils.retry_until_true { participant2.topology.party_to_participant_mappings.list_hosting_proposals(sequencer1.synchronizer_id, participant2.id).nonEmpty }
-    .. success:: participant2.topology.party_to_participant_mappings.list_hosting_proposals(sequencer1.synchronizer_id, participant2.id)
-
-This will show the pending proposal, awaiting the signature of the second participant. The proposal is identified
-by the transaction hash ``txHash``, which can be obtained from the output of the previous command:
-
-.. snippet:: external_signing_topology_distribution
-    .. success:: val txHash = participant2.topology.party_to_participant_mappings.list_hosting_proposals(sequencer1.synchronizer_id, participant2.id).head.txHash
-
-Authorize the proposal using the console command :ref:`topology.transactions.authorize <topology.transactions.authorize>`:
-
-.. snippet:: external_signing_topology_distribution
-    .. success:: participant2.topology.transactions.authorize(sequencer1.synchronizer_id, txHash)
-    .. hidden:: utils.retry_until_true { participant1.parties.hosted("Alice").nonEmpty }
-
-This will add the signature of participant2 to the proposal. Because the proposal is now fully signed, the party
-will appear as being hosted on both nodes:
-
-.. snippet:: external_signing_topology_distribution
-    .. success:: participant1.parties.hosted("Alice")
-
+.. snippet:: party_management_multi_hosted
+    .. shell:: curl -sS -f ${PARTICIPANT1}/v2/parties/$PARTY_ID
+    .. shell:: curl -sS -f ${PARTICIPANT2}/v2/parties/$PARTY_ID

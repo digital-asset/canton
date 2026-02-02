@@ -1,0 +1,27 @@
+// -----------------------------------------------------------
+// load jar
+// -----------------------------------------------------------
+Seq("performance-driver_", "performance_").foreach { jar =>
+  os.walk(os.Path(".", base=os.pwd)).filter(x => x.ext == "jar" && x.baseName.startsWith(jar)).sorted.lastOption match {
+    case Some(jar) =>
+      logger.info(s"Loading $jar")
+      println(s"Loading $jar")
+      interp.load.cp(jar)
+    case None =>
+      println(s"No ${jar} found by walking pwd. If you haven't included in the classpath, then you will likely start to see errors. Lots of errors.")
+  }
+}
+
+// adding a @ will make the imports available
+@
+
+import com.digitalasset.canton.performance.scenarios.LongRunning
+
+val mc = try {
+    LongRunning.startup()
+} catch {
+    case e: Exception =>
+        logger.error("Failed to start the performance test", e)
+        throw e
+}
+import mc._

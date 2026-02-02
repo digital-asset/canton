@@ -1,0 +1,250 @@
+save_sbt_cache:
+  steps:
+    - run:
+        name: Make caches readable & calculate their size
+        # On machine executors, some files in the caches may be owned by root.
+        # Make them readable to the cirecleci user.
+        command: .ci/nix-exec scripts/ci/make-cache-action.sh chmodcache sizecache
+
+    - azure-caching-orb/save_to_azure:
+        job_name: "Uploading Coursier cache with non-pecific key to populate 'older cache'"
+        key: >-
+          cache=canton-coursier
+          dependencies=$(checksum project/Dependencies.scala)
+        path: "${HOME}/.cache/coursier/v1/"
+    - azure-caching-orb/save_to_azure:
+        # In custom orb, name parameter had to be changed to job_name
+        job_name: "Uploading Coursier cache"
+        # The cache is stored only when the build definition or dependencies change
+        key: >-
+          cache=canton-coursier
+          dependencies=$(checksum project/Dependencies.scala)
+          dockerfile=$(checksum .ci/Dockerfile)
+          projectplugins=$(checksum project/project/plugins.sbt)
+          projectdamlversions=$(checksum project/project/DamlVersions.scala)
+          buildproperties=$(checksum project/build.properties)
+          buildinfo=$(checksum project/buildinfo.sbt)
+          houserules=$(checksum project/Houserules.scala)
+          plugins=$(checksum project/plugins.sbt)
+          build=$(checksum build.sbt)
+        # Components of the cache key:
+        # - Keyword "coursier" to indicate this stores the coursier cache.
+        # - Dockerfile to start with a clean state if build tools are updated.
+        # - This file to be on the save side.
+        # - Everything in project that may contain a dependency.
+        # - build.sbt as it may contain a hardcoded dependency.
+        # - Adding ${HOME} in path to determine relative path due to moving to self hosted CCI runner
+        path: "${HOME}/.cache/coursier/v1/"
+
+    - azure-caching-orb/save_to_azure:
+        job_name: "Uploading Ivy caches with non-specific key to populate 'older cache'"
+        key: >-
+          cache=canton-ivy
+          dependencies=$(checksum project/Dependencies.scala)
+        path: "${HOME}/.ivy2/cache/" # despite sbt 1.3 using coursier it appears a handful of dependencies are placed in the ivy cache (core sbt plugins and coursier itself)
+    - azure-caching-orb/save_to_azure:
+        # In custom orb, name parameter had to be changed to job_name
+        job_name: "Uploading Ivy caches"
+        # The cache is stored only when the build definition or dependencies change
+        key: >-
+          cache=canton-ivy
+          dependencies=$(checksum project/Dependencies.scala)
+          dockerfile=$(checksum .ci/Dockerfile)
+          projectplugins=$(checksum project/project/plugins.sbt)
+          projectdamlversions=$(checksum project/project/DamlVersions.scala)
+          buildproperties=$(checksum project/build.properties)
+          buildinfo=$(checksum project/buildinfo.sbt)
+          houserules=$(checksum project/Houserules.scala)
+          plugins=$(checksum project/plugins.sbt)
+          build=$(checksum build.sbt)
+        # Components of the cache key:
+        # - Keyword "sbt" to indicate this stores Sbt caches.
+        # - Otherwise as for the coursier cache key.
+        # - Adding ${HOME} in path to determine relative path due to moving to self hosted CCI runner
+        # - Using ":" to separate multiple paths that need to go in the same cache key
+        path: "${HOME}/.ivy2/cache/" # despite sbt 1.3 using coursier it appears a handful of dependencies are placed in the ivy cache (core sbt plugins and coursier itself)
+
+    - azure-caching-orb/save_to_azure:
+        job_name: "Uploading Sbt caches with non-specific key to populate 'older cache'"
+        key: >-
+          cache=canton-sbt
+          dependencies=$(checksum project/Dependencies.scala)
+        path: "${HOME}/.sbt/" # despite sbt 1.3 using coursier it appears a handful of dependencies are placed in the ivy cache (core sbt plugins and coursier itself)
+    - azure-caching-orb/save_to_azure:
+        # In custom orb, name parameter had to be changed to job_name
+        job_name: "Uploading Sbt caches"
+        # The cache is stored only when the build definition or dependencies change
+        key: >-
+          cache=canton-sbt
+          dependencies=$(checksum project/Dependencies.scala)
+          dockerfile=$(checksum .ci/Dockerfile)
+          projectplugins=$(checksum project/project/plugins.sbt)
+          projectdamlversions=$(checksum project/project/DamlVersions.scala)
+          buildproperties=$(checksum project/build.properties)
+          buildinfo=$(checksum project/buildinfo.sbt)
+          houserules=$(checksum project/Houserules.scala)
+          plugins=$(checksum project/plugins.sbt)
+          build=$(checksum build.sbt)
+        # Components of the cache key:
+        # - Keyword "sbt" to indicate this stores Sbt caches.
+        # - Otherwise as for the coursier cache key.
+        # - Adding ${HOME} in path to determine relative path due to moving to self hosted CCI runner
+        # - Using ":" to separate multiple paths that need to go in the same cache key
+        path: "${HOME}/.sbt/" # despite sbt 1.3 using coursier it appears a handful of dependencies are placed in the ivy cache (core sbt plugins and coursier itself)
+
+restore_sbt_cache:
+  # We are saving to / restoring from several caches to keep individual caches below 500MB.
+  # Otherwise, restore_cache may fail for no good reason.
+  # See https://circleci.com/docs/2.0/caching/#cache-size
+  steps:
+    - run:
+        name: Deleting cache directories
+        # Delete the cache directories so that we don't include arbitrary stuff coming from the docker image.
+        command: .ci/nix-exec scripts/ci/make-cache-action.sh rmcache
+
+    - azure-caching-orb/restore_from_azure:
+        # In custom orb, name parameter had to be changed to job_name
+        job_name: "Restoring Coursier cache - then if that is not present trying slightly older cache"
+        # First try to restore the cache for the exact same build configuration.
+        # If this is not possible and Dependencies.scala hasn't changed, populate the cache with slightly outdated data.
+        # This will speed up compilation, because most libraries are already in the cache.
+        key: >-
+          cache=canton-coursier
+          dependencies=$(checksum project/Dependencies.scala)
+          dockerfile=$(checksum .ci/Dockerfile)
+          projectplugins=$(checksum project/project/plugins.sbt)
+          projectdamlversions=$(checksum project/project/DamlVersions.scala)
+          buildproperties=$(checksum project/build.properties)
+          buildinfo=$(checksum project/buildinfo.sbt)
+          houserules=$(checksum project/Houserules.scala)
+          plugins=$(checksum project/plugins.sbt)
+          build=$(checksum build.sbt)
+          :
+          cache=canton-coursier
+          dependencies=$(checksum project/Dependencies.scala)
+        # If dependencies have changed, continue with an empty cache.
+    - azure-caching-orb/restore_from_azure:
+        # In custom orb, name parameter had to be changed to job_name
+        # This works similar to coursier cache
+        job_name: "Restoring Sbt caches - then if that is not present trying slightly older cache"
+        key: >-
+          cache=canton-sbt
+          dependencies=$(checksum project/Dependencies.scala)
+          dockerfile=$(checksum .ci/Dockerfile)
+          projectplugins=$(checksum project/project/plugins.sbt)
+          projectdamlversions=$(checksum project/project/DamlVersions.scala)
+          buildproperties=$(checksum project/build.properties)
+          buildinfo=$(checksum project/buildinfo.sbt)
+          houserules=$(checksum project/Houserules.scala)
+          plugins=$(checksum project/plugins.sbt)
+          build=$(checksum build.sbt)
+          :
+          cache=canton-sbt
+          dependencies=$(checksum project/Dependencies.scala)
+    - azure-caching-orb/restore_from_azure:
+        job_name: "Restoring Ivy caches - then if that is not present trying slightly older cache"
+        key: >-
+          cache=canton-ivy
+          dependencies=$(checksum project/Dependencies.scala)
+          dockerfile=$(checksum .ci/Dockerfile)
+          projectplugins=$(checksum project/project/plugins.sbt)
+          projectdamlversions=$(checksum project/project/DamlVersions.scala)
+          buildproperties=$(checksum project/build.properties)
+          buildinfo=$(checksum project/buildinfo.sbt)
+          houserules=$(checksum project/Houserules.scala)
+          plugins=$(checksum project/plugins.sbt)
+          build=$(checksum build.sbt)
+          :
+          cache=canton-ivy
+          dependencies=$(checksum project/Dependencies.scala)
+
+    - run:
+        name: Make caches readable & calculate their size
+        command: .ci/nix-exec scripts/ci/make-cache-action.sh chmodcache sizecache
+
+execute_sbt_command:
+  description: |
+    A context within which SBT commands can be run correctly for Cantons needs
+  parameters:
+    cmd:
+      # This may contain several commands.
+      # The caller needs to quote commands that contain spaces, e.g. "\"testOnly myTest\"".
+      type: string
+    execution_context_size:
+      # Number of permanent threads per execution context, i.e.,
+      # the value to be assigned to the JVM property "scala.concurrent.context.numThreads"
+      # This will affect the sizes of most execution contexts used by Canton.
+      # It will not affect parallel test execution, as sbt uses its own custom execution context for that.
+      type: string
+      default: $EXECUTOR_NUM_CPUS
+    timeout:
+      type: string
+      default: "25m"
+    succeed_on_error:
+      # Will cause the command to always succeed regardless of the sbt exit code.
+      # The original exit code will be available through the `STATUS` shell variable.
+      type: boolean
+      default: false
+    retry_fetch:
+      # If true, will send a few \r\n to sbt to ensure we download dependencies
+      type: string
+      default: "0"
+    fail_on_error_in_output:
+      # Fail if there is an error in the sbt output.
+      type: boolean
+      default: true
+    custom_java_home:
+      # specify a different java version to use
+      # value should be an absolute path to a JDK home directory
+      # if empty the system default will be used
+      type: string
+      default: ""
+    extra_parameters:
+      type: string
+      default: ""
+    override_java_version_for_tests:
+      # specify a different java version to run tests without compilation
+      # value should be the feature-release counter of the desired java version, e.g. "17" for Java 17.0.6
+      # if empty the system default (with the default compilation behavior) will be used
+      type: string
+      default: ""
+    debug:
+      # output mode set to debug for sbt, by default it is set to verbose mode and not debug
+      type: boolean
+      default: false
+    use_maven_mirror:
+      # use Azure DevOps da-maven-mirror for dependencies
+      type: boolean
+      default: true
+    log_immediate_flush:
+      type: string
+      default: "true"
+  steps:
+    - when:
+        condition: << parameters.override_java_version_for_tests >>
+        steps:
+          - run: |
+              nix_java_home=`nix-build ./nix/nixpkgs.nix -A "pkgs.openjdk<< parameters.override_java_version_for_tests >>" --no-out-link`
+              echo "export JAVA_HOME_FOR_TESTS=$nix_java_home" >> $BASH_ENV
+    - run:
+        name: Executing "sbt << parameters.cmd >>"
+        # In general jobs should be terminated by << parameters.timeout >>. If that does not work for some reason,
+        # use CircleCi's no-output timeout.
+        # We choose a value of 2h, because that is the highest value for << parameters.timeout >> that we currently use.
+        no_output_timeout: 2h
+        command: |
+          ./scripts/ci/sbt-ci-wrapper.sh << parameters.cmd >>
+        environment:
+          LOG_IMMEDIATE_FLUSH: << parameters.log_immediate_flush >>
+          EXECUTION_CONTEXT_SIZE: << parameters.execution_context_size >>
+          TIMEOUT: << parameters.timeout >>
+          SUCCEED_ON_ERROR: << parameters.succeed_on_error >>
+          RETRY_FETCH: << parameters.retry_fetch >>
+          FAIL_ON_ERROR_IN_OUTPUT: << parameters.fail_on_error_in_output >>
+          CUSTOM_JAVA_HOME: << parameters.custom_java_home >>
+          EXTRA_PARAMETERS: << parameters.extra_parameters >>
+          OVERRIDE_JAVA_VERSION_FOR_TESTS: << parameters.override_java_version_for_tests >>
+          DEBUG: << parameters.debug >>
+          USE_MAVEN_MIRROR: << parameters.use_maven_mirror >>
+          # Necessary for tests of the REPL
+          TERM: dumb

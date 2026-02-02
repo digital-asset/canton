@@ -1,0 +1,4624 @@
+# GENERATED FILE, DO NOT EDIT
+# If you need to change the CircleCI configuration, edit the relevant fragment in the .circleci/config directory and run `.circleci/build-config.sh`
+_canton_docker_executor:
+    auth:
+        password: $DOCKERHUB_PASSWORD
+        username: $DOCKERHUB_USERNAME
+    image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+_postgres_docker_executor:
+    command: |-
+        postgres
+          -c max_connections=1000
+          -c shared_preload_libraries=pg_store_plans,pg_stat_statements
+          -c pg_store_plans.plan_format=json
+          -c pg_store_plans.max=100000
+          -c pg_store_plans.max_plan_length=10240
+          -c pg_stat_statements.max=100000
+    environment:
+        POSTGRES_DB: test
+        POSTGRES_INITDB_ARGS: -A scram-sha-256
+        POSTGRES_PASSWORD: test-password
+        POSTGRES_USER: test
+    image: digitalasset/query-stats-postgres:17-343483aee440
+_postgres_environment:
+    POSTGRES_DB: test
+    POSTGRES_INITDB_ARGS: -A scram-sha-256
+    POSTGRES_PASSWORD: test-password
+    POSTGRES_USER: test
+_postgres_non_standard_environment:
+    NON_STANDARD_POSTGRES: "yes"
+    POSTGRES_DB: test
+    POSTGRES_INITDB_ARGS: -A scram-sha-256
+    POSTGRES_PASSWORD: test-password
+    POSTGRES_USER: test
+_postgres14_docker_executor:
+    command: postgres -c max_connections=1000
+    environment:
+        NON_STANDARD_POSTGRES: "yes"
+        POSTGRES_DB: test
+        POSTGRES_INITDB_ARGS: -A scram-sha-256
+        POSTGRES_PASSWORD: test-password
+        POSTGRES_USER: test
+    image: postgres:14
+_postgres15_docker_executor:
+    command: postgres -c max_connections=1000
+    environment:
+        NON_STANDARD_POSTGRES: "yes"
+        POSTGRES_DB: test
+        POSTGRES_INITDB_ARGS: -A scram-sha-256
+        POSTGRES_PASSWORD: test-password
+        POSTGRES_USER: test
+    image: postgres:15
+_postgres16_docker_executor:
+    command: postgres -c max_connections=1000
+    environment:
+        NON_STANDARD_POSTGRES: "yes"
+        POSTGRES_DB: test
+        POSTGRES_INITDB_ARGS: -A scram-sha-256
+        POSTGRES_PASSWORD: test-password
+        POSTGRES_USER: test
+    image: postgres:16
+_postgres17_docker_executor:
+    command: postgres -c max_connections=1000
+    environment:
+        NON_STANDARD_POSTGRES: "yes"
+        POSTGRES_DB: test
+        POSTGRES_INITDB_ARGS: -A scram-sha-256
+        POSTGRES_PASSWORD: test-password
+        POSTGRES_USER: test
+    image: postgres:17
+_toxiproxy_docker_executor:
+    image: ghcr.io/shopify/toxiproxy:2.1.5
+commands:
+    authorize_git:
+        steps:
+            - run:
+                command: |
+                    # setup the `canton-machine` user for pushing back to our github repo
+                    git remote set-url origin https://canton-machine:${GITHUB_TOKEN}@github.com/DACH-NY/canton.git
+                    git config --global user.name canton-machine
+                    git config --global user.email soren.bleikertz+canton-github@digitalasset.com
+                    git config --global push.default current
+                name: Authorize Git for canton-machine github account
+    build_and_publish_docker_base_image:
+        description: Build docker base image
+        parameters:
+            nightly_release:
+                default: false
+                type: boolean
+        steps:
+            - docker_log_into_gcr
+            - setup_qemu_and_buildx
+            - run:
+                command: ./docker/canton/build_canton_image.sh <<parameters.nightly_release>>
+                name: Build and publish docker base image
+    check_number_of_successes:
+        description: |
+            Fail the build, if the number of files matching "success_status/<<job_name>>_success.*" is lower than min_successes
+        parameters:
+            job_name:
+                type: string
+            min_successes:
+                type: integer
+        steps:
+            - attach_workspace:
+                at: /tmp/workspace
+            - run:
+                command: |
+                    SUCCESSES="$(ls -1q /tmp/workspace/success_status/<< parameters.job_name >>_success.* 2>/dev/null || true)"
+                    # The "if" is needed, because otherwise NUM_SUCCESSES would be set to 1 in case of no successes.
+                    if [[ -z $SUCCESSES ]]; then NUM_SUCCESSES=0; else NUM_SUCCESSES="$(wc -l \<<< "$SUCCESSES")"; fi
+                    echo "Detected $NUM_SUCCESSES successful nodes, namely:"
+                    echo "$SUCCESSES"
+
+                    FAILURES="$(ls -1q /tmp/workspace/failure_status/<< parameters.job_name >>_failure_code.* 2>/dev/null || true)"
+                    if [[ -z $FAILURES ]]; then NUM_FAILURES=0; else NUM_FAILURES="$(wc -l \<<< "$FAILURES")"; fi
+                    echo "Detected $NUM_FAILURES failed nodes, namely:"
+                    echo "$FAILURES"
+
+                    exit $((NUM_SUCCESSES < << parameters.min_successes >>))
+                name: Fail, if there are fewer than << parameters.min_successes >> successes
+                when: always
+    check_pr_compliance_labels:
+        steps:
+            - run:
+                command: .circleci/check-pr-compliance-labels.sh
+                name: Compliance labels check for PR
+    check_pr_skip_ci:
+        steps:
+            - run:
+                command: .circleci/abort-if-skip-ci.sh
+                name: Check whether build should be aborted due to `skip ci` label on PR
+    checkout_and_restore_caches:
+        steps:
+            - checkout_and_restore_precompiled_classes
+            - restore_sbt_cache
+            - track_cpu_and_memory
+    checkout_and_restore_precompiled_classes:
+        parameters:
+            reset_classes_if_requested:
+                default: false
+                type: boolean
+        steps:
+            - checkout:
+                method: blobless
+            - azure-caching-orb/restore_from_azure:
+                job_name: Downloading archive with compiled classes from cache
+                key: 'classes branch=${CIRCLE_BRANCH} daml=$(checksum project/project/DamlVersions.scala) projectplugins=$(checksum project/project/plugins.sbt) buildprops=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) damlplugin=$(checksum project/DamlPlugin.scala) dependencies=$(checksum project/Dependencies.scala) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) rev=<< pipeline.git.revision >> : classes branch=${CIRCLE_BRANCH} daml=$(checksum project/project/DamlVersions.scala) projectplugins=$(checksum project/project/plugins.sbt) buildprops=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) damlplugin=$(checksum project/DamlPlugin.scala) dependencies=$(checksum project/Dependencies.scala) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) : classes branch=main daml=$(checksum project/project/DamlVersions.scala) projectplugins=$(checksum project/project/plugins.sbt) buildprops=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) damlplugin=$(checksum project/DamlPlugin.scala) dependencies=$(checksum project/Dependencies.scala) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt)'
+            - run:
+                command: |
+                    if [[ << parameters.reset_classes_if_requested >> == true ]] &&
+                       grep "^$CIRCLE_BRANCH$" .circleci/branches_to_be_fully_recompiled_in_ci.txt > /dev/null
+                    then
+                      echo "Do not extract precompiled classes, as a full recompilation has been requested."
+                      exit 0
+                    fi
+
+                    if [[ -e /tmp/classes/classes.tar.gz ]]; then
+                      tar --use-compress-program=".ci/nix-exec pigz" -xf /tmp/classes/classes.tar.gz
+                    else
+                      echo "No precompiled classes found. Skipping..."
+                    fi
+                name: Extracting precompiled classes
+    cleanup_build_job:
+        steps:
+            - store_track_cpu_and_memory
+            - slack_red_main_with_volunteer
+    cleanup_test_job:
+        parameters:
+            collect_postgres_query_stats:
+                default: false
+                type: boolean
+            report_to_datadog:
+                default: true
+                type: boolean
+        steps:
+            - store_track_cpu_and_memory
+            - upload_test_reports
+            - post_stability_result
+            - when:
+                condition: << parameters.report_to_datadog >>
+                steps:
+                    - collect_failing_test_data_and_send_to_datadog
+            - post_log_metrics
+            - run:
+                command: |
+                    if [[ -d log ]]; then
+                      .ci/nix-exec pigz $(find log -not -name "*.gz" -and -not -type "d")
+                    fi
+                name: Pack Logfiles
+                when: always
+            - store_artifacts:
+                destination: log
+                name: Store test logs as artifacts (if any)
+                path: log
+            - when:
+                condition: << parameters.collect_postgres_query_stats >>
+                steps:
+                    - run:
+                        command: |
+                            .ci/nix-exec .circleci/dump-pg-query-stats.sh
+                        name: Dump Postgres query stats (if any)
+                        when: always
+                    - store_artifacts:
+                        destination: postgres/postgres-query-stats.sql.gz
+                        name: Store Postgres query stats as artifacts (if any)
+                        path: postgres-query-stats.sql.gz
+    collect_failing_test_data_and_send_to_datadog:
+        steps:
+            - run:
+                command: |
+                    nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "python3 ./scripts/ci/collect_failing_tests_and_send_to_datadog.py"
+                name: Send name of each failing test to datadog
+                when: always
+    docker_log_into_gcr:
+        description: Log Docker into GCR
+        steps:
+            - run:
+                command: |
+                    echo "Authenticating to Google Cloud..."
+                    gcloud beta auth activate-service-account --key-file=<(echo "$GAC_JSON") >/dev/null
+                    echo "Logging Docker in to $OCI_REGISTRY..."
+                    ACCESS_TOKEN="$(gcloud auth print-access-token)"
+                    printf '%s\n' "$ACCESS_TOKEN" | \
+                      docker login -u oauth2accesstoken --password-stdin "https://$OCI_REGISTRY" >/dev/null
+                name: Log Docker into GCR
+    execute_sbt_command:
+        description: |
+            A context within which SBT commands can be run correctly for Cantons needs
+        parameters:
+            cmd:
+                type: string
+            custom_java_home:
+                default: ""
+                type: string
+            debug:
+                default: false
+                type: boolean
+            execution_context_size:
+                default: $EXECUTOR_NUM_CPUS
+                type: string
+            extra_parameters:
+                default: ""
+                type: string
+            fail_on_error_in_output:
+                default: true
+                type: boolean
+            log_immediate_flush:
+                default: "true"
+                type: string
+            override_java_version_for_tests:
+                default: ""
+                type: string
+            retry_fetch:
+                default: "0"
+                type: string
+            succeed_on_error:
+                default: false
+                type: boolean
+            timeout:
+                default: 25m
+                type: string
+            use_maven_mirror:
+                default: true
+                type: boolean
+        steps:
+            - when:
+                condition: << parameters.override_java_version_for_tests >>
+                steps:
+                    - run: |
+                        nix_java_home=`nix-build ./nix/nixpkgs.nix -A "pkgs.openjdk<< parameters.override_java_version_for_tests >>" --no-out-link`
+                        echo "export JAVA_HOME_FOR_TESTS=$nix_java_home" >> $BASH_ENV
+            - run:
+                command: |
+                    ./scripts/ci/sbt-ci-wrapper.sh << parameters.cmd >>
+                environment:
+                    CUSTOM_JAVA_HOME: << parameters.custom_java_home >>
+                    DEBUG: << parameters.debug >>
+                    EXECUTION_CONTEXT_SIZE: << parameters.execution_context_size >>
+                    EXTRA_PARAMETERS: << parameters.extra_parameters >>
+                    FAIL_ON_ERROR_IN_OUTPUT: << parameters.fail_on_error_in_output >>
+                    LOG_IMMEDIATE_FLUSH: << parameters.log_immediate_flush >>
+                    OVERRIDE_JAVA_VERSION_FOR_TESTS: << parameters.override_java_version_for_tests >>
+                    RETRY_FETCH: << parameters.retry_fetch >>
+                    SUCCEED_ON_ERROR: << parameters.succeed_on_error >>
+                    TERM: dumb
+                    TIMEOUT: << parameters.timeout >>
+                    USE_MAVEN_MIRROR: << parameters.use_maven_mirror >>
+                name: Executing "sbt << parameters.cmd >>"
+                no_output_timeout: 2h
+    halt_publish_if_not_tuesday:
+        parameters:
+            withdate:
+                default: false
+                type: boolean
+        steps:
+            - run:
+                command: |
+                    # Abort "weekly snapshot release" unless its Tuesday
+                    if [[ "<< parameters.withdate >>" == "true" && $(date +"%u") -ne 2 ]]; then
+                      # https://support.circleci.com/hc/en-us/articles/360015562253-Conditionally-end-a-running-job-gracefully
+                      circleci-agent step halt
+                    fi
+                name: Abort if we shouldn't publish docker image
+    install_datadog_machine:
+        steps:
+            - run: sudo apt-get update
+            - run: sudo apt-get -y install jo python3-pip
+            - run: pip3 install datadog
+    limit_parallel_test_execution:
+        parameters:
+            num_tasks:
+                default: $EXECUTOR_NUM_CPUS
+                type: string
+        steps:
+            - run:
+                command: echo "export MAX_CONCURRENT_SBT_TEST_TASKS=<< parameters.num_tasks >>" >> $BASH_ENV
+                name: Limit parallel tests
+    obtain_release_suffix:
+        parameters:
+            is_manual:
+                type: boolean
+            is_nightly_workflow:
+                type: boolean
+        steps:
+            - run:
+                command: |
+                    suffix="$(.ci/nix-exec ./scripts/ci/obtain-release-suffix.sh <<parameters.is_nightly_workflow>> <<parameters.is_manual>>)"
+                    echo "export RELEASE_SUFFIX=\"$suffix\"" | tee -a $BASH_ENV
+                name: Obtain release suffix
+    package:
+        description: |
+            Create bundles
+        parameters:
+            artifact_suffix:
+                default: .tar.gz
+                type: string
+            cmd:
+                type: string
+            location:
+                type: string
+        steps:
+            - checkout_and_restore_caches
+            - execute_sbt_command:
+                cmd: << parameters.cmd >>
+                fail_on_error_in_output: false
+            - run:
+                command: |
+                    # Clean-up temporary releases from previous package jobs
+                    rm -rf tmp-release && mkdir tmp-release
+                    cp -v << parameters.location >>/*<< parameters.artifact_suffix >> tmp-release
+                name: Prepare for artefact upload
+            - store_artifacts:
+                destination: release
+                name: Store Release as artifacts
+                path: tmp-release
+            - persist_to_workspace:
+                paths: << parameters.location >>
+                root: .
+    persist_failure_status:
+        description: |
+            On failure, publish the status variable to the workspace and as an artifact
+        steps:
+            - run:
+                command: |
+                    mkdir -p success_status
+                    mkdir -p failure_status
+                    if [[ "$STATUS" -eq 0 ]]; then
+                      echo "Storing success status to success_status/${CIRCLE_JOB}_success.$CIRCLE_NODE_INDEX."
+                      echo 0 > "success_status/${CIRCLE_JOB}_success.$CIRCLE_NODE_INDEX"
+                    else
+                      echo "Storing failure status to failure_status/${CIRCLE_JOB}_failure_code.$CIRCLE_NODE_INDEX."
+                      echo "$STATUS" > "failure_status/${CIRCLE_JOB}_failure_code.$CIRCLE_NODE_INDEX"
+                    fi
+                name: Create status files
+                when: always
+            - persist_to_workspace:
+                name: Persist status files to the workspace
+                paths:
+                    - success_status
+                    - failure_status
+                root: .
+                when: always
+            - store_artifacts:
+                destination: FAILURE_STATUS/
+                name: Upload failure status (if any) as an artifact
+                path: failure_status/
+    persist_jvm_crash_files:
+        description: |
+            Try to save the JVM crash error file and core dump as artifacts
+        steps:
+            - run:
+                command: |
+                    mkdir -p jvm_crash
+                    cp hs_err_pid*.log core.* *.hprof jvm_crash 2>/dev/null || echo "no crash files found"
+                name: Copy JVM crash files
+                when: always
+            - store_artifacts:
+                name: Upload JVM crash files (if any) as an artifact
+                path: jvm_crash
+    post_benchmark_metrics:
+        steps:
+            - run:
+                command: |
+                    if cat benchmark_*.dat > benchmark.dat 2> /dev/null ; then
+                      benchmark="$(cat benchmark.dat | tr '\n' ' ')"
+                    else
+                      benchmark=""
+                    fi
+
+                    echo "BENCHMARK=$benchmark"
+                    echo "export BENCHMARK=\"$benchmark\"" >> $BASH_ENV
+                name: Read benchmark metrics from test report
+                when: always
+            - post_to_datadog:
+                data: $BENCHMARK
+                label: Post benchmark metrics to Datadog
+                when: always
+    post_log_metrics:
+        steps:
+            - run:
+                command: |
+                    statistics=$(./scripts/ci/compute-log-metrics.sh ./log/canton_test.log)
+                    echo "$statistics"
+                    echo "$statistics" >> $BASH_ENV
+                name: Compute log statistics (if log exists)
+            - post_to_datadog:
+                data: canton.log.size=$LOG_SIZE canton.log.line_count=$LOG_LINE_COUNT canton.log.avg_line_length=$AVG_LOG_LINE_LENGTH canton.log.max_line_length=$MAX_LOG_LINE_LENGTH canton.log.avg_entry_size=$AVG_LOG_ENTRY_SIZE canton.log.max_entry_size=$MAX_LOG_ENTRY_SIZE
+                label: Post canton.log metrics to Datadog
+                when: on_success
+    post_stability_result:
+        steps:
+            - post_to_datadog:
+                data: canton.stability.successes=$((STATUS == 0)) canton.stability.failures=$((STATUS != 0)) canton.stability.total=1
+                label: Post canton.stability.* metrics to Datadog
+                metric_type: count
+                use_commit_time: false
+    post_test_coverage:
+        steps:
+            - execute_sbt_command:
+                cmd: coverageAggregate
+            - run:
+                command: |
+                    report="target/scala-2.13/scoverage-report/scoverage.xml"
+                    coverage=$(grep -om 1 -E "statement-rate=\"[^\"]+\"" "$report" | grep -oE "[[:digit:]]+(\.[[:digit:]]+)?")
+                    echo "COVERAGE: $coverage"
+                    echo "export coverage=$coverage" >> $BASH_ENV
+                name: Determine test coverage
+            - post_to_datadog:
+                data: canton.build.test_coverage=$coverage
+                label: Post test coverage to Datadog
+                when: on_success
+    post_to_datadog:
+        parameters:
+            data:
+                type: string
+            label:
+                type: string
+            metric_type:
+                default: gauge
+                enum:
+                    - gauge
+                    - count
+                    - rate
+                type: enum
+            use_commit_time:
+                default: true
+                type: boolean
+            when:
+                default: always
+                enum:
+                    - always
+                    - on_success
+                    - on_fail
+                type: enum
+        steps:
+            - run:
+                command: |
+                    if [[ -n "<< parameters.data >>" ]]; then
+                      <<# parameters.use_commit_time >>
+                      TIMESTAMP=$(git log -1 --pretty=%ct)
+                      <</ parameters.use_commit_time >>
+                      <<^ parameters.use_commit_time >>
+                      TIMESTAMP=$(date +%s)
+                      <</ parameters.use_commit_time >>
+                      echo "Timestamp: $TIMESTAMP"
+                      HASH=$(git log -1 --pretty=%h)
+                      echo "Commit hash (abbreviated): $HASH"
+                      TAGS=$(jo -a "branch:$CIRCLE_BRANCH" "hash:$HASH" "workflow:$CIRCLE_WORKFLOW_ID" "job:$CIRCLE_JOB" "build:$CIRCLE_BUILD_NUM" "url:$CIRCLE_BUILD_URL" "container:$CIRCLE_NODE_INDEX")
+
+                      ./scripts/ci/post-to-datadog.sh "$TIMESTAMP" << parameters.metric_type >> "$TAGS" << parameters.data >>
+                    fi
+                name: << parameters.label >>
+                when: << parameters.when >>
+    publish_libs_to_google_artifact_registry:
+        steps:
+            - setup_gcp_gar
+            - execute_sbt_command:
+                cmd: publish
+                fail_on_error_in_output: false
+    publish_libs_to_maven_central:
+        steps:
+            - setup_gpg
+            - execute_sbt_command:
+                cmd: publishToSonatype
+                fail_on_error_in_output: false
+    publish_release_on_artifactory:
+        parameters:
+            nightly_release:
+                default: false
+                type: boolean
+        steps:
+            - run:
+                command: |
+                    .ci/nix-exec ./scripts/ci/publish-to-artifactory.sh << parameters.nightly_release >>
+                name: Publish to Artifactory
+    publish_release_on_oci_registry:
+        parameters:
+            nightly_release:
+                default: false
+                type: boolean
+        steps:
+            - run:
+                command: |
+                    echo "export DPM_REGISTRY_AUTH=~/.docker/config.json" | tee -a $BASH_ENV
+                name: Set DPM variables
+            - run:
+                command: nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "scripts/ci/publish-to-oci.sh << parameters.nightly_release >>"
+                name: Publish to OCI registry
+    publish_release_on_s3:
+        steps:
+            - run:
+                command: |
+                    .ci/nix-exec ./scripts/ci/publish-to-s3.sh
+                name: Publish to S3
+    publish_sandbox_to_jfrog:
+        parameters:
+            repository:
+                default: generic-sandbox
+                description: JFROG repo for upload
+                type: string
+        steps:
+            - run:
+                command: |
+                    cd tmp-release || exit 1
+                    for i in $(find . -type f | sed 's|//|/|g'); do
+                      ../scripts/ci/publish-to-jfrog.sh -r << parameters.repository >> ${i} ${@} || exit ${?}
+                    done
+                name: Publish to JFROG
+    restore_packaged_release:
+        parameters:
+            location:
+                type: string
+        steps:
+            - attach_workspace:
+                at: /tmp/workspace
+            - run:
+                command: |
+                    TARGET="<<parameters.location>>"
+                    mkdir -p $TARGET
+                    cp -rv /tmp/workspace/$TARGET/* $TARGET
+                name: Copy release
+    restore_sbt_cache:
+        steps:
+            - run:
+                command: .ci/nix-exec scripts/ci/make-cache-action.sh rmcache
+                name: Deleting cache directories
+            - azure-caching-orb/restore_from_azure:
+                job_name: Restoring Coursier cache - then if that is not present trying slightly older cache
+                key: 'cache=canton-coursier dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) : cache=canton-coursier dependencies=$(checksum project/Dependencies.scala)'
+            - azure-caching-orb/restore_from_azure:
+                job_name: Restoring Sbt caches - then if that is not present trying slightly older cache
+                key: 'cache=canton-sbt dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) : cache=canton-sbt dependencies=$(checksum project/Dependencies.scala)'
+            - azure-caching-orb/restore_from_azure:
+                job_name: Restoring Ivy caches - then if that is not present trying slightly older cache
+                key: 'cache=canton-ivy dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) : cache=canton-ivy dependencies=$(checksum project/Dependencies.scala)'
+            - run:
+                command: .ci/nix-exec scripts/ci/make-cache-action.sh chmodcache sizecache
+                name: Make caches readable & calculate their size
+    run_crash_recovery_tests:
+        parameters:
+            exclude_unstable_tests:
+                type: boolean
+            filter:
+                type: string
+            num_test_buckets:
+                default: $CIRCLE_NODE_TOTAL
+                type: string
+            succeed_on_error:
+                default: false
+                type: boolean
+        steps:
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD<<# parameters.exclude_unstable_tests >> -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest<</ parameters.exclude_unstable_tests >>"
+                fail_on_error_in_output: false
+                filter: << parameters.filter >>
+                num_parallel_tasks: "1"
+                num_test_buckets: << parameters.num_test_buckets >>
+                skip_cleanup: true
+                succeed_on_error: << parameters.succeed_on_error >>
+                timeout: 35m
+            - run:
+                command: find log -name "external-*" | xargs --no-run-if-empty tar cvf log/all-external-jobs.tar
+                name: Pack external log files into single file
+                when: always
+            - cleanup_test_job:
+                collect_postgres_query_stats: true
+            - when:
+                condition: << parameters.succeed_on_error >>
+                steps:
+                    - slack_red_main_with_volunteer
+    run_db_tests:
+        parameters:
+            db_name:
+                type: string
+            exclude_unstable_tests:
+                type: boolean
+            num_test_buckets:
+                default: $CIRCLE_NODE_TOTAL
+                type: string
+            override_java_version_for_tests:
+                default: ""
+                type: string
+            succeed_on_error:
+                default: false
+                type: boolean
+        steps:
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD<<# parameters.exclude_unstable_tests >> -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest<</ parameters.exclude_unstable_tests >>" checkErrors
+                filter: 'grep -E -e << parameters.db_name >>$ | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.manual -e com\.digitalasset\.canton\.integration\.tests\.crashrecovery -e com\.digitalasset\.canton\.nightly -e com\.digitalasset\.canton\.integration\.tests\.nightly -e com\.digitalasset\.canton\.integration\.tests\.toxiproxy -e com\.digitalasset\.canton\.integration\.tests\.release -e com\.digitalasset\.canton\.integration\.tests\.benchmarks -e com\.digitalasset\.canton\.integration\.tests\.continuity '
+                num_test_buckets: << parameters.num_test_buckets >>
+                override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+                succeed_on_error: << parameters.succeed_on_error >>
+    run_ordinary_tests:
+        parameters:
+            collect_postgres_query_stats:
+                default: false
+                type: boolean
+            exclude_unstable_tests:
+                type: boolean
+            execution_context_size:
+                default: $EXECUTOR_NUM_CPUS
+                type: string
+            num_parallel_tasks:
+                default: "4"
+                type: string
+            num_test_buckets:
+                default: $CIRCLE_NODE_TOTAL
+                type: string
+            override_java_version_for_tests:
+                default: ""
+                type: string
+            succeed_on_error:
+                default: false
+                type: boolean
+            test_scala3_migration:
+                default: false
+                type: boolean
+        steps:
+            - run_tests:
+                collect_postgres_query_stats: << parameters.collect_postgres_query_stats >>
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD<<# parameters.exclude_unstable_tests >> -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest<</ parameters.exclude_unstable_tests >>" checkErrors
+                execution_context_size: << parameters.execution_context_size >>
+                filter: 'grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.manual -e com\.digitalasset\.canton\.integration\.tests\.crashrecovery -e com\.digitalasset\.canton\.nightly -e com\.digitalasset\.canton\.integration\.tests\.nightly -e com\.digitalasset\.canton\.integration\.tests\.toxiproxy -e com\.digitalasset\.canton\.integration\.tests\.release -e com\.digitalasset\.canton\.integration\.tests\.benchmarks -e com\.digitalasset\.canton\.integration\.tests\.continuity -e com\.digitalasset\.canton\.integration\.tests\.variations -e com\.digitalasset\.canton\.integration\.tests\.upgrade\.MajorUpgrade.\*Writer.\* '
+                num_parallel_tasks: << parameters.num_parallel_tasks >>
+                num_test_buckets: << parameters.num_test_buckets >>
+                override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+                succeed_on_error: << parameters.succeed_on_error >>
+                test_scala3_migration: << parameters.test_scala3_migration >>
+    run_sbt_command_on_machine:
+        parameters:
+            additional_docker_args:
+                default: ""
+                type: string
+            command:
+                type: string
+            no_output_timeout:
+                default: 10m
+                type: string
+            sbt_options:
+                default: ""
+                type: string
+            timeout:
+                default: 25m
+                type: string
+        steps:
+            - run:
+                command: |
+                    # run sbt in our usual build container but from a host that can launch multiple docker containers.
+                    # supply the docker socket to allow test containers within our scalatests to do this.
+                    # the .ci/update-build-image.sh script should update this label when the image is updated.
+                    # Note: need to use `--security-opt seccomp=unconfined` because nix uses the clone3 call which
+                    #       is not properly supported by docker < 20.10.10, see https://github.com/moby/moby/pull/42681
+                    #       alternatively, update the machine image to ubuntu-2004:202111-02
+                    timeout --kill-after=30s << parameters.timeout >> docker run --rm --volume "$PWD:$CIRCLE_WORKING_DIRECTORY" --workdir "$CIRCLE_WORKING_DIRECTORY" \
+                      --volume "$HOME/.docker/config.json:/root/.docker/config.json" \
+                      --volume "/var/run/docker.sock:/var/run/docker.sock" \
+                      --volume "$HOME/.ivy2/cache:/root/.ivy2/cache" \
+                      --volume "$HOME/.m2:/root/.m2" \
+                      --volume "$HOME/.cache/coursier/v1:/root/.cache/coursier/v1" \
+                      --volume "$HOME/.sbt:/root/.sbt" \
+                      --env "CI=$CI" \
+                      --env "MACHINE=1" \
+                      --env "SBT_OPTS=-Xmx$EXECUTOR_JVM_HEAP_SIZE" \
+                      --env MAX_CONCURRENT_SBT_TEST_TASKS \
+                      --env ARTIFACTORY_USER \
+                      --env ARTIFACTORY_PASSWORD \
+                      --env CANTON_PROTOCOL_VERSION \
+                      --security-opt seccomp=unconfined \
+                      << parameters.additional_docker_args >> \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa \
+                      nix-shell \
+                      -I nixpkgs=./nix/nixpkgs.nix \
+                      --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
+                name: Run tests
+                no_output_timeout: << parameters.no_output_timeout >>
+    run_test_coverage_test:
+        parameters:
+            command:
+                type: string
+            filter:
+                default: 'grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.manual -e com\.digitalasset\.canton\.integration\.tests\.crashrecovery -e com\.digitalasset\.canton\.nightly -e com\.digitalasset\.canton\.integration\.tests\.nightly -e com\.digitalasset\.canton\.integration\.tests\.toxiproxy -e com\.digitalasset\.canton\.integration\.tests\.release -e com\.digitalasset\.canton\.integration\.tests\.benchmarks -e com\.digitalasset\.canton\.integration\.tests\.continuity -e com\.digitalasset\.canton\.integration\.tests\.variations -e com\.digitalasset\.canton\.integration\.tests\.upgrade\.MajorUpgrade.\*Writer.\* '
+                type: string
+            num_test_buckets:
+                default: $CIRCLE_NODE_TOTAL
+                type: string
+        steps:
+            - run:
+                command: |
+                    # The coverage instrumentation may introduce new warts which would fail compilation.
+                    # Disabling wart checking, as we don't care about warts when measuring coverage.
+                    echo "export _JAVA_OPTIONS=-Dcanton-disable-warts=true" >> "$BASH_ENV"
+                name: Disable compiler warts
+            - run_tests:
+                command: << parameters.command >>
+                fail_on_error_in_output: false
+                filter: << parameters.filter >>
+                num_test_buckets: << parameters.num_test_buckets >>
+                succeed_on_error: true
+                timeout: 120m
+            - post_test_coverage
+            - run:
+                command: |
+                    tar czf coverage_report.tar.gz target/scala-2.13/scoverage-report
+                name: Create archive with coverage report
+            - store_artifacts:
+                destination: coverage-report
+                name: Store coverage report as artifact (if any)
+                path: coverage_report.tar.gz
+            - slack_red_main_with_volunteer
+    run_tests:
+        parameters:
+            collect_postgres_query_stats:
+                default: false
+                type: boolean
+            command:
+                type: string
+            do_checkout:
+                default: true
+                type: boolean
+            execution_context_size:
+                default: $EXECUTOR_NUM_CPUS
+                type: string
+            fail_on_error_in_output:
+                default: true
+                type: boolean
+            filter:
+                type: string
+            num_parallel_tasks:
+                default: $EXECUTOR_NUM_CPUS
+                type: string
+            num_test_buckets:
+                default: $CIRCLE_NODE_TOTAL
+                type: string
+            override_java_version_for_tests:
+                default: ""
+                type: string
+            release_path:
+                default: ""
+                type: string
+            report_to_datadog:
+                default: true
+                type: boolean
+            skip_cleanup:
+                default: false
+                type: boolean
+            succeed_on_error:
+                default: false
+                type: boolean
+            test_scala3_migration:
+                default: false
+                type: boolean
+            test_sub_command:
+                default: testOnly
+                type: string
+            timeout:
+                default: 25m
+                type: string
+        steps:
+            - when:
+                condition: << parameters.do_checkout >>
+                steps:
+                    - checkout_and_restore_caches
+            - when:
+                condition: << parameters.release_path >>
+                steps:
+                    - restore_packaged_release:
+                        location: << parameters.release_path >>
+            - setup_gcp_kms
+            - when:
+                condition: << parameters.num_test_buckets >>
+                steps:
+                    - split_tests_for_parallel_run:
+                        filter: << parameters.filter >>
+                        index: $((CIRCLE_NODE_INDEX % << parameters.num_test_buckets >>))
+                        test_sub_command: << parameters.test_sub_command >>
+                        total: << parameters.num_test_buckets >>
+            - limit_parallel_test_execution:
+                num_tasks: << parameters.num_parallel_tasks >>
+            - run:
+                command: |
+                    echo "export CANTON_CRASH_ON_PRETTY_PRINTING_ERRORS=true" >> $BASH_ENV
+                name: Set CANTON_CRASH_ON_PRETTY_PRINTING_ERRORS=true
+            - execute_sbt_command:
+                cmd: << parameters.command >>
+                execution_context_size: << parameters.execution_context_size >>
+                extra_parameters: -J-Xlog:gc=info,safepoint=info:file=track/GC.log:time
+                fail_on_error_in_output: << parameters.fail_on_error_in_output >>
+                log_immediate_flush: "false"
+                override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+                succeed_on_error: << parameters.succeed_on_error >>
+                timeout: << parameters.timeout >>
+            - when:
+                condition: << parameters.test_scala3_migration >>
+                steps:
+                    - execute_sbt_command:
+                        cmd: '"++3.3;wartremover-extension/test"'
+                        execution_context_size: << parameters.execution_context_size >>
+                        fail_on_error_in_output: << parameters.fail_on_error_in_output >>
+                        log_immediate_flush: "false"
+                        override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+                        succeed_on_error: << parameters.succeed_on_error >>
+                        timeout: 5m
+            - when:
+                condition: << parameters.collect_postgres_query_stats >>
+                name: Analyze Postgres query plans
+                steps:
+                    - execute_sbt_command:
+                        cmd: '"community-common / testOnly / com.digitalasset.canton.integration.tests.manual.PostgresStatsAnalysisTest"'
+                        execution_context_size: << parameters.execution_context_size >>
+                        fail_on_error_in_output: << parameters.fail_on_error_in_output >>
+                        log_immediate_flush: "false"
+                        override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+                        succeed_on_error: << parameters.succeed_on_error >>
+                        timeout: 5m
+            - persist_failure_status
+            - persist_jvm_crash_files
+            - unless:
+                condition: << parameters.skip_cleanup >>
+                steps:
+                    - cleanup_test_job:
+                        collect_postgres_query_stats: << parameters.collect_postgres_query_stats >>
+                        report_to_datadog: << parameters.report_to_datadog >>
+            - when:
+                condition: << parameters.succeed_on_error >>
+                steps:
+                    - slack_red_main_with_volunteer
+    run_todo_script:
+        steps:
+            - authorize_git
+            - run:
+                command: |
+                    # .ci/nix-exec intentionally not used because non-pure nix environment is required for running ammonite (amm)
+                    nix-shell -I nixpkgs=./nix/nixpkgs.nix --run "amm .circleci/todo-script/src/checkTodos.sc"
+                    # save number of open todos so we can push it to datadog
+                    if [ -e todo-out/count ]; then
+                      open_todos=$(cat todo-out/count)
+                    else
+                      open_todos=0
+                    fi
+                    echo "export open_todos=\"$open_todos\"" >> $BASH_ENV
+                name: Run the todo script
+            - store_artifacts:
+                destination: todos
+                name: Store todos as artifacts
+                path: todo-out/todos
+    run_variations_tests:
+        parameters:
+            exclude_unstable_tests:
+                type: boolean
+            execution_context_size:
+                default: $EXECUTOR_NUM_CPUS
+                type: string
+            num_test_buckets:
+                default: $CIRCLE_NODE_TOTAL
+                type: string
+            override_java_version_for_tests:
+                default: ""
+                type: string
+            succeed_on_error:
+                default: false
+                type: boolean
+        steps:
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD<<# parameters.exclude_unstable_tests >> -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest<</ parameters.exclude_unstable_tests >>" checkErrors
+                execution_context_size: << parameters.execution_context_size >>
+                filter: 'grep -E -e com\.digitalasset\.canton\.integration\.tests\.variations '
+                num_test_buckets: << parameters.num_test_buckets >>
+                override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+                succeed_on_error: << parameters.succeed_on_error >>
+    save_compiled_classes:
+        steps:
+            - run:
+                command: |
+                    mkdir -p /tmp/classes
+                    find . -type d -name target | xargs tar --use-compress-program=".ci/nix-exec pigz" -cf /tmp/classes/classes.tar.gz -H posix
+                name: Creating archive of compiled classes
+            - azure-caching-orb/save_to_azure:
+                job_name: Uploading archive with compiled classes to cache - without revision
+                key: classes branch=${CIRCLE_BRANCH} daml=$(checksum project/project/DamlVersions.scala) projectplugins=$(checksum project/project/plugins.sbt) buildprops=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) damlplugin=$(checksum project/DamlPlugin.scala) dependencies=$(checksum project/Dependencies.scala) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt)
+                path: /tmp/classes
+            - azure-caching-orb/save_to_azure:
+                job_name: Uploading archive with compiled classes to cache
+                key: classes branch=${CIRCLE_BRANCH} daml=$(checksum project/project/DamlVersions.scala) projectplugins=$(checksum project/project/plugins.sbt) buildprops=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) damlplugin=$(checksum project/DamlPlugin.scala) dependencies=$(checksum project/Dependencies.scala) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) rev=<< pipeline.git.revision >>
+                path: /tmp/classes
+    save_sbt_cache:
+        steps:
+            - run:
+                command: .ci/nix-exec scripts/ci/make-cache-action.sh chmodcache sizecache
+                name: Make caches readable & calculate their size
+            - azure-caching-orb/save_to_azure:
+                job_name: Uploading Coursier cache with non-pecific key to populate 'older cache'
+                key: cache=canton-coursier dependencies=$(checksum project/Dependencies.scala)
+                path: ${HOME}/.cache/coursier/v1/
+            - azure-caching-orb/save_to_azure:
+                job_name: Uploading Coursier cache
+                key: cache=canton-coursier dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt)
+                path: ${HOME}/.cache/coursier/v1/
+            - azure-caching-orb/save_to_azure:
+                job_name: Uploading Ivy caches with non-specific key to populate 'older cache'
+                key: cache=canton-ivy dependencies=$(checksum project/Dependencies.scala)
+                path: ${HOME}/.ivy2/cache/
+            - azure-caching-orb/save_to_azure:
+                job_name: Uploading Ivy caches
+                key: cache=canton-ivy dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt)
+                path: ${HOME}/.ivy2/cache/
+            - azure-caching-orb/save_to_azure:
+                job_name: Uploading Sbt caches with non-specific key to populate 'older cache'
+                key: cache=canton-sbt dependencies=$(checksum project/Dependencies.scala)
+                path: ${HOME}/.sbt/
+            - azure-caching-orb/save_to_azure:
+                job_name: Uploading Sbt caches
+                key: cache=canton-sbt dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt)
+                path: ${HOME}/.sbt/
+    send_slack_notification_for_sdk_updates:
+        description: Send a message to slack
+        parameters:
+            from_version:
+                default: ""
+                type: string
+            message:
+                default: ""
+                type: string
+            pr_url:
+                default: ""
+                type: string
+            to_version:
+                default: ""
+                type: string
+        steps:
+            - run:
+                command: |
+                    message="<< parameters.message >>"
+                    from="<< parameters.from_version >>"
+                    to="<< parameters.to_version >>"
+                    pr_url="<< parameters.pr_url >>"
+
+                    . scripts/ci/common.sh
+                    tell_slack "$message" "$SLACK_WEBHOOK_TEAM_SDK_UPDATES" "$pr_url" "$from" "$to"
+                name: send message to slack
+    set_canton_protocol_version:
+        parameters:
+            protocol_version:
+                default: ""
+                type: string
+        steps:
+            - run:
+                command: |
+                    if [[ -n "<< parameters.protocol_version >>" ]]; then
+                      echo "export CANTON_PROTOCOL_VERSION=<< parameters.protocol_version >>" >> $BASH_ENV
+                      echo "Canton will use protocol version << parameters.protocol_version >>"
+                    fi
+                name: Set optionally specified protocol version
+    set_external_parties:
+        steps:
+            - run:
+                command: |
+                    echo "export CANTON_TEST_EXTERNAL_PARTIES=true" >> $BASH_ENV
+                    echo "Canton will use external parties for capable tests"
+                name: Set external parties test mode
+    setup_docker_engine:
+        steps:
+            - setup_remote_docker:
+                docker_layer_caching: false
+    setup_dockerhub:
+        steps:
+            - run:
+                command: echo "$DOCKERHUB_PASSWORD" | docker login --username $DOCKERHUB_USERNAME --password-stdin
+                name: Log into Dockerhub
+    setup_gcp_gar:
+        steps:
+            - run:
+                command: |-
+                    key=$(mktemp)
+                    echo "${GAC_JSON}" > $key
+                    echo "export GOOGLE_CREDENTIALS_FILE=$key" >> "$BASH_ENV"
+                name: Setup GCP credentials for GAR
+    setup_gcp_kms:
+        steps:
+            - run:
+                command: |
+                    key=$(mktemp)
+                    echo "${GCLOUD_SERVICE_KEY}" > $key
+                    echo "export GOOGLE_APPLICATION_CREDENTIALS=$key" >> "$BASH_ENV"
+                name: Setup GCP credentials for KMS
+    setup_gpg:
+        steps:
+            - run:
+                command: |
+                    key=$(mktemp)
+                    echo $gpg_code_signing | base64 --decode > $key
+                    gpg --no-tty --quiet --import $key
+                name: Setup GPG
+    setup_qemu_and_buildx:
+        steps:
+            - run:
+                command: |
+                    docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+                    docker info
+                    docker buildx create --name ci-builder --driver docker-container --use
+                    docker buildx inspect --bootstrap
+                name: Enable QEMU emulation
+    slack_red_main_with_volunteer:
+        parameters:
+            webhook_url:
+                default: $SLACK_WEBHOOK_TEAM_CANTON_INTERNAL
+                type: string
+        steps:
+            - run:
+                command: |
+                    members=(
+                      # Architecture
+                      "U9AGNADBJ" # Andreas L.
+                      "U056R7C1H1A" # Cristina
+                      # Security
+                      "U03RK2ZNZFH" # Christian
+                      "U03A208N537" # João Sá
+                      "U990L3H0R" # Matthias
+                      "U0A0VU32CS0" # Simran
+                      "U276HDDB6" # Soren
+                      "U03NCGBFCDP" # Thibault
+                      # Protocol
+                      "U5LC1FB6D" # Gerolf
+                      "U046D8XGD7H" # Kirill
+                      # "U03FH83LRNH" # Meriam
+                      "UF766DLN4" # Oliver
+                      "U020XUXADCP" # Raf
+                      "UDDVDCKD0" # Raphael
+                      "U04DC4NAK1S" # Yves
+                      # LAPI
+                      "U03HVEFHGLU" # Andreas T.
+                      "U57BTEKR9" # Marcin
+                      "U01A2K1NWAX" # Marton
+                      "UPED4TSGN" # Simon
+                      "U01B2BD2CP4" # Tudor
+                      "U029VGVV25Q" # Jarek
+                      # BFT
+                      "U04S25SG9D5" # Daniel
+                      "U04TG4XMJ" # Danilo
+                      "USE2D5GB1" # Fabio
+                      "U04P9CS4F6Z" # Tom
+                    )
+
+                    # Takes the first bytes of the sha and convert to and int
+                    WORKFLOW_IDENTIFIER=$(echo "$CIRCLE_WORKFLOW_ID" | sha256sum | cut -c1-2 | awk '{ print "0x" toupper($0) }')
+
+                    SELECTED_VOLUNTEER=${members[ $WORKFLOW_IDENTIFIER % ${#members[@]} ]}
+
+                    echo "$SELECTED_VOLUNTEER"
+                    echo "export SELECTED_VOLUNTEER=\"${SELECTED_VOLUNTEER}\"" >> $BASH_ENV
+                name: Choose volunteer
+                when: always
+            - slack/status:
+                fail_only: true
+                failure_message: 'A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`! Can you have a look? (Note: Person on support takes care of failed nightly jobs.)'
+                mentions: ${SELECTED_VOLUNTEER}
+                only_for_branches: main,release-line-3.4,release-line-3.5,release-line-3.6,release-line-3.7,release-line-3.8,release-line-3.9,release-line-3.10
+                webhook: << parameters.webhook_url >>
+    split_tests_for_parallel_run:
+        description: split tests for parallel execution
+        parameters:
+            filter:
+                type: string
+            index:
+                default: ""
+                type: string
+            test_sub_command:
+                default: testOnly
+                type: string
+            total:
+                default: ""
+                type: string
+        steps:
+            - attach_workspace:
+                at: /tmp/workspace
+            - run:
+                command: |
+                    TEST_NAMES=/tmp/workspace/test-full-class-names.log
+                    echo "[fix negative test times]"
+                    # Skipped tests report a negative duration, this leads to garbage-in-garbage-out behavior by the CircleCI test splitter
+                    TIMING_DATA_FILE="$CIRCLE_INTERNAL_TASK_DATA/circle-test-results/results.json"
+                    if [[ -e $TIMING_DATA_FILE ]]; then
+                      cat \<<< $(jq -c '.tests |= map(if .run_time < 0 then .run_time |= 0 else . end)' $TIMING_DATA_FILE) > $TIMING_DATA_FILE
+                      cp "$TIMING_DATA_FILE" timing-data.json
+                    fi
+
+                    index="<< parameters.index >>"
+                    total="<< parameters.total >>"
+                    if [[ -z $index && -z $total ]]; then
+                      extraargs=""
+                    else
+                      extraargs=" --index=$index --total=$total"
+                      echo $extraargs
+                    fi
+                    echo "[split tests ${extraargs}]"
+                    rm -f tests-to-run.txt
+
+                    # Set time-default to 5 minutes so that tests with unknown duration get distributed evenly.
+                    # (The default for tests with unknown duration would be 1s.)
+                    # The tests run command wants to invoke the test runner for each test. That doesn't work for us.
+                    # However, what we do instead is we just print the tests it wants to run into a file and pass
+                    # that content then to sbt ...
+                    cat $TEST_NAMES | << parameters.filter >> | sort | uniq | circleci tests run --command "xargs ./scripts/ci/grab-tests.sh" $extraargs --split-by=timings --timings-type=classname --time-default=5m
+
+                    # if we are re-running but don't have anything todo, then the file won't be there and we can halt
+                    if [ -e tests-to-run.txt ]; then
+                      splitted=$(cat tests-to-run.txt)
+                      tests=$(echo $splitted | tr '\n' ' ')
+                      count=$(echo $tests | wc -w)
+                      echo "We are running $count tests in this batch:"
+                      cat \<<< "$splitted"
+                      echo "export RUN_SPLITTED_TESTS_CMD=\"<< parameters.test_sub_command >> $tests\"" >> "$BASH_ENV"
+                    else
+                      echo "re-running this bucket can be aborted, as nothing flaked here"
+                      circleci-agent step halt
+                    fi
+                name: Splitting tests
+            - store_artifacts:
+                destination: timing-data.json
+                name: Upload timing data
+                path: timing-data.json
+    store_track_cpu_and_memory:
+        steps:
+            - store_artifacts:
+                destination: track
+                name: Store the cpu and memory usage
+                path: track
+    test_flake_fix_many_times_command:
+        parameters:
+            exclude_unstable_tests:
+                default: false
+                type: boolean
+            execution_context_size:
+                default: $EXECUTOR_NUM_CPUS
+                type: string
+            succeed_on_error:
+                default: false
+                type: boolean
+            test_repetitions_per_runner:
+                type: integer
+            test_to_run_many_times:
+                type: string
+        steps:
+            - checkout:
+                method: blobless
+            - run:
+                command: |
+                    echo "export FLAKY_TEST_GREP_FILTER=<< parameters.test_to_run_many_times >>" >> $BASH_ENV
+                name: Fetch the test grep filter from the parameter 'test_to_run_many_times'
+            - run:
+                command: |
+                    echo "manual_test_flake_fix_many_times workflow will run the tests with filter $FLAKY_TEST_GREP_FILTER"
+                name: Print the test grep filter
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD<<# parameters.exclude_unstable_tests >> -- -l UnstableTest<</ parameters.exclude_unstable_tests >>" checkErrors
+                execution_context_size: << parameters.execution_context_size >>
+                filter: |
+                    grep -E -e $FLAKY_TEST_GREP_FILTER \
+                num_test_buckets: "1"
+                succeed_on_error: << parameters.succeed_on_error >>
+                test_sub_command: testManyTimes << parameters.test_repetitions_per_runner >>
+    topology_chaos_test_command:
+        parameters:
+            execution_context_size:
+                default: $EXECUTOR_NUM_CPUS
+                type: string
+            num_test_buckets:
+                default: $CIRCLE_NODE_TOTAL
+                type: string
+            run_all_ops_test:
+                default: false
+                type: boolean
+        steps:
+            - checkout:
+                method: blobless
+            - run:
+                command: |
+                    if [[ << parameters.run_all_ops_test >> == true ]] ; then
+                      echo "export TOPOLOGY_CHAOS_TEST_GREP_INCLUDE_FILTER='com.digitalasset.canton.integration.tests.manual.topology.ChangingTopologyPerformanceIntegrationAllOpsTest'" >> $BASH_ENV
+                      echo "export TOPOLOGY_CHAOS_TEST_GREP_EXCLUDE_FILTER='dummy-test-does-not-exist'" >> $BASH_ENV
+                    else
+                      echo "export TOPOLOGY_CHAOS_TEST_GREP_INCLUDE_FILTER='com.digitalasset.canton.integration.tests.manual.topology'" >> $BASH_ENV
+                      echo "export TOPOLOGY_CHAOS_TEST_GREP_EXCLUDE_FILTER='com.digitalasset.canton.integration.tests.manual.topology.ChangingTopologyPerformanceIntegrationAllOpsTest'" >> $BASH_ENV
+                    fi
+                name: Set the topology chaos test grep filters to manual topology tests
+            - run:
+                command: |
+                    echo "manual_topology_chaos_test workflow will run the tests with include filter \"$TOPOLOGY_CHAOS_TEST_GREP_INCLUDE_FILTER\" and exclude filter \"$TOPOLOGY_CHAOS_TEST_GREP_EXCLUDE_FILTER\""
+                name: Print the test grep filters
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD" checkErrors
+                execution_context_size: << parameters.execution_context_size >>
+                filter: |
+                    grep -E -e $TOPOLOGY_CHAOS_TEST_GREP_INCLUDE_FILTER | grep -v $TOPOLOGY_CHAOS_TEST_GREP_EXCLUDE_FILTER \
+                num_parallel_tasks: "1"
+                num_test_buckets: << parameters.num_test_buckets >>
+                timeout: 45m
+    track_cpu_and_memory:
+        steps:
+            - run:
+                background: true
+                command: scripts/ci/record-memory-usage.sh
+                name: Record memory usage
+    unpack_scaladoc_in_workspace:
+        steps:
+            - attach_workspace:
+                at: /tmp/workspace
+            - run:
+                command: |
+                    mkdir -p /tmp/workspace/docs/scaladoc
+                    tar xzf "/tmp/workspace/scaladoc.tar.gz" -C "/tmp/workspace/docs/scaladoc"
+                name: Unpack Canton scaladoc documentation
+    upload_test_reports:
+        steps:
+            - run:
+                command: |
+                    for subproject in `find . -path "*/target/test-reports" | sed -e 's/^\.\///' -e 's/\/target\/test-reports$//'`
+                    do
+                      mkdir -p test-reports/"$subproject"
+                      # Keep going, if there is no test report.
+                      cp -v "$subproject"/target/test-reports/TEST-*.xml test-reports/"$subproject" || true
+                    done
+                name: Group test reports by subproject
+                when: always
+            - store_test_results:
+                path: test-reports
+executors:
+    canton-2xlarge-docker:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 16000M
+            EXECUTOR_JVM_METASPACE_SIZE: 3200M
+            EXECUTOR_NUM_CPUS: 16
+        resource_class: dach_ny/azure_cci_2xl
+        working_directory: /home/circleci/project
+    canton-2xlarge-docker-with-postgres:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+            - command: |-
+                postgres
+                  -c max_connections=1000
+                  -c shared_preload_libraries=pg_store_plans,pg_stat_statements
+                  -c pg_store_plans.plan_format=json
+                  -c pg_store_plans.max=100000
+                  -c pg_store_plans.max_plan_length=10240
+                  -c pg_stat_statements.max=100000
+              environment:
+                POSTGRES_DB: test
+                POSTGRES_INITDB_ARGS: -A scram-sha-256
+                POSTGRES_PASSWORD: test-password
+                POSTGRES_USER: test
+              image: digitalasset/query-stats-postgres:17-343483aee440
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 16000M
+            EXECUTOR_JVM_METASPACE_SIZE: 3200M
+            EXECUTOR_NUM_CPUS: 16
+            POSTGRES_DB: test
+            POSTGRES_INITDB_ARGS: -A scram-sha-256
+            POSTGRES_PASSWORD: test-password
+            POSTGRES_USER: test
+        resource_class: dach_ny/azure_cci_2xl
+        working_directory: /home/circleci/project
+    canton-2xlarge-plus-docker:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 16000M
+            EXECUTOR_JVM_METASPACE_SIZE: 12000M
+            EXECUTOR_NUM_CPUS: 16
+        resource_class: dach_ny/azure_cci_2xl
+        working_directory: /home/circleci/project
+    canton-2xlarge-plus-docker-with-postgres:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+            - command: |-
+                postgres
+                  -c max_connections=1000
+                  -c shared_preload_libraries=pg_store_plans,pg_stat_statements
+                  -c pg_store_plans.plan_format=json
+                  -c pg_store_plans.max=100000
+                  -c pg_store_plans.max_plan_length=10240
+                  -c pg_stat_statements.max=100000
+              environment:
+                POSTGRES_DB: test
+                POSTGRES_INITDB_ARGS: -A scram-sha-256
+                POSTGRES_PASSWORD: test-password
+                POSTGRES_USER: test
+              image: digitalasset/query-stats-postgres:17-343483aee440
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 16000M
+            EXECUTOR_JVM_METASPACE_SIZE: 12000M
+            EXECUTOR_NUM_CPUS: 16
+            POSTGRES_DB: test
+            POSTGRES_INITDB_ARGS: -A scram-sha-256
+            POSTGRES_PASSWORD: test-password
+            POSTGRES_USER: test
+        resource_class: dach_ny/azure_cci_2xl
+        working_directory: /home/circleci/project
+    canton-large-docker:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 4500M
+            EXECUTOR_JVM_METASPACE_SIZE: 1000M
+            EXECUTOR_NUM_CPUS: 4
+        resource_class: dach_ny/azure_cci_large
+        working_directory: /home/circleci/project
+    canton-large-docker-on-cci:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 4500M
+            EXECUTOR_JVM_METASPACE_SIZE: 1000M
+            EXECUTOR_NUM_CPUS: 4
+        working_directory: /home/circleci/project
+    canton-large-docker-with-postgres:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+            - command: |-
+                postgres
+                  -c max_connections=1000
+                  -c shared_preload_libraries=pg_store_plans,pg_stat_statements
+                  -c pg_store_plans.plan_format=json
+                  -c pg_store_plans.max=100000
+                  -c pg_store_plans.max_plan_length=10240
+                  -c pg_stat_statements.max=100000
+              environment:
+                POSTGRES_DB: test
+                POSTGRES_INITDB_ARGS: -A scram-sha-256
+                POSTGRES_PASSWORD: test-password
+                POSTGRES_USER: test
+              image: digitalasset/query-stats-postgres:17-343483aee440
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 4500M
+            EXECUTOR_JVM_METASPACE_SIZE: 1000M
+            EXECUTOR_NUM_CPUS: 4
+            POSTGRES_DB: test
+            POSTGRES_INITDB_ARGS: -A scram-sha-256
+            POSTGRES_PASSWORD: test-password
+            POSTGRES_USER: test
+        resource_class: dach_ny/azure_cci_large
+        working_directory: /home/circleci/project
+    canton-medium-docker:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 2500M
+            EXECUTOR_JVM_METASPACE_SIZE: 400M
+            EXECUTOR_NUM_CPUS: 2
+        resource_class: dach_ny/azure_cci_medium
+        working_directory: /home/circleci/project
+    canton-small-docker:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 1200M
+            EXECUTOR_JVM_METASPACE_SIZE: 200M
+            EXECUTOR_NUM_CPUS: 1
+        resource_class: dach_ny/azure_cci_small
+        working_directory: /home/circleci/project
+    canton-xlarge-docker:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 6500M
+            EXECUTOR_JVM_METASPACE_SIZE: 3100M
+            EXECUTOR_NUM_CPUS: 8
+        resource_class: dach_ny/azure_cci_xlarge
+        working_directory: /home/circleci/project
+    canton-xlarge-docker-with-postgres:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+            - command: |-
+                postgres
+                  -c max_connections=1000
+                  -c shared_preload_libraries=pg_store_plans,pg_stat_statements
+                  -c pg_store_plans.plan_format=json
+                  -c pg_store_plans.max=100000
+                  -c pg_store_plans.max_plan_length=10240
+                  -c pg_stat_statements.max=100000
+              environment:
+                POSTGRES_DB: test
+                POSTGRES_INITDB_ARGS: -A scram-sha-256
+                POSTGRES_PASSWORD: test-password
+                POSTGRES_USER: test
+              image: digitalasset/query-stats-postgres:17-343483aee440
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 6500M
+            EXECUTOR_JVM_METASPACE_SIZE: 3100M
+            EXECUTOR_NUM_CPUS: 8
+            POSTGRES_DB: test
+            POSTGRES_INITDB_ARGS: -A scram-sha-256
+            POSTGRES_PASSWORD: test-password
+            POSTGRES_USER: test
+        resource_class: dach_ny/azure_cci_xlarge
+        working_directory: /home/circleci/project
+    canton-xlarge-docker-with-postgres-toxiproxy:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+            - command: |-
+                postgres
+                  -c max_connections=1000
+                  -c shared_preload_libraries=pg_store_plans,pg_stat_statements
+                  -c pg_store_plans.plan_format=json
+                  -c pg_store_plans.max=100000
+                  -c pg_store_plans.max_plan_length=10240
+                  -c pg_stat_statements.max=100000
+              environment:
+                POSTGRES_DB: test
+                POSTGRES_INITDB_ARGS: -A scram-sha-256
+                POSTGRES_PASSWORD: test-password
+                POSTGRES_USER: test
+              image: digitalasset/query-stats-postgres:17-343483aee440
+            - image: ghcr.io/shopify/toxiproxy:2.1.5
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 6500M
+            EXECUTOR_JVM_METASPACE_SIZE: 3100M
+            EXECUTOR_NUM_CPUS: 8
+            POSTGRES_DB: test
+            POSTGRES_INITDB_ARGS: -A scram-sha-256
+            POSTGRES_PASSWORD: test-password
+            POSTGRES_USER: test
+        resource_class: dach_ny/azure_cci_xlarge
+        working_directory: /home/circleci/project
+    canton-xlarge-docker-with-postgres14:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+            - command: postgres -c max_connections=1000
+              environment:
+                NON_STANDARD_POSTGRES: "yes"
+                POSTGRES_DB: test
+                POSTGRES_INITDB_ARGS: -A scram-sha-256
+                POSTGRES_PASSWORD: test-password
+                POSTGRES_USER: test
+              image: postgres:14
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 6500M
+            EXECUTOR_JVM_METASPACE_SIZE: 3100M
+            EXECUTOR_NUM_CPUS: 8
+            NON_STANDARD_POSTGRES: "yes"
+            POSTGRES_DB: test
+            POSTGRES_INITDB_ARGS: -A scram-sha-256
+            POSTGRES_PASSWORD: test-password
+            POSTGRES_USER: test
+        resource_class: dach_ny/azure_cci_xlarge
+        working_directory: /home/circleci/project
+    canton-xlarge-docker-with-postgres15:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+            - command: postgres -c max_connections=1000
+              environment:
+                NON_STANDARD_POSTGRES: "yes"
+                POSTGRES_DB: test
+                POSTGRES_INITDB_ARGS: -A scram-sha-256
+                POSTGRES_PASSWORD: test-password
+                POSTGRES_USER: test
+              image: postgres:15
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 6500M
+            EXECUTOR_JVM_METASPACE_SIZE: 3100M
+            EXECUTOR_NUM_CPUS: 8
+            NON_STANDARD_POSTGRES: "yes"
+            POSTGRES_DB: test
+            POSTGRES_INITDB_ARGS: -A scram-sha-256
+            POSTGRES_PASSWORD: test-password
+            POSTGRES_USER: test
+        resource_class: dach_ny/azure_cci_xlarge
+        working_directory: /home/circleci/project
+    canton-xlarge-docker-with-postgres16:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+            - command: postgres -c max_connections=1000
+              environment:
+                NON_STANDARD_POSTGRES: "yes"
+                POSTGRES_DB: test
+                POSTGRES_INITDB_ARGS: -A scram-sha-256
+                POSTGRES_PASSWORD: test-password
+                POSTGRES_USER: test
+              image: postgres:16
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 6500M
+            EXECUTOR_JVM_METASPACE_SIZE: 3100M
+            EXECUTOR_NUM_CPUS: 8
+            NON_STANDARD_POSTGRES: "yes"
+            POSTGRES_DB: test
+            POSTGRES_INITDB_ARGS: -A scram-sha-256
+            POSTGRES_PASSWORD: test-password
+            POSTGRES_USER: test
+        resource_class: dach_ny/azure_cci_xlarge
+        working_directory: /home/circleci/project
+    canton-xlarge-docker-with-postgres17:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+            - command: postgres -c max_connections=1000
+              environment:
+                NON_STANDARD_POSTGRES: "yes"
+                POSTGRES_DB: test
+                POSTGRES_INITDB_ARGS: -A scram-sha-256
+                POSTGRES_PASSWORD: test-password
+                POSTGRES_USER: test
+              image: postgres:17
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 6500M
+            EXECUTOR_JVM_METASPACE_SIZE: 3100M
+            EXECUTOR_NUM_CPUS: 8
+            NON_STANDARD_POSTGRES: "yes"
+            POSTGRES_DB: test
+            POSTGRES_INITDB_ARGS: -A scram-sha-256
+            POSTGRES_PASSWORD: test-password
+            POSTGRES_USER: test
+        resource_class: dach_ny/azure_cci_xlarge
+        working_directory: /home/circleci/project
+    canton-xlarge-plus-docker-with-postgres:
+        docker:
+            - auth:
+                password: $DOCKERHUB_PASSWORD
+                username: $DOCKERHUB_USERNAME
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+            - command: |-
+                postgres
+                  -c max_connections=1000
+                  -c shared_preload_libraries=pg_store_plans,pg_stat_statements
+                  -c pg_store_plans.plan_format=json
+                  -c pg_store_plans.max=100000
+                  -c pg_store_plans.max_plan_length=10240
+                  -c pg_stat_statements.max=100000
+              environment:
+                POSTGRES_DB: test
+                POSTGRES_INITDB_ARGS: -A scram-sha-256
+                POSTGRES_PASSWORD: test-password
+                POSTGRES_USER: test
+              image: digitalasset/query-stats-postgres:17-343483aee440
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 6500M
+            EXECUTOR_JVM_METASPACE_SIZE: 3100M
+            EXECUTOR_NUM_CPUS: 8
+            POSTGRES_DB: test
+            POSTGRES_INITDB_ARGS: -A scram-sha-256
+            POSTGRES_PASSWORD: test-password
+            POSTGRES_USER: test
+        resource_class: dach_ny/azure_cci_xlarge_plus
+        working_directory: /home/circleci/project
+    large-ubuntu-machine:
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 8000M
+            EXECUTOR_JVM_METASPACE_SIZE: 1600M
+            EXECUTOR_NUM_CPUS: 4
+        machine:
+            image: ubuntu-2204:2024.01.1
+            resource_class: large
+    medium-arm-machine:
+        machine:
+            image: ubuntu-2204:2024.01.1
+            resource_class: arm.medium
+    medium-windows-machine:
+        machine:
+            image: windows-server-2022-gui:2023.05.1
+            resource_class: windows.medium
+    xlarge-ubuntu-machine:
+        environment:
+            EXECUTOR_JVM_HEAP_SIZE: 8000M
+            EXECUTOR_JVM_METASPACE_SIZE: 1600M
+            EXECUTOR_NUM_CPUS: 8
+        machine:
+            image: ubuntu-2204:2024.01.1
+            resource_class: xlarge
+jobs:
+    assembly_ledger_api_test_tool:
+        executor: canton-medium-docker
+        parameters:
+            is_manual:
+                type: boolean
+            is_nightly_workflow:
+                type: boolean
+        steps:
+            - checkout:
+                method: blobless
+            - obtain_release_suffix:
+                is_manual: << parameters.is_manual >>
+                is_nightly_workflow: << parameters.is_nightly_workflow >>
+            - package:
+                artifact_suffix: .jar
+                cmd: ledger-test-tool-2-dev/assembly
+                location: community/ledger-test-tool/tool/lf-v2.dev/target/scala-2.13
+            - package:
+                artifact_suffix: .jar
+                cmd: ledger-test-tool-2-1/assembly
+                location: community/ledger-test-tool/tool/lf-v2.1/target/scala-2.13
+            - cleanup_build_job
+    benchmark:
+        executor: canton-xlarge-plus-docker-with-postgres
+        parallelism: 2
+        steps:
+            - run:
+                command: |
+                    echo "export LOG_LEVEL_CANTON=WARN" >> $BASH_ENV
+                name: Set Canton log level to WARN
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.benchmarks
+                num_parallel_tasks: "1"
+            - post_benchmark_metrics
+            - slack_red_main_with_volunteer
+    blackduck:
+        executor: canton-large-docker
+        steps:
+            - checkout_and_restore_precompiled_classes:
+                reset_classes_if_requested: true
+            - restore_sbt_cache
+            - track_cpu_and_memory
+            - run:
+                command: |
+                    echo "export EXECUTOR_JVM_METASPACE_SIZE=1500M" >> $BASH_ENV
+                    echo "export EXECUTOR_JVM_HEAP_SIZE=4000M" >> $BASH_ENV
+            - execute_sbt_command:
+                cmd: compile community-app/bundle
+                fail_on_error_in_output: true
+                use_maven_mirror: false
+            - run:
+                command: |
+                    nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run  bash \<<'EOF'
+                      export BDS_JAVA_HOME=$JAVA_HOME
+                      # GO_MOD is excluded because the go executable is only available in docker build
+                      bash <(curl -s https://raw.githubusercontent.com/DACH-NY/security-blackduck/master/synopsys-detect) \
+                      ci-build ${CIRCLE_PROJECT_USERNAME}_${CIRCLE_PROJECT_REPONAME} ${CIRCLE_BRANCH} \
+                      --logging.level.com.synopsys.integration=DEBUG  \
+                      --detect.tools=DETECTOR \
+                      --detect.excluded.detector.types=GO_MOD,NPM \
+                      --detect.excluded.directories="daml,project/project/target,**/target/streams" \
+                      --detect.notices.report=true \
+                      --detect.cleanup=false \
+                      --detect.policy.check.fail.on.severities=MAJOR,CRITICAL,BLOCKER \
+                      --detect.timeout=3600
+                    EOF
+                name: Run Blackduck Detect
+                no_output_timeout: 30m
+            - run:
+                command: |
+                    cp $CIRCLE_WORKING_DIRECTORY/*_Black_Duck_Notices_Report.txt $CIRCLE_WORKING_DIRECTORY/NOTICE
+                name: copy blackduck notice file
+                when: always
+            - store_artifacts:
+                destination: NOTICE
+                name: Store Black Duck Report
+                path: NOTICE
+            - store_artifacts:
+                name: Blackduck Run Artifacts
+                path: /home/circleci/blackduck/runs
+            - save_sbt_cache
+            - cleanup_build_job
+    build_and_publish_docker:
+        environment:
+            OCI_REGISTRY: europe-docker.pkg.dev
+        executor: canton-large-docker-on-cci
+        parameters:
+            is_manual:
+                type: boolean
+            is_nightly_workflow:
+                type: boolean
+        steps:
+            - attach_workspace:
+                at: /tmp/workspace
+            - checkout:
+                method: blobless
+            - obtain_release_suffix:
+                is_manual: << parameters.is_manual >>
+                is_nightly_workflow: << parameters.is_nightly_workflow >>
+            - setup_remote_docker
+            - build_and_publish_docker_base_image:
+                nightly_release: << parameters.is_nightly_workflow >>
+            - slack_red_main_with_volunteer
+    build_docs:
+        executor: canton-xlarge-docker-with-postgres
+        steps:
+            - checkout_and_restore_caches
+            - restore_packaged_release:
+                location: community/app/target/release
+            - unpack_scaladoc_in_workspace
+            - execute_sbt_command:
+                cmd: docs-open/test
+            - execute_sbt_command:
+                cmd: packageDocsWithExistingRelease
+                use_maven_mirror: false
+            - cleanup_test_job
+    build_scaladoc:
+        executor: canton-large-docker
+        steps:
+            - checkout_and_restore_caches
+            - execute_sbt_command:
+                cmd: unidoc
+                use_maven_mirror: false
+            - run:
+                command: |
+                    tar -czf target/scaladoc.tar.gz -C target/scala-2.13/unidoc .
+                name: Create ScalaDoc archive
+            - store_artifacts:
+                destination: scaladoc.tar.gz
+                name: Store ScalaDoc as artifact
+                path: target/scaladoc.tar.gz
+            - persist_to_workspace:
+                paths:
+                    - scaladoc.tar.gz
+                root: target
+            - cleanup_test_job
+    build_systematic_testing_inventory:
+        executor: canton-large-docker
+        steps:
+            - run:
+                command: circleci-agent step halt
+            - checkout_and_restore_caches
+            - execute_sbt_command:
+                cmd: dumpTestClassPath "community-app/Test/runMain com.digitalasset.canton.SystematicTestingGenerator"
+                fail_on_error_in_output: false
+            - store_artifacts:
+                name: Store security tests inventory (json)
+                path: security-tests.json
+            - store_artifacts:
+                name: Store security tests inventory (csv)
+                path: security-tests.csv
+            - store_artifacts:
+                name: Store reliability tests inventory (json)
+                path: reliability-tests.json
+            - store_artifacts:
+                name: Store reliability tests inventory (csv)
+                path: reliability-tests.csv
+            - persist_to_workspace:
+                paths:
+                    - security-tests.json
+                    - security-tests.csv
+                    - reliability-tests.json
+                    - reliability-tests.csv
+                root: .
+            - cleanup_build_job
+    compile:
+        executor: canton-xlarge-docker
+        steps:
+            - checkout_and_restore_precompiled_classes:
+                reset_classes_if_requested: true
+            - check_pr_skip_ci
+            - restore_sbt_cache
+            - track_cpu_and_memory
+            - run:
+                command: .ci/nix-exec truncate --size=0 test-full-class-names.log
+                name: Truncate the file collecting the test names to prevent duplicate test runs
+            - execute_sbt_command:
+                cmd: update Test/compile printTests
+                retry_fetch: "50"
+            - persist_to_workspace:
+                paths:
+                    - test-full-class-names.log
+                root: .
+            - save_compiled_classes
+            - save_sbt_cache
+            - cleanup_build_job
+    crash_recovery_test:
+        executor: canton-xlarge-docker-with-postgres
+        parallelism: 6
+        steps:
+            - run_crash_recovery_tests:
+                exclude_unstable_tests: true
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.crashrecovery
+    daml_upgrade_pr:
+        executor: canton-medium-docker
+        steps:
+            - checkout:
+                method: blobless
+            - authorize_git
+            - run:
+                command: |
+                    nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "./scripts/ci/daml_upgrade_pr.sh"
+                name: Kick off upgrade if necessary
+                no_output_timeout: 60m
+            - send_slack_notification_for_sdk_updates:
+                from_version: $CANTON_DAML_VERSION
+                message: '*[canton/main]* Upgrade DAML'
+                pr_url: $PR_URL
+                to_version: $NEWEST_DAML_VERSION
+            - slack_red_main_with_volunteer
+    external_parties_test:
+        executor: canton-xlarge-docker-with-postgres
+        parallelism: 12
+        parameters:
+            override_java_version_for_tests:
+                default: ""
+                type: string
+            protocol_version:
+                default: ""
+                type: string
+        steps:
+            - set_canton_protocol_version:
+                protocol_version: << parameters.protocol_version >>
+            - set_external_parties
+            - run_ordinary_tests:
+                exclude_unstable_tests: true
+                override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+    fast_smoke_test:
+        executor: canton-large-docker-with-postgres
+        parallelism: 1
+        steps:
+            - run_crash_recovery_tests:
+                exclude_unstable_tests: true
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.SimplestPingReferenceIntegrationTestPostgres
+    full_test_coverage:
+        executor: canton-2xlarge-plus-docker-with-postgres
+        steps:
+            - run_test_coverage_test:
+                command: dumpClassPath coverage "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest"
+    generate_data_continuity_dumps:
+        executor: canton-xlarge-docker-with-postgres
+        parallelism: 1
+        parameters:
+            is_manual:
+                type: boolean
+            is_nightly_workflow:
+                type: boolean
+        steps:
+            - checkout:
+                method: blobless
+            - obtain_release_suffix:
+                is_manual: << parameters.is_manual >>
+                is_nightly_workflow: << parameters.is_nightly_workflow >>
+            - run:
+                command: |
+                    # Abort for nightly non-weekly (Tuesday) releases
+                    IS_NIGHTLY="<< parameters.is_nightly_workflow >>"
+                    if [[ "$IS_NIGHTLY" == "true" &&  $(date +"%u") -ne 2 ]]; then
+                      # https://support.circleci.com/hc/en-us/articles/360015562253-Conditionally-end-a-running-job-gracefully
+                      echo "On nightly jobs, data continuity dumps are only generated for weekly releases. Aborting..."
+                      circleci-agent step halt
+                    fi
+
+                    # Abort if the data continuity dumps have already been generated or for nightly non-weekly releases
+                    version="$RELEASE_SUFFIX"
+                    echo "Checking whether dumps already exist for $version"
+
+                    # List all the data continuity dumps in the S3 bucket into 'dumps_listing' file
+                    aws s3api list-objects --bucket canton-public-releases --prefix data-continuity-dumps/ --query 'CommonPrefixes[].{Prefix: Prefix}' --output text --no-sign-request --delimiter "/0" > dumps_listing
+
+                    if grep -q "/$version/" dumps_listing; then
+                      # https://support.circleci.com/hc/en-us/articles/360015562253-Conditionally-end-a-running-job-gracefully
+                      echo "Data continuity dumps have already been generated for this version. Aborting..."
+                      circleci-agent step halt
+                    fi
+                    rm -f dumps_listing
+
+                    # Prevent failures in further steps in case nothing is generated
+                    mkdir -p /tmp/canton/data-continuity-dumps
+                name: Abort if data continuity have been already generated or for nightly non-weekly releases
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+                filter: 'grep -E -e com\.digitalasset\.canton\.integration\.tests\.manual\.Create.\*DataContinuityDumpsPostgres_all.\* -e com\.digitalasset\.canton\.integration\.tests\.manual\.ConfigContinuityWriterTest -e com\.digitalasset\.canton\.integration\.tests\.upgrade\.MajorUpgrade.\*Writer.\* -e com\.digitalasset\.canton\.integration\.tests\.manual\.ConsoleCommandBackwardsCompatibilityWriterTest -e com\.digitalasset\.canton\.integration\.tests\.manual\.ProtobufCompatibilityWriterTest '
+                num_test_buckets: "1"
+                timeout: 1h
+            - run:
+                command: |
+                    .ci/nix-exec ./scripts/ci/publish-data-continuity-dumps-to-s3.sh
+                name: Upload data continuity dumps to S3
+            - cleanup_test_job
+            - slack_red_main_with_volunteer
+    nightly_integration_test:
+        executor: canton-xlarge-docker-with-postgres-toxiproxy
+        steps:
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly
+                num_parallel_tasks: "1"
+                num_test_buckets: "2"
+    nightly_integration_test_bftordering_only:
+        executor: canton-xlarge-docker
+        steps:
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.bftordering
+                num_parallel_tasks: "1"
+                num_test_buckets: "2"
+    nightly_integration_test_sequencer_only:
+        executor: canton-xlarge-docker-with-postgres-toxiproxy
+        steps:
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.sequencer
+                num_parallel_tasks: "1"
+                num_test_buckets: "2"
+    nightly_reporting:
+        executor: canton-small-docker
+        steps:
+            - checkout
+            - run:
+                command: scripts/ci/reporting/report-open-issues-without-milestone.sh
+                name: report open issues without milestone
+    package_community:
+        executor: canton-medium-docker
+        parameters:
+            is_manual:
+                type: boolean
+            is_nightly_workflow:
+                type: boolean
+        steps:
+            - checkout:
+                method: blobless
+            - obtain_release_suffix:
+                is_manual: << parameters.is_manual >>
+                is_nightly_workflow: << parameters.is_nightly_workflow >>
+            - package:
+                cmd: performance-driver/package performance/package community-app/bundle
+                location: community/app/target/release
+            - run:
+                command: |
+                    performance/bundle-performance.sh
+                name: Package performance runner
+            - run:
+                command: |
+                    set -eo pipefail
+                    . scripts/daml.sh
+                    DAML_VERSION=$(fetch_daml_version $PWD)
+                    GIT_SHA=$(git rev-parse HEAD)
+                    echo "daml_version=$DAML_VERSION sha=$GIT_SHA" | tee info.properties
+                name: Remember version info
+            - persist_to_workspace:
+                paths:
+                    - canton-performance.tar.gz
+                    - info.properties
+                root: .
+            - cleanup_build_job
+    package_jsonapi:
+        executor: canton-medium-docker
+        parameters:
+            is_manual:
+                type: boolean
+            is_nightly_workflow:
+                type: boolean
+        steps:
+            - checkout:
+                method: blobless
+            - obtain_release_suffix:
+                is_manual: << parameters.is_manual >>
+                is_nightly_workflow: << parameters.is_nightly_workflow >>
+            - package:
+                artifact_suffix: .tar.gz
+                cmd: packageJsonApiDocsArtifacts
+                location: ./target
+            - cleanup_build_job
+    package_kms_driver:
+        executor: canton-medium-docker
+        parameters:
+            is_manual:
+                type: boolean
+            is_nightly_workflow:
+                type: boolean
+        steps:
+            - checkout:
+                method: blobless
+            - obtain_release_suffix:
+                is_manual: << parameters.is_manual >>
+                is_nightly_workflow: << parameters.is_nightly_workflow >>
+            - package:
+                artifact_suffix: .{jar,pom}
+                cmd: kms-driver-api/package kms-driver-api/packageSrc kms-driver-api/packageDoc kms-driver-api/makePom
+                location: community/kms-driver-api/target/scala-2.13
+            - package:
+                artifact_suffix: .{jar,pom}
+                cmd: kms-driver-testing-lib/package kms-driver-testing-lib/packageSrc kms-driver-testing-lib/packageDoc kms-driver-testing-lib/makePom
+                location: kms-driver-testing-lib/target/scala-2.13
+            - package:
+                artifact_suffix: .{jar,pom}
+                cmd: aws-kms-driver/assembly aws-kms-driver/packageSrc aws-kms-driver/packageDoc aws-kms-driver/makePom
+                location: community/aws-kms-driver/target/scala-2.13
+            - package:
+                artifact_suffix: .{jar,pom}
+                cmd: mock-kms-driver/package mock-kms-driver/packageSrc mock-kms-driver/packageDoc mock-kms-driver/makePom
+                location: community/mock-kms-driver/target/scala-2.13
+            - cleanup_build_job
+    package_sandbox:
+        executor: canton-medium-docker
+        parameters:
+            is_manual:
+                type: boolean
+            is_nightly_workflow:
+                type: boolean
+        steps:
+            - checkout:
+                method: blobless
+            - obtain_release_suffix:
+                is_manual: << parameters.is_manual >>
+                is_nightly_workflow: << parameters.is_nightly_workflow >>
+            - package:
+                artifact_suffix: .{zip,tar.gz}
+                cmd: community-app/bundle
+                location: community/app/target/release
+            - run:
+                command: |
+                    cd tmp-release || exit 1
+                    for i in $(find . -type f | sed 's|//|/|g;s/\.\///g'); do
+                      ../scripts/ci/publish-to-jfrog.sh -r generic-sandbox ${i} ${@} || exit ${?}
+                    done
+                name: Upload artifact to JFROG
+            - run:
+                command: |
+                    cd tmp-release || exit 1
+                    for i in $(find . -type f | sed 's|//|/|g;s/\.\///g'); do
+                      ../scripts/ci/publish-to-jfrog.sh -r generic-sandbox -D ${i} ${@} || exit ${?}
+                    done
+                name: Delete artifact from JFROG
+            - cleanup_build_job
+    package_sequencer_driver_api:
+        executor: canton-medium-docker
+        parameters:
+            is_manual:
+                type: boolean
+            is_nightly_workflow:
+                type: boolean
+        steps:
+            - checkout:
+                method: blobless
+            - obtain_release_suffix:
+                is_manual: << parameters.is_manual >>
+                is_nightly_workflow: << parameters.is_nightly_workflow >>
+            - package:
+                artifact_suffix: .{jar,pom}
+                cmd: sequencer-driver-lib/package sequencer-driver-lib/packageSrc sequencer-driver-lib/packageDoc sequencer-driver-lib/makePom
+                location: sequencer-driver-lib/target/scala-2.13
+            - package:
+                artifact_suffix: .{jar,pom}
+                cmd: sequencer-driver-api-conformance-tests/package sequencer-driver-api-conformance-tests/packageSrc sequencer-driver-api-conformance-tests/packageDoc sequencer-driver-api-conformance-tests/makePom
+                location: community/sequencer-driver-api-conformance-tests/target/scala-2.13
+            - package:
+                artifact_suffix: .{jar,pom}
+                cmd: community-integration-testing-lib/package community-integration-testing-lib/packageSrc community-integration-testing-lib/packageDoc community-integration-testing-lib/makePom
+                location: community-integration-testing-lib/target/scala-2.13
+            - cleanup_build_job
+    postgres_conformance_test:
+        executor: canton-xlarge-docker-with-postgres<<parameters.postgres_version>>
+        parallelism: 12
+        parameters:
+            postgres_version:
+                type: integer
+        steps:
+            - run_db_tests:
+                db_name: Postgres
+                exclude_unstable_tests: true
+    print_tests:
+        executor: canton-large-docker
+        steps:
+            - checkout_and_restore_caches
+            - attach_workspace:
+                at: /tmp/workspace
+            - run:
+                command: cat /dev/null > /tmp/workspace/test-full-class-names.log
+                name: Truncate the file collecting the test names to prevent duplicate test runs
+            - execute_sbt_command:
+                cmd: printTests
+                fail_on_error_in_output: false
+                retry_fetch: "50"
+            - persist_to_workspace:
+                paths:
+                    - test-full-class-names.log
+                root: .
+    protobuf_continuity:
+        executor: canton-medium-docker
+        steps:
+            - checkout_and_restore_caches
+            - execute_sbt_command:
+                cmd: protobufContinuityCheck
+            - slack_red_main_with_volunteer
+    protocol_continuity_test_all:
+        executor: canton-xlarge-docker-with-postgres
+        parallelism: 12
+        steps:
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.continuity | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.continuity\.latest
+                num_parallel_tasks: "1"
+                num_test_buckets: "12"
+                timeout: 40m
+    protocol_continuity_test_latest:
+        executor: canton-xlarge-docker-with-postgres
+        parallelism: 2
+        steps:
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.continuity.\latest
+                num_parallel_tasks: "1"
+                num_test_buckets: "2"
+                timeout: 30m
+    publish_canton_open_source_code_drop:
+        executor: canton-xlarge-docker-with-postgres
+        parameters:
+            enforce_date:
+                default: true
+                type: boolean
+        steps:
+            - when:
+                condition: << parameters.enforce_date >>
+                steps:
+                    - run:
+                        command: |
+                            if [[ $(date +"%u") -ne 2 ]]; then
+                              # https://support.circleci.com/hc/en-us/articles/360015562253-Conditionally-end-a-running-job-gracefully
+                              circleci-agent step halt
+                            fi
+                        name: Ensure we only sync on Tuesday (as this will become the public weekly snapshot release)
+            - checkout:
+                method: blobless
+            - restore_sbt_cache
+            - track_cpu_and_memory
+            - limit_parallel_test_execution
+            - run:
+                command: |
+                    export NIX_SSL_CERT_FILE="$(ls -1  /nix/store/*-nss-cacert-*/etc/ssl/certs/ca-bundle.crt)"
+                    .ci/nix-exec release/propose-open-source-code-drop.sh \
+                                   -t "$GITHUB_TOKEN" \
+                                   -c "$EXECUTOR_NUM_CPUS" \
+                                   -m "$EXECUTOR_JVM_HEAP_SIZE" \
+                                   -s "$EXECUTOR_JVM_METASPACE_SIZE"
+                name: Pull request of unit-tested canton-community code drop
+                no_output_timeout: 30m
+            - slack/notify:
+                message: Open-source PR to be merged at https://github.com/digital-asset/canton/pulls/canton-machine
+                webhook: $SLACK_WEBHOOK_TEAM_CANTON_INTERNAL
+            - store_artifacts:
+                destination: log/
+                name: Store test logs as artifacts
+                path: public-log/
+                when: always
+            - slack_red_main_with_volunteer
+    publish_libraries:
+        environment:
+            GOOGLE_ARTIFACT_REGISTRY: europe-maven.pkg.dev/da-images/public-maven-unstable
+        executor: canton-xlarge-docker
+        parameters:
+            is_manual:
+                type: boolean
+            is_nightly_workflow:
+                type: boolean
+        steps:
+            - checkout_and_restore_caches
+            - obtain_release_suffix:
+                is_manual: << parameters.is_manual >>
+                is_nightly_workflow: << parameters.is_nightly_workflow >>
+            - track_cpu_and_memory
+            - publish_libs_to_google_artifact_registry
+            - publish_libs_to_maven_central
+            - slack_red_main_with_volunteer
+    publish_release:
+        environment:
+            OCI_REGISTRY: europe-docker.pkg.dev
+        executor: canton-large-docker-on-cci
+        parameters:
+            is_manual:
+                type: boolean
+            is_nightly_workflow:
+                type: boolean
+        steps:
+            - attach_workspace:
+                at: /tmp/workspace
+            - checkout:
+                method: blobless
+            - obtain_release_suffix:
+                is_manual: << parameters.is_manual >>
+                is_nightly_workflow: << parameters.is_nightly_workflow >>
+            - publish_release_on_s3
+            - publish_release_on_artifactory:
+                nightly_release: << parameters.is_nightly_workflow >>
+            - publish_release_on_oci_registry:
+                nightly_release: << parameters.is_nightly_workflow >>
+            - run:
+                command: nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "scripts/ci/publish-to-github.sh"
+                name: Publish to GitHub releases
+            - slack_red_main_with_volunteer
+    publish_release_to_jfrog:
+        executor: canton-small-docker
+        parameters:
+            is_manual:
+                type: boolean
+            is_nightly_workflow:
+                type: boolean
+        steps:
+            - attach_workspace:
+                at: /tmp/workspace
+            - checkout:
+                method: blobless
+            - restore_packaged_release:
+                location: tmp-release
+            - publish_sandbox_to_jfrog
+            - slack_red_main_with_volunteer
+    release_test:
+        executor: canton-xlarge-docker-with-postgres
+        parameters:
+            is_manual:
+                type: boolean
+            is_nightly_workflow:
+                type: boolean
+        steps:
+            - checkout_and_restore_caches
+            - obtain_release_suffix:
+                is_manual: << parameters.is_manual >>
+                is_nightly_workflow: << parameters.is_nightly_workflow >>
+            - restore_packaged_release:
+                location: community/aws-kms-driver/target/scala-2.13
+            - restore_packaged_release:
+                location: community/mock-kms-driver/target/scala-2.13
+            - restore_packaged_release:
+                location: community/app/target/release
+            - run_tests:
+                command: '"testOnly com.digitalasset.canton.integration.tests.release* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors'
+                do_checkout: false
+                filter: ""
+                num_parallel_tasks: "1"
+                num_test_buckets: ""
+    replicate_docs:
+        executor: canton-xlarge-docker-with-postgres
+        parameters:
+            env:
+                type: string
+        steps:
+            - checkout_and_restore_caches
+            - restore_packaged_release:
+                location: community/app/target/release
+            - unpack_scaladoc_in_workspace
+            - execute_sbt_command:
+                cmd: packageDocsWithExistingRelease
+                use_maven_mirror: false
+            - cleanup_test_job
+            - authorize_git
+            - run:
+                command: |
+                    nix-shell -I nixpkgs=./nix/nixpkgs.nix --run "./scripts/docs/replication.sh --env <<parameters.env>> --githubAuth canton-machine:$GITHUB_TOKEN"
+                name: Replicate the docs
+            - cleanup_build_job
+    run_propose_script:
+        executor: canton-large-docker-on-cci
+        parameters:
+            script_argument:
+                default: ""
+                type: string
+        steps:
+            - checkout_and_restore_caches
+            - authorize_git
+            - setup_dockerhub
+            - setup_docker_engine
+            - run:
+                command: |
+                    set +eo pipefail
+                    # Setup heap size
+                    JAVA_OPTS="$JAVA_OPTS -Xmx$EXECUTOR_JVM_HEAP_SIZE -Xms$EXECUTOR_JVM_HEAP_SIZE -XX:+UseG1GC"
+                    # Setup metaspace
+                    JAVA_OPTS="$JAVA_OPTS -XX:MaxMetaspaceSize=$EXECUTOR_JVM_METASPACE_SIZE"
+                    export SBT_OPTS="-Xmx$EXECUTOR_JVM_HEAP_SIZE"
+                    nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "./release/propose.sh << parameters.script_argument >>"
+                name: Invoke propose.sh script for release step
+                no_output_timeout: 60m
+            - slack_red_main_with_volunteer
+    scalafix:
+        description: run scalafix command in order to organize imports.
+        executor: canton-large-docker
+        steps:
+            - checkout_and_restore_caches
+            - execute_sbt_command:
+                cmd: scalafixCheck
+            - save_sbt_cache
+            - slack_red_main_with_volunteer
+    sequential_test:
+        executor: canton-xlarge-docker-with-postgres
+        parallelism: 16
+        steps:
+            - run_ordinary_tests:
+                exclude_unstable_tests: true
+                execution_context_size: "1"
+                num_parallel_tasks: "4"
+    stability_crash_recovery_test:
+        executor: canton-xlarge-docker-with-postgres
+        parallelism: 64
+        parameters:
+            succeed_on_error:
+                default: true
+                type: boolean
+        steps:
+            - run_crash_recovery_tests:
+                exclude_unstable_tests: false
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.crashrecovery
+                num_test_buckets: "4"
+                succeed_on_error: << parameters.succeed_on_error >>
+    stability_crash_recovery_test_alerting:
+        executor: canton-small-docker
+        steps:
+            - check_number_of_successes:
+                job_name: stability_crash_recovery_test
+                min_successes: 32
+            - slack_red_main_with_volunteer
+    stability_sequential_test:
+        executor: canton-xlarge-docker-with-postgres
+        parallelism: 72
+        parameters:
+            succeed_on_error:
+                default: true
+                type: boolean
+        steps:
+            - run_ordinary_tests:
+                exclude_unstable_tests: false
+                execution_context_size: "1"
+                num_test_buckets: "12"
+                succeed_on_error: << parameters.succeed_on_error >>
+    stability_test:
+        executor: canton-xlarge-docker-with-postgres
+        parallelism: 72
+        parameters:
+            protocol_version:
+                default: ""
+                type: string
+            succeed_on_error:
+                default: true
+                type: boolean
+        steps:
+            - set_canton_protocol_version:
+                protocol_version: << parameters.protocol_version >>
+            - run_ordinary_tests:
+                exclude_unstable_tests: true
+                num_test_buckets: "12"
+                succeed_on_error: << parameters.succeed_on_error >>
+    static_tests:
+        executor: canton-medium-docker
+        steps:
+            - checkout:
+                method: blobless
+            - check_pr_skip_ci
+            - restore_sbt_cache
+            - execute_sbt_command:
+                cmd: checkJavaDamlDependencies
+            - execute_sbt_command:
+                cmd: google-common-protos-scala/protocGenerate ledger-api-value/protocGenerate
+            - execute_sbt_command:
+                cmd: lint
+                extra_parameters: -J-Xss5M
+                use_maven_mirror: false
+            - run:
+                command: .ci/nix-exec scripts/ci/make-cache-action.sh sizecache
+                name: Check cache sizes
+            - run:
+                command: scripts/ci/check_sql_definitions.sh
+                name: Check SQL table definitions
+            - run:
+                command: |
+                    echo "checking that the containers shell.nix matches the one in the repository".
+                    echo "if this fails, you need to update our build image. have a look at .ci/README.md"
+                    diff shell.nix /tmp/shell.nix || exit 1
+                    diff -r nix /tmp/nix || exit 1
+                name: Check that Nix definitions are up to date
+            - run_todo_script
+            - post_to_datadog:
+                data: canton.build.open_todos=$open_todos
+                label: Post canton.build.open_todos to Datadog
+                metric_type: count
+            - slack_red_main_with_volunteer
+    tag_new_releases:
+        executor: canton-small-docker
+        steps:
+            - checkout:
+                method: blobless
+            - authorize_git
+            - run:
+                command: release/tag-new-releases.sh
+                name: Tag new releases
+            - slack_red_main_with_volunteer
+    test:
+        executor: canton-xlarge-docker-with-postgres
+        parallelism: 12
+        parameters:
+            override_java_version_for_tests:
+                default: ""
+                type: string
+            protocol_version:
+                default: ""
+                type: string
+            test_scala3_migration:
+                default: false
+                type: boolean
+        steps:
+            - set_canton_protocol_version:
+                protocol_version: << parameters.protocol_version >>
+            - run_ordinary_tests:
+                collect_postgres_query_stats: true
+                exclude_unstable_tests: true
+                override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+                test_scala3_migration: << parameters.test_scala3_migration >>
+    test_data_continuity_dumps:
+        executor: canton-xlarge-docker-with-postgres
+        parallelism: 8
+        steps:
+            - run:
+                command: |
+                    mkdir -p /tmp/canton/data-continuity-dumps
+                    chmod 777 /tmp/canton/data-continuity-dumps
+                name: Set the Docker bind mount permissions
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.manual\.\*DataContinuityTestPostgres
+                num_parallel_tasks: "1"
+                num_test_buckets: "8"
+                report_to_datadog: false
+                timeout: 1h
+            - slack_red_main_with_volunteer
+    test_flake_fix_many_times:
+        executor: canton-xlarge-docker-with-postgres-toxiproxy
+        parallelism: << parameters.parallel_runners >>
+        parameters:
+            parallel_runners:
+                type: integer
+            protocol_version:
+                default: ""
+                type: string
+            test_repetitions_per_runner:
+                type: integer
+            test_to_run_many_times:
+                type: string
+        steps:
+            - set_canton_protocol_version:
+                protocol_version: << parameters.protocol_version >>
+            - test_flake_fix_many_times_command:
+                exclude_unstable_tests: false
+                succeed_on_error: false
+                test_repetitions_per_runner: << parameters.test_repetitions_per_runner >>
+                test_to_run_many_times: << parameters.test_to_run_many_times >>
+    test_performance_runner:
+        executor: canton-xlarge-docker-with-postgres
+        steps:
+            - checkout_and_restore_caches
+            - attach_workspace:
+                at: /tmp/workspace
+            - run:
+                command: |
+                    export TERM=dumb
+                    tar -zxvf /tmp/workspace/canton-performance.tar.gz
+                    cd canton/performance/postgres
+                    # setup database
+                    echo "creating role '${POSTGRES_USER}' '${POSTGRES_PORT}' '${POSTGRES_HOST}'"
+                    echo "CREATE ROLE \"test-user\" LOGIN PASSWORD 'test-password'; ALTER USER \"test-user\" createdb;" | \
+                      PGPASSWORD=$POSTGRES_PASSWORD psql -h localhost postgres $POSTGRES_USER
+                    echo "creating databases"
+                    ../../config/utils/postgres/db.sh setup
+                    cd ../../../
+                    # start
+                    export NUM_CYCLES=210
+                    export EXIT_WHEN_DONE=1
+                    export flags="--no-tty -v"
+                    .ci/nix-exec ./canton/performance/run.sh -s -n two-synchronizers-topology
+                name: Run performance runner
+            - run:
+                command: |
+                    mkdir -p log
+                    for ff in `ls canton/log/*`
+                    do
+                      mv -v $ff log
+                    done
+                name: Copy log files so we preserve them as build artefacts
+                when: always
+            - cleanup_test_job
+            - slack_red_main_with_volunteer
+    test_ping_arm:
+        executor: medium-arm-machine
+        steps:
+            - attach_workspace:
+                at: workspace
+            - run:
+                command: |
+                    workspace/community/app/target/release/canton/bin/canton run -v -c workspace/community/app/target/release/canton/examples/01-simple-topology/simple-topology.conf workspace/community/app/target/release/canton/examples/01-simple-topology/simple-ping.canton
+                name: Run ping
+            - store_artifacts:
+                destination: log
+                name: Store test logs as artifacts (if any)
+                path: log
+            - slack_red_main_with_volunteer
+    test_ping_windows:
+        executor: medium-windows-machine
+        steps:
+            - attach_workspace:
+                at: workspace
+            - run:
+                command: |
+                    workspace/community/app/target/release/canton/bin/canton.bat run -v -c workspace/community/app/target/release/canton/examples/01-simple-topology/simple-topology.conf workspace/community/app/target/release/canton/examples/01-simple-topology/simple-ping.canton
+                name: Run ping
+            - store_artifacts:
+                destination: log
+                name: Store test logs as artifacts (if any)
+                path: log
+    topology_chaos_test:
+        executor: canton-xlarge-docker-with-postgres
+        parallelism: << parameters.test_repetitions >>
+        parameters:
+            num_test_buckets:
+                default: $CIRCLE_NODE_TOTAL
+                type: string
+            protocol_version:
+                default: ""
+                type: string
+            run_all_ops_test:
+                default: false
+                type: boolean
+            test_repetitions:
+                type: integer
+        steps:
+            - set_canton_protocol_version:
+                protocol_version: << parameters.protocol_version >>
+            - topology_chaos_test_command:
+                num_test_buckets: << parameters.num_test_buckets >>
+                run_all_ops_test: << parameters.run_all_ops_test >>
+    toxiproxy_test_fast:
+        executor: canton-xlarge-docker-with-postgres-toxiproxy
+        steps:
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest"
+                fail_on_error_in_output: false
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.toxiproxy\.fast
+                num_parallel_tasks: "1"
+    toxiproxy_test_slow:
+        executor: canton-xlarge-docker-with-postgres-toxiproxy
+        steps:
+            - run_tests:
+                command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest"
+                fail_on_error_in_output: false
+                filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.toxiproxy | grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.toxiproxy\.fast
+                num_parallel_tasks: "1"
+                succeed_on_error: true
+                timeout: 90m
+    unit_test_coverage:
+        executor: canton-xlarge-docker-with-postgres-toxiproxy
+        steps:
+            - run_test_coverage_test:
+                command: coverage unitTest collectCoverage
+                num_test_buckets: ""
+    unstable_test:
+        executor: canton-xlarge-docker-with-postgres-toxiproxy
+        steps:
+            - run_tests:
+                command: dumpClassPath "testOnly com.digitalasset.canton.integration.tests.* -- -n UnstableTest -n com.digitalasset.canton.annotations.UnstableTest"
+                fail_on_error_in_output: false
+                filter: cat
+                num_parallel_tasks: "1"
+                num_test_buckets: ""
+                release_path: community/app/target/release
+                succeed_on_error: true
+    unstable_test_slow:
+        executor: canton-xlarge-docker-with-postgres-toxiproxy
+        steps:
+            - run_tests:
+                command: dumpClassPath "testOnly * -- -n UnstableTest -n com.digitalasset.canton.annotations.UnstableTest"
+                fail_on_error_in_output: false
+                filter: cat
+                num_parallel_tasks: "1"
+                num_test_buckets: ""
+                succeed_on_error: true
+    update_canton_build_docker_image:
+        docker:
+            - image: nixos/nix:2.31.2
+        steps:
+            - checkout:
+                method: blobless
+            - setup_docker_engine
+            - run:
+                command: |
+                    set -eo pipefail
+                    [[ ! -d "${HOME}/bin" ]] && mkdir -pv ${HOME}/bin
+                    export PATH="${HOME}/bin:$PATH"
+                    echo "export PATH=${HOME}/bin:$PATH" >> $BASH_ENV
+                    nix-channel --update
+                    nix --extra-experimental-features nix-command \
+                        --extra-experimental-features flakes \
+                        profile add \
+                        nixpkgs#ncurses \
+                        nixpkgs#gawk \
+                        nixpkgs#gnused \
+                        nixpkgs#google-cloud-sdk \
+                        nixpkgs#docker-client \
+                        nixpkgs#docker-buildx \
+                        nixpkgs#oras \
+                        nixpkgs#circleci-cli
+                environment:
+                    TERM: xterm-256color
+                name: Install dependencies
+            - setup_dockerhub
+            - run:
+                command: |
+                    ${CIRCLE_WORKING_DIRECTORY}/.ci/update-build-image.sh
+                name: Build and upload canton-build image
+            - run:
+                command: |
+                    circleci setup --no-prompt --host https://circleci.com --token "${CIRCLECI_API_TOKEN}"
+                name: Setup circleci-cli
+            - run:
+                command: .circleci/build-config.sh
+                name: Generate the combined config
+            - authorize_git
+            - run:
+                command: |
+                    git --no-pager diff
+                    git add -v .circleci/config.yml .circleci/config
+                    # Only commit if config has been changed
+                    git diff-index --quiet HEAD || git commit -m "Updated docker image for Canton builds"
+                    git push
+                name: Push changes in .circleci/config.yml to origin
+    upload_new_test_artifact_dars:
+        executor: canton-small-docker
+        steps:
+            - checkout:
+                method: blobless
+            - run:
+                command: |
+                    .ci/nix-exec ./scripts/ci/update-s3-test-artifact-dars.sh
+                name: Upload any staged test artifact DARs to s3. Consult contributing/managing-dependencies.md for more details
+    variations_test:
+        executor: canton-xlarge-docker-with-postgres
+        parallelism: 4
+        parameters:
+            override_java_version_for_tests:
+                default: ""
+                type: string
+            protocol_version:
+                default: ""
+                type: string
+        steps:
+            - set_canton_protocol_version:
+                protocol_version: << parameters.protocol_version >>
+            - run_variations_tests:
+                exclude_unstable_tests: true
+                override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+    verify_circleci_config_and_compliance_label:
+        executor: canton-small-docker
+        steps:
+            - checkout:
+                method: blobless
+            - check_pr_skip_ci
+            - check_pr_compliance_labels
+            - run:
+                command: |
+                    cd .circleci
+                    circleci config pack config > config.yml.new
+                    if ! diff -q -I '^#' config.yml config.yml.new; then # Ignore full-line comments as part of the check
+                      echo "ERROR: Committed config.yml is stale, please run build-config.sh in .circleci"
+                      exit 1
+                    fi
+                name: Generate and check circleci config with committed one
+            - run:
+                command: |
+                    nix-shell -I nixpkgs=./nix/nixpkgs.nix -p yamllint --run 'mkdir -p log; yamllint  -c .yamllint $(git ls-files *.yml) || true'
+                name: Lint yaml files
+            - slack_red_main_with_volunteer
+orbs:
+    azure-caching-orb: dach_ny/azure-caching-orb@1.2
+    slack: circleci/slack@3.3.0
+parameters:
+    manual_job:
+        default: none
+        enum:
+            - adhoc-daml-update
+            - blackduck-test
+            - build-canton-local-cache
+            - docs-replication-prod
+            - docs-replication-test
+            - external-parties-tests
+            - generate-data-continuity-dumps
+            - nightly-integration-tests
+            - nightly-test-sequencer
+            - nightly-test-bftordering
+            - open-source-code-drop
+            - override-java-versions-for-tests
+            - performance-runner-test
+            - postgres-conformance-tests
+            - protocol-continuity-tests
+            - release-sandbox
+            - release-test
+            - snapshot-release
+            - stability-crash-recovery-test
+            - stability-sequential-test
+            - stability-test
+            - start-release-process
+            - test-ping
+            - test-protocol-version-35
+            - test-protocol-version-dev
+            - toxiproxy-chaos-test
+            - toxiproxy-slow-test
+            - unstable-test
+            - update-canton-build-docker-image
+            - upload-new-test-artifact-dars
+            - none
+        type: enum
+    pv_for_run_many_times:
+        default: ""
+        enum:
+            - ""
+            - "35"
+            - dev
+        type: enum
+    test_to_run_many_times:
+        default: ""
+        type: string
+version: 2.1
+workflows:
+    blackduck_daily:
+        jobs:
+            - blackduck:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - blackduck
+        triggers:
+            - schedule:
+                cron: 0 4,16 * * *
+                filters:
+                    branches:
+                        only:
+                            - main
+    canton_build_required:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    tags:
+                        only: /^v.*/
+            - package_community:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    tags:
+                        only: /^v.*/
+                is_manual: false
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - package_sequencer_driver_api:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    branches:
+                        only:
+                            - main
+                            - /^release-line.*/
+                    tags:
+                        only: /^v.*/
+                is_manual: false
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - package_jsonapi:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    branches:
+                        only:
+                            - main
+                            - /^release-line.*/
+                    tags:
+                        only: /^v.*/
+                is_manual: false
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - assembly_ledger_api_test_tool:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    branches:
+                        only:
+                            - main
+                            - /^release-line.*/
+                    tags:
+                        only: /^v.*/
+                is_manual: false
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - package_kms_driver:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    branches:
+                        only:
+                            - main
+                            - /^release-line.*/
+                    tags:
+                        only: /^v.*/
+                is_manual: false
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - verify_circleci_config_and_compliance_label:
+                filters:
+                    branches:
+                        ignore:
+                            - main
+                            - /^release-line.*/
+                    tags:
+                        only: /^v.*/
+            - static_tests:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - protobuf_continuity:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+            - blackduck:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - blackduck
+                filters:
+                    branches:
+                        only: /^blackduck.*/
+            - build_systematic_testing_inventory:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                filters:
+                    branches:
+                        only:
+                            - main
+                            - /^release-line.*/
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - compile
+            - build_scaladoc:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - compile
+            - build_docs:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - package_community
+                    - build_scaladoc
+            - test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - compile
+                test_scala3_migration: true
+            - test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                name: test_protocol_version_35
+                protocol_version: "35"
+                requires:
+                    - compile
+            - test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    branches:
+                        only:
+                            - main
+                            - /^release-line.*/
+                    tags:
+                        only: /^v.*/
+                name: test_protocol_version_dev
+                protocol_version: DEV
+                requires:
+                    - test_protocol_version_35
+            - unstable_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    branches:
+                        only:
+                            - main
+                            - /^release-line.*/
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - package_community
+            - variations_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - compile
+            - scalafix:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - compile
+            - sequential_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    branches:
+                        only:
+                            - main
+                            - /^release-line.*/
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - compile
+                    - test
+            - crash_recovery_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - compile
+            - release_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    branches:
+                        only:
+                            - main
+                            - /^release-line.*/
+                    tags:
+                        only: /^v.*/
+                is_manual: false
+                is_nightly_workflow: false
+                requires:
+                    - package_community
+                    - package_kms_driver
+            - toxiproxy_test_fast:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - compile
+            - tag_new_releases:
+                filters:
+                    branches:
+                        only:
+                            - main
+                            - /release-line-.*/
+            - publish_libraries:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - gpg-signing
+                    - maven-mirror
+                    - maven-publish
+                    - da-images
+                filters:
+                    branches:
+                        only:
+                            - main
+                    tags:
+                        only: /^v.*/
+                is_manual: false
+                is_nightly_workflow: false
+                requires:
+                    - compile
+                    - tag_new_releases
+            - publish_release:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    branches:
+                        only:
+                            - main
+                    tags:
+                        only: /^v.*/
+                is_manual: false
+                is_nightly_workflow: false
+                requires:
+                    - package_community
+                    - package_sequencer_driver_api
+                    - package_jsonapi
+                    - package_kms_driver
+                    - assembly_ledger_api_test_tool
+                    - build_scaladoc
+                    - compile
+                    - tag_new_releases
+                    - build_systematic_testing_inventory
+            - run_propose_script:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    branches:
+                        ignore: /.*/
+                    tags:
+                        only: /^v.*/
+                name: Update main after release
+                requires:
+                    - publish_libraries
+                    - publish_release
+                script_argument: finish_release_process
+            - test_data_continuity_dumps:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+            - generate_data_continuity_dumps:
+                context:
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    branches:
+                        ignore: /.*/
+                    tags:
+                        only: /^v.*/
+                is_manual: false
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - build_and_publish_docker:
+                context:
+                    - da-images
+                filters:
+                    branches:
+                        ignore: /.*/
+                    tags:
+                        only: /^v.*/
+                is_manual: false
+                is_nightly_workflow: false
+                requires:
+                    - package_community
+        max_auto_reruns: 1
+        when:
+            and:
+                - not: << pipeline.parameters.test_to_run_many_times >>
+                - equal:
+                    - none
+                    - << pipeline.parameters.manual_job >>
+    canton_dependencies_update:
+        jobs:
+            - daml_upgrade_pr:
+                context:
+                    - artifactory
+                    - canton-daml-update-pr
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+        triggers:
+            - schedule:
+                cron: 30 7 * * 1-5
+                filters:
+                    branches:
+                        only:
+                            - main
+    canton_nightly:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - package_community:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: false
+                is_nightly_workflow: true
+                requires:
+                    - compile
+            - package_sequencer_driver_api:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: false
+                is_nightly_workflow: true
+                requires:
+                    - compile
+            - package_jsonapi:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: false
+                is_nightly_workflow: true
+                requires:
+                    - compile
+            - package_kms_driver:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: false
+                is_nightly_workflow: true
+                requires:
+                    - compile
+            - assembly_ledger_api_test_tool:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: false
+                is_nightly_workflow: true
+                requires:
+                    - compile
+            - build_and_publish_docker:
+                context:
+                    - da-images
+                is_manual: false
+                is_nightly_workflow: true
+                requires:
+                    - package_community
+            - build_scaladoc:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+            - build_docs:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - build_scaladoc
+                    - package_community
+            - external_parties_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                name: external_parties_test
+                requires:
+                    - compile
+            - nightly_integration_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                requires:
+                    - compile
+            - toxiproxy_test_slow:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+            - unstable_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                requires:
+                    - package_community
+            - unstable_test_slow:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - toxiproxy_test_slow
+            - test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                name: test_with_java17
+                override_java_version_for_tests: "17"
+                requires:
+                    - compile
+            - postgres_conformance_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                name: postgres_conformance_test_14
+                postgres_version: 14
+                requires:
+                    - compile
+            - postgres_conformance_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                name: postgres_conformance_test_15
+                postgres_version: 15
+                requires:
+                    - postgres_conformance_test_14
+            - postgres_conformance_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                name: postgres_conformance_test_16
+                postgres_version: 16
+                requires:
+                    - postgres_conformance_test_15
+            - stability_crash_recovery_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                    - azure-self-cache
+                requires:
+                    - compile
+            - stability_crash_recovery_test_alerting:
+                requires:
+                    - stability_crash_recovery_test
+            - test_ping_windows:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                filters:
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - package_community
+            - test_ping_arm:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                filters:
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - package_community
+            - build_systematic_testing_inventory:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+            - nightly_reporting
+            - publish_libraries:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - gpg-signing
+                    - maven-mirror
+                    - da-images
+                is_manual: false
+                is_nightly_workflow: true
+                requires:
+                    - compile
+            - publish_canton_open_source_code_drop:
+                context:
+                    - azure-self-cache
+                requires:
+                    - package_community
+                    - build_systematic_testing_inventory
+                    - build_scaladoc
+            - topology_chaos_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirrory
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                requires:
+                    - compile
+                run_all_ops_test: false
+                test_repetitions: 13
+            - benchmark:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                requires:
+                    - compile
+            - test_performance_runner:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - package_community
+        triggers:
+            - schedule:
+                cron: 0 22 * * 1-5
+                filters:
+                    branches:
+                        only:
+                            - main
+    docs_replication_on_schedule:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - package_community:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: false
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - build_scaladoc:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+            - replicate_docs:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                env: prod
+                requires:
+                    - package_community
+                    - build_scaladoc
+        triggers:
+            - schedule:
+                cron: 15 22 * * *
+                filters:
+                    branches:
+                        only:
+                            - main
+    manual_adhoc_daml_update:
+        jobs:
+            - daml_upgrade_pr:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - canton-daml-update-pr
+        when:
+            equal:
+                - adhoc-daml-update
+                - << pipeline.parameters.manual_job >>
+    manual_blackduck_test:
+        jobs:
+            - blackduck:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - blackduck
+        when:
+            equal:
+                - blackduck-test
+                - << pipeline.parameters.manual_job >>
+    manual_build_canton_local_cache:
+        jobs:
+            - build_canton_local_cache:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+        when:
+            equal:
+                - build-canton-local-cache
+                - << pipeline.parameters.manual_job >>
+    manual_docs_replication_prod:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - package_community:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - build_scaladoc:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+            - replicate_docs:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                env: prod
+                requires:
+                    - package_community
+                    - build_scaladoc
+        when:
+            equal:
+                - docs-replication-prod
+                - << pipeline.parameters.manual_job >>
+    manual_docs_replication_test:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - package_community:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - build_scaladoc:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+            - replicate_docs:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                env: test
+                requires:
+                    - package_community
+                    - build_scaladoc
+        when:
+            equal:
+                - docs-replication-test
+                - << pipeline.parameters.manual_job >>
+    manual_external_party_tests:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - external_parties_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    tags:
+                        only: /^v.*/
+                name: manual_test_external_parties
+                requires:
+                    - compile
+        when:
+            equal:
+                - external-parties-tests
+                - << pipeline.parameters.manual_job >>
+    manual_generate_data_continuity_dumps:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - generate_data_continuity_dumps:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - compile
+        when:
+            equal:
+                - generate-data-continuity-dumps
+                - << pipeline.parameters.manual_job >>
+    manual_nightly_integration_tests:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+            - nightly_integration_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                requires:
+                    - compile
+        when:
+            equal:
+                - nightly-integration-tests
+                - << pipeline.parameters.manual_job >>
+    manual_nightly_test_bftordering:
+        jobs:
+            - print_tests:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - nightly_integration_test_bftordering_only:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - print_tests
+        when:
+            equal:
+                - nightly-test-bftordering
+                - << pipeline.parameters.manual_job >>
+    manual_nightly_test_sequencer:
+        jobs:
+            - print_tests:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - nightly_integration_test_sequencer_only:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - print_tests
+        when:
+            equal:
+                - nightly-test-sequencer
+                - << pipeline.parameters.manual_job >>
+    manual_open_source_code_drop:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - publish_canton_open_source_code_drop:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                enforce_date: false
+                requires:
+                    - compile
+        when:
+            equal:
+                - open-source-code-drop
+                - << pipeline.parameters.manual_job >>
+    manual_override_java_version_for_tests:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    branches:
+                        ignore:
+                            - main
+                            - /release-line-.*/
+                name: manual_compile_with_project_default_java
+            - test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    branches:
+                        ignore:
+                            - main
+                            - /release-line-.*/
+                name: manual_test_with_java_<< parameters.manual_override_java_version_for_tests >>
+                override_java_version_for_tests: << parameters.manual_override_java_version_for_tests >>
+                requires:
+                    - manual_compile_with_project_default_java
+        parameters:
+            manual_override_java_version_for_tests:
+                default: "17"
+                type: string
+        when:
+            equal:
+                - override-java-versions-for-tests
+                - << pipeline.parameters.manual_job >>
+    manual_performance_runner_test:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - package_community:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - test_performance_runner:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - package_community
+        when:
+            and:
+                - equal:
+                    - performance-runner-test
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
+    manual_postgres_conformance_tests:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - postgres_conformance_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                name: postgres_conformance_test_14
+                postgres_version: 14
+                requires:
+                    - compile
+            - postgres_conformance_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                name: postgres_conformance_test_15
+                postgres_version: 15
+                requires:
+                    - compile
+            - postgres_conformance_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                name: postgres_conformance_test_16
+                postgres_version: 16
+                requires:
+                    - compile
+        when:
+            equal:
+                - postgres-conformance-tests
+                - << pipeline.parameters.manual_job >>
+    manual_protocol_continuity_tests:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - protocol_continuity_test_all:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+        when:
+            and:
+                - equal:
+                    - protocol-continuity-tests
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
+    manual_release_sandbox:
+        jobs:
+            - package_sandbox:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+        when:
+            equal:
+                - release-sandbox
+                - << pipeline.parameters.manual_job >>
+    manual_release_test:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - package_kms_driver:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - package_community:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - release_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                    - da-images
+                filters:
+                    branches:
+                        ignore:
+                            - main
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - package_community
+                    - package_kms_driver
+        when:
+            and:
+                - equal:
+                    - release-test
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
+    manual_snapshot_release:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - package_community:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - package_jsonapi:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - package_sequencer_driver_api:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - assembly_ledger_api_test_tool:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - package_kms_driver:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - build_scaladoc:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+            - build_systematic_testing_inventory:
+                context:
+                    - artifactory
+                    - azure-self-cache
+                requires:
+                    - compile
+            - publish_libraries:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - gpg-signing
+                    - maven-mirror
+                    - maven-publish
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - publish_release:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - package_community
+                    - package_jsonapi
+                    - package_sequencer_driver_api
+                    - assembly_ledger_api_test_tool
+                    - package_kms_driver
+                    - build_systematic_testing_inventory
+                    - build_scaladoc
+            - build_and_publish_docker:
+                context:
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                post-steps:
+                    - store_artifacts:
+                        destination: ci-artifacts
+                        path: docker/canton/tests/ping/ci-artifacts
+                requires:
+                    - package_community
+        when:
+            equal:
+                - snapshot-release
+                - << pipeline.parameters.manual_job >>
+    manual_stability_crash_recovery_test:
+        jobs:
+            - print_tests:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - stability_crash_recovery_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                requires:
+                    - print_tests
+                succeed_on_error: false
+        when:
+            and:
+                - equal:
+                    - stability-crash-recovery-test
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
+    manual_stability_sequential_test:
+        jobs:
+            - print_tests:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - stability_sequential_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                requires:
+                    - print_tests
+                succeed_on_error: false
+        when:
+            and:
+                - equal:
+                    - stability-sequential-test
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
+    manual_stability_test:
+        jobs:
+            - print_tests:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - stability_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                requires:
+                    - print_tests
+                succeed_on_error: false
+        when:
+            and:
+                - equal:
+                    - stability-test
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
+    manual_start_release_process:
+        jobs:
+            - run_propose_script:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                filters:
+                    branches:
+                        only:
+                            - main
+                            - /release-line-.*/
+                name: Start the release process
+                script_argument: create_release_pr
+        when:
+            equal:
+                - start-release-process
+                - << pipeline.parameters.manual_job >>
+    manual_test_flake_fix_many_times:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - test_flake_fix_many_times:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                    - da-images
+                parallel_runners: 10
+                protocol_version: << pipeline.parameters.pv_for_run_many_times >>
+                requires:
+                    - compile
+                test_repetitions_per_runner: 5
+                test_to_run_many_times: << pipeline.parameters.test_to_run_many_times >>
+        when: << pipeline.parameters.test_to_run_many_times >>
+    manual_test_ping:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - package_community:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - test_ping_windows:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                filters:
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - package_community
+            - test_ping_arm:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                filters:
+                    tags:
+                        only: /^v.*/
+                requires:
+                    - package_community
+        when:
+            equal:
+                - test-ping
+                - << pipeline.parameters.manual_job >>
+    manual_test_protocol_version_35:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                    - da-images
+                filters:
+                    tags:
+                        only: /^v.*/
+                name: test_protocol_version_35
+                protocol_version: "35"
+                requires:
+                    - compile
+        when:
+            equal:
+                - test-protocol-version-35
+                - << pipeline.parameters.manual_job >>
+    manual_test_protocol_version_dev:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                    - da-images
+                filters:
+                    tags:
+                        only: /^v.*/
+                name: test_protocol_version_dev
+                protocol_version: dev
+                requires:
+                    - compile
+        when:
+            equal:
+                - test-protocol-version-dev
+                - << pipeline.parameters.manual_job >>
+    manual_topology_chaos_test:
+        jobs:
+            - print_tests:
+                context:
+                    - azure-self-cache
+            - topology_chaos_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                    - azure-self-cache
+                name: topology_chaos_test_specific
+                requires:
+                    - print_tests
+                run_all_ops_test: false
+                test_repetitions: 20
+            - topology_chaos_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                name: topology_chaos_test_all
+                num_test_buckets: "1"
+                requires:
+                    - print_tests
+                run_all_ops_test: true
+                test_repetitions: 20
+        when:
+            and:
+                - equal:
+                    - toxiproxy-chaos-test
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
+    manual_toxiproxy_slow_test:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - toxiproxy_test_slow:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+            - unstable_test_slow:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+        when:
+            and:
+                - equal:
+                    - toxiproxy-slow-test
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
+    manual_unstable_test:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - package_community:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - compile
+            - unstable_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - aws_kms_testing
+                    - gcp_kms_testing
+                filters:
+                    branches:
+                        ignore:
+                            - main
+                requires:
+                    - package_community
+        when:
+            and:
+                - equal:
+                    - unstable-test
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
+    manual_update_canton_build_docker_image:
+        jobs:
+            - update_canton_build_docker_image:
+                context:
+                    - circleci-api
+                    - da-images
+        when:
+            and:
+                - equal:
+                    - update-canton-build-docker-image
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
+    manual_upload_new_test_artifact_dars:
+        jobs:
+            - upload_new_test_artifact_dars:
+                context:
+                    - circleci-api
+                    - da-images
+        when:
+            and:
+                - equal:
+                    - upload-new-test-artifact-dars
+                    - << pipeline.parameters.manual_job >>
+    version: 2.1
+

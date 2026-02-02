@@ -1,0 +1,47 @@
+package:
+  description: |
+    Create bundles
+  parameters:
+    cmd:
+      # what the sbt command is that we should run
+      type: string
+    location:
+      # where our target artefacts will end up
+      type: string
+    artifact_suffix:
+      type: string
+      # a suffix for artifacts to save, usually a file extension
+      default: ".tar.gz"
+  steps:
+    - checkout_and_restore_caches
+    - execute_sbt_command:
+        cmd: << parameters.cmd >>
+        fail_on_error_in_output: false
+    - run:
+        name: Prepare for artefact upload
+        command: |
+          # Clean-up temporary releases from previous package jobs
+          rm -rf tmp-release && mkdir tmp-release
+          cp -v << parameters.location >>/*<< parameters.artifact_suffix >> tmp-release
+    - store_artifacts:
+        name: Store Release as artifacts
+        path: tmp-release
+        destination: release
+    - persist_to_workspace:
+        root: .
+        paths: << parameters.location >>
+
+restore_packaged_release:
+  parameters:
+    location:
+      type: string
+  steps:
+    - attach_workspace:
+        at: /tmp/workspace
+    - run:
+        name: Copy release
+        command: |
+          TARGET="<<parameters.location>>"
+          mkdir -p $TARGET
+          cp -rv /tmp/workspace/$TARGET/* $TARGET
+

@@ -1,0 +1,32 @@
+# Rules used when comparing a snapshot of the released Protobuf files against a snapshot of the current files
+# 'Backwards' as this is the opposite direction Protobuf breaking change checks are usually done
+# Please see 'Protobuf continuity' in CONTRIBUTING.MD and following Google Doc for more
+# context: https://docs.google.com/document/d/1jG-dcCP5j2HvUVxGUMUe6XyHK9C7oRcW99qVO_gg13o/edit?usp=sharin
+version: v1
+breaking:
+  use:
+    - FILE_SAME_PACKAGE
+    - ENUM_VALUE_NO_DELETE
+    - FIELD_NO_DELETE
+   # - RPC_NO_DELETE only difference to `forwards-buf.yaml`
+    - ONEOF_NO_DELETE
+    - FIELD_SAME_JAVA_UTF8_VALIDATION
+    - FIELD_SAME_TYPE
+    - FIELD_SAME_CARDINALITY
+    - FIELD_SAME_ONEOF
+    - RESERVED_ENUM_NO_DELETE
+    - RESERVED_MESSAGE_NO_DELETE
+    - RPC_SAME_REQUEST_TYPE
+    - RPC_SAME_RESPONSE_TYPE
+    - RPC_SAME_CLIENT_STREAMING
+    - RPC_SAME_SERVER_STREAMING
+    - RPC_SAME_IDEMPOTENCY_LEVEL
+  ignore:
+    # ignore topology admin api in backwards test, as an attacker can't use it to break transparency
+    - com/digitalasset/canton/topology/admin/v30/
+    # Ignore messages created by the mediator, because a malicious mediator can't break transparency
+    - com/digitalasset/canton/protocol/v30/mediator.proto
+    # ignore participant admin api in backwards tests, as an attacker can't use it to break transparency
+    - com/digitalasset/canton/admin/participant/v30/
+    # ignore ledger api protos as they are checked independently
+    - com/daml/ledger/api/

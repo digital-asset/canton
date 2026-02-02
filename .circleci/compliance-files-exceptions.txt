@@ -1,0 +1,2 @@
+project/project/DamlVersions.scala
+.circleci/branches_to_be_fully_recompiled_in_ci.txt
