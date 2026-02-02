@@ -1,0 +1,325 @@
+triggers:
+  - schedule:
+      cron: "0 22 * * 1-5" # Nightly on Monday-Friday
+      filters:
+        branches:
+          only:
+            - main
+
+jobs:
+##### Build Canton
+  - compile:
+      context:
+      - datadog
+      - artifactory
+      - azure-self-cache
+      - maven-mirror
+      - da-images
+##### Package Canton
+  - package_community:
+      context:
+      - datadog
+      - artifactory
+      - azure-self-cache
+      - maven-mirror
+      - da-images
+      is_nightly_workflow: true
+      is_manual: false
+      requires:
+        - compile
+  - package_sequencer_driver_api:
+      context:
+      - datadog
+      - artifactory
+      - azure-self-cache
+      - maven-mirror
+      - da-images
+      is_nightly_workflow: true
+      is_manual: false
+      requires:
+        - compile
+  - package_jsonapi:
+      context:
+      - datadog
+      - artifactory
+      - azure-self-cache
+      - maven-mirror
+      - da-images
+      is_nightly_workflow: true
+      is_manual: false
+      requires:
+        - compile
+  - package_kms_driver:
+      context:
+      - datadog
+      - artifactory
+      - azure-self-cache
+      - maven-mirror
+      - da-images
+      is_nightly_workflow: true
+      is_manual: false
+      requires:
+        - compile
+  - assembly_ledger_api_test_tool:
+      context:
+      - datadog
+      - artifactory
+      - azure-self-cache
+      - maven-mirror
+      - da-images
+      is_nightly_workflow: true
+      is_manual: false
+      requires:
+        - compile
+  - build_and_publish_docker:
+      context:
+        - da-images
+      is_nightly_workflow: true
+      is_manual: false
+      requires:
+        - package_community
+
+
+##### Build Docs
+  - build_scaladoc:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      requires:
+        - compile
+  - build_docs:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      requires:
+        - build_scaladoc
+        - package_community
+
+##### Tests
+  - external_parties_test:
+      name: external_parties_test
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      requires:
+        - compile
+  - nightly_integration_test:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+        requires:
+          - compile
+  - toxiproxy_test_slow:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      requires:
+        - compile
+  - unstable_test:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      requires:
+        - package_community
+  - unstable_test_slow:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      requires:
+        - toxiproxy_test_slow
+  - test:
+      name: test_with_java17
+      override_java_version_for_tests: "17"
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      requires:
+        - compile
+# TODO(#16458) enable this test after the first release of Canton 3
+#  - protocol_continuity_test_all:
+#      context:
+#        - datadog
+#        - artifactory
+#      requires:
+#        - compile
+  - postgres_conformance_test: &postgres_conformance
+      name: postgres_conformance_test_14
+      postgres_version: 14
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      requires:
+        - compile
+  - postgres_conformance_test:
+      <<: *postgres_conformance
+      name: postgres_conformance_test_15
+      postgres_version: 15
+      requires:
+        - postgres_conformance_test_14
+  - postgres_conformance_test:
+      <<: *postgres_conformance
+      name: postgres_conformance_test_16
+      postgres_version: 16
+      requires:
+        - postgres_conformance_test_15
+  - stability_crash_recovery_test:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+        - azure-self-cache
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+  - stability_crash_recovery_test_alerting:
+      requires:
+        - stability_crash_recovery_test
+  - test_ping_windows:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+      filters:
+        tags:
+          only: /^v.*/
+      requires:
+        - package_community
+  - test_ping_arm:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+      filters:
+        tags:
+          only: /^v.*/
+      requires:
+        - package_community
+
+##### Miscellaneous
+  - build_systematic_testing_inventory:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+  - nightly_reporting
+  - publish_libraries:
+      context:
+      - datadog
+      - artifactory
+      - azure-self-cache
+      - gpg-signing
+      - maven-mirror
+      - da-images
+      is_nightly_workflow: true
+      is_manual: false
+      requires:
+        - compile
+# TODO(#26949): Enable nightly publish again once we stop overwriting released artifacts between manual snapshots and nightly snapshot releases.
+#  - publish_release:
+#      context:
+#      - datadog
+#      - artifactory
+#      - azure-self-cache
+#      - maven-mirror
+#      - da-images
+#      is_nightly_workflow: true
+#      is_manual: false
+#      requires:
+#        - package_community
+#        - package_sequencer_driver_api
+#        - package_jsonapi
+#        - package_kms_driver
+#        - assembly_ledger_api_test_tool
+#        - build_systematic_testing_inventory
+#        - build_scaladoc
+  - publish_canton_open_source_code_drop:
+      context:
+        - azure-self-cache
+      # depend on the same artifacts as the nightly release, so we only run together
+      requires:
+        - package_community
+        - build_systematic_testing_inventory
+        - build_scaladoc
+
+##### Chaos Tests
+  - topology_chaos_test:
+      run_all_ops_test: false
+      test_repetitions: 13 # odd number to save CI costs as there are 13 ChangingTopology*Test's (excluding the AllOpsTest)
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirrory
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+
+  - benchmark:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      requires:
+        - compile # optional dependency, introduced to save credits in case of compile errors
+
+  - test_performance_runner:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+      requires:
+        - package_community

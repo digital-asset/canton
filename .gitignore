@@ -69,3 +69,6 @@ metals.sbt
 # sbt build artifacts
 project/project/project/
 target/
+*.hprof
+*.log
+*.clog

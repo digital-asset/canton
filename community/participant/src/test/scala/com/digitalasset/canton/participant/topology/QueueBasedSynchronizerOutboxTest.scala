@@ -9,7 +9,6 @@ import com.digitalasset.canton.common.sequencer.RegisterTopologyTransactionHandl
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
   BatchAggregatorConfig,
-  CachingConfigs,
   NonNegativeFiniteDuration,
   ProcessingTimeout,
   TopologyConfig,
@@ -27,10 +26,9 @@ import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast
 import com.digitalasset.canton.protocol.messages.TopologyTransactionsBroadcast.State
 import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.cache.TopologyStateWriteThroughCache
 import com.digitalasset.canton.topology.client.{
+  StoreBasedSynchronizerTopologyClient,
   SynchronizerTopologyClientWithInit,
-  WriteThroughCacheSynchronizerTopologyClient,
 }
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.*
@@ -38,7 +36,10 @@ import com.digitalasset.canton.topology.store.memory.InMemoryTopologyStore
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignAllMappings
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
-import com.digitalasset.canton.topology.transaction.TopologyTransaction.GenericTopologyTransaction
+import com.digitalasset.canton.topology.transaction.TopologyTransaction.{
+  GenericTopologyTransaction,
+  TxHash,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{FutureUnlessShutdownUtil, MonadUtil}
 import com.digitalasset.canton.{
@@ -121,7 +122,6 @@ class QueueBasedSynchronizerOutboxTest
         SynchronizerTopologyManager,
         MockHandle,
         SynchronizerTopologyClientWithInit,
-        TopologyStateWriteThroughCache,
     )
   ] = {
     val target = new InMemoryTopologyStore(
@@ -148,34 +148,21 @@ class QueueBasedSynchronizerOutboxTest
       futureSupervisor,
       loggerFactory,
     )
-    val stateCache = new TopologyStateWriteThroughCache(
-      target,
-      BatchAggregatorConfig.defaultsForTesting,
-      PositiveInt.tryCreate(10),
-      enableConsistencyChecks = false,
-      timeouts,
-      loggerFactory,
+    val client = new StoreBasedSynchronizerTopologyClient(
+      clock,
+      defaultStaticSynchronizerParameters,
+      store = target,
+      packageDependencyResolver = NoPackageDependencies,
+      topologyConfig = TopologyConfig(),
+      timeouts = timeouts,
+      futureSupervisor = futureSupervisor,
+      loggerFactory = loggerFactory,
     )
-    val client = WriteThroughCacheSynchronizerTopologyClient
-      .create(
-        clock,
-        defaultStaticSynchronizerParameters,
-        target,
-        stateCache,
-        synchronizerUpgradeTime = None,
-        NoPackageDependencies,
-        CachingConfigs.testing,
-        TopologyConfig.forTesting,
-        timeouts,
-        futureSupervisor,
-        loggerFactory,
-      )(None)
-      .futureValueUS
     val handle =
       new MockHandle(
         expect,
         responses = responses,
-        stateCache = stateCache,
+        store = target,
         targetClient = client,
         rejections = rejections,
         dropSequencedBroadcast = dropSequencedBroadcast,
@@ -195,13 +182,13 @@ class QueueBasedSynchronizerOutboxTest
             removals = Map.empty,
             additions = Seq(ValidatedTopologyTransaction(rootCert)),
           )
-    } yield (target, manager, handle, client, stateCache)
+    } yield (target, manager, handle, client)
   }
 
   private class MockHandle(
       expectI: Int,
       responses: Iterator[State],
-      stateCache: TopologyStateWriteThroughCache,
+      store: TopologyStore[TopologyStoreId],
       targetClient: SynchronizerTopologyClientWithInit,
       rejections: Iterator[Option[TopologyTransactionRejection]] = Iterator.continually(None),
       dropSequencedBroadcast: Iterator[Boolean] = Iterator.continually(false),
@@ -244,16 +231,23 @@ class QueueBasedSynchronizerOutboxTest
           if (autoFlush) flushBlocker.get().outcome_(())
           val ts = CantonTimestamp.now()
           if (finalResult.forall(_ == State.Accepted) && !dropBroadcast) {
+            preFlushNotification.getAndSet(PromiseUnlessShutdown.unsupervised()).outcome_(())
             for {
-              _ <- stateCache.append(
-                SequencedTime(ts),
-                EffectiveTime(ts),
-                ValidatedTopologyTransaction(x, rejections.next()),
-              )
-              _ = preFlushNotification.getAndSet(PromiseUnlessShutdown.unsupervised()).outcome_(())
               _ <- flushBlocker.get().futureUS
               _ = flushBlocker.set(PromiseUnlessShutdown.unsupervised())
-              _ <- stateCache.flush(SequencedTime(ts), EffectiveTime(ts))
+              _ <- store
+                .update(
+                  SequencedTime(ts),
+                  EffectiveTime(ts),
+                  additions = List(ValidatedTopologyTransaction(x, rejections.next())),
+                  // dumbed down version of how to "append" ValidatedTopologyTransactions:
+                  removals = Option
+                    .when(x.operation == TopologyChangeOp.Remove)(
+                      x.mapping.uniqueKey -> (x.serial.some, Set.empty[TxHash])
+                    )
+                    .toList
+                    .toMap,
+                )
               _ <- MonadUtil.when(topologyClientConnected.get())(
                 targetClient
                   .observed(
@@ -391,7 +385,7 @@ class QueueBasedSynchronizerOutboxTest
 
     "dispatch transaction on new connect" in {
       for {
-        (target, manager, handle, client, _) <- mk(transactions.length)
+        (target, manager, handle, client) <- mk(transactions.length)
         res <- push(manager, transactions)
         _ <- outboxConnected(manager, handle, client, target)
         _ <- handle.allObserved()
@@ -403,7 +397,7 @@ class QueueBasedSynchronizerOutboxTest
 
     "dispatch transaction on existing connections" in {
       for {
-        (target, manager, handle, client, _) <- mk(transactions.length)
+        (target, manager, handle, client) <- mk(transactions.length)
         _ <- outboxConnected(manager, handle, client, target)
         res <- push(manager, transactions)
         _ <- handle.allObserved()
@@ -415,7 +409,7 @@ class QueueBasedSynchronizerOutboxTest
 
     "dispatch transactions continuously respecting the batch size" in {
       for {
-        (target, manager, handle, client, _) <- mk(slice1.length)
+        (target, manager, handle, client) <- mk(slice1.length)
         _res <- push(manager, slice1)
         _ <- outboxConnected(
           manager,
@@ -438,7 +432,7 @@ class QueueBasedSynchronizerOutboxTest
 
     "not dispatch old data when reconnected" in {
       for {
-        (target, manager, handle, client, _) <- mk(slice1.length)
+        (target, manager, handle, client) <- mk(slice1.length)
         outbox <- outboxConnected(manager, handle, client, target)
         _ <- push(manager, slice1)
         _ <- handle.allObserved()
@@ -458,7 +452,7 @@ class QueueBasedSynchronizerOutboxTest
       val another = txAddFromMapping(mkPTP("eta"))
 
       for {
-        (target, manager, handle, client, _) <- mk(transactions.length)
+        (target, manager, handle, client) <- mk(transactions.length)
         outbox <- outboxConnected(manager, handle, client, target)
         _ <- push(manager, transactions)
         _ <- handle.allObserved()
@@ -482,7 +476,7 @@ class QueueBasedSynchronizerOutboxTest
 
     "handle rejected transactions" in {
       for {
-        (target, manager, handle, client, _) <-
+        (target, manager, handle, client) <-
           mk(
             transactions.size,
             rejections = Iterator.continually(
@@ -503,7 +497,7 @@ class QueueBasedSynchronizerOutboxTest
       @nowarn val Seq(tx2) = transactions.slice(1, 2)
 
       lazy val action = for {
-        (target, manager, handle, client, _) <-
+        (target, manager, handle, client) <-
           mk(
             2,
             responses = Iterator(
@@ -532,7 +526,7 @@ class QueueBasedSynchronizerOutboxTest
 
     "handle dropped transactions" in {
       for {
-        (target, manager, handle, client, _) <- mk(
+        (target, manager, handle, client) <- mk(
           1,
           // drop the first submission, but not the second
           dropSequencedBroadcast = Iterator(true, false),
@@ -563,6 +557,7 @@ class QueueBasedSynchronizerOutboxTest
       }
     }
 
+    // TODO(#30401) re-enable when fixed
     "handle being closed while transactions are pending" in {
       // This test executes the following scenario:
       // 1. submit TB1 (topology broadcast 1) and keep it from being fully flushed to the topology store.
@@ -575,7 +570,7 @@ class QueueBasedSynchronizerOutboxTest
       // 4. d
 
       for {
-        (target, manager, handle, client, stateCache) <- mk(
+        (target, manager, handle, client) <- mk(
           0,
           autoFlush = false,
         )
@@ -637,19 +632,16 @@ class QueueBasedSynchronizerOutboxTest
         // * handle
         // * outbox
 
-        client2 <- WriteThroughCacheSynchronizerTopologyClient.create(
+        client2 = new StoreBasedSynchronizerTopologyClient(
           clock,
           defaultStaticSynchronizerParameters,
-          target,
-          stateCache,
-          None,
-          NoPackageDependencies,
-          CachingConfigs.testing,
-          TopologyConfig.forTesting,
-          timeouts,
-          futureSupervisor,
-          loggerFactory,
-        )(None)
+          store = target,
+          packageDependencyResolver = NoPackageDependencies,
+          topologyConfig = TopologyConfig(),
+          timeouts = timeouts,
+          futureSupervisor = futureSupervisor,
+          loggerFactory = loggerFactory,
+        )
 
         handle2 = new MockHandle(
           // even though we pushed two transactions before, the one that was pending ultimately made it into the store
@@ -657,7 +649,7 @@ class QueueBasedSynchronizerOutboxTest
           // the test pushes another transaction to this new outbox, to show that the state recovers properly.
           2,
           responses = Iterator.continually(TopologyTransactionsBroadcast.State.Accepted),
-          stateCache = stateCache,
+          store = manager.store,
           targetClient = client2,
           autoFlush = true,
         )

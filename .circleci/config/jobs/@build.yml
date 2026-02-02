@@ -1,0 +1,176 @@
+compile:
+  executor: canton-xlarge-docker
+  steps:
+    - checkout_and_restore_precompiled_classes:
+        reset_classes_if_requested: true
+    - check_pr_skip_ci
+    - restore_sbt_cache
+    - track_cpu_and_memory
+    - run:
+        name: Truncate the file collecting the test names to prevent duplicate test runs
+        command: .ci/nix-exec truncate --size=0 test-full-class-names.log
+    - execute_sbt_command:
+        cmd: update Test/compile printTests
+        retry_fetch: "50"
+    - persist_to_workspace:
+        root: .
+        paths:
+          - "test-full-class-names.log"
+    - save_compiled_classes
+    - save_sbt_cache
+    - cleanup_build_job
+
+protobuf_continuity:
+  executor: canton-medium-docker
+  steps:
+    - checkout_and_restore_caches
+    - execute_sbt_command:
+        cmd: "protobufContinuityCheck"
+    - slack_red_main_with_volunteer
+
+static_tests:
+  executor: canton-medium-docker
+  steps:
+    - checkout:
+        method: blobless
+    - check_pr_skip_ci
+    - restore_sbt_cache
+    - execute_sbt_command:
+        cmd: checkJavaDamlDependencies
+    - execute_sbt_command:
+        cmd: "google-common-protos-scala/protocGenerate ledger-api-value/protocGenerate"
+    - execute_sbt_command:
+        cmd: "lint"
+        extra_parameters: "-J-Xss5M" # Increase stack size to avoid StackOverflowErrors.
+        # `use_maven_mirror` is set to false, because it breaks `scalafmt`
+        use_maven_mirror: false
+    - run:
+        name: Check cache sizes
+        command: .ci/nix-exec scripts/ci/make-cache-action.sh sizecache
+    - run:
+        name: Check SQL table definitions
+        command: scripts/ci/check_sql_definitions.sh
+    - run:
+        name: Check that Nix definitions are up to date
+        command: |
+          echo "checking that the containers shell.nix matches the one in the repository".
+          echo "if this fails, you need to update our build image. have a look at .ci/README.md"
+          diff shell.nix /tmp/shell.nix || exit 1
+          diff -r nix /tmp/nix || exit 1
+    # run checker last as it will rebase to main to avoid the race condition
+    - run_todo_script
+    - post_to_datadog:
+        label: "Post canton.build.open_todos to Datadog"
+        data: "canton.build.open_todos=$open_todos"
+        metric_type: count
+    - slack_red_main_with_volunteer
+
+scalafix:
+  executor: canton-large-docker
+  description: run scalafix command in order to organize imports.
+  steps:
+    - checkout_and_restore_caches
+    - execute_sbt_command:
+        cmd: "scalafixCheck"
+    - save_sbt_cache
+    - slack_red_main_with_volunteer
+
+update_canton_build_docker_image:
+  docker:
+    - image: nixos/nix:2.31.2
+  steps:
+    - checkout:
+        method: blobless
+    - setup_docker_engine
+    - run:
+        name: Install dependencies
+        command: |
+          set -eo pipefail
+          [[ ! -d "${HOME}/bin" ]] && mkdir -pv ${HOME}/bin
+          export PATH="${HOME}/bin:$PATH"
+          echo "export PATH=${HOME}/bin:$PATH" >> $BASH_ENV
+          nix-channel --update
+          nix --extra-experimental-features nix-command \
+              --extra-experimental-features flakes \
+              profile add \
+              nixpkgs#ncurses \
+              nixpkgs#gawk \
+              nixpkgs#gnused \
+              nixpkgs#google-cloud-sdk \
+              nixpkgs#docker-client \
+              nixpkgs#docker-buildx \
+              nixpkgs#oras \
+              nixpkgs#circleci-cli
+        environment:
+          TERM: xterm-256color
+    - setup_dockerhub
+    - run:
+        name: Build and upload canton-build image
+        command: |
+          ${CIRCLE_WORKING_DIRECTORY}/.ci/update-build-image.sh
+    - run:
+        name: Setup circleci-cli
+        command: |
+          circleci setup --no-prompt --host https://circleci.com --token "${CIRCLECI_API_TOKEN}"
+    - run:
+        name: Generate the combined config
+        command: .circleci/build-config.sh
+    - authorize_git
+    - run:
+        name: Push changes in .circleci/config.yml to origin
+        command: |
+          git --no-pager diff
+          git add -v .circleci/config.yml .circleci/config
+          # Only commit if config has been changed
+          git diff-index --quiet HEAD || git commit -m "Updated docker image for Canton builds"
+          git push
+
+verify_circleci_config_and_compliance_label:
+  executor: canton-small-docker
+  steps:
+    - checkout:
+        method: blobless
+    - check_pr_skip_ci
+    - check_pr_compliance_labels
+    - run:
+        name: Generate and check circleci config with committed one
+        command: |
+          cd .circleci
+          circleci config pack config > config.yml.new
+          if ! diff -q -I '^#' config.yml config.yml.new; then # Ignore full-line comments as part of the check
+            echo "ERROR: Committed config.yml is stale, please run build-config.sh in .circleci"
+            exit 1
+          fi
+    - run:
+        name: Lint yaml files
+        command: |
+          nix-shell -I nixpkgs=./nix/nixpkgs.nix -p yamllint --run 'mkdir -p log; yamllint  -c .yamllint $(git ls-files *.yml) || true'
+    - slack_red_main_with_volunteer
+
+daml_upgrade_pr:
+  executor: canton-medium-docker
+  steps:
+    - checkout:
+        method: blobless
+    - authorize_git
+    - run:
+        name: Kick off upgrade if necessary
+        no_output_timeout: "60m"
+        command: |
+          nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "./scripts/ci/daml_upgrade_pr.sh"
+    - send_slack_notification_for_sdk_updates:
+        message: '*[canton/main]* Upgrade DAML'
+        from_version: $CANTON_DAML_VERSION
+        to_version: $NEWEST_DAML_VERSION
+        pr_url: $PR_URL
+    - slack_red_main_with_volunteer
+
+upload_new_test_artifact_dars:
+    executor: canton-small-docker
+    steps:
+        - checkout:
+            method: blobless
+        - run:
+            command: |
+                .ci/nix-exec ./scripts/ci/update-s3-test-artifact-dars.sh
+            name: Upload any staged test artifact DARs to s3. Consult contributing/managing-dependencies.md for more details

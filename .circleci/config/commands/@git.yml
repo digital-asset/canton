@@ -1,0 +1,11 @@
+# configure git for pushing and pulling to github on behalf of our canton-machine account
+authorize_git:
+  steps:
+    - run:
+        name: Authorize Git for canton-machine github account
+        command: |
+          # setup the `canton-machine` user for pushing back to our github repo
+          git remote set-url origin https://canton-machine:${GITHUB_TOKEN}@github.com/DACH-NY/canton.git
+          git config --global user.name canton-machine
+          git config --global user.email soren.bleikertz+canton-github@digitalasset.com
+          git config --global push.default current

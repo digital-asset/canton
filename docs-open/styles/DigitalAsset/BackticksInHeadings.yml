@@ -1,0 +1,10 @@
+extends: existence
+message: "Avoid using backticks for code formatting in headings."
+level: error
+scope: raw
+ignorecase: true
+nonword: true
+# Matches lines with backticks that are followed or preceded by a heading underline/overline
+tokens:
+  - '^(.*`.*)\n[=~\-^"*+#<>]{3,}$'
+  - '^[=~\-^"*+#<>]{3,}\n(.*`.*)$'

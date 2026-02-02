@@ -1,0 +1,939 @@
+# This job runs ordinary tests multiple times. It is no longer run automatically on main.
+# It can be useful to trigger for additional verification when making bigger changes that can result in increased flakiness.
+manual_stability_test:
+  # Workflow with optional jobs that only run on branch other than main through trigger
+  when:
+    and:
+      - equal: [ stability-test, << pipeline.parameters.manual_job >> ]
+      - not:
+          equal: [ main, << pipeline.git.branch >> ]
+
+  jobs:
+    - print_tests:
+        context:
+          - datadog  #seem to fail because of lack of datadog api key
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    # Test alerting jobs are not needed because the manual stability tests always fail on error
+    - stability_test:
+        succeed_on_error: false
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+        requires:
+          - print_tests
+
+manual_stability_sequential_test:
+  when:
+    and:
+      - equal: [ stability-sequential-test, << pipeline.parameters.manual_job >> ]
+      - not:
+          equal: [ main, << pipeline.git.branch >> ]
+  jobs:
+    - print_tests:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - stability_sequential_test:
+        succeed_on_error: false
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+        requires:
+          - print_tests
+
+manual_stability_crash_recovery_test:
+  when:
+    and:
+      - equal: [ stability-crash-recovery-test, << pipeline.parameters.manual_job >> ]
+      - not:
+          equal: [ main, << pipeline.git.branch >> ]
+
+  jobs:
+    - print_tests:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - stability_crash_recovery_test:
+        succeed_on_error: false
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+        requires:
+          - print_tests
+
+manual_update_canton_build_docker_image:
+  when:
+    and:
+      - equal: [ update-canton-build-docker-image, << pipeline.parameters.manual_job >> ]
+      - not:
+            equal: [ main, << pipeline.git.branch >> ]
+
+  jobs:
+    - update_canton_build_docker_image:
+        context:
+          - circleci-api
+          - da-images
+
+manual_adhoc_daml_update:
+  when:
+    equal: [ adhoc-daml-update, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - daml_upgrade_pr:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - canton-daml-update-pr
+
+manual_upload_new_test_artifact_dars:
+  when:
+    and:
+      - equal: [ upload-new-test-artifact-dars, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - upload_new_test_artifact_dars:
+        context:
+          - circleci-api
+          - da-images
+
+manual_generate_data_continuity_dumps:
+  when:
+    equal: [ generate-data-continuity-dumps, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - generate_data_continuity_dumps:
+        is_manual: true
+        is_nightly_workflow: false
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - compile
+
+manual_protocol_continuity_tests:
+  when:
+    and:
+      - equal: [ protocol-continuity-tests, << pipeline.parameters.manual_job >> ]
+      - not:
+          equal: [ main, << pipeline.git.branch >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - protocol_continuity_test_all:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - compile
+
+
+manual_toxiproxy_slow_test:
+  when:
+    and:
+      - equal: [ toxiproxy-slow-test, << pipeline.parameters.manual_job >> ]
+      - not:
+          equal: [ main, << pipeline.git.branch >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+
+    - toxiproxy_test_slow:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - compile
+
+    # Included so that we have a way of manually running all slow toxiproxy tests.
+    # It's a bit of a hack, as the job may also run tests no related to toxiproxy.
+    - unstable_test_slow:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - compile
+
+manual_start_release_process:
+  when:
+    equal: [ start-release-process, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - run_propose_script:
+        name: Start the release process
+        script_argument: "create_release_pr"
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        filters:
+          branches:
+            only:
+              - main
+              - /release-line-.*/
+
+manual_open_source_code_drop:
+  when:
+    equal: [ open-source-code-drop, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - publish_canton_open_source_code_drop:
+        enforce_date: false
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - compile
+
+manual_topology_chaos_test:
+  when:
+    and:
+      - equal: [ toxiproxy-chaos-test, << pipeline.parameters.manual_job >> ]
+      - not:
+          equal: [ main, << pipeline.git.branch >> ]
+  jobs:
+    - print_tests:
+        context:
+          - azure-self-cache
+    - topology_chaos_test:
+        name: topology_chaos_test_specific
+        run_all_ops_test: false
+        test_repetitions: 20
+        context:
+          - datadog
+          - artifactory
+          - aws_kms_testing
+          - gcp_kms_testing
+          - azure-self-cache
+        requires:
+          - print_tests
+    - topology_chaos_test:
+        name: topology_chaos_test_all
+        run_all_ops_test: true # run separate test quarantining all-ops chaos test until stable
+        num_test_buckets: "1"
+        test_repetitions: 20
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - aws_kms_testing
+          - gcp_kms_testing
+        requires:
+          - print_tests
+
+manual_test_protocol_version_35:
+  when:
+    equal: [ test-protocol-version-35, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - test:
+        name: test_protocol_version_35
+        protocol_version: "35"
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - aws_kms_testing
+          - gcp_kms_testing
+          - da-images
+        filters:
+          tags:
+            only: /^v.*/
+        requires:
+          - compile
+
+manual_test_protocol_version_dev:
+  when:
+    equal: [ test-protocol-version-dev, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - test:
+        name: test_protocol_version_dev
+        protocol_version: "dev"
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - aws_kms_testing
+          - gcp_kms_testing
+          - da-images
+        filters:
+          tags:
+            only: /^v.*/
+        requires:
+          - compile
+
+manual_snapshot_release:
+  when:
+    equal: [ snapshot-release, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    ##### Package Canton
+    - package_community:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        is_nightly_workflow: false
+        is_manual: true
+        requires:
+          - compile
+    - package_jsonapi:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        is_nightly_workflow: false
+        is_manual: true
+        requires:
+          - compile
+    - package_sequencer_driver_api:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        is_nightly_workflow: false
+        is_manual: true
+        requires:
+          - compile
+    - assembly_ledger_api_test_tool:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        is_nightly_workflow: false
+        is_manual: true
+        requires:
+          - compile
+    - package_kms_driver:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        is_nightly_workflow: false
+        is_manual: true
+        requires:
+          - compile
+    - build_scaladoc:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - compile
+    - build_systematic_testing_inventory:
+        context:
+          - artifactory
+          - azure-self-cache
+        requires:
+          - compile
+    - publish_libraries:
+        context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - gpg-signing
+        - maven-mirror
+        - maven-publish
+        - da-images
+        is_nightly_workflow: false
+        is_manual: true
+        requires:
+          - compile
+    - publish_release:
+        context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        is_nightly_workflow: false
+        is_manual: true
+        requires:
+          - package_community
+          - package_jsonapi
+          - package_sequencer_driver_api
+          - assembly_ledger_api_test_tool
+          - package_kms_driver
+          - build_systematic_testing_inventory
+          - build_scaladoc
+    - build_and_publish_docker:
+        context:
+          - da-images
+        is_nightly_workflow: false
+        is_manual: true
+        requires:
+          - package_community
+        post-steps:
+          - store_artifacts:
+              path: docker/canton/tests/ping/ci-artifacts
+              destination: ci-artifacts
+
+
+# Running tests with a different Java version than is used for the compilation happens nightly.
+# This workflow exists to try out / debug the behaviour manually and in a much smaller scope than the nightly build.
+manual_override_java_version_for_tests:
+  when:
+    equal: [ override-java-versions-for-tests, << pipeline.parameters.manual_job >> ]
+  parameters:
+    manual_override_java_version_for_tests:
+      type: string
+      default: "17"
+  jobs:
+    - compile:
+        name: manual_compile_with_project_default_java
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        filters:
+          branches:
+            ignore:
+              - main
+              - /release-line-.*/
+    - test:
+        name: manual_test_with_java_<< parameters.manual_override_java_version_for_tests >>
+        override_java_version_for_tests: << parameters.manual_override_java_version_for_tests >>
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+        requires:
+          - manual_compile_with_project_default_java
+        filters:
+          branches:
+            ignore:
+              - main
+              - /release-line-.*/
+
+manual_unstable_test:
+  when:
+    and:
+      - equal: [ unstable-test, << pipeline.parameters.manual_job >> ]
+      - not:
+          equal: [ main, << pipeline.git.branch >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - package_community:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        is_nightly_workflow: false
+        is_manual: true
+        requires:
+          - compile
+    - unstable_test:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+        requires:
+          - package_community
+        filters:
+          branches:
+            ignore:
+              - main
+
+manual_release_test:
+  when:
+    and:
+      - equal: [ release-test, << pipeline.parameters.manual_job >> ]
+      - not:
+          equal: [ main, << pipeline.git.branch >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - package_kms_driver:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        is_nightly_workflow: false
+        is_manual: true
+        requires:
+          - compile
+    - package_community:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        is_nightly_workflow: false
+        is_manual: true
+        requires:
+          - compile
+    - release_test:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - aws_kms_testing
+          - gcp_kms_testing
+          - da-images
+        is_nightly_workflow: false
+        is_manual: true
+        requires:
+          - package_community
+          - package_kms_driver
+        filters:
+          branches:
+            ignore:
+              - main
+
+manual_performance_runner_test:
+  when:
+    and:
+      - equal: [ performance-runner-test, << pipeline.parameters.manual_job >> ]
+      - not:
+          equal: [ main, << pipeline.git.branch >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - package_community:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        is_nightly_workflow: false
+        is_manual: true
+        requires:
+          - compile
+    - test_performance_runner:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - package_community
+
+manual_blackduck_test:
+  when:
+    equal: [ blackduck-test, << pipeline.parameters.manual_job >> ]
+
+  jobs:
+    - blackduck:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - blackduck
+
+
+manual_release_sandbox:
+  when:
+    equal: [ release-sandbox, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - package_sandbox:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        is_nightly_workflow: false
+        is_manual: true
+
+manual_nightly_integration_tests:
+  when:
+    equal: [ nightly-integration-tests, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+    - nightly_integration_test:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+        requires:
+          - compile
+
+manual_nightly_test_sequencer:
+  when:
+    equal: [ nightly-test-sequencer, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - print_tests:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - nightly_integration_test_sequencer_only:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - print_tests
+
+manual_nightly_test_bftordering:
+  when:
+    equal: [ nightly-test-bftordering, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - print_tests:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - nightly_integration_test_bftordering_only:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - print_tests
+
+manual_docs_replication_test:
+  when:
+    equal: [ docs-replication-test, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - package_community:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        is_nightly_workflow: false
+        is_manual: true
+        requires:
+          - compile
+    - build_scaladoc:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - compile # optional dependency, introduced to save credits in case of compile errors
+    - replicate_docs:
+        env: test
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - package_community
+          - build_scaladoc
+
+manual_docs_replication_prod:
+  when:
+    equal: [ docs-replication-prod, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - package_community:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        is_nightly_workflow: false
+        is_manual: true
+        requires:
+          - compile
+    - build_scaladoc:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - compile # optional dependency, introduced to save credits in case of compile errors
+    - replicate_docs:
+        env: prod
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - package_community
+          - build_scaladoc
+
+
+manual_build_canton_local_cache:
+  when:
+    equal: [ build-canton-local-cache, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - build_canton_local_cache:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+
+manual_test_ping:
+  when:
+    equal: [ test-ping, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - package_community:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        is_nightly_workflow: false
+        is_manual: true
+        requires:
+          - compile
+    - test_ping_windows:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+        filters:
+          tags:
+            only: /^v.*/
+        requires:
+          - package_community
+    - test_ping_arm:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+        filters:
+          tags:
+            only: /^v.*/
+        requires:
+          - package_community
+
+manual_external_party_tests:
+  when:
+    equal: [ external-parties-tests, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - external_parties_test:
+        name: manual_test_external_parties
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+        filters:
+          tags:
+            only: /^v.*/
+        requires:
+          - compile
+
+manual_postgres_conformance_tests:
+  when:
+    equal: [ postgres-conformance-tests, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - postgres_conformance_test: &postgres_conformance
+        name: postgres_conformance_test_14
+        postgres_version: 14
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+        requires:
+          - compile
+    - postgres_conformance_test:
+        <<: *postgres_conformance
+        name: postgres_conformance_test_15
+        postgres_version: 15
+    - postgres_conformance_test:
+        <<: *postgres_conformance
+        name: postgres_conformance_test_16
+        postgres_version: 16

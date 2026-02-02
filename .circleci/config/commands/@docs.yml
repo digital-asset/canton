@@ -1,0 +1,9 @@
+unpack_scaladoc_in_workspace:
+  steps:
+    - attach_workspace: # Get the Canton scaladoc documentation from the workspace
+        at: /tmp/workspace
+    - run:
+        name: Unpack Canton scaladoc documentation
+        command: |
+          mkdir -p /tmp/workspace/docs/scaladoc
+          tar xzf "/tmp/workspace/scaladoc.tar.gz" -C "/tmp/workspace/docs/scaladoc"

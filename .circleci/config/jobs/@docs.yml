@@ -1,0 +1,93 @@
+build_scaladoc:
+  executor: canton-large-docker
+  steps:
+    - checkout_and_restore_caches
+    - execute_sbt_command:
+        cmd: unidoc
+        # `use_maven_mirror` is set to false, because the sbt sphinx plugin is trying
+        # to authorize in the mirror from Python but can't. and it fail the build
+        use_maven_mirror: false
+    - run:
+        # the ScalaDoc site contains thousands of files, so throw in an archive to make easier to push around
+        name: Create ScalaDoc archive
+        command: |
+          tar -czf target/scaladoc.tar.gz -C target/scala-2.13/unidoc .
+    - store_artifacts:
+        name: Store ScalaDoc as artifact
+        path: target/scaladoc.tar.gz
+        destination: scaladoc.tar.gz
+    - persist_to_workspace: # Persist ScalaDoc to workspace so that subsequent jobs can publish it
+        root: target
+        paths:
+          - "scaladoc.tar.gz"
+    - cleanup_test_job
+
+build_docs:
+  executor: canton-xlarge-docker-with-postgres
+  steps:
+    - checkout_and_restore_caches
+    - restore_packaged_release:
+        location: community/app/target/release
+    - unpack_scaladoc_in_workspace
+    - execute_sbt_command:
+        cmd: "docs-open/test"
+    - execute_sbt_command:
+        cmd: packageDocsWithExistingRelease
+        # `use_maven_mirror` is set to false, because the sbt sphinx plugin is trying
+        # to authorize in the mirror from Python but can't. and it fail the build
+        use_maven_mirror: false
+    - cleanup_test_job
+
+replicate_docs:
+  executor: canton-xlarge-docker-with-postgres
+  parameters:
+    env:
+      type: string
+  steps:
+    - checkout_and_restore_caches
+    - restore_packaged_release:
+        location: community/app/target/release
+    - unpack_scaladoc_in_workspace
+    - execute_sbt_command:
+        cmd: packageDocsWithExistingRelease
+        # `use_maven_mirror` is set to false, because the sbt sphinx plugin is trying
+        # to authorize in the mirror from Python but can't. and it fail the build
+        use_maven_mirror: false
+    - cleanup_test_job
+    - authorize_git
+    - run:
+        name: Replicate the docs
+        command: |
+          nix-shell -I nixpkgs=./nix/nixpkgs.nix --run "./scripts/docs/replication.sh --env <<parameters.env>> --githubAuth canton-machine:$GITHUB_TOKEN"
+    - cleanup_build_job
+
+build_systematic_testing_inventory:
+  executor: canton-large-docker
+  steps:
+    # TODO(i29845): Fix and re-enable
+    - run:
+        command: circleci-agent step halt
+    - checkout_and_restore_caches
+    - execute_sbt_command:
+        cmd: "dumpTestClassPath \"community-app/Test/runMain com.digitalasset.canton.SystematicTestingGenerator\""
+        fail_on_error_in_output: false
+    - store_artifacts:
+        name: Store security tests inventory (json)
+        path: security-tests.json
+    - store_artifacts:
+        name: Store security tests inventory (csv)
+        path: security-tests.csv
+    - store_artifacts:
+        name: Store reliability tests inventory (json)
+        path: reliability-tests.json
+    - store_artifacts:
+        name: Store reliability tests inventory (csv)
+        path: reliability-tests.csv
+    - persist_to_workspace:
+        root: .
+        paths:
+          - "security-tests.json"
+          - "security-tests.csv"
+          - "reliability-tests.json"
+          - "reliability-tests.csv"
+    - cleanup_build_job

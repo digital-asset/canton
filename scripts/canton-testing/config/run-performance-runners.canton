@@ -1,0 +1,12 @@
+// Copyright (c) 2024 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+Seq(
+    "community/performance-driver/target/scala-2.13/performance-driver_2.13",
+    "performance/target/scala-2.13/performance_2.13").foreach { jar =>
+    interp.load.cp(os.Path(s"${jar}-${com.digitalasset.canton.buildinfo.BuildInfo.version}.jar", base=os.pwd))
+}
+
+@
+
+com.digitalasset.canton.performance.scenarios.CantonTesting.runPerformanceRunners()

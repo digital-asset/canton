@@ -1,0 +1,15 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="Canton Performance Runner with Postgres" type="Application" factoryName="Application">
+    <envs>
+      <env name="POSTGRES_USER" value="test-user" />
+      <env name="POSTGRES_PASSWORD" value="test-password" />
+      <env name="POSTGRES_HOST" value="localhost" />
+    </envs>
+    <option name="MAIN_CLASS_NAME" value="com.digitalasset.canton.CantonEnterpriseApp" />
+    <module name="enterprise-app" />
+    <option name="PROGRAM_PARAMETERS" value="--log-truncate --log-file-appender=flat -v --no-tty -c performance/src/main/console/topology/distributed-reference.conf -c performance/src/main/console/postgres/persistence.conf --bootstrap performance/src/main/console/performance.canton " />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

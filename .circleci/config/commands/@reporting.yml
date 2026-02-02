@@ -1,0 +1,72 @@
+post_to_datadog:
+  parameters:
+    label:
+      type: string
+    data:
+      # List of metric names and values, e.g., "metric1=0.01 metric2=2.32"
+      # Metric name and value are separated by "=".
+      # List elements are separated by spaces.
+      # Values must be floating point numbers.
+      type: string
+    metric_type:
+      type: enum
+      enum: ["gauge", "count", "rate"]
+      default: gauge
+    when:
+      type: enum
+      enum: ["always", "on_success", "on_fail"]
+      default: always
+    use_commit_time:
+      type: boolean
+      default: true
+  steps:
+    - run:
+        name: << parameters.label >>
+        when: << parameters.when >>
+        command: |
+          if [[ -n "<< parameters.data >>" ]]; then
+            <<# parameters.use_commit_time >>
+            TIMESTAMP=$(git log -1 --pretty=%ct)
+            <</ parameters.use_commit_time >>
+            <<^ parameters.use_commit_time >>
+            TIMESTAMP=$(date +%s)
+            <</ parameters.use_commit_time >>
+            echo "Timestamp: $TIMESTAMP"
+            HASH=$(git log -1 --pretty=%h)
+            echo "Commit hash (abbreviated): $HASH"
+            TAGS=$(jo -a "branch:$CIRCLE_BRANCH" "hash:$HASH" "workflow:$CIRCLE_WORKFLOW_ID" "job:$CIRCLE_JOB" "build:$CIRCLE_BUILD_NUM" "url:$CIRCLE_BUILD_URL" "container:$CIRCLE_NODE_INDEX")
+
+            ./scripts/ci/post-to-datadog.sh "$TIMESTAMP" << parameters.metric_type >> "$TAGS" << parameters.data >>
+          fi
+
+post_log_metrics:
+  steps:
+    - run:
+        name: Compute log statistics (if log exists)
+        command: |
+          statistics=$(./scripts/ci/compute-log-metrics.sh ./log/canton_test.log)
+          echo "$statistics"
+          echo "$statistics" >> $BASH_ENV
+    - post_to_datadog:
+        label: "Post canton.log metrics to Datadog"
+        when: on_success
+        data: "canton.log.size=$LOG_SIZE canton.log.line_count=$LOG_LINE_COUNT canton.log.avg_line_length=$AVG_LOG_LINE_LENGTH canton.log.max_line_length=$MAX_LOG_LINE_LENGTH canton.log.avg_entry_size=$AVG_LOG_ENTRY_SIZE canton.log.max_entry_size=$MAX_LOG_ENTRY_SIZE"
+
+post_benchmark_metrics:
+  steps:
+    - run:
+        name: Read benchmark metrics from test report
+        when: always
+        command: |
+          if cat benchmark_*.dat > benchmark.dat 2> /dev/null ; then
+            benchmark="$(cat benchmark.dat | tr '\n' ' ')"
+          else
+            benchmark=""
+          fi
+
+          echo "BENCHMARK=$benchmark"
+          echo "export BENCHMARK=\"$benchmark\"" >> $BASH_ENV
+    - post_to_datadog:
+        label: "Post benchmark metrics to Datadog"
+        data: "$BENCHMARK"
+        when: always

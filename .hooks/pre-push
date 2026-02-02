@@ -1,0 +1,19 @@
+#!/bin/sh
+# -*- sh -*-
+
+# Prevent push to remote main or master branch
+# see https://gist.github.com/aaronhoffman/ffbfd36928f9336be2436cffe39feaec#file-pre-push
+
+while read local_ref local_sha remote_ref remote_sha
+do
+	if [ "$remote_ref" = "refs/heads/main" ]; then
+		echo "pre-push hook: Can not push to remote main branch."
+		exit 1
+	fi
+
+	if [ "$remote_ref" = "refs/heads/master" ]; then
+ 		echo "pre-push hook: Can not push to remote master branch."
+ 		exit 1
+ 	fi
+done
+

@@ -1,0 +1,86 @@
+slack_red_main_with_volunteer:
+  parameters:
+    webhook_url:
+      type: string
+      default: $SLACK_WEBHOOK_TEAM_CANTON_INTERNAL
+
+  steps:
+    - run:
+        name: Choose volunteer
+        when: always
+        command: |
+          members=(
+            # Architecture
+            "U9AGNADBJ" # Andreas L.
+            "U056R7C1H1A" # Cristina
+            # Security
+            "U03RK2ZNZFH" # Christian
+            "U03A208N537" # João Sá
+            "U990L3H0R" # Matthias
+            "U0A0VU32CS0" # Simran
+            "U276HDDB6" # Soren
+            "U03NCGBFCDP" # Thibault
+            # Protocol
+            "U5LC1FB6D" # Gerolf
+            "U046D8XGD7H" # Kirill
+            # "U03FH83LRNH" # Meriam
+            "UF766DLN4" # Oliver
+            "U020XUXADCP" # Raf
+            "UDDVDCKD0" # Raphael
+            "U04DC4NAK1S" # Yves
+            # LAPI
+            "U03HVEFHGLU" # Andreas T.
+            "U57BTEKR9" # Marcin
+            "U01A2K1NWAX" # Marton
+            "UPED4TSGN" # Simon
+            "U01B2BD2CP4" # Tudor
+            "U029VGVV25Q" # Jarek
+            # BFT
+            "U04S25SG9D5" # Daniel
+            "U04TG4XMJ" # Danilo
+            "USE2D5GB1" # Fabio
+            "U04P9CS4F6Z" # Tom
+          )
+
+          # Takes the first bytes of the sha and convert to and int
+          WORKFLOW_IDENTIFIER=$(echo "$CIRCLE_WORKFLOW_ID" | sha256sum | cut -c1-2 | awk '{ print "0x" toupper($0) }')
+
+          SELECTED_VOLUNTEER=${members[ $WORKFLOW_IDENTIFIER % ${#members[@]} ]}
+
+          echo "$SELECTED_VOLUNTEER"
+          echo "export SELECTED_VOLUNTEER=\"${SELECTED_VOLUNTEER}\"" >> $BASH_ENV
+    - slack/status:
+        mentions: "${SELECTED_VOLUNTEER}"
+        fail_only: true
+        only_for_branches: main,release-line-3.4,release-line-3.5,release-line-3.6,release-line-3.7,release-line-3.8,release-line-3.9,release-line-3.10
+        failure_message: 'A \`$CIRCLE_JOB\` job has failed on branch \`$CIRCLE_BRANCH\`! Can you have a look? (Note: Person on support takes care of failed nightly jobs.)'
+        webhook: << parameters.webhook_url >>
+
+# This command will send a notification to team-sdk-updates
+# about docs or daml update in canton
+send_slack_notification_for_sdk_updates:
+  description: Send a message to slack
+  parameters:
+    message:
+      type: string
+      default: ""
+    from_version:
+      type: string
+      default: ""
+    to_version:
+      type: string
+      default: ""
+    pr_url:
+      type: string
+      default: ""
+  steps:
+    - run:
+        name: send message to slack
+        command: |
+          message="<< parameters.message >>"
+          from="<< parameters.from_version >>"
+          to="<< parameters.to_version >>"
+          pr_url="<< parameters.pr_url >>"
+
+          . scripts/ci/common.sh
+          tell_slack "$message" "$SLACK_WEBHOOK_TEAM_SDK_UPDATES" "$pr_url" "$from" "$to"

@@ -1,0 +1,25 @@
+when: << pipeline.parameters.test_to_run_many_times >>
+
+jobs:
+  - compile:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+  - test_flake_fix_many_times:
+      parallel_runners: 10
+      test_repetitions_per_runner: 5
+      test_to_run_many_times: << pipeline.parameters.test_to_run_many_times >>
+      protocol_version: << pipeline.parameters.pv_for_run_many_times >>
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - aws_kms_testing
+        - gcp_kms_testing
+        - da-images
+      requires:
+        - compile

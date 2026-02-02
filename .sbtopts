@@ -1,0 +1,38 @@
+# Important! Don't specify the heap size here, as everybody wants to have a different size locally.
+# Instead, specify the heap size with "export SBT_OPTS=-Xmx..." in your .bash_profile
+
+# Note that the sbt shell has a memory leak - it consumes all the metaspace
+# Usually, 500M-1G should be sufficient, but to work around the memory leak, let's go for 2G.
+-J-XX:MaxMetaspaceSize=2G
+
+# Have big stacks to allow for deep recursions.
+-J-Xss2M
+
+# Increase code cache size, as the default is occasionally insufficient for running the coverage instrumented integration tests
+-J-XX:ReservedCodeCacheSize=600M
+
+# Crash on OutOfMemoryErrors and produce a heap dump
+-J-XX:+CrashOnOutOfMemoryError
+
+# Actually this produces an usable heap dump on OOM
+-J-XX:+HeapDumpOnOutOfMemoryError
+
+# Print out native memory usage statistics on exit
+# Comment out if needed - slows down execution
+#-J-XX:+UnlockDiagnosticVMOptions
+#-J-XX:NativeMemoryTracking=summary
+#-J-XX:+PrintNMTStatistics
+
+# Print all flags to see which settings have effectively been picked up
+#-J-XX:+PrintFlagsFinal
+
+# Print gc events
+#-J-verbose:gc
+#-J-Xlog:gc*
+
+# Output error files to log dir
+-J-XX:ErrorFile=log/hs_err_pid%p.log
+
+# Submodule sbt projects use symlinks to work around Intellij visual compiler bug, hence we need this to silence
+# "Warning: Tried to extract the base path for relative glob..." warnings.
+-Dsbt.io.implicit.relative.glob.conversion=allow

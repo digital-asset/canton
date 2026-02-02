@@ -1,107 +1,126 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import sbt.{Def, *}
+import sbt.*
 import sbt.Keys.*
+import sbt.nio.{Keys => _, *}
+import sbt.util.HashFileInfo
+import xsbti.compile.CompileAnalysis
 
 import java.io.File
+import scala.jdk.CollectionConverters.*
 
 object DamlLfPlugin extends AutoPlugin {
 
   object autoImport {
-    val lfSource = settingKey[File]("Directory containing lf files")
-    val lfDarOut = settingKey[File]("Directory where DAR will be outputted")
-
+    val lfSourceDirectory = settingKey[File]("Directory containing lf files")
     val lfVersions = settingKey[Seq[String]]("List of LF versions to generate DARs for")
-
-    val lfGenerateDar = taskKey[Seq[File]]("Generate all DAR files")
+    val lfDarOutput = settingKey[File]("Directory where DAR will be outputted")
   }
 
   import autoImport.*
 
-  def prepareLfFiles(
-      version: String,
-      sourceDir: File,
-      workDir: File,
-      darOutputDir: File,
-  ): (File, String) = {
-    // Create the version-specific working directory
-    val versionWorkDir = workDir / version
-    IO.createDirectory(versionWorkDir)
-
-    // Identify files to copy
-    val allFiles = (sourceDir ** "*.lf").get
-
-    val filesToCopy = allFiles.flatMap { file =>
-      val name = file.getName
-
-      if (name.endsWith(s"_${version}_.lf")) {
-        // Case 1: Hardcoded version -> Copy as is (preserving existing name)
-        Some(file -> (versionWorkDir / name))
-      } else if (name.endsWith("_all_.lf")) {
-        // Case 2: "All" version -> Rename to test_2.1.lf
-        val newName = name.replace("_all_.lf", s"_$version.lf")
-        Some(file -> (versionWorkDir / newName))
-      } else {
-        None
-      }
-    }
-
-    IO.copy(filesToCopy, overwrite = true, preserveLastModified = true, preserveExecutable = true)
-
-    val mangledVersion = version.replace(".", "_")
-    val metadataContent = s"metadata ( 'testing-dar-$mangledVersion' : '0.0.0' )"
-    val generatedMetadataName = s"metadata_$version.lf"
-    val metadataFile = versionWorkDir / generatedMetadataName
-    IO.write(metadataFile, metadataContent)
-
-    // Sort files alphabetically to ensure deterministic order
-    val sortedDestinations = filesToCopy.map(_._2).sortBy(_.getName)
-
-    // Prepend the metadata file (it must be first)
-    val allDestinations = metadataFile +: sortedDestinations
-
-    val filePaths = allDestinations.map(_.getAbsolutePath).mkString(" ")
-    val darOutputFile = darOutputDir / s"test-$version.dar"
-
-    (darOutputFile, s" $filePaths --output ${darOutputFile.getAbsolutePath} --target $version")
-  }
-
   private val unscopedProjectSettings = Seq(
-    lfSource := sourceDirectory.value / "lf",
-    lfDarOut := {
-      target.value / "lf-dars" / configuration.value.name
-    },
+    lfSourceDirectory := sourceDirectory.value / "lf",
     lfVersions := Seq("2.1", "2.2", "2.dev"),
-
-    // TODO(#30253): cache this task
-    lfGenerateDar := Def.taskDyn {
-      val lfVersionsVals = lfVersions.value
-      val lfSourceVal = lfSource.value
-      val lfTempDirVal = IO.createTemporaryDirectory
-      val lfDarOutDirVal = lfDarOut.value
-      val log = streams.value.log
-
-      if (!lfDarOutDirVal.exists()) {
-        log.info(s"Creating output directory: ${lfDarOutDirVal.getAbsolutePath}")
-        IO.createDirectory(lfDarOutDirVal)
-      }
-
-      import sbt.Scoped.richTaskSeq
-      lfVersionsVals.map { lfVersion =>
-        val (darLoc, strArg) = prepareLfFiles(lfVersion, lfSourceVal, lfTempDirVal, lfDarOutDirVal)
-        /* NOTE: this prints the entire strArg to log, which causes /scripts/ci/check-logs.sh to report it as error
-        since this will mention the string "Exception". Currently, we whitelist any string that contains "running
-        com.digitalasset.daml.lf.archive.testing.DamlLfEncoder" (see /project/errors-in-log-to-ignore.txt) */
-        (BuildCommon.DamlProjects.`daml-lf-encoder` / Compile / run)
-          .toTask(strArg)
-          .map(_ => darLoc)
-      }.join
-    }.value,
-    resourceGenerators += lfGenerateDar.taskValue,
+    lfDarOutput := { target.value / "lf-dars" / configuration.value.name },
+    resourceGenerators += generateDar.taskValue,
   )
 
   override def projectSettings: Seq[Def.Setting[_]] =
     inConfig(Test)(unscopedProjectSettings)
 
+  private def generateDar = Def.taskDyn {
+    import BuildCommon.DamlProjects.`daml-lf-encoder`
+
+    val lfVers = lfVersions.value
+    val lfSourceDir = lfSourceDirectory.value
+    val lfDarOut = lfDarOutput.value
+    val streams = Keys.streams.value
+    val encoderClasspath = (`daml-lf-encoder` / Compile / fullClasspath).value
+
+    if (!lfDarOut.exists()) IO.createDirectory(lfDarOut)
+
+    // compute hashes of the encoder classpath, to trigger regeneration if anything changes
+    val encoderHashes = encoderClasspath.view
+      .flatMap(_.metadata.get(Keys.analysis))
+      .flatMap(_.readStamps.getAllProductStamps.asScala.values)
+      .flatMap(_.getHash.asScala)
+      .toSet
+
+    val (outputDarFiles, argsOpts) = lfVers
+      .map(prepareLfEncoderArgs(streams, _, lfSourceDir, lfDarOut, encoderHashes))
+      .unzip
+
+    import sbt.Scoped.richTaskSeq
+    argsOpts.flatten
+      .map { args =>
+        /* NOTE: this prints the entire strArg to log, which causes /scripts/ci/check-logs.sh to report it as error
+      since this will mention the string "Exception". Currently, we whitelist any string that contains "running
+      com.digitalasset.daml.lf.archive.testing.DamlLfEncoder" (see /project/errors-in-log-to-ignore.txt) */
+        (`daml-lf-encoder` / Compile / run).toTask(args)
+      }
+      .join
+      .map(_ => outputDarFiles)
+  }
+
+  // returns None if the output DAR is already cached
+  private def prepareLfEncoderArgs(
+      streams: TaskStreams,
+      lfVersion: String,
+      sourceDir: File,
+      darOutputDir: File,
+      // hashes for the encoder classpath
+      encoderHashes: Set[String],
+  ): (File, Option[String]) = {
+    import CacheImplicits._
+    val sourceFiles = (sourceDir ** "*.lf").get
+      .filter(f => f.getName.endsWith(s"_${lfVersion}_.lf") || f.getName.endsWith("_all_.lf"))
+    val darOutputFile = darOutputDir / s"test-$lfVersion.dar"
+
+    val cacheInput = (
+      lfVersion,
+      sourceFiles.map(FileInfo.hash(_)).toSet,
+      darOutputFile.toString,
+      encoderHashes,
+    )
+    val cacheStore = streams.cacheStoreFactory.make(s"lfGenerateDar-$lfVersion")
+    implicit val inputFormat = tuple4Format(
+      StringJsonFormat, // lfVersions
+      immSetFormat(HashFileInfo.format), // sourceFiles
+      StringJsonFormat, // darOutputFile
+      immSetFormat(StringJsonFormat), // encoderHashes
+    )
+    val trackedArgs = Tracked.inputChanged[
+      (String, Set[HashFileInfo], String, Set[String]),
+      Option[String],
+    ](cacheStore) {
+      case (true, _) =>
+        val tempDir = IO.createTemporaryDirectory
+        val filesToCopy = sourceFiles.map { file =>
+          val name = file.getName
+          val newName =
+            if (name.endsWith("_all_.lf")) name.replace("_all_.lf", s"_$lfVersion.lf") else name
+          (file, tempDir / newName)
+        }
+        IO.copy(filesToCopy)
+
+        val mangledVersion = lfVersion.replace(".", "_")
+        val metadataContent = s"metadata ( 'testing-dar-$mangledVersion' : '0.0.0' )"
+        val metadataFile = tempDir / s"metadata_$lfVersion.lf"
+        IO.write(metadataFile, metadataContent)
+
+        // Sort files alphabetically to ensure deterministic order
+        // and prepend the metadata file (it must be first)
+        val allSourceFiles = metadataFile +: filesToCopy.map(_._2).sortBy(_.getName)
+
+        val filePaths = allSourceFiles.map(_.getAbsolutePath).mkString(" ")
+        Some(
+          s" $filePaths --suppress-testing-purpose-warning --output ${darOutputFile.getAbsolutePath} --target $lfVersion"
+        )
+      case (false, _) => None // no need to generate the dar file as it is already cached
+    }
+
+    (darOutputFile, trackedArgs(cacheInput))
+  }
 }

@@ -1,0 +1,357 @@
+
+.. _canton_console_reference:
+
+.. note::
+    split by participant and synchronizer, put shared commands in extend/participant section,
+    and add a section for the synchronizer
+
+Console Commands
+================
+
+Top-level Commands
+------------------------
+
+The following commands are available for convenience:
+
+<console-topic-marker: Top-level Commands>
+
+
+<console-topic-marker: Bootstrap>
+
+
+<console-topic-marker: Console>
+
+
+<console-topic-marker: Generic Node References>
+
+
+<console-topic-marker: Ledger Api Utils>
+
+
+<console-topic-marker: Logging>
+
+
+<console-topic-marker: Node References>
+
+
+<console-topic-marker: Utilities>
+
+
+Participant Commands
+--------------------
+
+<console-topic-marker: Participant>
+
+Bilateral Commitments
+~~~~~~~~~~~~~~~~~~~~~
+
+<console-topic-marker: Participant, Commitments>
+
+DAR Management
+~~~~~~~~~~~~~~
+
+<console-topic-marker: Participant, DAR Management>
+
+<console-topic-marker: Participant, DAR Management, Vetting>
+
+Database
+~~~~~~~~
+
+<console-topic-marker: Participant, Database>
+
+.. _participant_synchronizer_connectivity:
+
+Synchronizer connectivity
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+<console-topic-marker: Participant, Synchronizers>
+
+Health
+~~~~~~
+
+<console-topic-marker: Participant, Health>
+
+Key administration
+~~~~~~~~~~~~~~~~~~
+
+<console-topic-marker: Participant, Keys>
+
+<console-topic-marker: Participant, Keys, Public keys>
+
+<console-topic-marker: Participant, Keys, Secret keys>
+
+Ledger API Access
+~~~~~~~~~~~~~~~~~
+The following commands on a participant reference provide access to the participant's Ledger API services.
+
+<console-topic-marker: Participant, Ledger Api>
+
+<console-topic-marker: Participant, Ledger Api, Ledger Api (Java bindings)>
+
+
+Command Completion Service
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+<console-topic-marker: Participant, Ledger Api, Command Completions>
+
+Command Submission Service
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+<console-topic-marker: Participant, Ledger Api, Command Submission>
+
+<console-topic-marker: Participant, Ledger Api, Ledger Api (Java bindings), Command Submission (Java bindings)>
+
+<console-topic-marker: Participant, Ledger Api, Interactive Submission>
+
+<console-topic-marker: Participant, Ledger Api, Ledger Api (Java bindings), Interactive Submission>
+
+Event Service
+^^^^^^^^^^^^^
+
+<console-topic-marker: Participant, Ledger Api, EventQuery>
+
+<console-topic-marker: Participant, Ledger Api, Ledger Api (Java bindings), EventQuery>
+
+Identity Provider Configuration Management
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+<console-topic-marker: Participant, Ledger Api, Ledger Api Identity Provider Configuration Management>
+
+User Management Service
+^^^^^^^^^^^^^^^^^^^^^^^
+
+<console-topic-marker: Participant, Ledger Api, Ledger Api Users>
+
+<console-topic-marker: Participant, Ledger Api, Ledger Api Users, Ledger Api User Rights>
+
+Package Service
+^^^^^^^^^^^^^^^
+
+<console-topic-marker: Participant, Ledger Api, Package Management>
+
+Party Management Service
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+<console-topic-marker: Participant, Ledger Api, Party Management>
+
+State Service
+^^^^^^^^^^^^^
+
+<console-topic-marker: Participant, Ledger Api, State>
+
+<console-topic-marker: Participant, Ledger Api, Ledger Api (Java bindings), State (Java bindings)>
+
+<console-topic-marker: Participant, Ledger Api, State, Active Contracts>
+
+<console-topic-marker: Participant, Ledger Api, Ledger Api (Java bindings), State (Java bindings), Active Contracts (Java bindings)>
+
+Time Service
+^^^^^^^^^^^^^
+
+<console-topic-marker: Participant, Ledger Api, Time>
+
+Updates Service
+^^^^^^^^^^^^^^^
+
+<console-topic-marker: Participant, Ledger Api, Updates>
+
+<console-topic-marker: Participant, Ledger Api, Ledger Api (Java bindings), Updates (Java bindings)>
+
+.. _ledger-pruning-commands:
+
+Ledger Pruning
+~~~~~~~~~~~~~~
+
+<console-topic-marker: Participant, Ledger Pruning>
+
+Metrics
+~~~~~~~
+
+<console-topic-marker: Participant, Metrics>
+
+.. _participants-references:
+
+Multiple Participants
+---------------------
+
+This section lists the commands available for a sequence of participants. They can be used on the
+participant references ``participants.all``, ``.local`` or ``.remote`` as:
+
+.. code-block:: scala
+
+    participants.all.dars.upload("my.dar")
+
+<console-topic-marker: Multiple Participants>
+
+<console-topic-marker: Multiple Participants, DAR Management>
+
+<console-topic-marker: Multiple Participants, Synchronizers>
+
+Packages
+~~~~~~~~
+
+<console-topic-marker: Participant, Package Management>
+
+
+Party Management
+~~~~~~~~~~~~~~~~
+The party management commands allow to conveniently enable and disable parties on the local node. Under the hood,
+they use the more complicated but feature-richer identity management commands.
+
+<console-topic-marker: Participant, Parties>
+
+.. _participant-repair:
+
+Participant Repair
+~~~~~~~~~~~~~~~~~~
+
+<console-topic-marker: Participant, Repair>
+
+Replication
+~~~~~~~~~~~
+
+<console-topic-marker: Participant, Replication>
+
+Resource Management
+~~~~~~~~~~~~~~~~~~~
+
+<console-topic-marker: Participant, Resource Management>
+
+Testing
+~~~~~~~
+
+<console-topic-marker: Participant, Testing>
+
+.. _identity-commands:
+
+Topology Administration
+~~~~~~~~~~~~~~~~~~~~~~~
+
+The topology commands can be used to manipulate and inspect the topology state.
+In all commands, we use fingerprints to refer to public keys. Internally, these
+fingerprints are resolved using the key registry (which is a map of Fingerprint -> PublicKey).
+Any key can be added to the key registry using the ``keys.public.load`` commands.
+
+<console-topic-marker: Participant, Topology>
+
+<console-topic-marker: Participant, Topology, All Transactions>
+
+<console-topic-marker: Participant, Topology, Decentralized namespaces>
+
+<console-topic-marker: Participant, Topology, Synchronizer Parameters State>
+
+<console-topic-marker: Participant, Topology, Synchronizer trust certificates>
+
+<console-topic-marker: Participant, Topology, Mediator Synchronizer State>
+
+<console-topic-marker: Participant, Topology, Namespace delegations>
+
+<console-topic-marker: Participant, Topology, Owner to key mappings>
+
+<console-topic-marker: Participant, Topology, Participant Synchronizer Permissions>
+
+<console-topic-marker: Participant, Topology, Participant Synchronizer States>
+
+<console-topic-marker: Participant, Topology, Party hosting limits>
+
+<console-topic-marker: Participant, Topology, Party to key mappings>
+
+<console-topic-marker: Participant, Topology, Party to participant mappings>
+
+<console-topic-marker: Participant, Topology, Sequencer Synchronizer State>
+
+<console-topic-marker: Participant, Topology, Synchronisation Helpers>
+
+<console-topic-marker: Participant, Topology, Topology stores>
+
+<console-topic-marker: Participant, Topology, Vetted Packages>
+
+Traffic
+~~~~~~~
+
+<console-topic-marker: Participant, Traffic>
+
+
+Sequencer Administration Commands
+---------------------------------
+
+<console-topic-marker: Sequencer>
+
+Database
+~~~~~~~~
+
+<console-topic-marker: Sequencer, Database>
+
+Synchronizer parameters
+~~~~~~~~~~~~~~~~~~~~~~~
+
+<console-topic-marker: Sequencer, Synchronizer parameters>
+
+Health
+~~~~~~
+
+<console-topic-marker: Sequencer, Health>
+
+Key Administration
+~~~~~~~~~~~~~~~~~~
+
+<console-topic-marker: Sequencer, Keys>
+
+<console-topic-marker: Sequencer, Keys, Public keys>
+
+<console-topic-marker: Sequencer, Keys, Secret keys>
+
+Metrics
+~~~~~~~
+
+<console-topic-marker: Sequencer, Metrics>
+
+Traffic
+~~~~~~~
+
+<console-topic-marker: Sequencer, Traffic>
+
+
+Mediator Administration Commands
+--------------------------------
+
+<console-topic-marker: Mediator>
+
+Database
+~~~~~~~~
+
+<console-topic-marker: Mediator, Database>
+
+Health
+~~~~~~
+
+<console-topic-marker: Mediator, Health>
+
+Key Administration
+~~~~~~~~~~~~~~~~~~
+
+<console-topic-marker: Mediator, Keys>
+
+<console-topic-marker: Mediator, Keys, Public keys>
+
+<console-topic-marker: Mediator, Keys, Secret keys>
+
+Metrics
+~~~~~~~
+
+<console-topic-marker: Mediator, Metrics>
+
+Sequencer Connection
+~~~~~~~~~~~~~~~~~~~~
+
+<console-topic-marker: Mediator, Sequencer Connection>
+
+Testing
+~~~~~~~
+
+<console-topic-marker: Mediator, Testing>
+
+Traffic
+~~~~~~~
+
+<console-topic-marker: Mediator, Traffic>

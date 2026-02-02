@@ -1,0 +1,74 @@
+#
+# Copyright 2020 Digital Asset (Switzerland) GmbH and/or its affiliates
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+version: '3'
+
+services:
+  postgres_primary:
+    image: "postgres:17"
+    container_name: "${PROJECT_NAME}_primary"
+    ports:
+      - "$POSTGRES_PRIMARY_DIRECT_PORT:5432"
+    environment:
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_DB
+      - PERFORMANCE_PROFILE
+      - ENABLE_WAL_ARCHIVING
+      - WAL_ARCHIVE_TIMEOUT
+      - ENABLE_STREAMING_REPLICATION
+      - ENABLE_REPLICATION_SLOT
+      - SYNCHRONOUS_COMMIT
+      - PGDATA=/data/pgdata
+    volumes:
+      - "$PRIMARY_PGDATA_MOUNTPOINT:/data/pgdata:delegated"
+      - "$PRIMARY_LOGS_MOUNTPOINT:/data/logs:delegated"
+      - "$WALARCHIVE_MOUNTPOINT:/data/wal-archive"
+      - "$BASEBACKUP_MOUNTPOINT:/data/basebackup"
+      - "$SCRIPTDIR/docker-entrypoint-initdb.d/setup-primary.sh:/docker-entrypoint-initdb.d/setup-primary.sh:cached"
+      - "$SCRIPTDIR:/scripts:cached"
+    depends_on:
+      - toxiproxy
+
+  postgres_secondary:
+    image: "postgres:17"
+    container_name: "${PROJECT_NAME}_secondary"
+    ports:
+      - "$POSTGRES_SECONDARY_DIRECT_PORT:5432"
+    environment:
+      - POSTGRES_USER
+      - POSTGRES_PASSWORD
+      - POSTGRES_DB
+      - PERFORMANCE_PROFILE
+      - ENABLE_STREAMING_REPLICATION
+      - POSTGRES_PRIMARY_REPLICATION_PORT
+      - ENABLE_REPLICATION_SLOT
+      - PGDATA=/data/pgdata
+    volumes:
+      - "$SECONDARY_PGDATA_MOUNTPOINT:/data/pgdata:delegated"
+      - "$SECONDARY_LOGS_MOUNTPOINT:/data/logs:delegated"
+      - "$WALARCHIVE_MOUNTPOINT:/data/wal-archive"
+      - "$BASEBACKUP_MOUNTPOINT:/data/basebackup"
+      - "$SCRIPTDIR/docker-entrypoint-initdb.d/setup-secondary.sh:/docker-entrypoint-initdb.d/setup-secondary.sh:cached"
+      - "$SCRIPTDIR:/scripts:cached"
+    depends_on:
+      - toxiproxy
+
+  toxiproxy:
+    image: "shopify/toxiproxy:2.1.4"
+    container_name: "${PROJECT_NAME}_toxiproxy"
+    ports:
+      - "$POSTGRES_PRIMARY_APPLICATION_PORT:$POSTGRES_PRIMARY_APPLICATION_PORT"
+      - "$POSTGRES_PRIMARY_REPLICATION_PORT:$POSTGRES_PRIMARY_REPLICATION_PORT"
+      - "$TOXIPROXY_PORT:8474"
+    environment:
+      - POSTGRES_PRIMARY_APPLICATION_PORT
+      - POSTGRES_PRIMARY_REPLICATION_PORT
+      - APPLICATION_TO_DB_REQUEST_LATENCY
+      - APPLICATION_TO_DB_RESPONSE_LATENCY
+      - SECONDARY_TO_PRIMARY_REQUEST_LATENCY
+      - SECONDARY_TO_PRIMARY_RESPONSE_LATENCY
+    volumes:
+      - "$SCRIPTDIR:/scripts:cached"

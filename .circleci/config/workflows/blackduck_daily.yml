@@ -1,0 +1,16 @@
+triggers:
+  - schedule:
+      cron: "0 4,16 * * *" # Run "daily" Blackduck twice a day (only on main, see below)
+      filters:
+        branches:
+          only:
+            - main
+jobs:
+  - blackduck:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - blackduck

@@ -1,0 +1,57 @@
+install_datadog_machine:
+  steps:
+    - run: sudo apt-get update
+    - run: sudo apt-get -y install jo python3-pip
+    - run: pip3 install datadog
+
+run_sbt_command_on_machine:
+  parameters:
+    # additional arguments to pass to the docker run command
+    # must all be on a single line
+    additional_docker_args:
+      type: string
+      default: ""
+    timeout:
+      type: string
+      default: "25m"
+    # the sbt command to run to start the tests
+    command:
+      type: string
+    sbt_options:
+      type: string
+      default: ""
+    no_output_timeout:
+      type: string
+      default: "10m"
+  steps:
+    - run:
+        name: Run tests
+        no_output_timeout: << parameters.no_output_timeout >>
+        command: |
+          # run sbt in our usual build container but from a host that can launch multiple docker containers.
+          # supply the docker socket to allow test containers within our scalatests to do this.
+          # the .ci/update-build-image.sh script should update this label when the image is updated.
+          # Note: need to use `--security-opt seccomp=unconfined` because nix uses the clone3 call which
+          #       is not properly supported by docker < 20.10.10, see https://github.com/moby/moby/pull/42681
+          #       alternatively, update the machine image to ubuntu-2004:202111-02
+          timeout --kill-after=30s << parameters.timeout >> docker run --rm --volume "$PWD:$CIRCLE_WORKING_DIRECTORY" --workdir "$CIRCLE_WORKING_DIRECTORY" \
+            --volume "$HOME/.docker/config.json:/root/.docker/config.json" \
+            --volume "/var/run/docker.sock:/var/run/docker.sock" \
+            --volume "$HOME/.ivy2/cache:/root/.ivy2/cache" \
+            --volume "$HOME/.m2:/root/.m2" \
+            --volume "$HOME/.cache/coursier/v1:/root/.cache/coursier/v1" \
+            --volume "$HOME/.sbt:/root/.sbt" \
+            --env "CI=$CI" \
+            --env "MACHINE=1" \
+            --env "SBT_OPTS=-Xmx$EXECUTOR_JVM_HEAP_SIZE" \
+            --env MAX_CONCURRENT_SBT_TEST_TASKS \
+            --env ARTIFACTORY_USER \
+            --env ARTIFACTORY_PASSWORD \
+            --env CANTON_PROTOCOL_VERSION \
+            --security-opt seccomp=unconfined \
+            << parameters.additional_docker_args >> \
+            digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa \
+            nix-shell \
+            -I nixpkgs=./nix/nixpkgs.nix \
+            --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
+

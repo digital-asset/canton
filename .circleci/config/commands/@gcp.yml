@@ -1,0 +1,28 @@
+docker_log_into_gcr:
+  description: Log Docker into GCR
+  steps:
+    - run:
+        name: Log Docker into GCR
+        command: |
+          echo "Authenticating to Google Cloud..."
+          gcloud beta auth activate-service-account --key-file=<(echo "$GAC_JSON") >/dev/null
+          echo "Logging Docker in to $OCI_REGISTRY..."
+          ACCESS_TOKEN="$(gcloud auth print-access-token)"
+          printf '%s\n' "$ACCESS_TOKEN" | \
+            docker login -u oauth2accesstoken --password-stdin "https://$OCI_REGISTRY" >/dev/null
+setup_gcp_kms:
+  steps:
+    - run:
+        name: "Setup GCP credentials for KMS"
+        command: |
+          key=$(mktemp)
+          echo "${GCLOUD_SERVICE_KEY}" > $key
+          echo "export GOOGLE_APPLICATION_CREDENTIALS=$key" >> "$BASH_ENV"
+setup_gcp_gar:
+  steps:
+    - run:
+        name: "Setup GCP credentials for GAR"
+        command: |
+          key=$(mktemp)
+          echo "${GAC_JSON}" > $key
+          echo "export GOOGLE_CREDENTIALS_FILE=$key" >> "$BASH_ENV"

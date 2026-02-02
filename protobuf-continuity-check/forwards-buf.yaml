@@ -1,0 +1,26 @@
+# Rules used when comparing a snapshot of the current files against a snapshot of the released Protobuf files
+# 'Forwards' as this is the direction Protobuf breaking change checks are normally done
+# Please see 'Protobuf continuity' in CONTRIBUTING.MD and following Google Doc for more
+# context: https://docs.google.com/document/d/1jG-dcCP5j2HvUVxGUMUe6XyHK9C7oRcW99qVO_gg13o/edit?usp=sharin
+version: v1
+breaking:
+  use:
+    - FILE_SAME_PACKAGE
+    - ENUM_VALUE_NO_DELETE
+    - FIELD_NO_DELETE
+    - RPC_NO_DELETE
+    - ONEOF_NO_DELETE
+    - FIELD_SAME_JAVA_UTF8_VALIDATION
+    - FIELD_SAME_TYPE
+    - FIELD_SAME_CARDINALITY
+    - FIELD_SAME_ONEOF
+    - RESERVED_ENUM_NO_DELETE
+    - RESERVED_MESSAGE_NO_DELETE
+    - RPC_SAME_REQUEST_TYPE
+    - RPC_SAME_RESPONSE_TYPE
+    - RPC_SAME_CLIENT_STREAMING
+    - RPC_SAME_SERVER_STREAMING
+    - RPC_SAME_IDEMPOTENCY_LEVEL
+  ignore_only:
+    FIELD_NO_DELETE:
+      - com/daml/ledger/api/v2/command_service.proto

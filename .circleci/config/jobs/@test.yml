@@ -1,0 +1,512 @@
+test:
+  parameters:
+    protocol_version:
+      type: string
+      default: ""
+    override_java_version_for_tests:
+      type: string
+      default: ""
+    test_scala3_migration:
+      type: boolean
+      default: false
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 12
+  steps:
+    - set_canton_protocol_version:
+        protocol_version: << parameters.protocol_version >>
+    - run_ordinary_tests:
+        exclude_unstable_tests: true
+        override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+        test_scala3_migration: << parameters.test_scala3_migration >>
+        collect_postgres_query_stats: true
+
+external_parties_test:
+  parameters:
+    protocol_version:
+      type: string
+      default: ""
+    override_java_version_for_tests:
+      type: string
+      default: ""
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 12
+  steps:
+    - set_canton_protocol_version:
+        protocol_version: << parameters.protocol_version >>
+    - set_external_parties
+    - run_ordinary_tests:
+        exclude_unstable_tests: true
+        override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+
+variations_test:
+  parameters:
+    protocol_version:
+      type: string
+      default: ""
+    override_java_version_for_tests:
+      type: string
+      default: ""
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 4
+  steps:
+    - set_canton_protocol_version:
+        protocol_version: << parameters.protocol_version >>
+    - run_variations_tests:
+        exclude_unstable_tests: true
+        override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+
+postgres_conformance_test:
+  parameters:
+    postgres_version:
+      type: integer
+  executor: canton-xlarge-docker-with-postgres<<parameters.postgres_version>>
+  parallelism: 12
+  steps:
+    - run_db_tests:
+        db_name: Postgres
+        exclude_unstable_tests: true
+
+stability_test:
+  parameters:
+    succeed_on_error:
+      type: boolean
+      default: true
+    protocol_version:
+      type: string
+      default: ""
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 72 # The number of test runs. Increase to make the test more "aggressive".
+  # Should be a multiple of the num_test_buckets parameter below so that each test bucket gets executed the same number of times.
+  steps:
+    - set_canton_protocol_version:
+        protocol_version: << parameters.protocol_version >>
+    - run_ordinary_tests:
+        exclude_unstable_tests: true
+        num_test_buckets: "12"
+        succeed_on_error: << parameters.succeed_on_error >>
+
+sequential_test:
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 16
+  steps:
+    - run_ordinary_tests:
+        exclude_unstable_tests: true
+        execution_context_size: "1" # Make execution contexts single threaded to discover deadlocks
+        num_parallel_tasks: "4" # Limit to 4 to avoid overloading with too many interleaving test suites
+
+stability_sequential_test:
+  parameters:
+    succeed_on_error:
+      type: boolean
+      default: true
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 72 # The number of test runs. Increase to make the test more "aggressive".
+  # Should be a multiple of the num_test_buckets parameter below so that each test bucket gets executed the same number of times.
+  steps:
+    - run_ordinary_tests:
+        exclude_unstable_tests: false
+        num_test_buckets: "12"
+        execution_context_size: "1" # Make execution contexts single threaded to discover deadlocks
+        succeed_on_error: << parameters.succeed_on_error >>
+
+crash_recovery_test:
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 6
+  steps:
+    - run_crash_recovery_tests:
+        exclude_unstable_tests: true
+        filter: &crash_recovery_filter
+          "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.crashrecovery"
+
+# Replace the test jobs in `canton_build_required` workflow with this one
+# for faster feedback on the CircleCI test job itself
+fast_smoke_test:
+  executor: canton-large-docker-with-postgres
+  parallelism: 1
+  steps:
+    - run_crash_recovery_tests:
+        exclude_unstable_tests: true
+        filter:
+          "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.SimplestPingReferenceIntegrationTestPostgres"
+
+stability_crash_recovery_test:
+  parameters:
+    succeed_on_error:
+      type: boolean
+      default: true
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 64 # The number of test runs. Increase to make the test more "aggressive".
+  # Should be a multiple of the num_test_buckets parameter below so that each test bucket gets executed the same number of times.
+  steps:
+    - run_crash_recovery_tests:
+        exclude_unstable_tests: false
+        filter: *crash_recovery_filter
+        num_test_buckets: "4"
+        succeed_on_error: << parameters.succeed_on_error >>
+
+stability_crash_recovery_test_alerting:
+  executor: canton-small-docker
+  steps:
+    - check_number_of_successes:
+        min_successes: 32 # Low threshold, since test failures are reported to datadog anyway
+        job_name: "stability_crash_recovery_test"
+    - slack_red_main_with_volunteer
+
+benchmark:
+  executor: canton-xlarge-plus-docker-with-postgres
+  parallelism: 2
+  steps:
+    - run:
+        name: Set Canton log level to WARN
+        command: |
+          echo "export LOG_LEVEL_CANTON=WARN" >> $BASH_ENV
+    - run_tests:
+        command: &default_test_command
+          "dumpClassPath \"$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\" checkErrors"
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.benchmarks"
+        num_parallel_tasks: "1"
+    - post_benchmark_metrics
+    - slack_red_main_with_volunteer
+
+release_test:
+  executor: canton-xlarge-docker-with-postgres
+  parameters:
+    is_nightly_workflow:
+      type: boolean
+    is_manual:
+      type: boolean
+  steps:
+    - checkout_and_restore_caches
+    - obtain_release_suffix:
+        is_nightly_workflow: << parameters.is_nightly_workflow >>
+        is_manual: << parameters.is_manual >>
+    # Get the AWS KMS driver from workspace
+    - restore_packaged_release:
+        location: "community/aws-kms-driver/target/scala-2.13"
+    # Get the Mock KMS driver from workspace
+    - restore_packaged_release:
+        location: "community/mock-kms-driver/target/scala-2.13"
+    - restore_packaged_release:
+        location: "community/app/target/release"
+    - run_tests:
+        command: "\"testOnly com.digitalasset.canton.integration.tests.release* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\" checkErrors"
+        filter: ""
+        num_test_buckets: ""
+        num_parallel_tasks: "1"
+        do_checkout: false # we already did the checkout before restoring the KMS driver
+
+protocol_continuity_test_all:
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 12 # Should be the same as num_test_buckets below, as we want to run every test once.
+  steps:
+    - run_tests:
+        command: *default_test_command
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.continuity |
+                 grep -v -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.continuity\\.latest"
+        num_test_buckets: "12"
+        num_parallel_tasks: "1"
+        timeout: "40m"
+
+protocol_continuity_test_latest:
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 2 # Should be the same as num_test_buckets below, as we want to run every test once.
+  steps:
+    - run_tests:
+        command: *default_test_command
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.continuity.\\latest"
+        num_test_buckets: "2"
+        num_parallel_tasks: "1"
+        timeout: "30m"
+
+nightly_integration_test:
+  executor: canton-xlarge-docker-with-postgres-toxiproxy
+  steps:
+    - run_tests:
+        command: *default_test_command
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly"
+        num_test_buckets: "2"
+        num_parallel_tasks: "1"
+
+nightly_integration_test_sequencer_only:
+  executor: canton-xlarge-docker-with-postgres-toxiproxy
+  steps:
+    - run_tests:
+        command: *default_test_command
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.sequencer"
+        num_test_buckets: "2"
+        num_parallel_tasks: "1"
+
+nightly_integration_test_bftordering_only:
+  executor: canton-xlarge-docker
+  steps:
+    - run_tests:
+        command: *default_test_command
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.bftordering"
+        num_test_buckets: "2"
+        num_parallel_tasks: "1"
+
+toxiproxy_test_fast:
+  executor: canton-xlarge-docker-with-postgres-toxiproxy
+  steps:
+    - run_tests:
+        command: "dumpClassPath \"$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\""
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.toxiproxy\\.fast"
+        num_parallel_tasks: "1"
+        fail_on_error_in_output: false
+
+toxiproxy_test_slow:
+  executor: canton-xlarge-docker-with-postgres-toxiproxy
+  steps:
+    - run_tests:
+        command: "dumpClassPath \"$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\""
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.toxiproxy |
+                 grep -v -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.toxiproxy\\.fast"
+        timeout: "90m"
+        num_parallel_tasks: "1"
+        fail_on_error_in_output: false
+        succeed_on_error: true
+
+unstable_test:
+  executor: canton-xlarge-docker-with-postgres-toxiproxy
+  steps:
+    - run_tests:
+        command: "dumpClassPath \
+          \"testOnly com.digitalasset.canton.integration.tests.* \
+              -- -n UnstableTest -n com.digitalasset.canton.annotations.UnstableTest\""
+        filter: "cat" # cat acts as identity filter
+        num_test_buckets: ""
+        release_path: community/app/target/release
+        num_parallel_tasks: "1"
+        succeed_on_error: true
+        fail_on_error_in_output: false # We won't fail anyway, but this also skips checking of stdout
+
+unstable_test_slow:
+  executor: canton-xlarge-docker-with-postgres-toxiproxy
+  steps:
+    - run_tests:
+        command: "dumpClassPath \"testOnly * -- -n UnstableTest -n com.digitalasset.canton.annotations.UnstableTest\""
+        filter: "cat" # cat acts as identity filter
+        num_test_buckets: ""
+        num_parallel_tasks: "1"
+        succeed_on_error: true
+        fail_on_error_in_output: false # We won't fail anyway, but this also skips checking of stdout
+
+unit_test_coverage:
+  executor: canton-xlarge-docker-with-postgres-toxiproxy
+  steps:
+    - run_test_coverage_test:
+        # Unfortunately, this will skip collectCoverage, if unitTest fails.
+        command: "coverage unitTest collectCoverage"
+        num_test_buckets: ""
+
+full_test_coverage:
+  executor: canton-2xlarge-plus-docker-with-postgres
+  steps:
+    - run_test_coverage_test:
+        command: "dumpClassPath coverage \"$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\""
+
+test_performance_runner:
+  executor: canton-xlarge-docker-with-postgres
+  steps:
+    - checkout_and_restore_caches
+    - attach_workspace:
+        at: /tmp/workspace
+    - run:
+        name: Run performance runner
+        command: |
+          export TERM=dumb
+          tar -zxvf /tmp/workspace/canton-performance.tar.gz
+          cd canton/performance/postgres
+          # setup database
+          echo "creating role '${POSTGRES_USER}' '${POSTGRES_PORT}' '${POSTGRES_HOST}'"
+          echo "CREATE ROLE \"test-user\" LOGIN PASSWORD 'test-password'; ALTER USER \"test-user\" createdb;" | \
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h localhost postgres $POSTGRES_USER
+          echo "creating databases"
+          ../../config/utils/postgres/db.sh setup
+          cd ../../../
+          # start
+          export NUM_CYCLES=210
+          export EXIT_WHEN_DONE=1
+          export flags="--no-tty -v"
+          .ci/nix-exec ./canton/performance/run.sh -s -n two-synchronizers-topology
+    - run:
+        name: Copy log files so we preserve them as build artefacts
+        when: always
+        command: |
+          mkdir -p log
+          for ff in `ls canton/log/*`
+          do
+            mv -v $ff log
+          done
+    - cleanup_test_job
+    - slack_red_main_with_volunteer
+
+generate_data_continuity_dumps:
+  executor: canton-xlarge-docker-with-postgres
+  # Increase the level of parallelism as the number of supported protocol versions increases.
+  parallelism: 1
+  parameters:
+    is_manual:
+      type: boolean
+    is_nightly_workflow:
+      type: boolean
+  steps:
+    - checkout:
+        method: blobless
+    - obtain_release_suffix:
+        is_manual: << parameters.is_manual >>
+        is_nightly_workflow: << parameters.is_nightly_workflow >>
+    - run:
+        name: Abort if data continuity have been already generated or for nightly non-weekly releases
+        command: |
+          # Abort for nightly non-weekly (Tuesday) releases
+          IS_NIGHTLY="<< parameters.is_nightly_workflow >>"
+          if [[ "$IS_NIGHTLY" == "true" &&  $(date +"%u") -ne 2 ]]; then
+            # https://support.circleci.com/hc/en-us/articles/360015562253-Conditionally-end-a-running-job-gracefully
+            echo "On nightly jobs, data continuity dumps are only generated for weekly releases. Aborting..."
+            circleci-agent step halt
+          fi
+
+          # Abort if the data continuity dumps have already been generated or for nightly non-weekly releases
+          version="$RELEASE_SUFFIX"
+          echo "Checking whether dumps already exist for $version"
+
+          # List all the data continuity dumps in the S3 bucket into 'dumps_listing' file
+          aws s3api list-objects --bucket canton-public-releases --prefix data-continuity-dumps/ --query 'CommonPrefixes[].{Prefix: Prefix}' --output text --no-sign-request --delimiter "/0" > dumps_listing
+
+          if grep -q "/$version/" dumps_listing; then
+            # https://support.circleci.com/hc/en-us/articles/360015562253-Conditionally-end-a-running-job-gracefully
+            echo "Data continuity dumps have already been generated for this version. Aborting..."
+            circleci-agent step halt
+          fi
+          rm -f dumps_listing
+
+          # Prevent failures in further steps in case nothing is generated
+          mkdir -p /tmp/canton/data-continuity-dumps
+    - run_tests:
+        command: *default_test_command
+        filter: "grep -E \
+                    -e com\\.digitalasset\\.canton\\.integration\\.tests\\.manual\\.Create.\\*DataContinuityDumpsPostgres_all.\\* \
+                    -e com\\.digitalasset\\.canton\\.integration\\.tests\\.manual\\.ConfigContinuityWriterTest \
+                    -e com\\.digitalasset\\.canton\\.integration\\.tests\\.upgrade\\.MajorUpgrade.\\*Writer.\\* \
+                    -e com\\.digitalasset\\.canton\\.integration\\.tests\\.manual\\.ConsoleCommandBackwardsCompatibilityWriterTest \
+                    -e com\\.digitalasset\\.canton\\.integration\\.tests\\.manual\\.ProtobufCompatibilityWriterTest \
+                "
+        num_test_buckets: "1"
+        timeout: 1h
+    - run:
+        name: Upload data continuity dumps to S3
+        command: |
+          .ci/nix-exec ./scripts/ci/publish-data-continuity-dumps-to-s3.sh
+    - cleanup_test_job
+    - slack_red_main_with_volunteer
+
+test_data_continuity_dumps:
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 8
+  steps:
+    - run:
+        # This step is required to have correct permissions on a folder that is populated later during the test run
+        name: Set the Docker bind mount permissions
+        command: |
+          mkdir -p /tmp/canton/data-continuity-dumps
+          chmod 777 /tmp/canton/data-continuity-dumps
+    - run_tests:
+        command: *default_test_command
+        filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.manual\\.\\*DataContinuityTestPostgres"
+        num_test_buckets: "8"
+        num_parallel_tasks: "1" # ports are hardcoded
+        timeout: 1h
+        report_to_datadog: false # because of Slack notification and no need for failing test statistics
+    - slack_red_main_with_volunteer
+
+print_tests:
+  executor: canton-large-docker
+  steps:
+    - checkout_and_restore_caches
+    - attach_workspace:
+        at: /tmp/workspace
+    - run:
+        command: cat /dev/null > /tmp/workspace/test-full-class-names.log
+        name: Truncate the file collecting the test names to prevent duplicate test runs
+    - execute_sbt_command:
+        cmd: "printTests"
+        retry_fetch: "50"
+        fail_on_error_in_output: false
+    - persist_to_workspace:
+        root: .
+        paths:
+          - "test-full-class-names.log"
+
+test_flake_fix_many_times:
+  parameters:
+    parallel_runners:
+      type: integer
+    test_repetitions_per_runner:
+      type: integer
+    test_to_run_many_times:
+      type: string
+    protocol_version:
+      type: string
+      default: ""
+  executor: canton-xlarge-docker-with-postgres-toxiproxy
+  parallelism: << parameters.parallel_runners >>
+  steps:
+    - set_canton_protocol_version:
+        protocol_version: << parameters.protocol_version >>
+    - test_flake_fix_many_times_command:
+        exclude_unstable_tests: false
+        succeed_on_error: false
+        test_repetitions_per_runner: << parameters.test_repetitions_per_runner >>
+        test_to_run_many_times: << parameters.test_to_run_many_times >>
+
+topology_chaos_test:
+  parameters:
+    run_all_ops_test:
+      type: boolean
+      default: false
+    num_test_buckets:
+      type: string
+      default: "$CIRCLE_NODE_TOTAL"
+    test_repetitions:
+      type: integer
+    protocol_version:
+      type: string
+      default: ""
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: << parameters.test_repetitions >>
+  steps:
+    - set_canton_protocol_version:
+        protocol_version: << parameters.protocol_version >>
+    - topology_chaos_test_command:
+        run_all_ops_test: << parameters.run_all_ops_test >>
+        num_test_buckets: << parameters.num_test_buckets >>
+
+test_ping_windows:
+  executor: medium-windows-machine
+  steps:
+    - attach_workspace:
+        at: workspace
+    - run:
+        name: Run ping
+        command: |
+          workspace/community/app/target/release/canton/bin/canton.bat run -v -c workspace/community/app/target/release/canton/examples/01-simple-topology/simple-topology.conf workspace/community/app/target/release/canton/examples/01-simple-topology/simple-ping.canton
+    - store_artifacts:
+        destination: log
+        name: Store test logs as artifacts (if any)
+        path: log
+
+test_ping_arm:
+  executor: medium-arm-machine
+  steps:
+    - attach_workspace:
+        at: workspace
+    - run:
+        name: Run ping
+        command: |
+          workspace/community/app/target/release/canton/bin/canton run -v -c workspace/community/app/target/release/canton/examples/01-simple-topology/simple-topology.conf workspace/community/app/target/release/canton/examples/01-simple-topology/simple-ping.canton
+    - store_artifacts:
+        destination: log
+        name: Store test logs as artifacts (if any)
+        path: log
+    - slack_red_main_with_volunteer

@@ -1,0 +1,18 @@
+
+version: v1
+
+breaking:
+  use:
+    - FILE
+    # Generated source code breaking changes on a per-file basis, that is changes that would
+    # break the generated stubs where definitions cannot be moved across files.
+    # This category also verifies wire and JSON compatibility.
+    #
+    # We rely in particular on fields not getting renamed in `Update___` calls that use a `FieldMask`
+    # to select the fields to update, see https://github.com/protocolbuffers/protobuf/blob/main/src/google/protobuf/field_mask.proto
+  ignore:
+    # exclude the non ledger api protos
+    - com/digitalasset/canton/
+  ignore_only:
+    FIELD_NO_DELETE:
+      - com/daml/ledger/api/v2/command_service.proto

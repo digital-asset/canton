@@ -1,0 +1,46 @@
+CODEOWNERS @DACH-NY/canton-change-owners
+
+# SOC2 compliance: if you add any new paths below that require canton-change-owners approval
+# also add the path to .circleci/check-pr-compliance-labels.sh that will automatically label PRs
+# requiring compliance reviews
+
+# merges to main will enforce that only release owners can merge new release notes.
+# the release tasks will check release notes exist on main for their release.
+# this will imply that a release owner authorized the release.
+/release-notes/   @DACH-NY/canton-release-owners
+
+# all changes to ci and release process need change owner approval
+/.circleci/       @DACH-NY/canton-change-owners
+/.ci/             @DACH-NY/canton-change-owners
+/scripts/ci/      @DACH-NY/canton-change-owners
+/release/         @DACH-NY/canton-change-owners
+
+# changes to the nix setup
+/nix/             @DACH-NY/canton-change-owners
+/shell.nix        @DACH-NY/canton-change-owners
+
+# changes to the build system and dependencies
+/project/          @DACH-NY/canton-change-owners
+/project/project/DamlVersions.scala # No group because we don't want to protect that file
+/build.sbt         @DACH-NY/canton-change-owners
+/daml_dependencies.json @DACH-NY/canton-change-owners
+
+# Triggering a recompile on a branch does not require change owners approval
+/.circleci/branches_to_be_fully_recompiled_in_ci.txt
+
+# changes to the sequencer driver API should be reviewed by the change owners
+# because the canton-drivers repository depends on it
+/community/sequencer-driver @DACH-NY/canton-change-owners @DACH-NY/canton-bft-sequencer
+
+# External KMS Driver API in Scala
+/community/kms-driver-api @DACH-NY/canton-change-owners @soren-da
+
+# Changes to SHA256 checksum files must be flagged
+*.sha256          @DACH-NY/canton-change-owners
+*.pg_dump         @DACH-NY/canton-change-owners
+
+# Breaking changes to the protobuf definitions must be flagged
+/.proto_snapshot_image.bin.gz    @DACH-NY/canton-change-owners
+
+# Inform CN on docker image changes but does not require their approval (canton-change-owners can approve)
+/docker/canton/images @DACH-NY/canton-network-upstream-notifications @DACH-NY/canton-change-owners

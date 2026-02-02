@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+FILES_CHANGED=$(git diff --diff-filter=d --staged --name-only HEAD | awk '/scala/ || /sbt/')
+
+if [ -z "$FILES_CHANGED" ]; then
+  # No qualified files changed
+  exit 0
+fi
+
+# ensure scalafmt is installed
+command -v scalafmt >/dev/null 2>&1 || { echo >&2 "ERROR: scalafmt was not found"; exit 1; }
+
+# format them
+echo "Running scalafmt: [$FILES_CHANGED]"
+scalafmt $FILES_CHANGED
+git add $FILES_CHANGED

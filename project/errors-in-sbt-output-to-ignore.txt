@@ -1,0 +1,109 @@
+# Patterns must be extended regular expressions, i.e., they will be passed to `grep -E -e`.
+# Lines containing only blanks or lines starting with '#' are ignored.
+
+# Unfortunately, very hard to fix. See i398
+There may be incompatibilities among your library dependencies; run 'evicted' to see detailed eviction warnings\.
+
+# We update regularly, but there is no need to always use the most recent version.
+WARNING: Using an outdated version of the DAML SDK in project\.
+
+# sbt test summary line
+Passed: Total .*, Failed 0, Errors 0, Passed .*
+
+# sbt slow poke notification
+Test still running after
+
+# JUnit test case reporting
+Test .*Test.*#.*() started
+
+# Ignored tests
+!!! IGNORED !!!
+
+# Triggered, if project A depends on project B, project A uses ProtoBuf and B does not.
+# Probably a bug.
+# Not worth addressing.
+src/main/protobuf: warning: directory does not exist\.
+
+# Library name
+com\.google\.errorprone:error_prone_annotations:
+.*error_prone.*
+.*base-errors.*
+
+# Directory and file names
+project/base/errors
+protobuf/lib/google/rpc/error_details\.proto
+
+# Name of the sbt command
+^"testOnly .*"
+^checkErrors$
+
+# Sometimes SBT can't auth at Azure and re-try it
+Unable to find credentials for \[https:\/\/pkgsprodcus1\.pkgs\.visualstudio\.com\/ @ pkgs\.dev\.azure\.com\]\.
+
+# SBT 1.3.3 gives a warning on possible resource leaks, ignore
+\[warn\].*This is a likely resource leak
+
+# protocGenerate occasionally emits this warning, which is harmless as protoc will retry.
+protoc-jar: caught exception, retrying: java\.io\.IOException: Cannot run program "/tmp/protocjar.*\.exe": error=26, Text file busy
+
+# Command line arguments
+-XX:\+CrashOnOutOfMemoryError
+-XX:\+HeapDumpOnOutOfMemoryError
+-XX:ErrorFile=log/hs_err_pid%p.log
+
+# Coursier noise
+.*no longer exists at.*
+
+# TODO(i12608) remove following 4 lines once reasons for incapacitated RewritingAppender are fixed
+grpc\.internal\.SerializingExecutor
+java\.lang.*Exception: test exception
+grpc\.internal\.ManagedChannelImpl
+
+# sbt 1.4 onwards logs GC warnings
+.*warn.* of the last .* were spent in garbage collection\.
+# Java 21+
+.*warn.* In the last .*, .* were spent in GC\.
+
+#JMH report
+Benchmark .* Mode .* Cnt .* Score .* Error .* Units
+
+#ocsp tests
+X509v3.* Key Usage: critical
+
+# Remove once example monitoring setup is part of user guide
+example_monitoring_setup.rst: WARNING: document isn't included in any toctree
+
+# This is always logged when F flag is set on ScalaTest logger (despite K flag)
+at sbt\.internal\.util\.ErrorHandling\$\.wideConvert\(ErrorHandling\.scala:24\)
+TestCanceledException
+
+# AuthServiceJWTCodecSpec
+com.digitalasset.canton.ledger.api.auth.AuthServiceJWTCodec.*
+
+# HaCoordinatorSpec
+com.digitalasset.canton.platform.indexer.ha.HaCoordinator.*CannotAcquireLockException: Cannot acquire lock TestLockId.* in lock-mode Exclusive
+
+# Janino lib is verbose in tests and can contain the string "error"
+DEBUG org\.codehaus\.janino.*
+
+# Check whether we can remove that exception (https://github.com/grpc/grpc-java/issues/10635)
+java.lang.ClassNotFoundException: org.bouncycastle.jce.provider.BouncyCastleProvider
+
+# Since Java 21, if the log level is set to DEBUG or TRACE then spawning a process is logged with more details and a stacktrace
+# See https://www.oracle.com/java/technologies/javase/21all-relnotes.html#JDK-8303392
+java\.lang\.RuntimeException: ProcessBuilder.start\(\) debug
+
+# Ignore [info] lines about protobuf files being copied, even if they contain "error" in the filename
+^\[info\] '.*/target/protobuf_external/google/rpc/error_details\.proto' -> '.*'$
+
+# Ignore expected errors about missing implementations from HttpMetricsInterseptorSpec
+.*HttpMetricsInterseptorSpec.* Error during processing of request: 'an implementation is missing'.*\nscala.NotImplementedError.*(\n\s+at.*)*
+
+# Ignore expected warnings from jol while running VM for size calculations in CostModelV0Test
+\# WARNING: Unable to get Instrumentation. Dynamic Attach failed. You may add this JAR as -javaagent manually, or supply -Djdk.attach.allowAttachSelf
+\# WARNING: Unable to attach Serviceability Agent. HotSpot Serviceability Agent attach skipped due to jol.skipHotspotSAAttach flag.
+
+# TODO(#30481) Ignore warnings from ZIO CodecCommonSpec test until it's rewritten to ScalaTest
+.*Warning.*A check / checkAll / checkN generator did not produce any test cases, which may result in the test hanging.*
+
+# Make sure to have a trailing newline

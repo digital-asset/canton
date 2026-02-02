@@ -1,0 +1,7 @@
+#! /usr/bin/env nix-shell
+#! nix-shell -I nixpkgs=./nix/nixpkgs.nix -i bash ../shell.nix
+
+# Remove from the path everything that is not in /nix/store/ to emulate --pure behavior
+export PATH=$(echo $PATH | sed "s/\:/\n/g" | grep "/nix/store/" | sed -z "s/\n/:/g")
+
+exec "$@"

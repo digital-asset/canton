@@ -1,0 +1,105 @@
+services:
+  db:
+    image: canton-postgres:15-init
+    build:
+      context: ./db
+      dockerfile: Dockerfile
+    container_name: canton-postgres
+    environment:
+      POSTGRES_USER: cnadmin
+      POSTGRES_PASSWORD: cnadmin
+      POSTGRES_DB: cantonnet
+    ports:
+      - "5432:5432"
+
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U cnadmin -d cantonnet" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  participant:
+    build:
+      context: ./participant
+      args:
+        BASE_IMAGE: "${OCI_PATH:-}canton-participant:${RELEASE_SUFFIX:-local}"
+    environment:
+      AUTH_TARGET_AUDIENCE: "participant"
+      AUTH_JWKS_URL: "http://auth:8080/.well-known/jwks.json"
+      CANTON_PARTICIPANT_POSTGRES_SERVER: "canton-postgres"
+      CANTON_PARTICIPANT_POSTGRES_PORT: "5432"
+    container_name: participant
+
+    ports:
+      - "5001:5001"
+      - "5002:5002"
+      - "7575:7575"
+      - "10013:10013"
+    healthcheck:
+      test: ["CMD", "grpcurl", "-plaintext", "localhost:5061", "grpc.health.v1.Health/Check"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10m
+    depends_on:
+      - db
+
+  sequencer:
+    build:
+      context: ./sequencer
+      args:
+        BASE_IMAGE: "${OCI_PATH:-}canton-sequencer:${RELEASE_SUFFIX:-local}"
+    environment:
+      CANTON_DOMAIN_POSTGRES_SERVER: "canton-postgres"
+      CANTON_DOMAIN_POSTGRES_PORT: "5432"
+    container_name: sequencer
+    depends_on:
+      - db
+
+  mediator:
+    build:
+      context: ./mediator
+      args:
+        BASE_IMAGE: "${OCI_PATH:-}canton-mediator:${RELEASE_SUFFIX:-local}"
+    environment:
+      CANTON_DOMAIN_POSTGRES_SERVER: "canton-postgres"
+      CANTON_DOMAIN_POSTGRES_PORT: "5432"
+    container_name: mediator
+    depends_on:
+      - db
+
+
+  synchronizer:
+    build:
+      context: ./synchronizer
+      # synchronizer base must match variant+tag too:
+      args:
+        BASE_IMAGE: "${OCI_PATH:-}canton-base:${RELEASE_SUFFIX:-local}"
+    image: "canton-synchronizer-under-test:${RELEASE_SUFFIX:-local}"
+    ports:
+      - "7001:7001"   # Sequencer public API (optional locally)
+      - "7002:7002"   # Sequencer admin API (optional locally)
+      - "7202:7202"   # Mediator admin API (optional locally)
+    depends_on:
+      - sequencer
+      - mediator
+
+  test:
+    build:
+      context: ./test
+    image: "canton-smoketest:${RELEASE_SUFFIX:-local}"
+    depends_on:
+      - participant
+      - sequencer
+      - synchronizer
+      - mediator
+    environment:
+      # These are consumed by test/run.sh
+      RELEASE_SUFFIX: "${RELEASE_SUFFIX:-local}"
+      HOSTPORT: "participant:5002"
+      SERVICE: "com.digitalasset.canton.admin.participant.v30.SynchronizerConnectivityService"
+      METHOD: "ListConnectedSynchronizers"
+      TIMEOUT: "180"
+      INTERVAL: "3"
+    # Don’t restart: we want a clean exit code and single log stream
+    restart: "no"

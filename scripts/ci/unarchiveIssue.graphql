@@ -1,0 +1,8 @@
+mutation($project:ID!, $issue:ID!) {
+	unarchiveProjectV2Item(
+		input: {
+			itemId: $issue,
+			projectId: $project
+		}
+	) { item { id } }
+}

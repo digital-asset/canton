@@ -11,23 +11,30 @@ _Write summary of release_
 
 ### Topic A
 Template for a bigger topic
-
 #### Background
 #### Specific Changes
-
 #### Impact and Migration
+
+
+### Protocol Changes
+
+#### Protocol Version 35
+
+
+#### Dev Protocol
+
+
+### Minor Improvements
 
 - JSON Ledger API OpenAPI/AsyncAPI spec corrections
   - Fields not marked as required in the Ledger API `.proto` specification are now also optional in the OpenAPI/AsyncAPI specifications.
     If your client code is using code generated using previous versions of these specifications, it may not compile or function correctly with the new version. To migrate:
-      - If you prefer not to update your code, continue using the previous specification versions as the JSON API server preserves backward compatibility.
-      - If you want to use new endpoints, features or leverage the new less strict spec, migrate to the new OpenAPI/AsyncAPI specifications as follows:
-        - Java clients: No changes are needed if you use the `OpenAPI Generator`. Otherwise, potentially optionality of fields should be handled appropriately for other code generators.
-        - TypeScript clients: Update your code to handle optional fields, using the `!` or `??` operators as appropriate.
+    - If you prefer not to update your code, continue using the previous specification versions as the JSON API server preserves backward compatibility.
+    - If you want to use new endpoints, features or leverage the new less strict spec, migrate to the new OpenAPI/AsyncAPI specifications as follows:
+      - Java clients: No changes are needed if you use the `OpenAPI Generator`. Otherwise, potentially optionality of fields should be handled appropriately for other code generators.
+      - TypeScript clients: Update your code to handle optional fields, using the `!` or `??` operators as appropriate.
   - From Canton 3.5 onwards, OpenAPI/AsyncAPI specification files are suffixed with the Canton version (e.g., `openapi-3.5.0.yaml`).
   - Canton 3.5 is compatible with OpenAPI specification files from version 3.4.0 to 3.5.0 (inclusive).
-
-### Minor Improvements
 - Added support for adding table settings for PostgreSQL. One can use a repeatable migration (Flyway feature) in a file
   provided to Canton externally.
   - Use the new config `repeatable-migrations-paths` under the `canton.<node_type>.<node>.storage.parameters` configuration section.
@@ -91,6 +98,11 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
   updates or completions stream is requested. An OffsetCheckpoint can have offset equal to the exclusive start for which
   the stream is requested. This ensures that checkpoints are visible even when there are no updates, and the stream was
   requested to begin exclusively from the ledger end.
+- Extended the set of characters allowed in user-id in the ledger api to contain brackets: `()`.
+  This also makes those characters accepted as part of the `sub` claims in JWT tokens.
+- A new indexer pipeline batching strategy added under the feature flag `useWeighetdBatching`. When switched on, the
+  batches are created using their estimated database processing time using the `submissionBatchInsertionSize` as a limit
+  for individual batches
 
 * Additional metrics for the ACS commitment processor: `daml.participant.sync.commitments.last-incoming-received`, `daml.participant.sync.commitments.last-incoming-processed`, `daml.participant.sync.commitments.last-locally-completed`, and `daml.participant.sync.commitments.last-locally-checkpointed`.
 
@@ -101,6 +113,8 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
 
 - Fixed a bug preventing automatic synchronization of protocol feature flags.
 Automatic synchronization can be disabled by setting `parameters.auto-sync-protocol-feature-flags = false` in the participant's configuration object.
+- Fixed a bug where the Ledger API `PackageService.ListVettedPackages` used to return a potentially not yet
+  effective state of the vetted packages. Now it returns the state of vetted packages effective at the time of the request.
 
 ### (YY-nnn, Severity): Title
 
@@ -119,6 +133,7 @@ Automatic synchronization can be disabled by setting `parameters.auto-sync-proto
 #### Likeliness
 
 #### Recommendation
+
 
 ## Other changes
 
@@ -159,11 +174,28 @@ Note: Multi-synchronizer support is currently in Alpha; most Ledger API consumer
 Assign/Unassign events. Only enable this if your application specifically requires non-zero reassignment counters
 and can process these event types.
 
+### Only PackageName is accepted on Ledger API
+
+- *BREAKING* Usage of package id for ledger queries was deprecated and now the validation will fail if used.
+  The impacted APIs are:
+    - GetUpdates
+    - GetUpdateByOffset
+    - GetUpdateById
+    - GetActiveContracts
+    - GetEventsByContractIdRequest
+    - SubmitAndWaitForTransaction (the optional `transaction_format`)
+    - SubmitAndWaitForReassignmentRequest
+    - ExecuteSubmissionAndWaitForTransactionRequest
+
 ### Party replication repair console macro removal
 
 The original party replication, which relied on a silent synchronizer, has been superseded by the offline party
 replication process. As a result, the obsolete repair console macros associated with the old approach have
 been removed.
+
+### update to GRPC 1.77.0
+
+removes [CVE-2025-58057](https://github.com/advisories/GHSA-3p8m-j85q-pgmj) from security reports.
 
 ## Compatibility
 
@@ -180,8 +212,5 @@ Canton has been tested against the following versions of its dependencies:
 | Java Runtime               | JAVA_VERSION               |
 | Postgres                   | POSTGRES_VERSION           |
 
-## update to GRPC 1.77.0
-
-removes [CVE-2025-58057](https://github.com/advisories/GHSA-3p8m-j85q-pgmj) from security reports.
 
 

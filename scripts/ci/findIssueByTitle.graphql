@@ -1,0 +1,26 @@
+query($searchstr: String!){
+search(query: $searchstr, type: ISSUE, first: 10) {
+    nodes {
+        ... on Issue {
+            number
+            title
+            body
+            projectItems(first:1, includeArchived:true) {
+                nodes {
+                    id
+                    isArchived
+                    releaseLine: fieldValueByName(name: "Release Line") {
+                        ... on ProjectV2ItemFieldSingleSelectValue {
+                            name
+                            id
+                        }
+                    }
+                    project {
+                        id
+                    }
+                }
+            }
+        }
+    }
+}
+}

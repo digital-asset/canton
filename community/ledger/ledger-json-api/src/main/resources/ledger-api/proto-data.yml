@@ -1018,7 +1018,7 @@ fileComments:
               Modifiable
             id: |-
               The user identifier, which must be a non-empty string of at most 128
-              characters that are either alphanumeric ASCII characters or one of the symbols "@^$.!`-#+'~_|:".
+              characters that are either alphanumeric ASCII characters or one of the symbols "@^$.!`-#+'~_|:()".
               Required
             is_deactivated: |-
               When set, then the user is denied all access to the Ledger API.

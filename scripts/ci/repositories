@@ -1,0 +1,4 @@
+[repositories]
+maven-azure: https://pkgs.dev.azure.com/digitalasset/da-maven-mirror/_packaging/da-maven-mirror/maven/v1/
+maven-central
+local

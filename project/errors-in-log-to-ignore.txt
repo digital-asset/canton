@@ -1,0 +1,35 @@
+# Patterns of entries to be ignored when checking log files (sbt checkErrors).
+# As the Canton log appenders emit errors/warnings to stdout, the patterns listed here will also be applied when checking the sbt output.
+# Patterns must be both
+# - PCRE regular expressions (see https://regex101.com) and
+# - extended regular expressions as used by "grep -E -e".
+# Lines containing only blanks or lines starting with '#' are ignored.
+#
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# Please note that any ignore rule is expensive check-logs.sh and should be avoided. Use rewrite-appender <testing> instead.
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+# Reporting aborted test suite
+LogReporter - Aborted test suite
+
+# TODO(#12063) TimeServiceIT:TSTimeAdvancementCanFail logs warnings
+WARN  c\.d\.c\.p\.l\.a\.CantonTimeServiceBackend:LedgerApiStaticTimeConformanceTestPostgres/participant=participant1 - Cannot advance clock: Specified current time .* does not match ledger time .*
+WARN  c\.d\.c\.p\.a\.s\.ApiTimeService - Failed to set time for request SetTimeRequest.*: INVALID_ARGUMENT: INVALID_ARGUMENT\(8,0\): The submitted request has invalid arguments: current_time mismatch. Provided: .* Actual: .*, context: .*
+
+# TODO(#12064): LAPI Benchtool CLI parsers logs errors to stderr
+Error: Latency test cannot have configured streams
+
+# AuthInterceptorSpec warnings
+WARN  .*AuthServiceJWTCodec.*Access token with unknown scope .*dummy-scope1 dummy-scope2.*
+
+# Open telemetry prints these messages when an exporter tries to send spans as the OTLP server is shutting down
+ERROR .*DefaultGrpcExporter - Failed to export spans. Server is UNAVAILABLE
+ERROR .*DefaultGrpcExporter - Too many log messages detected.
+
+# Under some load conditions, the create database call might be retried
+WARN  .*Operation com.digitalasset.canton.resource.DbStorage.createDatabase failed
+
+# Ignore warnings from ledger-api-test-tool
+WARN .*SingleParticipantTestContext - Failed to prune
+
+# Make sure to have a trailing newline

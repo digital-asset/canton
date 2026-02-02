@@ -4835,6 +4835,7 @@ components:
           enum:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
+          - HASHING_SCHEME_VERSION_V3
         minLedgerTime:
           $ref: '#/components/schemas/MinLedgerTime'
           description: |-
@@ -4910,6 +4911,7 @@ components:
           enum:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
+          - HASHING_SCHEME_VERSION_V3
         minLedgerTime:
           $ref: '#/components/schemas/MinLedgerTime'
           description: |-
@@ -4964,6 +4966,7 @@ components:
           enum:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
+          - HASHING_SCHEME_VERSION_V3
         minLedgerTime:
           $ref: '#/components/schemas/MinLedgerTime'
           description: |-
@@ -5250,6 +5253,7 @@ components:
           enum:
           - HASHING_SCHEME_VERSION_UNSPECIFIED
           - HASHING_SCHEME_VERSION_V2
+          - HASHING_SCHEME_VERSION_V3
         hashingDetails:
           description: |-
             Optional additional details on how the transaction was encoded and hashed. Only set if verbose_hashing = true in the request
@@ -7246,7 +7250,7 @@ components:
         id:
           description: |-
             The user identifier, which must be a non-empty string of at most 128
-            characters that are either alphanumeric ASCII characters or one of the symbols "@^$.!`-#+'~_|:".
+            characters that are either alphanumeric ASCII characters or one of the symbols "@^$.!`-#+'~_|:()".
             Required
           type: string
         primaryParty:
