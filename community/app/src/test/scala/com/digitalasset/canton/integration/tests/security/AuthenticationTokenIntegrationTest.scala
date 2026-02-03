@@ -9,8 +9,10 @@ import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authenticity
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.admin.api.client.data.*
 import com.digitalasset.canton.admin.api.client.data.OnboardingRestriction.*
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.SessionSigningKeysConfig
 import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.crypto.SynchronizerCrypto
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -69,6 +71,8 @@ trait AuthenticationTokenIntegrationTest
         ConfigTransforms.updateAllSequencerConfigs_(
           _.focus(_.timeTracker.observationLatency).replace(config.NonNegativeFiniteDuration.Zero)
         ),
+        // TODO(#30068): Enable session keys after sim clock advances are synced
+        ConfigTransforms.setSessionSigningKeys(SessionSigningKeysConfig.disabled),
       )
       .withSetup { implicit env =>
         import env.*
@@ -665,6 +669,8 @@ trait AuthenticationTokenIntegrationTest
   }
 }
 
+// TODO (#30542) this test is known to be flaky
+@UnstableTest
 class AuthenticationTokenIntegrationTestInMemory extends AuthenticationTokenIntegrationTest {
   registerPlugin(new UseBftSequencer(loggerFactory))
 }

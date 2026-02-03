@@ -335,6 +335,7 @@ object Dependencies {
   lazy val munit = "org.scalameta" % "munit_2.13" % munit_version
 
   lazy val protoc_gen_doc = "io.github.pseudomuto" % "protoc-gen-doc" % protoc_gen_doc_version
+  lazy val protoc_gen_grpc_java = "io.grpc" % "protoc-gen-grpc-java" % "1.60.2"
 
   // We prevent library conflicts that new tapir creates / some tests fail
   val tapirExclusions = Seq(

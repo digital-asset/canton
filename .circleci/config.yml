@@ -566,13 +566,13 @@ commands:
                 name: Deleting cache directories
             - azure-caching-orb/restore_from_azure:
                 job_name: Restoring Coursier cache - then if that is not present trying slightly older cache
-                key: 'cache=canton-coursier dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) : cache=canton-coursier dependencies=$(checksum project/Dependencies.scala)'
+                key: 'cache=canton-coursier dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile.canton-build) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) : cache=canton-coursier dependencies=$(checksum project/Dependencies.scala)'
             - azure-caching-orb/restore_from_azure:
                 job_name: Restoring Sbt caches - then if that is not present trying slightly older cache
-                key: 'cache=canton-sbt dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) : cache=canton-sbt dependencies=$(checksum project/Dependencies.scala)'
+                key: 'cache=canton-sbt dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile.canton-build) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) : cache=canton-sbt dependencies=$(checksum project/Dependencies.scala)'
             - azure-caching-orb/restore_from_azure:
                 job_name: Restoring Ivy caches - then if that is not present trying slightly older cache
-                key: 'cache=canton-ivy dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) : cache=canton-ivy dependencies=$(checksum project/Dependencies.scala)'
+                key: 'cache=canton-ivy dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile.canton-build) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) : cache=canton-ivy dependencies=$(checksum project/Dependencies.scala)'
             - run:
                 command: .ci/nix-exec scripts/ci/make-cache-action.sh chmodcache sizecache
                 name: Make caches readable & calculate their size
@@ -933,7 +933,7 @@ commands:
                 path: ${HOME}/.cache/coursier/v1/
             - azure-caching-orb/save_to_azure:
                 job_name: Uploading Coursier cache
-                key: cache=canton-coursier dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt)
+                key: cache=canton-coursier dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile.canton-build) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt)
                 path: ${HOME}/.cache/coursier/v1/
             - azure-caching-orb/save_to_azure:
                 job_name: Uploading Ivy caches with non-specific key to populate 'older cache'
@@ -941,7 +941,7 @@ commands:
                 path: ${HOME}/.ivy2/cache/
             - azure-caching-orb/save_to_azure:
                 job_name: Uploading Ivy caches
-                key: cache=canton-ivy dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt)
+                key: cache=canton-ivy dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile.canton-build) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt)
                 path: ${HOME}/.ivy2/cache/
             - azure-caching-orb/save_to_azure:
                 job_name: Uploading Sbt caches with non-specific key to populate 'older cache'
@@ -949,7 +949,7 @@ commands:
                 path: ${HOME}/.sbt/
             - azure-caching-orb/save_to_azure:
                 job_name: Uploading Sbt caches
-                key: cache=canton-sbt dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt)
+                key: cache=canton-sbt dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile.canton-build) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt)
                 path: ${HOME}/.sbt/
     send_slack_notification_for_sdk_updates:
         description: Send a message to slack
@@ -1058,6 +1058,7 @@ commands:
                       "U0A0VU32CS0" # Simran
                       "U276HDDB6" # Soren
                       "U03NCGBFCDP" # Thibault
+                      "UPED4TSGN" # Simon
                       # Protocol
                       "U5LC1FB6D" # Gerolf
                       "U046D8XGD7H" # Kirill
@@ -1067,12 +1068,14 @@ commands:
                       "UDDVDCKD0" # Raphael
                       "U04DC4NAK1S" # Yves
                       # LAPI
+                      "U08LBV2U75H" # Adrien
                       "U03HVEFHGLU" # Andreas T.
+                      "U9AM249RP" # Andris
+                      "U1CNLNUV7" # Gergely
+                      "U029VGVV25Q" # Jarek
                       "U57BTEKR9" # Marcin
                       "U01A2K1NWAX" # Marton
-                      "UPED4TSGN" # Simon
                       "U01B2BD2CP4" # Tudor
-                      "U029VGVV25Q" # Jarek
                       # BFT
                       "U04S25SG9D5" # Daniel
                       "U04TG4XMJ" # Danilo

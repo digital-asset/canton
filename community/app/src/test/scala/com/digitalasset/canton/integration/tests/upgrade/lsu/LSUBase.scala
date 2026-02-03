@@ -11,7 +11,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
+import com.digitalasset.canton.config.{SessionSigningKeysConfig, SynchronizerTimeTrackerConfig}
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
   InstanceReference,
@@ -62,6 +62,8 @@ trait LSUBase
     ++ List(
       ConfigTransforms.disableAutoInit(newOldNodesResolution.keySet),
       ConfigTransforms.useStaticTime,
+      // TODO(#30068): Enable session keys after sim clock advances are synced
+      ConfigTransforms.setSessionSigningKeys(SessionSigningKeysConfig.disabled),
     ) ++ ConfigTransforms.enableAlphaVersionSupport
 
   /** Prepare the environment for LSU with default values.
