@@ -19,6 +19,7 @@ Template for a bigger topic
 fixes CVE-2024-29857 and CVE-2024-34447
 
 ### Minor Improvements
+* Fixed the private store cache to prevent an excessive number of database reads.
 * Added support for adding table settings for PostgreSQL. One can use a repeatable migration (Flyway feature) in a file
   provided to Canton externally.
     * Use the new config `repeatable-migrations-paths` under the `canton.<node_type>.<node>.storage.parameters` configuration section.
