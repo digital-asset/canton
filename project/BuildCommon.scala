@@ -397,6 +397,7 @@ object BuildCommon {
     case PathList("org", "jline", _ @_*) => MergeStrategy.first
     case PathList("META-INF", "FastDoubleParser-LICENSE") => MergeStrategy.first
     case PathList("META-INF", "FastDoubleParser-NOTICE") => MergeStrategy.first
+    case path if path.endsWith("/OSGI-INF/MANIFEST.MF") => MergeStrategy.first
     case x => oldStrategy(x)
   }
 
@@ -687,8 +688,8 @@ object BuildCommon {
         JvmRulesPlugin.damlRepoHeaderSettings,
         libraryDependencies ++= Seq(
           better_files,
-          bouncycastle_bcpkix_jdk15on,
-          bouncycastle_bcprov_jdk15on,
+          bouncycastle_bcpkix,
+          bouncycastle_bcprov,
           cats,
           chimney,
           circe_core,
@@ -1038,8 +1039,8 @@ object BuildCommon {
       .settings(
         sharedSettings,
         libraryDependencies ++= Seq(
-          bouncycastle_bcprov_jdk15on,
-          bouncycastle_bcpkix_jdk15on,
+          bouncycastle_bcprov,
+          bouncycastle_bcpkix,
         ),
         // Exclude to apply our license header to any Java files
         headerSources / excludeFilter := "*.java",
@@ -1193,6 +1194,9 @@ object BuildCommon {
           scalacheck % Test,
           opentelemetry_sdk_testing % Test,
           scalatestScalacheck % Test,
+          bouncycastle_bcprov % Test,
+          bouncycastle_bcpkix % Test,
+          bouncycastle_bctls % Test,
         ),
         Test / parallelExecution := true,
         coverageEnabled := false,
@@ -1242,8 +1246,8 @@ object BuildCommon {
           hikaricp,
           guava,
           dropwizard_metrics_core,
-          bouncycastle_bcprov_jdk15on % Test,
-          bouncycastle_bcpkix_jdk15on % Test,
+          bouncycastle_bcprov % Test,
+          bouncycastle_bcpkix % Test,
           scalaz_scalacheck % Test,
           grpc_netty_shaded,
           grpc_services,

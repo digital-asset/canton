@@ -27,7 +27,7 @@ object Dependencies {
   lazy val awaitility_version = "4.2.0"
   lazy val aws_version = "2.41.1"
   lazy val better_files_version = "3.9.1"
-  lazy val bouncy_castle_version = "1.70"
+  lazy val bouncy_castle_version = bouncycastle_bcprov.revision
   lazy val cats_law_version = "2.9.0"
   lazy val cats_scalacheck_version = "0.3.2"
   lazy val cats_version = "2.9.0"
@@ -45,8 +45,8 @@ object Dependencies {
   // TODO(i8460) Don't upgrade until https://github.com/sbt/sbt/issues/6564 is fixed
   lazy val javafx_all_version = "17-ea+8"
   lazy val javax_annotations_version = "1.3.2"
-  lazy val log4j_version = "2.17.0"
-  lazy val logback_version = "1.4.5"
+  lazy val log4j_version = log4j_core.revision
+  lazy val logback_version = logback_core.revision
   lazy val logstash_version = "6.6"
   lazy val magnolia_version = "1.1.3"
   lazy val magnolifyScalacheck_version = "0.6.2"
@@ -128,10 +128,12 @@ object Dependencies {
   lazy val scalapb_runtime_grpc =
     "com.thesamet.scalapb" %% "scalapb-runtime-grpc" % scalapb.compiler.Version.scalapbVersion
 
-  lazy val bouncycastle_bcprov_jdk15on =
-    "org.bouncycastle" % "bcprov-jdk15on" % bouncy_castle_version
-  lazy val bouncycastle_bcpkix_jdk15on =
-    "org.bouncycastle" % "bcpkix-jdk15on" % bouncy_castle_version
+  lazy val bouncycastle_bcprov =
+    damlDependency("org.bouncycastle", "bcprov-jdk18on")
+  lazy val bouncycastle_bcpkix =
+    "org.bouncycastle" % "bcpkix-jdk18on" % bouncy_castle_version
+  lazy val bouncycastle_bctls =
+    "org.bouncycastle" % "bctls-jdk18on" % bouncy_castle_version
 
   lazy val javax_annotations =
     "javax.annotation" % "javax.annotation-api" % javax_annotations_version
@@ -191,9 +193,9 @@ object Dependencies {
   lazy val jul_to_slf4j = "org.slf4j" % "jul-to-slf4j" % slf4j_version
   lazy val logback_classic = "ch.qos.logback" % "logback-classic" % logback_version
 
-  lazy val logback_core = "ch.qos.logback" % "logback-core" % logback_version
+  lazy val logback_core = damlDependency("ch.qos.logback", "logback-core")
 
-  lazy val log4j_core = "org.apache.logging.log4j" % "log4j-core" % log4j_version
+  lazy val log4j_core = damlDependency("org.apache.logging.log4j", "log4j-core")
   lazy val log4j_api = "org.apache.logging.log4j" % "log4j-api" % log4j_version
 
   // used for condition evaluation in logback
