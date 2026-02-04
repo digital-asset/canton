@@ -168,6 +168,7 @@ class BlockSequencer(
       clock,
       materializer.system.scheduler,
       metrics,
+      timeouts,
       loggerFactory,
     )
 

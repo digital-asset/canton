@@ -242,19 +242,19 @@ abstract class ScheduledParticipantPruningCommitmentStateTest
     def ledgerEndOffset(p: LocalParticipantReference): Long =
       p.ledger_api.state.end()
 
-    deployContract()
-    val ledgerEndAfter1 = ledgerEndOffset(participant1)
-    val ledgerEndAfter2 = ledgerEndOffset(participant2)
-    val ledgerEndAfter3 = ledgerEndOffset(participant3)
-
-    val pruningIntervalP1 = 2
-    val pruningIntervalP2 = 3
-    val retentionP1 = 2
-    val retentionP2 = 3
-    val maxDurationP1 = 1
-    val maxDurationP2 = 2
-
     ignoreTransientSchedulerErrorsAndCommitmentMismatches(this.getClass.getSimpleName) {
+      deployContract()
+      val ledgerEndAfter1 = ledgerEndOffset(participant1)
+      val ledgerEndAfter2 = ledgerEndOffset(participant2)
+      val ledgerEndAfter3 = ledgerEndOffset(participant3)
+
+      val pruningIntervalP1 = 2
+      val pruningIntervalP2 = 3
+      val retentionP1 = 2
+      val retentionP2 = 3
+      val maxDurationP1 = 1
+      val maxDurationP2 = 2
+
       Seq(
         (participant1, pruningIntervalP1, maxDurationP1, retentionP1),
         (participant2, pruningIntervalP2, maxDurationP2, retentionP2),
@@ -289,6 +289,8 @@ abstract class ScheduledParticipantPruningCommitmentStateTest
       lbo2 shouldBe >=(ledgerEndAfter2)
       // Participant 3 receives a matching commitment and has an outstanding one, and can prune on an All policy
       lbo3 shouldBe >=(ledgerEndAfter3)
+
+      sequencer.resetPolicy()
     }
   }
 }
