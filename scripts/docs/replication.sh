@@ -10,4 +10,8 @@ CANTON_LOCAL_VERSION=$(extract_local_version)
 CANTON_FULL_VERSION=$(snapshot_version $(git rev-parse HEAD) $CANTON_LOCAL_VERSION)
 CANTON_SHORT_VERSION=$(extract_major_minor $CANTON_LOCAL_VERSION)
 
+info "CANTON_LOCAL_VERSION: ${CANTON_LOCAL_VERSION}"
+info "CANTON_FULL_VERSION: ${CANTON_FULL_VERSION}"
+info "CANTON_SHORT_VERSION: ${CANTON_SHORT_VERSION}"
+
 amm $THIS_DIR/replication.sc $@ --shortVersion $CANTON_SHORT_VERSION --fullVersion $CANTON_FULL_VERSION --docsOpenDir $(realpath $THIS_DIR/../../docs-open)

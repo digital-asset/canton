@@ -105,7 +105,8 @@ final class LSUFaultySynchronizerNodesIntegrationTest extends LSUBase {
       participant1.health.ping(participant3)
       // no activity for P4 on purpose: LSU should also work that way
 
-      val upgradeFailureError = s"Failed to upgrade to ${fixture.newPSId}"
+      val upgradeFailureError = s"Upgrade to ${fixture.newPSId} failed"
+
       val logAssertions: Seq[LogEntry] => Assertion = LogEntry.assertLogSeq(
         Seq(
           (
@@ -174,6 +175,7 @@ final class LSUFaultySynchronizerNodesIntegrationTest extends LSUBase {
           _.synchronizers.is_connected(fixture.currentPSId) shouldBe false
         )
       }
+      waitForTargetTimeOnSequencer(sequencer3, environment.clock.now)
 
       participant1.underlying.value.sync
         .connectedSynchronizerForAlias(daName)
@@ -206,10 +208,6 @@ final class LSUFaultySynchronizerNodesIntegrationTest extends LSUBase {
       pingF.futureValue // ping should succeed
 
       manuallyUpgraded.foreach { p =>
-        // TODO(#30484) This should not be needed if execution queue is not failed
-        p.stop()
-        p.start()
-
         p.repair.perform_synchronizer_upgrade(
           currentPhysicalSynchronizerId = fixture.currentPSId,
           successorPhysicalSynchronizerId = fixture.newPSId,

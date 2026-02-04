@@ -42,13 +42,15 @@ def run(env: String, docsOpenDir: Path, githubAuth: String, shortVersion: String
     os.proc("git", "remote", "set-url", "origin", docsRepoUrl).call(cwd = docsRepoDir)
   }
 
+  val branchAlreadyExists = os.proc("git", "ls-remote", "--heads", "origin", s"$newBranchName").call(cwd = docsRepoDir).out.text().nonEmpty
+
   os.remove.all(docsRepoCantonDocsDir)
   os.copy(preprocessedSphinxDocsDir, docsRepoCantonDocsDir)
 
   val gitStatus = os.proc("git", "status").call(cwd = docsRepoDir).out.text()
   val hasChanges = !gitStatus.contains("nothing to commit")
 
-  if (hasChanges) {
+  if (hasChanges && !branchAlreadyExists) {
     os.proc("git", "checkout", "-b", newBranchName).call(cwd = docsRepoDir)
     os.proc("git", "add", ".").call(cwd = docsRepoDir)
     os.proc("git", "commit", "-m", commitMessage).call(cwd = docsRepoDir)

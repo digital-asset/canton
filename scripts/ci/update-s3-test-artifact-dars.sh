@@ -17,7 +17,7 @@ fi
 declare -a test_dars
 test_dars=(
   "community/daml-lf/archive/src/test/resources/DarReaderTest-v115.dar" # Build this DAR by running `daml build --target=1.15` in `daml-lf/archive/src/.../DarReaderTest` with the most recent 2.x compiler and placing the output on this path
-  "community/daml-lf/transaction/src/test/resources/InterfaceTestPackage-v1.dar" # Build this DAR by running `daml build --target=1.15` in `daml-lf/transaction/src/.../InterfaceTestPackage` with the most recent 2.x compiler and placing the output on this path
+  "community/daml-lf/transaction-tests/src/test/resources/InterfaceTestPackage-v1.dar" # Build this DAR by running `daml build --target=1.15` in `daml-lf/transaction-tests/src/.../InterfaceTestPackage` with the most recent 2.x compiler and placing the output on this path
 )
 
 for test_dar in "${test_dars[@]}"; do
