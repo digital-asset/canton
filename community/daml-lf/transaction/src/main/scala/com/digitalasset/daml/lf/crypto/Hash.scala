@@ -476,7 +476,7 @@ object Hash {
             exerciseResult,
             keyOpt,
             byKey,
-            _,
+            _, // externalCallResults - not included in hash
             version,
           ) =>
         if (choiceAuthorizers.nonEmpty)
