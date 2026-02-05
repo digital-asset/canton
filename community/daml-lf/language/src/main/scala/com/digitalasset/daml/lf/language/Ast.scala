@@ -570,6 +570,10 @@ object Ast {
   final case object BFailWithStatus
       extends BuiltinFunction // : ∀a. Text → FailureCategory → Text → TextMap Text → a
 
+  // External Call
+  final case object BExternalCall
+      extends BuiltinFunction // : Text → Text → Text → Text → Update Text
+
   final case class EExperimental(name: String, typ: Type) extends Expr
 
   //

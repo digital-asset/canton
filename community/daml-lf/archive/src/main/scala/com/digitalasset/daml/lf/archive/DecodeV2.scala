@@ -1896,6 +1896,12 @@ private[lf] object DecodeV2 {
         versionRange = Some(LV.featureUnstable.versionRange),
       ),
       BuiltinFunctionInfo(FAIL_WITH_STATUS, BFailWithStatus),
+      BuiltinFunctionInfo(
+        EXTERNAL_CALL,
+        BExternalCall,
+        minVersion = LV.featureExternalCall.versionRange.min,
+        versionRange = Some(LV.featureExternalCall.versionRange),
+      ),
     )
   }
 
