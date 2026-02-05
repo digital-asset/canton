@@ -30,6 +30,11 @@ import java.nio.file.Path
   * security consequences.
   * @param snapshotDir
   *   path to the directory used for saving transaction tree snapshots
+  * @param extensions
+  *   Configuration for external extension services that can be called from Daml contracts. Map from
+  *   extension ID to extension service configuration.
+  * @param extensionSettings
+  *   Global settings for engine extensions
   */
 final case class CantonEngineConfig(
     enableEngineStackTraces: Boolean = false,
@@ -40,4 +45,6 @@ final case class CantonEngineConfig(
     enableAdditionalConsistencyChecks: Boolean = false,
     profileDir: Option[Path] = None,
     snapshotDir: Option[Path] = None,
+    extensions: Map[String, ExtensionServiceConfig] = Map.empty,
+    extensionSettings: EngineExtensionsConfig = EngineExtensionsConfig.default,
 )
