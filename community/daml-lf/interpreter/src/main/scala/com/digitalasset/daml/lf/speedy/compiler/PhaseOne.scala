@@ -445,6 +445,9 @@ private[lf] final class PhaseOne(
           case BSECP256K1WithEcdsaBool => SBSECP256K1WithEcdsaBool
           case BSECP256K1ValidateKey => SBSECP256K1ValidateKey
 
+          // External call
+          case BExternalCall => SBExternalCall
+
           // TextMap
 
           case BTextMapInsert => SBMapInsert
