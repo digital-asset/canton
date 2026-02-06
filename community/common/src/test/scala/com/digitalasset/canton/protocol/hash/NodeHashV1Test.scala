@@ -176,6 +176,7 @@ class NodeHashV1Test extends BaseTest with AnyWordSpecLike with Matchers with Ha
     exerciseResult = Some(VA.text.inj("result")),
     keyOpt = None,
     byKey = false,
+    externalCallResults = ImmArray.empty,
     version = LfSerializationVersion.V1,
   )
 

@@ -58,11 +58,15 @@ import com.digitalasset.canton.participant.store.{
   PruningOffsetServiceImpl,
 }
 import com.digitalasset.canton.participant.sync.CantonSyncService
+import com.digitalasset.canton.participant.extension.{
+  ExtensionServiceExternalCallHandler,
+  ExtensionServiceManager,
+}
 import com.digitalasset.canton.participant.{
   LedgerApiServerBootstrapUtils,
   ParticipantNodeParameters,
 }
-import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
+import com.digitalasset.canton.platform.apiserver.execution.{CommandProgressTracker, ExternalCallHandler}
 import com.digitalasset.canton.platform.apiserver.ratelimiting.{
   RateLimitingInterceptorFactory,
   ThreadpoolCheck,
@@ -205,6 +209,26 @@ class LedgerApiServer(
     val dbSupport = ledgerApiStore.value.ledgerApiDbSupport
     val inMemoryState = ledgerApiIndexer.value.inMemoryState
     val timedSyncService = new TimedSyncService(syncService, grpcApiMetrics)
+
+    // Create extension service manager and handler for external calls
+    val extensionServiceManagerOpt: Option[ExtensionServiceManager] =
+      if (cantonParameterConfig.engine.extensions.nonEmpty) {
+        val manager = new ExtensionServiceManager(
+          extensionConfigs = cantonParameterConfig.engine.extensions,
+          engineExtensionsConfig = cantonParameterConfig.engine.extensionSettings,
+          loggerFactory = loggerFactory,
+        )
+        logger.info(
+          s"Extension service manager initialized with ${cantonParameterConfig.engine.extensions.size} extension(s): " +
+            s"${cantonParameterConfig.engine.extensions.keys.mkString(", ")}"
+        )
+        Some(manager)
+      } else {
+        None
+      }
+    val externalCallHandler: ExternalCallHandler =
+      ExtensionServiceExternalCallHandler.create(extensionServiceManagerOpt)
+
     logger.debug(
       s"Ledger API Server is initializing with ledgerApiStore=$ledgerApiStore, ledgerApiIndexer=$ledgerApiIndexer, dbSupport=$dbSupport, inMemoryState=$inMemoryState"
     )
@@ -416,6 +440,7 @@ class LedgerApiServer(
         packagePreferenceBackend = packagePreferenceBackend,
         apiLoggingConfig = cantonParameterConfig.loggingConfig.api,
         apiContractService = apiContractService,
+        externalCallHandler = externalCallHandler,
       )
       _ <- startHttpApiIfEnabled(
         timedSyncService,
