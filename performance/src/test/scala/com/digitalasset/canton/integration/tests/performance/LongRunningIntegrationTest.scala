@@ -29,13 +29,15 @@ final class LongRunningSingleSynchronizerIntegrationTest
       .withManualStart
 
   "long-running startup script allows to start (single synchronizer)" in { implicit env =>
-    val mc = LongRunning.startup(
-      totalCycles = 10,
-      reportFrequency = 1,
-      numAssetsPerIssuer = 10,
-      enablePruning = false,
-      singleSynchronizer = true,
-    )
+    val mc = LongRunning
+      .startup(
+        totalCycles = 10,
+        reportFrequency = 1,
+        numAssetsPerIssuer = 10,
+        enablePruning = false,
+        singleSynchronizer = true,
+      )
+      ._1
     Await.result(mc.isDoneF, 1.minute)
   }
 }
@@ -55,13 +57,15 @@ sealed trait LongRunningMultiSynchronizerIntegrationTest
       .withManualStart
 
   "long-running startup script allows to start (multi synchronizers)" in { implicit env =>
-    val mc = LongRunning.startup(
-      totalCycles = 10,
-      reportFrequency = 1,
-      numAssetsPerIssuer = 10,
-      enablePruning = false,
-      singleSynchronizer = false,
-    )
+    val mc = LongRunning
+      .startup(
+        totalCycles = 10,
+        reportFrequency = 1,
+        numAssetsPerIssuer = 10,
+        enablePruning = false,
+        singleSynchronizer = false,
+      )
+      ._1
     Await.result(mc.isDoneF, 1.minute)
   }
 }

@@ -143,19 +143,3 @@ run_propose_script:
           nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "./release/propose.sh << parameters.script_argument >>"
     - slack_red_main_with_volunteer
 
-publish_release_to_jfrog:
-  executor: canton-small-docker
-  parameters:
-    is_nightly_workflow:
-      type: boolean
-    is_manual:
-      type: boolean
-  steps:
-    - attach_workspace:
-        at: /tmp/workspace
-    - checkout:
-        method: blobless
-    - restore_packaged_release:
-        location: tmp-release
-    - publish_sandbox_to_jfrog
-    - slack_red_main_with_volunteer

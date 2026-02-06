@@ -43,21 +43,6 @@ publish_release_on_oci_registry:
         name: Publish to OCI registry
         command: nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "scripts/ci/publish-to-oci.sh << parameters.nightly_release >>"
 
-publish_sandbox_to_jfrog:
-  parameters:
-    repository:
-      description : JFROG repo for upload
-      type: string
-      default: generic-sandbox
-  steps:
-    - run:
-        name: Publish to JFROG
-        command: |
-          cd tmp-release || exit 1
-          for i in $(find . -type f | sed 's|//|/|g'); do
-            ../scripts/ci/publish-to-jfrog.sh -r << parameters.repository >> ${i} ${@} || exit ${?}
-          done
-
 publish_libs_to_google_artifact_registry:
   steps:
     - setup_gcp_gar

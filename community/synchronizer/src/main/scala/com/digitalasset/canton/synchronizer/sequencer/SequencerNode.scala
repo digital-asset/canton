@@ -519,11 +519,17 @@ class SequencerNodeBootstrap(
                   _ <- sequencerSnapshot
                     .map { snapshot =>
                       logger.debug("Uploading sequencer snapshot to sequencer driver")
+                      logger.trace(
+                        s"Initial topology transactions used to establish last sequenced and effective time: ${initialTopologyTransactions.result}"
+                      )
                       val initialState = SequencerInitialState(
                         psid,
                         snapshot,
                         initialTopologyTransactions.result.view
                           .map(tx => (tx.sequenced.value, tx.validFrom.value)),
+                      )
+                      logger.debug(
+                        s"last sequencer event timestamp = ${initialState.latestSequencerEventTimestamp}, initial topology effective timestamp = ${initialState.initialTopologyEffectiveTimestamp}"
                       )
                       // TODO(#14070) make initialize idempotent to support crash recovery during init
                       sequencerFactory
@@ -583,7 +589,7 @@ class SequencerNodeBootstrap(
           processorAndClient <- EitherT
             .right(
               TopologyTransactionProcessor
-                .createProcessorAndClientForSynchronizerWithWriteThroughCache(
+                .createProcessorAndClientForSynchronizer(
                   synchronizerTopologyStore,
                   synchronizerUpgradeTime = parameters.sequencingTimeLowerBoundExclusive,
                   crypto.pureCrypto,

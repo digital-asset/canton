@@ -139,7 +139,6 @@ export JAVA_OPTS="-Xmx${MEMORY} -Xlog:gc*:./log/garbagecollection.log:time -XX:+
   --log-file-rolling-pattern=yyyy-MM-dd-HH \
   --config "$topology_conf" \
   --log-immediate-flush=false \
-  --log-last-errors=false \
   $tls_parameter \
   --config "$persistence_conf" \
   --config "$metrics_conf" \

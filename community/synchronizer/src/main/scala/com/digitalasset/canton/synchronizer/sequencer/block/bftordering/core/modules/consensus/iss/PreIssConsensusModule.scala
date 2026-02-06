@@ -17,7 +17,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.SignedMessage
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.CommitCertificate
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.snapshot.SequencerSnapshotAdditionalInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopologyInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus
@@ -35,7 +34,6 @@ import com.google.common.annotations.VisibleForTesting
 import scala.util.Random
 
 import EpochState.Epoch
-import IssConsensusModule.DefaultDatabaseReadTimeout
 
 final class PreIssConsensusModule[E <: Env[E]](
     bootstrapTopologyInfo: OrderingTopologyInfo[E],
@@ -57,98 +55,125 @@ final class PreIssConsensusModule[E <: Env[E]](
     with HasDelayedInit[Consensus.Message[E]] {
 
   override def ready(self: ModuleRef[Consensus.Message[E]]): Unit =
-    self.asyncSendNoTrace(Consensus.Init)
+    self.asyncSendNoTrace(Consensus.Init.KickOff)
 
   override protected def receiveInternal(message: Consensus.Message[E])(implicit
       context: E#ActorContextT[Consensus.Message[E]],
       traceContext: TraceContext,
   ): Unit =
     message match {
-      case Consensus.Init =>
-        val (initialEpochState, latestCompletedEpoch, previousEpochsCommitCerts) =
-          restoreEpochStateFromDB()
-        val consensus = new IssConsensusModule(
-          epochLength,
-          IssConsensusModule.InitialState(
-            bootstrapTopologyInfo,
-            initialEpochState,
+      case Consensus.Init.KickOff =>
+        loadLatestEpochs()
+
+      case Consensus.Init.LatestEpochsLoaded(latestCompletedEpoch, latestEpoch) =>
+        loadEpochInitData(latestCompletedEpoch, latestEpoch)
+
+      case Consensus.Init.EpochInitDataLoaded(
             latestCompletedEpoch,
-            sequencerSnapshotAdditionalInfo,
-          ),
-          epochStore,
-          clock,
-          metrics,
-          segmentModuleRefFactory,
-          new RetransmissionsManager[E](
-            bootstrapTopologyInfo.thisNode,
-            dependencies.p2pNetworkOut,
-            abort,
-            previousEpochsCommitCerts,
-            metrics,
-            clock,
-            loggerFactory,
-          ),
-          random,
-          dependencies,
-          loggerFactory,
-          timeouts,
-          futurePbftMessageQueue =
-            new FairBoundedQueue[ConsensusMessage.PbftUnverifiedNetworkMessage](
-              config.consensusQueueMaxSize,
-              config.consensusQueuePerNodeQuota,
-              // Drop newest to ensure continuity of messages (and fall back to retransmissions or state transfer later if needed)
-              DropStrategy.DropNewest,
+            latestEpoch,
+            epochInProgress,
+            completedBlocks,
+          ) =>
+        val previousEpochsCommitCerts =
+          completedBlocks
+            .groupBy(_.epochNumber)
+            .fmap(_.sortBy(_.blockNumber).map(_.commitCertificate))
+        val epochState =
+          initialEpochState(
+            latestCompletedEpoch.lastBlockCommits,
+            latestEpoch,
+            epochInProgress,
+          )
+        val consensus =
+          new IssConsensusModule(
+            epochLength,
+            IssConsensusModule.InitialState(
+              bootstrapTopologyInfo,
+              epochState,
+              latestCompletedEpoch,
+              sequencerSnapshotAdditionalInfo,
             ),
-        )()()
+            epochStore,
+            clock,
+            metrics,
+            segmentModuleRefFactory,
+            new RetransmissionsManager[E](
+              bootstrapTopologyInfo.thisNode,
+              dependencies.p2pNetworkOut,
+              abort,
+              previousEpochsCommitCerts,
+              metrics,
+              clock,
+              loggerFactory,
+            ),
+            random,
+            dependencies,
+            loggerFactory,
+            timeouts,
+            futurePbftMessageQueue =
+              new FairBoundedQueue[ConsensusMessage.PbftUnverifiedNetworkMessage](
+                config.consensusQueueMaxSize,
+                config.consensusQueuePerNodeQuota,
+                // Drop newest to ensure continuity of messages (and fall back to retransmissions or state transfer later if needed)
+                DropStrategy.DropNewest,
+              ),
+          )()()
         context.become(consensus)
+
         // This will send all queued messages to the proper Consensus module.
         initCompleted(consensus.receive(_))
+
       case message =>
         ifInitCompleted(message) { _ =>
           abort(s"${this.getClass.toString} shouldn't receive any messages after init")
         }
     }
 
-  @VisibleForTesting
-  private[iss] def restoreEpochStateFromDB()(implicit
+  private def loadLatestEpochs()(implicit
       context: E#ActorContextT[Consensus.Message[E]],
       traceContext: TraceContext,
-  ): (EpochState[E], EpochStore.Epoch, Map[EpochNumber, Seq[CommitCertificate]]) = {
-
-    val latestCompletedEpochFromStore =
-      context.blockingAwait(
+  ): Unit =
+    context.pipeToSelf(
+      context.futureContext.zipFuture(
         epochStore.latestEpoch(includeInProgress = false),
-        DefaultDatabaseReadTimeout,
-      )
-
-    val latestEpochFromStore =
-      context.blockingAwait(
         epochStore.latestEpoch(includeInProgress = true),
-        DefaultDatabaseReadTimeout,
       )
+    ) {
+      case scala.util.Success(latestCompletedEpoch -> latestEpoch) =>
+        Some(Consensus.Init.LatestEpochsLoaded(latestCompletedEpoch, latestEpoch))
+      case scala.util.Failure(exception) =>
+        abort(s"Failed to load latest epochs from store: ${exception.getMessage}")
+    }
 
-    // This query will return the in-progress epoch regardless if it has already been started or not.
-    val epochInProgress =
-      context.blockingAwait(
-        epochStore.loadEpochProgress(latestEpochFromStore.info),
-        DefaultDatabaseReadTimeout,
+  private def loadEpochInitData(
+      latestCompletedEpoch: EpochStore.Epoch,
+      latestEpoch: EpochStore.Epoch,
+  )(implicit
+      context: E#ActorContextT[Consensus.Message[E]],
+      traceContext: TraceContext,
+  ): Unit =
+    context.pipeToSelf(
+      context.futureContext.zipFuture(
+        epochStore.loadEpochProgress(latestEpoch.info),
+        epochStore.loadCompleteBlocks(
+          EpochNumber(
+            latestCompletedEpoch.info.number - RetransmissionsManager.HowManyEpochsToKeep + 1
+          ),
+          latestCompletedEpoch.info.number,
+        ),
       )
+    ) {
+      case scala.util.Success(epochInProgress -> completeBlocks) =>
+        Some(
+          Consensus.Init
+            .EpochInitDataLoaded(latestCompletedEpoch, latestEpoch, epochInProgress, completeBlocks)
+        )
+      case scala.util.Failure(exception) =>
+        abort(s"Failed to load latest epoch init data from store: ${exception.getMessage}")
+    }
 
-    val previousEpochsCommitCerts = PreIssConsensusModule.loadPreviousEpochCommitCertificates(
-      epochStore
-    )(latestCompletedEpochFromStore.info.number, RetransmissionsManager.HowManyEpochsToKeep)
-
-    // Set up the initial state of the Consensus module for the in-progress epoch.
-    val epochState = initialEpochState(
-      latestCompletedEpochFromStore.lastBlockCommits,
-      latestEpochFromStore,
-      epochInProgress,
-    )
-
-    (epochState, latestCompletedEpochFromStore, previousEpochsCommitCerts)
-  }
-
-  private def initialEpochState(
+  @VisibleForTesting
+  private[iss] def initialEpochState(
       latestCompletedEpochLastCommits: Seq[SignedMessage[Commit]],
       latestEpochFromStore: EpochStore.Epoch,
       epochInProgress: EpochStore.EpochInProgress,
@@ -175,30 +200,5 @@ final class PreIssConsensusModule[E <: Env[E]](
       loggerFactory = loggerFactory,
       timeouts = timeouts,
     )
-  }
-}
-
-object PreIssConsensusModule {
-
-  /** @return
-    *   map from epoch number to a list of commit certificates sorted by block number, for the last
-    *   how many epochs from the latest completed epoch (inclusive).
-    */
-  @VisibleForTesting
-  private[iss] def loadPreviousEpochCommitCertificates[E <: Env[E]](epochStore: EpochStore[E])(
-      lastCompletedEpoch: EpochNumber,
-      numberOfEpochsToLoad: Int,
-  )(implicit
-      context: E#ActorContextT[Consensus.Message[E]],
-      traceContext: TraceContext,
-  ): Map[EpochNumber, Seq[CommitCertificate]] = {
-    val completedBlocks = context.blockingAwait(
-      epochStore.loadCompleteBlocks(
-        EpochNumber(lastCompletedEpoch - numberOfEpochsToLoad + 1),
-        EpochNumber(lastCompletedEpoch),
-      ),
-      DefaultDatabaseReadTimeout,
-    )
-    completedBlocks.groupBy(_.epochNumber).fmap(_.sortBy(_.blockNumber).map(_.commitCertificate))
   }
 }

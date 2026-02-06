@@ -289,6 +289,7 @@ object Profile {
             s"exerciseByKey @${tmplRef.qualifiedName} ${name}"
           case FetchByKeyDefRef(tmplRef) => s"fetchByKey @${tmplRef.qualifiedName}"
           case LookupByKeyDefRef(tmplRef) => s"lookupByKey @${tmplRef.qualifiedName}"
+          case QueryNByKeyDefRef(tmplRef) => s"queryNByKey @${tmplRef.qualifiedName}"
           case CreateAndExerciseLabel(tmplRef, name) =>
             s"createAndExercise @${tmplRef.qualifiedName} ${name}"
           case ExceptionMessageDefRef(typeId) => s"message @${typeId.qualifiedName}"

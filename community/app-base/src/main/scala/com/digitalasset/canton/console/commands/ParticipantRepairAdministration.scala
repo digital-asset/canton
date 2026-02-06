@@ -665,7 +665,7 @@ class ParticipantRepairAdministration(
        |- validation: The validations which need to be done to the connection.
       """
   )
-  def perform_synchronizer_upgrade(
+  def perform_manual_lsu(
       currentPhysicalSynchronizerId: PhysicalSynchronizerId,
       successorPhysicalSynchronizerId: PhysicalSynchronizerId,
       announcedUpgradeTime: CantonTimestamp,
@@ -676,7 +676,7 @@ class ParticipantRepairAdministration(
       consoleEnvironment.run {
         runner.adminCommand(
           ParticipantAdminCommands.ParticipantRepairManagement
-            .PerformSynchronizerUpgrade(
+            .PerformManualLsu(
               currentPSId = currentPhysicalSynchronizerId,
               successorPSId = successorPhysicalSynchronizerId,
               upgradeTime = announcedUpgradeTime,

@@ -303,6 +303,21 @@ object ConsoleCommandBackwardsCompatibilityReaderTest {
     "console-environment.health_.dump",
     "console-environment.health_.help",
     "console-environment.health_.status",
+    // LastErrorsAppender was removed, along with the console commands
+    "console-macros.logging.last_errors",
+    "console-macros.logging.last_error_trace",
+    "remote-sequencer.health.last_errors",
+    "remote-sequencer.health.last_error_trace",
+    "remote-mediator.health.last_errors",
+    "remote-mediator.health.last_error_trace",
+    "remote-participant.health.last_errors",
+    "remote-participant.health.last_error_trace",
+    "local-sequencer.health.last_errors",
+    "local-sequencer.health.last_error_trace",
+    "local-mediator.health.last_errors",
+    "local-mediator.health.last_error_trace",
+    "local-participant.health.last_errors",
+    "local-participant.health.last_error_trace",
   )
 
   /** Checks that `origCmd` has a corresponding command in `currentCommands` without breaking

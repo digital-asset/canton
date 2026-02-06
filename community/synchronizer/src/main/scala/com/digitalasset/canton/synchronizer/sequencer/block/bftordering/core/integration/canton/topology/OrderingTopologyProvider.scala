@@ -18,15 +18,16 @@ trait OrderingTopologyProvider[E <: Env[E]] {
     *   The timestamp with which to query the topology client for a topology snapshot. See
     *   [[com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime]]
     *   for details.
-    * @param traceContext
-    *   The trace context.
+    * @param checkPendingChanges
+    *   Whether to check if there are pending topology changes that have not yet been activated.
     * @return
     *   A future that completes and yields the requested topology only if at least the immediate
     *   predecessor has been successfully sequenced and is visible to the sequencer's topology
     *   processor.
     */
   def getOrderingTopologyAt(
-      activationTime: TopologyActivationTime
+      activationTime: TopologyActivationTime,
+      checkPendingChanges: Boolean,
   )(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[Option[(OrderingTopology, CryptoProvider[E])]]

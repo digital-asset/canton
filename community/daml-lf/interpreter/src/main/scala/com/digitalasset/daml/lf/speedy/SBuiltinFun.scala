@@ -2472,6 +2472,21 @@ private[lf] object SBuiltinFun {
     }
   }
 
+  final case object SQueryNByKey extends SBuiltinFun(2) {
+    override private[speedy] def execute[Q](
+                                             args: ArraySeq[SValue],
+                                             machine: Machine[Q],
+                                           ): Control[Nothing] = {
+      val nrOfResults = getSInt64(args, 0)
+      val key = args(1)
+
+      // the filling in is up to Remy
+
+      crash(s"SQueryNByKey not implemented ${nrOfResults} ${key}")
+    }
+  }
+
+
   object SBExperimental {
 
     private object SBExperimentalAnswer extends SBuiltinFun(1) {

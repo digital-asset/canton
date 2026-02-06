@@ -1558,7 +1558,7 @@ trait TopologyManagementIntegrationTest
 
       val announcementMapping = synchronizerOwners1
         .map { owner =>
-          owner.topology.synchronizer_upgrade.announcement.propose(
+          owner.topology.lsu.announcement.propose(
             PhysicalSynchronizerId(daId, NonNegativeInt.two, testedProtocolVersion),
             upgradeTime,
           )
@@ -1570,7 +1570,7 @@ trait TopologyManagementIntegrationTest
       eventually() {
         forAll(
           synchronizerOwners1.map(
-            _.topology.synchronizer_upgrade.announcement
+            _.topology.lsu.announcement
               .list(daId)
               .loneElement
               .item
@@ -1578,7 +1578,7 @@ trait TopologyManagementIntegrationTest
         )(result => result shouldBe announcementMapping)
       }
       synchronizerOwners1.foreach(
-        _.topology.synchronizer_upgrade.announcement.revoke(
+        _.topology.lsu.announcement.revoke(
           PhysicalSynchronizerId(daId, NonNegativeInt.two, testedProtocolVersion),
           upgradeTime,
         )

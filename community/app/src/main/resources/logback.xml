@@ -52,11 +52,6 @@
   </if>
 
   <if condition='isDefined("LOG_FILE_FLAT")'>
-    <if condition='isDefined("LOG_LAST_ERRORS")'>
-      <then><variable name="log_last_errors_filter" value="com.digitalasset.canton.logging.CantonFilterEvaluator"/></then>
-      <!-- dummy filter which will have no effect, to reduce code replication -->
-      <else><variable name="log_last_errors_filter" value="ch.qos.logback.classic.filter.ThresholdFilter"/></else>
-    </if>
     <then>
       <if condition='isDefined("LOG_FORMAT_JSON")'>
         <then>
@@ -71,7 +66,6 @@
                 <levelValue>[ignore]</levelValue>
               </fieldNames>
             </encoder>
-            <filter class="${log_last_errors_filter}" />
           </appender>
         </then>
         <else>
@@ -84,7 +78,6 @@
               <!-- attempt to place the correlation-id with a trailing space, however replace with an empty string if it's empty -->
               <pattern>%date [%thread] %-5level %logger{10} &entityCorrelationIdTrailingSpaceReplace;</pattern>
             </encoder>
-            <filter class="${log_last_errors_filter}" />
           </appender>
         </else>
       </if>
@@ -111,7 +104,6 @@
                     <levelValue>[ignore]</levelValue>
                   </fieldNames>
                 </encoder>
-                <filter class="${log_last_errors_filter}" />
               </appender>
             </then>
             <else>
@@ -130,7 +122,6 @@
                   <!-- attempt to place the correlation-id with a trailing space, however replace with an empty string if it's empty -->
                   <pattern>%date [%thread] %-5level %logger{35} &entityCorrelationIdTrailingSpaceReplace;</pattern>
                 </encoder>
-                <filter class="${log_last_errors_filter}" />
               </appender>
             </else>
           </if>
@@ -243,46 +234,8 @@
     </then>
   </if>
 
-  <!-- If log last errors is true, we set the DA loggers to debug log level but filter out at log level canton on the main log files -->
-  <if condition='isDefined("LOG_LAST_ERRORS")'>
-    <then>
-      <logger name="com.digitalasset" level="DEBUG"/>
-      <logger name="com.daml" level="DEBUG"/>
-    </then>
-    <else>
-      <logger name="com.digitalasset" level="${LOG_LEVEL_CANTON:-INFO}"/>
-      <logger name="com.daml" level="${LOG_LEVEL_CANTON:-INFO}"/>
-    </else>
-  </if>
-
-  <if condition='isDefined("LOG_LAST_ERRORS")'>
-    <then>
-      <appender name="FILE_LAST_ERRORS" class="ch.qos.logback.core.FileAppender">
-        <file>${LOG_LAST_ERRORS_FILE_NAME:-log/canton_errors.log}</file>
-        <append>${LOG_FILE_APPEND:-true}</append>
-        <encoder>
-          <!-- attempt to place the correlation-id with a trailing space, however replace with an empty string if it's empty -->
-          <pattern>%date [%thread] %-5level %logger{10} &entityCorrelationIdTrailingSpaceReplace;</pattern>
-        </encoder>
-      </appender>
-
-      <if condition='"false".equals(p("LOG_IMMEDIATE_FLUSH"))'>
-        <then>
-            <variable name="REWRITE_LOG_LEVEL_MODE" value="REWRITE_LOG_LEVEL"/>
-        </then>
-        <else>
-            <variable name="REWRITE_LOG_LEVEL_MODE" value="REWRITE_LOG_LEVEL_SYNC"/>
-        </else>
-      </if>
-
-      <!-- Buffer errors for the last_errors command before passing them on to the rewrite appender -->
-      <appender name="LAST_ERRORS" class="com.digitalasset.canton.logging.LastErrorsAppender">
-        <appender-ref ref="${REWRITE_LOG_LEVEL_MODE}" />
-        <lastErrorsFileAppenderName>FILE_LAST_ERRORS</lastErrorsFileAppenderName>
-        <appender-ref ref="FILE_LAST_ERRORS"/>
-      </appender>
-    </then>
-  </if>
+  <logger name="com.digitalasset" level="${LOG_LEVEL_CANTON:-INFO}"/>
+  <logger name="com.daml" level="${LOG_LEVEL_CANTON:-INFO}"/>
 
     <if condition='isDefined("LOG_ACCESS")'>
         <then>
@@ -335,27 +288,19 @@
     </if>
 
   <root level="${LOG_LEVEL_ROOT:-INFO}"></root>
-  <if condition='isDefined("LOG_LAST_ERRORS")'>
+  <if condition='"false".equals(p("LOG_IMMEDIATE_FLUSH"))'>
     <then>
       <root>
-        <appender-ref ref="LAST_ERRORS" />
+        <appender-ref ref="REWRITE_LOG_LEVEL" />
       </root>
     </then>
     <else>
-      <if condition='"false".equals(p("LOG_IMMEDIATE_FLUSH"))'>
-        <then>
-          <root>
-            <appender-ref ref="REWRITE_LOG_LEVEL" />
-          </root>
-        </then>
-        <else>
-          <root>
-            <!-- default choice, chosen if LOG_IMMEDIATE_FLUSH is undefined -->
-            <appender-ref ref="REWRITE_LOG_LEVEL_SYNC" />
-          </root>
-        </else>
-      </if>
+      <root>
+        <!-- default choice, chosen if LOG_IMMEDIATE_FLUSH is undefined -->
+        <appender-ref ref="REWRITE_LOG_LEVEL_SYNC" />
+      </root>
     </else>
   </if>
+
 
 </configuration>

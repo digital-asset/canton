@@ -24,10 +24,10 @@ import com.digitalasset.canton.synchronizer.sequencer.admin.data.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockOrderer
 import com.digitalasset.canton.synchronizer.sequencer.errors.*
-import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.LSUSequencerError
+import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.LsuSequencerError
 import com.digitalasset.canton.synchronizer.sequencer.traffic.TimestampSelector.TimestampSelector
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
-  LSUTrafficState,
+  LsuTrafficState,
   SequencerRateLimitError,
   SequencerRateLimitManager,
   SequencerTrafficStatus,
@@ -205,13 +205,13 @@ trait Sequencer
       announcementEffectiveTime: EffectiveTime,
   )(implicit traceContext: TraceContext): Unit
 
-  def getLSUTrafficControlState(implicit
+  def getLsuTrafficControlState(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, LSUSequencerError, LSUTrafficState]
+  ): EitherT[FutureUnlessShutdown, LsuSequencerError, LsuTrafficState]
 
-  def setLSUTrafficControlState(
-      state: LSUTrafficState
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, LSUSequencerError, Unit]
+  def setLsuTrafficControlState(
+      state: LsuTrafficState
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, LsuSequencerError, Unit]
 }
 
 /** Sequencer pruning interface.

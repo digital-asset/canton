@@ -213,29 +213,4 @@ abstract class HealthAdministration[S <: NodeStatus.Status](
       new StatusAdminCommands.SetLogLevel(level)
     )
   }
-
-  @Help.Summary("Show the last errors logged")
-  @Help.Description(
-    """Returns a map with the trace-id as key and the most recent error messages as
-      |value. Requires that --log-last-errors is enabled (and not turned off).
-      """
-  )
-  def last_errors(): Map[String, String] = consoleEnvironment.run {
-    adminCommand(
-      new StatusAdminCommands.GetLastErrors()
-    )
-  }
-
-  @Help.Summary("Show all messages logged with the given traceId in a recent interval")
-  @Help.Description(
-    """Returns a list of buffered log messages associated to a given trace-id. Usually,
-      |the trace-id is taken from last_errors().
-      """
-  )
-  def last_error_trace(traceId: String): Seq[String] = consoleEnvironment.run {
-    adminCommand(
-      new StatusAdminCommands.GetLastErrorTrace(traceId)
-    )
-  }
-
 }

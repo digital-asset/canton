@@ -135,53 +135,6 @@ class CliIntegrationTest extends ReleaseArtifactIntegrationTestUtils {
         assert(contents.contains(",\"message\":\"Starting Canton version "))
     }
 
-    "run with log last errors disabled" in { processLogger =>
-      s"$cantonBin --log-last-errors=false --config $simpleConf $cantonShouldStartFlags" ! processLogger
-      checkOutput(
-        processLogger,
-        shouldContain = Seq(successMsg),
-      )
-    }
-
-    "log last errors in separate file" in { processLogger =>
-      s"$cantonBin --config $cacheTurnOff --log-truncate --log-last-errors=true --log-file-appender flat --config $simpleConf --no-tty --bootstrap $resourceDir/scripts/bootstrap-with-error.canton --log-file-name log/canton-without-debug.log" ! processLogger
-
-      // Make sure the main log file does not contain debug-level log entries
-      val logFile = File("log/canton-without-debug.log")
-      val logContents = logFile.contentAsString
-      assert(!logContents.contains("some logging debug event"))
-      assert(logContents.contains("some logging error"))
-
-      val lastErrorsLogFile = File("log/canton_errors.log")
-      lastErrorsLogFile.lineCount shouldEqual 4
-      val errorContents = lastErrorsLogFile.contentAsString
-      // Errors file must include debug output
-      forEvery(List("some logging debug event", "some logging error"))(errorContents.contains)
-    }
-
-    "dynamically set log level with log last errors enabled" in { processLogger =>
-      s"$cantonBin --config $cacheTurnOff --log-truncate --log-last-errors=true --log-file-appender flat --config $simpleConf --no-tty --bootstrap $resourceDir/scripts/bootstrap-with-error-dynamic.canton --log-file-name log/canton-partial-debug.log" ! processLogger
-
-      val logFile = File("log/canton-partial-debug.log")
-      val logContents = logFile.contentAsString
-
-      assert(!logContents.contains("some logging debug event"))
-      assert(logContents.contains("final logging debug event"))
-
-      val lastErrorsLogFile = File("log/canton_errors.log")
-      lastErrorsLogFile.lineCount shouldEqual 6
-      val errorContents = lastErrorsLogFile.contentAsString
-      // Errors file must include debug output
-      forEvery(
-        List(
-          "some logging debug event",
-          "some logging error",
-          "final logging debug event",
-          "final logging error",
-        )
-      )(errorContents.contains)
-    }
-
     "run with log file appender off" in { processLogger =>
       s"$cantonBin --log-file-appender=off --config $simpleConf $cantonShouldStartFlags" ! processLogger
       checkOutput(

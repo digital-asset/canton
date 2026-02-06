@@ -30,7 +30,7 @@ import com.digitalasset.canton.synchronizer.sequencer.admin.data.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockOrderer
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
-  LSUSequencerError,
+  LsuSequencerError,
   SnapshotNotFound,
 }
 import com.digitalasset.canton.synchronizer.sequencer.errors.{
@@ -45,7 +45,7 @@ import com.digitalasset.canton.synchronizer.sequencer.store.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.traffic.TimestampSelector.TimestampSelector
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
-  LSUTrafficState,
+  LsuTrafficState,
   SequencerRateLimitError,
   SequencerRateLimitManager,
   SequencerTrafficStatus,
@@ -542,16 +542,16 @@ class DatabaseSequencer(
 
   override private[canton] def orderer: Option[BlockOrderer] = None
 
-  override def getLSUTrafficControlState(implicit
+  override def getLsuTrafficControlState(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, LSUSequencerError, LSUTrafficState] =
+  ): EitherT[FutureUnlessShutdown, LsuSequencerError, LsuTrafficState] =
     throw new UnsupportedOperationException(
       "Traffic control is not supported by the database sequencer"
     )
 
-  override def setLSUTrafficControlState(state: LSUTrafficState)(implicit
+  override def setLsuTrafficControlState(state: LsuTrafficState)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, LSUSequencerError, Unit] =
+  ): EitherT[FutureUnlessShutdown, LsuSequencerError, Unit] =
     throw new UnsupportedOperationException(
       "Traffic control is not supported by the database sequencer"
     )

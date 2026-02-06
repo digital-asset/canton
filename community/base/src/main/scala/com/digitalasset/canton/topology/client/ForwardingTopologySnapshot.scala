@@ -165,7 +165,7 @@ class ForwardingTopologySnapshot(
 
   override def sequencerConnectionSuccessors()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SequencerId, SequencerConnectionSuccessor]] =
+  ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
     parent.sequencerConnectionSuccessors()
 }
 
@@ -445,6 +445,6 @@ class CachingTopologySnapshot(
 
   override def sequencerConnectionSuccessors()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SequencerId, SequencerConnectionSuccessor]] =
+  ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
     parent.sequencerConnectionSuccessors()
 }

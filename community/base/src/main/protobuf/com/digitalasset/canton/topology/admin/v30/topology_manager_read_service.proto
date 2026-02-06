@@ -29,8 +29,8 @@ service TopologyManagerReadService {
   rpc ListMediatorSynchronizerState(ListMediatorSynchronizerStateRequest) returns (ListMediatorSynchronizerStateResponse);
   rpc ListSequencerSynchronizerState(ListSequencerSynchronizerStateRequest) returns (ListSequencerSynchronizerStateResponse);
 
-  rpc ListSynchronizerUpgradeAnnouncement(ListSynchronizerUpgradeAnnouncementRequest) returns (ListSynchronizerUpgradeAnnouncementResponse);
-  rpc ListSequencerConnectionSuccessor(ListSequencerConnectionSuccessorRequest) returns (ListSequencerConnectionSuccessorResponse);
+  rpc ListLsuAnnouncement(ListLsuAnnouncementRequest) returns (ListLsuAnnouncementResponse);
+  rpc ListLsuSequencerConnectionSuccessor(ListLsuSequencerConnectionSuccessorRequest) returns (ListLsuSequencerConnectionSuccessorResponse);
 
   rpc ListAvailableStores(ListAvailableStoresRequest) returns (ListAvailableStoresResponse);
   rpc ListAll(ListAllRequest) returns (ListAllResponse);
@@ -240,28 +240,28 @@ message ListSequencerSynchronizerStateResponse {
   repeated Result results = 1;
 }
 
-message ListSynchronizerUpgradeAnnouncementRequest {
+message ListLsuAnnouncementRequest {
   BaseQuery base_query = 1;
   string filter_synchronizer_id = 2;
 }
 
-message ListSynchronizerUpgradeAnnouncementResponse {
+message ListLsuAnnouncementResponse {
   message Result {
     BaseResult context = 1;
-    com.digitalasset.canton.protocol.v30.SynchronizerUpgradeAnnouncement item = 2;
+    com.digitalasset.canton.protocol.v30.LsuAnnouncement item = 2;
   }
   repeated Result results = 1;
 }
 
-message ListSequencerConnectionSuccessorRequest {
+message ListLsuSequencerConnectionSuccessorRequest {
   BaseQuery base_query = 1;
   string filter_sequencer_id = 2;
 }
 
-message ListSequencerConnectionSuccessorResponse {
+message ListLsuSequencerConnectionSuccessorResponse {
   message Result {
     BaseResult context = 1;
-    com.digitalasset.canton.protocol.v30.SequencerConnectionSuccessor item = 2;
+    com.digitalasset.canton.protocol.v30.LsuSequencerConnectionSuccessor item = 2;
   }
   repeated Result results = 1;
 }

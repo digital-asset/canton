@@ -395,7 +395,11 @@ object ConfigTransforms {
         .replace(config.NonNegativeFiniteDuration.ofDays(10000))
     )
 
-    mainUpdates compose sequencerWriteBound
+    // TODO(#30068): Enable session keys after sim clock advances are synced
+    val disableSessionKeys =
+      ConfigTransforms.setSessionSigningKeys(SessionSigningKeysConfig.disabled)
+
+    mainUpdates compose sequencerWriteBound compose disableSessionKeys
   }
 
   /** Enable the testing time service in the ledger API */

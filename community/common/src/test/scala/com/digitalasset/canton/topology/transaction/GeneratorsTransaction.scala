@@ -105,11 +105,11 @@ final class GeneratorsTransaction(
     } yield HostingParticipant(pid, permission, onboarding)
   )
 
-  implicit val synchronizerUpgradeAnnouncementArb: Arbitrary[SynchronizerUpgradeAnnouncement] =
+  implicit val synchronizerUpgradeAnnouncementArb: Arbitrary[LsuAnnouncement] =
     Arbitrary(for {
       psid <- Arbitrary.arbitrary[PhysicalSynchronizerId]
       upgradeTime <- Arbitrary.arbitrary[CantonTimestamp]
-    } yield SynchronizerUpgradeAnnouncement(psid, upgradeTime))
+    } yield LsuAnnouncement(psid, upgradeTime))
 
   implicit val keyMappingArb: Arbitrary[KeyMapping] = genArbitrary
 

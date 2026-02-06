@@ -18,7 +18,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
-import com.digitalasset.canton.participant.sync.LogicalSynchronizerUpgradeCallback
+import com.digitalasset.canton.participant.sync.LsuCallback
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
@@ -103,7 +103,7 @@ class ParticipantTopologyTerminateProcessingTest
       DefaultTestIdentities.participant1,
       pauseSynchronizerIndexingDuringPartyReplication = false,
       synchronizerPredecessor = synchronizerPredecessor,
-      lsuCallback = LogicalSynchronizerUpgradeCallback.NoOp,
+      lsuCallback = LsuCallback.NoOp,
       retrieveAndStoreMissingSequencerIds = _ => EitherTUtil.unitUS,
       loggerFactory,
     )

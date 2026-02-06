@@ -35,12 +35,10 @@ trait ReleaseArtifactIntegrationTestUtils extends FixtureAnyWordSpec with BaseTe
       shouldNotContain: Seq[String] = Seq(),
       shouldSucceed: Boolean = true,
   ): Unit = {
-    // Filter out false positives in help message for last-errors option
+    // Filter out false positives in help message
     val filters = List(
       jsonTtyWarning,
       ttyWarning,
-      "last_errors",
-      "last-errors",
       "log-access-errors",
       "access error",
       // slow ExecutionContextMonitor warnings

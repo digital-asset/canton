@@ -28,6 +28,9 @@ import OrderingTopology.{
   * Being unsorted, sequencer IDs must not be iterated over without sorting first, as the iteration
   * order is not deterministic and could introduce nondeterminism in the protocol and/or simulation
   * testing.
+  *
+  * @param areTherePendingCantonTopologyChanges
+  *   `None` when `getOrderingTopologyAt` is called with `checkPendingChanges` set to `false`.
   */
 final case class OrderingTopology(
     // NOTE: make sure to change `toString` when adding useful information
@@ -35,7 +38,7 @@ final case class OrderingTopology(
     sequencingParameters: SequencingParameters,
     maxBytesToDecompress: MaxBytesToDecompress,
     activationTime: TopologyActivationTime,
-    areTherePendingCantonTopologyChanges: Boolean,
+    areTherePendingCantonTopologyChanges: Option[Boolean],
 ) extends MessageAuthorizer {
 
   lazy val size: Int = nodesTopologyInfo.size
@@ -93,7 +96,7 @@ object OrderingTopology {
       nodes: Set[BftNodeId],
       sequencingParameters: SequencingParameters = SequencingParameters.Default,
       activationTime: TopologyActivationTime = TopologyActivationTime(CantonTimestamp.MinValue),
-      areTherePendingCantonTopologyChanges: Boolean = false,
+      areTherePendingCantonTopologyChanges: Option[Boolean] = Some(false),
       nodesTopologyInfos: Map[BftNodeId, NodeTopologyInfo] = Map.empty,
   ): OrderingTopology =
     OrderingTopology(

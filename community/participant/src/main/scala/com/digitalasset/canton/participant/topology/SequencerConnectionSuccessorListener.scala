@@ -24,7 +24,7 @@ import com.digitalasset.canton.topology.processing.{
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
-import com.digitalasset.canton.topology.{KnownPhysicalSynchronizerId, LSU, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.{KnownPhysicalSynchronizerId, Lsu, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureUnlessShutdownUtil
 import com.digitalasset.canton.{SequencerCounter, SynchronizerAlias}
@@ -85,7 +85,7 @@ class SequencerConnectionSuccessorListener(
       (synchronizerUpgradeOngoing, _) <- OptionT(snapshot.synchronizerUpgradeOngoing())
       SynchronizerSuccessor(successorPSId, upgradeTime) = synchronizerUpgradeOngoing
 
-      logger = LSU.Logger(loggerFactory, getClass, synchronizerUpgradeOngoing)
+      logger = Lsu.Logger(loggerFactory, getClass, synchronizerUpgradeOngoing)
 
       _ = logger.info(
         s"Checking whether the participant can migrate $alias from ${activeConfig.configuredPSId} to $successorPSId"

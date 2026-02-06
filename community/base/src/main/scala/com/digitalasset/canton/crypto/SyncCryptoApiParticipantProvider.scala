@@ -205,9 +205,9 @@ object SyncCryptoClient {
       loggingContext.debug(
         s"Waiting for topology snapshot at $timestamp; desired=$desiredTimestamp, known until ${client.topologyKnownUntilTimestamp}; previous $previousTimestampO"
       )
-      client.awaitSnapshotUSSupervised(
+      client.awaitHypotheticalSnapshotUSSupervised(
         s"requesting topology snapshot at $timestamp; desired=$desiredTimestamp, previousO=$previousTimestampO, known until=${client.topologyKnownUntilTimestamp}"
-      )(timestamp)
+      )(timestamp, desiredTimestamp)
     }
   }
 
@@ -294,6 +294,14 @@ class SynchronizerCryptoClient private (
       traceContext: TraceContext
   ): FutureUnlessShutdown[SynchronizerSnapshotSyncCryptoApi] =
     ips.awaitSnapshot(timestamp).map(create)
+
+  override def awaitHypotheticalSnapshot(
+      timestamp: CantonTimestamp,
+      desiredTimestamp: CantonTimestamp,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[SynchronizerSnapshotSyncCryptoApi] =
+    ips.awaitHypotheticalSnapshot(timestamp, desiredTimestamp).map(create)
 
   def create(snapshot: TopologySnapshot): SynchronizerSnapshotSyncCryptoApi =
     new SynchronizerSnapshotSyncCryptoApi(

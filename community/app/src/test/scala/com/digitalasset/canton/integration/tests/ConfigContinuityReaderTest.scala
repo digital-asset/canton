@@ -51,7 +51,7 @@ class ConfigContinuityReaderTest extends AnyWordSpec with BaseTest with S3Synchr
 
           CantonConfig
             .parseAndLoad(Seq(transformedConfigFile).map(_.toJava), None)
-            .isRight shouldBe true
+            .value shouldBe a[CantonConfig]
         }
       }
   }

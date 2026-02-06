@@ -142,7 +142,7 @@ class GrpcTopologyManagerWriteService(
           (op, serial, validatedMapping, signingKeys, forceChanges) = mapping
 
           // TODO(#28972) Remove this check once LSU is stable
-          _ <- EitherT.fromEither[FutureUnlessShutdown](ensureLSUPreviewEnabled(validatedMapping))
+          _ <- EitherT.fromEither[FutureUnlessShutdown](ensureLsuPreviewEnabled(validatedMapping))
 
           manager <- targetManagerET(store)
           signedTopoTx <- manager
@@ -163,19 +163,20 @@ class GrpcTopologyManagerWriteService(
   }
 
   // LSU announcement require preview features enabled
-  private def ensureLSUPreviewEnabled(
+  // TODO(#28972) Remove when LSU is stable
+  private def ensureLsuPreviewEnabled(
       mapping: TopologyMapping
-  )(implicit traceContext: TraceContext): Either[RpcError, Unit] = mapping
-    .select[SynchronizerUpgradeAnnouncement]
-    .fold(().asRight[RpcError])(_ =>
-      Either
-        .cond(
-          nodeParameters.enablePreviewFeatures,
-          (),
-          TopologyManagerError.PreviewFeature.Error(operation = "synchronizer upgrade announcement"),
-        )
-        .leftWiden[RpcError]
-    )
+  )(implicit traceContext: TraceContext): Either[RpcError, Unit] = {
+    val isLsuMapping = TopologyMapping.Code.lsuMappings.contains(mapping.code)
+    Either
+      .cond(
+        !isLsuMapping || nodeParameters.enablePreviewFeatures,
+        (),
+        TopologyManagerError.PreviewFeature
+          .Error(operation = "synchronizer upgrade announcement"),
+      )
+      .leftWiden[RpcError]
+  }
 
   override def signTransactions(
       requestP: v30.SignTransactionsRequest

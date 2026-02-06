@@ -119,6 +119,7 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
         sql"AND t.namespace = criteria.ns " ++
         sql"AND t.identifier = criteria.ident " ++
         sql"AND (t.valid_until IS NULL OR t.valid_until >= criteria.v_until) " ++
+        sql"AND t.rejection_reason is NULL " ++
         sql"ORDER BY valid_until DESC, batch_idx DESC ";
     storage
       .query(query.as[QueryResult], "fetch-all-topo")

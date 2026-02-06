@@ -709,7 +709,9 @@ class TopologyStateWriteThroughCache(
                 // we might load transactions which we are going to reprocess now. We deal with this by simply
                 // just dropping any modification of the future and resetting the state to just before this timestamp
                 val state =
-                  StateData.fromLoaded(key, txs, effective).dropPendingChanges(effective.value)
+                  StateData
+                    .fromLoaded(key, txs, effective, enableConsistencyChecks)
+                    .dropPendingChanges(effective.value)
                 val loaded = Loaded(state, fetchHistory(key))
                 stateCache.put(key, loaded).discard
                 completePromise(promise, loaded)
@@ -810,7 +812,10 @@ class TopologyStateWriteThroughCache(
       // start eviction if necessary. we only need to start it if we had a cache miss
       evictIfNecessary()
       aggregator.run(key.toStateKeyFetch(validUntilInclusive)).map { txs =>
-        val loaded = Loaded(StateData.fromLoaded(key, txs, validUntilInclusive), fetchHistory(key))
+        val loaded = Loaded(
+          StateData.fromLoaded(key, txs, validUntilInclusive, enableConsistencyChecks),
+          fetchHistory(key),
+        )
         stateCache.put(key, loaded).discard
         completePromise(promise, loaded)
         // mark this as loaded (this will schedule its eviction later on)
@@ -930,8 +935,8 @@ class TopologyStateWriteThroughCache(
 
   /** Find the current transaction active for the given unique key
     *
-    * Used by the [[com.digitalasset.canton.topology.TopologyStateProcessor]] to get the current
-    * inStore transaction.
+    * Used by the [[com.digitalasset.canton.topology.processing.TopologyStateProcessor]] to get the
+    * current inStore transaction.
     *
     * @param timeHint
     *   an initial time hint to have a reference time for how much history we load into the cache by
@@ -957,8 +962,8 @@ class TopologyStateWriteThroughCache(
 
   /** Lookup the pending proposal for the given transaction
     *
-    * Used by [[com.digitalasset.canton.topology.TopologyStateProcessor]] to check for any pending
-    * proposal for the given transaction
+    * Used by [[com.digitalasset.canton.topology.processing.TopologyStateProcessor]] to check for
+    * any pending proposal for the given transaction
     */
   def lookupPendingProposal(
       timeHint: EffectiveTime,
@@ -1294,7 +1299,28 @@ object TopologyStateWriteThroughCache {
         stateKey: StateKey,
         initial: Seq[GenericStoredTopologyTransaction],
         validUntilInclusive: EffectiveTime,
-    ): StateData = {
+        checkConsistency: Boolean,
+    )(implicit errorLoggingContext: ErrorLoggingContext): StateData = {
+      if (checkConsistency) {
+        val invalid = initial.filter { tx =>
+          tx.rejectionReason.nonEmpty || StateKey(tx.mapping) != stateKey || tx.validUntil.exists(
+            _ < validUntilInclusive
+          )
+        }
+        ErrorUtil.requireState(
+          invalid.isEmpty,
+          s"Transactions loaded into the state key $stateKey don't seem valid:\n  " + invalid
+            .mkString("\n  "),
+        )
+        initial
+          .foldLeft(Set.empty[GenericStoredTopologyTransaction]) { case (acc, elem) =>
+            if (acc.contains(elem) && !elem.validUntil.contains(elem.validFrom)) {
+              ErrorUtil.invalidState(s"Found duplicate transaction in state $elem")
+            }
+            acc + elem
+          }
+          .discard
+      }
       val (head, tail) = initial.partition(_.validUntil.isEmpty)
       val sortedTail =
         tail

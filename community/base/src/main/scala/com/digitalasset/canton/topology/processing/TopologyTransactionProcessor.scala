@@ -42,15 +42,8 @@ import com.digitalasset.canton.topology.store.{
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.checks.RequiredTopologyMappingChecks
-import com.digitalasset.canton.topology.transaction.{
-  SynchronizerUpgradeAnnouncement,
-  TopologyChangeOp,
-}
-import com.digitalasset.canton.topology.{
-  PhysicalSynchronizerId,
-  TopologyManagerError,
-  TopologyStateProcessor,
-}
+import com.digitalasset.canton.topology.transaction.{LsuAnnouncement, TopologyChangeOp}
+import com.digitalasset.canton.topology.{PhysicalSynchronizerId, TopologyManagerError}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil, MonadUtil, SimpleExecutionQueue}
 
@@ -491,7 +484,7 @@ class TopologyTransactionProcessor(
       before the record order publisher gets pinged.
        */
       validUpgradeAnnouncements = validTransactions
-        .mapFilter(_.selectMapping[SynchronizerUpgradeAnnouncement])
+        .mapFilter(_.selectMapping[LsuAnnouncement])
 
       _ = validUpgradeAnnouncements.foreach { announcement =>
         announcement.operation match {
@@ -537,7 +530,7 @@ object TopologyTransactionProcessor {
     ): FutureUnlessShutdown[TopologyTransactionProcessor]
   }
 
-  def createProcessorAndClientForSynchronizerWithWriteThroughCache(
+  def createProcessorAndClientForSynchronizer(
       topologyStore: TopologyStore[TopologyStoreId.SynchronizerStore],
       synchronizerUpgradeTime: Option[CantonTimestamp],
       pureCrypto: SynchronizerCryptoPureApi,
@@ -579,7 +572,7 @@ object TopologyTransactionProcessor {
       loggerFactory,
     )
 
-    val writeThroughCacheClientF = WriteThroughCacheSynchronizerTopologyClient.create(
+    val topologyClientF = TopologyClientFactory.create(
       clock,
       staticSynchronizerParameters,
       topologyStore,
@@ -593,7 +586,7 @@ object TopologyTransactionProcessor {
       loggerFactory,
     )(sequencerSnapshotTimestamp)
 
-    writeThroughCacheClientF.map { client =>
+    topologyClientF.map { client =>
       // Subscribe the new client object to updates from the subscriber
       processor.subscribe(client)
       // return the processor and the client to the application

@@ -103,8 +103,9 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
 - A new indexer pipeline batching strategy added under the feature flag `useWeighetdBatching`. When switched on, the
   batches are created using their estimated database processing time using the `submissionBatchInsertionSize` as a limit
   for individual batches
-
-* Additional metrics for the ACS commitment processor: `daml.participant.sync.commitments.last-incoming-received`, `daml.participant.sync.commitments.last-incoming-processed`, `daml.participant.sync.commitments.last-locally-completed`, and `daml.participant.sync.commitments.last-locally-checkpointed`.
+- Additional metrics for the ACS commitment processor: `daml.participant.sync.commitments.last-incoming-received`, `daml.participant.sync.commitments.last-incoming-processed`, `daml.participant.sync.commitments.last-locally-completed`, and `daml.participant.sync.commitments.last-locally-checkpointed`.
+- *BREAKING* Removed the `LastErrorsAppender` along with the Admin API endpoints `StatusService.GetLastErrors` and `StatusServiceGetLastErrorTrace`, as
+  well as the corresponding console commands `last_errors` and `last_error_trace`.
 
 ### Preview Features
 - preview feature

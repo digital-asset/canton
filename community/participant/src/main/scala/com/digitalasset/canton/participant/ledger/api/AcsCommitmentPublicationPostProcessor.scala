@@ -6,7 +6,7 @@ package com.digitalasset.canton.participant.ledger.api
 import com.digitalasset.canton.ledger.participant.state.Update.{
   AcsChangeSequencedUpdate,
   EmptyAcsPublicationRequired,
-  LogicalSynchronizerUpgradeTimeReached,
+  LsuTimeReached,
 }
 import com.digitalasset.canton.ledger.participant.state.{
   AcsChangeFactory,
@@ -63,7 +63,7 @@ class AcsCommitmentPublicationPostProcessor(
           acsChangeFactoryO = None,
         )
 
-      case upgradeTimeReached: LogicalSynchronizerUpgradeTimeReached =>
+      case upgradeTimeReached: LsuTimeReached =>
         val (synchronizerId, synchronizerIndex) = upgradeTimeReached.synchronizerIndex
 
         connectedSynchronizersLookupContainer

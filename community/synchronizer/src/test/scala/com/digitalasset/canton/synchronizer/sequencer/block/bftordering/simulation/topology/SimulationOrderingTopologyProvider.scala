@@ -31,7 +31,10 @@ class SimulationOrderingTopologyProvider(
     loggerFactory: NamedLoggerFactory,
 ) extends OrderingTopologyProvider[SimulationEnv] {
 
-  override def getOrderingTopologyAt(activationTime: TopologyActivationTime)(implicit
+  override def getOrderingTopologyAt(
+      activationTime: TopologyActivationTime,
+      checkPendingChanges: Boolean,
+  )(implicit
       traceContext: TraceContext
   ): SimulationFuture[Option[(OrderingTopology, CryptoProvider[SimulationEnv])]] =
     SimulationFuture(s"getOrderingTopologyAt($activationTime)") { () =>
@@ -62,7 +65,8 @@ class SimulationOrderingTopologyProvider(
           BaseTest.defaultMaxBytesToDecompress,
           activationTime,
           // Switch the value deterministically so that we trigger all code paths.
-          areTherePendingCantonTopologyChanges = activationTime.value.toMicros % 2 == 0,
+          areTherePendingCantonTopologyChanges =
+            Option.when(checkPendingChanges)(activationTime.value.toMicros % 2 == 0),
         )
       Success(
         Some(

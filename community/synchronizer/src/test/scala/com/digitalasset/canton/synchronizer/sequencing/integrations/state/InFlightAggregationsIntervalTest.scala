@@ -146,20 +146,6 @@ class InFlightAggregationsIntervalTest extends AsyncWordSpec with BaseTest {
     suppressLogWarnings {
       getInFlightAggregationIntervals(
         PositiveFiniteDuration.ofMillis(4),
-        sequencingTimeBound1,
-        CantonTimestamp.MaxValue,
-      ) shouldBe Seq(sequencingTimeBound1 -> CantonTimestamp.MaxValue)
-    }
-    suppressLogWarnings {
-      getInFlightAggregationIntervals(
-        PositiveFiniteDuration.ofMillis(4),
-        CantonTimestamp.Epoch,
-        CantonTimestamp.MaxValue,
-      ) shouldBe Seq(CantonTimestamp.Epoch -> CantonTimestamp.MaxValue)
-    }
-    suppressLogWarnings {
-      getInFlightAggregationIntervals(
-        PositiveFiniteDuration.ofMillis(4),
         CantonTimestamp.MinValue,
         CantonTimestamp.MaxValue,
       ) shouldBe Seq(CantonTimestamp.MinValue -> CantonTimestamp.MaxValue)

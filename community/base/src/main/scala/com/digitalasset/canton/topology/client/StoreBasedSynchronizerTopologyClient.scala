@@ -212,12 +212,13 @@ class StoreBasedSynchronizerTopologyClient(
       traceContext: TraceContext
   ): Unit = {
     logger.debug(
-      s"Head update: sequenced=$sequencedTimestamp, effective=$effectiveTimestamp, approx=$approximateTimestamp, topologyChange=$topologyChange"
+      s"Head update requested: sequenced=$sequencedTimestamp, effective=$effectiveTimestamp, approx=$approximateTimestamp, topologyChange=$topologyChange"
     )
     val curHead =
       head.updateAndGet(
         _.update(sequencedTimestamp, effectiveTimestamp, approximateTimestamp, topologyChange)
       )
+    logger.debug(s"New head: $curHead")
     // waiting for a sequenced time has "inclusive" semantics
     sequencedTimeAwaiter.notifyAwaitedFutures(curHead.sequencedTimestamp.value)
     // now notify the futures that wait for this update here. as the update is active at t+epsilon, (see most recent timestamp),
@@ -454,6 +455,11 @@ class StoreBasedSynchronizerTopologyClient(
         logger.debug(s"Taking into account sequencer snapshot at $effectiveTime")
         (SequencedTime(effectiveTime.value), effectiveTime)
       }
+      // `sequencerSnapshotTimes` contains `lastTs` and in principle its sequencing time should become
+      //  the head's sequencing time, which may not happen in the following logic that only keeps
+      //  the head update with the maximum effective time.
+      //  In practice, this is not a problem, because currently the sequencing time head is not
+      //  relied upon during onboarding.
       val initialHeadTimestamps =
         (adjustedStoreMaxTimestamp.toList ++ upgradeTimes.toList ++ sequencerSnapshotTimes.toList)
           .maxByOption { case (_, effectiveTime: EffectiveTime) =>

@@ -42,6 +42,7 @@ import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
   SequencedTime,
   TopologyManagerSigningKeyDetection,
+  TopologyStateProcessor,
 }
 import com.digitalasset.canton.topology.store.TopologyStoreId.{
   AuthorizedStore,
@@ -934,7 +935,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
         transaction.transaction.operation,
       )
 
-    case upgradeAnnouncement: SynchronizerUpgradeAnnouncement =>
+    case upgradeAnnouncement: LsuAnnouncement =>
       if (transaction.operation == TopologyChangeOp.Replace)
         checkSynchronizerUpgradeAnnouncementIsNotDangerous(upgradeAnnouncement, transaction.serial)
       else EitherT.pure(())
@@ -1046,7 +1047,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
     } yield ()
 
   private def checkSynchronizerUpgradeAnnouncementIsNotDangerous(
-      upgradeAnnouncement: SynchronizerUpgradeAnnouncement,
+      upgradeAnnouncement: LsuAnnouncement,
       serial: PositiveInt,
   )(implicit
       traceContext: TraceContext
@@ -1064,7 +1065,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
       )
       .map { result =>
         result
-          .collectOfMapping[SynchronizerUpgradeAnnouncement]
+          .collectOfMapping[LsuAnnouncement]
           .result
           .maxByOption(_.serial) match {
           case None => ().asRight
@@ -1208,7 +1209,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
       .map(_ => ())
 
   override protected def onClosed(): Unit =
-    LifeCycle.close(sequentialQueue, processor.cache, store)(logger)
+    LifeCycle.close(sequentialQueue, processor, store)(logger)
 
   override def toString: String = s"TopologyManager[${store.storeId}]"
 }

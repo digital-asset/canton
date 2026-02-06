@@ -491,6 +491,9 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
   private lazy val updateLookupByKey =
     Id("lookup_by_key") ~! `@` ~> fullIdentifier ^^ UpdateLookupByKey
 
+  private lazy val updateQueryNByKey =
+    Id("query_n_by_key") ~! `@` ~> fullIdentifier ^^ UpdateQueryNByKey
+
   private lazy val updateGetTime =
     Id("uget_time") ^^^ UpdateGetTime
 
@@ -522,6 +525,7 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
       updateExerciseByKey |
       updateFetchByKey |
       updateLookupByKey |
+      updateQueryNByKey |
       updateGetTime |
       updateLedgerTimeLT |
       updateEmbedExpr |

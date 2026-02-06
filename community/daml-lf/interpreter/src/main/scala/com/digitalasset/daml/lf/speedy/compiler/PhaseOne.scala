@@ -732,6 +732,8 @@ private[lf] final class PhaseOne(
         }
       case UpdateLookupByKey(templateId) =>
         Return(t.LookupByKeyDefRef(templateId)())
+      case UpdateQueryNByKey(templateId) =>
+        Return(t.QueryNByKeyDefRef(templateId)())
       case UpdateFetchByKey(templateId) =>
         Return(t.FetchByKeyDefRef(templateId)())
       case UpdateTryCatch(_, body, binder, handler) =>

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.pruning
 
-import com.digitalasset.canton.config.SessionSigningKeysConfig
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -22,11 +21,7 @@ import scala.concurrent.duration.*
 class BftOrdererPruningIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S2M1
-      .addConfigTransforms(
-        ConfigTransforms.useStaticTime,
-        // TODO(#30068): Enable session keys after sim clock advances are synced
-        ConfigTransforms.setSessionSigningKeys(SessionSigningKeysConfig.disabled),
-      )
+      .addConfigTransform(ConfigTransforms.useStaticTime)
 
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

@@ -16,8 +16,11 @@ import com.digitalasset.canton.topology.processing.{
   SequencedTime,
   TopologyTransactionTestFactory,
 }
-import com.digitalasset.canton.topology.store.StoredTopologyTransaction
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
+import com.digitalasset.canton.topology.store.{
+  StoredTopologyTransaction,
+  TopologyTransactionRejection,
+}
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp
 import com.digitalasset.canton.{BaseTestWordSpec, HasExecutionContext}
@@ -52,8 +55,9 @@ class StateDataTest extends BaseTestWordSpec with HasExecutionContext {
 
   private object Txs {
     val ns1k1_k1_0_N = toStored(ns1k1_k1, ts(0), None)
+    val rejection = TopologyTransactionRejection.Processor.InternalError("SomeRejection")
     val ns1k1_k1_1_1_r =
-      toStored(ns1k1_k1_unsupportedScheme, ts(1), ts(1).some, Some("Not supported"))
+      toStored(ns1k1_k1_unsupportedScheme, ts(1), ts(1).some, Some(rejection.message))
     val ns1k2_k1_1_3 = toStored(ns1k2_k1, ts(1), ts(3).some)
     val ns1k2_k1_1_3rm = toStored(mkRemoveTx(ns1k2_k1), ts(3), ts(3).some)
     val ns1k3_k2_2_N = toStored(ns1k3_k2, ts(3), None)
@@ -73,7 +77,9 @@ class StateDataTest extends BaseTestWordSpec with HasExecutionContext {
   "state data" should {
 
     "add to head and move archived to tail" in {
-      val s = StateData.fromLoaded(sk, Seq(ns1k1_k1_1_1_r), ts(-1))
+      val s = StateData
+        .fromLoaded(sk, Seq(), ts(-1), checkConsistency = true)
+        .addNewTransaction(new MaybeUpdatedTx(sk, ns1k1_k1_1_1_r, false, Some(rejection)))
 
       // we first add one
       val m = new MaybeUpdatedTx(sk, ns1k1_k1_0_N, false, None)
@@ -190,7 +196,8 @@ class StateDataTest extends BaseTestWordSpec with HasExecutionContext {
     "drop pending changes and always find correct head state" in {
 
       val ns1k2_k1_1_3p = ns1k2_k1_1_3.copy(validUntil = None)
-      val s = StateData.fromLoaded(sk, Seq(ns1k1_k1_0_N, ns1k2_k1_1_3), ts(1))
+      val s =
+        StateData.fromLoaded(sk, Seq(ns1k1_k1_0_N, ns1k2_k1_1_3), ts(1), checkConsistency = true)
       validate(s.head.map(_.stored), Seq(ns1k1_k1_0_N))
       validate(s.tail, Seq(ns1k2_k1_1_3))
       s.findAtMostOne(_.mapping == ns1k1_k1_0_N.mapping, true, "test") should not be empty
@@ -221,7 +228,7 @@ class StateDataTest extends BaseTestWordSpec with HasExecutionContext {
 
     "deal with historical" in {
 
-      val s = StateData.fromLoaded(sk, Seq(ns1k1_k1_0_N), ts(4))
+      val s = StateData.fromLoaded(sk, Seq(ns1k1_k1_0_N), ts(4), checkConsistency = true)
       val sh =
         s.updateHistorical(
           EffectiveTime(CantonTimestamp.MinValue),

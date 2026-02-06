@@ -1244,7 +1244,7 @@ class AcsCommitmentProcessor private (
     val rt = RecordTime.fromTimeOfChange(TimeOfChange(upgradeTime, None))
 
     /* The check is more lenient than the one in publishInternal. The reason we allow for equality
-     * is that we might have several events LogicalSynchronizerUpgradeTimeReached which lead to
+     * is that we might have several events LsuTimeReached which lead to
      * several calls to this method. This is safe because:
      *   - This method is only about persistence.
      *   - We ensure that the effects of previous messages (with ACS change) have been taken into

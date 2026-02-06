@@ -130,7 +130,7 @@ class DisseminationProtocolStateTest
       SequencingParameters.Default, // irrelevant for this test
       defaultMaxBytesToDecompress, // irrelevant for this test
       AnActivationTime, // irrelevant for this test
-      areTherePendingCantonTopologyChanges = false, // irrelevant for this test
+      areTherePendingCantonTopologyChanges = Some(false), // irrelevant for this test
     )
 }
 

@@ -510,7 +510,7 @@ class OutputModule[E <: Env[E]](
             // We only store metadata for an epoch if it may alter the topology, i.e.,
             //  we never insert `false` and then change it; this avoids updates
             //  and allows leveraging idempotency for easier CFT support.
-            if (orderingTopology.areTherePendingCantonTopologyChanges) {
+            if (orderingTopology.areTherePendingCantonTopologyChanges.exists(identity)) {
               val outputEpochMetadata =
                 OutputEpochMetadata(newEpochNumber, couldAlterOrderingTopology = true)
               logger.debug(s"Storing $outputEpochMetadata")
@@ -751,7 +751,8 @@ class OutputModule[E <: Env[E]](
       //  (and successfully processed and applied by the topology processor).
       pipeToSelf(
         orderingTopologyProvider.getOrderingTopologyAt(
-          TopologyActivationTime(epochEndBftTime.immediateSuccessor)
+          TopologyActivationTime(epochEndBftTime.immediateSuccessor),
+          checkPendingChanges = true,
         ),
         metrics.topology.queryLatency,
       ) {
@@ -843,7 +844,7 @@ class OutputModule[E <: Env[E]](
       logger.debug(
         s"Pending topology changes in new ordering topology = $pendingTopologyChanges"
       )
-      currentEpochCouldAlterOrderingTopology = pendingTopologyChanges
+      currentEpochCouldAlterOrderingTopology = pendingTopologyChanges.exists(identity)
 
       metrics.topology.validators.updateValue(currentEpochOrderingTopology.nodes.size)
       logger.debug(

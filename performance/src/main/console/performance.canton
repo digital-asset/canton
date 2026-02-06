@@ -17,9 +17,9 @@ Seq("performance-driver_", "performance_").foreach { jar =>
 
 import com.digitalasset.canton.performance.scenarios.LongRunning
 
-logging.set_level("com.digitalasset.canton", "INFO")
-val mc = try {
-    LongRunning.startup(singleSynchronizer=true,partyGrowth=8)
+
+val (mc, psc) = try {
+    LongRunning.startup()
 } catch {
     case e: Exception =>
         logger.error("Failed to start the performance test", e)
