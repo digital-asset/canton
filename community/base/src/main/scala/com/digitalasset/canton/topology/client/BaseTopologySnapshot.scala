@@ -28,6 +28,7 @@ import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
 import com.digitalasset.canton.topology.transaction.{
   DynamicSequencingParametersState,
   HostingParticipant,
+  LsuAnnouncement,
   MediatorSynchronizerState,
   OwnerToKeyMapping,
   ParticipantAttributes,
@@ -38,7 +39,6 @@ import com.digitalasset.canton.topology.transaction.{
   SequencerSynchronizerState,
   SynchronizerParametersState,
   SynchronizerTrustCertificate,
-  SynchronizerUpgradeAnnouncement,
   TopologyChangeOp,
   TopologyMapping,
   VettedPackage,
@@ -697,7 +697,7 @@ abstract class BaseTopologySnapshot(
     findTransactionsByUids(
       types = Seq(TopologyMapping.Code.SynchronizerUpgradeAnnouncement),
       filterUid = NonEmpty(Seq, psid.uid),
-    ).map(_.collectOfMapping[SynchronizerUpgradeAnnouncement].result.toList match {
+    ).map(_.collectOfMapping[LsuAnnouncement].result.toList match {
       case atMostOne @ (_ :: Nil | Nil) =>
         atMostOne
           .map(tx =>

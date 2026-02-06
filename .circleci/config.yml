@@ -532,20 +532,6 @@ commands:
                 command: |
                     .ci/nix-exec ./scripts/ci/publish-to-s3.sh
                 name: Publish to S3
-    publish_sandbox_to_jfrog:
-        parameters:
-            repository:
-                default: generic-sandbox
-                description: JFROG repo for upload
-                type: string
-        steps:
-            - run:
-                command: |
-                    cd tmp-release || exit 1
-                    for i in $(find . -type f | sed 's|//|/|g'); do
-                      ../scripts/ci/publish-to-jfrog.sh -r << parameters.repository >> ${i} ${@} || exit ${?}
-                    done
-                name: Publish to JFROG
     restore_packaged_release:
         parameters:
             location:
@@ -2061,38 +2047,6 @@ jobs:
                 cmd: mock-kms-driver/package mock-kms-driver/packageSrc mock-kms-driver/packageDoc mock-kms-driver/makePom
                 location: community/mock-kms-driver/target/scala-2.13
             - cleanup_build_job
-    package_sandbox:
-        executor: canton-medium-docker
-        parameters:
-            is_manual:
-                type: boolean
-            is_nightly_workflow:
-                type: boolean
-        steps:
-            - checkout:
-                method: blobless
-            - obtain_release_suffix:
-                is_manual: << parameters.is_manual >>
-                is_nightly_workflow: << parameters.is_nightly_workflow >>
-            - package:
-                artifact_suffix: .{zip,tar.gz}
-                cmd: community-app/bundle
-                location: community/app/target/release
-            - run:
-                command: |
-                    cd tmp-release || exit 1
-                    for i in $(find . -type f | sed 's|//|/|g;s/\.\///g'); do
-                      ../scripts/ci/publish-to-jfrog.sh -r generic-sandbox ${i} ${@} || exit ${?}
-                    done
-                name: Upload artifact to JFROG
-            - run:
-                command: |
-                    cd tmp-release || exit 1
-                    for i in $(find . -type f | sed 's|//|/|g;s/\.\///g'); do
-                      ../scripts/ci/publish-to-jfrog.sh -r generic-sandbox -D ${i} ${@} || exit ${?}
-                    done
-                name: Delete artifact from JFROG
-            - cleanup_build_job
     package_sequencer_driver_api:
         executor: canton-medium-docker
         parameters:
@@ -2257,22 +2211,6 @@ jobs:
             - run:
                 command: nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run "scripts/ci/publish-to-github.sh"
                 name: Publish to GitHub releases
-            - slack_red_main_with_volunteer
-    publish_release_to_jfrog:
-        executor: canton-small-docker
-        parameters:
-            is_manual:
-                type: boolean
-            is_nightly_workflow:
-                type: boolean
-        steps:
-            - attach_workspace:
-                at: /tmp/workspace
-            - checkout:
-                method: blobless
-            - restore_packaged_release:
-                location: tmp-release
-            - publish_sandbox_to_jfrog
             - slack_red_main_with_volunteer
     release_test:
         executor: canton-xlarge-docker-with-postgres
@@ -3515,6 +3453,23 @@ workflows:
                 is_nightly_workflow: true
                 requires:
                     - compile
+            - publish_release:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: false
+                is_nightly_workflow: true
+                requires:
+                    - package_community
+                    - package_sequencer_driver_api
+                    - package_jsonapi
+                    - package_kms_driver
+                    - assembly_ledger_api_test_tool
+                    - build_systematic_testing_inventory
+                    - build_scaladoc
             - publish_canton_open_source_code_drop:
                 context:
                     - azure-self-cache
@@ -4041,21 +3996,6 @@ workflows:
                     equal:
                         - main
                         - << pipeline.git.branch >>
-    manual_release_sandbox:
-        jobs:
-            - package_sandbox:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                is_manual: true
-                is_nightly_workflow: false
-        when:
-            equal:
-                - release-sandbox
-                - << pipeline.parameters.manual_job >>
     manual_release_test:
         jobs:
             - compile:

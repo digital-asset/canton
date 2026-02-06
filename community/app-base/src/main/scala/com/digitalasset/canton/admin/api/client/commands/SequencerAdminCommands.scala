@@ -570,40 +570,41 @@ object SequencerAdminCommands {
     }
   }
 
-  final case object GetLSUTrafficControlState
+  final case object GetLsuTrafficControlState
       extends BaseSequencerAdministrationCommand[
-        proto.GetLSUTrafficControlStateRequest,
-        proto.GetLSUTrafficControlStateResponse,
+        proto.GetLsuTrafficControlStateRequest,
+        proto.GetLsuTrafficControlStateResponse,
         ByteString,
       ] {
-    override protected def createRequest(): Either[String, proto.GetLSUTrafficControlStateRequest] =
-      Right(proto.GetLSUTrafficControlStateRequest())
+    override protected def createRequest(): Either[String, proto.GetLsuTrafficControlStateRequest] =
+      Right(proto.GetLsuTrafficControlStateRequest())
     override protected def submitRequest(
         service: proto.SequencerAdministrationServiceGrpc.SequencerAdministrationServiceStub,
-        request: proto.GetLSUTrafficControlStateRequest,
-    ): Future[proto.GetLSUTrafficControlStateResponse] =
-      service.getLSUTrafficControlState(request)
+        request: proto.GetLsuTrafficControlStateRequest,
+    ): Future[proto.GetLsuTrafficControlStateResponse] =
+      service.getLsuTrafficControlState(request)
     override protected def handleResponse(
-        response: proto.GetLSUTrafficControlStateResponse
+        response: proto.GetLsuTrafficControlStateResponse
     ): Either[String, ByteString] =
       Right(response.lsuTrafficState)
   }
-  final case class SetLSUTrafficControlState(
+
+  final case class SetLsuTrafficControlState(
       membersTraffic: ByteString
   ) extends BaseSequencerAdministrationCommand[
-        proto.SetLSUTrafficControlStateRequest,
-        proto.SetLSUTrafficControlStateResponse,
+        proto.SetLsuTrafficControlStateRequest,
+        proto.SetLsuTrafficControlStateResponse,
         Unit,
       ] {
-    override protected def createRequest(): Either[String, proto.SetLSUTrafficControlStateRequest] =
-      Right(proto.SetLSUTrafficControlStateRequest(membersTraffic))
+    override protected def createRequest(): Either[String, proto.SetLsuTrafficControlStateRequest] =
+      Right(proto.SetLsuTrafficControlStateRequest(membersTraffic))
     override protected def submitRequest(
         service: proto.SequencerAdministrationServiceGrpc.SequencerAdministrationServiceStub,
-        request: proto.SetLSUTrafficControlStateRequest,
-    ): Future[proto.SetLSUTrafficControlStateResponse] =
-      service.setLSUTrafficControlState(request)
+        request: proto.SetLsuTrafficControlStateRequest,
+    ): Future[proto.SetLsuTrafficControlStateResponse] =
+      service.setLsuTrafficControlState(request)
     override protected def handleResponse(
-        response: proto.SetLSUTrafficControlStateResponse
+        response: proto.SetLsuTrafficControlStateResponse
     ): Either[String, Unit] = Either.unit
   }
 }

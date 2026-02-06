@@ -436,19 +436,18 @@ object TopologyAdminCommands {
           .leftMap(_.toString)
     }
 
-    final case class ListSynchronizerUpgradeAnnouncement(
+    final case class ListLsuAnnouncement(
         query: BaseQuery,
         filterSynchronizerId: String,
     ) extends BaseCommand[
-          v30.ListSynchronizerUpgradeAnnouncementRequest,
-          v30.ListSynchronizerUpgradeAnnouncementResponse,
-          Seq[ListSynchronizerUpgradeAnnouncementResult],
+          v30.ListLsuAnnouncementRequest,
+          v30.ListLsuAnnouncementResponse,
+          Seq[ListLsuAnnouncementResult],
         ] {
 
-      override protected def createRequest()
-          : Either[String, v30.ListSynchronizerUpgradeAnnouncementRequest] =
+      override protected def createRequest(): Either[String, v30.ListLsuAnnouncementRequest] =
         Right(
-          new ListSynchronizerUpgradeAnnouncementRequest(
+          new ListLsuAnnouncementRequest(
             baseQuery = Some(query.toProtoV1),
             filterSynchronizerId = filterSynchronizerId,
           )
@@ -456,31 +455,31 @@ object TopologyAdminCommands {
 
       override protected def submitRequest(
           service: TopologyManagerReadServiceStub,
-          request: v30.ListSynchronizerUpgradeAnnouncementRequest,
-      ): Future[v30.ListSynchronizerUpgradeAnnouncementResponse] =
-        service.listSynchronizerUpgradeAnnouncement(request)
+          request: v30.ListLsuAnnouncementRequest,
+      ): Future[v30.ListLsuAnnouncementResponse] =
+        service.listLsuAnnouncement(request)
 
       override protected def handleResponse(
-          response: v30.ListSynchronizerUpgradeAnnouncementResponse
-      ): Either[String, Seq[ListSynchronizerUpgradeAnnouncementResult]] =
+          response: v30.ListLsuAnnouncementResponse
+      ): Either[String, Seq[ListLsuAnnouncementResult]] =
         response.results
-          .traverse(ListSynchronizerUpgradeAnnouncementResult.fromProtoV30)
+          .traverse(ListLsuAnnouncementResult.fromProtoV30)
           .leftMap(_.toString)
     }
 
-    final case class ListSequencerConnectionSuccessor(
+    final case class ListLsuSequencerConnectionSuccessor(
         query: BaseQuery,
         filterSequencerId: String,
     ) extends BaseCommand[
-          v30.ListSequencerConnectionSuccessorRequest,
-          v30.ListSequencerConnectionSuccessorResponse,
-          Seq[ListSequencerConnectionSuccessorResult],
+          v30.ListLsuSequencerConnectionSuccessorRequest,
+          v30.ListLsuSequencerConnectionSuccessorResponse,
+          Seq[ListLsuSequencerConnectionSuccessorResult],
         ] {
 
       override protected def createRequest()
-          : Either[String, v30.ListSequencerConnectionSuccessorRequest] =
+          : Either[String, v30.ListLsuSequencerConnectionSuccessorRequest] =
         Right(
-          new ListSequencerConnectionSuccessorRequest(
+          new ListLsuSequencerConnectionSuccessorRequest(
             baseQuery = Some(query.toProtoV1),
             filterSequencerId = filterSequencerId,
           )
@@ -488,15 +487,15 @@ object TopologyAdminCommands {
 
       override protected def submitRequest(
           service: TopologyManagerReadServiceStub,
-          request: v30.ListSequencerConnectionSuccessorRequest,
-      ): Future[v30.ListSequencerConnectionSuccessorResponse] =
-        service.listSequencerConnectionSuccessor(request)
+          request: v30.ListLsuSequencerConnectionSuccessorRequest,
+      ): Future[v30.ListLsuSequencerConnectionSuccessorResponse] =
+        service.listLsuSequencerConnectionSuccessor(request)
 
       override protected def handleResponse(
-          response: v30.ListSequencerConnectionSuccessorResponse
-      ): Either[String, Seq[ListSequencerConnectionSuccessorResult]] =
+          response: v30.ListLsuSequencerConnectionSuccessorResponse
+      ): Either[String, Seq[ListLsuSequencerConnectionSuccessorResult]] =
         response.results
-          .traverse(ListSequencerConnectionSuccessorResult.fromProtoV30)
+          .traverse(ListLsuSequencerConnectionSuccessorResult.fromProtoV30)
           .leftMap(_.toString)
     }
 

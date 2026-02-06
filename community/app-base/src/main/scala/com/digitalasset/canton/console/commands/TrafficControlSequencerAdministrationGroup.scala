@@ -153,7 +153,6 @@ class TrafficControlSequencerAdministrationGroup(
       )
     )
 
-  // TODO(#30533): Make sure the naming is consistent with other LSU commands
   @Help.Summary(
     "Get the traffic control state to be transferred to a new sequencer during a logical synchronizer upgrade"
   )
@@ -166,10 +165,9 @@ class TrafficControlSequencerAdministrationGroup(
   )
   def get_lsu_state(): ByteString =
     consoleEnvironment.run(
-      runner.adminCommand(SequencerAdminCommands.GetLSUTrafficControlState)
+      runner.adminCommand(SequencerAdminCommands.GetLsuTrafficControlState)
     )
 
-  // TODO(#30533): Make sure the naming is consistent with other LSU commands
   @Help.Summary(
     "Set the traffic control state on a fresh sequencer during a logical synchronizer upgrade"
   )
@@ -186,7 +184,7 @@ class TrafficControlSequencerAdministrationGroup(
       memberTraffic: ByteString
   ): Unit =
     consoleEnvironment.run(
-      runner.adminCommand(SequencerAdminCommands.SetLSUTrafficControlState(memberTraffic))
+      runner.adminCommand(SequencerAdminCommands.SetLsuTrafficControlState(memberTraffic))
     )
 
 }

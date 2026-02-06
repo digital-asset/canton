@@ -261,7 +261,15 @@ object SequencerClientFactory {
 
           // Make a BFT call to all the transports to retrieve the current traffic state from the synchronizer
           // and initialize the trafficStateController with it
-          trafficStateO <- latestSequencedTimestampO
+          trafficInitTimestampO = latestSequencedTimestampO.orElse(
+            synchronizerPredecessor.map(
+              _.upgradeTime
+            )
+          )
+          _ = logger.info(
+            s"Initializing traffic state at timestamp: $trafficInitTimestampO"
+          )
+          trafficStateO <- trafficInitTimestampO
             .traverse(getTrafficStateFromSynchronizerWithRetryFn)
             .map(_.flatten)
 

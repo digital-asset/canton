@@ -8,7 +8,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.tracing.TraceContext
 
 package object topology {
-  object LSU {
+  object Lsu {
     final case class Logger private (private val logger: TracedLogger) {
       // For now, all LSU-specific logging should be at info level or higher
       def info(msg: => String)(implicit tc: TraceContext): Unit = logger.info(msg)

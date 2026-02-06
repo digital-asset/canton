@@ -148,7 +148,7 @@ private[platform] object InMemoryStateUpdaterFlow {
                     Some((tt.synchronizerId, tt.recordTime))
                   case sim: Update.SequencerIndexMoved => Some((sim.synchronizerId, sim.recordTime))
                   case _: Update.EmptyAcsPublicationRequired => None
-                  case _: Update.LogicalSynchronizerUpgradeTimeReached => None
+                  case _: Update.LsuTimeReached => None
                   case _: Update.CommitRepair => None
                 }
 

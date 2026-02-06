@@ -17,7 +17,7 @@ import com.digitalasset.canton.data.{
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.Update.{
   EmptyAcsPublicationRequired,
-  LogicalSynchronizerUpgradeTimeReached,
+  LsuTimeReached,
 }
 import com.digitalasset.canton.ledger.participant.state.{
   FloatingUpdate,
@@ -494,7 +494,7 @@ class RecordOrderPublisher private (
           if !LogicalUpgradeTime.canProcessKnowingSuccessor(successorO, event.recordTime) =>
         event match {
           case synchronizerUpdate: SynchronizerUpdate =>
-            val upgradeTimeReached = LogicalSynchronizerUpgradeTimeReached(
+            val upgradeTimeReached = LsuTimeReached(
               synchronizerUpdate.synchronizerId,
               successor.upgradeTime,
             )

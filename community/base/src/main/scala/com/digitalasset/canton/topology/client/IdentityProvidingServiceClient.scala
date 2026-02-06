@@ -190,6 +190,18 @@ trait TopologyClientApi[+T] { this: HasFutureSupervision =>
       traceContext: TraceContext
   ): FutureUnlessShutdown[T]
 
+  /** Waits until a snapshot for the given timestamp is available and returns the topology
+    * information at that point in time, using `desiredTimestamp` as the actual "forwarded"
+    * timestamp.
+    *
+    * The snapshot returned by this method should ONLY BE USED when computing the timestamp for
+    * signature validation (i.e.
+    * [[com.digitalasset.canton.crypto.SyncCryptoClient.getSnapshotForTimestamp]]).
+    */
+  def awaitHypotheticalSnapshot(timestamp: CantonTimestamp, desiredTimestamp: CantonTimestamp)(
+      implicit traceContext: TraceContext
+  ): FutureUnlessShutdown[T]
+
   /** Supervised version of [[awaitSnapshot]] */
   def awaitSnapshotUSSupervised(description: => String, warnAfter: Duration = 30.seconds)(
       timestamp: CantonTimestamp
@@ -197,6 +209,23 @@ trait TopologyClientApi[+T] { this: HasFutureSupervision =>
       loggingContext: ErrorLoggingContext
   ): FutureUnlessShutdown[T] =
     supervisedUS(description, warnAfter)(awaitSnapshot(timestamp)(loggingContext.traceContext))
+
+  /** Supervised version of [[awaitHypotheticalSnapshot]] */
+  def awaitHypotheticalSnapshotUSSupervised(
+      description: => String,
+      warnAfter: Duration = 30.seconds,
+  )(
+      timestamp: CantonTimestamp,
+      desiredTimestamp: CantonTimestamp,
+  )(implicit
+      loggingContext: ErrorLoggingContext
+  ): FutureUnlessShutdown[T] =
+    supervisedUS(description, warnAfter)(
+      awaitHypotheticalSnapshot(
+        timestamp,
+        desiredTimestamp,
+      )(loggingContext.traceContext)
+    )
 
   /** Returns an optional future which will complete when the effective timestamp has been observed
     *
@@ -675,7 +704,7 @@ trait SynchronizerUpgradeClient {
     */
   def sequencerConnectionSuccessors()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SequencerId, SequencerConnectionSuccessor]]
+  ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]]
 }
 
 trait TopologySnapshot
@@ -774,6 +803,16 @@ trait SynchronizerTopologyClientWithInit
     awaitTimestamp(timestamp)
       .getOrElse(FutureUnlessShutdown.unit)
       .flatMap(_ => snapshot(timestamp))
+
+  override final def awaitHypotheticalSnapshot(
+      timestamp: CantonTimestamp,
+      desiredTimestamp: CantonTimestamp,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[TopologySnapshot] =
+    awaitTimestamp(timestamp)
+      .getOrElse(FutureUnlessShutdown.unit)
+      .flatMap(_ => hypotheticalSnapshot(timestamp, desiredTimestamp))
 
   /** internal await implementation used to schedule state evaluations after topology updates */
   private[topology] def scheduleAwait(

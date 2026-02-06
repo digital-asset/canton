@@ -336,7 +336,7 @@ object TestingTimeServiceConfig {
   *   are logged as warning instead.
   * @param packageMetadataView
   *   Initialization parameters for the package metadata in-memory store.
-  * @param automaticallyPerformLogicalSynchronizerUpgrade
+  * @param automaticallyPerformLsu
   *   Whether the participant automatically performs a handshake with the upgraded synchronizer
   *   after receiving enough sequencer connections, and whether the participants automatically
   *   connects to the synchronizer after the upgrade time.
@@ -402,7 +402,7 @@ final case class ParticipantNodeParameterConfig(
     commandProgressTracker: CommandProgressTrackerConfig = CommandProgressTrackerConfig(),
     unsafeOnlinePartyReplication: Option[UnsafeOnlinePartyReplicationConfig] = None,
     // TODO(#25344): check whether this should be removed
-    automaticallyPerformLogicalSynchronizerUpgrade: Boolean = true,
+    automaticallyPerformLsu: Boolean = true,
     activationFrequencyForWarnAboutConsistencyChecks: Long = 1000,
     reassignmentsConfig: ReassignmentsConfig = ReassignmentsConfig(),
     doNotAwaitOnCheckingIncomingCommitments: Boolean = false,

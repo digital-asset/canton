@@ -23,14 +23,14 @@ import com.digitalasset.canton.synchronizer.sequencer.admin.data.{
   SequencerHealthStatus,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockOrderer
-import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.LSUSequencerError
+import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.LsuSequencerError
 import com.digitalasset.canton.synchronizer.sequencer.errors.{
   CreateSubscriptionError,
   SequencerError,
 }
 import com.digitalasset.canton.synchronizer.sequencer.traffic.TimestampSelector.TimestampSelector
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
-  LSUTrafficState,
+  LsuTrafficState,
   SequencerRateLimitError,
   SequencerTrafficStatus,
 }
@@ -216,13 +216,13 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
 
     override private[canton] def orderer: Option[BlockOrderer] = ???
 
-    override def getLSUTrafficControlState(implicit
+    override def getLsuTrafficControlState(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, LSUSequencerError, LSUTrafficState] = ???
+    ): EitherT[FutureUnlessShutdown, LsuSequencerError, LsuTrafficState] = ???
 
-    override def setLSUTrafficControlState(state: LSUTrafficState)(implicit
+    override def setLsuTrafficControlState(state: LsuTrafficState)(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, LSUSequencerError, Unit] = ???
+    ): EitherT[FutureUnlessShutdown, LsuSequencerError, Unit] = ???
   }
 
   "sendAsyncSigned" should {

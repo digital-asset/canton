@@ -20,9 +20,9 @@ import com.digitalasset.canton.topology.store.{
 }
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.{
+  LsuSequencerConnectionSuccessor,
   MediatorSynchronizerState,
   OwnerToKeyMapping,
-  SequencerConnectionSuccessor,
   SequencerSynchronizerState,
   SynchronizerParametersState,
   SynchronizerTrustCertificate,
@@ -204,7 +204,7 @@ class WriteThroughCacheTopologySnapshot(
 
   override def sequencerConnectionSuccessors()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Map[SequencerId, SequencerConnectionSuccessor]] =
+  ): FutureUnlessShutdown[Map[SequencerId, LsuSequencerConnectionSuccessor]] =
     // since the state lookup cannot look at the state just based on the type,
     // we first have to load the current registered sequencers in SequencerSynchronizerState,
     // and then lookup the corresponding SequencerConnectionSuccessor transactions.
@@ -232,7 +232,7 @@ class WriteThroughCacheTopologySnapshot(
         )
       )
     } yield txs
-      .collectOfMapping[SequencerConnectionSuccessor]
+      .collectOfMapping[LsuSequencerConnectionSuccessor]
       .result
       .view
       .map(stored => stored.mapping.sequencerId -> stored.mapping)

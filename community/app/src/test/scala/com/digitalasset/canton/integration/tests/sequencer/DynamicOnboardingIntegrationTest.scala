@@ -389,9 +389,9 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
             // corresponding synchronizer.
             logEntry => {
               logEntry.loggerName should include("SynchronizerConnectionsManager")
-              logEntry.errorMessage should (include(
+              logEntry.errorMessage should include(
                 "SYNC_SERVICE_SYNCHRONIZER_DISCONNECTED"
-              ))
+              )
             },
           )
 

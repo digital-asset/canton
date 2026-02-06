@@ -213,6 +213,9 @@ private[daml] class AstRewriter(
         UpdateFetchByKey(apply(rbk))
       case UpdateLookupByKey(rbk) =>
         UpdateLookupByKey(apply(rbk))
+      case UpdateQueryNByKey(templateId) =>
+        // NOTE TO REVIEWER: this is doing optimization, right? Assuming no optimization for this
+        UpdateQueryNByKey(apply(templateId))
       case UpdateEmbedExpr(typ, body) =>
         UpdateEmbedExpr(apply(typ), apply(body))
       case UpdateTryCatch(typ, body, binder, handler) =>

@@ -221,7 +221,10 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                   _ <- mediatorState.add(aggregation)
                 } yield {
                   logger.info(
-                    show"Phase 2: Registered request=${requestId.unwrap} with ${request.informeesAndConfirmationParamsByViewPosition.size} view(s). Initial state: ${aggregation.showMergedState}"
+                    show"Phase 2: Registered request=${requestId.unwrap} from submittingParticipant=${request.submittingParticipant} with ${request.informeesAndConfirmationParamsByViewPosition.size} view(s)."
+                  )
+                  logger.debug(
+                    show"Phase 2: Initial state for request=${requestId.unwrap}: ${aggregation.showMergedState}"
                   )
                 }
 
@@ -716,8 +719,9 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
 
         val responses = signedResponses.message
         logger.info(
-          show"Phase 5: Received responses for request=${responses.requestId.unwrap}: $responses"
+          show"Phase 5: Received ${responses.responses.size} response(s) for request=${responses.requestId.unwrap}."
         )
+        logger.debug(show"Phase 5: Responses for request=${responses.requestId.unwrap}: $responses")
 
         (for {
           snapshot <- OptionT.liftF(crypto.awaitSnapshot(responses.requestId.unwrap))

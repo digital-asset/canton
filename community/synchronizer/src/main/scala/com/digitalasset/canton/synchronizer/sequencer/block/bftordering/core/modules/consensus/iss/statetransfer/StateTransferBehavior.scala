@@ -149,7 +149,7 @@ final class StateTransferBehavior[E <: Env[E]](
     None
 
   override def ready(self: ModuleRef[Consensus.Message[E]]): Unit =
-    self.asyncSendNoTrace(Consensus.Init)
+    self.asyncSendNoTrace(Consensus.Init.KickOff)
 
   override protected def receiveInternal(
       message: Consensus.Message[E]
@@ -157,7 +157,7 @@ final class StateTransferBehavior[E <: Env[E]](
     lazy val messageType = shortType(message)
 
     message match {
-      case Consensus.Init =>
+      case _: Consensus.Init =>
         val epochNumber = initialState.epochState.epoch.info.number
         // Note that for onboarding, segments are created but not started
         logger.info(s"$messageType: cancelling segment modules for epoch $epochNumber")

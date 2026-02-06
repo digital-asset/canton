@@ -84,7 +84,7 @@ class StateTransferBehaviorTest
 
         stateTransferBehavior.ready(context.self)
 
-        context.extractSelfMessages() shouldBe Seq(Consensus.Init)
+        context.extractSelfMessages() shouldBe Seq(Consensus.Init.KickOff)
       }
     }
 
@@ -96,7 +96,7 @@ class StateTransferBehaviorTest
           createStateTransferBehavior(preConfiguredInitialEpochState = Some(_ => epochStateMock))
         implicit val ctx: ContextType = context
 
-        stateTransferBehavior.receive(Consensus.Init)
+        stateTransferBehavior.receive(Consensus.Init.KickOff)
 
         verify(epochStateMock, times(1)).notifyEpochCancellationToSegments(EpochNumber(1))
 

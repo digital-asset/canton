@@ -161,9 +161,9 @@ final class IssConsensusModule[E <: Env[E]](
   ): Unit =
     message match {
 
-      case Consensus.Init =>
+      case _: Consensus.Init =>
         abort(
-          s"${PreIssConsensusModule.getClass.getSimpleName} should be the only one receiving ${Consensus.Init.getClass.getSimpleName}"
+          s"${classOf[PreIssConsensusModule[?]].getSimpleName} should be the only one receiving ${classOf[Consensus.Init].getSimpleName}"
         )
 
       case Consensus.SegmentCancelledEpoch =>

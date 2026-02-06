@@ -15,7 +15,16 @@ import com.digitalasset.canton.performance.PartyRole.{Master, MasterDynamicConfi
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
 import com.digitalasset.canton.performance.console.{RunTypeConfig as C, *}
 import com.digitalasset.canton.performance.model.java as M
+import com.digitalasset.canton.performance.model.java.orchestration.partygrowth.{
+  LocalGrowth,
+  NoPartyGrowth,
+  RemoteGrowth,
+}
 import com.digitalasset.canton.performance.model.java.orchestration.runtype.DvpRun
+import com.digitalasset.canton.performance.util.{
+  ParticipantSimulator,
+  ParticipantSimulatorController,
+}
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 
 import java.util.concurrent.atomic.AtomicReference
@@ -23,6 +32,24 @@ import scala.concurrent.duration.*
 
 object LongRunning {
 
+  /** Start long runnign test
+    *
+    * @param partyGrowthFactor
+    *   if > 0 then the test will continuously allocate parties until it hits maxParties per
+    *   allocator. a larger value means that the party will be used several times before replaced.
+    *   this means that growth is slower with a larger factor
+    * @param maxPendingParties
+    *   how many party allocation requests can be pending simultaneously during local growth per
+    *   allocator
+    * @param maxPartiesInPool
+    *   how many parties to keep in the allocator pool
+    * @param maxParties
+    *   how many parties per allocator to allocate at best
+    * @param lightweightParticipants
+    *   how many lightweight participants to spin up and connect to the first sequencer. if set to
+    *   true, any party allocation will refer to the lightweight participants (for a constant party
+    *   test, set maxParties = maxPartiesInPool and partyGrowthFactor > 1)
+    */
   def startup(
       masterName: String = "1Master",
       localMaster: Boolean = !sys.env.contains("REMOTE_MASTER"),
@@ -35,7 +62,11 @@ object LongRunning {
       tradersPerNode: Int = 5,
       numAssetsPerIssuer: Int = 1000,
       acsGrowthFactor: Int = 1,
-      partyGrowth: Int = 0,
+      partyGrowthFactor: Int = 0,
+      maxPendingParties: Int = 5,
+      maxPartiesInPool: Int = 1000,
+      maxParties: Int = Int.MaxValue,
+      enableLightweightParticipants: Boolean = false,
       dvpPayloadSize: Int = 0,
       sequencerTrustThreshold: PositiveInt = PositiveInt.one,
       sequencerLivenessMargin: NonNegativeInt = NonNegativeInt.zero,
@@ -45,7 +76,9 @@ object LongRunning {
       pruningRetention: FiniteDuration = 7.days,
       otherSynchronizersRatio: Double = 0.5,
       disableTrafficControl: Boolean = sys.env.contains("DISABLE_TRAFFIC_CONTROL"),
-  )(implicit consoleEnvironment: ConsoleEnvironment): MissionControl = {
+  )(implicit
+      consoleEnvironment: ConsoleEnvironment
+  ): (MissionControl, Option[ParticipantSimulatorController]) = {
 
     import ConsoleEnvironment.Implicits.*
     import consoleEnvironment.*
@@ -91,6 +124,15 @@ object LongRunning {
     // register auto-close first such that we can orderly shut down performance runner as first thing
     utils.auto_close(() => onClose.get().foreach(_.close()))
     nodes.local.start()
+
+    val partyPrefix = "bystander-"
+    val partyGrowth = if (partyGrowthFactor > 0 && enableLightweightParticipants) {
+      new RemoteGrowth(partyGrowthFactor, maxParties, maxPartiesInPool, partyPrefix)
+    } else if (partyGrowthFactor > 0) {
+      new LocalGrowth(partyGrowthFactor, maxParties, maxPartiesInPool, maxPendingParties)
+    } else {
+      new NoPartyGrowth(com.daml.ledger.javaapi.data.Unit.getInstance())
+    }
 
     // parametrise test run
     val (runTypeConfig, runTypeParams) = {
@@ -182,6 +224,41 @@ object LongRunning {
         Connectivity(name = name, port = port, tls = tls)
     }
 
+    val participantSimController = if (enableLightweightParticipants && singleSynchronizer) {
+      (for {
+        localNode <- participants.local.headOption
+        sequencersB <- NonEmpty.from(sequencers.all)
+        sequencers = NonEmpty.mk(Seq, sequencersB.head1)
+      } yield {
+        val simulator =
+          new ParticipantSimulator(
+            localNode,
+            sequencers,
+            sequencers.head1.synchronizer_parameters.static.get().toInternal,
+            respondToAcsCommitments = true,
+            loggerFactory,
+            environmentTimeouts,
+          )
+        simulator.uploadRootCert().discard
+
+        // copy the packages to vet from participant1
+        val packagesToVet = participant1.topology.vetted_packages
+          .list(sequencers.head1.synchronizer_id, filterParticipant = localNode.filterString)
+          .headOption
+          .getOrElse(sys.error(s"No package vetting for $localNode"))
+          .item
+          .packages
+
+        new ParticipantSimulatorController(
+          simulator = simulator,
+          prefix = partyPrefix,
+          packagesToVet = packagesToVet,
+          loggerFactory = loggerFactory,
+        )
+
+      })
+    } else None
+
     myLogger.info(
       s"Starting runners now, using synchronizer $baseSynchronizer as base, and other synchronizers $otherSynchronizers with participants at ${participantInfo
           .map(x => s"${x.host}:${x.port.unwrap}")
@@ -223,7 +300,7 @@ object LongRunning {
         sys.exit(0)
       }(environment.executionContext)
     }
-    mc
+    (mc, participantSimController)
   }
 
   private def getMasterSetup(

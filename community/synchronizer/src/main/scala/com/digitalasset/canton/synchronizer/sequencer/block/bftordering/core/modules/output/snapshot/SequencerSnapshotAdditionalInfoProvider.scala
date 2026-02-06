@@ -47,6 +47,10 @@ class SequencerSnapshotAdditionalInfoProvider[E <: Env[E]](
       leaderSelectionPolicy: LeaderSelectionPolicy[E],
       requester: ModuleRef[SequencerNode.SnapshotMessage],
   )(implicit actorContext: E#ActorContextT[Output.Message[E]], traceContext: TraceContext): Unit = {
+    logger.debug(
+      s"Providing additional info for sequencer snapshot at $snapshotTimestamp " +
+        s"and ordering topology with activation time ${orderingTopology.activationTime}"
+    )
     // TODO(#23143) Consider returning an error if the `snapshotTimestamp` is too high, i.e., above the safe watermark.
     val relevantNodesTopologyInfo =
       orderingTopology.nodesTopologyInfo.view.filter { case (_, nodeTopologyInfo) =>

@@ -108,45 +108,4 @@ object StatusAdminCommands {
       Either.unit
   }
 
-  class GetLastErrors()
-      extends StatusServiceCommand[
-        v30.GetLastErrorsRequest,
-        v30.GetLastErrorsResponse,
-        Map[String, String],
-      ] {
-
-    override protected def submitRequest(
-        service: StatusServiceGrpc.StatusServiceStub,
-        request: v30.GetLastErrorsRequest,
-    ): Future[v30.GetLastErrorsResponse] =
-      service.getLastErrors(request)
-    override protected def createRequest(): Either[String, v30.GetLastErrorsRequest] = Right(
-      v30.GetLastErrorsRequest()
-    )
-    override protected def handleResponse(
-        response: v30.GetLastErrorsResponse
-    ): Either[String, Map[String, String]] =
-      response.errors.map(r => (r.traceId -> r.message)).toMap.asRight
-  }
-
-  class GetLastErrorTrace(traceId: String)
-      extends StatusServiceCommand[v30.GetLastErrorTraceRequest, v30.GetLastErrorTraceResponse, Seq[
-        String
-      ]] {
-
-    override protected def submitRequest(
-        service: StatusServiceGrpc.StatusServiceStub,
-        request: v30.GetLastErrorTraceRequest,
-    ): Future[v30.GetLastErrorTraceResponse] =
-      service.getLastErrorTrace(request)
-
-    override protected def createRequest(): Either[String, v30.GetLastErrorTraceRequest] = Right(
-      v30.GetLastErrorTraceRequest(traceId)
-    )
-
-    override protected def handleResponse(
-        response: v30.GetLastErrorTraceResponse
-    ): Either[String, Seq[String]] = Right(response.messages)
-  }
-
 }

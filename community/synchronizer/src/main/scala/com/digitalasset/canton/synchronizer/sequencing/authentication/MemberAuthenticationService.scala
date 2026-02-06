@@ -502,7 +502,7 @@ class MemberAuthenticationServiceImpl(
                 _: DecentralizedNamespaceDefinition | _: OwnerToKeyMapping | _: PartyToKeyMapping |
                 _: PartyToParticipant | _: VettedPackages | _: PartyHostingLimits |
                 _: SynchronizerParametersState | _: DynamicSequencingParametersState |
-                _: SynchronizerUpgradeAnnouncement | _: SequencerConnectionSuccessor
+                _: LsuAnnouncement | _: LsuSequencerConnectionSuccessor
               ),
             ) =>
           FutureUnlessShutdown.unit

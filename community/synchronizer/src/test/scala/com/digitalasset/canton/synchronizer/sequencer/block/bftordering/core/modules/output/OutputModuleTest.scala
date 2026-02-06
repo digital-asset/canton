@@ -640,10 +640,15 @@ class OutputModuleTest
                 nodes = Set(BftNodeId("node1")),
                 SequencingParameters.Default,
                 topologyActivationTime,
-                areTherePendingCantonTopologyChanges = pendingChanges,
+                areTherePendingCantonTopologyChanges = Some(pendingChanges),
               )
             val newCryptoProvider = failingCryptoProvider[ProgrammableUnitTestEnv]
-            when(topologyProviderMock.getOrderingTopologyAt(topologyActivationTime))
+            when(
+              topologyProviderMock.getOrderingTopologyAt(
+                topologyActivationTime,
+                checkPendingChanges = true,
+              )
+            )
               .thenReturn(() => Some((newOrderingTopology, newCryptoProvider)))
             val subscriptionBlocks = mutable.Queue.empty[Traced[BlockFormat.Block]]
             implicit val context
@@ -730,7 +735,8 @@ class OutputModuleTest
               TickTopology(anotherTimestamp.toMicros, broadcast = false)
             )
 
-            verify(topologyProviderMock, times(1)).getOrderingTopologyAt(topologyActivationTime)
+            verify(topologyProviderMock, times(1))
+              .getOrderingTopologyAt(topologyActivationTime, checkPendingChanges = true)
             // Update the last block if needed and set up the new topology
             piped3.foreach(output.receive)
 
@@ -1077,7 +1083,10 @@ class OutputModuleTest
 
         context.runPipedMessages() shouldBe Seq.empty
 
-        verify(topologyProviderSpy, never).getOrderingTopologyAt(any[TopologyActivationTime])(
+        verify(topologyProviderSpy, never).getOrderingTopologyAt(
+          any[TopologyActivationTime],
+          checkPendingChanges = any[Boolean],
+        )(
           any[TraceContext]
         )
         verify(consensusRef, times(1)).asyncSend(
@@ -1122,7 +1131,7 @@ class OutputModuleTest
         SequencingParameters.Default,
         defaultMaxBytesToDecompress, // irrelevant for this test
         topologyActivationTime,
-        areTherePendingCantonTopologyChanges = false,
+        areTherePendingCantonTopologyChanges = Some(false),
       )
 
       def bftTimeForBlockInFirstEpoch(blockNumber: Long) =
@@ -1450,11 +1459,16 @@ object OutputModuleTest {
   private class FakeOrderingTopologyProvider[E <: BaseIgnoringUnitTestEnv[E]]
       extends OrderingTopologyProvider[E] {
 
-    override def getOrderingTopologyAt(activationTime: TopologyActivationTime)(implicit
+    override def getOrderingTopologyAt(
+        activationTime: TopologyActivationTime,
+        checkPendingChanges: Boolean,
+    )(implicit
         traceContext: TraceContext
-    ): E#FutureUnlessShutdownT[Option[(OrderingTopology, CryptoProvider[E])]] = createFuture(None)
+    ): E#FutureUnlessShutdownT[Option[(OrderingTopology, CryptoProvider[E])]] =
+      createFuture(None)
 
-    private def createFuture[A](a: A): E#FutureUnlessShutdownT[A] = () => a
+    private def createFuture[A](a: A): E#FutureUnlessShutdownT[A] =
+      () => a
   }
 
   private val aTag = BlockFormat.SendTag

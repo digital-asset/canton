@@ -361,6 +361,7 @@ private[lf] object SExpr {
 
   final case class FetchByKeyDefRef(ref: DefinitionRef) extends SDefinitionRef
   final case class LookupByKeyDefRef(ref: DefinitionRef) extends SDefinitionRef
+  final case class QueryNByKeyDefRef(ref: DefinitionRef) extends SDefinitionRef
   final case class ExceptionMessageDefRef(ref: DefinitionRef) extends SDefinitionRef
   final case class ThrowExceptionAsFailureStatusDefRef(ref: DefinitionRef) extends SDefinitionRef
   final case class SignatoriesDefRef(ref: DefinitionRef) extends SDefinitionRef

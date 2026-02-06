@@ -30,7 +30,7 @@ final case class ParticipantNodeParameters(
     enableStrictDarValidation: Boolean,
     commandProgressTracking: CommandProgressTrackerConfig,
     unsafeOnlinePartyReplication: Option[UnsafeOnlinePartyReplicationConfig],
-    automaticallyPerformLogicalSynchronizerUpgrade: Boolean,
+    automaticallyPerformLsu: Boolean,
     reassignmentsConfig: ReassignmentsConfig,
     doNotAwaitOnCheckingIncomingCommitments: Boolean,
     disableOptionalTopologyChecks: Boolean,
@@ -89,7 +89,7 @@ object ParticipantNodeParameters {
     enableStrictDarValidation = true,
     commandProgressTracking = CommandProgressTrackerConfig(),
     unsafeOnlinePartyReplication = None,
-    automaticallyPerformLogicalSynchronizerUpgrade = true,
+    automaticallyPerformLsu = true,
     reassignmentsConfig = ReassignmentsConfig(
       targetTimestampForwardTolerance = NonNegativeFiniteDuration.ofSeconds(30)
     ),

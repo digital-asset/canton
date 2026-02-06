@@ -5,13 +5,17 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftOrderingModuleSystemInitializer.{
   BftOrderingStores,
   BootstrapTopologyInfo,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.DelegationCryptoProvider
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.{
+  CryptoProvider,
+  DelegationCryptoProvider,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.{
   OrderingTopologyProvider,
   TopologyActivationTime,
@@ -64,6 +68,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.snapshot.SequencerSnapshotAdditionalInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
   Membership,
+  OrderingTopology,
   OrderingTopologyInfo,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Mempool
@@ -319,13 +324,15 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
   ): (EpochNumber, OrderingTopologyInfo[E], BlacklistLeaderSelectionPolicyState) = {
     import TraceContext.Implicits.Empty.*
 
-    val BootstrapTopologyInfo(
+    val bti @ BootstrapTopologyInfo(
       initialEpochNumber,
       initialTopologyQueryTimestamp,
       previousTopologyQueryTimestamp,
       maybeOnboardingTopologyQueryTimestamp,
     ) =
       getInitialAndPreviousTopologyQueryTimestamps(moduleSystem)
+
+    logger.debug(s"Retrieved bootstrap topologies timestamps: $bti")
 
     val (initialTopology, initialCryptoProvider) =
       getOrderingTopologyAt(moduleSystem, initialTopologyQueryTimestamp, "initial")
@@ -438,20 +445,23 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
       moduleSystem: ModuleSystem[E],
       topologyQueryTimestamp: TopologyActivationTime,
       topologyDesignation: String,
-  )(implicit traceContext: TraceContext) =
+  )(implicit traceContext: TraceContext): (OrderingTopology, CryptoProvider[E]) =
     awaitFuture(
       moduleSystem,
-      orderingTopologyProvider.getOrderingTopologyAt(topologyQueryTimestamp),
-      s"fetch $topologyDesignation ordering topology for bootstrap",
+      orderingTopologyProvider.getOrderingTopologyAt(
+        topologyQueryTimestamp,
+        checkPendingChanges = false,
+      ),
+      s"Fetch $topologyDesignation ordering topology for bootstrap",
     ).getOrElse(failBootstrap(s"Failed to fetch $topologyDesignation ordering topology"))
 
   private def fetchLatestEpoch(moduleSystem: ModuleSystem[E], includeInProgress: Boolean)(implicit
       traceContext: TraceContext
-  ) =
+  ): EpochStore.Epoch =
     awaitFuture(
       moduleSystem,
       stores.epochStore.latestEpoch(includeInProgress),
-      s"fetch latest${if (includeInProgress) " in-progress " else " "}epoch",
+      s"Fetch latest${if (includeInProgress) " in-progress " else " "}epoch",
     )
 
   private def failBootstrap(msg: String)(implicit traceContext: TraceContext) = {
@@ -506,5 +516,14 @@ object BftOrderingModuleSystemInitializer {
       initialTopologyQueryTimestamp: TopologyActivationTime,
       previousTopologyQueryTimestamp: TopologyActivationTime,
       onboardingTopologyQueryTimestamp: Option[TopologyActivationTime] = None,
-  )
+  ) extends PrettyPrinting {
+
+    override protected def pretty: Pretty[BootstrapTopologyInfo] =
+      prettyOfClass(
+        param("initialEpochNumber", _.initialEpochNumber),
+        param("initialTopologyQueryTimestamp", _.initialTopologyQueryTimestamp.value),
+        param("previousTopologyQueryTimestamp", _.previousTopologyQueryTimestamp.value),
+        param("onboardingTopologyQueryTimestamp", _.onboardingTopologyQueryTimestamp.map(_.value)),
+      )
+  }
 }

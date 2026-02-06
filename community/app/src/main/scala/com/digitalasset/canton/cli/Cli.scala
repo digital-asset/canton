@@ -51,8 +51,6 @@ final case class Cli(
     logFileName: Option[String] = None,
     kmsLogFileName: Option[String] = None,
     logEncoder: LogEncoder = LogEncoder.Plain,
-    logLastErrors: Boolean = false,
-    logLastErrorsFileName: Option[String] = None,
     logAccess: Boolean = false,
     logAccessFileName: Option[String] = None,
     logAccessErrors: Boolean = false,
@@ -99,8 +97,6 @@ final case class Cli(
       "KMS_LOG_FILE_ROLLING_PATTERN",
       "LOG_FILE_HISTORY",
       "KMS_LOG_FILE_HISTORY",
-      "LOG_LAST_ERRORS",
-      "LOG_LAST_ERRORS_FILE_NAME",
       "LOG_FORMAT_JSON",
       "LOG_IMMEDIATE_FLUSH",
       "KMS_LOG_IMMEDIATE_FLUSH",
@@ -109,7 +105,6 @@ final case class Cli(
     ).foreach(System.clearProperty(_).discard[String])
     logFileName.foreach(System.setProperty("LOG_FILE_NAME", _))
     kmsLogFileName.foreach(System.setProperty("KMS_LOG_FILE_NAME", _))
-    logLastErrorsFileName.foreach(System.setProperty("LOG_LAST_ERRORS_FILE_NAME", _))
     logFileHistory.foreach(x => System.setProperty("LOG_FILE_HISTORY", x.toString))
     kmsLogFileHistory.foreach(x => System.setProperty("KMS_LOG_FILE_HISTORY", x.toString))
     logFileRollingPattern.foreach(System.setProperty("LOG_FILE_ROLLING_PATTERN", _))
@@ -122,8 +117,6 @@ final case class Cli(
         System.setProperty("LOG_FILE_FLAT", "true").discard
       case LogFileAppender.Off =>
     }
-    if (logLastErrors)
-      System.setProperty("LOG_LAST_ERRORS", "true").discard
     if (logAccess)
       System.setProperty("LOG_ACCESS", "true").discard
     logAccessFileName.foreach(System.setProperty("LOG_ACCESS_FILE_NAME", _))
@@ -332,10 +325,6 @@ object Cli {
             case _ => throw new IllegalArgumentException(s"Unknown log profile $profile")
           }
         )
-
-      opt[Boolean]("log-last-errors")
-        .text("Capture events for logging.last_errors command")
-        .action((isEnabled, cli) => cli.copy(logLastErrors = isEnabled))
 
       opt[Boolean]("log-access")
         .text("Capture API access logs in a separate file")

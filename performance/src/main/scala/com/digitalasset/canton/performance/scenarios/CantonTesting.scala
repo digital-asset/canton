@@ -22,6 +22,7 @@ import com.digitalasset.canton.performance.*
 import com.digitalasset.canton.performance.PartyRole.*
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
 import com.digitalasset.canton.performance.elements.DriverStatus.MasterStatus
+import com.digitalasset.canton.performance.elements.dvp.TraderDriver
 import com.digitalasset.canton.performance.model.java as M
 import com.digitalasset.canton.sequencing.client.RecordingConfig
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeBootstrap
@@ -251,7 +252,7 @@ object CantonTesting {
           numAssetsPerIssuer,
           0,
           payloadSize,
-          0,
+          TraderDriver.toPartyGrowth(0),
         ),
       ),
       quorumIssuers = numberOfIssuersPerParticipant,

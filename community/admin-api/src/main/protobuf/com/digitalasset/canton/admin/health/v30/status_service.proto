@@ -12,11 +12,6 @@ service StatusService {
   rpc HealthDump(HealthDumpRequest) returns (stream HealthDumpResponse);
   // Toggle log levels
   rpc SetLogLevel(SetLogLevelRequest) returns (SetLogLevelResponse);
-  // Get the last errors observed on this node
-  // This is a built in functionality where we keep track of the last errors and all messages that were logged with the same trace id within a certain time frame
-  rpc GetLastErrors(GetLastErrorsRequest) returns (GetLastErrorsResponse);
-  // Get the trace of the last errors observed
-  rpc GetLastErrorTrace(GetLastErrorTraceRequest) returns (GetLastErrorTraceResponse);
 }
 
 message TopologyQueueStatus {
@@ -81,20 +76,3 @@ message SetLogLevelRequest {
 }
 
 message SetLogLevelResponse {}
-
-message GetLastErrorsRequest {}
-message GetLastErrorsResponse {
-  message Error {
-    string trace_id = 1;
-    string message = 2;
-  }
-  repeated Error errors = 1;
-}
-
-message GetLastErrorTraceRequest {
-  // The trace id of the error
-  string trace_id = 1;
-}
-message GetLastErrorTraceResponse {
-  repeated string messages = 1;
-}

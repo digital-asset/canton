@@ -19,19 +19,19 @@ import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencer.admin.v30
 import com.digitalasset.canton.sequencer.admin.v30.{
-  GetLSUTrafficControlStateRequest,
-  GetLSUTrafficControlStateResponse,
+  GetLsuTrafficControlStateRequest,
+  GetLsuTrafficControlStateResponse,
   OnboardingStateResponse,
   OnboardingStateV2Request,
   OnboardingStateV2Response,
-  SetLSUTrafficControlStateRequest,
-  SetLSUTrafficControlStateResponse,
+  SetLsuTrafficControlStateRequest,
+  SetLsuTrafficControlStateResponse,
   SetTrafficPurchasedRequest,
   SetTrafficPurchasedResponse,
 }
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.synchronizer.sequencer.traffic.{LSUTrafficState, TimestampSelector}
+import com.digitalasset.canton.synchronizer.sequencer.traffic.{LsuTrafficState, TimestampSelector}
 import com.digitalasset.canton.synchronizer.sequencer.{
   OnboardingStateForSequencer,
   OnboardingStateForSequencerV2,
@@ -274,7 +274,14 @@ class GrpcSequencerAdministrationService(
               .findFirstSequencerStateForSequencer(sequencerId)
               .map(txOpt =>
                 txOpt
-                  .map(stored => stored.validFrom)
+                  .map { stored =>
+                    val referenceEffectiveTime = stored.validFrom
+                    logger.debug(
+                      s"Computed onboarding reference effective time $referenceEffectiveTime " +
+                        s"when requested onboarding state for sequencer $sequencerId"
+                    )
+                    referenceEffectiveTime
+                  }
                   .toRight(
                     TopologyManagerError.MissingTopologyMapping
                       .Reject(Map(sequencerId -> Seq(SequencerSynchronizerState.code)))
@@ -283,6 +290,10 @@ class GrpcSequencerAdministrationService(
               )
           )
         case Right(timestamp) =>
+          logger.debug(
+            s"Producing onboarding state for requested timestamp $timestamp",
+            timestamp,
+          )
           EitherT.rightT[FutureUnlessShutdown, RpcError](EffectiveTime(timestamp))
       }
 
@@ -311,6 +322,11 @@ class GrpcSequencerAdministrationService(
       sequencerSnapshotTimestamp <- sequencer
         .awaitContainingBlockLastTimestamp(referenceEffective.value)
         .leftMap(_.toCantonRpcError)
+
+      _ = logger.debug(
+        s"Producing sequencer snapshot at $sequencerSnapshotTimestamp " +
+          "(i.e., last timestamp of block \"containing\" reference effective time)"
+      )
 
       // Wait for the domain time tracker to observe the sequencerSnapshot.lastTs.
       // This is only serves as a potential trigger for the topology client, in case no
@@ -396,12 +412,12 @@ class GrpcSequencerAdministrationService(
   /** Get the traffic control state at the Logical Synchronizer Upgrade time. Only available once
     * sequencer node has reached the upgrade time, otherwise returns an empty map.
     */
-  override def getLSUTrafficControlState(
-      request: GetLSUTrafficControlStateRequest
-  ): Future[GetLSUTrafficControlStateResponse] = {
+  override def getLsuTrafficControlState(
+      request: GetLsuTrafficControlStateRequest
+  ): Future[GetLsuTrafficControlStateResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
-    val result = sequencer.getLSUTrafficControlState
-      .map(trafficState => GetLSUTrafficControlStateResponse(trafficState.toByteString))
+    val result = sequencer.getLsuTrafficControlState
+      .map(trafficState => GetLsuTrafficControlStateResponse(trafficState.toByteString))
       .leftMap(_.toCantonRpcError)
     mapErrNewEUS(result)
   }
@@ -410,26 +426,26 @@ class GrpcSequencerAdministrationService(
     * during the upgrade process, can be called successfully once, only works if sequencer node
     * hasn't progressed beyond the upgrade time, otherwise returns an error.
     */
-  override def setLSUTrafficControlState(
-      request: SetLSUTrafficControlStateRequest
-  ): Future[SetLSUTrafficControlStateResponse] = {
+  override def setLsuTrafficControlState(
+      request: SetLsuTrafficControlStateRequest
+  ): Future[SetLsuTrafficControlStateResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
     val result = for {
       protocolVersionForProtoV30 <- wrapErrUS(
-        LSUTrafficState.protocolVersionRepresentativeFor(ProtoVersion(30))
+        LsuTrafficState.protocolVersionRepresentativeFor(ProtoVersion(30))
       )
       trafficStates <- wrapErrUS(
-        LSUTrafficState.fromByteString(
+        LsuTrafficState.fromByteString(
           protocolVersionForProtoV30.representative,
           request.lsuTrafficState,
         )
       )
       _ <-
         sequencer
-          .setLSUTrafficControlState(trafficStates)
+          .setLsuTrafficControlState(trafficStates)
           .leftMap(_.toCantonRpcError)
-    } yield SetLSUTrafficControlStateResponse()
+    } yield SetLsuTrafficControlStateResponse()
 
     mapErrNewEUS(result)
   }

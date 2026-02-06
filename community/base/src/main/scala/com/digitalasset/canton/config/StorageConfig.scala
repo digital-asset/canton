@@ -131,6 +131,8 @@ final case class DbParametersConfig(
   *   split pruning queries into intervals of this duration to avoid sequential scans
   * @param pruningParallelism
   *   number of parallel pruning queries to the db. defaults to 2
+  * @param topologyCacheAggregator
+  *   number of parallel requests for the toplogy cache read side
   */
 final case class BatchingConfig(
     maxItemsInBatch: PositiveNumeric[Int] = BatchingConfig.defaultMaxItemsBatch,

@@ -1326,15 +1326,15 @@ object ParticipantAdminCommands {
       ): Either[String, Unit] = Either.unit
     }
 
-    final case class PerformSynchronizerUpgrade(
+    final case class PerformManualLsu(
         currentPSId: PhysicalSynchronizerId,
         successorPSId: PhysicalSynchronizerId,
         upgradeTime: CantonTimestamp,
         successorConfig: SynchronizerConnectionConfig,
         sequencerConnectionValidation: SequencerConnectionValidation,
     ) extends GrpcAdminCommand[
-          v30.PerformSynchronizerUpgradeRequest,
-          v30.PerformSynchronizerUpgradeResponse,
+          v30.PerformManualLsuRequest,
+          v30.PerformManualLsuResponse,
           Unit,
         ] {
       override type Svc = ParticipantRepairServiceStub
@@ -1342,12 +1342,11 @@ object ParticipantAdminCommands {
       override def createService(channel: ManagedChannel): ParticipantRepairServiceStub =
         v30.ParticipantRepairServiceGrpc.stub(channel)
 
-      override protected def createRequest()
-          : Either[String, v30.PerformSynchronizerUpgradeRequest] =
+      override protected def createRequest(): Either[String, v30.PerformManualLsuRequest] =
         Right(
-          v30.PerformSynchronizerUpgradeRequest(
+          v30.PerformManualLsuRequest(
             physicalSynchronizerId = currentPSId.toProtoPrimitive,
-            successor = v30.PerformSynchronizerUpgradeRequest
+            successor = v30.PerformManualLsuRequest
               .Successor(
                 physicalSynchronizerId = successorPSId.toProtoPrimitive,
                 announcedUpgradeTime = upgradeTime.toProtoTimestamp.some,
@@ -1360,12 +1359,12 @@ object ParticipantAdminCommands {
 
       override protected def submitRequest(
           service: ParticipantRepairServiceStub,
-          request: v30.PerformSynchronizerUpgradeRequest,
-      ): Future[v30.PerformSynchronizerUpgradeResponse] =
-        service.performSynchronizerUpgrade(request)
+          request: v30.PerformManualLsuRequest,
+      ): Future[v30.PerformManualLsuResponse] =
+        service.performManualLsu(request)
 
       override protected def handleResponse(
-          response: v30.PerformSynchronizerUpgradeResponse
+          response: v30.PerformManualLsuResponse
       ): Either[String, Unit] = Either.unit
     }
   }

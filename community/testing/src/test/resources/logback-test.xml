@@ -30,13 +30,8 @@
   <property name="REWRITE_TESTING" value="true" />
   <include resource="rewrite-appender.xml"/>
 
-  <!-- Buffer errors for the last_errors command before passing them on to the rewrite appender -->
-  <appender name="LAST_ERRORS" class="com.digitalasset.canton.logging.LastErrorsAppender">
-    <appender-ref ref="REWRITE_LOG_LEVEL_SYNC"/>
-  </appender>
-
   <root level="INFO">
-    <appender-ref ref="LAST_ERRORS" />
+    <appender-ref ref="REWRITE_LOG_LEVEL_SYNC"/>
   </root>
 
   <!-- Ensure everything is logged before the JVM exits -->

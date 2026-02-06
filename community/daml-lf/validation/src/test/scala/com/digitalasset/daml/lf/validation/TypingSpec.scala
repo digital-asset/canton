@@ -19,7 +19,7 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
 
-abstract class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with Matchers {
+final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with Matchers {
 
   private[this] implicit val parserParameters: ParserParameters[this.type] =
     ParserParameters.default
@@ -399,6 +399,8 @@ abstract class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks wit
           T"Party → (( Update ($tuple2TyCon (ContractId Mod:T) Mod:T) ))",
         E"λ (e: Party) →  (( lookup_by_key @Mod:T e ))" ->
           T"Party → (( Update (Option (ContractId Mod:T)) ))",
+        E"λ (n : Int64) (e: Party) → (( query_n_by_key @Mod:T n e ))" ->
+          T"Int64 → Party → (( Update (List (ContractId Mod:T)) ))",
         E"(( uget_time ))" ->
           T"(( Update Timestamp ))",
         E"Λ (τ : ⋆). λ (e: Update τ) →(( uembed_expr @τ e ))" ->
@@ -899,6 +901,8 @@ abstract class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks wit
         E"""⸨ fetch_by_key @Mod:T "Bob" ⸩""" -> //
           { case _: ETypeMismatch => },
         E"""⸨ lookup_by_key @Mod:T "Bob" ⸩""" -> //
+          { case _: ETypeMismatch => },
+        E"""⸨ query_n_by_key @Mod:T 1 "Bob" ⸩""" -> //
           { case _: ETypeMismatch => },
         // UpdateEmbedExpr
         E"Λ (τ : ⋆) (σ : ⋆). λ (e : σ) → ⸨ uembed_expr @τ e ⸩" -> //

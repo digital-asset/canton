@@ -241,25 +241,24 @@ class JsonRequestBodyLoggingTest
             case "Chunked-Multi" => createMultiChunkedEntity(contentType)
           }
           loggerFactory
-            .assertLogsSeq(SuppressionRule.forLogger[ApiRequestLogger])(
+            .assertEventuallyLogsSeq(SuppressionRule.forLogger[ApiRequestLogger])(
               call(port1, entity),
               logSeq => {
                 val headerPart =
                   s"received a message \nContentType: Some($expectedContentType)\nContentLength: $expectedContentLength\nParameters: []"
                 val bodyPart = "Body: "
-                if (shouldLogBody) {
-                  logSeq.exists(logEntry =>
-                    logEntry.message.contains(headerPart) && logEntry.message.contains(bodyPart)
-                      && logEntry.message
-                        .substring(logEntry.message.indexOf("\nContentType"))
-                        .length <= ApiLoggingConfig.defaultMaxStringLength + "...".length
-                  ) shouldBe true
-                } else {
-                  logSeq.exists(logEntry =>
-                    logEntry.message.contains(headerPart) && !logEntry.message
-                      .contains(bodyPart)
-                  ) shouldBe true
+                forExactly(1, logSeq) { logEntry =>
+                  logEntry.message should include(headerPart)
+                  if (shouldLogBody) {
+                    logEntry.message should include(bodyPart)
+                    logEntry.message
+                      .substring(logEntry.message.indexOf("ContentType"))
+                      .length should be <= ApiLoggingConfig.defaultMaxStringLength + "...".length
+                  } else {
+                    logEntry.message should not include bodyPart
+                  }
                 }
+
               },
             )
             .map(_ => succeed)
@@ -352,17 +351,17 @@ class JsonRequestBodyLoggingTest
             case "Chunked-Multi" => createMultiChunkedEntity(contentType)
           }
           loggerFactory
-            .assertLogsSeq(SuppressionRule.forLogger[ApiRequestLogger])(
+            .assertEventuallyLogsSeq(SuppressionRule.forLogger[ApiRequestLogger])(
               call(port2, entity),
               logSeq => {
                 val headerPart =
                   s"received a message"
                 val messagePartRegex =
-                  s"\nContentType:.*\nContentLength:.*\nParameters: \\[\\]\nBody: .*"
-                logSeq.exists(logEntry =>
-                  logEntry.message.contains(headerPart) && !logEntry.message
-                    .matches(messagePartRegex)
-                ) shouldBe true
+                  "^\nContentType:.*\nContentLength:.*\nParameters: \\[\\]\nBody: .*$"
+                forExactly(1, logSeq) { logEntry =>
+                  logEntry.message should include(headerPart)
+                  logEntry.message should not fullyMatch regex(messagePartRegex)
+                }
               },
             )
             .map(_ => succeed)

@@ -75,7 +75,7 @@ service ParticipantRepairService {
      After the upgrade has been done, other repair operations might need to be done.
      This includes manually repairing the ACS to account for missed activity on both the old and new synchronizer.
   */
-  rpc PerformSynchronizerUpgrade(PerformSynchronizerUpgradeRequest) returns (PerformSynchronizerUpgradeResponse);
+  rpc PerformManualLsu(PerformManualLsuRequest) returns (PerformManualLsuResponse);
 }
 
 message PurgeContractsRequest {
@@ -409,7 +409,7 @@ message RepairCommitmentsStatus {
   }
 }
 
-message PerformSynchronizerUpgradeRequest {
+message PerformManualLsuRequest {
   message Successor {
     string physical_synchronizer_id = 1;
 
@@ -425,4 +425,4 @@ message PerformSynchronizerUpgradeRequest {
   Successor successor = 2;
 }
 
-message PerformSynchronizerUpgradeResponse {}
+message PerformManualLsuResponse {}

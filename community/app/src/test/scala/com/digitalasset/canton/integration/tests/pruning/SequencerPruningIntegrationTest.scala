@@ -5,7 +5,6 @@ package com.digitalasset.canton.integration.tests.pruning
 
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
-import com.digitalasset.canton.config.SessionSigningKeysConfig
 import com.digitalasset.canton.console.{LocalParticipantReference, SequencerReference}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.{
@@ -338,8 +337,6 @@ trait SequencerNodePruningIntegrationTest extends SequencerPruningIntegrationTes
         reduceSequencerAcknowledgementConflateWindow,
         increaseParticipant3AcknowledgementInterval,
         ConfigTransforms.useStaticTime,
-        // TODO(#30068): Enable session keys after sim clock advances are synced
-        ConfigTransforms.setSessionSigningKeys(SessionSigningKeysConfig.disabled),
         setupSequencerConfig,
       )
       .withSetup { implicit env =>

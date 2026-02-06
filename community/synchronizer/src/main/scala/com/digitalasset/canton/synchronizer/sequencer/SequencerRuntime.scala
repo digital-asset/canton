@@ -59,10 +59,10 @@ import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
 import com.digitalasset.canton.topology.transaction.{
+  LsuAnnouncement,
   MediatorSynchronizerState,
   SequencerSynchronizerState,
   SynchronizerTrustCertificate,
-  SynchronizerUpgradeAnnouncement,
   TopologyChangeOp,
 }
 import com.digitalasset.canton.tracing.TraceContext
@@ -364,7 +364,7 @@ class SequencerRuntime(
       val replaceO = transactions.collectFirst {
         case tx
             if tx.operation == TopologyChangeOp.Replace && tx.mapping.code == Code.SynchronizerUpgradeAnnouncement =>
-          tx.mapping.select[SynchronizerUpgradeAnnouncement].map(_.successor)
+          tx.mapping.select[LsuAnnouncement].map(_.successor)
       }
       // Some(Some(successor)) - replacement, otherwise Some(None) - removal, otherwise None - noop
       // Replace op takes precedence over Remove op

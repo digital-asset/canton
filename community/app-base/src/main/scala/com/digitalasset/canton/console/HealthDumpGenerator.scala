@@ -227,13 +227,6 @@ class HealthDumpGenerator(
           .getOrElse("log/canton.log")
       )
 
-    val logLastErrorsFile = File(
-      sys.env
-        .get("LOG_LAST_ERRORS_FILE_NAME")
-        .orElse(sys.props.get("LOG_LAST_ERRORS_FILE_NAME"))
-        .getOrElse("log/canton_errors.log")
-    )
-
     // This is a guess based on the default logback config as to what the rolling log files look like
     // If we want to be more robust we'd have to access logback directly, extract the pattern from there, and use it to
     // glob files.
@@ -247,7 +240,7 @@ class HealthDumpGenerator(
 
     File.usingTemporaryFile("canton-dump-", ".json") { tmpFile =>
       tmpFile.append(dump.asJson.spaces2)
-      val files = Iterator(logFile, logLastErrorsFile, tmpFile).filter(_.nonEmpty)
+      val files = Iterator(logFile, tmpFile).filter(_.nonEmpty)
       outputFile.zipIn(files ++ extraFilesToZip.iterator ++ rollingLogs)
     }
   }

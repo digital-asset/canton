@@ -43,15 +43,15 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   BlockNotFound,
   ExceededMaxSequencingTime,
-  LSUSequencerError,
-  LSUTrafficAlreadyInitialized,
+  LsuSequencerError,
+  LsuTrafficAlreadyInitialized,
   MissingSynchronizerPredecessor,
   SequencerPastUpgradeTime,
 }
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore
 import com.digitalasset.canton.synchronizer.sequencer.traffic.TimestampSelector.*
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
-  LSUTrafficState,
+  LsuTrafficState,
   SequencerRateLimitError,
   SequencerRateLimitManager,
   SequencerTrafficStatus,
@@ -169,7 +169,7 @@ class BlockSequencer(
       implicit val traceContext: TraceContext = TraceContext.createNew(
         "block-sequencer-lsu-traffic-control-check"
       )
-      val checkLSUTrafficInitializedFUS = for {
+      val checkLsuTrafficInitializedFUS = for {
         snapshot <- cryptoApi.ipsSnapshot(upgradeTime)
         trafficControlParametersO <- snapshot.trafficControlParameters(protocolVersion)
         trafficPurchasedInitialized <- trafficPurchasedStore.getInitialTimestamp
@@ -195,7 +195,7 @@ class BlockSequencer(
       }
 
       doNotAwaitUnlessShutdown(
-        checkLSUTrafficInitializedFUS,
+        checkLsuTrafficInitializedFUS,
         s"Failure during traffic initialization check for LSU successor sequencer",
       )
   }
@@ -881,19 +881,20 @@ class BlockSequencer(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SequencerRateLimitError.TrafficNotFound, Option[
     TrafficState
-  ]] = {
-    val latestSequencerEventTimestamp =
-      stateManager.getHeadState.block.latestSequencerEventTimestamp.orElse(
-        // TODO(#26983): Rather fall back to the topology state for older synchronizer LSU announcement
-        // predecessor.map(_.upgradeTime)
-        sequencingTimeLowerBoundExclusive.get
+  ]] =
+    EitherT.right(lsuTrafficInitialized.futureUS).flatMap { _ =>
+      val latestSequencerEventTimestamp =
+        stateManager.getHeadState.block.latestSequencerEventTimestamp.orElse(
+          // TODO(#26983): Rather fall back to the topology state for older synchronizer LSU announcement
+          // predecessor.map(_.upgradeTime)
+          sequencingTimeLowerBoundExclusive.get
+        )
+      blockRateLimitManager.getTrafficStateForMemberAt(
+        member,
+        timestamp,
+        latestSequencerEventTimestamp,
       )
-    blockRateLimitManager.getTrafficStateForMemberAt(
-      member,
-      timestamp,
-      latestSequencerEventTimestamp,
-    )
-  }
+    }
 
   override def sequencingTime(implicit
       traceContext: TraceContext
@@ -920,14 +921,14 @@ class BlockSequencer(
   }
 
   @nowarn("cat=deprecation")
-  override def getLSUTrafficControlState(implicit
+  override def getLsuTrafficControlState(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, LSUSequencerError, LSUTrafficState] =
+  ): EitherT[FutureUnlessShutdown, LsuSequencerError, LsuTrafficState] =
     for {
       // - Check that LSU is ongoing
       upgrade <- EitherT.fromOption[FutureUnlessShutdown](
         ongoingSynchronizerUpgrade.get(),
-        SequencerError.NoOngoingLSU.Error(cryptoApi.psid, cryptoApi.topologyKnownUntilTimestamp),
+        SequencerError.NoOngoingLsu.Error(cryptoApi.psid, cryptoApi.topologyKnownUntilTimestamp),
       )
 
       // - Basic time check against the wall clock
@@ -943,7 +944,7 @@ class BlockSequencer(
       }
 
       // - Check that sequencer has reached the upgrade time
-      latestPersistedBlockTimeO <- EitherT.right[LSUSequencerError](
+      latestPersistedBlockTimeO <- EitherT.right[LsuSequencerError](
         // - Traffic states have been persisted (the block completion is written last, after traffic)
         // TODO(##29986): When traffic accounting is made async, we need a different way to determine that
         //  it has become consistent (accounting reached the upgrade time)
@@ -963,7 +964,7 @@ class BlockSequencer(
         ),
       )
       // - All checks passed
-      topologySnapshot <- EitherT.right[LSUSequencerError](
+      topologySnapshot <- EitherT.right[LsuSequencerError](
         SyncCryptoClient.getSnapshotForTimestamp(
           cryptoApi,
           upgrade.successor.upgradeTime,
@@ -971,7 +972,7 @@ class BlockSequencer(
         )
       )
       // - Get all members known at the upgrade time
-      allMembers <- EitherT.right[LSUSequencerError](
+      allMembers <- EitherT.right[LsuSequencerError](
         topologySnapshot.ipsSnapshot.allMembers()
       )
       // - Get traffic states at the upgrade time for all members
@@ -985,19 +986,19 @@ class BlockSequencer(
             }
           )
           .map(_.flatten.toMap)
-          .leftMap[LSUSequencerError](error =>
-            SequencerError.LSUTrafficNotFound.Error(error.toString)
+          .leftMap[LsuSequencerError](error =>
+            SequencerError.LsuTrafficNotFound.Error(error.toString)
           )
 
     } yield {
-      LSUTrafficState(trafficStates)(
-        LSUTrafficState.protocolVersionRepresentativeFor(protocolVersion)
+      LsuTrafficState(trafficStates)(
+        LsuTrafficState.protocolVersionRepresentativeFor(protocolVersion)
       )
     }
 
-  override def setLSUTrafficControlState(
-      state: LSUTrafficState
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, LSUSequencerError, Unit] =
+  override def setLsuTrafficControlState(
+      state: LsuTrafficState
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, LsuSequencerError, Unit] =
     for {
       // - Check that there's an LSU predecessor
       upgradeTime <- EitherT.fromOption[FutureUnlessShutdown](
@@ -1016,7 +1017,7 @@ class BlockSequencer(
       )
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
         !lsuTrafficInitialized.futureUS.isCompleted,
-        LSUTrafficAlreadyInitialized.Error(
+        LsuTrafficAlreadyInitialized.Error(
           cryptoApi.psid
         ),
       )

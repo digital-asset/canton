@@ -470,6 +470,14 @@ class TestingIdentityFactory(
             topologySnapshot(synchronizerId, timestampForSynchronizerParameters = timestamp)
           })
 
+        override def awaitHypotheticalSnapshot(
+            timestamp: CantonTimestamp,
+            desiredTimestamp: CantonTimestamp,
+        )(implicit
+            traceContext: TraceContext
+        ): FutureUnlessShutdown[TopologySnapshot] =
+          hypotheticalSnapshot(timestamp, desiredTimestamp)
+
         override def close(): Unit = ()
 
         override def topologyKnownUntilTimestamp: CantonTimestamp = upToInclusive

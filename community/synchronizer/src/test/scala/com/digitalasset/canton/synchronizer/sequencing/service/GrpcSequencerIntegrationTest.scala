@@ -597,7 +597,8 @@ class GrpcSequencerIntegrationTest
             .mk(Set, SequencerAlias.Default -> sequencerId, sequencerAlias2 -> sequencerId2)
             .toMap,
         ).futureValueUS,
-        assertions = _.infoMessage should include(
+        assertions = _.infoMessage should include("Initializing traffic state at timestamp:"),
+        _.infoMessage should include(
           "Cannot reach threshold for Retrieving traffic state from synchronizer"
         ),
         _.infoMessage should include(

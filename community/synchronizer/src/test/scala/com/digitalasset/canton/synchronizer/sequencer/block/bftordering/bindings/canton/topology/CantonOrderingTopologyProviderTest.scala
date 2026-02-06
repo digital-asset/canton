@@ -93,20 +93,20 @@ class CantonOrderingTopologyProviderTest
         (
           "activationTimestamp",
           "maxEffectiveTimestamp",
-          "expected pending topology changes true/false",
+          "expected pending topology changes",
         ),
         // Case 1: the topology snapshot query timestamp is the immediate successor of the maximum effective timestamp,
         //  i.e., the maximum activation timestamp is the same as the topology snapshot query timestamp; e.g.,
         //  a valid topology transaction is the last sequenced event and topology change delay is 0, then
         //  no topology changes are pending because the last topology change is already active at the topology
         //  snapshot query time.
-        (aTimestamp.immediateSuccessor, aTimestamp, false),
+        (aTimestamp.immediateSuccessor, aTimestamp, Some(false)),
         // Case 2: the topology snapshot query timestamp equals the maximum effective timestamp,
         //  i.e., the maximum activation timestamp is 1 microsecond later than the topology snapshot query timestamp;
         //  e.g., a valid topology transaction is the last sequenced event and topology change delay is 1 microsecond,
         //  then the corresponding topology change is pending because it is not already active at the topology
         //  snapshot query time.
-        (aTimestamp, aTimestamp, true),
+        (aTimestamp, aTimestamp, Some(true)),
       ).forEvery {
         case (activationTimestamp, maxEffectiveTimestamp, expectedPendingTopologyChangesFlag) =>
           when(
@@ -122,7 +122,10 @@ class CantonOrderingTopologyProviderTest
             loggerFactory,
             SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
           )
-            .getOrderingTopologyAt(TopologyActivationTime(activationTimestamp))
+            .getOrderingTopologyAt(
+              TopologyActivationTime(activationTimestamp),
+              checkPendingChanges = true,
+            )
             .futureUnlessShutdown()
             .futureValueUS
             .fold(fail("Ordering topology not returned")) { case (orderingTopology, _) =>

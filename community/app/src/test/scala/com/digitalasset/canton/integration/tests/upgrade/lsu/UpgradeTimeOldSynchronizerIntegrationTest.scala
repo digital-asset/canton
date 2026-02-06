@@ -53,7 +53,7 @@ final class UpgradeTimeOldSynchronizerIntegrationTest
       .addConfigTransforms(ConfigTransforms.useStaticTime)
       .addConfigTransform(
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.automaticallyPerformLogicalSynchronizerUpgrade).replace(false)
+          _.focus(_.parameters.automaticallyPerformLsu).replace(false)
         )
       )
 
@@ -65,11 +65,11 @@ final class UpgradeTimeOldSynchronizerIntegrationTest
       participant1.synchronizers.connect_local(sequencer1, daName)
 
       synchronizerOwners1.foreach(
-        _.topology.synchronizer_upgrade.announcement.propose(successorPSId, upgradeTime)
+        _.topology.lsu.announcement.propose(successorPSId, upgradeTime)
       )
 
       eventually() {
-        participant1.topology.synchronizer_upgrade.announcement
+        participant1.topology.lsu.announcement
           .list(daId)
           .loneElement
           .item
@@ -182,9 +182,8 @@ final class UpgradeTimeOldSynchronizerIntegrationTest
       /** Despite the call to fetch time and the empty message triggered by the ping (ping messages
         * are replaced by empty messages on the read side of the sequencer), time should not
         * progress past upgrade time from indexer point of view. Instead, last events are replaced
-        * by
-        * [[com.digitalasset.canton.ledger.participant.state.Update.LogicalSynchronizerUpgradeTimeReached]]
-        * with record time equal upgrade time.
+        * by [[com.digitalasset.canton.ledger.participant.state.Update.LsuTimeReached]] with record
+        * time equal upgrade time.
         */
       cleanSynchronizerIndex.recordTime shouldBe upgradeTime
       cleanSynchronizerIndex.sequencerIndex.value.sequencerTimestamp should be < upgradeTime

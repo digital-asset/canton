@@ -366,7 +366,7 @@ message SequencerSynchronizerState {
 // removing this mapping unfreezes the topology state again.
 // authorization: whoever controls the synchronizer
 // UNIQUE(successor_physical_synchronizer_id.logical)
-message SynchronizerUpgradeAnnouncement {
+message LsuAnnouncement {
   // the physical synchronizer id of the successor synchronizer
   string successor_physical_synchronizer_id = 1;
   // when the upgrade happens
@@ -376,7 +376,7 @@ message SynchronizerUpgradeAnnouncement {
 // a sequencer can announce its connections on the successor synchronizer
 // authorization: whoever controls the sequencer
 // UNIQUE(sequencer_id, synchronizer_id)
-message SequencerConnectionSuccessor {
+message LsuSequencerConnectionSuccessor {
   // the sequencer id
   string sequencer_id = 1;
   // to synchronizer id
@@ -420,8 +420,8 @@ message TopologyMapping {
 
     PartyToKeyMapping party_to_key_mapping = 16;
 
-    SynchronizerUpgradeAnnouncement synchronizer_upgrade_announcement = 17;
-    SequencerConnectionSuccessor sequencer_connection_successor = 18;
+    LsuAnnouncement synchronizer_upgrade_announcement = 17;
+    LsuSequencerConnectionSuccessor sequencer_connection_successor = 18;
   }
   reserved 2; // was identifier_delegation
   reserved 10; // was authority_of

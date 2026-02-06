@@ -21,7 +21,7 @@ import com.digitalasset.canton.participant.config.UnsafeOnlinePartyReplicationCo
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing
-import com.digitalasset.canton.participant.sync.LogicalSynchronizerUpgradeCallback
+import com.digitalasset.canton.participant.sync.LsuCallback
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.store.SequencedEventStore
 import com.digitalasset.canton.time.Clock
@@ -79,7 +79,7 @@ class TopologyComponentFactory(
       onboardingClearanceScheduler: OnboardingClearanceScheduler,
       topologyClient: SynchronizerTopologyClientWithInit,
       recordOrderPublisher: RecordOrderPublisher,
-      lsuCallback: LogicalSynchronizerUpgradeCallback,
+      lsuCallback: LsuCallback,
       retrieveAndStoreMissingSequencerIds: TraceContext => EitherT[
         FutureUnlessShutdown,
         String,
@@ -145,9 +145,7 @@ class TopologyComponentFactory(
     }
   }
 
-  def createInitialTopologySnapshotValidator(
-      topologyConfig: TopologyConfig
-  )(implicit
+  def createInitialTopologySnapshotValidator()(implicit
       executionContext: ExecutionContext,
       materializer: Materializer,
   ): InitialTopologySnapshotValidator =
@@ -155,7 +153,7 @@ class TopologyComponentFactory(
       crypto.pureCrypto,
       topologyStore,
       batching.topologyCacheAggregator,
-      topologyConfig,
+      topology,
       Some(crypto.staticSynchronizerParameters),
       timeouts,
       loggerFactory,

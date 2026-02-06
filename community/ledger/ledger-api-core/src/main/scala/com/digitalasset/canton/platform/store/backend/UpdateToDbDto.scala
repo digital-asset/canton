@@ -87,7 +87,7 @@ object UpdateToDbDto {
         Iterator(DbDto.SequencerIndexMoved(u.synchronizerId))
 
       case _: EmptyAcsPublicationRequired => Iterator.empty
-      case _: LogicalSynchronizerUpgradeTimeReached => Iterator.empty
+      case _: LsuTimeReached => Iterator.empty
 
       case _: CommitRepair =>
         Iterator.empty

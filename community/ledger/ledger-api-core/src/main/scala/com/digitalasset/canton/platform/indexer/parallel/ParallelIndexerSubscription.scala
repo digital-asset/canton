@@ -13,7 +13,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.Update.{
   CommitRepair,
   EmptyAcsPublicationRequired,
-  LogicalSynchronizerUpgradeTimeReached,
+  LsuTimeReached,
   ReassignmentAccepted,
   SequencedCommandRejected,
   SequencerIndexMoved,
@@ -1035,7 +1035,7 @@ object ParallelIndexerSubscription {
 
   def updateWeightEstimator(input: (Offset, Update)): Long = input match {
     case (_, u: CommitRepair) => LightWeight
-    case (_, u: LogicalSynchronizerUpgradeTimeReached) => LightWeight
+    case (_, u: LsuTimeReached) => LightWeight
     case (_, u: SequencerIndexMoved) => LightWeight
     case (_, u: EmptyAcsPublicationRequired) => LightWeight
     case (_, u: TransactionAccepted) =>

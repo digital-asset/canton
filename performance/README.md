@@ -195,10 +195,10 @@ ln -s /mnt/ssddisk/log
 ```
 
 There are quite a few possible topologies that you can run. Check out the config files in `performance/topology/`.
-Normally, we just use the `distributed-topology.conf`. You can start it using
+Normally, we just use the `distributed-reference.conf`. You can start it using
 
 ```
-    ./performance/run.sh -n distributed-topology
+    ./performance/run.sh -n distributed-reference
 ```
 
 Once it is started up, you will get the console, where you can run the `stats` command to see what it is doing.

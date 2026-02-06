@@ -77,8 +77,8 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
   // Shorten the interval, as the default is 1 minute
   private val sequencerClientAcknowledgementIntervalMs: Int = 5000
 
-  private lazy val containsLSUChaos: Boolean =
-    operations.exists(_.name == LogicalSynchronizerUpgradeChaos.name)
+  private lazy val containsLsuChaos: Boolean =
+    operations.exists(_.name == LsuChaos.name)
 
   protected lazy val submissionRateSettings: SubmissionRateSettings =
     SubmissionRateSettings.TargetLatency(targetLatencyMs = performanceRunnerTargetLatencyMs)
@@ -239,7 +239,7 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
     ensureNodeExclusivityUnique(_.exclusiveMediators, "mediators")
     ensureNodeExclusivityUnique(_.exclusiveSequencers, "sequencers")
 
-    if (containsLSUChaos && operations.sizeIs != 1) {
+    if (containsLsuChaos && operations.sizeIs != 1) {
       /*
       LSU chaos changes the performance runner from TargetLatency to FixedRate.
       Since we did not think yet whether it would impact negatively the other chaos, we require that
@@ -352,9 +352,9 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
       TODO(#30088) Consider relaxing this constraint
       Checking the topology in with LSU chaos is more difficult because we need to track active nodes.
          */
-        val operationsContainLSU = operations.exists(_.name == LogicalSynchronizerUpgradeChaos.name)
+        val operationsContainLsu = operations.exists(_.name == LsuChaos.name)
 
-        if (!operationsContainLSU) {
+        if (!operationsContainLsu) {
           // Run one last topology transaction through the synchronizer and wait until all synchronizer members have observed
           // that transaction to help ensure that no synchronizer member is behind consuming topology changes.
           val sequencedTimeOfDummyTransaction =
@@ -759,11 +759,11 @@ class ChangingTopologyKeyRotationOwnerToKeyTest extends ChangingTopologyPerforma
 
 // TODO (#26983): this is known to be flaky
 @UnstableTest
-class ChangingTopologyLSUTest extends ChangingTopologyPerformanceIntegrationTest {
-  private lazy val maxLSU: Int = 3
+class ChangingTopologyLsuTest extends ChangingTopologyPerformanceIntegrationTest {
+  private lazy val maxLsu: Int = 3
 
-  protected val numMediators: Int = 1 + maxLSU
-  protected val numSequencers: Int = 1 + maxLSU
+  protected val numMediators: Int = 1 + maxLsu
+  protected val numSequencers: Int = 1 + maxLsu
 
   protected val numParticipants = 2
 
@@ -785,7 +785,7 @@ class ChangingTopologyLSUTest extends ChangingTopologyPerformanceIntegrationTest
   override lazy val operations: NonEmpty[Seq[TopologyOperations]] =
     NonEmpty.apply(
       Seq,
-      new LogicalSynchronizerUpgradeChaos(PositiveInt.tryCreate(maxLSU), logger),
+      new LsuChaos(PositiveInt.tryCreate(maxLsu), logger),
     )
 }
 

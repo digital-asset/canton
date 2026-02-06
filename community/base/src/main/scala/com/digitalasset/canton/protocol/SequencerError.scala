@@ -29,7 +29,6 @@ import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId, Sequenc
 import com.digitalasset.canton.util.LoggerUtil
 
 import scala.concurrent.duration.Duration
-import scala.jdk.DurationConverters.*
 
 sealed trait SequencerError extends CantonBaseError
 object SequencerError extends SequencerErrorGroup {
@@ -182,7 +181,7 @@ object SequencerError extends SequencerErrorGroup {
         message: String,
     ) extends CantonBaseError.Impl(
           cause =
-            s"The sequencer time [$ts] has exceeded by ${LoggerUtil.roundDurationForHumans((ts - maxSequencingTime).toScala)} the max-sequencing-time of the send request [$maxSequencingTime]: $message"
+            s"The sequencer time [$ts] has exceeded by ${LoggerUtil.roundDurationForHumans(ts - maxSequencingTime)} the max-sequencing-time of the send request [$maxSequencingTime]: $message"
         )
   }
 
@@ -278,7 +277,7 @@ object SequencerError extends SequencerErrorGroup {
         with SequencerError
   }
 
-  sealed trait LSUSequencerError extends SequencerError
+  sealed trait LsuSequencerError extends SequencerError
 
   @Explanation(
     """This error indicates that the sequencer is missing logical upgrade predecessor information."""
@@ -298,7 +297,7 @@ object SequencerError extends SequencerErrorGroup {
           cause =
             s"Synchronizer $synchronizerId is missing predecessor information for sequencer $sequencerId"
         )
-        with LSUSequencerError
+        with LsuSequencerError
   }
 
   @Explanation(
@@ -323,7 +322,7 @@ object SequencerError extends SequencerErrorGroup {
           cause =
             s"Synchronizer $synchronizerId is currently at $currentTime which is past the upgrade time $upgradeTime"
         )
-        with LSUSequencerError
+        with LsuSequencerError
   }
 
   @Explanation(
@@ -332,7 +331,7 @@ object SequencerError extends SequencerErrorGroup {
   @Resolution(
     """Sequencer traffic initialization should only be called once during a logical synchronizer upgrade."""
   )
-  object LSUTrafficAlreadyInitialized
+  object LsuTrafficAlreadyInitialized
       extends ErrorCode(
         "SEQUENCER_LSU_TRAFFIC_ALREADY_INITIALIZED",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
@@ -343,7 +342,7 @@ object SequencerError extends SequencerErrorGroup {
           cause =
             s"Synchronizer $synchronizerId has already been initialized with the traffic control from its LSU predecessor"
         )
-        with LSUSequencerError
+        with LsuSequencerError
   }
 
   @Explanation(
@@ -354,7 +353,7 @@ object SequencerError extends SequencerErrorGroup {
       | Need to make sure that has indeed been announced and became effective
       | and that sequencer has caught up past it becoming effective. Can be retried safely."""
   )
-  object NoOngoingLSU
+  object NoOngoingLsu
       extends ErrorCode(
         "SEQUENCER_LSU_NO_ONGOING",
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
@@ -366,7 +365,7 @@ object SequencerError extends SequencerErrorGroup {
           cause =
             s"No ongoing LSU found on the synchronizer $synchronizerId as of $currentTopologyTimestamp"
         )
-        with LSUSequencerError
+        with LsuSequencerError
   }
 
   @Explanation(
@@ -388,7 +387,7 @@ object SequencerError extends SequencerErrorGroup {
           cause =
             s"Sequencer hasn't reached upgrade time $upgradeTime, currently observed time is $currentTimestampO"
         )
-        with LSUSequencerError
+        with LsuSequencerError
   }
 
   @Explanation(
@@ -397,7 +396,7 @@ object SequencerError extends SequencerErrorGroup {
   @Resolution(
     """Traffic not found for a synchronizer member. Cannot be retried."""
   )
-  object LSUTrafficNotFound
+  object LsuTrafficNotFound
       extends ErrorCode(
         "SEQUENCER_LSU_TRAFFIC_NOT_FOUND",
         ErrorCategory.SystemInternalAssumptionViolated,
@@ -407,6 +406,6 @@ object SequencerError extends SequencerErrorGroup {
     ) extends CantonBaseError.Impl(
           cause = s"Traffic control error: $errorMessage"
         )
-        with LSUSequencerError
+        with LsuSequencerError
   }
 }

@@ -310,7 +310,7 @@ class RequiredTopologyMappingChecks(
             None | Some(Code.SynchronizerUpgradeAnnouncement),
           ) =>
         toValidate
-          .select[TopologyChangeOp.Replace, SynchronizerUpgradeAnnouncement]
+          .select[TopologyChangeOp.Replace, LsuAnnouncement]
           .map(checkSynchronizerUpgradeAnnouncement(effective, _))
 
       case _otherwise => None
@@ -327,7 +327,7 @@ class RequiredTopologyMappingChecks(
   }
 
   private val mappingsAllowedDuringSynchronizerUpgrade =
-    TopologyMapping.Code.logicalSynchronizerUpgradeMappings
+    TopologyMapping.Code.lsuMappings
 
   /** Check that the topology state is not frozen if this store is a synchronizer store. All other
     * stores are not subject to freezing the topology state.
@@ -347,7 +347,7 @@ class RequiredTopologyMappingChecks(
             filterUid = NonEmpty.mk(Seq, synchronizerId.uid),
           )
           announcements = NonEmpty.from(
-            results.flatMap(_.selectMapping[SynchronizerUpgradeAnnouncement].toList)
+            results.flatMap(_.selectMapping[LsuAnnouncement].toList)
           )
           _ <- announcements match {
             case None => EitherTUtil.unitUS[TopologyTransactionRejection]
@@ -955,7 +955,7 @@ class RequiredTopologyMappingChecks(
       effective: EffectiveTime,
       toValidate: SignedTopologyTransaction[
         TopologyChangeOp.Replace,
-        SynchronizerUpgradeAnnouncement,
+        LsuAnnouncement,
       ],
   ): EitherT[FutureUnlessShutdown, TopologyTransactionRejection, Unit] =
     for {

@@ -9,6 +9,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.SupportedVersions
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.Epoch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
@@ -36,7 +37,22 @@ object Consensus {
 
   sealed trait Message[+E] extends Product
 
-  final case object Init extends Message[Nothing]
+  sealed trait Init extends Message[Nothing]
+  object Init {
+    final case object KickOff extends Init
+
+    final case class LatestEpochsLoaded(
+        latestCompletedEpoch: EpochStore.Epoch,
+        latestEpoch: EpochStore.Epoch,
+    ) extends Init
+
+    final case class EpochInitDataLoaded(
+        latestCompletedEpoch: Epoch,
+        latestEpoch: Epoch,
+        epochInProgress: EpochStore.EpochInProgress,
+        completedBlocks: Seq[EpochStore.Block],
+    ) extends Init
+  }
 
   final case object Start extends Message[Nothing]
 

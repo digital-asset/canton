@@ -16,7 +16,7 @@ import com.digitalasset.canton.data.{
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LifeCycleContainer
-import com.digitalasset.canton.participant.admin.data.ManualLSURequest
+import com.digitalasset.canton.participant.admin.data.ManualLsuRequest
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.UnknownPSId
 import com.digitalasset.canton.participant.store.{
@@ -31,13 +31,10 @@ import com.digitalasset.canton.resource.DbExceptionRetryPolicy
 import com.digitalasset.canton.sequencing.{SequencerConnection, SequencerConnections}
 import com.digitalasset.canton.topology.client.StoreBasedTopologySnapshot
 import com.digitalasset.canton.topology.store.NoPackageDependencies
-import com.digitalasset.canton.topology.transaction.{
-  SynchronizerUpgradeAnnouncement,
-  TopologyMapping,
-}
+import com.digitalasset.canton.topology.transaction.{LsuAnnouncement, TopologyMapping}
 import com.digitalasset.canton.topology.{
   KnownPhysicalSynchronizerId,
-  LSU,
+  Lsu,
   PhysicalSynchronizerId,
   SequencerId,
   SynchronizerId,
@@ -140,7 +137,7 @@ abstract class LogicalSynchronizerUpgrade[Param](
       params: Param,
   )(implicit
       traceContext: TraceContext,
-      logger: LSU.Logger,
+      logger: Lsu.Logger,
   ): EitherT[FutureUnlessShutdown, String, Unit]
 
   /** Run `operation` only if connectivity to `lsid` matches `shouldBeConnected`.
@@ -183,7 +180,7 @@ abstract class LogicalSynchronizerUpgrade[Param](
       operation: String,
   )(implicit
       traceContext: TraceContext,
-      logger: LSU.Logger,
+      logger: Lsu.Logger,
   ): EitherT[FutureUnlessShutdown, E, Unit] =
     synchronizerConnectionConfigStore.get(successorPSId) match {
       case Right(
@@ -206,7 +203,7 @@ abstract class LogicalSynchronizerUpgrade[Param](
       param: Param,
   )(implicit
       traceContext: TraceContext,
-      logger: LSU.Logger,
+      logger: Lsu.Logger,
   ): EitherT[FutureUnlessShutdown, NegativeResult, Unit] = {
     val successorPSId = synchronizerSuccessor.psid
     val lsid = currentPSId.logical
@@ -300,7 +297,7 @@ class AutomaticLogicalSynchronizerUpgrade(
       synchronizerSuccessor: SynchronizerSuccessor,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
     val successorPSId = synchronizerSuccessor.psid
-    implicit val logger = LSU.Logger(loggerFactory, getClass, synchronizerSuccessor)
+    implicit val logger = Lsu.Logger(loggerFactory, getClass, synchronizerSuccessor)
 
     logger.info(s"Upgrade from $currentPSId to $successorPSId")
 
@@ -322,7 +319,7 @@ class AutomaticLogicalSynchronizerUpgrade(
             filterNamespace = None,
           )
         )
-        .map(_.collectOfMapping[SynchronizerUpgradeAnnouncement])
+        .map(_.collectOfMapping[LsuAnnouncement])
         .map(_.result.map(_.transaction.mapping))
 
       _ <- announcements match {
@@ -390,7 +387,7 @@ class AutomaticLogicalSynchronizerUpgrade(
       params: Unit,
   )(implicit
       traceContext: TraceContext,
-      logger: LSU.Logger,
+      logger: Lsu.Logger,
   ): EitherT[FutureUnlessShutdown, String, Unit] =
     for {
       // Should have been checked before but this is cheap
@@ -430,7 +427,7 @@ class AutomaticLogicalSynchronizerUpgrade(
       synchronizerSuccessor: SynchronizerSuccessor,
   )(implicit
       traceContext: TraceContext,
-      logger: LSU.Logger,
+      logger: Lsu.Logger,
   ): FutureUnlessShutdown[Either[NegativeResult, UpgradabilityCheckResult]] = {
     val successorPSId = synchronizerSuccessor.psid
     val lsid = currentPSId.logical
@@ -717,14 +714,14 @@ class ManualLogicalSynchronizerUpgrade(
   override def kind: String = "manual"
 
   def upgrade(
-      request: ManualLSURequest
+      request: ManualLsuRequest
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
     val currentPSId = request.currentPSId
     val successorPSId = request.successorPSId
     val upgradeTime = request.upgradeTime
     val alias = request.successorConfig.synchronizerAlias
     val synchronizerSuccessor = SynchronizerSuccessor(successorPSId, upgradeTime)
-    implicit val logger = LSU.Logger(loggerFactory, getClass, synchronizerSuccessor)
+    implicit val logger = Lsu.Logger(loggerFactory, getClass, synchronizerSuccessor)
 
     EitherT(
       runWithRetries(
@@ -745,7 +742,7 @@ class ManualLogicalSynchronizerUpgrade(
       successorConfig: SynchronizerConnectionConfig,
   )(implicit
       traceContext: TraceContext,
-      logger: LSU.Logger,
+      logger: Lsu.Logger,
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
     logger.info(s"Marking synchronizer connection $currentPSId as inactive")
     val successorPSId = synchronizerSuccessor.psid

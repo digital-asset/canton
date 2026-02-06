@@ -971,57 +971,57 @@ class GrpcTopologyManagerReadService(
           includeRejected = false,
         )
         .filter { stored =>
-          val isNonLSU =
+          val isNonLsu =
             !TopologyMapping.Code.lsuMappingsExcludedFromUpgrade.contains(stored.mapping.code)
           val isFullyAuthorizedOrNotExpiredProposal =
             !stored.transaction.isProposal || stored.validUntil.isEmpty
 
-          isNonLSU && isFullyAuthorizedOrNotExpiredProposal
+          isNonLsu && isFullyAuthorizedOrNotExpiredProposal
         }
     }
     CantonGrpcUtil.mapErrNewEUS(sourceEUS)
   }
 
-  override def listSynchronizerUpgradeAnnouncement(
-      request: ListSynchronizerUpgradeAnnouncementRequest
-  ): Future[ListSynchronizerUpgradeAnnouncementResponse] = {
+  override def listLsuAnnouncement(
+      request: ListLsuAnnouncementRequest
+  ): Future[ListLsuAnnouncementResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val ret = for {
       res <- collectFromStoresByFilterString(
         request.baseQuery,
-        SynchronizerUpgradeAnnouncement.code,
+        LsuAnnouncement.code,
         request.filterSynchronizerId,
       )
     } yield {
-      val results = res.collect { case (context, announcement: SynchronizerUpgradeAnnouncement) =>
-        adminProto.ListSynchronizerUpgradeAnnouncementResponse.Result(
+      val results = res.collect { case (context, announcement: LsuAnnouncement) =>
+        adminProto.ListLsuAnnouncementResponse.Result(
           context = Some(createBaseResult(context)),
           item = Some(announcement.toProto),
         )
       }
-      adminProto.ListSynchronizerUpgradeAnnouncementResponse(results)
+      adminProto.ListLsuAnnouncementResponse(results)
     }
     CantonGrpcUtil.mapErrNewEUS(ret)
   }
 
-  override def listSequencerConnectionSuccessor(
-      request: ListSequencerConnectionSuccessorRequest
-  ): Future[ListSequencerConnectionSuccessorResponse] = {
+  override def listLsuSequencerConnectionSuccessor(
+      request: ListLsuSequencerConnectionSuccessorRequest
+  ): Future[ListLsuSequencerConnectionSuccessorResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val ret = for {
       res <- collectFromStoresByFilterString(
         request.baseQuery,
-        SequencerConnectionSuccessor.code,
+        LsuSequencerConnectionSuccessor.code,
         request.filterSequencerId,
       )
     } yield {
-      val results = res.collect { case (context, successor: SequencerConnectionSuccessor) =>
-        adminProto.ListSequencerConnectionSuccessorResponse.Result(
+      val results = res.collect { case (context, successor: LsuSequencerConnectionSuccessor) =>
+        adminProto.ListLsuSequencerConnectionSuccessorResponse.Result(
           context = Some(createBaseResult(context)),
           item = Some(successor.toProto),
         )
       }
-      adminProto.ListSequencerConnectionSuccessorResponse(results)
+      adminProto.ListLsuSequencerConnectionSuccessorResponse(results)
     }
     CantonGrpcUtil.mapErrNewEUS(ret)
   }

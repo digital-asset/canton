@@ -140,6 +140,9 @@ final class ProtobufCompatibilityReaderTest
     """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Field "3" with name "message_id" on message "OrderingRequest" changed type from "bytes" to "string".""",
     """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Field "4" with name "payload" on message "OrderingRequest" changed cardinality from "optional with explicit presence" to "optional with implicit presence".""",
     """com/digitalasset/canton/synchronizer/sequencing/sequencer/bftordering/v30/bft_ordering_service.proto:Field "4" with name "payload" on message "OrderingRequest" changed type from "message" to "bytes".""",
+    // LastErrorsAppender was removed, along with the corresponding Admin API endpoints
+    """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present RPC "GetLastErrorTrace" on service "StatusService" was deleted.""",
+    """com/digitalasset/canton/admin/health/v30/status_service.proto:Previously present RPC "GetLastErrors" on service "StatusService" was deleted.""",
   )
 
   "protobuf" should {

@@ -80,10 +80,13 @@ class FixedFileBasedOrderingTopologyProvider(
       SequencingParameters.Default,
       MaxBytesToDecompress(DynamicSynchronizerParameters.defaultMaxRequestSize.value),
       Genesis.GenesisTopologyActivationTime,
-      areTherePendingCantonTopologyChanges = false,
+      areTherePendingCantonTopologyChanges = Some(false),
     )
 
-  override def getOrderingTopologyAt(activationTime: TopologyActivationTime)(implicit
+  override def getOrderingTopologyAt(
+      activationTime: TopologyActivationTime,
+      checkPendingChanges: Boolean,
+  )(implicit
       traceContext: TraceContext
   ): PekkoEnv#FutureUnlessShutdownT[Option[(OrderingTopology, CryptoProvider[PekkoEnv])]] =
     PekkoFutureUnlessShutdown.pure(
