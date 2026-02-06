@@ -202,6 +202,7 @@ private class NodeBuilderV1(
           exerciseResult,
           keyOpt,
           byKey,
+          _, // externalCallResults - not included in hash
           version,
         ) =>
       if (choiceAuthorizers.nonEmpty)
