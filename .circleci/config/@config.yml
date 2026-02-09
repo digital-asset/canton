@@ -3,7 +3,6 @@ version: 2.1
 # Equivalent to module imports
 orbs:
   slack: circleci/slack@3.3.0
-  azure-caching-orb: dach_ny/azure-caching-orb@1.2
 
 parameters:
   test_to_run_many_times:
