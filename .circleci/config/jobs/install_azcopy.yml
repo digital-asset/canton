@@ -1,0 +1,10 @@
+description: >
+  A job that installs AZcopy if its not in PATH or is not installed
+parameters:
+  executor:
+    description: The underlying job calling the orb must have an executor and it must be run on the self-hosted Azure runners resource_class
+    type: executor
+    default: default
+executor: << parameters.executor >>
+steps:
+  - install_azcopy

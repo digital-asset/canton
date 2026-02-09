@@ -1,0 +1,13 @@
+description: >
+  This command installs AzCopy through dpkg if its not available in PATH
+parameters:
+  executor:
+    description: The underlying job calling the orb must have an executor and it must be run on the self-hosted Azure runners resource_class
+    type: executor
+    default: default
+# What will this command do?
+# Descriptions should be short, simple, and clear.
+steps:
+  - run:
+      name: Check and install AZCopy
+      command: <<include(scripts/install-azcopy.sh)>>

@@ -1,0 +1,25 @@
+description: >
+  A job that copies a local file to Azure Storage Account
+parameters:
+  job_name:
+    type: string
+    description: Optional name for description
+    default: ''
+  path:
+    type: string
+    description: A local file or path
+  key:
+    type: string
+    description: Cache Key to store under
+  CONTAINER:
+    type: env_var_name
+    default: CONTAINER_URL
+  executor:
+    description: The underlying job calling the orb must have an executor and it must be run on the self-hosted Azure runners resource_class
+    type: executor
+    default: default
+executor: << parameters.executor >>
+steps:
+  - save_to_azure:
+      path: << parameters.path >>
+      key: << parameters.key >>

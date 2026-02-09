@@ -1,0 +1,22 @@
+description: >
+  A job that copies a local artifact to Azure Storage Account
+parameters:
+  path:
+    type: string
+    description: A local file or path
+  destination:
+    type: string
+    description: prefix for cache key
+    default: ''
+  CONTAINER:
+    type: env_var_name
+    default: ARTIFACT_CONTAINER_URL
+  executor:
+    description: The underlying job calling the orb must have an executor and it must be run on the self-hosted Azure runners resource_class
+    type: executor
+    default: default
+executor: << parameters.executor >>
+steps:
+  - store_artifacts:
+      path: << parameters.path >>
+      destination: << parameters.destination >>

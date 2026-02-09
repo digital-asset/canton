@@ -1,0 +1,21 @@
+description: >
+  Commands that copies a local artifact to Azure Storage Account
+parameters:
+  path:
+    type: string
+    description: A local file or path
+  destination:
+    type: string
+    description: Cache Key to store under
+    default: ''
+  CONTAINER:
+    type: env_var_name
+    default: ARTIFACT_CONTAINER_URL
+steps:
+  - run:
+      name: Save to Azure using AzCopy
+      environment:
+        ORB_PATH: << parameters.path >>
+        ORB_KEY: << parameters.destination >>
+        ORB_CONTAINER: <<parameters.CONTAINER>>
+      command: <<include(scripts/store-artifacts.sh>>
