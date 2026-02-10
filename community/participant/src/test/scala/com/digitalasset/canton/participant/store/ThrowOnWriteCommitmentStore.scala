@@ -24,6 +24,7 @@ import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.atomic.AtomicInteger
+import scala.collection.immutable
 import scala.collection.immutable.SortedSet
 import scala.concurrent.ExecutionContext
 
@@ -38,7 +39,7 @@ class ThrowOnWriteCommitmentStore()(override implicit val ec: ExecutionContext)
     incrementCounterAndErr()
 
   override def markOutstanding(
-      period: NonEmpty[Set[CommitmentPeriod]],
+      period: NonEmpty[immutable.Iterable[CommitmentPeriod]],
       counterParticipants: NonEmpty[Set[ParticipantId]],
   )(implicit
       traceContext: TraceContext
@@ -57,7 +58,7 @@ class ThrowOnWriteCommitmentStore()(override implicit val ec: ExecutionContext)
 
   override def markPeriod(
       counterParticipant: ParticipantId,
-      period: NonEmpty[Set[CommitmentPeriod]],
+      period: NonEmpty[immutable.Iterable[CommitmentPeriod]],
       matchingState: CommitmentPeriodStateInOutstanding,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     incrementCounterAndErr()

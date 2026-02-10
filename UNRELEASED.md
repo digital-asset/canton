@@ -14,11 +14,46 @@ Template for a bigger topic
 #### Specific Changes
 #### Impact and Migration
 
+### Free confirmation responses
+A new traffic control parameter has been added: `freeConfirmationResponses`.
+When set to true on a synchronizer where traffic control is enabled, confirmation responses will not cost traffic.
+Defaults to `false`.
+
+### New Topology Processing and Client Architecture
+
+Topology processing has been significantly refactored. Before, it used to perform a large number of sequential of database
+lookups during the validation of a topology transaction. The new validation pre-fetches all data of a batch into a
+write through cache and only persists the data at the end of the batch processing. This means that where before
+a batch of 100 txs needed 200-300 db round trips to process, this is now reduced down to effectively 2 db operations
+(one batch read, one batch write).
+
+In addition, the same write-through cache is now also leveraged for read processing, where the topology state is built
+from the cache directly, avoiding further database round trips.
+
+The new components can be turned on and controlled using
+
+```
+canton.<type>.<name>.topology = {
+       use-new-processor = true // can be used without new client
+       use-new-client = true // can only be used with new processor
+       // optional flags
+       enable-topology-state-cache-consistency-checks = true // enable in the beginning for additional consistency checks for further validation
+       topology-state-cache-eviction-threshold = 250 // what is the oversize threshold that must be reached before we start eviction
+       max-topology-state-cache-items = 10000 // how many items to keep in cache (uid, transaction_type)
+}
+```
+The topology state cache will also expose appropriate cache metrics using the label "topology".
+
+
 ### Update to bouncy castle 1.83
 
 fixes CVE-2024-29857 and CVE-2024-34447
 
 ### Minor Improvements
+* Added an RPC and corresponding console command on the sequencer's admin API to generate an authentication token for a member. Requires the following config: `canton.features.enable-testing-commands = yes`.
+  * `sequencer1.authentication.generate_authentication_token(participant1)`
+* Added a console command to logout a member using their token on a sequencer:
+  * `sequencer1.authentication.logout(token)`
 * Fixed the private store cache to prevent an excessive number of database reads.
 * Added support for adding table settings for PostgreSQL. One can use a repeatable migration (Flyway feature) in a file
   provided to Canton externally.
@@ -85,8 +120,34 @@ the current participant. The parameter affects all pruning commands, including s
 
 * Additional DB indices on the ACS commitment tables to improve performance of commitment pruning. This requires a DB migration.
 
+* The acknowledgement metric `daml_sequencer_block_acknowledgments_micros` is now monotonic within restarts and ignores late/delayed member's acknowledgements.
+
 * Set aggressive TCP keepalive settings on Postgres connections to allow quick HA failover in case of stuck DB connections.
 
+* New configuration value for setting the sequencer in-flight aggregation query interval: `batching-config.in-flight-aggregation-query-interval`.
+
+* Disabled last-error-log by default due to performance reasons. You can re-enable the previous behavior by passing `--log-last-errors=true` to the canton binary.
+
+* New participant config flag `canton.participants.<participant>.parameters.commitment-asynchronous-initialization` to enable asynchronous initialization of the ACS commitment processor. This speeds up synchronizer connection if the participant manages active contracts for a large number of different stakeholder groups, at the expense of additional memory and DB load.
+
+* Mediator metric `daml_mediator_requests` includes confirmation requests that are rejected due to reusing the request UUID. Such requests are labelled with `duplicate_request -> true` on the metric.
+
+* Added a mode for the mediator to process events asynchronously. By default, the mediator processes all requests sequentially.
+  In the new asynchronous mode, events for the same request id are processed sequentially, but events for different request ids are processed in parallel.
+  To enable the asynchronous mode, set `canton.mediators.<mediator-name>.mediator.asynchronous-processing = true`.
+* The mediator now batches fetching from and storing of finalized responses. The batch behavior can be configured via the following parameters:
+```hocon
+canton.mediators.<mediator>.parameters.batching {
+  mediator-fetch-finalized-responses-aggregator {
+    maximum-in-flight = 2 // default
+    maximum-batch-size = 500 // default
+  }
+  mediator-store-finalized-responses-aggregator {
+    maximum-in-flight = 2 // default
+    maximum-batch-size = 500 // default
+  }
+}
+```
 
 ### Preview Features
 - preview feature

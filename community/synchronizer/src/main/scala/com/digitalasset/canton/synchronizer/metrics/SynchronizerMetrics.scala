@@ -387,9 +387,8 @@ class MediatorMetrics(
     MetricInfo(
       prefix :+ "requests",
       summary = "Total number of processed confirmation requests (approved and rejected)",
-      description =
-        """This metric provides the number of processed confirmation requests since the system
-           |has been started.""",
+      description = """This metric provides the number of processed confirmation requests since the system
+           |has been started. Requests that are rejected because they reuse the request UUID are labelled with `duplicate_reject`.""",
       qualification = MetricQualification.Debug,
     )
   )
@@ -421,4 +420,10 @@ class MediatorMetrics(
     )(
       MetricsContext.Empty
     )
+}
+
+object MediatorMetrics {
+  val duplicateRejectLabel = "duplicate_reject"
+  val duplicateRejectContext: MetricsContext = MetricsContext(duplicateRejectLabel -> "true")
+  val nonduplicateRejectContext: MetricsContext = MetricsContext(duplicateRejectLabel -> "false")
 }

@@ -383,6 +383,10 @@ object TestingTimeServiceConfig {
   * @param doNotAwaitOnCheckingIncomingCommitments
   *   Enable fully asynchronous checking of incoming commitments. This may result in some incoming
   *   commitments not being checked in case of crashes or HA failovers.
+  * @param commitmentAsynchronousInitialization
+  *   Enables asynchronous initialization of the ACS commitment processor. This speeds up
+  *   reconnection to a synchronizer at the expense of potentially increased memory and resource
+  *   consumption while the initialization is running in the background.
   * @param commitmentCheckpointInterval
   *   Checkpoint interval for commitments. Smaller intervals lead to less resource-intensive crash
   *   recovery, at the cost of more frequent DB writing of checkpoints. Regardless of this
@@ -435,6 +439,7 @@ final case class ParticipantNodeParameterConfig(
     activationFrequencyForWarnAboutConsistencyChecks: Long = 1000,
     reassignmentsConfig: ReassignmentsConfig = ReassignmentsConfig(),
     doNotAwaitOnCheckingIncomingCommitments: Boolean = false,
+    commitmentAsynchronousInitialization: Boolean = false,
     commitmentCheckpointInterval: config.PositiveDurationSeconds =
       config.PositiveDurationSeconds.ofMinutes(1),
     commitmentMismatchDebugging: Boolean = false,

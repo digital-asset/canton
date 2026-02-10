@@ -495,6 +495,8 @@ final case class CantonConfig(
         doNotAwaitOnCheckingIncomingCommitments =
           participantParameters.doNotAwaitOnCheckingIncomingCommitments,
         disableOptionalTopologyChecks = participantConfig.topology.disableOptionalTopologyChecks,
+        commitmentAsynchronousInitialization =
+          participantParameters.commitmentAsynchronousInitialization,
         commitmentCheckpointInterval = participantParameters.commitmentCheckpointInterval,
         commitmentMismatchDebugging = participantParameters.commitmentMismatchDebugging,
         commitmentProcessorNrAcsChangesBehindToTriggerCatchUp =
@@ -666,6 +668,7 @@ private[canton] object CantonNodeParameterConverter {
       loggingConfig = parent.monitoring.logging,
       enableAdditionalConsistencyChecks = parent.parameters.enableAdditionalConsistencyChecks,
       enablePreviewFeatures = parent.features.enablePreviewCommands,
+      enableTestingFeatures = parent.features.enableTestingCommands,
       processingTimeouts = parent.parameters.timeouts.processing,
       sequencerClient = node.sequencerClient,
       cachingConfigs = node.parameters.caching,
