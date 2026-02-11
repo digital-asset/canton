@@ -9,6 +9,7 @@ import com.digitalasset.canton.config.{DefaultProcessingTimeouts, TopologyConfig
 import com.digitalasset.canton.crypto.{SigningKeyUsage, SigningPublicKey}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.store.db.{DbTest, H2Test, PostgresTest}
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
@@ -28,6 +29,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.*
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext, SequencerCounter}
 import org.scalatest.wordspec.AsyncWordSpec
+import org.slf4j.event.Level
 
 object EffectiveTimeTestHelpers {
 
@@ -96,14 +98,16 @@ trait StoreBasedTopologySnapshotTest
       val client: StoreBasedSynchronizerTopologyClient = mkClient()
 
       def add(
-          timestamp: CantonTimestamp,
+          sequencedTimestamp: CantonTimestamp,
           transactions: Seq[SignedTopologyTransaction[TopologyChangeOp, TopologyMapping]],
+          effectiveTimestamp: Option[CantonTimestamp] = None,
           rejectionReason: Option[TopologyTransactionRejection] = None,
-      ): FutureUnlessShutdown[Unit] =
+      ): FutureUnlessShutdown[Unit] = {
+        val et = effectiveTimestamp.getOrElse(sequencedTimestamp)
         for {
           _ <- store.update(
-            SequencedTime(timestamp),
-            EffectiveTime(timestamp),
+            SequencedTime(sequencedTimestamp),
+            EffectiveTime(et),
             removals = transactions
               .groupBy(_.mapping.uniqueKey)
               .map { case (kk, txs) =>
@@ -112,8 +116,9 @@ trait StoreBasedTopologySnapshotTest
             additions = transactions.map(ValidatedTopologyTransaction(_, rejectionReason)),
           )
           _ <- client
-            .observed(timestamp, timestamp, SequencerCounter(1), transactions)
+            .observed(sequencedTimestamp, et, SequencerCounter(1), transactions)
         } yield ()
+      }
 
       def observed(ts: CantonTimestamp): Unit =
         observed(SequencedTime(ts), EffectiveTime(ts))
@@ -136,15 +141,15 @@ trait StoreBasedTopologySnapshotTest
         val ts6 = ts5.plusSeconds(60)
         for {
           // Populate the store
-          _ <- add(ts1, Seq(dpc1, p1_otk, p1_dtc, party1participant1))
-          _ <- add(ts2, Seq(p2_otk, p2_dtc, party2participant1_2))
+          _ <- add(sequencedTimestamp = ts1, Seq(dpc1, p1_otk, p1_dtc, party1participant1))
+          _ <- add(sequencedTimestamp = ts2, Seq(p2_otk, p2_dtc, party2participant1_2))
           // we expect the rejections and proposals to not affect the latestTopologyChangeTimestamp
           _ <- add(
-            ts2.plusMillis(100),
+            sequencedTimestamp = ts2.plusMillis(100),
             Seq(p3_otk.copy(isProposal = true), p3_dtc.copy(isProposal = true)),
           )
           _ <- add(
-            ts2.plusMillis(200),
+            sequencedTimestamp = ts2.plusMillis(200),
             Seq(p2_pdp_confirmation),
             rejectionReason = Some(NoSignatureProvided),
           )
@@ -198,6 +203,24 @@ trait StoreBasedTopologySnapshotTest
           _ =
             newClient3.latestTopologyChangeTimestamp shouldBe ts2.immediateSuccessor // from the store
 
+          // Check that sequencer snapshot is taken into account for sequencing time even if there
+          //  are topology transactions with greater effective time
+          f = loggerFactory.assertLogs(SuppressionRule.Level(Level.WARN))(
+            add(
+              sequencedTimestamp = ts6,
+              effectiveTimestamp = Some(ts6.plusMillis(100)),
+              transactions = Seq(p2_pdp_submission),
+            ).unwrap,
+            _.message should include(
+              "Not advancing approximate time to effective time using the time tracker as it's unavailable"
+            ),
+          )
+          _ <- FutureUnlessShutdown.outcomeF(f)
+          newClient4 = mkClient()
+          _ <- newClient4.initialize(
+            sequencerSnapshotTimestamp = Some(ts6.plusMillis(50))
+          )
+          _ = newClient4.latestSequencedTimestamp shouldBe ts6.plusMillis(50)
         } yield {
           succeed
         }
@@ -344,7 +367,7 @@ trait StoreBasedTopologySnapshotTest
       val fixture = new Fixture()
       for {
         _ <- fixture.add(
-          ts,
+          sequencedTimestamp = ts,
           Seq(
             dpc1,
             p1_nsk2,
@@ -381,7 +404,10 @@ trait StoreBasedTopologySnapshotTest
     "properly deals with participants with lower synchronizer privileges" in {
       val fixture = new Fixture()
       for {
-        _ <- fixture.add(ts, Seq(dpc1, p1_otk, p1_dtc, party1participant1, p1_pdp_observation))
+        _ <- fixture.add(
+          sequencedTimestamp = ts,
+          Seq(dpc1, p1_otk, p1_dtc, party1participant1, p1_pdp_observation),
+        )
         _ = fixture.client.observed(
           ts.immediateSuccessor,
           ts.immediateSuccessor,
@@ -400,7 +426,7 @@ trait StoreBasedTopologySnapshotTest
       val ts2 = ts1.plusSeconds(1)
       for {
         _ <- fixture.add(
-          ts,
+          sequencedTimestamp = ts,
           Seq(
             seq_okm_k2,
             dpc1,
@@ -411,7 +437,7 @@ trait StoreBasedTopologySnapshotTest
           ),
         )
         _ <- fixture.add(
-          ts1,
+          sequencedTimestamp = ts1,
           Seq(
             mkRemoveTx(seq_okm_k2),
             med_okm_k3,
@@ -421,7 +447,10 @@ trait StoreBasedTopologySnapshotTest
             p2_pdp_confirmation,
           ),
         )
-        _ <- fixture.add(ts2, Seq(mkRemoveTx(p1_pdp_observation), mkRemoveTx(p1_dtc)))
+        _ <- fixture.add(
+          sequencedTimestamp = ts2,
+          Seq(mkRemoveTx(p1_pdp_observation), mkRemoveTx(p1_dtc)),
+        )
         _ = fixture.client.observed(
           ts2.immediateSuccessor,
           ts2.immediateSuccessor,

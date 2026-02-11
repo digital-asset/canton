@@ -44,10 +44,7 @@ object BuildCommon {
 
     val commandAliases = Def.settings(
       addCommandAlias("checkDamlProjectVersions", alsoTest("damlCheckProjectVersions")),
-      addCommandAlias(
-        "updateDamlProjectVersions",
-        alsoTest("damlUpdateProjectVersions") + ";updateJavaDamlDependencies",
-      ),
+      addCommandAlias("updateDamlProjectVersions", alsoTest("damlUpdateProjectVersions")),
       addCommandAlias("checkLicenseHeaders", alsoTest("headerCheck")),
       addCommandAlias("createLicenseHeaders", alsoTest("headerCreate")),
       addCommandAlias(
@@ -125,11 +122,6 @@ object BuildCommon {
         crossScalaVersions := Seq(scala_version, scala3_version),
         resolvers := resolvers.value ++ Option.when(Dependencies.use_custom_daml_version)(
           sbt.librarymanagement.Resolver.mavenLocal // conditionally enable local maven repo for custom Daml jars
-        ),
-        // This is necessary in order to override the dependencies of an adhoc
-        // Daml snapshot release
-        dependencyOverrides := dependencyOverrides.value ++ Seq(
-          Dependencies.daml_script_runner
         ),
         ideExcludedDirectories := Seq(
           baseDirectory.value / "target"
@@ -1333,6 +1325,7 @@ object BuildCommon {
       )
 
     // Keep as separate sub-project due to possible dependency problems with daml_script_runner protobuf dependencies
+    // TODO(#30144) fix the test broken as part of #29333
     lazy val `daml-script-tests` = project
       .in(file("community/daml-script-tests"))
       .dependsOn(
@@ -1341,7 +1334,6 @@ object BuildCommon {
       .settings(
         sharedCantonCommunitySettings,
         libraryDependencies ++= Seq(
-          daml_script_runner % Test
         ),
         excludeTranscodeConflictingDependencies,
         addProtobufFilesToHeaderCheck(Compile),
@@ -3300,7 +3292,8 @@ object BuildCommon {
         publish / skip := false,
         coverageEnabled := false,
         libraryDependencies ++= Seq(
-          jline
+          slf4j_nop,
+          jline,
         ),
         addProtobufFilesToHeaderCheck(Compile),
       )
@@ -3675,7 +3668,6 @@ object BuildCommon {
         addProtobufFilesToHeaderCheck(Compile),
         excludeTranscodeConflictingDependencies,
         libraryDependencies ++= Seq(
-          daml_script_runner % Test,
           google_protobuf_java,
           scalatest % Test,
           scalaz_core,
@@ -3718,6 +3710,7 @@ object BuildCommon {
           scalatest_compatible % Test,
           scalatestScalacheck % Test,
           jol_core % Test,
+          slf4j_nop % Test,
         ),
         addProtobufFilesToHeaderCheck(Compile),
         Test / scalacOptions ++= Seq(
@@ -3803,6 +3796,7 @@ object BuildCommon {
           scalactic % Test,
           scalameter % Test,
           scalatest % Test,
+          slf4j_nop % Test,
         ),
         Compile / bufLintCheck := {},
         Compile / PB.targets := List(PB.gens.java -> (Compile / sourceManaged).value),

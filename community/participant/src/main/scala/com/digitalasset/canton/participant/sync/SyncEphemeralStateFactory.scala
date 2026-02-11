@@ -8,7 +8,7 @@ import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{ProcessingTimeout, SessionEncryptionKeyCacheConfig}
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
-import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, PromiseUnlessShutdownFactory}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
@@ -42,6 +42,7 @@ trait SyncEphemeralStateFactory {
       ledgerApiIndexer: Eval[LedgerApiIndexer],
       contractStore: Eval[ContractStore],
       participantNodeEphemeralState: ParticipantNodeEphemeralState,
+      synchronizerPredecessor: Option[SynchronizerPredecessor],
       createTimeTracker: () => SynchronizerTimeTracker,
       promiseUSFactory: PromiseUnlessShutdownFactory,
       metrics: ConnectedSynchronizerMetrics,
@@ -69,6 +70,7 @@ class SyncEphemeralStateFactoryImpl(
       ledgerApiIndexer: Eval[LedgerApiIndexer],
       contractStore: Eval[ContractStore],
       participantNodeEphemeralState: ParticipantNodeEphemeralState,
+      synchronizerPredecessor: Option[SynchronizerPredecessor],
       createTimeTracker: () => SynchronizerTimeTracker,
       promiseUSFactory: PromiseUnlessShutdownFactory,
       metrics: ConnectedSynchronizerMetrics,
@@ -84,10 +86,14 @@ class SyncEphemeralStateFactoryImpl(
       )
       synchronizerIndex <- ledgerApiIndexer.value.ledgerApiStore.value
         .cleanSynchronizerIndex(persistentState.synchronizerIdx.synchronizerId)
+      _ = logger.info(
+        s"Computing starting points for ${persistentState.psid} with $synchronizerIndex"
+      )
       startingPoints <- SyncEphemeralStateFactory.startingPoints(
         persistentState.requestJournalStore,
         persistentState.sequencedEventStore,
         synchronizerIndex,
+        synchronizerPredecessor,
       )
 
       _ <- SyncEphemeralStateFactory.cleanupPersistentState(persistentState, synchronizerIndex)
@@ -182,36 +188,63 @@ object SyncEphemeralStateFactory {
       requestJournalStore: RequestJournalStore,
       sequencedEventStore: SequencedEventStore,
       synchronizerIndexO: Option[SynchronizerIndex],
+      synchronizerPredecessor: Option[SynchronizerPredecessor],
+  )(implicit
+      ec: ExecutionContext,
+      loggingContext: ErrorLoggingContext,
+  ): FutureUnlessShutdown[ProcessingStartingPoints] = {
+
+    val updatedSynchronizerIndexO = synchronizerPredecessor match {
+      case Some(synchronizerPredecessor) =>
+        synchronizerIndexO.flatMap { synchronizerIndex =>
+          // If recordTime <= upgradeTime, it means that processing should start from genesis (as the clean index is before the upgrade time).
+          Option.when(synchronizerIndex.recordTime > synchronizerPredecessor.upgradeTime)(
+            synchronizerIndex
+          )
+        }
+
+      case None => synchronizerIndexO
+    }
+
+    startingPointsInternal(requestJournalStore, sequencedEventStore, updatedSynchronizerIndexO)
+  }
+
+  /** See scaladoc of [[startingPoints]] above for the generic documentation and invariants.
+    * @param updatedSynchronizerIndexO
+    *   Constructed from a [[SynchronizerIndex]] as follows: changed to None if the
+    *   updatedSynchronizerIndexO' record time is before the upgrade time.
+    */
+  private def startingPointsInternal(
+      requestJournalStore: RequestJournalStore,
+      sequencedEventStore: SequencedEventStore,
+      updatedSynchronizerIndexO: Option[SynchronizerIndex],
   )(implicit
       ec: ExecutionContext,
       loggingContext: ErrorLoggingContext,
   ): FutureUnlessShutdown[ProcessingStartingPoints] = {
     implicit val traceContext: TraceContext = loggingContext.traceContext
+
     for {
-      isSequencedEventStoreEmpty <- sequencedEventStore.sequencedEvents(Some(1)).map(_.isEmpty)
+      requestCounterO <- updatedSynchronizerIndexO
+        .flatTraverse(si =>
+          requestJournalStore.lastRequestTimeWithRequestTimestampBeforeOrAt(si.recordTime)
+        )
 
-      requestCounterO <-
-        if (!isSequencedEventStoreEmpty)
-          synchronizerIndexO
-            .flatTraverse(si =>
-              requestJournalStore.lastRequestTimeWithRequestTimestampBeforeOrAt(si.recordTime)
-            )
-        else FutureUnlessShutdown.pure(None)
-
-      sequencerCounterO <-
-        if (!isSequencedEventStoreEmpty)
-          sequencerCounterFromSynchronizerIndex(sequencedEventStore, synchronizerIndexO)
-        else FutureUnlessShutdown.pure(None)
+      sequencerCounterO <- sequencerCounterFromSynchronizerIndex(
+        sequencedEventStore,
+        updatedSynchronizerIndexO,
+      )
 
       messageProcessingStartingPoint = MessageProcessingStartingPoint(
         nextRequestCounter = requestCounterO.map(_.rc + 1).getOrElse(RequestCounter.Genesis),
         nextSequencerCounter = sequencerCounterO
           .map(_ + 1)
           .getOrElse(SequencerCounter.Genesis),
-        lastSequencerTimestamp = lastSequencerTimestamp(synchronizerIndexO),
-        currentRecordTime = currentRecordTime(synchronizerIndexO),
-        nextRepairCounter = nextRepairCounter(synchronizerIndexO),
+        lastSequencerTimestamp = lastSequencerTimestamp(updatedSynchronizerIndexO),
+        currentRecordTime = currentRecordTime(updatedSynchronizerIndexO),
+        nextRepairCounter = nextRepairCounter(updatedSynchronizerIndexO),
       )
+
       replayOpt <- requestJournalStore
         .firstRequestWithCommitTimeAfter(
           // We need to follow the repair requests which might come between sequencer timestamps hence we
@@ -270,12 +303,12 @@ object SyncEphemeralStateFactory {
       .flatMap(_.sequencerIndex)
       .traverse(sequencerIndex =>
         sequencedEventStore
-          .find(ByTimestamp(sequencerIndex.sequencerTimestamp))
+          .find(ByTimestamp(sequencerIndex))
           .value
           .map(
             _.getOrElse(
               ErrorUtil.invalidState(
-                s"SequencerIndex with timestamp ${sequencerIndex.sequencerTimestamp} is not found in sequenced event store"
+                s"SequencerIndex with timestamp $sequencerIndex is not found in sequenced event store"
               )
             ).counter
           )
@@ -287,7 +320,6 @@ object SyncEphemeralStateFactory {
   ): Option[CantonTimestamp] =
     synchronizerIndexO
       .flatMap(_.sequencerIndex)
-      .map(_.sequencerTimestamp)
 
   def lastSequencerTimestamp(synchronizerIndexO: Option[SynchronizerIndex]): CantonTimestamp =
     lastSequencerTimestampO(synchronizerIndexO)

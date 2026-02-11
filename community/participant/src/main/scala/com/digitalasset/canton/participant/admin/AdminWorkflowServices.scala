@@ -20,20 +20,21 @@ import com.digitalasset.canton.error.CantonErrorGroups.ParticipantErrorGroup.Adm
 import com.digitalasset.canton.ledger.api.refinements.ApiTypes as A
 import com.digitalasset.canton.ledger.client.configuration.CommandClientConfiguration
 import com.digitalasset.canton.ledger.client.{LedgerClient, ResilientLedgerSubscription}
-import com.digitalasset.canton.lifecycle.{
-  FutureUnlessShutdown,
-  PromiseUnlessShutdown,
-  UnlessShutdown,
-  *,
-}
+import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.ParticipantNodeParameters
-import com.digitalasset.canton.participant.admin.party.PartyReplicationAdminWorkflow
-import com.digitalasset.canton.participant.config.ParticipantNodeConfig
+import com.digitalasset.canton.participant.admin.AdminWorkflowServices.isPartyReplicationWorkflowLoaded
+import com.digitalasset.canton.participant.admin.party.{
+  PartyReplicationAdminWorkflow,
+  PartyReplicator,
+}
+import com.digitalasset.canton.participant.config.{
+  AlphaOnlinePartyReplicationConfig,
+  ParticipantNodeConfig,
+}
 import com.digitalasset.canton.participant.ledger.api.client.LedgerConnection
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError
-import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.TopologyManagerError.{
   NoAppropriateSigningKeyInStore,
@@ -54,6 +55,7 @@ import org.apache.pekko.stream.scaladsl.Flow
 
 import java.io.InputStream
 import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
+import scala.util.chaining.scalaUtilChainingOps
 
 /** Manages our admin workflow applications (ping, party management). Currently, each is an
   * individual application with their own ledger connection and acting independently.
@@ -63,9 +65,9 @@ class AdminWorkflowServices(
     parameters: ParticipantNodeParameters,
     packageService: PackageService,
     syncService: CantonSyncService,
+    partyReplicatorO: Option[PartyReplicator],
     participantId: ParticipantId,
     adminTokenDispenser: CantonAdminTokenDispenser,
-    storage: Storage,
     futureSupervisor: FutureSupervisor,
     protected val loggerFactory: NamedLoggerFactory,
     protected val clock: Clock,
@@ -131,27 +133,28 @@ class AdminWorkflowServices(
   val partyManagementO: Option[
     (FutureUnlessShutdown[ResilientLedgerSubscription[?, ?]], PartyReplicationAdminWorkflow)
   ] =
-    parameters.unsafeOnlinePartyReplication.map(config =>
-      createService(
-        "party-management",
-        // TODO(#20637): Don't resubscribe if the ledger api has been pruned as that would mean missing updates that
-        //  the PartyReplicationAdminWorkflow cares about. Instead let the ledger subscription fail after logging an error.
-        resubscribeIfPruned = false,
-      ) { connection =>
-        new PartyReplicationAdminWorkflow(
-          connection,
-          participantId,
-          syncService,
-          clock,
-          config,
-          storage,
-          futureSupervisor,
-          parameters.exitOnFatalFailures,
-          timeouts,
-          loggerFactory,
-        )
+    partyReplicatorO
+      .collect {
+        case partyReplicator
+            if isPartyReplicationWorkflowLoaded(parameters.alphaOnlinePartyReplicationSupport) =>
+          createService(
+            "party-management",
+            // TODO(#20637): Don't resubscribe if the ledger api has been pruned as that would mean missing updates that
+            //  the PartyReplicationAdminWorkflow cares about. Instead let the ledger subscription fail after logging an error.
+            resubscribeIfPruned = false,
+          ) { connection =>
+            new PartyReplicationAdminWorkflow(
+              connection,
+              participantId,
+              syncService,
+              partyReplicator,
+              clock,
+              futureSupervisor,
+              timeouts,
+              loggerFactory,
+            ).tap(partyReplicator.initializeDamlAdminWorkflow)
+          }
       }
-    )
 
   protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     import TraceContext.Implicits.Empty.*
@@ -206,9 +209,13 @@ class AdminWorkflowServices(
         for {
           adminWorkflowLoaded <- isLoaded(AdminWorkflowServices.PingDarResourceFileName)
           partReplicationWorkflowLoaded <-
-            if (config.parameters.unsafeOnlinePartyReplication.isDefined)
+            if (
+              AdminWorkflowServices.isPartyReplicationWorkflowLoaded(
+                config.parameters.alphaOnlinePartyReplicationSupport
+              )
+            ) {
               isLoaded(AdminWorkflowServices.PartyReplicationDarResourceFileName)
-            else FutureUnlessShutdown.pure(true)
+            } else FutureUnlessShutdown.pure(true)
         } yield adminWorkflowLoaded && partReplicationWorkflowLoaded
       }
     }
@@ -236,9 +243,13 @@ class AdminWorkflowServices(
         val resultUS = for {
           _ <- load(AdminWorkflowServices.PingDarResourceFileName)
           _ <-
-            if (config.parameters.unsafeOnlinePartyReplication.isDefined)
+            if (
+              AdminWorkflowServices.isPartyReplicationWorkflowLoaded(
+                config.parameters.alphaOnlinePartyReplicationSupport
+              )
+            ) {
               load(AdminWorkflowServices.PartyReplicationDarResourceFileName)
-            else FutureUnlessShutdown.unit
+            } else FutureUnlessShutdown.unit
         } yield ()
 
         resultUS.transform[Unit](
@@ -411,6 +422,12 @@ object AdminWorkflowServices extends AdminWorkflowServicesErrorGroup {
         case err =>
           Left(new IllegalStateException(CantonError.stringFromContext(err)))
       }
+
+  // The party replication admin workflow is only loaded when online party replication is enabled
+  // in sequencer channel mode.
+  private[participant] def isPartyReplicationWorkflowLoaded(
+      config: Option[AlphaOnlinePartyReplicationConfig]
+  ): Boolean = config.exists(_.unsafeSequencerChannelSupport)
 
   lazy val PingPackages: Map[PackageId, Ast.Package] = getDarPackages(PingDarResourceFileName)
   lazy val PartyReplicationPackages: Map[PackageId, Ast.Package] = getDarPackages(

@@ -129,7 +129,7 @@ object AcsInspectionTest extends MockitoSugar with ArgumentMatchersSugar with Ba
   private val fakeSynchronizerId = SynchronizerId.tryFromString(s"acme::${"0" * 68}")
 
   private val MaxSynchronizerIndex: SynchronizerIndex =
-    SynchronizerIndex.of(CantonTimestamp.MaxValue)
+    SynchronizerIndex.forFloatingUpdate(CantonTimestamp.MaxValue)
 
   private def mockContract(
       contractId: LfContractId,

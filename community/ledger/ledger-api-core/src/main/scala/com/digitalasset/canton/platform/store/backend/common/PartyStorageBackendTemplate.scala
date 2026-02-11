@@ -76,9 +76,9 @@ class PartyStorageBackendTemplate(ledgerEndCache: LedgerEndCache) extends PartyS
       case None => offsetPartyFilter
     }
     queryParties(
-      partyFilter,
-      cSQL"fetch next $maxResults rows only",
-      connection,
+      partyFilter = partyFilter,
+      limitClause = QueryStrategy.limitClause(Some(maxResults)),
+      connection = connection,
     ).toList
   }
 

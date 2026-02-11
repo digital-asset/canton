@@ -142,7 +142,7 @@ commands:
         steps:
             - checkout:
                 method: blobless
-            - azure-caching-orb/restore_from_azure:
+            - restore_from_azure:
                 job_name: Downloading archive with compiled classes from cache
                 key: 'classes branch=${CIRCLE_BRANCH} daml=$(checksum project/project/DamlVersions.scala) projectplugins=$(checksum project/project/plugins.sbt) buildprops=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) damlplugin=$(checksum project/DamlPlugin.scala) dependencies=$(checksum project/Dependencies.scala) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) rev=<< pipeline.git.revision >> : classes branch=${CIRCLE_BRANCH} daml=$(checksum project/project/DamlVersions.scala) projectplugins=$(checksum project/project/plugins.sbt) buildprops=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) damlplugin=$(checksum project/DamlPlugin.scala) dependencies=$(checksum project/Dependencies.scala) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) : classes branch=main daml=$(checksum project/project/DamlVersions.scala) projectplugins=$(checksum project/project/plugins.sbt) buildprops=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) damlplugin=$(checksum project/DamlPlugin.scala) dependencies=$(checksum project/Dependencies.scala) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt)'
             - run:
@@ -532,6 +532,27 @@ commands:
                 command: |
                     .ci/nix-exec ./scripts/ci/publish-to-s3.sh
                 name: Publish to S3
+    restore_from_azure:
+        description: |
+            Commands that copies a local file to Azure Storage Account cp.html
+        parameters:
+            CONTAINER:
+                default: CONTAINER_URL
+                type: env_var_name
+            job_name:
+                default: ""
+                description: Optional name for description
+                type: string
+            key:
+                description: Cache Key to store under
+                type: string
+        steps:
+            - run:
+                command: ./scripts/ci/azure/restore-from-azure.sh
+                environment:
+                    ORB_CONTAINER: <<parameters.CONTAINER>>
+                    ORB_KEY: << parameters.key >>
+                name: << parameters.job_name >> - Restoring using AzCopy
     restore_packaged_release:
         parameters:
             location:
@@ -550,13 +571,13 @@ commands:
             - run:
                 command: .ci/nix-exec scripts/ci/make-cache-action.sh rmcache
                 name: Deleting cache directories
-            - azure-caching-orb/restore_from_azure:
+            - restore_from_azure:
                 job_name: Restoring Coursier cache - then if that is not present trying slightly older cache
                 key: 'cache=canton-coursier dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile.canton-build) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) : cache=canton-coursier dependencies=$(checksum project/Dependencies.scala)'
-            - azure-caching-orb/restore_from_azure:
+            - restore_from_azure:
                 job_name: Restoring Sbt caches - then if that is not present trying slightly older cache
                 key: 'cache=canton-sbt dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile.canton-build) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) : cache=canton-sbt dependencies=$(checksum project/Dependencies.scala)'
-            - azure-caching-orb/restore_from_azure:
+            - restore_from_azure:
                 job_name: Restoring Ivy caches - then if that is not present trying slightly older cache
                 key: 'cache=canton-ivy dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile.canton-build) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) : cache=canton-ivy dependencies=$(checksum project/Dependencies.scala)'
             - run:
@@ -900,11 +921,11 @@ commands:
                     mkdir -p /tmp/classes
                     find . -type d -name target | xargs tar --use-compress-program=".ci/nix-exec pigz" -cf /tmp/classes/classes.tar.gz -H posix
                 name: Creating archive of compiled classes
-            - azure-caching-orb/save_to_azure:
+            - save_to_azure:
                 job_name: Uploading archive with compiled classes to cache - without revision
                 key: classes branch=${CIRCLE_BRANCH} daml=$(checksum project/project/DamlVersions.scala) projectplugins=$(checksum project/project/plugins.sbt) buildprops=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) damlplugin=$(checksum project/DamlPlugin.scala) dependencies=$(checksum project/Dependencies.scala) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt)
                 path: /tmp/classes
-            - azure-caching-orb/save_to_azure:
+            - save_to_azure:
                 job_name: Uploading archive with compiled classes to cache
                 key: classes branch=${CIRCLE_BRANCH} daml=$(checksum project/project/DamlVersions.scala) projectplugins=$(checksum project/project/plugins.sbt) buildprops=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) damlplugin=$(checksum project/DamlPlugin.scala) dependencies=$(checksum project/Dependencies.scala) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt) rev=<< pipeline.git.revision >>
                 path: /tmp/classes
@@ -913,30 +934,55 @@ commands:
             - run:
                 command: .ci/nix-exec scripts/ci/make-cache-action.sh chmodcache sizecache
                 name: Make caches readable & calculate their size
-            - azure-caching-orb/save_to_azure:
+            - save_to_azure:
                 job_name: Uploading Coursier cache with non-pecific key to populate 'older cache'
                 key: cache=canton-coursier dependencies=$(checksum project/Dependencies.scala)
                 path: ${HOME}/.cache/coursier/v1/
-            - azure-caching-orb/save_to_azure:
+            - save_to_azure:
                 job_name: Uploading Coursier cache
                 key: cache=canton-coursier dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile.canton-build) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt)
                 path: ${HOME}/.cache/coursier/v1/
-            - azure-caching-orb/save_to_azure:
+            - save_to_azure:
                 job_name: Uploading Ivy caches with non-specific key to populate 'older cache'
                 key: cache=canton-ivy dependencies=$(checksum project/Dependencies.scala)
                 path: ${HOME}/.ivy2/cache/
-            - azure-caching-orb/save_to_azure:
+            - save_to_azure:
                 job_name: Uploading Ivy caches
                 key: cache=canton-ivy dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile.canton-build) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt)
                 path: ${HOME}/.ivy2/cache/
-            - azure-caching-orb/save_to_azure:
+            - save_to_azure:
                 job_name: Uploading Sbt caches with non-specific key to populate 'older cache'
                 key: cache=canton-sbt dependencies=$(checksum project/Dependencies.scala)
                 path: ${HOME}/.sbt/
-            - azure-caching-orb/save_to_azure:
+            - save_to_azure:
                 job_name: Uploading Sbt caches
                 key: cache=canton-sbt dependencies=$(checksum project/Dependencies.scala) dockerfile=$(checksum .ci/Dockerfile.canton-build) projectplugins=$(checksum project/project/plugins.sbt) projectdamlversions=$(checksum project/project/DamlVersions.scala) buildproperties=$(checksum project/build.properties) buildinfo=$(checksum project/buildinfo.sbt) houserules=$(checksum project/Houserules.scala) plugins=$(checksum project/plugins.sbt) build=$(checksum build.sbt)
                 path: ${HOME}/.sbt/
+    save_to_azure:
+        description: |
+            Commands that copies a local file to Azure Storage Account
+        parameters:
+            CONTAINER:
+                default: CONTAINER_URL
+                type: env_var_name
+            job_name:
+                default: ""
+                description: Optional name for description
+                type: string
+            key:
+                description: Cache Key to store under
+                type: string
+            path:
+                description: A local file or path
+                type: string
+        steps:
+            - run:
+                command: ./scripts/ci/azure/save-to-azure.sh
+                environment:
+                    ORB_CONTAINER: <<parameters.CONTAINER>>
+                    ORB_KEY: << parameters.key >>
+                    ORB_PATH: << parameters.path >>
+                name: << parameters.job_name >> - Saving using AzCopy
     send_slack_notification_for_sdk_updates:
         description: Send a message to slack
         parameters:
@@ -1681,18 +1727,7 @@ jobs:
     blackduck:
         executor: canton-large-docker
         steps:
-            - checkout_and_restore_precompiled_classes:
-                reset_classes_if_requested: true
-            - restore_sbt_cache
-            - track_cpu_and_memory
-            - run:
-                command: |
-                    echo "export EXECUTOR_JVM_METASPACE_SIZE=1500M" >> $BASH_ENV
-                    echo "export EXECUTOR_JVM_HEAP_SIZE=4000M" >> $BASH_ENV
-            - execute_sbt_command:
-                cmd: compile community-app/bundle
-                fail_on_error_in_output: true
-                use_maven_mirror: false
+            - checkout_and_restore_caches
             - run:
                 command: |
                     nix-shell -I nixpkgs=./nix/nixpkgs.nix shell.nix --run  bash \<<'EOF'
@@ -1723,7 +1758,6 @@ jobs:
             - store_artifacts:
                 name: Blackduck Run Artifacts
                 path: /home/circleci/blackduck/runs
-            - save_sbt_cache
             - cleanup_build_job
     build_and_publish_docker:
         environment:
@@ -2354,8 +2388,6 @@ jobs:
             - check_pr_skip_ci
             - restore_sbt_cache
             - execute_sbt_command:
-                cmd: checkJavaDamlDependencies
-            - execute_sbt_command:
                 cmd: google-common-protos-scala/protocGenerate ledger-api-value/protocGenerate
             - execute_sbt_command:
                 cmd: lint
@@ -2673,14 +2705,13 @@ jobs:
                 name: Lint yaml files
             - slack_red_main_with_volunteer
 orbs:
-    azure-caching-orb: dach_ny/azure-caching-orb@1.2
     slack: circleci/slack@3.3.0
 parameters:
     manual_job:
         default: none
         enum:
             - adhoc-daml-update
-            - blackduck-test
+            - blackduck
             - build-canton-local-cache
             - docs-replication-prod
             - docs-replication-test
@@ -2723,23 +2754,6 @@ parameters:
         type: string
 version: 2.1
 workflows:
-    blackduck_daily:
-        jobs:
-            - blackduck:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - blackduck
-        triggers:
-            - schedule:
-                cron: 0 4,16 * * *
-                filters:
-                    branches:
-                        only:
-                            - main
     canton_build_required:
         jobs:
             - compile:
@@ -3510,6 +3524,16 @@ workflows:
                     - da-images
                 requires:
                     - package_community
+            - blackduck:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                    - blackduck
+                requires:
+                    - package_community
         triggers:
             - schedule:
                 cron: 0 22 * * 1-5
@@ -3578,8 +3602,26 @@ workflows:
             equal:
                 - adhoc-daml-update
                 - << pipeline.parameters.manual_job >>
-    manual_blackduck_test:
+    manual_blackduck:
         jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - package_community:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                is_manual: true
+                is_nightly_workflow: false
+                requires:
+                    - compile
             - blackduck:
                 context:
                     - datadog
@@ -3588,9 +3630,11 @@ workflows:
                     - maven-mirror
                     - da-images
                     - blackduck
+                requires:
+                    - package_community
         when:
             equal:
-                - blackduck-test
+                - blackduck
                 - << pipeline.parameters.manual_job >>
     manual_build_canton_local_cache:
         jobs:

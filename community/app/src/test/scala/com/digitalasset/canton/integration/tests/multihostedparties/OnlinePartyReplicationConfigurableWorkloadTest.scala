@@ -44,7 +44,7 @@ import scala.util.control.NonFatal
   *   - SP hosts Alice (replicated to TP) and Carol, TP hosts Alice (onboarding) and Bob.
   *   - 1 mediator/sequencer each
   */
-sealed trait OnlinePartyReplicationConfigurableWorkloadTest
+trait OnlinePartyReplicationConfigurableWorkloadTest
     extends CommunityIntegrationTest
     with OnlinePartyReplicationTestHelpers
     with HasTempDirectory
@@ -67,7 +67,7 @@ sealed trait OnlinePartyReplicationConfigurableWorkloadTest
   private val createContractsAlreadyOnTP = true
   private val exerciseContractsAlreadyOnTP = true
   private val createContractsOnboardingOnTP = true
-  private val exerciseContractsOnboardingOnTP = true
+  protected def exerciseContractsOnboardingOnTP: Boolean
 
   private val numContractsInCreateBatch = 100
   // Approximate target duration of OnPR used if necessary to slow down OnPR so that
@@ -110,7 +110,7 @@ sealed trait OnlinePartyReplicationConfigurableWorkloadTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(
-        ConfigTransforms.unsafeEnableOnlinePartyReplication(
+        ConfigTransforms.enableAlphaOnlinePartyReplicationSupport(
           Map("participant2" -> (() => createTargetParticipantTestInterceptor()))
         )*
       )
@@ -262,4 +262,6 @@ sealed trait OnlinePartyReplicationConfigurableWorkloadTest
 class OnlinePartyReplicationConfigurableWorkloadTestPostgres
     extends OnlinePartyReplicationConfigurableWorkloadTest {
   registerPlugin(new UsePostgres(loggerFactory))
+
+  override protected def exerciseContractsOnboardingOnTP: Boolean = true
 }

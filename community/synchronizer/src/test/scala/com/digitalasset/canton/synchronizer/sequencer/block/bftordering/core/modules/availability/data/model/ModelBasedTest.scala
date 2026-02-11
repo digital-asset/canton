@@ -4,11 +4,12 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.model
 
 import com.daml.nameof.NameOf.functionFullName
-import com.digitalasset.canton.config.BatchAggregatorConfig
+import com.digitalasset.canton.config.{BatchAggregatorConfig, CachingConfigs}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.{DbTest, H2Test}
+import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.PekkoEnv
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore
@@ -24,7 +25,14 @@ import scala.util.Random
 trait ModelBasedTest extends AnyWordSpec with BftSequencerBaseTest { this: DbTest =>
 
   def createStore(): AvailabilityStore[PekkoEnv] =
-    new DbAvailabilityStore(BatchAggregatorConfig(), storage, timeouts, loggerFactory)(
+    new DbAvailabilityStore(
+      BatchAggregatorConfig(),
+      CachingConfigs(),
+      SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
+      storage,
+      timeouts,
+      loggerFactory,
+    )(
       implicitly[ExecutionContext]
     )
 
@@ -62,6 +70,9 @@ trait ModelBasedTest extends AnyWordSpec with BftSequencerBaseTest { this: DbTes
             case Command.GC(staleBatchIds) =>
               Await.result(store.gc(staleBatchIds), timeout)
               Await.result(model.gc(staleBatchIds), timeout)
+            case Command.Prune(epochNumber) =>
+              Await.result(store.prune(epochNumber), timeout)
+              Await.result(model.prune(epochNumber), timeout)
           }
         }
       }

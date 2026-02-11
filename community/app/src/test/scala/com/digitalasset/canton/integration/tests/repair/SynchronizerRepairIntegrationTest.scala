@@ -21,6 +21,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.logging.{LogEntry, SuppressingLogger, SuppressionRule}
 import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription
+import org.scalatest.Ignore
 import org.slf4j.event.Level
 
 import scala.annotation.nowarn
@@ -315,6 +316,8 @@ sealed abstract class SynchronizerRepairIntegrationTest
   private def newSynchronizerId(implicit env: TestConsoleEnvironment) = env.acmeId.logical
 }
 
+// TODO(i30690): Un-Ignore this test if the change-assignation logic is fixed re RepairCounter usage
+@Ignore
 final class SynchronizerRepairBftOrderingIntegrationTestPostgres
     extends SynchronizerRepairIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))

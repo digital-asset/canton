@@ -48,31 +48,27 @@ class AcsCommitmentPublicationPostProcessor(
 
     update match {
       case updateWithAcsChangeFactory: AcsChangeSequencedUpdate =>
-        val (synchronizerId, synchronizerIndex) = updateWithAcsChangeFactory.synchronizerIndex
         publishAcsCommitment(
-          synchronizerId,
-          synchronizerIndex,
+          updateWithAcsChangeFactory.synchronizerId,
+          updateWithAcsChangeFactory.synchronizerIndex,
           Some(updateWithAcsChangeFactory.acsChangeFactory),
         )
 
       case emptyAcsPublicationRequired: EmptyAcsPublicationRequired =>
-        val (synchronizerId, synchronizerIndex) = emptyAcsPublicationRequired.synchronizerIndex
         publishAcsCommitment(
-          synchronizerId,
-          synchronizerIndex,
+          emptyAcsPublicationRequired.synchronizerId,
+          emptyAcsPublicationRequired.synchronizerIndex,
           acsChangeFactoryO = None,
         )
 
       case upgradeTimeReached: LsuTimeReached =>
-        val (synchronizerId, synchronizerIndex) = upgradeTimeReached.synchronizerIndex
-
         connectedSynchronizersLookupContainer
           // not publishing if not connected to synchronizer: it means subsequent crash recovery will establish consistency again
-          .get(synchronizerId)
+          .get(upgradeTimeReached.synchronizerId)
           // not publishing anything if the AcsCommitmentProcessor initialization succeeded with AbortedDueToShutdown or failed
           .foreach(
             _.acsCommitmentProcessor.publishForUpgradeTime(
-              synchronizerIndex.recordTime
+              upgradeTimeReached.synchronizerIndex.recordTime
             )(
               // The trace context is deliberately generated here instead of continuing the one for the Update
               // to unlink the asynchronous acs commitment processing from message processing trace.

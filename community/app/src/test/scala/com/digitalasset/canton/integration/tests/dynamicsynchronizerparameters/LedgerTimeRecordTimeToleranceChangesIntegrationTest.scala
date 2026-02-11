@@ -11,7 +11,7 @@ import com.digitalasset.canton.integration.plugins.{
   UseProgrammableSequencer,
   UseReferenceBlockSequencer,
 }
-import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils
+import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -35,10 +35,7 @@ trait LedgerTimeRecordTimeToleranceChangesIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with HasProgrammableSequencer
-    with HasCycleUtils
-    with LogicalUpgradeUtils {
-
-  override protected def testName: String = "ledger-time-record-time-tolerance-changes"
+    with HasCycleUtils {
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1

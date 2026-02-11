@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.upgrade.lsu
 import better.files.File
 import com.daml.ledger.api.v2.topology_transaction.TopologyEvent.Event
 import com.digitalasset.canton.admin.api.client.data.TemplateId
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
@@ -16,6 +17,7 @@ import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
+import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.PartyId
 
@@ -255,8 +257,34 @@ final class LsuLateParticipantUpgradeIntegrationTest extends LsuBase {
         p.health.ping(env.participant1.id)
       }
 
-      lateUpgrade(env.participant2, aliceMissedIou, upgradeBeforeACSRepair = true)
-      lateUpgrade(env.participant3, charlieMissedIou, upgradeBeforeACSRepair = false)
+      // TODO(#30628) Fix crash recovery in case of late upgrade and remove reinitialize_commitments below
+      loggerFactory.assertLogsUnordered(
+        {
+          lateUpgrade(env.participant2, aliceMissedIou, upgradeBeforeACSRepair = true)
+          lateUpgrade(env.participant3, charlieMissedIou, upgradeBeforeACSRepair = false)
+        },
+        // P2
+        _.errorMessage should include(
+          "Detected an inconsistency between the running commitment and the ACS"
+        ),
+        // P3
+        _.errorMessage should include(
+          "Detected an inconsistency between the running commitment and the ACS"
+        ),
+      )
+
+      participant2.commitments.reinitialize_commitments(
+        Nil,
+        Nil,
+        Nil,
+        NonNegativeDuration.ofSeconds(1),
+      )
+      participant3.commitments.reinitialize_commitments(
+        Nil,
+        Nil,
+        Nil,
+        NonNegativeDuration.ofSeconds(1),
+      )
 
       // P4 late upgrade
       manualLsu(participant4)

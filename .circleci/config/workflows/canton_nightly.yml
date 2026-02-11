@@ -323,3 +323,15 @@ jobs:
         - da-images
       requires:
         - package_community
+
+##### Blackduck vulnerability scan
+  - blackduck:
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - blackduck
+      requires:
+        - package_community

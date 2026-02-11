@@ -92,13 +92,14 @@ sealed trait OnlinePartyReplicationCascadingRepetitionsTest
         new NetworkBootstrapper(S1M1)
       }
       .addConfigTransforms(
-        ConfigTransforms.unsafeEnableOnlinePartyReplication(
+        ConfigTransforms.enableAlphaOnlinePartyReplicationSupport(
           Map(
             "participant1" -> (() => createSourceParticipantTestInterceptor()),
             "participant2" -> (() => createSourceParticipantTestInterceptor()),
             "participant3" -> (() => createSourceParticipantTestInterceptor()),
             "participant4" -> (() => createSourceParticipantTestInterceptor()),
-          )
+          ),
+          enableUnsafeSequencerChannelSupport = true,
         )*
       )
       .withSetup { implicit env =>

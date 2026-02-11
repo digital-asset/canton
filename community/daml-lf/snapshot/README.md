@@ -95,9 +95,6 @@ With `CHOICE_NAME1=ReplayBenchmark:T:Add` and `CHOICE_NAME2=ReplayBenchmark:T:Su
 # Warmup Fork: 1 of 1
 # Warmup Iteration   1: %%% loading submission entries from $SNAPSHOT_DIR/ReplayBenchmark.dar/globalCreateAndExercise/snapshot-participant.bin...
 %%% loading dar file $DAR_FILE ...
-SLF4J: No SLF4J providers were found.
-SLF4J: Defaulting to no-operation (NOP) logger implementation
-SLF4J: See https://www.slf4j.org/codes.html#noProviders for further details.
 %%% compile 31 packages ...
 0.222 ms/op
 Iteration   1: 0.081 ms/op
@@ -117,9 +114,6 @@ Iteration   3: 0.049 ms/op
 # Fork: 1 of 1
 # Warmup Iteration   1: %%% loading submission entries from $SNAPSHOT_DIR/ReplayBenchmark.dar/globalCreateAndExercise/snapshot-participant.bin...
 %%% loading dar file $DAR_FILE ...
-SLF4J: No SLF4J providers were found.
-SLF4J: Defaulting to no-operation (NOP) logger implementation
-SLF4J: See https://www.slf4j.org/codes.html#noProviders for further details.
 %%% compile 31 packages ...
 0.250 ms/op
 Iteration   1: 0.082 ms/op
@@ -169,9 +163,6 @@ Secondary result "com.digitalasset.daml.lf.testing.snapshot.ReplayBenchmark.benc
 # Warmup Fork: 1 of 1
 # Warmup Iteration   1: %%% loading submission entries from $SNAPSHOT_DIR/ReplayBenchmark.dar/globalCreateAndExercise/snapshot-participant.bin...
 %%% loading dar file $DAR_FILE ...
-SLF4J: No SLF4J providers were found.
-SLF4J: Defaulting to no-operation (NOP) logger implementation
-SLF4J: See https://www.slf4j.org/codes.html#noProviders for further details.
 %%% compile 31 packages ...
 0.235 ms/op
 Iteration   1: 0.080 ms/op
@@ -191,9 +182,6 @@ Iteration   3: 0.046 ms/op
 # Fork: 1 of 1
 # Warmup Iteration   1: %%% loading submission entries from $SNAPSHOT_DIR/ReplayBenchmark.dar/globalCreateAndExercise/snapshot-participant.bin...
 %%% loading dar file $DAR_FILE ...
-SLF4J: No SLF4J providers were found.
-SLF4J: Defaulting to no-operation (NOP) logger implementation
-SLF4J: See https://www.slf4j.org/codes.html#noProviders for further details.
 %%% compile 31 packages ...
 0.221 ms/op
 Iteration   1: 0.079 ms/op
@@ -243,9 +231,6 @@ Secondary result "com.digitalasset.daml.lf.testing.snapshot.ReplayBenchmark.benc
 # Warmup Fork: 1 of 1
 # Warmup Iteration   1: %%% loading submission entries from $SNAPSHOT_DIR/ReplayBenchmark.dar/globalCreateAndExercise/snapshot-participant.bin...
 %%% loading dar file $DAR_FILE ...
-SLF4J: No SLF4J providers were found.
-SLF4J: Defaulting to no-operation (NOP) logger implementation
-SLF4J: See https://www.slf4j.org/codes.html#noProviders for further details.
 %%% compile 31 packages ...
 0.226 ms/op
 Iteration   1: 0.080 ms/op
@@ -265,9 +250,6 @@ Iteration   3: 0.048 ms/op
 # Fork: 1 of 1
 # Warmup Iteration   1: %%% loading submission entries from $SNAPSHOT_DIR/ReplayBenchmark.dar/globalCreateAndExercise/snapshot-participant.bin...
 %%% loading dar file $DAR_FILE ...
-SLF4J: No SLF4J providers were found.
-SLF4J: Defaulting to no-operation (NOP) logger implementation
-SLF4J: See https://www.slf4j.org/codes.html#noProviders for further details.
 %%% compile 31 packages ...
 0.240 ms/op
 Iteration   1: 0.081 ms/op
@@ -317,9 +299,6 @@ Secondary result "com.digitalasset.daml.lf.testing.snapshot.ReplayBenchmark.benc
 # Warmup Fork: 1 of 1
 # Warmup Iteration   1: %%% loading submission entries from $SNAPSHOT_DIR/ReplayBenchmark.dar/globalCreateAndExercise/snapshot-participant.bin...
 %%% loading dar file $DAR_FILE ...
-SLF4J: No SLF4J providers were found.
-SLF4J: Defaulting to no-operation (NOP) logger implementation
-SLF4J: See https://www.slf4j.org/codes.html#noProviders for further details.
 %%% compile 31 packages ...
 0.232 ms/op
 Iteration   1: 0.083 ms/op
@@ -339,9 +318,6 @@ Iteration   3: 0.048 ms/op
 # Fork: 1 of 1
 # Warmup Iteration   1: %%% loading submission entries from $SNAPSHOT_DIR/ReplayBenchmark.dar/globalCreateAndExercise/snapshot-participant.bin...
 %%% loading dar file $DAR_FILE ...
-SLF4J: No SLF4J providers were found.
-SLF4J: Defaulting to no-operation (NOP) logger implementation
-SLF4J: See https://www.slf4j.org/codes.html#noProviders for further details.
 %%% compile 31 packages ...
 0.211 ms/op
 Iteration   1: 0.080 ms/op

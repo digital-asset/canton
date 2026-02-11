@@ -1,0 +1,48 @@
+restore_from_azure:
+  description: >
+    Commands that copies a local file to Azure Storage Account cp.html
+  parameters:
+    job_name:
+      type: string
+      description: Optional name for description
+      default: ''
+    key:
+      type: string
+      description: Cache Key to store under
+    CONTAINER:
+      type: env_var_name
+      default: CONTAINER_URL
+  steps:
+    - run:
+        name: << parameters.job_name >> - Restoring using AzCopy
+        environment:
+          ORB_KEY: << parameters.key >>
+          ORB_CONTAINER: <<parameters.CONTAINER>>
+        command: ./scripts/ci/azure/restore-from-azure.sh
+
+save_to_azure:
+  description: >
+    Commands that copies a local file to Azure Storage Account
+  parameters:
+    job_name:
+      type: string
+      description: Optional name for description
+      default: ''
+    path:
+      type: string
+      description: A local file or path
+    key:
+      type: string
+      description: Cache Key to store under
+    CONTAINER:
+      type: env_var_name
+      default: CONTAINER_URL
+  steps:
+    - run:
+        name: << parameters.job_name >> - Saving using AzCopy
+        environment:
+          ORB_PATH: << parameters.path >>
+          ORB_KEY: << parameters.key >>
+          ORB_CONTAINER: <<parameters.CONTAINER>>
+        command: ./scripts/ci/azure/save-to-azure.sh
+

@@ -17,7 +17,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.CacheMetrics
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
-import com.digitalasset.canton.participant.config.UnsafeOnlinePartyReplicationConfig
+import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing
@@ -54,7 +54,7 @@ class TopologyComponentFactory(
     batching: BatchingConfig,
     topology: TopologyConfig,
     participantId: ParticipantId,
-    unsafeOnlinePartyReplication: Option[UnsafeOnlinePartyReplicationConfig],
+    alphaOnlinePartyReplicationSupport: Option[AlphaOnlinePartyReplicationConfig],
     exitOnFatalFailures: Boolean,
     topologyStore: TopologyStore[SynchronizerStore],
     topologyCacheMetrics: CacheMetrics,
@@ -101,7 +101,8 @@ class TopologyComponentFactory(
         topologyStore,
         initialRecordTime = recordOrderPublisher.initTimestamp,
         participantId,
-        pauseSynchronizerIndexingDuringPartyReplication = unsafeOnlinePartyReplication.nonEmpty,
+        pauseSynchronizerIndexingDuringPartyReplication =
+          alphaOnlinePartyReplicationSupport.nonEmpty,
         synchronizerPredecessor = synchronizerPredecessor,
         lsuCallback = lsuCallback,
         retrieveAndStoreMissingSequencerIds = retrieveAndStoreMissingSequencerIds,

@@ -12,7 +12,8 @@ import com.digitalasset.canton.integration.EnvironmentDefinition.S2M2
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
-import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils.SynchronizerNodes
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
+import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.logging.SuppressionRule.LevelAndAbove
 import org.scalatest.Assertion

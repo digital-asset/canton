@@ -1159,7 +1159,8 @@ class TransactionProcessingSteps(
               optNodeSeeds = None, // optNodeSeeds is unused by the indexer
               optByKeyNodes = None, // optByKeyNodes is unused by the indexer
             ),
-            transaction = LfCommittedTransaction(lfTx.unwrap),
+            transactionInfo =
+              Update.TransactionAccepted.TransactionInfo(LfCommittedTransaction(lfTx.unwrap)),
             updateId = updateId,
             synchronizerId = psid.logical,
             recordTime = requestTime,

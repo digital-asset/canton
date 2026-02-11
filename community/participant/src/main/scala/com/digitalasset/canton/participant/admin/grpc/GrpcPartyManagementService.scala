@@ -56,7 +56,7 @@ import scala.util.{Failure, Success, Try}
   */
 class GrpcPartyManagementService(
     participantId: ParticipantId,
-    adminWorkflowO: Option[PartyReplicationAdminWorkflow],
+    partyReplicatorO: Option[PartyReplicator],
     sync: CantonSyncService,
     parameters: ParticipantNodeParameters,
     protected val loggerFactory: NamedLoggerFactory,
@@ -72,8 +72,8 @@ class GrpcPartyManagementService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
     EitherTUtil.toFuture(for {
-      adminWorkflow <- EitherT.fromEither[Future](
-        ensureAdminWorkflowIfOnlinePartyReplicationEnabled()
+      partyReplicator <- EitherT.fromEither[Future](
+        ensureOnlinePartyReplicationEnabled()
       )
 
       argsP <- EitherT
@@ -87,8 +87,8 @@ class GrpcPartyManagementService(
         verifyArguments(argsP).leftMap(toStatusRuntimeException(Status.INVALID_ARGUMENT))
       )
 
-      hash <- adminWorkflow.partyReplicator
-        .addPartyAsync(args, adminWorkflow)
+      hash <- partyReplicator
+        .addPartyAsync(args)
         .leftMap(toStatusRuntimeException(Status.FAILED_PRECONDITION))
         .onShutdown(Left(GrpcErrors.AbortedDueToShutdown.Error().asGrpcError))
     } yield v30.AddPartyAsyncResponse(addPartyRequestId = hash.toHexString))
@@ -153,13 +153,7 @@ class GrpcPartyManagementService(
               .toRight(toStatusRuntimeException(Status.INVALID_ARGUMENT)("Arguments not set"))
           )
           partyReplicator <- EitherT.fromEither[Future](
-            adminWorkflowO
-              .map(_.partyReplicator)
-              .toRight(
-                toStatusRuntimeException(Status.FAILED_PRECONDITION)(
-                  "PartyReplicator not initialized"
-                )
-              )
+            ensureOnlinePartyReplicationEnabled()
           )
           acsByteString <- EitherT.fromEither[Future](
             Try(ByteString.copyFrom(outputStream.toByteArray)).toEither.leftMap(t =>
@@ -235,13 +229,13 @@ class GrpcPartyManagementService(
       request: v30.GetAddPartyStatusRequest
   ): Future[v30.GetAddPartyStatusResponse] =
     (for {
-      adminWorkflow <- ensureAdminWorkflowIfOnlinePartyReplicationEnabled()
+      partyReplicator <- ensureOnlinePartyReplicationEnabled()
 
       requestId <- Hash
         .fromHexString(request.addPartyRequestId)
         .leftMap(err => toStatusRuntimeException(Status.INVALID_ARGUMENT)(err.message))
 
-      status <- adminWorkflow.partyReplicator
+      status <- partyReplicator
         .getAddPartyStatus(requestId)
         .toRight(
           toStatusRuntimeException(Status.UNKNOWN)(
@@ -255,10 +249,10 @@ class GrpcPartyManagementService(
   private def toStatusRuntimeException(status: Status)(err: String): StatusRuntimeException =
     status.withDescription(err).asRuntimeException()
 
-  private def ensureAdminWorkflowIfOnlinePartyReplicationEnabled() = adminWorkflowO
+  private def ensureOnlinePartyReplicationEnabled() = partyReplicatorO
     .toRight(
       toStatusRuntimeException(Status.UNIMPLEMENTED)(
-        "The add_party_async command requires the `unsafe_online_party_replication` configuration"
+        "Online party replication commands require the `alpha_online_party_replication_support` configuration"
       )
     )
 

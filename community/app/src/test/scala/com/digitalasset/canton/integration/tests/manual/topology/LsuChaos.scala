@@ -24,8 +24,8 @@ import com.digitalasset.canton.integration.tests.manual.topology.TopologyOperati
   TransactionProgress,
   topologyChangeTimeout,
 }
-import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils
-import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils.SynchronizerNodes
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.{
   ConfigTransform,
   ConfigTransforms,

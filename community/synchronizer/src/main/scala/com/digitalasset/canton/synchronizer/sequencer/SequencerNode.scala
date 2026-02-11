@@ -723,7 +723,7 @@ class SequencerNodeBootstrap(
             )
 
           sequencerChannelServiceO = Option.when(
-            parameters.unsafeEnableOnlinePartyReplication
+            parameters.unsafeSequencerChannelSupport
           )(
             GrpcSequencerChannelService(
               authenticationConfig.check,

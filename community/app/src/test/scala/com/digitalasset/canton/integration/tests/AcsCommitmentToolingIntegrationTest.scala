@@ -781,7 +781,7 @@ trait AcsCommitmentToolingIntegrationTest
             .cleanSynchronizerIndex(synchronizerId)
             .futureValueUS
             .flatMap(_.sequencerIndex)
-        }.map(_.sequencerTimestamp)
+        }
         cleanReqTs
       }
 

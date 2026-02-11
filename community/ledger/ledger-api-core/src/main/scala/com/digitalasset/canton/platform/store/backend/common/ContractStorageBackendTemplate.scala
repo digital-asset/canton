@@ -48,7 +48,7 @@ class ContractStorageBackendTemplate(
                  WHERE create_key_hash = ${key.hash}
                    AND event_sequential_id <= $validAtEventSeqId
                  ORDER BY event_sequential_id DESC
-                 FETCH NEXT 1 ROW ONLY
+                 ${QueryStrategy.limitClause(Some(1))}
               )
          SELECT internal_contract_id
            FROM last_contract_key_create

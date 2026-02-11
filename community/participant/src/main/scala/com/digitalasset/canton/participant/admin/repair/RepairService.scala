@@ -220,7 +220,7 @@ final class RepairService(
               .toRight(s"Could not find $synchronizerAlias")
           )
 
-          repair <- helpers.initRepairRequestAndVerifyPreconditions(synchronizerId)
+          repair <- helpers.initRepairRequestAndVerifyPreconditions(synchronizerId, repairIndexer)
 
           contractStates <- EitherT.right[String](
             helpers.readContractAcsStates(
@@ -375,31 +375,34 @@ final class RepairService(
         "Source must differ from target synchronizer!",
       )
 
-      repairSource <- sourceSynchronizer.traverse(
-        helpers.initRepairRequestAndVerifyPreconditions(
-          _,
-          contractsCount,
-        )
-      )
-
-      repairTarget <- targetSynchronizer.traverse(
-        helpers.initRepairRequestAndVerifyPreconditions(
-          _,
-          contractsCount,
-        )
-      )
-
       _ <- helpers.withRepairIndexer { repairIndexer =>
-        val changeAssignation = new ChangeAssignation(
-          repairSource,
-          repairTarget,
-          participantId,
-          syncCrypto,
-          repairIndexer,
-          contractStore.value,
-          loggerFactory,
-        )
         (for {
+          repairSource <- sourceSynchronizer.traverse(
+            helpers.initRepairRequestAndVerifyPreconditions(
+              _,
+              repairIndexer,
+              contractsCount,
+            )
+          )
+
+          repairTarget <- targetSynchronizer.traverse(
+            helpers.initRepairRequestAndVerifyPreconditions(
+              _,
+              repairIndexer,
+              contractsCount,
+            )
+          )
+
+          changeAssignation = new ChangeAssignation(
+            repairSource,
+            repairTarget,
+            participantId,
+            syncCrypto,
+            repairIndexer,
+            contractStore.value,
+            loggerFactory,
+          )
+
           changeAssignationData <- EitherT.rightT[FutureUnlessShutdown, String](
             ChangeAssignation.Data.from(contracts.forgetNE, changeAssignation)
           )
@@ -445,8 +448,12 @@ final class RepairService(
   )(implicit context: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
     helpers.withRepairIndexer { repairIndexer =>
       (for {
-        sourceRepairRequest <- source.traverse(helpers.initRepairRequestAndVerifyPreconditions(_))
-        targetRepairRequest <- target.traverse(helpers.initRepairRequestAndVerifyPreconditions(_))
+        sourceRepairRequest <- source.traverse(
+          helpers.initRepairRequestAndVerifyPreconditions(_, repairIndexer)
+        )
+        targetRepairRequest <- target.traverse(
+          helpers.initRepairRequestAndVerifyPreconditions(_, repairIndexer)
+        )
         reassignmentData <-
           targetRepairRequest.unwrap.synchronizer.persistentState.reassignmentStore
             .lookup(reassignmentId)
@@ -500,6 +507,15 @@ final class RepairService(
       persistentState <- EitherT.fromEither[FutureUnlessShutdown](
         helpers.lookUpSynchronizerPersistence(psid)
       )
+
+      synchronizerPredecessor <- EitherT
+        .fromEither[FutureUnlessShutdown](
+          syncPersistentStateLookup
+            .connectionConfig(psid)
+            .toRight(s"Unable to find connection config for $psid")
+        )
+        .map(_.predecessor)
+
       _ <- EitherT.right(
         ledgerApiIndexer.value
           .ensureNoProcessingForSynchronizer(psid.logical)
@@ -513,6 +529,7 @@ final class RepairService(
           persistentState.requestJournalStore,
           persistentState.sequencedEventStore,
           synchronizerIndex,
+          synchronizerPredecessor,
         )
       )
       _ <- EitherTUtil
@@ -647,10 +664,12 @@ final class RepairService(
         optNodeSeeds = None,
         optByKeyNodes = None,
       ),
-      transaction = LfCommittedTransaction(
-        CantonOnly.lfVersionedTransaction(
-          nodes = txNodes,
-          roots = ImmArray.from(nodeIds.take(txNodes.size)),
+      transactionInfo = Update.TransactionAccepted.TransactionInfo(
+        LfCommittedTransaction(
+          CantonOnly.lfVersionedTransaction(
+            nodes = txNodes,
+            roots = ImmArray.from(nodeIds.take(txNodes.size)),
+          )
         )
       ),
       updateId = updateId,

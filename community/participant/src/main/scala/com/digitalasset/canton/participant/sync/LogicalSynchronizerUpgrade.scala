@@ -527,7 +527,6 @@ class AutomaticLogicalSynchronizerUpgrade(
           )
       )
 
-      // TODO(#30484) Ensure error reporting is sufficiently to infer resolution
       _ <- EitherT
         .fromEither[FutureUnlessShutdown](
           synchronizerConnectionConfigStore.get(synchronizerSuccessor.psid).map(_ => ())

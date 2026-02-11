@@ -348,6 +348,10 @@ object TestingTimeServiceConfig {
   * @param doNotAwaitOnCheckingIncomingCommitments
   *   Enable fully asynchronous checking of incoming commitments. This may result in some incoming
   *   commitments not being checked in case of crashes or HA failovers.
+  * @param commitmentAsynchronousInitialization
+  *   Enables asynchronous initialization of the ACS commitment processor. This speeds up
+  *   reconnection to a synchronizer at the expense of potentially increased memory and resource
+  *   consumption while the initialization is running in the background.
   * @param commitmentCheckpointInterval
   *   Checkpoint interval for commitments. Smaller intervals lead to less resource-intensive crash
   *   recovery, at the cost of more frequent DB writing of checkpoints. Regardless of this
@@ -400,12 +404,13 @@ final case class ParticipantNodeParameterConfig(
     watchdog: Option[WatchdogConfig] = None,
     packageMetadataView: PackageMetadataViewConfig = PackageMetadataViewConfig(),
     commandProgressTracker: CommandProgressTrackerConfig = CommandProgressTrackerConfig(),
-    unsafeOnlinePartyReplication: Option[UnsafeOnlinePartyReplicationConfig] = None,
+    alphaOnlinePartyReplicationSupport: Option[AlphaOnlinePartyReplicationConfig] = None,
     // TODO(#25344): check whether this should be removed
     automaticallyPerformLsu: Boolean = true,
     activationFrequencyForWarnAboutConsistencyChecks: Long = 1000,
     reassignmentsConfig: ReassignmentsConfig = ReassignmentsConfig(),
     doNotAwaitOnCheckingIncomingCommitments: Boolean = false,
+    commitmentAsynchronousInitialization: Boolean = false,
     commitmentCheckpointInterval: config.PositiveDurationSeconds =
       config.PositiveDurationSeconds.ofMinutes(1),
     commitmentMismatchDebugging: Boolean = false,
@@ -513,13 +518,14 @@ object ContractLoaderConfig {
   private val defaultMaxParallelism: PositiveInt = PositiveInt.tryCreate(5)
 }
 
-/** Parameters for the Online Party Replication (OPR) preview feature (unsafe for production)
+/** Parameters for the Online Party Replication (OnPR) alpha preview feature
   */
-final case class UnsafeOnlinePartyReplicationConfig(
-    testInterceptor: Option[UnsafeOnlinePartyReplicationConfig.TestInterceptor] = None
+final case class AlphaOnlinePartyReplicationConfig(
+    testInterceptor: Option[AlphaOnlinePartyReplicationConfig.TestInterceptor] = None,
+    unsafeSequencerChannelSupport: Boolean = false,
 )
 
-object UnsafeOnlinePartyReplicationConfig {
+object AlphaOnlinePartyReplicationConfig {
 
   /** The PartyReplicator supports adding a test interceptor for manipulating behavior during tests.
     * This is used for delaying and/or dropping messages to verify the behavior in abnormal

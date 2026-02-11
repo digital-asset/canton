@@ -313,7 +313,6 @@ class TransactionSpec
       val parties = Set("Alice")
 
       def create(s: V.ContractId) = {
-        println(s)
         builder
           .create(
             id = s,
@@ -362,9 +361,7 @@ class TransactionSpec
 
       builder.add(root1)
       val exeId = builder.add(root2)
-      println(cid("Create"))
       builder.add(create(cid("Create"): V.ContractId))
-      println("created")
       builder.add(exe(cid("NonConsumingExerciseById"), false, false), exeId)
       builder.add(exe(cid("ConsumingExerciseById"), true, false), exeId)
       builder.add(exe(cid("NonConsumingExerciseByKey"), false, true), exeId)

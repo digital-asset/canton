@@ -469,7 +469,7 @@ class SyncPersistentStateManager(
         parameters.batchingConfig,
         topologyConfig,
         participantId,
-        parameters.unsafeOnlinePartyReplication,
+        parameters.alphaOnlinePartyReplicationSupport,
         exitOnFatalFailures = parameters.exitOnFatalFailures,
         state.topologyStore,
         topologyCacheMetrics = participantMetrics.topologyCache,

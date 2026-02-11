@@ -136,12 +136,13 @@ sealed trait OnlinePartyReplicationNetworkDisruptionsTest
       }
       .addConfigTransforms(
         (ConfigTransforms.setProtocolVersion(devProtocolVersionToRemove) ++
-          ConfigTransforms.unsafeEnableOnlinePartyReplication(
+          ConfigTransforms.enableAlphaOnlinePartyReplicationSupport(
             Map(
               // configure the test interceptor on both participants since the tests vary the source participant
               "participant1" -> (() => createSourceParticipantTestInterceptor()),
               "participant2" -> (() => createSourceParticipantTestInterceptor()),
-            )
+            ),
+            enableUnsafeSequencerChannelSupport = true,
           ))*
       )
       .withSetup { implicit env =>

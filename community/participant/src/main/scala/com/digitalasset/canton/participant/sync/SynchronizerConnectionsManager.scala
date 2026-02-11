@@ -926,10 +926,7 @@ private[sync] class SynchronizerConnectionsManager(
           // Attempt to grab and store *all* the sequencer ids to increase chances to have them all
           _ <- retrieveAndStoreMissingSequencerIds(psid)
 
-          synchronizerLoggerFactory = loggerFactory.append(
-            "psid",
-            psid.toString,
-          )
+          synchronizerLoggerFactory = loggerFactory.append("psid", psid.toString)
           persistent = synchronizerHandle.syncPersistentState
 
           synchronizerCrypto = syncCrypto.tryForSynchronizer(
@@ -962,6 +959,7 @@ private[sync] class SynchronizerConnectionsManager(
                 ledgerApiIndexer.asEval,
                 participantNodePersistentState.map(_.contractStore),
                 participantNodeEphemeralState,
+                synchronizerConnectionConfig.predecessor,
                 () => {
                   val tracker = SynchronizerTimeTracker(
                     synchronizerConnectionConfig.config.timeTracker,

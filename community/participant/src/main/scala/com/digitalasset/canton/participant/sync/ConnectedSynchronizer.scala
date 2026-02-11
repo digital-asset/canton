@@ -430,9 +430,7 @@ class ConnectedSynchronizer(
             chunkSize = PositiveInt.tryCreate(500),
           )(
             change.deactivations.keySet.toSeq
-          )(
-            withMetadataSeq
-          )
+          )(withMetadataSeq)
       } yield {
         AcsChange(
           activations = storedActivatedContracts
@@ -487,12 +485,7 @@ class ConnectedSynchronizer(
     ): EitherT[
       FutureUnlessShutdown,
       ConnectedSynchronizerInitializationError,
-      (
-          Seq[
-            (RecordTime, AcsChange)
-          ],
-          Int,
-      ),
+      (Seq[(RecordTime, AcsChange)], Int), // (changes, number of changes)
     ] =
       liftF(for {
         (contractIdChanges, count) <- persistent.activeContractStore
@@ -844,7 +837,7 @@ class ConnectedSynchronizer(
               tc =>
                 participantNodePersistentState.value.ledgerApiStore
                   .cleanSynchronizerIndex(psid.logical)(tc, ec)
-                  .map(_.flatMap(_.sequencerIndex).map(_.sequencerTimestamp)),
+                  .map(_.flatMap(_.sequencerIndex)),
             )(initializationTraceContext)
           )
 
@@ -1259,6 +1252,7 @@ object ConnectedSynchronizer {
           clock,
           exitOnFatalFailures = parameters.exitOnFatalFailures,
           parameters.batchingConfig,
+          asynchronousInitialization = parameters.commitmentAsynchronousInitialization,
           doNotAwaitOnCheckingIncomingCommitments =
             parameters.doNotAwaitOnCheckingIncomingCommitments,
           commitmentCheckpointInterval = parameters.commitmentCheckpointInterval,

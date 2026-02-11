@@ -1008,7 +1008,8 @@ object InMemoryStateUpdaterSpec {
     Update.SequencedTransactionAccepted(
       completionInfoO = None,
       transactionMeta = someTransactionMeta,
-      transaction = CommittedTransaction(TransactionBuilder.Empty),
+      transactionInfo =
+        Update.TransactionAccepted.TransactionInfo(CommittedTransaction(TransactionBuilder.Empty)),
       updateId = txId2,
       synchronizerId = SynchronizerId.tryFromString("da::default"),
       recordTime = CantonTimestamp.MinValue,
@@ -1165,7 +1166,7 @@ object InMemoryStateUpdaterSpec {
     Update.SequencedTransactionAccepted(
       completionInfoO = None,
       transactionMeta = someTransactionMeta,
-      transaction = transaction,
+      transactionInfo = Update.TransactionAccepted.TransactionInfo(transaction),
       updateId = txId1,
       synchronizerId = synchronizerId,
       recordTime = CantonTimestamp(Timestamp(t)),

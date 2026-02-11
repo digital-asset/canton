@@ -71,7 +71,9 @@ class RestartSequencersReliabilityTest
       Threading.sleep(7.seconds.toMillis)
       logger.debug(s"Starting ${node.name}")
       node.start()
+      // user-manual-entry-begin: WaitForParticipantInitialization
       node.health.wait_for_initialized()
+      // user-manual-entry-end: WaitForParticipantInitialization
     } else {
       checkPerfRunnerCompletion(index)
     }

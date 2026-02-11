@@ -5,14 +5,18 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
+import com.digitalasset.canton.caching.ScaffeineCache
+import com.digitalasset.canton.caching.ScaffeineCache.TracedAsyncLoadingCache
+import com.digitalasset.canton.config.CantonRequireTypes.String68
+import com.digitalasset.canton.config.{BatchAggregatorConfig, CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.resource.DbStorage.Profile.{H2, Postgres}
-import com.digitalasset.canton.resource.{DbStorage, DbStore}
+import com.digitalasset.canton.resource.{DbStorage, DbStore, ToDbPrimitive}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.store.db.DbDeserializationException
+import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.{
   PekkoEnv,
   PekkoFutureUnlessShutdown,
@@ -24,13 +28,15 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.BatchAggregator
-import slick.jdbc.{GetResult, PositionedParameters, SetParameter}
+import slick.jdbc.{GetResult, SetParameter}
 
 import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 
 class DbAvailabilityStore(
     batchAggregatorConfig: BatchAggregatorConfig,
+    cachingConfigs: CachingConfigs,
+    bftOrderingMetrics: BftOrderingMetrics,
     override protected val storage: DbStorage,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
@@ -72,10 +78,66 @@ class DbAvailabilityStore(
     BatchAggregator(processor, batchAggregatorConfig)
   }
 
-  implicit object SetSeqBatchId extends SetParameter[Seq[BatchId]] {
-    override def apply(v1: Seq[BatchId], pp: PositionedParameters): Unit =
-      v1.foreach(setBatchIdParameter(_, pp))
+  private val missingBatchAggregator = {
+    val processor =
+      new BatchAggregator.Processor[BatchId, Boolean] {
+        override def kind: String = "availability-missing-batch"
+
+        override def logger: TracedLogger = DbAvailabilityStore.this.logger
+        override def executeBatch(items: NonEmpty[Seq[Traced[BatchId]]])(implicit
+            traceContext: TraceContext,
+            callerCloseContext: CloseContext,
+        ): FutureUnlessShutdown[immutable.Iterable[Boolean]] =
+          findIfMissingBatches(items.map(_.value))
+
+        override def prettyItem: Pretty[BatchId] = {
+          import com.digitalasset.canton.logging.pretty.PrettyUtil.*
+          prettyOfClass[BatchId](
+            param("batchId", _.hash)
+          )
+        }
+      }
+
+    BatchAggregator(processor, batchAggregatorConfig)
   }
+
+  private val lookupBatchAggregator = {
+    val processor =
+      new BatchAggregator.Processor[BatchId, OrderingRequestBatch] {
+        override def kind: String = "availability-lookup-batch"
+
+        override def logger: TracedLogger = DbAvailabilityStore.this.logger
+        override def executeBatch(items: NonEmpty[Seq[Traced[BatchId]]])(implicit
+            traceContext: TraceContext,
+            callerCloseContext: CloseContext,
+        ): FutureUnlessShutdown[immutable.Iterable[OrderingRequestBatch]] =
+          lookupBatches(items.map(_.value)).map { result =>
+            items.map(item => result(item.value))
+          }
+
+        override def prettyItem: Pretty[BatchId] = {
+          import com.digitalasset.canton.logging.pretty.PrettyUtil.*
+          prettyOfClass[BatchId](
+            param("batchId", _.hash)
+          )
+        }
+      }
+
+    BatchAggregator(processor, batchAggregatorConfig)
+  }
+
+  @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+  private val lookupBatchCache
+      : TracedAsyncLoadingCache[FutureUnlessShutdown, BatchId, OrderingRequestBatch] =
+    ScaffeineCache.buildTracedAsync[FutureUnlessShutdown, BatchId, OrderingRequestBatch](
+      cache = cachingConfigs.bftOrderingBatchCache
+        .buildScaffeine(loggerFactory)
+        .weigher((_: Any, v: Any) =>
+          v.asInstanceOf[OrderingRequestBatch].requests.map(_.value.payload.size()).sum
+        ),
+      loader = implicit traceContext => batchId => lookupBatchAggregator.run(batchId),
+      metrics = Some(bftOrderingMetrics.availability.dissemination.batchCache),
+    )(logger, "batchCache")
 
   private implicit def readOrderingRequestBatch: GetResult[OrderingRequestBatch] =
     converters.getResultByteArray.andThen { bytes =>
@@ -105,8 +167,9 @@ class DbAvailabilityStore(
     }
   }
 
-  private implicit val setBatchIdParameter: SetParameter[BatchId] =
-    (batchId, pp) => pp >> batchId.hash.toLengthLimitedHexString
+  private implicit val batchIdToPrimitive: ToDbPrimitive[BatchId, String68] = ToDbPrimitive(
+    _.hash.toLengthLimitedHexString
+  )
 
   override def addBatch(
       batchId: BatchId,
@@ -146,7 +209,7 @@ class DbAvailabilityStore(
       storage
         .runWrite(
           DbStorage
-            .bulkOperation_(insertSql, batches, storage.profile) { pp => msg =>
+            .bulkOperation(insertSql, batches, storage.profile) { pp => msg =>
               pp >> msg._1
               pp >> msg._2
               pp >> msg._2.epochNumber
@@ -154,54 +217,82 @@ class DbAvailabilityStore(
           functionFullName,
           maxRetries = 1,
         )
-        .map(_ => ())
+        .map { results =>
+          batches.view.zip(results).filter(_._2 != 0).map(_._1).foreach {
+            case (batchId, orderingRequestBatch) =>
+              lookupBatchCache.put(batchId, orderingRequestBatch)
+          }
+        }
     }
 
-  @SuppressWarnings(Array("org.wartremover.warts.Return"))
+  private def findIfMissingBatches(batches: NonEmpty[Seq[BatchId]])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[immutable.Iterable[Boolean]] = {
+    import DbStorage.Implicits.BuilderChain.*
+    storage.synchronizeWithClosing("find-if-missing-batches") {
+      val query =
+        sql"""select id from ord_availability_batch where """ ++ DbStorage.toInClause("id", batches)
+      storage
+        .query(
+          query.as[BatchId],
+          functionFullName,
+        )
+        .map { existingBatches =>
+          val existingBatchesAsSet = existingBatches.toSet
+          batches.toSeq.map(existingBatchesAsSet.contains)
+        }
+    }
+  }
+
+  private def lookupBatches(batches: NonEmpty[Seq[BatchId]])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[BatchId, OrderingRequestBatch]] = {
+    import DbStorage.Implicits.BuilderChain.*
+    storage.synchronizeWithClosing("find-if-missing-batches") {
+      val query =
+        sql"""select id, batch from ord_availability_batch where """ ++ DbStorage.toInClause(
+          "id",
+          batches,
+        )
+      storage
+        .query(
+          query.as[(BatchId, OrderingRequestBatch)],
+          functionFullName,
+        )
+        .map(_.toMap)
+    }
+  }
+
   override def fetchBatches(batches: Seq[BatchId])(implicit
       traceContext: TraceContext
   ): PekkoFutureUnlessShutdown[AvailabilityStore.FetchBatchesResult] = {
     val name = fetchBatchesActionName
-    if (batches.isEmpty) {
-      return PekkoFutureUnlessShutdown(
-        name,
-        () => FutureUnlessShutdown.pure(AvailabilityStore.AllBatches(Seq.empty)),
-      )
-    }
 
-    val future: () => FutureUnlessShutdown[AvailabilityStore.FetchBatchesResult] =
-      () =>
-        storage.synchronizeWithClosing(name) {
-          storage
-            .query(
-              sql"""select id
-              from ord_availability_batch
-              where id in ($batches#${",?" * (batches.size - 1)})
-             """.as[BatchId],
-              functionFullName,
-            )
-            .flatMap { batchesThatWeHave =>
-              val missing = batches.toSet.diff(batchesThatWeHave.toSet)
-
-              if (missing.nonEmpty) {
-                FutureUnlessShutdown.pure(AvailabilityStore.MissingBatches(missing))
-              } else {
-                storage
-                  .query(
-                    sql"""select id, batch
-              from ord_availability_batch
-              where id in ($batches#${",?" * (batches.size - 1)})
-             """.as[(BatchId, OrderingRequestBatch)],
-                    functionFullName,
-                  )
-                  .map { retrievedBatches =>
-                    val batchMap = retrievedBatches.toMap
-                    AvailabilityStore.AllBatches(batches.map(i => i -> batchMap(i)))
+    NonEmpty.from(batches) match {
+      case None =>
+        PekkoFutureUnlessShutdown(
+          name,
+          () => FutureUnlessShutdown.pure(AvailabilityStore.AllBatches(Seq.empty)),
+        )
+      case Some(oneOrMoreBatchIds) =>
+        val future: () => FutureUnlessShutdown[AvailabilityStore.FetchBatchesResult] =
+          () =>
+            missingBatchAggregator.runMany(oneOrMoreBatchIds.map(Traced(_))).flatMap {
+              batchesThatWeHave =>
+                val missing =
+                  oneOrMoreBatchIds.zip(batchesThatWeHave).collect { case (batchId, false) =>
+                    batchId
                   }
-              }
+                if (missing.nonEmpty) {
+                  FutureUnlessShutdown.pure(AvailabilityStore.MissingBatches(missing.toSet))
+                } else {
+                  lookupBatchCache.getAll(oneOrMoreBatchIds).map { retrievedBatches =>
+                    AvailabilityStore.AllBatches(batches.map(i => i -> retrievedBatches(i)))
+                  }
+                }
             }
-        }
-    PekkoFutureUnlessShutdown(name, future, orderingStage = Some(functionFullName))
+        PekkoFutureUnlessShutdown(name, future, orderingStage = Some(functionFullName))
+    }
   }
 
   override def gc(staleBatchIds: Seq[BatchId])(implicit
@@ -210,13 +301,16 @@ class DbAvailabilityStore(
     PekkoFutureUnlessShutdown(
       gcName,
       () =>
-        if (staleBatchIds.nonEmpty) {
-          storage.update_(
-            sqlu"""delete from ord_availability_batch
-                 where id in ($staleBatchIds#${",?" * (staleBatchIds.size - 1)})""",
-            functionFullName,
-          )
-        } else FutureUnlessShutdown.unit,
+        NonEmpty.from(staleBatchIds) match {
+          case Some(oneOrMoreBatchIds) =>
+            import DbStorage.Implicits.BuilderChain.*
+            storage.update_(
+              (sql"""delete from ord_availability_batch where """ ++ DbStorage
+                .toInClause("id", oneOrMoreBatchIds)).asUpdate,
+              functionFullName,
+            )
+          case None => FutureUnlessShutdown.unit
+        },
       orderingStage = Some(functionFullName),
     )
 

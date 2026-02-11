@@ -400,7 +400,7 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
         E"λ (e: Party) →  (( lookup_by_key @Mod:T e ))" ->
           T"Party → (( Update (Option (ContractId Mod:T)) ))",
         E"λ (n : Int64) (e: Party) → (( query_n_by_key @Mod:T n e ))" ->
-          T"Int64 → Party → (( Update (List (ContractId Mod:T)) ))",
+          T"Int64 → Party → (( Update (List ($tuple2TyCon (ContractId Mod:T) Mod:T)) ))",
         E"(( uget_time ))" ->
           T"(( Update Timestamp ))",
         E"Λ (τ : ⋆). λ (e: Update τ) →(( uembed_expr @τ e ))" ->

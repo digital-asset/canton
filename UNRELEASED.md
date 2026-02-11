@@ -154,13 +154,19 @@ The ability to recompute contract ids upon ACS import has been removed.
 
 ### Online party replication
 
-Added the file-based online party replication command `participant.parties.add_party_with_acs_async` to
+- Added the file-based online party replication command `participant.parties.add_party_with_acs_async` to
 be used along with `participant.parties.export_party_acs` and instead of the sequencer-channel-based
 `add_party_async` command.
-
-The online party replication status command now returns status in a very different, "vector-status" format
+- The online party replication status command now returns status in a very different, "vector-status" format
 rather than the old "oneof" style. This impacts the `participant.parties.get_add_party_status` command and
 `com.digitalasset.canton.admin.participant.v30.PartyManagementService.GetAddPartyStatus` gRPC response type.
+- The participant configuration to enable online party replication has been renamed to
+`alpha-online-party-replication-support` from `unsafe-online-party-replication` for consistency with other
+alpha features and to reflect that the default file-based mode is more secure not relying on sequencer
+channels.
+- The sequencer configuration to enable sequencer channels for online party replication has been renamed to
+`unsafe-sequencer-channel-support` from `unsafe-enable-online-party-replication` for consistency and to
+refer specifically to sequencer channels.
 
 ### Alpha Multi-Synchronizer Support
 

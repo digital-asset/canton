@@ -162,7 +162,7 @@ trait RequestJournalStore { this: NamedLogging =>
       // TODO(i21246): Note for unifying crashRecoveryPruningBoundInclusive and startingPoints: This minimum building is not needed anymore, as the request timestamp is also smaller than the sequencer timestamp.
       cleanSequencerIndexTs = cleanSynchronizerIndexO
         .flatMap(_.sequencerIndex)
-        .fold(CantonTimestamp.MinValue)(_.sequencerTimestamp.immediatePredecessor)
+        .fold(CantonTimestamp.MinValue)(_.immediatePredecessor)
     } yield requestReplayTs.min(cleanSequencerIndexTs)
 
 }

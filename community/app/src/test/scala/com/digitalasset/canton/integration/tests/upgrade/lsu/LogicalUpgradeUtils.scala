@@ -1,10 +1,9 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.integration.tests.upgrade
+package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import better.files.File
-import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnectionPoolDelays,
   SequencerConnections,
@@ -21,24 +20,19 @@ import com.digitalasset.canton.console.{
   MediatorReference,
   SequencerReference,
 }
-import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils.{
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.{
   SynchronizerNodes,
   UpgradeDataFiles,
 }
 import com.digitalasset.canton.logging.TracedLogger
-import com.digitalasset.canton.sequencing.client.{SendCallback, SendResult}
-import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver}
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.{NamespaceDelegation, OwnerToKeyMapping}
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.BinaryFileUtil
-import com.digitalasset.canton.{BaseTest, FutureHelpers, SequencerAlias}
+import com.digitalasset.canton.{FutureHelpers, SequencerAlias}
 import com.google.protobuf.ByteString
-import org.scalatest.Assertion
 import org.scalatest.OptionValues.*
-import org.scalatest.matchers.should.Matchers.*
 
 trait LogicalUpgradeUtils extends FutureHelpers {
   protected def testName: String
@@ -246,26 +240,6 @@ trait LogicalUpgradeUtils extends FutureHelpers {
     migratedNode.topology.transactions
       .import_topology_snapshotV2(files.authorizedStore, TopologyStoreId.Authorized)
   }
-
-  def waitForTargetTimeOnSequencer(
-      sequencer: LocalSequencerReference,
-      targetTime: CantonTimestamp,
-  ): Assertion =
-    BaseTest.eventually() {
-      // send time proofs until we see a successful deliver with
-      // a sequencing time greater than or equal to the target time.
-      val sendCallback = SendCallback.future
-      sequencer.underlying.value.sequencer.client
-        .send(Batch(Nil, BaseTest.testedProtocolVersion), callback = sendCallback)(
-          TraceContext.empty,
-          MetricsContext.Empty,
-        )
-        .futureValueUS shouldBe Right(())
-
-      sendCallback.future.futureValueUS should matchPattern {
-        case SendResult.Success(d: Deliver[?]) if d.timestamp >= targetTime =>
-      }
-    }
 
   private def initializeSequencer(
       migrated: SequencerReference,

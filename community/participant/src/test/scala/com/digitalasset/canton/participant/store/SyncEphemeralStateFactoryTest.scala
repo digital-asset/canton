@@ -4,12 +4,8 @@
 package com.digitalasset.canton.participant.store
 
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
-import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.ledger.participant.state.{
-  RepairIndex,
-  SequencerIndex,
-  SynchronizerIndex,
-}
+import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
+import com.digitalasset.canton.ledger.participant.state.{RepairIndex, SynchronizerIndex}
 import com.digitalasset.canton.participant.protocol.RequestJournal.RequestData
 import com.digitalasset.canton.participant.protocol.{
   MessageCleanReplayStartingPoint,
@@ -22,7 +18,11 @@ import com.digitalasset.canton.sequencing.protocol.SignedContent
 import com.digitalasset.canton.sequencing.{SequencedSerializedEvent, SequencerTestUtils}
 import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
 import com.digitalasset.canton.store.memory.InMemorySequencedEventStore
-import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
+import com.digitalasset.canton.topology.{
+  DefaultTestIdentities,
+  PhysicalSynchronizerId,
+  SynchronizerId,
+}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{
   BaseTest,
@@ -32,10 +32,9 @@ import com.digitalasset.canton.{
   RequestCounter,
   SequencerCounter,
 }
-import monocle.macros.syntax.lens.*
 import org.scalatest.wordspec.AsyncWordSpec
 
-class SyncEphemeralStateFactoryTest
+final class SyncEphemeralStateFactoryTest
     extends AsyncWordSpec
     with BaseTest
     with CloseableTest
@@ -64,7 +63,7 @@ class SyncEphemeralStateFactoryTest
         val ses = new InMemorySequencedEventStore(loggerFactory, timeouts)
 
         for {
-          startingPoints <- SyncEphemeralStateFactory.startingPoints(rjs, ses, None)
+          startingPoints <- SyncEphemeralStateFactory.startingPoints(rjs, ses, None, None)
         } yield {
           startingPoints shouldBe ProcessingStartingPoints.tryCreate(
             MessageCleanReplayStartingPoint.default,
@@ -88,7 +87,8 @@ class SyncEphemeralStateFactoryTest
           withCleanSc <- SyncEphemeralStateFactory.startingPoints(
             rjs,
             ses,
-            Some(SynchronizerIndex.of(SequencerIndex(ts))),
+            Some(SynchronizerIndex.forSequencedUpdate(ts)),
+            None,
           )
         } yield {
           val cleanReplay = MessageCleanReplayStartingPoint(rc, sc, ts.immediatePredecessor)
@@ -135,39 +135,43 @@ class SyncEphemeralStateFactoryTest
           sp1 <- SyncEphemeralStateFactory.startingPoints(
             rjs,
             ses,
-            Some(SynchronizerIndex.of(SequencerIndex(ts0))),
+            Some(SynchronizerIndex.forSequencedUpdate(ts0)),
+            None,
           )
           sp2 <- SyncEphemeralStateFactory.startingPoints(
             rjs,
             ses,
-            Some(SynchronizerIndex.of(SequencerIndex(ts1))),
+            Some(SynchronizerIndex.forSequencedUpdate(ts1)),
+            None,
           )
           synchronizerIndex = Some(
             SynchronizerIndex(
               repairIndex = None,
-              sequencerIndex = Some(SequencerIndex(ts3)),
+              sequencerIndex = Some(ts3),
               recordTime = ts3,
             )
           )
-          sp3 <- SyncEphemeralStateFactory.startingPoints(rjs, ses, synchronizerIndex)
+          sp3 <- SyncEphemeralStateFactory.startingPoints(rjs, ses, synchronizerIndex, None)
           sp3WithRecordTimeIncrease <- SyncEphemeralStateFactory.startingPoints(
             rjs,
             ses,
             synchronizerIndex.map(_.copy(recordTime = ts3plus)),
+            None,
           )
           _ <- rjs.insert(RequestData.initial(rc + 4L, ts6))
           _ <- rjs.insert(RequestData.initial(rc + 3L, ts5))
-          sp3a <- SyncEphemeralStateFactory.startingPoints(rjs, ses, synchronizerIndex)
+          sp3a <- SyncEphemeralStateFactory.startingPoints(rjs, ses, synchronizerIndex, None)
           sp3b <- SyncEphemeralStateFactory.startingPoints(
             rjs,
             ses,
             Some(
               SynchronizerIndex(
                 repairIndex = None,
-                sequencerIndex = Some(SequencerIndex(ts4)),
+                sequencerIndex = Some(ts4),
                 recordTime = ts4,
               )
             ),
+            None,
           )
         } yield {
           // The clean sequencer index is ahead of the clean request index
@@ -278,12 +282,14 @@ class SyncEphemeralStateFactoryTest
             sp0 <- SyncEphemeralStateFactory.startingPoints(
               rjs,
               ses,
-              Some(SynchronizerIndex.of(SequencerIndex(ts0))),
+              Some(SynchronizerIndex.forSequencedUpdate(ts0)),
+              None,
             )
             sp2 <- SyncEphemeralStateFactory.startingPoints(
               rjs,
               ses,
-              Some(SynchronizerIndex.of(SequencerIndex(ts1))),
+              Some(SynchronizerIndex.forSequencedUpdate(ts1)),
+              None,
             )
           } yield {
             // start with request 0 because request 1 hasn't yet been marked as clean and request 0 commits after request 1 starts
@@ -341,10 +347,11 @@ class SyncEphemeralStateFactoryTest
               Some(
                 SynchronizerIndex(
                   repairIndex = None,
-                  sequencerIndex = Some(SequencerIndex(ts0)),
+                  sequencerIndex = Some(ts0),
                   recordTime = ts0,
                 )
               ),
+              None,
             )
             repairAndSequencedEvent <- SyncEphemeralStateFactory.startingPoints(
               rjs,
@@ -354,10 +361,11 @@ class SyncEphemeralStateFactoryTest
                   repairIndex = Some(
                     RepairIndex(timestamp = ts1, counter = repairCounter)
                   ),
-                  sequencerIndex = Some(SequencerIndex(ts1)),
+                  sequencerIndex = Some(ts1),
                   recordTime = ts1,
                 )
               ),
+              None,
             )
             loneRepair <- SyncEphemeralStateFactory.startingPoints(
               rjs,
@@ -371,6 +379,7 @@ class SyncEphemeralStateFactoryTest
                   recordTime = ts1,
                 )
               ),
+              None,
             )
             repairFollowedBySequencedEvent <- SyncEphemeralStateFactory.startingPoints(
               rjs,
@@ -383,10 +392,11 @@ class SyncEphemeralStateFactoryTest
                       counter = repairCounter + 1L,
                     )
                   ),
-                  sequencerIndex = Some(SequencerIndex(ts2)),
+                  sequencerIndex = Some(ts2),
                   recordTime = ts2,
                 )
               ),
+              None,
             )
           } yield {
             noRepair.cleanReplay shouldBe MessageCleanReplayStartingPoint(
@@ -464,6 +474,7 @@ class SyncEphemeralStateFactoryTest
                   recordTime = repairTs,
                 )
               ),
+              None,
             )
             synchronizerIndex = Some(
               SynchronizerIndex(
@@ -477,9 +488,19 @@ class SyncEphemeralStateFactoryTest
                 recordTime = repairTs,
               )
             )
-            twoRepairs <- SyncEphemeralStateFactory.startingPoints(rjs, ses, synchronizerIndex)
+            twoRepairs <- SyncEphemeralStateFactory.startingPoints(
+              rjs,
+              ses,
+              synchronizerIndex,
+              None,
+            )
             // Repair has crashed before advancing the clean request index
-            crashedRepair <- SyncEphemeralStateFactory.startingPoints(rjs, ses, synchronizerIndex)
+            crashedRepair <- SyncEphemeralStateFactory.startingPoints(
+              rjs,
+              ses,
+              synchronizerIndex,
+              None,
+            )
           } yield {
             val startOne = MessageProcessingStartingPoint(
               RequestCounter.Genesis,
@@ -515,37 +536,73 @@ class SyncEphemeralStateFactoryTest
       "return the right result across migrations" in {
         val rjs = new InMemoryRequestJournalStore(loggerFactory)
         val ses = new InMemorySequencedEventStore(loggerFactory, timeouts)
-        val ts0 = CantonTimestamp.ofEpochSecond(42)
+
+        val rc = RequestCounter(0)
+        val sc = SequencerCounter(0)
+
+        val beforeLsu = CantonTimestamp.ofEpochSecond(20)
+        val upgradeTime = CantonTimestamp.ofEpochSecond(30)
+        val afterLsu = CantonTimestamp.ofEpochSecond(40)
+
+        val synchronizerPredecessor = SynchronizerPredecessor(
+          DefaultTestIdentities.physicalSynchronizerId,
+          upgradeTime,
+          isLateUpgrade = false,
+        )
 
         // Sequenced event store is empty across LSU
-
         for {
+          _ <- rjs.insert(
+            RequestData.clean(rc, afterLsu, afterLsu.plusSeconds(2))
+          )
+          _ <- ses.store(Seq(dummyEvent(synchronizerId)(afterLsu)))
+          _ <- ses.store(Seq(dummyEvent(synchronizerId)(afterLsu.plusSeconds(1))))
+
           withSequencerIndex <- SyncEphemeralStateFactory.startingPoints(
             rjs,
             ses,
-            synchronizerIndexO = Some(SynchronizerIndex.of(SequencerIndex(ts0))),
+            synchronizerIndexO = Some(SynchronizerIndex.forSequencedUpdate(beforeLsu)),
+            Some(synchronizerPredecessor),
           )
 
-          // With a sequencer index, defaults should be used except of the timestamps (coming from the index)
           _ = withSequencerIndex shouldBe ProcessingStartingPoints.tryCreate(
-            cleanReplay =
-              MessageCleanReplayStartingPoint.default.focus(_.prenextTimestamp).replace(ts0),
-            processing = MessageProcessingStartingPoint.default
-              .focus(_.currentRecordTime)
-              .replace(ts0)
-              .focus(_.lastSequencerTimestamp)
-              .replace(ts0),
+            cleanReplay = MessageCleanReplayStartingPoint.default,
+            processing = MessageProcessingStartingPoint.default,
           )
 
-          // Without a sequencer index, defaults should be used
           withoutSequencerIndex <- SyncEphemeralStateFactory.startingPoints(
             rjs,
             ses,
-            synchronizerIndexO = None,
+            synchronizerIndexO = Some(SynchronizerIndex.forFloatingUpdate(beforeLsu)),
+            Some(synchronizerPredecessor),
           )
 
           _ = withoutSequencerIndex shouldBe ProcessingStartingPoints.default
-        } yield succeed
+
+          nonGenesisStartingPoint <- SyncEphemeralStateFactory.startingPoints(
+            rjs,
+            ses,
+            synchronizerIndexO = Some(SynchronizerIndex.forSequencedUpdate(afterLsu)),
+            Some(synchronizerPredecessor),
+          )
+        } yield {
+
+          // Commit time is after `afterLsu` so there is clean replay...
+          nonGenesisStartingPoint.cleanReplay shouldBe MessageCleanReplayStartingPoint(
+            rc,
+            sc,
+            afterLsu.immediatePredecessor,
+          )
+
+          // ... processing starts after
+          nonGenesisStartingPoint.processing shouldBe MessageProcessingStartingPoint(
+            rc + 1,
+            sc + 1L,
+            afterLsu,
+            afterLsu,
+            RepairCounter.Genesis,
+          )
+        }
       }
     }
   }

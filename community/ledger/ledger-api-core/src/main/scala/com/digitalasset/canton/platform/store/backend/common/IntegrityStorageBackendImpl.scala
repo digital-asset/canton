@@ -65,7 +65,7 @@ private[backend] object IntegrityStorageBackendImpl extends IntegrityStorageBack
        AND event_sequential_id <= lapi_parameters.ledger_end_sequential_id
        GROUP BY event_sequential_id
        HAVING count(*) > 1
-       FETCH NEXT #$maxReportedDuplicates ROWS ONLY
+       ${QueryStrategy.limitClause(Some(maxReportedDuplicates))}
        """
 
   private val allEventIds: String =
@@ -85,7 +85,7 @@ private[backend] object IntegrityStorageBackendImpl extends IntegrityStorageBack
        AND event_offset <= lapi_parameters.ledger_end
        GROUP BY event_offset, node_id
        HAVING count(*) > 1
-       FETCH NEXT #$maxReportedDuplicates ROWS ONLY
+       ${QueryStrategy.limitClause(Some(maxReportedDuplicates))}
        """
 
   final case class EventSequentialIdsRow(min: Long, max: Long, count: Long)
@@ -170,7 +170,7 @@ private[backend] object IntegrityStorageBackendImpl extends IntegrityStorageBack
           FROM lapi_update_meta as meta1, lapi_update_meta as meta2
           WHERE meta1.update_id = meta2.update_id and
                 meta1.event_offset != meta2.event_offset
-          FETCH NEXT 1 ROWS ONLY
+          ${QueryStrategy.limitClause(Some(1))}
       """
       .asSingleOpt(updateId("uId") ~ offset("offset1") ~ offset("offset2"))(connection)
       .foreach { case uId ~ offset1 ~ offset2 =>
@@ -185,7 +185,7 @@ private[backend] object IntegrityStorageBackendImpl extends IntegrityStorageBack
           FROM lapi_command_completions
           GROUP BY completion_offset
           HAVING count(*) > 1
-          FETCH NEXT 1 ROWS ONLY
+          ${QueryStrategy.limitClause(Some(1))}
       """
       .asSingleOpt(offset("completion_offset") ~ int("offset_count"))(connection)
       .foreach { case offset ~ count =>
@@ -287,6 +287,62 @@ private[backend] object IntegrityStorageBackendImpl extends IntegrityStorageBack
               .take(10)}"
         )
       )
+
+    val filterTableName = "lapi_filter_achs_stakeholder"
+
+    // Verify no duplicate filter table entry
+    val filterTableEntries: Vector[(Long, Int)] = SQL"""
+        select
+          event_sequential_id, count(*) as count
+        from #$filterTableName
+        group by event_sequential_id, template_id, party_id
+        having count(*) > 1
+        ${QueryStrategy.limitClause(Some(maxReportedDuplicates))}
+    """
+      .asVectorOf(long("event_sequential_id") ~ int("count") map { case eventSeqId ~ count =>
+        (eventSeqId, count)
+      })(connection)
+    // duplicate filter table entries
+    filterTableEntries
+      .foreach { case (eventSeqId, count) =>
+        throw new RuntimeException(
+          s"duplicate entries found ($count in total) in filter table $filterTableName at event sequential id $eventSeqId"
+        )
+      }
+
+    // Verify all fields in lapi_filter_achs_stakeholder are also in lapi_filter_activate_stakeholder
+    val invalidEntries = SQL"""
+        select event_sequential_id
+        from lapi_filter_achs_stakeholder achs
+        where not exists (
+          select 1
+          from lapi_filter_activate_stakeholder activate
+          where achs.event_sequential_id = activate.event_sequential_id
+            and achs.template_id = activate.template_id
+            and achs.party_id = activate.party_id
+        )
+        ${QueryStrategy.limitClause(Some(maxReportedDuplicates))}
+      """.asVectorOf(long("event_sequential_id"))(connection)
+
+    if (invalidEntries.nonEmpty) {
+      throw new RuntimeException(
+        "lapi_filter_achs_stakeholder contains entries not present in lapi_filter_activate_stakeholder at event " +
+          s"sequential ids (first $maxReportedDuplicates shown): ${invalidEntries.mkString(", ")}"
+      )
+    }
+
+    // verify lapi_achs_state contains at most one row
+    val lapiAchsStateRowCount = SQL"""
+          select count(*) as count
+          from lapi_achs_state
+        """
+      .asSingle(int("count"))(connection)
+
+    if (lapiAchsStateRowCount > 1) {
+      throw new RuntimeException(
+        s"lapi_achs_state table contains more than one row: $lapiAchsStateRowCount rows found"
+      )
+    }
 
     // Verify no duplicate completion entry
     val internalContractIds = SQL"""

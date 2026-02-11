@@ -764,12 +764,12 @@ final class SyncStateInspection(
             _.flatMap(_.sequencerIndex)
               .traverse(sequencerIndex =>
                 state.sequencedEventStore
-                  .find(ByTimestamp(sequencerIndex.sequencerTimestamp))
+                  .find(ByTimestamp(sequencerIndex))
                   .value
                   .map(
                     _.getOrElse(
                       ErrorUtil.invalidState(
-                        s"SequencerIndex with timestamp ${sequencerIndex.sequencerTimestamp} is not found in sequenced event store"
+                        s"SequencerIndex with timestamp $sequencerIndex is not found in sequenced event store"
                       )
                     ).counter
                   )
@@ -1120,12 +1120,12 @@ final class SyncStateInspection(
           _.flatMap(_.sequencerIndex)
             .traverse(sequencerIndex =>
               persistentState.sequencedEventStore
-                .find(ByTimestamp(sequencerIndex.sequencerTimestamp))
+                .find(ByTimestamp(sequencerIndex))
                 .value
                 .map(
                   _.getOrElse(
                     ErrorUtil.invalidState(
-                      s"SequencerIndex with timestamp ${sequencerIndex.sequencerTimestamp} is not found in sequenced event store"
+                      s"SequencerIndex with timestamp $sequencerIndex is not found in sequenced event store"
                     )
                   ).counter
                 )

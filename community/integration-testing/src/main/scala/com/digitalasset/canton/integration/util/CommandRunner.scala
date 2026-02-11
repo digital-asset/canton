@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.util
 
-import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.console.BufferedProcessLogger
 import org.scalatest.matchers.should.Matchers.*
 
@@ -34,37 +33,4 @@ class CommandRunner(command: String) {
     }
   }
 
-}
-
-/** Utility to run damlc */
-class DamlBuilder()
-    extends CommandRunner(
-      command = (DamlBuilder.localDamlArtifactCache / "damlc" / "damlc").pathAsString
-    ) {
-  def build(cwd: File): Unit = {
-    DamlBuilder.checkArtifactCacheExists()
-    run("build ", Some(cwd), extraEnv = DamlBuilder.damlLibsEnvSpecification)
-  }
-}
-
-object DamlBuilder {
-  private[DamlBuilder] lazy val localDamlArtifactCache =
-    better.files.File(
-      System.getProperty("user.home")
-    ) / ".cache" / "daml-build" / BuildInfo.damlLibrariesVersion
-  private[DamlBuilder] lazy val damlLibsEnvSpecification = Seq(
-    "DAML_SDK" -> localDamlArtifactCache.pathAsString
-  )
-  private[DamlBuilder] def checkArtifactCacheExists(): Unit =
-    if (localDamlArtifactCache.notExists())
-      fail(
-        s"""
-          |About to run the Daml compiler, but the expected Daml artifact cache directory does not exist:
-          |
-          |   $localDamlArtifactCache
-          |
-          |This usually happens when Daml was bumped to a new version, but the new Docker image has not yet been generated.
-          |To fix it, please generate a new Docker image by running the `manual_update_canton_build_docker_image` job on CI.
-          |""".stripMargin
-      )
 }

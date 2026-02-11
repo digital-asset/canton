@@ -9,13 +9,10 @@ import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.api.ParticipantId
-import com.digitalasset.canton.ledger.participant.state.{
-  RepairIndex,
-  SequencerIndex,
-  SynchronizerIndex,
-}
+import com.digitalasset.canton.ledger.participant.state.{RepairIndex, SynchronizerIndex}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.backend.Conversions.offset
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.ACHSState
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.{Conversions, ParameterStorageBackend}
 import com.digitalasset.canton.platform.store.interning.StringInterning
@@ -74,7 +71,7 @@ private[backend] class ParameterStorageBackendImpl(
             synchronizerId
           ),
           "sequencerTimestampMicros" -> synchronizerIndex.sequencerIndex.map(
-            _.sequencerTimestamp.toMicros
+            _.toMicros
           ),
           "repairTimestampMicros" -> synchronizerIndex.repairIndex.map(_.timestamp.toMicros),
           "repairCounter" -> synchronizerIndex.repairIndex.map(_.counter.unwrap),
@@ -282,7 +279,7 @@ private[backend] class ParameterStorageBackendImpl(
               val repairIndex = (repairTimestampO, repairCounterO) match {
                 case (Some(repairTimestamp), Some(repairCounter)) =>
                   List(
-                    SynchronizerIndex.of(
+                    SynchronizerIndex.forRepairUpdate(
                       RepairIndex(
                         timestamp = CantonTimestamp.ofEpochMicro(repairTimestamp),
                         counter = RepairCounter(repairCounter),
@@ -300,10 +297,9 @@ private[backend] class ParameterStorageBackendImpl(
               }
               val sequencerIndex = sequencerTimestampO
                 .map(CantonTimestamp.ofEpochMicro)
-                .map(SequencerIndex.apply)
-                .map(SynchronizerIndex.of)
+                .map(SynchronizerIndex.forSequencedUpdate)
                 .toList
-              val recordTimeSynchronizerIndex = SynchronizerIndex.of(
+              val recordTimeSynchronizerIndex = SynchronizerIndex.forFloatingUpdate(
                 CantonTimestamp.ofEpochMicro(recordTime)
               )
               (recordTimeSynchronizerIndex :: repairIndex ::: sequencerIndex)
@@ -336,6 +332,55 @@ private[backend] class ParameterStorageBackendImpl(
         offset("post_processing_end").?
       )(connection)
       .flatten
+
+  def fetchACHSState(connection: Connection): Option[ACHSState] =
+    SQL"select valid_at, last_removed, last_populated from lapi_achs_state"
+      .asSingleOpt(
+        for {
+          validAt <- long("valid_at")
+          lastRemoved <- long("last_removed")
+          lastPopulated <- long("last_populated")
+        } yield ACHSState(
+          validAt = validAt,
+          lastRemoved = lastRemoved,
+          lastPopulated = lastPopulated,
+        )
+      )(connection)
+
+  def insertACHSState(achsState: ACHSState)(
+      connection: Connection
+  ): Unit =
+    discard(
+      SQL"insert into lapi_achs_state (valid_at, last_removed, last_populated) values (${achsState.validAt}, ${achsState.lastRemoved}, ${achsState.lastPopulated})"
+        .execute()(connection)
+    )
+
+  def updateACHSValidAt(validAt: Long)(
+      connection: Connection
+  ): Unit = {
+    val updatedRows =
+      SQL"update lapi_achs_state set valid_at = $validAt".executeUpdate()(connection)
+
+    if (updatedRows == 0) {
+      throw new IllegalStateException("Failed to update valid_at in lapi_achs_state table.")
+    }
+  }
+
+  def updateACHSLastPointers(lastRemoved: Long, lastPopulated: Long)(
+      connection: Connection
+  ): Unit = {
+    val updatedRows =
+      SQL"update lapi_achs_state set last_removed = $lastRemoved, last_populated = $lastPopulated"
+        .executeUpdate()(connection)
+
+    if (updatedRows == 0) {
+      throw new IllegalStateException("Failed to update lapi_achs_state table.")
+    }
+  }
+  def clearACHSState(connection: Connection): Unit =
+    discard(
+      SQL"delete from lapi_achs_state".execute()(connection)
+    )
 
   private def batchSql(
       sqlWithNamedParams: String,

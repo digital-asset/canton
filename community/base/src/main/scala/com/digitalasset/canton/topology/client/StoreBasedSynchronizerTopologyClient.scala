@@ -28,6 +28,7 @@ import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.Ge
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
+import com.google.common.annotations.VisibleForTesting
 
 import java.time.Duration as JDuration
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
@@ -343,6 +344,10 @@ class StoreBasedSynchronizerTopologyClient(
   override def latestTopologyChangeTimestamp: CantonTimestamp =
     head.get().lastChangeTimestamp.value.immediateSuccessor
 
+  @VisibleForTesting
+  private[client] def latestSequencedTimestamp: CantonTimestamp =
+    head.get().sequencedTimestamp.value
+
   /** return both values above consistently */
   def knownUntilAndLatestChangeTimestamps: (CantonTimestamp, CantonTimestamp) = {
     val tmp = head.get()
@@ -455,16 +460,13 @@ class StoreBasedSynchronizerTopologyClient(
         logger.debug(s"Taking into account sequencer snapshot at $effectiveTime")
         (SequencedTime(effectiveTime.value), effectiveTime)
       }
-      // `sequencerSnapshotTimes` contains `lastTs` and in principle its sequencing time should become
-      //  the head's sequencing time, which may not happen in the following logic that only keeps
-      //  the head update with the maximum effective time.
-      //  In practice, this is not a problem, because currently the sequencing time head is not
-      //  relied upon during onboarding.
+      // Exclude the sequencer snapshot times from the selection by max effective time,
+      //  so that the head sequencer time is correctly set to a sequencer snapshot's `lastTs`.
       val initialHeadTimestamps =
-        (adjustedStoreMaxTimestamp.toList ++ upgradeTimes.toList ++ sequencerSnapshotTimes.toList)
-          .maxByOption { case (_, effectiveTime: EffectiveTime) =>
+        (adjustedStoreMaxTimestamp.toList ++ upgradeTimes.toList).maxByOption {
+          case (_, effectiveTime: EffectiveTime) =>
             effectiveTime
-          }
+        }.toList ++ sequencerSnapshotTimes.toList
       storeLatestTopologyChangeTimestamp.foreach { case (sequencedTime, effectiveTime) =>
         logger.debug(
           s"Taking into account latest topology change at $sequencedTime, $effectiveTime"

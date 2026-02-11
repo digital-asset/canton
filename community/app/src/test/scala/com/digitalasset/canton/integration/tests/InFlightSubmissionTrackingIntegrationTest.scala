@@ -234,8 +234,8 @@ trait InFlightSubmissionTrackingIntegrationTest
         observedSomeRequest.future.futureValue
         eventually() {
           val recordedLogEntries = loggerFactory.fetchRecordedLogEntries
-          recordedLogEntries.exists(
-            _.warningMessage.matches(maxRequestSizeExceededLog(daId))
+          forAtLeast(1, recordedLogEntries)(
+            _.warningMessage should include regex maxRequestSizeExceededLog(daId)
           )
         }
 

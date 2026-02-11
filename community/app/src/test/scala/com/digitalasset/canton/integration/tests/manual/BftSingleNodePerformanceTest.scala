@@ -162,6 +162,8 @@ class BftSingleNodePerformanceTest
     setBalanceRequestSubmissionWindowSize = config.PositiveFiniteDuration.ofMinutes(5L),
     enforceRateLimiting = true,
     baseEventCost = NonNegativeLong.tryCreate(1),
+    // It's a performance test so let's charge as much as possible
+    freeConfirmationResponses = false,
   )
 
   def blockEventCount(sequencer: LocalSequencerReference): Long =

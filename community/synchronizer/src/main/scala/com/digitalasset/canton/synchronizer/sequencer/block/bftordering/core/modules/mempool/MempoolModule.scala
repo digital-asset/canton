@@ -69,14 +69,14 @@ class MempoolModule[E <: Env[E]](
             metrics.ingress.labels.outcome.values.P2PNotReady
           } else if (mempoolState.receivedOrderRequests.sizeIs == config.maxQueueSize) {
             val rejectionMessage =
-              s"mempool received client request but the queue is full (${config.maxQueueSize}), rejecting"
+              s"Mempool received client request but the queue is full (${config.maxQueueSize}), rejecting"
             logger.info(rejectionMessage)
             from.foreach(_.asyncSend(SequencerNode.RequestRejected(rejectionMessage)))
             span.setStatus(StatusCode.ERROR, "queue_full"); span.end()
             metrics.ingress.labels.outcome.values.QueueFull
           } else if (config.checkTags && !orderingRequest.isTagValid) {
             val rejectionMessage =
-              s"mempool received a client request with an invalid tag '${orderingRequest.tag}', " +
+              s"Mempool received a client request with an invalid tag '${orderingRequest.tag}', " +
                 s"valid tags are: (${OrderingRequest.ValidTags.mkString(", ")}), rejecting"
             logger.warn(rejectionMessage)
             from.foreach(_.asyncSend(SequencerNode.RequestRejected(rejectionMessage)))
@@ -86,13 +86,16 @@ class MempoolModule[E <: Env[E]](
             val payloadSize = orderingRequest.payload.size()
             if (payloadSize > config.maxRequestPayloadBytes) {
               val rejectionMessage =
-                s"mempool received client request of size $payloadSize " +
+                s"Mempool received client request of size $payloadSize " +
                   s"but it exceeds the maximum (${config.maxRequestPayloadBytes}), rejecting"
               logger.warn(rejectionMessage)
               from.foreach(_.asyncSend(SequencerNode.RequestRejected(rejectionMessage)))
               span.setStatus(StatusCode.ERROR, "max_request_size_exceeded"); span.end()
               metrics.ingress.labels.outcome.values.RequestTooBig
             } else {
+              logger.debug(
+                s"Mempool accepting client request with tag '${orderingRequest.tag}' of size $payloadSize"
+              )
               mempoolState.receivedOrderRequests.enqueue((r, span))
               from.foreach(_.asyncSend(SequencerNode.RequestAccepted))
               if (mempoolState.receivedOrderRequests.sizeIs >= config.minRequestsInBatch.toInt) {
@@ -110,7 +113,7 @@ class MempoolModule[E <: Env[E]](
       // From local availability
       case Mempool.CreateLocalBatches(atMost) =>
         logger.debug(
-          s"$messageType mempool received batch request from local availability " +
+          s"$messageType: mempool received batch request from local availability " +
             s"(maxRequestsInBatch: ${config.maxRequestsInBatch})"
         )
 

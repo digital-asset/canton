@@ -66,6 +66,7 @@ sealed trait TickRequestIntegrationTest
     setBalanceRequestSubmissionWindowSize = setBalanceRequestSubmissionWindowSize,
     enforceRateLimiting = true,
     baseEventCost = NonNegativeLong.tryCreate(500L),
+    freeConfirmationResponses = true,
   )
 
   private def advanceTimeBeyondTimeouts(simClock: SimClock): Unit = {

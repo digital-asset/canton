@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data
 
-import com.digitalasset.canton.config.{BatchAggregatorConfig, ProcessingTimeout}
+import com.digitalasset.canton.config.{BatchAggregatorConfig, CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, MemoryStorage, Storage}
+import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.PekkoEnv
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.db.DbAvailabilityStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.memory.InMemoryAvailabilityStore
@@ -64,6 +65,8 @@ object AvailabilityStore {
 
   def apply(
       batchAggregatorConfig: BatchAggregatorConfig,
+      cachingConfigs: CachingConfigs,
+      bftOrderingMetrics: BftOrderingMetrics,
       storage: Storage,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
@@ -72,7 +75,14 @@ object AvailabilityStore {
       case _: MemoryStorage =>
         new InMemoryAvailabilityStore()
       case dbStorage: DbStorage =>
-        new DbAvailabilityStore(batchAggregatorConfig, dbStorage, timeouts, loggerFactory)(
+        new DbAvailabilityStore(
+          batchAggregatorConfig,
+          cachingConfigs,
+          bftOrderingMetrics,
+          dbStorage,
+          timeouts,
+          loggerFactory,
+        )(
           executionContext
         )
     }

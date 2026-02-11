@@ -204,7 +204,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           if (isRepairTransaction)
             state.Update.RepairTransactionAccepted(
               transactionMeta = transactionMeta,
-              transaction = transaction,
+              transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
               updateId = updateId,
               synchronizerId = someSynchronizerId1,
               recordTime = someRecordTime,
@@ -215,7 +215,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             state.Update.SequencedTransactionAccepted(
               completionInfoO = Some(completionInfo),
               transactionMeta = transactionMeta,
-              transaction = transaction,
+              transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
               updateId = updateId,
               synchronizerId = someSynchronizerId1,
               recordTime = someRecordTime,
@@ -412,7 +412,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         state.Update.SequencedTransactionAccepted(
           completionInfoO = Some(completionInfo),
           transactionMeta = transactionMeta,
-          transaction = transaction,
+          transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
           updateId = updateId,
           synchronizerId = someSynchronizerId1,
           recordTime = someRecordTime,
@@ -555,7 +555,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val update = state.Update.SequencedTransactionAccepted(
         completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
-        transaction = transaction,
+        transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
         updateId = updateId,
         synchronizerId = someSynchronizerId1,
         recordTime = CantonTimestamp.ofEpochMicro(120),
@@ -691,7 +691,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val update = state.Update.SequencedTransactionAccepted(
         completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
-        transaction = transaction,
+        transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
         updateId = updateId,
         synchronizerId = someSynchronizerId1,
         recordTime = CantonTimestamp.ofEpochMicro(120),
@@ -817,7 +817,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val update = state.Update.SequencedTransactionAccepted(
         completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
-        transaction = transaction,
+        transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
         updateId = updateId,
         synchronizerId = someSynchronizerId1,
         recordTime = someRecordTime,
@@ -952,7 +952,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val update = state.Update.SequencedTransactionAccepted(
         completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
-        transaction = transaction,
+        transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
         updateId = updateId,
         synchronizerId = someSynchronizerId1,
         recordTime = someRecordTime,
@@ -1180,7 +1180,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val update = state.Update.SequencedTransactionAccepted(
         completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
-        transaction = transaction,
+        transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
         updateId = updateId,
         synchronizerId = someSynchronizerId1,
         recordTime = someRecordTime,
@@ -1424,7 +1424,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val update = state.Update.SequencedTransactionAccepted(
         completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
-        transaction = transaction,
+        transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
         updateId = updateId,
         synchronizerId = someSynchronizerId1,
         recordTime = someRecordTime,
@@ -1663,7 +1663,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val update = state.Update.SequencedTransactionAccepted(
         completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
-        transaction = transaction,
+        transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
         updateId = updateId,
         synchronizerId = someSynchronizerId1,
         recordTime = someRecordTime,
@@ -1738,7 +1738,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val update = state.Update.SequencedTransactionAccepted(
         completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
-        transaction = transaction,
+        transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
         updateId = updateId,
         synchronizerId = someSynchronizerId1,
         recordTime = someRecordTime,
@@ -1874,7 +1874,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val update = state.Update.SequencedTransactionAccepted(
         completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
-        transaction = transaction,
+        transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
         updateId = updateId,
         synchronizerId = someSynchronizerId1,
         recordTime = someRecordTime,
@@ -2054,7 +2054,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val update = state.Update.SequencedTransactionAccepted(
         completionInfoO = Some(completionInfo),
         transactionMeta = transactionMeta,
-        transaction = transaction,
+        transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
         updateId = updateId,
         synchronizerId = someSynchronizerId1,
         recordTime = someRecordTime,
@@ -2115,7 +2115,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val update = state.Update.SequencedTransactionAccepted(
         completionInfoO = None,
         transactionMeta = transactionMeta,
-        transaction = transaction,
+        transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
         updateId = updateId,
         synchronizerId = someSynchronizerId1,
         recordTime = someRecordTime,
@@ -2265,7 +2265,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           val update = state.Update.SequencedTransactionAccepted(
             completionInfoO = Some(completionInfo),
             transactionMeta = transactionMeta,
-            transaction = transaction,
+            transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
             updateId = updateId,
             synchronizerId = someSynchronizerId1,
             recordTime = someRecordTime,

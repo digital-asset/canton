@@ -86,20 +86,25 @@ class JsonRequestLoggingTest
               "\nContentType: Some(application/json)\nContentLength: Some(157)\nParameters: []" +
                 s"\nBody: {\"user\":{\"id\":\"$randomUser\",\"primaryParty\":\"\",\"isDeactivated\":false,\"metadata\":null,\"identityProviderId\":\"\"},\"rights\":[]}"
             )
-          val expectedLogsRegex = Seq(
+          val expectedLogsOrderRegexJson = Seq(
             "Request POST /v2/users by http.* auth claims",
             s"Request POST /v2/users by http.* received a message $content",
+            "Request POST /v2/users by http.* 200 Ok",
+          )
+
+          val expectedLogsOrderRegexGrpc = Seq(
             "Request .*CreateUser by in-process-grpc.* auth claims",
             "Request .*CreateUser by in-process-grpc.* received a message",
             "Request .*CreateUser by in-process-grpc.* sending response",
             "Request .*CreateUser by in-process-grpc.* succeeded\\(OK\\)",
             "Request .*CreateUser by in-process-grpc.* completed",
-            "Request POST /v2/users by http.* 200 Ok",
           )
 
           // Assert all expected logs are logged in order
-          val (_, relevantLogs) = expectedLogsRegex.foldLeft(logSeq -> Seq.empty[LogEntry]) {
-            case ((remainingSeq, relevantLogsAcc), nextExpectedLogRegex) =>
+          def assertLogsInOrder(expectedLogsRegex: Seq[String]): Seq[LogEntry] = {
+            val (_, relevantLogs) = expectedLogsRegex.foldLeft(
+              logSeq -> Seq.empty[LogEntry]
+            ) { case ((remainingSeq, relevantLogsAcc), nextExpectedLogRegex) =>
               val remainingWithFirstEntryMatchingRegex =
                 remainingSeq.dropWhile(!_.message.matches(s".*$nextExpectedLogRegex.*"))
               val logMatchingRegex = remainingWithFirstEntryMatchingRegex.headOption.toList
@@ -113,10 +118,18 @@ class JsonRequestLoggingTest
               val newRelevantLogs = relevantLogsAcc ++ logMatchingRegex
 
               newRemainingSeq -> newRelevantLogs
+            }
+            relevantLogs
           }
 
+          val relevantJsonLogs = assertLogsInOrder(expectedLogsOrderRegexJson)
+          val relevantGrpcLogs = assertLogsInOrder(expectedLogsOrderRegexGrpc)
+
           // all logs should have the same "trace-id"
-          relevantLogs.map(_.mdc.get("trace-id").value).toSet.size should be(1)
+          (relevantJsonLogs ++ relevantGrpcLogs)
+            .map(_.mdc.get("trace-id").value)
+            .toSet
+            .size should be(1)
         },
       )
     }

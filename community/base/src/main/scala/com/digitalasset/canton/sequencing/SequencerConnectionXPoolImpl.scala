@@ -452,8 +452,7 @@ class SequencerConnectionXPoolImpl private[sequencing] (
       threshold: PositiveInt
   )(implicit traceContext: TraceContext): Unit =
     if (!isClosing && !isThresholdStillReachable(threshold)) {
-      val message =
-        s"Trust threshold of ${config.trustThreshold} is no longer reachable"
+      val message = s"Trust threshold of ${config.trustThreshold} is no longer reachable"
       logger.info(message)
       if (
         initializedP

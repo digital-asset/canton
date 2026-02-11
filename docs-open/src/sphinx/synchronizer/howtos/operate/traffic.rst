@@ -54,6 +54,7 @@ Assuming ``sequencer1`` being the only synchronizer owner, run the following com
         maxBaseTrafficAccumulationDuration = PositiveFiniteDuration.ofSeconds(10L),
         setBalanceRequestSubmissionWindowSize = PositiveFiniteDuration.ofMinutes(5L),
         baseEventCost = NonNegativeNumeric.tryCreate(500L),
+        freeConfirmationResponses = false,
       )
       sequencer1.topology.synchronizer_parameters.propose_update(
         synchronizerId = sequencer1.synchronizer_id,

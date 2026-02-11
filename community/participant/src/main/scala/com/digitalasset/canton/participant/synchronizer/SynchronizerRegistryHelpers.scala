@@ -226,7 +226,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
             synchronizerLoggerFactory,
             ProtocolVersionCompatibility.supportedProtocols(participantNodeParameters),
           ),
-          participantNodeParameters.unsafeOnlinePartyReplication
+          participantNodeParameters.alphaOnlinePartyReplicationSupport
             .map(_ =>
               new SequencerChannelClientFactory(
                 psid,

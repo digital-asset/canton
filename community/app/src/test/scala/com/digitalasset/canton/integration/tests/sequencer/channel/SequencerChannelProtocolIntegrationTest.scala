@@ -55,7 +55,10 @@ sealed trait SequencerChannelProtocolIntegrationTest
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S1M1_Manual
-      .addConfigTransforms(ConfigTransforms.unsafeEnableOnlinePartyReplication()*)
+      .addConfigTransforms(
+        ConfigTransforms
+          .enableAlphaOnlinePartyReplicationSupport(enableUnsafeSequencerChannelSupport = true)*
+      )
       .withNetworkBootstrap { implicit env =>
         import env.*
         new NetworkBootstrapper(

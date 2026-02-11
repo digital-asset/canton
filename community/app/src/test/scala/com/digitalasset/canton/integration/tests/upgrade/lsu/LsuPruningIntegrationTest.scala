@@ -13,6 +13,7 @@ import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
+import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import monocle.macros.syntax.lens.*
 
 import java.time.Duration

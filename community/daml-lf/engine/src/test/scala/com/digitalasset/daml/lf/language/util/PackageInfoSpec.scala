@@ -168,7 +168,6 @@ class PackageInfoSpec extends AnyWordSpec with Matchers {
       for (n <- 0 to testCases.size)
         testCases.combinations(n).foreach { cases =>
           val (pkgIds, ids) = cases.unzip
-          println(pkgIds)
           val testPkgs = pkgIds.view.map(pkgId => pkgId -> pkgs(pkgId)).toMap
           new PackageInfo(testPkgs).definedInterfaces shouldBe ids.fold(Set.empty)(_ | _)
         }

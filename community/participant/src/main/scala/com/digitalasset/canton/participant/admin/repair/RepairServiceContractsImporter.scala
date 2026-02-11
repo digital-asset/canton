@@ -221,7 +221,7 @@ final class RepairServiceContractsImporter(
                 .toRight(s"Could not find $synchronizerAlias")
             )
 
-            synchronizer <- helpers.readSynchronizerData(synchronizerId)
+            synchronizer <- helpers.readSynchronizerData(synchronizerId, repairIndexer)
 
             contractsWithOverriddenRpId <- selectRepresentativePackageIds(contracts)
               .toEitherT[FutureUnlessShutdown]
@@ -408,42 +408,43 @@ final class RepairServiceContractsImporter(
       val indexedContractBatches: PekkoSource[(Seq[RepairContract], Long), NotUsed] =
         contracts.grouped(batchSize).zipWithIndex
 
-      val doneF = toFuture(helpers.readSynchronizerData(synchronizerId)).flatMap { synchronizer =>
-        indexedContractBatches
-          .mapAsync(parallelism) { data =>
-            toFuture(
-              validateAndPersistContracts(
-                synchronizer = synchronizer,
-                contractImportMode = contractImportMode,
-                selectRepresentativePackageIds = selectRepresentativePackageIds,
-                batchSize = batchSize,
-              )(data)
-            )
-          }
-          // Publish events to the indexer
-          .mapAsync(1) { contractsToAddWithInternalContractIds =>
-            if (nodeParameters.alphaMultiSynchronizerSupport) {
+      val doneF = toFuture(helpers.readSynchronizerData(synchronizerId, repairIndexer)).flatMap {
+        synchronizer =>
+          indexedContractBatches
+            .mapAsync(parallelism) { data =>
               toFuture(
-                publishAddEvents(
+                validateAndPersistContracts(
+                  synchronizer = synchronizer,
+                  contractImportMode = contractImportMode,
+                  selectRepresentativePackageIds = selectRepresentativePackageIds,
+                  batchSize = batchSize,
+                )(data)
+              )
+            }
+            // Publish events to the indexer
+            .mapAsync(1) { contractsToAddWithInternalContractIds =>
+              if (nodeParameters.alphaMultiSynchronizerSupport) {
+                toFuture(
+                  publishAddEvents(
+                    synchronizerId,
+                    synchronizer.currentRecordTime,
+                    contractsToAddWithInternalContractIds,
+                    workflowProvider,
+                    repairIndexer,
+                  )
+                )
+              } else {
+                writeContractsAddedEvents(
                   synchronizerId,
-                  synchronizer.currentRecordTime,
+                  recordTime = synchronizer.currentRecordTime,
                   contractsToAddWithInternalContractIds,
                   workflowProvider,
                   repairIndexer,
-                )
-              )
-            } else {
-              writeContractsAddedEvents(
-                synchronizerId,
-                recordTime = synchronizer.currentRecordTime,
-                contractsToAddWithInternalContractIds,
-                workflowProvider,
-                repairIndexer,
-              ).failOnShutdownToAbortException("addContracts")
+                ).failOnShutdownToAbortException("addContracts")
+              }
             }
-          }
-          .toMat(Sink.ignore)(Keep.right)
-          .run()
+            .toMat(Sink.ignore)(Keep.right)
+            .run()
       }
 
       EitherT.liftF(doneF.map(_ => ()))
@@ -687,10 +688,12 @@ final class RepairServiceContractsImporter(
         optNodeSeeds = None,
         optByKeyNodes = None,
       ),
-      transaction = LfCommittedTransaction(
-        CantonOnly.lfVersionedTransaction(
-          nodes = txNodes,
-          roots = ImmArray.from(nodeIds.take(txNodes.size)),
+      transactionInfo = Update.TransactionAccepted.TransactionInfo(
+        LfCommittedTransaction(
+          CantonOnly.lfVersionedTransaction(
+            nodes = txNodes,
+            roots = ImmArray.from(nodeIds.take(txNodes.size)),
+          )
         )
       ),
       updateId = randomUpdateId(syncCrypto),

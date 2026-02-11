@@ -6,7 +6,7 @@ save_compiled_classes:
         command: |
           mkdir -p /tmp/classes
           find . -type d -name target | xargs tar --use-compress-program=".ci/nix-exec pigz" -cf /tmp/classes/classes.tar.gz -H posix
-    - azure-caching-orb/save_to_azure:
+    - save_to_azure:
         # In custom orb, name parameter had to be changed to job_name
         job_name: "Uploading archive with compiled classes to cache - without revision"
         # Key components:
@@ -26,7 +26,7 @@ save_compiled_classes:
           plugins=$(checksum project/plugins.sbt)
           build=$(checksum build.sbt)
         path: "/tmp/classes"
-    - azure-caching-orb/save_to_azure:
+    - save_to_azure:
         # In custom orb, name parameter had to be changed to job_name
         job_name: "Uploading archive with compiled classes to cache"
         # Key components:
@@ -58,7 +58,7 @@ checkout_and_restore_precompiled_classes:
   steps:
     - checkout: # Also required to compute cache keys in the next step
         method: blobless
-    - azure-caching-orb/restore_from_azure:
+    - restore_from_azure:
         # In custom orb, name parameter had to be changed to job_name
         # First, try to download class files from the same revision
         # Using ":" to add additional cache key

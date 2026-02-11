@@ -402,3 +402,26 @@ with several separate configuration files (which get merged together).
 .. code-block:: bash
 
     ./bin/canton -c config/participant.conf -c config/sequencer.conf,config/mediator.conf -c config/manager.conf
+
+Run using the Oracle JDK
+------------------------
+
+When using the Oracle JDK, you may likely get an error such as the following when executing transactions:
+
+.. code-block:: none
+
+   java.lang.SecurityException: JCE cannot authenticate the provider BC
+           at java.base/javax.crypto.JceSecurity.getInstance(JceSecurity.java:150)
+           at java.base/javax.crypto.Mac.getInstance(Mac.java:272)
+           at com.digitalasset.canton.crypto.provider.jce.JcePureCrypto.$anonfun$computeHmacWithSecretInternal$1(JcePureCrypto.scala:873)
+           (...)
+
+The reason is that the Canton JAR embeds the BouncyCastle provider, and the Oracle JVM requires to verify the signature of third-party security libraries.
+
+In this case, you need to download the `BouncyCastle JAR file <https://mvnrepository.com/artifact/org.bouncycastle/bcprov-jdk18on/1.83>`__ and explicitly provide it on the class path while running Canton as follows:
+
+.. code:: shell
+
+   java -cp bcprov-jdk18on-1.83.jar:./lib/canton-enterprise-3.5.0.jar com.digitalasset.canton.CantonCommunityApp -c <config files...>
+
+replacing `3.5.0` with your appropriate Canton version.

@@ -46,7 +46,7 @@ import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.admin.party.PartyReplicationAdminWorkflow
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal as M
-import com.digitalasset.canton.participant.config.UnsafeOnlinePartyReplicationConfig
+import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
@@ -81,14 +81,14 @@ sealed trait OnlinePartyReplicationNegotiationTest
     )
   }
 
-  private def selectivelyEnablePartyReplicationOnSequencers(
+  private def selectivelyEnableSequencerChannels(
       sequencer: String,
       config: SequencerNodeConfig,
   ): SequencerNodeConfig =
     // Enable channels on all sequencer except sequencer3 to test
     // that a usable sequencer is chosen.
     config
-      .focus(_.parameters.unsafeEnableOnlinePartyReplication)
+      .focus(_.parameters.unsafeSequencerChannelSupport)
       .replace(sequencer != "sequencer3")
 
   registerPlugin(new UseBftSequencer(loggerFactory))
@@ -116,10 +116,10 @@ sealed trait OnlinePartyReplicationNegotiationTest
       )
       .addConfigTransforms(
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.unsafeOnlinePartyReplication)
-            .replace(Some(UnsafeOnlinePartyReplicationConfig()))
+          _.focus(_.parameters.alphaOnlinePartyReplicationSupport)
+            .replace(Some(AlphaOnlinePartyReplicationConfig(unsafeSequencerChannelSupport = true)))
         ),
-        ConfigTransforms.updateAllSequencerConfigs(selectivelyEnablePartyReplicationOnSequencers),
+        ConfigTransforms.updateAllSequencerConfigs(selectivelyEnableSequencerChannels),
       )
       .withNetworkBootstrap { implicit env =>
         import env.*

@@ -136,19 +136,21 @@ abstract class CantonAppDriver extends App with NamedLogging with NoTracing {
   }))
   logger.debug("Registered shutdown-hook.")
   private object Config {
-    val devConfig =
-      Option.when(cliOptions.devProtocol)(JarResourceUtils.extractFileFromJar("sandbox/dev.conf"))
-    val sandboxConfig = JarResourceUtils.extractFileFromJar("sandbox/sandbox.conf")
-    val devPrefix = if (cliOptions.devProtocol) "dev-" else ""
-    val sandboxBotstrap =
-      JarResourceUtils.extractFileFromJar(s"sandbox/${devPrefix}bootstrap.canton")
+    val multiSuffix = if (cliOptions.multiSync) "-multi-sync" else ""
+    val devConfig = Option.when(cliOptions.devProtocol)(
+      JarResourceUtils.extractFileFromJar(s"sandbox/dev$multiSuffix.conf")
+    )
+    val sandboxConfig = JarResourceUtils.extractFileFromJar(s"sandbox/sandbox$multiSuffix.conf")
+
+    val sandboxBootstrap = JarResourceUtils.extractFileFromJar(s"sandbox/bootstrap.canton")
+
     val configFiles = cliOptions.command
       .collect { case Sandbox => sandboxConfig }
       .toList
       .concat(cliOptions.configFiles)
       .concat(devConfig)
     val bootstrapFile = cliOptions.command
-      .collect { case Sandbox => sandboxBotstrap }
+      .collect { case Sandbox => sandboxBootstrap }
       .orElse(cliOptions.bootstrapScriptPath)
     val configFromMap = {
       import scala.jdk.CollectionConverters.*

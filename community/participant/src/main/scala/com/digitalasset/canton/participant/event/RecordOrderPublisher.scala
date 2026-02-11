@@ -126,7 +126,7 @@ class RecordOrderPublisher private (
     } {
       store.put(
         updateId = transactionAccepted.updateId.toHexString,
-        lfVersionedTransaction = transactionAccepted.transaction,
+        lfVersionedTransaction = transactionAccepted.transactionInfo.transactionForTesting,
       )
     }
 

@@ -12,6 +12,7 @@ import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.ProtocolVersion.{v34, v35}
 
