@@ -9,6 +9,7 @@ import com.digitalasset.daml.lf.command.ApiContractKey
 import com.digitalasset.daml.lf.{transaction => tx}
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
+  ExternalCallResult,
   FatContractInstance,
   FatContractInstanceImpl,
   GlobalKey,
@@ -95,6 +96,8 @@ private[lf] object CostModel {
     implicit def costOfNodeId(value: tx.NodeId): Cost
 
     implicit def costOfTxNode(value: tx.Node): Cost
+
+    implicit def costOfExternalCallResult(value: ExternalCallResult): Cost
   }
 
   object EmptyCostModelImplicits extends CostModelImplicits {
@@ -168,6 +171,8 @@ private[lf] object CostModel {
     implicit def costOfNodeId(value: tx.NodeId): Cost = 0L
 
     implicit def costOfTxNode(value: tx.Node): Cost = 0L
+
+    implicit def costOfExternalCallResult(value: ExternalCallResult): Cost = 0L
   }
 
   object StructuralCostModelImplicits extends CostModelImplicits {
@@ -410,6 +415,7 @@ private[lf] object CostModel {
             exerciseResult,
             keyOpt,
             byKey,
+            externalCallResults,
             version,
           ) =>
         1 + costOfContractId(targetCoid) +
@@ -428,9 +434,18 @@ private[lf] object CostModel {
           costOfOption(exerciseResult) +
           costOfOption(keyOpt) +
           costOfBoolean(byKey) +
+          costOfImmArray(externalCallResults) +
           costOfSerializationVersion(version)
       case Node.Rollback(children) =>
         1 + costOfImmArray(children)
     }
+
+    implicit def costOfExternalCallResult(value: ExternalCallResult): Cost =
+      1 + costOfString(value.extensionId) +
+        costOfString(value.functionId) +
+        costOfString(value.configHash) +
+        costOfString(value.inputHex) +
+        costOfString(value.outputHex) +
+        costOfInt(value.callIndex)
   }
 }

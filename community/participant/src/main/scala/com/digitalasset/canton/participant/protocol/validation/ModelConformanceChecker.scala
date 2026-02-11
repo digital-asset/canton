@@ -49,6 +49,7 @@ import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractValidator, ErrorUtil, RoseTree}
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.canton.{LfKeyResolver, LfPartyId, checked}
+import com.digitalasset.canton.data.ActionDescription.ExerciseActionDescription
 import com.digitalasset.daml.lf.data.Ref.{CommandId, PackageId, PackageName}
 
 import java.util.UUID
@@ -249,6 +250,14 @@ class ModelConformanceChecker(
 
     val seed = viewParticipantData.actionDescription.seedOption
 
+    // Extract stored external call results from the action description (if exercise)
+    val storedExternalCallResults: StoredExternalCallResults =
+      viewParticipantData.actionDescription match {
+        case exercise: ExerciseActionDescription =>
+          StoredExternalCallResults.fromResults(exercise.externalCallResults)
+        case _ => StoredExternalCallResults.empty
+      }
+
     val inputContracts = view.inputContracts.fmap(_.contract)
 
     val contractAndKeyLookup = new ExtendedContractLookup(inputContracts, resolverFromView)
@@ -269,6 +278,7 @@ class ModelConformanceChecker(
           packagePreference,
           failed,
           getEngineAbortStatus,
+          storedExternalCallResults,
         )(traceContext)
         .leftMap(DAMLeError(_, view.viewHash))
         .leftWiden[Error]

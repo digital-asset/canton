@@ -38,6 +38,8 @@ sealed trait Result[+A] extends Product with Serializable {
       ResultNeedKey(gk, mbAcoid => resume(mbAcoid).map(f))
     case ResultPrefetch(contractIds, keys, resume) =>
       ResultPrefetch(contractIds, keys, () => resume().map(f))
+    case ResultNeedExternalCall(extId, funcId, configHash, input, stored, resume) =>
+      ResultNeedExternalCall(extId, funcId, configHash, input, stored, result => resume(result).map(f))
   }
 
   def flatMap[B](f: A => Result[B]): Result[B] = this match {
@@ -53,6 +55,8 @@ sealed trait Result[+A] extends Product with Serializable {
       ResultNeedKey(gk, mbAcoid => resume(mbAcoid).flatMap(f))
     case ResultPrefetch(contractIds, keys, resume) =>
       ResultPrefetch(contractIds, keys, () => resume().flatMap(f))
+    case ResultNeedExternalCall(extId, funcId, configHash, input, stored, resume) =>
+      ResultNeedExternalCall(extId, funcId, configHash, input, stored, result => resume(result).flatMap(f))
   }
 
   private[lf] def consume(
@@ -61,6 +65,7 @@ sealed trait Result[+A] extends Product with Serializable {
       keys: PartialFunction[GlobalKeyWithMaintainers, ContractId] = PartialFunction.empty,
       hashingMethod: ContractId => Hash.HashingMethod = _ => Hash.HashingMethod.TypedNormalForm,
       idValidator: (ContractId, Hash) => Boolean = (_, _) => true,
+      externalCalls: PartialFunction[(String, String, String, String), String] = PartialFunction.empty,
   ): Either[Error, A] = {
     @tailrec
     def go(res: Result[A]): Either[Error, A] =
@@ -77,6 +82,18 @@ sealed trait Result[+A] extends Product with Serializable {
         case ResultNeedPackage(pkgId, resume) => go(resume(pkgs.lift(pkgId)))
         case ResultNeedKey(key, resume) => go(resume(keys.lift(key)))
         case ResultPrefetch(_, _, result) => go(result())
+        case ResultNeedExternalCall(extId, funcId, configHash, input, storedResult, resume) =>
+          // Use stored result if available, otherwise try the externalCalls partial function
+          val result = storedResult.orElse(externalCalls.lift((extId, funcId, configHash, input)))
+          result match {
+            case Some(output) => go(resume(Right(output)))
+            case None =>
+              go(resume(Left(ExternalCallError(
+                statusCode = 503,
+                message = s"External call not available: extensionId=$extId, functionId=$funcId",
+                requestId = None,
+              ))))
+          }
       }
     go(this)
   }
@@ -187,6 +204,34 @@ final case class ResultPrefetch[A](
     resume: () => Result[A],
 ) extends Result[A]
 
+/** Indicates that an external call to an extension service is required to complete the computation.
+  * To resume the computation, the caller must invoke `resume` with either:
+  * - Right(output) if the external call succeeded
+  * - Left(error) if the external call failed
+  *
+  * @param extensionId Identifier of the configured extension
+  * @param functionId Function identifier within the extension
+  * @param configHash Configuration hash (hex) for version validation
+  * @param input Input data (hex)
+  * @param storedResult Optional stored result for replay mode
+  * @param resume Callback to provide the result or error
+  */
+final case class ResultNeedExternalCall[A](
+    extensionId: String,
+    functionId: String,
+    configHash: String,
+    input: String,
+    storedResult: Option[String],
+    resume: Either[ExternalCallError, String] => Result[A],
+) extends Result[A]
+
+/** Error information from external call failures */
+final case class ExternalCallError(
+    statusCode: Int,
+    message: String,
+    requestId: Option[String],
+)
+
 object Result {
 
   val unit: ResultDone[Unit] = ResultDone(())
@@ -282,6 +327,18 @@ object Result {
                 keys,
                 () =>
                   resume().flatMap(x =>
+                    Result.sequence(results_).map(otherResults => (okResults :+ x) :++ otherResults)
+                  ),
+              )
+            case ResultNeedExternalCall(extId, funcId, configHash, input, stored, resume) =>
+              ResultNeedExternalCall(
+                extId,
+                funcId,
+                configHash,
+                input,
+                stored,
+                result =>
+                  resume(result).flatMap(x =>
                     Result.sequence(results_).map(otherResults => (okResults :+ x) :++ otherResults)
                   ),
               )
