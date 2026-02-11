@@ -503,7 +503,7 @@ final class BlockChunkProcessor(
       (goodTsAcks, futureAcks) = allAcknowledgements.partition { tracedSignedAck =>
         // In this condition we allow acks of timestamps that are in the future
         // during the synchronizer upgrade on the old synchronizer.
-        // This happens due to offsetting timestamps > the upgrade time by the decision timout in the SequencerReader.
+        // This happens due to offsetting timestamps > the upgrade time by the decision timeout in the SequencerReader.
         // This is to prevent warnings during the upgrade from otherwise harmless (and arguably honest) acks.
         // true only if both sub-conditions below are false
         val allowFutureAcksAfterSynchronizerUpgrade: Boolean = !(

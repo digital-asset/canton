@@ -1864,6 +1864,7 @@ class AcsCommitmentProcessor private (
         completedPeriod.fromExclusive.forgetRefinement,
         completedPeriod.toInclusive.forgetRefinement,
       )
+      intervalCount = intervals.size
 
       reconIntervals <- getReconciliationIntervals(
         completedPeriod.toInclusive.forgetRefinement
@@ -1885,10 +1886,10 @@ class AcsCommitmentProcessor private (
 
             lastPruningTime <- store.pruningStatus
 
-            _ = if (counterCommitmentList.sizeIs > intervals.size) {
+            _ = if (counterCommitmentList.sizeIs > intervalCount) {
               AcsCommitmentAlarm
                 .Warn(
-                  s"""There should be at most ${intervals.size} commitments from counter-participant
+                  s"""There should be at most $intervalCount commitments from counter-participant
                      |$counterParticipant covering the period ${completedPeriod.fromExclusive} to ${completedPeriod.toInclusive}),
                      |but we have the following ${counterCommitmentList.size}""".stripMargin
                 )
@@ -2414,37 +2415,21 @@ class AcsCommitmentProcessor private (
       completedPeriod: CommitmentPeriod,
       participants: Set[ParticipantId],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    for {
-      splitPeriod <- sortedReconciliationIntervalsProvider.splitCommitmentPeriod(
-        completedPeriod
-      )
-      counterParticipantsNE = NonEmpty.from(participants)
-      _ <- counterParticipantsNE.fold(FutureUnlessShutdown.unit)(counterParticipants =>
-        splitPeriod.fold(FutureUnlessShutdown.unit) { periods =>
-          MonadUtil
-            .batchedSequentialTraverse[
-              CommitmentPeriod,
-              FutureUnlessShutdown,
-              Unit,
-            ](
-              batchingConfig.parallelism,
-              batchingConfig.maxItemsInBatch,
-            )(periods.forgetNE.toSeq) { chunk =>
-              NonEmpty.from(chunk) match {
-                case Some(chunkNE) =>
-                  store
-                    .markOutstanding(
-                      chunkNE.toSet,
-                      counterParticipants,
-                    )
-                    .map(_ => Seq(()))
-                case None => FutureUnlessShutdown.pure(Seq.empty[Unit])
-              }
-            }
-            .map(_ => ())
+    NonEmpty.from(participants).traverse_ { counterParticipants =>
+      for {
+        splitPeriod <- sortedReconciliationIntervalsProvider.splitCommitmentPeriod(
+          completedPeriod
+        )
+        _ <- splitPeriod.traverse_ { periods =>
+          MonadUtil.batchedSequentialTraverseNE_(
+            batchingConfig.parallelism,
+            batchingConfig.maxItemsInBatch,
+          )(periods) { chunk =>
+            store.markOutstanding(chunk, counterParticipants)
+          }
         }
-      )
-    } yield ()
+      } yield ()
+    }
 
   private def markPeriods(
       cmt: AcsCommitmentData,
@@ -2454,26 +2439,21 @@ class AcsCommitmentProcessor private (
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     for {
       splitPeriods <- sortedReconciliationIntervalsProvider.splitCommitmentPeriod(cmt.period)
-      reconIntervals <- getReconciliationIntervals(
-        cmt.period.toInclusive.forgetRefinement
-      )
+      reconIntervals <- getReconciliationIntervals(cmt.period.toInclusive.forgetRefinement)
       reconIntervalLength = reconIntervals.intervals.headOption.fold(0L)(
         _.intervalLength.duration.toMillis
       )
-
-      _ <- splitPeriods match {
-        case Some(periods) =>
-          val isMatch =
-            matches(
-              cmt,
-              commitments,
-              lastPruningTime.map(_.timestamp),
-              possibleCatchUp,
-              reconIntervalLength,
-            )
-          if (isMatch) store.markSafe(cmt.sender, periods)
-          else store.markUnsafe(cmt.sender, periods)
-        case None => FutureUnlessShutdown.unit
+      _ <- splitPeriods.traverse_ { periods =>
+        val isMatch =
+          matches(
+            cmt,
+            commitments,
+            lastPruningTime.map(_.timestamp),
+            possibleCatchUp,
+            reconIntervalLength,
+          )
+        if (isMatch) store.markSafe(cmt.sender, periods)
+        else store.markUnsafe(cmt.sender, periods)
       }
     } yield ()
 

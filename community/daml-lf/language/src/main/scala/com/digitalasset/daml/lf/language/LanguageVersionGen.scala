@@ -31,16 +31,17 @@ trait LanguageVersionGenerated {
 
   val v2_1: LanguageVersion = LanguageVersion(V2, Stable(1))
   val v2_2: LanguageVersion = LanguageVersion(V2, Stable(2))
+  val v2_3: LanguageVersion = LanguageVersion(V2, Staging(3, 1))
   val v2_dev: LanguageVersion = LanguageVersion(V2, Dev)
 
-  val allLfVersions: List[LanguageVersion] = List(v2_1, v2_2, v2_dev)
-  val compilerInputLfVersions: List[LanguageVersion] = List(v2_1, v2_2, v2_dev)
-  val compilerOutputLfVersions: List[LanguageVersion] = List(v2_1, v2_2, v2_dev)
+  val allLfVersions: List[LanguageVersion] = List(v2_1, v2_2, v2_3, v2_dev)
+  val compilerInputLfVersions: List[LanguageVersion] = List(v2_1, v2_2, v2_3, v2_dev)
+  val compilerOutputLfVersions: List[LanguageVersion] = List(v2_1, v2_2, v2_3, v2_dev)
   val defaultLfVersion: LanguageVersion = v2_2
   val devLfVersion: LanguageVersion = v2_dev
   val latestStableLfVersion: LanguageVersion = v2_2
-  val stableLfVersions: List[LanguageVersion] = List(v2_1, v2_2)
-  val stagingLfVersion: LanguageVersion = v2_2
+  val stableLfVersions: List[LanguageVersion] = List(v2_1, v2_2, v2_3)
+  val stagingLfVersion: LanguageVersion = v2_3
 
   // ranges hardcoded (for now)
   val allLfVersionsRange: VersionRange.Inclusive[LanguageVersion] = VersionRange(v2_1, v2_dev)

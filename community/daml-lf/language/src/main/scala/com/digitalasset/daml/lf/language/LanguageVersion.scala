@@ -4,6 +4,9 @@
 package com.digitalasset.daml.lf
 package language
 
+import scala.math.Ordered.orderingToOrdered
+
+
 final case class LanguageVersion private (
     major: LanguageVersion.Major,
     minor: LanguageVersion.Minor,
@@ -50,9 +53,9 @@ object LanguageVersion extends LanguageFeaturesGenerated {
       case (Minor.Dev, _) => 1
       case (_, Minor.Dev) => -1
 
-      case (Minor.Staging(a), Minor.Staging(b)) => a.compare(b)
-      case (Minor.Staging(_), Minor.Stable(_)) => 1
-      case (Minor.Stable(_), Minor.Staging(_)) => -1
+      case (Minor.Staging(a, rca), Minor.Staging(b, rcb)) => (a, rca).compare((b, rcb))
+      case (Minor.Staging(_, _), Minor.Stable(_)) => 1
+      case (Minor.Stable(_), Minor.Staging(_, _)) => -1
 
       case (Minor.Stable(a), Minor.Stable(b)) => a.compare(b)
     }
@@ -63,8 +66,8 @@ object LanguageVersion extends LanguageFeaturesGenerated {
       override def pretty: String = version.toString
     }
 
-    final case class Staging(version: Int) extends Minor {
-      override def pretty: String = s"${version}-staging"
+    final case class Staging(version: Int, revision: Int) extends Minor {
+      override def pretty: String = s"${version}-rc${revision}"
     }
 
     case object Dev extends Minor {
@@ -92,7 +95,7 @@ object LanguageVersion extends LanguageFeaturesGenerated {
   def fromString(str: String): Either[String, LanguageVersion] =
     (allLegacyLfVersions ++ allLfVersions)
       .find(_.toString == str)
-      .toRight(s"${str} is not supported")
+      .toRight(s"Failed to parse ${str}, it is not supported (supported non-legacy versions are ${allLfVersions})")
   def assertFromString(s: String): LanguageVersion = data.assertRight(fromString(s))
 
   // TODO: remove after https://github.com/digital-asset/daml/issues/22403

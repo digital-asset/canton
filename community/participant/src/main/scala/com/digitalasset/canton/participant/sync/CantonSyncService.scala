@@ -939,7 +939,7 @@ class CantonSyncService(
       sequencerConnectionValidation: SequencerConnectionValidation,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
     for {
-      _ <- validateSequencerConnection(config, sequencerConnectionValidation)
+      _ <- connectionsManager.validateSequencerConnection(config, sequencerConnectionValidation)
       _ <- EitherT
         .rightT[FutureUnlessShutdown, SyncServiceError](
           synchronizerConnectionConfigStore
@@ -993,14 +993,6 @@ class CantonSyncService(
         }
     } yield ()
 
-  private def validateSequencerConnection(
-      config: SynchronizerConnectionConfig,
-      sequencerConnectionValidation: SequencerConnectionValidation,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
-    connectionsManager.validateSequencerConnection(config, sequencerConnectionValidation)
-
   /** Modifies the settings of the synchronizer connection
     *
     * @param psidO
@@ -1013,7 +1005,7 @@ class CantonSyncService(
       sequencerConnectionValidation: SequencerConnectionValidation,
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
     for {
-      _ <- validateSequencerConnection(config, sequencerConnectionValidation)
+      _ <- connectionsManager.validateSequencerConnection(config, sequencerConnectionValidation)
 
       connectionIdToUpdateE = psidO match {
         case Some(psid) => KnownPhysicalSynchronizerId(psid).asRight[SyncServiceError]

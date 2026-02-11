@@ -34,10 +34,8 @@ class OnlyForTestingTransactionInMemoryStore(override val loggerFactory: NamedLo
     )
 
   def get(updateId: String): Option[LfVersionedTransaction] =
-    (
-      lock.exclusive(
-        store.get(updateId)
-      )
+    lock.exclusive(
+      store.get(updateId)
     )
 
 }

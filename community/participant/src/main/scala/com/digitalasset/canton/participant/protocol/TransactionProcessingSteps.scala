@@ -76,6 +76,7 @@ import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.*
 import com.digitalasset.canton.participant.util.DAMLe.{ContractEnricher, TransactionEnricher}
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
+import com.digitalasset.canton.platform.store.cache.OnlyForTestingTransactionInMemoryStore
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.ContractIdAbsolutizer.ContractIdAbsolutizationDataV1
 import com.digitalasset.canton.protocol.WellFormedTransaction.{
@@ -134,6 +135,7 @@ class TransactionProcessingSteps(
     protected val loggerFactory: NamedLoggerFactory,
     futureSupervisor: FutureSupervisor,
     messagePayloadLoggingEnabled: Boolean,
+    onlyForTestingTransactionInMemoryStore: Option[OnlyForTestingTransactionInMemoryStore],
 )(implicit val ec: ExecutionContext)
     extends ProcessingSteps[
       SubmissionParam,
@@ -1144,7 +1146,14 @@ class TransactionProcessingSteps(
 
     val acceptedEvent =
       (acsChangeFactory: AcsChangeFactory) =>
-        (internalContractIds: Map[LfContractId, Long]) =>
+        (internalContractIds: Map[LfContractId, Long]) => {
+          val transaction = LfCommittedTransaction(lfTx.unwrap)
+          onlyForTestingTransactionInMemoryStore.foreach(
+            _.put(
+              updateId = updateId.toHexString,
+              lfVersionedTransaction = transaction,
+            )
+          )
           Update.SequencedTransactionAccepted(
             completionInfoO = completionInfoO,
             transactionMeta = TransactionMeta(
@@ -1159,8 +1168,7 @@ class TransactionProcessingSteps(
               optNodeSeeds = None, // optNodeSeeds is unused by the indexer
               optByKeyNodes = None, // optByKeyNodes is unused by the indexer
             ),
-            transactionInfo =
-              Update.TransactionAccepted.TransactionInfo(LfCommittedTransaction(lfTx.unwrap)),
+            transactionInfo = Update.TransactionAccepted.TransactionInfo(transaction),
             updateId = updateId,
             synchronizerId = psid.logical,
             recordTime = requestTime,
@@ -1183,6 +1191,7 @@ class TransactionProcessingSteps(
                 )
               },
           )
+        }
     CommitAndStoreContractsAndPublishEvent(
       Some(commitSetF),
       contractsToBeStored,

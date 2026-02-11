@@ -137,6 +137,49 @@ trait AuthenticationTokenIntegrationTest
       }
     }
 
+    "a test token has been generated" can {
+      "use the synchronizer" taggedAs securityAsset.setHappyCase(
+        "use a correct test authentication token"
+      ) in { implicit env =>
+        import env.*
+
+        val token = sequencer1.authentication.generate_authentication_token(participant1)
+        // Refused effectively means the token was accepted (the submission request itself was refused because it's a dummy one)
+        assertRefused(
+          sendSubmissionUsingToken(
+            daId,
+            participant1,
+            AuthenticationToken.tryFromProtoPrimitive(token.token),
+          )
+        )
+      }
+
+      "be rejected after logout" taggedAs securityAsset.setAttack(
+        Attack(
+          actor = "Network participant that can reach the public api",
+          threat = "Try to use an invalidated generated token",
+          mitigation = "Reject the request as unauthenticated",
+        )
+      ) in { implicit env =>
+        import env.*
+
+        val token = sequencer1.authentication.generate_authentication_token(participant1)
+        sequencer1.authentication.logout(token.token)
+        assertUnauthenticated(
+          sendSubmissionUsingToken(
+            daId,
+            participant1,
+            AuthenticationToken.tryFromProtoPrimitive(token.token),
+          )
+        )
+
+        // Force the participant to reconnect to the sequencer and renew its token
+        // to prevent subsequent tests to log warnings due to the invalidated token
+        participant1.synchronizers.disconnect_all()
+        participant1.synchronizers.reconnect_all()
+      }
+    }
+
     "the authentication token has expired" should {
       "renew the token" taggedAs securityAsset.setHappyCase(
         "renew an expired authentication token"

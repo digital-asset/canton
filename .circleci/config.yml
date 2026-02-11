@@ -4,7 +4,7 @@ _canton_docker_executor:
     auth:
         password: $DOCKERHUB_PASSWORD
         username: $DOCKERHUB_USERNAME
-    image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+    image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
 _postgres_docker_executor:
     command: |-
         postgres
@@ -714,7 +714,7 @@ commands:
                       --env CANTON_PROTOCOL_VERSION \
                       --security-opt seccomp=unconfined \
                       << parameters.additional_docker_args >> \
-                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25 \
                       nix-shell \
                       -I nixpkgs=./nix/nixpkgs.nix \
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
@@ -1304,7 +1304,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 16000M
             EXECUTOR_JVM_METASPACE_SIZE: 3200M
@@ -1316,7 +1316,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1346,7 +1346,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 16000M
             EXECUTOR_JVM_METASPACE_SIZE: 12000M
@@ -1358,7 +1358,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1388,7 +1388,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 4500M
             EXECUTOR_JVM_METASPACE_SIZE: 1000M
@@ -1400,7 +1400,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 4500M
             EXECUTOR_JVM_METASPACE_SIZE: 1000M
@@ -1411,7 +1411,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1441,7 +1441,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 2500M
             EXECUTOR_JVM_METASPACE_SIZE: 400M
@@ -1453,7 +1453,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 1200M
             EXECUTOR_JVM_METASPACE_SIZE: 200M
@@ -1465,7 +1465,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
         environment:
             EXECUTOR_JVM_HEAP_SIZE: 6500M
             EXECUTOR_JVM_METASPACE_SIZE: 3100M
@@ -1477,7 +1477,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1507,7 +1507,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -1538,7 +1538,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
             - command: postgres -c max_connections=1000
               environment:
                 NON_STANDARD_POSTGRES: "yes"
@@ -1563,7 +1563,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
             - command: postgres -c max_connections=1000
               environment:
                 NON_STANDARD_POSTGRES: "yes"
@@ -1588,7 +1588,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
             - command: postgres -c max_connections=1000
               environment:
                 NON_STANDARD_POSTGRES: "yes"
@@ -1613,7 +1613,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
             - command: postgres -c max_connections=1000
               environment:
                 NON_STANDARD_POSTGRES: "yes"
@@ -1638,7 +1638,7 @@ executors:
             - auth:
                 password: $DOCKERHUB_PASSWORD
                 username: $DOCKERHUB_USERNAME
-              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa
+              image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
             - command: |-
                 postgres
                   -c max_connections=1000
@@ -2858,6 +2858,7 @@ workflows:
                         ignore:
                             - main
                             - /^release-line.*/
+                            - /^gh-readonly-queue\/main\/.*/
                     tags:
                         only: /^v.*/
             - static_tests:
@@ -3198,396 +3199,6 @@ workflows:
                 - equal:
                     - none
                     - << pipeline.parameters.manual_job >>
-    canton_dependencies_update:
-        jobs:
-            - daml_upgrade_pr:
-                context:
-                    - artifactory
-                    - canton-daml-update-pr
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-        triggers:
-            - schedule:
-                cron: 30 7 * * 1-5
-                filters:
-                    branches:
-                        only:
-                            - main
-    canton_nightly:
-        jobs:
-            - compile:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-            - package_community:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                is_manual: false
-                is_nightly_workflow: true
-                requires:
-                    - compile
-            - package_sequencer_driver_api:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                is_manual: false
-                is_nightly_workflow: true
-                requires:
-                    - compile
-            - package_jsonapi:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                is_manual: false
-                is_nightly_workflow: true
-                requires:
-                    - compile
-            - package_kms_driver:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                is_manual: false
-                is_nightly_workflow: true
-                requires:
-                    - compile
-            - assembly_ledger_api_test_tool:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                is_manual: false
-                is_nightly_workflow: true
-                requires:
-                    - compile
-            - build_and_publish_docker:
-                context:
-                    - da-images
-                is_manual: false
-                is_nightly_workflow: true
-                requires:
-                    - package_community
-            - build_scaladoc:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                requires:
-                    - compile
-            - build_docs:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                requires:
-                    - build_scaladoc
-                    - package_community
-            - external_parties_test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                name: external_parties_test
-                requires:
-                    - compile
-            - nightly_integration_test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                requires:
-                    - compile
-            - toxiproxy_test_slow:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                requires:
-                    - compile
-            - unstable_test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                requires:
-                    - package_community
-            - unstable_test_slow:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                requires:
-                    - toxiproxy_test_slow
-            - test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                name: test_with_java17
-                override_java_version_for_tests: "17"
-                requires:
-                    - compile
-            - postgres_conformance_test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                name: postgres_conformance_test_14
-                postgres_version: 14
-                requires:
-                    - compile
-            - postgres_conformance_test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                name: postgres_conformance_test_15
-                postgres_version: 15
-                requires:
-                    - postgres_conformance_test_14
-            - postgres_conformance_test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                name: postgres_conformance_test_16
-                postgres_version: 16
-                requires:
-                    - postgres_conformance_test_15
-            - stability_crash_recovery_test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                    - azure-self-cache
-                requires:
-                    - compile
-            - stability_crash_recovery_test_alerting:
-                requires:
-                    - stability_crash_recovery_test
-            - test_ping_windows:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                filters:
-                    tags:
-                        only: /^v.*/
-                requires:
-                    - package_community
-            - test_ping_arm:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                filters:
-                    tags:
-                        only: /^v.*/
-                requires:
-                    - package_community
-            - build_systematic_testing_inventory:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                requires:
-                    - compile
-            - nightly_reporting
-            - publish_libraries:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - gpg-signing
-                    - maven-mirror
-                    - da-images
-                is_manual: false
-                is_nightly_workflow: true
-                requires:
-                    - compile
-            - publish_release:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                is_manual: false
-                is_nightly_workflow: true
-                requires:
-                    - package_community
-                    - package_sequencer_driver_api
-                    - package_jsonapi
-                    - package_kms_driver
-                    - assembly_ledger_api_test_tool
-                    - build_systematic_testing_inventory
-                    - build_scaladoc
-            - publish_canton_open_source_code_drop:
-                context:
-                    - azure-self-cache
-                requires:
-                    - package_community
-                    - build_systematic_testing_inventory
-                    - build_scaladoc
-            - topology_chaos_test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirrory
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                requires:
-                    - compile
-                run_all_ops_test: false
-                test_repetitions: 13
-            - benchmark:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                requires:
-                    - compile
-            - test_performance_runner:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                requires:
-                    - package_community
-            - blackduck:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - blackduck
-                requires:
-                    - package_community
-        triggers:
-            - schedule:
-                cron: 0 22 * * 1-5
-                filters:
-                    branches:
-                        only:
-                            - main
-    docs_replication_on_schedule:
-        jobs:
-            - compile:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-            - package_community:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                is_manual: false
-                is_nightly_workflow: false
-                requires:
-                    - compile
-            - build_scaladoc:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                requires:
-                    - compile
-            - replicate_docs:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                env: prod
-                requires:
-                    - package_community
-                    - build_scaladoc
-        triggers:
-            - schedule:
-                cron: 15 22 * * *
-                filters:
-                    branches:
-                        only:
-                            - main
     manual_adhoc_daml_update:
         jobs:
             - daml_upgrade_pr:

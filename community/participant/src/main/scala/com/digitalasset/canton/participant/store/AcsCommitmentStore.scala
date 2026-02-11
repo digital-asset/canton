@@ -20,6 +20,7 @@ import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.common.annotations.VisibleForTesting
 
+import scala.collection.immutable
 import scala.collection.immutable.SortedSet
 import scala.util.control.Breaks.*
 
@@ -49,7 +50,7 @@ trait AcsCommitmentStore extends AcsCommitmentLookup with PrunableByTime with Au
     * Caller needs to ensure the periods are valid.
     */
   def markOutstanding(
-      periods: NonEmpty[Set[CommitmentPeriod]],
+      periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
       counterParticipants: NonEmpty[Set[ParticipantId]],
   )(implicit
       traceContext: TraceContext
@@ -95,7 +96,7 @@ trait AcsCommitmentStore extends AcsCommitmentLookup with PrunableByTime with Au
     */
   def markSafe(
       counterParticipant: ParticipantId,
-      periods: NonEmpty[Set[CommitmentPeriod]],
+      periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     markPeriod(
       counterParticipant,
@@ -118,7 +119,7 @@ trait AcsCommitmentStore extends AcsCommitmentLookup with PrunableByTime with Au
     */
   def markUnsafe(
       counterParticipant: ParticipantId,
-      periods: NonEmpty[Set[CommitmentPeriod]],
+      periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     markPeriod(
       counterParticipant,
@@ -139,7 +140,7 @@ trait AcsCommitmentStore extends AcsCommitmentLookup with PrunableByTime with Au
     */
   protected def markPeriod(
       counterParticipant: ParticipantId,
-      periods: NonEmpty[Set[CommitmentPeriod]],
+      periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
       matchingState: CommitmentPeriodState,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 

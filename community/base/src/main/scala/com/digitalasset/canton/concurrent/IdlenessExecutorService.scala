@@ -3,11 +3,10 @@
 
 package com.digitalasset.canton.concurrent
 
-import com.daml.executors.QueueAwareExecutorService
+import com.daml.executors.executors.NamedExecutionContextExecutorService
 
 import java.util.concurrent.*
 import scala.annotation.tailrec
-import scala.concurrent.ExecutionContextExecutorService
 import scala.concurrent.duration.FiniteDuration
 
 trait IdlenessExecutorService extends ExecutorService {
@@ -52,34 +51,35 @@ trait IdlenessExecutorService extends ExecutorService {
 }
 
 abstract class ExecutionContextIdlenessExecutorService(
-    executorService: ExecutorService,
+    delegate: ExecutorService,
     name: String,
-) extends QueueAwareExecutorService(executorService, name)
-    with IdlenessExecutorService
-    with ExecutionContextExecutorService
+    reporter: Throwable => Unit,
+) extends NamedExecutionContextExecutorService(delegate, name, reporter)
+    with IdlenessExecutorService {
+
+  def queueSize: Long
+}
 
 class ForkJoinIdlenessExecutorService(
     pool: ForkJoinPool,
     delegate: ExecutorService,
     reporter: Throwable => Unit,
     name: String,
-) extends ExecutionContextIdlenessExecutorService(delegate, name) {
-  override def reportFailure(cause: Throwable): Unit = reporter(cause)
+) extends ExecutionContextIdlenessExecutorService(delegate, name, reporter) {
 
   override protected[concurrent] def awaitIdlenessOnce(timeout: FiniteDuration): Boolean =
     pool.awaitQuiescence(timeout.toMillis, TimeUnit.MILLISECONDS)
 
   override def toString: String = s"ForkJoinIdlenessExecutorService-$name: $pool"
 
+  override def queueSize: Long = pool.getQueuedTaskCount
 }
 
 class ThreadPoolIdlenessExecutorService(
     pool: ThreadPoolExecutor,
     reporter: Throwable => Unit,
-    override val name: String,
-) extends ExecutionContextIdlenessExecutorService(pool, name) {
-
-  override def reportFailure(cause: Throwable): Unit = reporter(cause)
+    name: String,
+) extends ExecutionContextIdlenessExecutorService(pool, name, reporter) {
 
   override protected[concurrent] def awaitIdlenessOnce(timeout: FiniteDuration): Boolean = {
     val deadline = timeout.fromNow
@@ -100,4 +100,6 @@ class ThreadPoolIdlenessExecutorService(
 
     go(minSleep)
   }
+
+  override def queueSize: Long = pool.getQueue.size().toLong
 }

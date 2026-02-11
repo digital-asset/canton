@@ -23,7 +23,6 @@ import com.digitalasset.canton.ledger.participant.state.{
   FloatingUpdate,
   SequencedUpdate,
   SynchronizerUpdate,
-  Update,
 }
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
@@ -116,20 +115,6 @@ class RecordOrderPublisher private (
 
   def getSynchronizerSuccessor: Option[SynchronizerSuccessor] = synchronizerSuccessor.get()
 
-  private def onlyForTestingRecordAcceptedTransactions(event: SequencedUpdate): Unit =
-    for {
-      store <- ledgerApiIndexer.onlyForTestingTransactionInMemoryStore
-      transactionAccepted <- event match {
-        case txAccepted: Update.TransactionAccepted => Some(txAccepted)
-        case _ => None
-      }
-    } {
-      store.put(
-        updateId = transactionAccepted.updateId.toHexString,
-        lfVersionedTransaction = transactionAccepted.transactionInfo.transactionForTesting,
-      )
-    }
-
   /** Schedules the given `eventO` to be published on the `eventLog`, and schedules the causal
     * "tick" defined by `clock`. Tick must be called exactly once for all sequencer counters higher
     * than initTimestamp.
@@ -150,7 +135,6 @@ class RecordOrderPublisher private (
           .foreach(requestCounter =>
             logger.debug(s"Schedule publication for request counter $requestCounter")
           )
-        onlyForTestingRecordAcceptedTransactions(event)
         taskScheduler.scheduleTask(EventPublicationTask(event, sequencerCounter))
         logger.debug(
           s"Observing time ${event.recordTime} for sequencer counter $sequencerCounter for publishing (with event:$event, requestCounterO:$rcO)"

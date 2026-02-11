@@ -22,7 +22,7 @@ object DamlLfPlugin extends AutoPlugin {
 
   private val unscopedProjectSettings = Seq(
     lfSourceDirectory := sourceDirectory.value / "lf",
-    lfVersions := Seq("2.1", "2.2", "2.dev"),
+    lfVersions := Seq("2.1", "2.2", "2.3-rc1", "2.dev"),
     lfDarOutput := { target.value / "lf-dars" / configuration.value.name },
     resourceGenerators += generateDar.taskValue,
   )

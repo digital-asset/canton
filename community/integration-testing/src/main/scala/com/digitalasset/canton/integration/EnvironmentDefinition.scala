@@ -445,13 +445,13 @@ object EnvironmentDefinition extends LazyLogging {
     numMediators = 1,
   )
 
-  private lazy val P1S4M4_Config = buildBaseEnvironmentDefinition(
+  lazy val P1S4M4_Config: EnvironmentDefinition = buildBaseEnvironmentDefinition(
     numParticipants = 1,
     numSequencers = 4,
     numMediators = 4,
   )
 
-  lazy val P1S5M5_Config = buildBaseEnvironmentDefinition(
+  lazy val P1S5M5_Config: EnvironmentDefinition = buildBaseEnvironmentDefinition(
     numParticipants = 1,
     numSequencers = 5,
     numMediators = 5,

@@ -120,7 +120,8 @@ sealed trait ParticipantSimulatorIntegrationTest
 
     // allocate parties hosted with different observing participants
     val partyIds = (1 to numParties).zip(observerGroups).map { case (partyIndex, observers) =>
-      val partyId = PartyId.tryCreate(s"party-$partyIndex", participant1.namespace)
+      val partyId = PartyId
+        .tryCreate(s"party-${this.getClass.getSimpleName}-$partyIndex", participant1.namespace)
       Seq[InstanceReference](participant1, sequencer1).foreach(
         _.topology.party_to_participant_mappings.propose(
           partyId,

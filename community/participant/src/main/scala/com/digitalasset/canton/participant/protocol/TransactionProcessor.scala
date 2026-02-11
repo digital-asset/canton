@@ -118,6 +118,7 @@ class TransactionProcessor(
         loggerFactory,
         futureSupervisor,
         messagePayloadLoggingEnabled,
+        ephemeral.ledgerApiIndexer.onlyForTestingTransactionInMemoryStore,
       ),
       inFlightSubmissionSynchronizerTracker,
       ephemeral,
