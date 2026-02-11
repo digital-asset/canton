@@ -29,6 +29,7 @@ pkgs.mkShell {
     go
     go-jsonnet
     google-cloud-sdk
+    grpcurl
     haproxy
     jo
     jq

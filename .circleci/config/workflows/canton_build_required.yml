@@ -110,6 +110,7 @@ jobs:
           ignore:
             - main
             - /^release-line.*/
+            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches as they don't have a PR associated
         tags:
           only: /^v.*/
   - static_tests:

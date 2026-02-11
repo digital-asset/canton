@@ -240,22 +240,19 @@ object Update {
         statistics: TransactionNodeStatistics,
         noOfNodes: Int,
         noOfRootNodes: Int,
-        // This needs to be removed in an upcoming refactor
-        transactionForTesting: CommittedTransaction,
     )
     object TransactionInfo {
       def apply(transaction: CommittedTransaction): TransactionInfo = TransactionInfo(
-        Blinding.blind(transaction),
-        TransactionTraversalUtils
+        blindingInfo = Blinding.blind(transaction),
+        executionOrder = TransactionTraversalUtils
           .executionOrderTraversalForIngestion(transaction.transaction)
           .toVector,
-        TransactionNodeStatistics(
+        statistics = TransactionNodeStatistics(
           transaction,
           Set.empty[Ref.PackageId],
         ),
-        transaction.nodes.size,
-        transaction.roots.length,
-        transaction,
+        noOfNodes = transaction.nodes.size,
+        noOfRootNodes = transaction.roots.length,
       )
     }
   }

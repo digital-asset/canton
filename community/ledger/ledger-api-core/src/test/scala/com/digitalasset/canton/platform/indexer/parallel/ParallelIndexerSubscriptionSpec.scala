@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.indexer.parallel
 
-import com.daml.executors.executors.{NamedExecutor, QueueAwareExecutor}
 import com.daml.metrics.DatabaseMetrics
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
 import com.digitalasset.canton.ledger.participant.state
@@ -261,13 +260,6 @@ class ParallelIndexerSubscriptionSpec
         loggingContext: LoggingContextWithTrace
     ): Future[T] =
       Future.successful(sql(connection))
-
-    override val executor: Option[QueueAwareExecutor & NamedExecutor] = Some(
-      new QueueAwareExecutor with NamedExecutor {
-        override def queueSize: Long = 0
-        override def name: String = "test"
-      }
-    )
 
     override def executeSqlUS[T](databaseMetrics: DatabaseMetrics)(
         sql: Connection => T

@@ -30,9 +30,9 @@ import com.digitalasset.canton.health.{
   HealthComponent,
   HealthQuasiComponent,
 }
-import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.lifecycle.LifeCycle.toCloseableOption
 import com.digitalasset.canton.lifecycle.UnlessShutdown.{AbortedDueToShutdown, Outcome}
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, *}
 import com.digitalasset.canton.logging.pretty.{CantonPrettyPrinter, Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
@@ -923,27 +923,47 @@ abstract class SequencerClientImpl(
       }
     }
 
+    def ack(
+        request: AcknowledgeRequest,
+        approximateSnapshot: SyncCryptoApi,
+    ): EitherT[FutureUnlessShutdown, String, Boolean] = for {
+      signedRequest <- requestSigner.signRequest(
+        request,
+        HashPurpose.AcknowledgementSignature,
+        approximateSnapshot,
+        Some(clock.now),
+      )
+      ackRes <-
+        if (config.useNewConnectionPool) {
+          acknowledgeWithConnectionPool(signedRequest)
+        } else {
+          sequencersTransportState.transport.acknowledgeSigned(signedRequest)
+        }
+    } yield ackRes
+
     if (LogicalUpgradeTime.canProcessKnowingPredecessor(synchronizerPredecessor, timestamp)) {
       val request = AcknowledgeRequest(member, timestamp, protocolVersion)
       for {
         approximateSnapshot <- EitherT.liftF(syncCryptoClient.currentSnapshotApproximation)
-        signedRequest <- requestSigner.signRequest(
-          request,
-          HashPurpose.AcknowledgementSignature,
-          approximateSnapshot,
-          Some(clock.now),
-        )
+        successor <- EitherT
+          .liftF(approximateSnapshot.ipsSnapshot.synchronizerUpgradeOngoing())
+          .map(_.map { case (successor, _) => successor })
+
         result <-
-          if (config.useNewConnectionPool) {
-            acknowledgeWithConnectionPool(signedRequest)
-          } else {
-            sequencersTransportState.transport.acknowledgeSigned(signedRequest)
+          if (LogicalUpgradeTime.canProcessKnowingSuccessor(successor, timestamp))
+            ack(request, approximateSnapshot)
+          else {
+            logger.debug(
+              s"Not acknowledging timestamp $timestamp past the upgrade time of the successor " +
+                s"synchronizer ${successor.map(_.upgradeTime)}."
+            )
+            EitherT.rightT[FutureUnlessShutdown, String](true)
           }
       } yield result
     } else {
       logger.debug(
-        s"Not acknowledging timestamp $timestamp which is before upgrade time ${synchronizerPredecessor
-            .map(_.upgradeTime)}"
+        s"Not acknowledging timestamp $timestamp which is before the upgrade time of the predecessor " +
+          s"synchronizer ${synchronizerPredecessor.map(_.upgradeTime)}."
       )
       EitherT.pure(true)
     }

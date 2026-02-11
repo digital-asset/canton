@@ -50,7 +50,7 @@ run_sbt_command_on_machine:
             --env CANTON_PROTOCOL_VERSION \
             --security-opt seccomp=unconfined \
             << parameters.additional_docker_args >> \
-            digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1f605a2d34fa \
+            digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25 \
             nix-shell \
             -I nixpkgs=./nix/nixpkgs.nix \
             --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '

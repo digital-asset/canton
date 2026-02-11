@@ -11,7 +11,6 @@ import com.daml.metrics.ExecutorServiceMetrics.{
   ThreadPoolMetricsName,
   TypeLabelKey,
 }
-import com.daml.metrics.InstrumentedExecutorServiceMetrics.InstrumentedExecutorService
 import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
 import com.daml.metrics.api.{MetricInfo, MetricName, MetricQualification, MetricsContext}
 import org.slf4j.LoggerFactory
@@ -29,7 +28,6 @@ import java.util.concurrent.{
 class ExecutorServiceMetrics(factory: LabeledMetricsFactory) {
 
   private val logger = LoggerFactory.getLogger(getClass)
-  private val instrumentedExecutorServiceMetrics = new InstrumentedExecutorServiceMetrics(factory)
 
   def monitorExecutorService(
       name: String,
@@ -45,19 +43,13 @@ class ExecutorServiceMetrics(factory: LabeledMetricsFactory) {
         MetricsContext.withMetricLabels(NameLabelKey -> name, TypeLabelKey -> "fork_join") {
           implicit mc =>
             val monitoringHandle = monitorForkJoin(forkJoinPool)
-            val instrumentedExecutor =
-              new InstrumentedExecutorService(forkJoinPool, instrumentedExecutorServiceMetrics)
-            new ExecutorServiceWithCleanup(instrumentedExecutor, monitoringHandle)
+            new ExecutorServiceWithCleanup(forkJoinPool, monitoringHandle)
         }
       case threadPoolExecutor: ThreadPoolExecutor =>
         MetricsContext.withMetricLabels(NameLabelKey -> name, TypeLabelKey -> "thread_pool") {
           implicit mc =>
             val monitoringHandle = monitorThreadPool(threadPoolExecutor)
-            val instrumentedExecutor = new InstrumentedExecutorService(
-              threadPoolExecutor,
-              instrumentedExecutorServiceMetrics,
-            )
-            new ExecutorServiceWithCleanup(instrumentedExecutor, monitoringHandle)
+            new ExecutorServiceWithCleanup(threadPoolExecutor, monitoringHandle)
         }
       case other =>
         logger.warn(

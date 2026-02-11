@@ -37,7 +37,7 @@ import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.annotation.tailrec
 import scala.collection.concurrent.TrieMap
 import scala.collection.immutable.SortedSet
-import scala.collection.mutable
+import scala.collection.{immutable, mutable}
 import scala.concurrent.{ExecutionContext, blocking}
 
 class InMemoryAcsCommitmentStore(
@@ -122,7 +122,7 @@ class InMemoryAcsCommitmentStore(
   }
 
   override def markOutstanding(
-      periods: NonEmpty[Set[CommitmentPeriod]],
+      periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
       counterParticipants: NonEmpty[Set[ParticipantId]],
   )(implicit
       traceContext: TraceContext
@@ -163,13 +163,15 @@ class InMemoryAcsCommitmentStore(
 
   override def markPeriod(
       counterParticipant: ParticipantId,
-      periods: NonEmpty[Set[CommitmentPeriod]],
+      periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
       matchingState: CommitmentPeriodState,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
+    val periodSets = periods.toSet
     _outstanding.updateAndGet { currentOutstanding =>
       currentOutstanding.map {
         case (currentPeriod, currentCounterParticipant, currentState, multiHostedCleared)
-            if periods.contains(currentPeriod) && currentCounterParticipant == counterParticipant =>
+            if periodSets.contains(currentPeriod) &&
+              currentCounterParticipant == counterParticipant =>
           (
             currentPeriod,
             currentCounterParticipant,

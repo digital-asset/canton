@@ -5,7 +5,6 @@ package com.digitalasset.canton.participant.ledger.api
 
 import cats.Eval
 import com.daml.executors.InstrumentedExecutors
-import com.daml.executors.executors.{NamedExecutor, QueueAwareExecutor}
 import com.daml.ledger.api.v2.experimental_features.ExperimentalCommandInspectionService
 import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction
@@ -63,10 +62,7 @@ import com.digitalasset.canton.participant.{
   ParticipantNodeParameters,
 }
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
-import com.digitalasset.canton.platform.apiserver.ratelimiting.{
-  RateLimitingInterceptorFactory,
-  ThreadpoolCheck,
-}
+import com.digitalasset.canton.platform.apiserver.ratelimiting.RateLimitingInterceptorFactory
 import com.digitalasset.canton.platform.apiserver.services.ApiContractService
 import com.digitalasset.canton.platform.apiserver.services.admin.Utils
 import com.digitalasset.canton.platform.apiserver.{
@@ -393,7 +389,7 @@ class LedgerApiServer(
         metrics = grpcApiMetrics,
         timeServiceBackend = testingTimeService,
         otherServices = Seq(apiInfoService),
-        otherInterceptors = getInterceptors(dbSupport.dbDispatcher.executor),
+        otherInterceptors = getInterceptors,
         engine = engine,
         queryExecutionContext = queryExecutionContext,
         commandExecutionContext = executionContext,
@@ -485,9 +481,7 @@ class LedgerApiServer(
       }
   }
 
-  private def getInterceptors(
-      indexDbExecutor: Option[QueueAwareExecutor & NamedExecutor]
-  ): List[ServerInterceptor] = List(
+  private def getInterceptors: List[ServerInterceptor] = List(
     new GrpcRequestLoggingInterceptor(
       loggerFactory,
       cantonParameterConfig.loggingConfig.api,
@@ -501,21 +495,6 @@ class LedgerApiServer(
       RateLimitingInterceptorFactory.create(
         loggerFactory = loggerFactory,
         config = rateLimit,
-        additionalChecks = List(
-          ThreadpoolCheck(
-            name = "Environment Execution Threadpool",
-            limit = rateLimit.maxApiServicesQueueSize,
-            queue = executionContext,
-            loggerFactory = loggerFactory,
-          )
-        ) ++ indexDbExecutor.map(executor =>
-          ThreadpoolCheck(
-            name = "Index DB Threadpool",
-            limit = rateLimit.maxApiServicesIndexDbQueueSize,
-            queue = executor,
-            loggerFactory = loggerFactory,
-          )
-        ),
       )
     )
     .toList) ::: (serverConfig.limits

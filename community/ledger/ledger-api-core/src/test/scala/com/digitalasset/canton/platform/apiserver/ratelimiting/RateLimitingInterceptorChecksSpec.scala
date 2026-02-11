@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.platform.apiserver.ratelimiting
 
-import com.daml.executors.executors.{NamedExecutor, QueueAwareExecutor}
 import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.metrics.api.{MetricInfo, MetricQualification, MetricsContext}
@@ -65,41 +64,7 @@ final class RateLimitingInterceptorChecksSpec
 
   behavior of "RateLimitingInterceptor"
 
-  it should "support additional checks" in {
-    val executorWithQueueSize = new QueueAwareExecutor with NamedExecutor {
-      private val queueSizeValues =
-        Iterator(0L, config.maxApiServicesQueueSize.toLong + 1, 0L)
-      override def queueSize: Long = queueSizeValues.next()
-      override def name: String = "test"
-    }
-    val threadPoolHumanReadableName = "For testing"
-    withChannel(
-      metrics,
-      new HelloServiceReferenceImplementation,
-      config,
-      loggerFactory,
-      additionalChecks = List(
-        ThreadpoolCheck(
-          threadPoolHumanReadableName,
-          executorWithQueueSize,
-          config.maxApiServicesQueueSize,
-          loggerFactory,
-        )
-      ),
-    ).use { channel =>
-      val helloService = protobuf.HelloServiceGrpc.stub(channel)
-      for {
-        _ <- helloService.hello(protobuf.Hello.Request("one"))
-        exception <- helloService.hello(protobuf.Hello.Request("two")).failed
-        _ <- helloService.hello(protobuf.Hello.Request("three"))
-      } yield {
-        exception.toString should include(threadPoolHumanReadableName)
-      }
-    }
-  }
-
   /** Allowing metadata requests allows grpcurl to be used to debug problems */
-
   it should "allow metadata requests even when over limit" in {
     metrics.openTelemetryMetricsFactory
       .meter(

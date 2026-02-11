@@ -440,6 +440,8 @@ class SequencerRuntime(
       topologyClient,
       timeTracker,
       staticSynchronizerParameters,
+      authenticationServices.memberAuthenticationService,
+      localNodeParameters,
       loggerFactory,
     )
 

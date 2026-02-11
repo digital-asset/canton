@@ -140,10 +140,8 @@ trait PartyTopologyUtils extends LoneElement with OptionValues {
           * @param node
           *   node through which to submit the update. For local parties, this must be the node that
           *   shares the party's namespace
-          * @param synchronizerId
-          *   synchronizerId on which to update the topology
-          * @param updater
-          *   function to update the PTP
+          * @param store
+          *   store on which to update the topology
           */
         @VisibleForTesting
         private[canton] def propose_delta(

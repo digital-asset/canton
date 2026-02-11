@@ -10,6 +10,7 @@ import com.digitalasset.canton.config
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{
+  FeatureFlag,
   HeadlessConsole,
   InstanceReference,
   SplitBufferedProcessLogger,
@@ -527,6 +528,24 @@ class ExternalMultiHostedPartyOnboardingDocsIntegrationTest
   override def afterAll(): Unit = {
     super.afterAll()
     File("external_party_onboarding_multi_hosted.json").delete(swallowIOExceptions = true)
+  }
+}
+
+class SynchronizerTroubleshootDocsIntegrationTest
+    extends SnippetGenerator(
+      File(
+        "docs-open/src/sphinx/synchronizer/howtos/troubleshoot/index.rst"
+      ),
+      File(
+        "community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"
+      ),
+    ) {
+  override def makeEnvironment: EnvironmentDefinition = super.makeEnvironment
+    .addConfigTransform(ConfigTransforms.enableAdvancedCommands(FeatureFlag.Testing))
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    File("/tmp/troubleshoot/auth_token").delete(swallowIOExceptions = true)
   }
 }
 

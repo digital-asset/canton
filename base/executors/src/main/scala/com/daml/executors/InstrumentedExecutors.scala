@@ -3,7 +3,7 @@
 
 package com.daml.executors
 
-import com.daml.executors.executors.QueueAwareExecutionContextExecutorService
+import com.daml.executors.executors.NamedExecutionContextExecutorService
 
 import java.util.concurrent.{Executors as JavaExecutors, ThreadFactory}
 import scala.concurrent.ExecutionContext
@@ -14,9 +14,9 @@ object InstrumentedExecutors {
       name: String,
       parallelism: Int,
       errorReporter: Throwable => Unit = ExecutionContext.defaultReporter,
-  ): QueueAwareExecutionContextExecutorService = {
+  ): NamedExecutionContextExecutorService = {
     val executorService = JavaExecutors.newWorkStealingPool(parallelism)
-    new QueueAwareExecutionContextExecutorService(
+    new NamedExecutionContextExecutorService(
       executorService,
       name,
       errorReporter,
@@ -27,9 +27,9 @@ object InstrumentedExecutors {
       name: String,
       nThreads: Int,
       errorReporter: Throwable => Unit = ExecutionContext.defaultReporter,
-  ): QueueAwareExecutionContextExecutorService = {
+  ): NamedExecutionContextExecutorService = {
     val executorService = JavaExecutors.newFixedThreadPool(nThreads)
-    new QueueAwareExecutionContextExecutorService(
+    new NamedExecutionContextExecutorService(
       executorService,
       name,
       errorReporter,
@@ -41,9 +41,9 @@ object InstrumentedExecutors {
       nThreads: Int,
       threadFactory: ThreadFactory,
       errorReporter: Throwable => Unit = ExecutionContext.defaultReporter,
-  ): QueueAwareExecutionContextExecutorService = {
+  ): NamedExecutionContextExecutorService = {
     val executorService = JavaExecutors.newFixedThreadPool(nThreads, threadFactory)
-    new QueueAwareExecutionContextExecutorService(
+    new NamedExecutionContextExecutorService(
       executorService,
       name,
       errorReporter,
@@ -54,9 +54,9 @@ object InstrumentedExecutors {
       name: String,
       threadFactory: ThreadFactory,
       errorReporter: Throwable => Unit = ExecutionContext.defaultReporter,
-  ): QueueAwareExecutionContextExecutorService = {
+  ): NamedExecutionContextExecutorService = {
     val executorService = JavaExecutors.newCachedThreadPool(threadFactory)
-    new QueueAwareExecutionContextExecutorService(
+    new NamedExecutionContextExecutorService(
       executorService,
       name,
       errorReporter,

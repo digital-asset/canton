@@ -71,15 +71,17 @@ trait LsuBase
     *   - Set reconciliation interval to 1s
     */
   protected def defaultEnvironmentSetup(
-      participantsOverride: Option[Seq[ParticipantReference]] = None
+      participantsOverride: Option[Seq[ParticipantReference]] = None,
+      connectParticipants: Boolean = true,
   )(implicit env: TestConsoleEnvironment): Unit = {
     import env.{participants as _, *}
 
-    val participants = participantsOverride.getOrElse(env.participants.all)
+    if (connectParticipants) {
+      val participants = participantsOverride.getOrElse(env.participants.all)
 
-    participants.synchronizers.connect(defaultSynchronizerConnectionConfig())
-
-    participants.dars.upload(CantonExamplesPath)
+      participants.synchronizers.connect(defaultSynchronizerConnectionConfig())
+      participants.dars.upload(CantonExamplesPath)
+    }
 
     synchronizerOwners1.foreach(
       _.topology.synchronizer_parameters.propose_update(
@@ -88,8 +90,10 @@ trait LsuBase
       )
     )
 
-    oldSynchronizerNodes = SynchronizerNodes(Seq(sequencer1), Seq(mediator1))
-    newSynchronizerNodes = SynchronizerNodes(Seq(sequencer2), Seq(mediator2))
+    oldSynchronizerNodes =
+      SynchronizerNodes(newOldSequencers.values.toSeq.map(ls), newOldMediators.values.toSeq.map(lm))
+    newSynchronizerNodes =
+      SynchronizerNodes(newOldSequencers.keySet.toSeq.map(ls), newOldMediators.keySet.toSeq.map(lm))
   }
 
   protected def defaultSynchronizerConnectionConfig()(implicit

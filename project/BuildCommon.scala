@@ -10,7 +10,7 @@ import org.latestbit.sbt.gcs.GcsPlugin.autoImport.*
 import org.scalafmt.sbt.ScalafmtPlugin
 import pl.project13.scala.sbt.JmhPlugin
 import pl.project13.scala.sbt.JmhPlugin.JmhKeys.Jmh
-import sbt.Keys.*
+import sbt.Keys.{update, *}
 import sbt.Tests.{Group, SubProcess}
 import sbt.{File, *}
 import sbt.internal.util.ManagedLogger

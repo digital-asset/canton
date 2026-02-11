@@ -14,6 +14,7 @@ CODEOWNERS @DACH-NY/canton-change-owners
 /.ci/             @DACH-NY/canton-change-owners
 /scripts/ci/      @DACH-NY/canton-change-owners
 /release/         @DACH-NY/canton-change-owners
+/.github/         @DACH-NY/canton-change-owners
 
 # changes to the nix setup
 /nix/             @DACH-NY/canton-change-owners
@@ -23,7 +24,7 @@ CODEOWNERS @DACH-NY/canton-change-owners
 /project/          @DACH-NY/canton-change-owners
 /project/project/DamlVersions.scala # No group because we don't want to protect that file
 /build.sbt         @DACH-NY/canton-change-owners
-/daml_dependencies.json @DACH-NY/canton-change-owners
+/shared_dependencies.json @DACH-NY/canton-change-owners
 
 # Triggering a recompile on a branch does not require change owners approval
 /.circleci/branches_to_be_fully_recompiled_in_ci.txt

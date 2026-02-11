@@ -176,6 +176,13 @@ for exclude in "scripts/planning.sc"; do
   run "Excluding $exclude" $_GIT rm -rf $exclude
 done
 
+# TODO(i30741): Enable scheduled workflows again
+for exclude in ".circleci/config/workflows/canton_nightly.yml" ".circleci/config/workflows/docs_replication_on_schedule.yml" ".circleci/config/workflows/canton_dependencies_update.yml"; do
+  run "Excluding $exclude" $_GIT rm -rf $exclude
+done
+# Need to rebuild the circleci config after those removals
+run "Rebuild CCI config" ./.circleci/build-config.sh
+$_GIT add .circleci/config.yml
 
 # Test canton-community using unit tests
 test_canton_community() {

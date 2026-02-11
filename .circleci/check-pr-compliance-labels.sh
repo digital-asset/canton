@@ -4,7 +4,7 @@ set -euo pipefail
 
 REPO="DACH-NY/canton"
 LABELS=( "Standard-Change" )
-COMPLIANCE_PATH_PREFIXES=( ".ci" "release" "deployment" "scripts/ci" "Dockerfile" "nix" "shell.nix" "project" "build.sbt" "dependencies.json" ) # See <root>/CODEOWNERS
+COMPLIANCE_PATH_PREFIXES=( ".ci" ".github" "release" "deployment" "scripts/ci" "nix" "shell.nix" "project" "build.sbt" "shared_dependencies.json" ) # See <root>/CODEOWNERS
 PULL_NUMBER=$((echo "${CIRCLE_PULL_REQUEST-}" | grep -o -E '[0-9]+$') || true)
 
 # compares the candidate trunk branches with the current commit using `git diff` and picks the least different one
