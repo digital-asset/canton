@@ -16,7 +16,6 @@ import com.digitalasset.canton.integration.plugins.{
   UseProgrammableSequencer,
 }
 import com.digitalasset.canton.integration.util.EntitySyntax
-import com.digitalasset.canton.ledger.participant.state.SequencerIndex
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.sequencing.protocol.{DeliverError, MemberRecipient, TimeProof}
 import com.digitalasset.canton.store.SequencedEventStore.{LatestUpto, OrdinarySequencedEvent}
@@ -284,8 +283,7 @@ trait RepairSynchronizerRecoveryIntegrationTest
                 logger.debug(s"Rewinding to event ${signedEvent.content}")
               }
               // as after MDEL-Indexer fusion the SequencerIndex cannot go further than the earliest dirty RequestIndex, it is expected that we are already at the same SequencerIndex
-              val expectedSequencerIndex =
-                SequencerIndex(deliverErrorP1.timestamp)
+              val expectedSequencerIndex = deliverErrorP1.timestamp
               val synchronizerIndex = participant1.testing.state_inspection
                 .lookupCleanSynchronizerIndex(daName)
                 .value

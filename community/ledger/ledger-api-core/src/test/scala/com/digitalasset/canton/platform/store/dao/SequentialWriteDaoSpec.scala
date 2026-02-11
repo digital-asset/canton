@@ -242,6 +242,25 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
 
     override def postProcessingEnd(connection: Connection): Option[Offset] =
       throw new UnsupportedOperationException
+
+    override def fetchACHSState(connection: Connection): Option[ParameterStorageBackend.ACHSState] =
+      throw new UnsupportedOperationException
+
+    override def insertACHSState(achsState: ParameterStorageBackend.ACHSState)(
+        connection: Connection
+    ): Unit = throw new UnsupportedOperationException
+
+    override def updateACHSValidAt(validAt: Long)(connection: Connection): Unit =
+      throw new UnsupportedOperationException
+
+    override def updateACHSLastPointers(lastRemoved: Long, lastPopulated: Long)(
+        connection: Connection
+    ): Unit =
+      throw new UnsupportedOperationException
+
+    override def clearACHSState(connection: Connection): Unit =
+      throw new UnsupportedOperationException
+
   }
 }
 

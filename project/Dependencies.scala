@@ -148,7 +148,7 @@ object Dependencies {
 
   lazy val google_findbugs = resolveDependency("com.google.code.findbugs", "jsr305")
   lazy val reactivestreams = resolveDependency("org.reactivestreams", "reactive-streams")
-  lazy val spray_json = resolveDependency("io.spray", "spray-json_2.13")
+  lazy val spray_json = resolveDependency("io.spray", "spray-json")
 
   lazy val grpc_protobuf = "io.grpc" % "grpc-protobuf" % grpc_version
 
@@ -202,10 +202,10 @@ object Dependencies {
   lazy val scalatestMockito = "org.scalatestplus" %% "mockito-3-4" % ("3.2.10.0")
 
   lazy val scalatest_compatible = resolveDependency("org.scalatest", "scalatest-compatible")
-  lazy val scalatest_wordspec = resolveDependency("org.scalatest", "scalatest-wordspec_2.13")
-  lazy val scalatest_flatspec = resolveDependency("org.scalatest", "scalatest-flatspec_2.13")
+  lazy val scalatest_wordspec = resolveDependency("org.scalatest", "scalatest-wordspec")
+  lazy val scalatest_flatspec = resolveDependency("org.scalatest", "scalatest-flatspec")
   lazy val scalatest_shouldmatchers =
-    resolveDependency("org.scalatest", "scalatest-shouldmatchers_2.13")
+    resolveDependency("org.scalatest", "scalatest-shouldmatchers")
 
   lazy val scalactic = resolveDependency("org.scalactic", "scalactic")
 
@@ -222,6 +222,7 @@ object Dependencies {
   lazy val scaffeine = "com.github.blemale" %% "scaffeine" % scaffeine_version
 
   lazy val slf4j_api = "org.slf4j" % "slf4j-api" % slf4j_version
+  lazy val slf4j_nop = "org.slf4j" % "slf4j-nop" % slf4j_version
   lazy val jul_to_slf4j = "org.slf4j" % "jul-to-slf4j" % slf4j_version
   lazy val logback_classic = "ch.qos.logback" % "logback-classic" % logback_version
 
@@ -414,13 +415,13 @@ object Dependencies {
     import io.circe.*, io.circe.parser.*, io.circe.generic.auto.*, io.circe.syntax.*
     import better.files.*
 
-    lazy val damlDependencyMap = {
+    lazy val sharedDependencyMap = {
       // This map is build from `maven_install_2.13.json` which is copied from the SDK repo
       import io.circe._, io.circe.parser._, io.circe.generic.auto._, io.circe.syntax._
       import better.files._
 
       val deps = decode[Map[String, String]](
-        file"daml_dependencies.json".contentAsString
+        file"shared_dependencies.json".contentAsString
       ).valueOr { err =>
         throw new RuntimeException(s"Failed to parse daml repo maven json file: $err")
       }
@@ -436,15 +437,13 @@ object Dependencies {
     }
 
     def apply(organization: String, artifact: String): ModuleID =
-      damlDependencyMap
+      sharedDependencyMap
         .get(organization -> artifact)
-        .orElse(damlDependencyMap.get(organization -> s"${artifact}_2.13"))
+        .orElse(sharedDependencyMap.get(organization -> s"${artifact}_2.13"))
         .getOrElse(
           throw new RuntimeException(s"Unknown dependency: $organization, $artifact")
         )
   }
-
-  lazy val daml_script_runner = "com.daml" %% "daml-script-runner" % daml_libraries_version
 
   lazy val jline = resolveDependency("org.jline", "jline")
 
@@ -469,5 +468,6 @@ object Dependencies {
 
   lazy val scalameter = resolveDependency("com.storm-enroute", "scalameter")
 
-  lazy val jol_core = resolveDependency("org.openjdk.jol", "jol-core")
+  lazy val jol_core = "org.openjdk.jol" % "jol-core" % "0.17"
+
 }

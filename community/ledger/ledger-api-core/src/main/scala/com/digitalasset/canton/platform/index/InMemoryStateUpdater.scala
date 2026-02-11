@@ -20,7 +20,6 @@ import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTrack
 import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater.{PrepareResult, UpdaterFlow}
-import com.digitalasset.canton.platform.indexer.TransactionTraversalUtils
 import com.digitalasset.canton.platform.indexer.TransactionTraversalUtils.NodeInfo
 import com.digitalasset.canton.platform.store.CompletionFromTransaction
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
@@ -418,14 +417,9 @@ private[platform] object InMemoryStateUpdater {
       offset: Offset,
       txAccepted: Update.TransactionAccepted,
   ): TransactionLogUpdate.TransactionAccepted = {
-    val rawEvents =
-      TransactionTraversalUtils.executionOrderTraversalForIngestion(
-        txAccepted.transaction.transaction
-      )
+    val blinding = txAccepted.transactionInfo.blindingInfo
 
-    val blinding = txAccepted.blindingInfo
-
-    val events = rawEvents.collect {
+    val events = txAccepted.transactionInfo.executionOrder.collect {
       case NodeInfo(nodeId, create: Create, _) =>
         val contractId = create.coid
         val contractInfo = txAccepted.contractInfos.getOrElse(

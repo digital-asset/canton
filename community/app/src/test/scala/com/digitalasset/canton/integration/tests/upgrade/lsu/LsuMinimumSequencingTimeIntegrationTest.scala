@@ -7,8 +7,8 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
-import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils
 import com.digitalasset.canton.integration.util.EntitySyntax
+import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.networking.grpc.GrpcError.GrpcRequestRefusedByServer
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.RequestRefused

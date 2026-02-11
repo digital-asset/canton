@@ -319,7 +319,7 @@ object FirstUnsafeOffsetComputation {
         safeCommitmentTick -> "ACS background reconciliation",
       ) ++ synchronizerIndex
         .flatMap(_.sequencerIndex)
-        .map(_.sequencerTimestamp -> "Synchronizer index crash recovery")
+        .map(_ -> "Synchronizer index crash recovery")
         ++ earliestInFlight.map(_ -> "inFlightSubmissionTs")
 
       _ = errorLoggingContext.debug(

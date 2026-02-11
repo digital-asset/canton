@@ -807,21 +807,24 @@ class SequencerReader(
                 .map(_.ipsSnapshot)
             )(FutureUnlessShutdown.pure)
             resolvedGroupAddresses <- {
-              groupRecipients match {
-                case x if x.isEmpty =>
-                  // an optimization in case there are no group addresses
-                  FutureUnlessShutdown.pure(Map.empty[GroupRecipient, Set[Member]])
-                case x if x.sizeCompare(1) == 0 && x.contains(AllMembersOfSynchronizer) =>
+              val resolvedMember =
+                if (groupRecipients.contains(AllMembersOfSynchronizer)) {
                   // an optimization to avoid group address resolution on topology txs
-                  FutureUnlessShutdown.pure(
-                    Map[GroupRecipient, Set[Member]](AllMembersOfSynchronizer -> Set(member))
-                  )
-                case _ =>
-                  GroupAddressResolver.resolveGroupsToMembers(
+                  Map(AllMembersOfSynchronizer -> Set(member))
+                } else Map.empty
+
+              val otherGroupsToMembers =
+                // An optimization to resolve others only when necessary
+                if (groupRecipients.exists(_ != AllMembersOfSynchronizer)) {
+                  GroupAddressResolver.resolveMediatorGroupsAndSequencerToMembers(
                     groupRecipients,
                     topologySnapshot,
                   )
-              }
+                } else {
+                  FutureUnlessShutdown.pure(Map.empty[GroupRecipient, Set[Member]])
+                }
+
+              otherGroupsToMembers.map(_ ++ resolvedMember)
             }
             _ <- synchronizerUpgradeO.fold(FutureUnlessShutdown.unit)(
               _.computeAndCacheTimeOffset(syncCryptoApi, timestamp)

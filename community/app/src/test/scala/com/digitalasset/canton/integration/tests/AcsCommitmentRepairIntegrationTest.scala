@@ -174,6 +174,7 @@ trait AcsCommitmentRepairIntegrationTest
 
       // Deploy three contracts. P1 and P2 exchange commitments
       createContractsAndCheck(sequencer1, daId)
+      createContractsAndCheck(sequencer2, acmeId)
 
       // P1 reinitializes commitments on da and acme. We should see the reinit in the DB, but no errors or warnings
       // in particular regarding inconsistencies or commitment mismatches.

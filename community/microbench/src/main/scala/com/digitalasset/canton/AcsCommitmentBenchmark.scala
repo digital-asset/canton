@@ -474,6 +474,7 @@ class AcsCommitmentBenchmark
       new SimClock(loggerFactory = loggerFactory),
       exitOnFatalFailures = true,
       BatchingConfig(),
+      asynchronousInitialization = false,
       // do not delay sending commitments for testing, because tests often expect to see commitments after an interval
       Some(CommitmentSendDelay(Some(NonNegativeProportion.zero), Some(NonNegativeProportion.zero))),
       doNotAwaitOnCheckingIncomingCommitments = false,

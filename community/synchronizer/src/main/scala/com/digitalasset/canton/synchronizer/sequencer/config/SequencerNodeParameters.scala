@@ -36,7 +36,7 @@ trait SequencerParameters {
   *   Whether the sequencer writes are async or sync
   * @param timeAdvancingTopology
   *   How the sequencer should send time advancing broadcasts after topology transactions
-  * @param unsafeEnableOnlinePartyReplication
+  * @param unsafeSequencerChannelSupport
   *   Whether to enable online party replication sequencer channels. Unsafe as still under
   *   development.
   * @param requestLimits
@@ -53,7 +53,7 @@ final case class SequencerNodeParameters(
     sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
     asyncWriter: AsyncWriterParameters,
     timeAdvancingTopology: TimeAdvancingTopologyConfig,
-    unsafeEnableOnlinePartyReplication: Boolean = false,
+    unsafeSequencerChannelSupport: Boolean = false,
     sequencerApiLimits: Map[String, NonNegativeInt] = Map.empty,
     warnOnUndefinedLimits: Boolean = true,
     requestLimits: Option[ActiveRequestLimitsConfig] = None,

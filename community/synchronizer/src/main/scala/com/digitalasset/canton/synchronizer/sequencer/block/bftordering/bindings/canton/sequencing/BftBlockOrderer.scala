@@ -273,7 +273,14 @@ final class BftBlockOrderer(
 
   private val p2pEndpointsStore = setupP2PEndpointsStore(localStorage)
   private val availabilityStore =
-    AvailabilityStore(config.batchAggregator, localStorage, timeouts, loggerFactory)
+    AvailabilityStore(
+      config.batchAggregator,
+      nodeParameters.cachingConfigs,
+      metrics,
+      localStorage,
+      timeouts,
+      loggerFactory,
+    )
   private val epochStore = EpochStore(config.batchAggregator, localStorage, timeouts, loggerFactory)
   private val outputStore = OutputMetadataStore(localStorage, timeouts, loggerFactory)
   private val pruningSchedulerStore =

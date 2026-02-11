@@ -443,12 +443,15 @@ final case class CantonConfig(
         disableUpgradeValidation = participantParameters.disableUpgradeValidation,
         enableStrictDarValidation = participantParameters.enableStrictDarValidation,
         commandProgressTracking = participantParameters.commandProgressTracker,
-        unsafeOnlinePartyReplication = participantParameters.unsafeOnlinePartyReplication,
+        alphaOnlinePartyReplicationSupport =
+          participantParameters.alphaOnlinePartyReplicationSupport,
         automaticallyPerformLsu = participantParameters.automaticallyPerformLsu,
         reassignmentsConfig = participantParameters.reassignmentsConfig,
         doNotAwaitOnCheckingIncomingCommitments =
           participantParameters.doNotAwaitOnCheckingIncomingCommitments,
         disableOptionalTopologyChecks = participantConfig.topology.disableOptionalTopologyChecks,
+        commitmentAsynchronousInitialization =
+          participantParameters.commitmentAsynchronousInitialization,
         commitmentCheckpointInterval = participantParameters.commitmentCheckpointInterval,
         commitmentMismatchDebugging = participantParameters.commitmentMismatchDebugging,
         commitmentProcessorNrAcsChangesBehindToTriggerCatchUp =
@@ -481,8 +484,8 @@ final case class CantonConfig(
           sequencerNodeConfig.parameters.sequencingTimeLowerBoundExclusive,
         asyncWriter = sequencerNodeConfig.parameters.asyncWriter.toParameters,
         timeAdvancingTopology = sequencerNodeConfig.parameters.timeAdvancingTopology,
-        unsafeEnableOnlinePartyReplication =
-          sequencerNodeConfig.parameters.unsafeEnableOnlinePartyReplication,
+        unsafeSequencerChannelSupport =
+          sequencerNodeConfig.parameters.unsafeSequencerChannelSupport,
         requestLimits = sequencerNodeConfig.publicApi.limits,
         maxAuthTokensPerMember = sequencerNodeConfig.publicApi.maxAuthTokensPerMember,
       )
@@ -1093,11 +1096,22 @@ object CantonConfig {
 
     lazy implicit final val sequencerNodeParametersConfigReader
         : ConfigReader[SequencerNodeParameterConfig] = {
+      implicit val deprecatedFields: DeprecatedFieldsFor[SequencerNodeParameterConfig] =
+        new DeprecatedFieldsFor[SequencerNodeParameterConfig] {
+          override def movedFields: List[DeprecatedConfigUtils.MovedConfigPath] = List(
+            DeprecatedConfigUtils.MovedConfigPath(
+              "unsafe-enable-online-party-replication",
+              since = "3.5.0",
+              to = Seq("unsafe-sequencer-channel-support"),
+            )
+          )
+        }
+
       implicit val asyncWriterConfigReader: ConfigReader[AsyncWriterConfig] =
         deriveReader[AsyncWriterConfig]
       implicit val timeAdvancingTopologyConfigReader: ConfigReader[TimeAdvancingTopologyConfig] =
         deriveReader[TimeAdvancingTopologyConfig]
-      deriveReader[SequencerNodeParameterConfig]
+      deriveReader[SequencerNodeParameterConfig].applyDeprecations
     }
     lazy implicit final val SequencerHealthConfigReader: ConfigReader[SequencerHealthConfig] =
       deriveReader[SequencerHealthConfig]
@@ -1266,7 +1280,12 @@ object CantonConfig {
               "automatically-perform-logical-synchronizer-upgrade",
               since = "3.5.0",
               to = Seq("automatically-perform-lsu"),
-            )
+            ),
+            DeprecatedConfigUtils.MovedConfigPath(
+              "unsafe-online-party-replication",
+              since = "3.5.0",
+              to = Seq("alpha-online-party-replication-support"),
+            ),
           )
         }
 
@@ -1287,12 +1306,12 @@ object CantonConfig {
       implicit val packageMetadataViewConfigReader: ConfigReader[PackageMetadataViewConfig] =
         deriveReader[PackageMetadataViewConfig]
       implicit val partyReplicatorTestInterceptorReader
-          : ConfigReader[UnsafeOnlinePartyReplicationConfig.TestInterceptor] =
+          : ConfigReader[AlphaOnlinePartyReplicationConfig.TestInterceptor] =
         (_: ConfigCursor) =>
           sys.error("party replicator test interceptor cannot be created from pureconfig")
-      implicit val unsafeOnlinePartyReplicationConfig
-          : ConfigReader[UnsafeOnlinePartyReplicationConfig] =
-        deriveReader[UnsafeOnlinePartyReplicationConfig]
+      implicit val alphaOnlinePartyReplicationConfig
+          : ConfigReader[AlphaOnlinePartyReplicationConfig] =
+        deriveReader[AlphaOnlinePartyReplicationConfig]
       implicit val reassignmentsReader: ConfigReader[ReassignmentsConfig] =
         deriveReader[ReassignmentsConfig]
       deriveReader[ParticipantNodeParameterConfig].applyDeprecations
@@ -1959,11 +1978,11 @@ object CantonConfig {
       implicit val packageMetadataViewConfigWriter: ConfigWriter[PackageMetadataViewConfig] =
         deriveWriter[PackageMetadataViewConfig]
       implicit val partyReplicatorTestInterceptorWriter
-          : ConfigWriter[UnsafeOnlinePartyReplicationConfig.TestInterceptor] =
+          : ConfigWriter[AlphaOnlinePartyReplicationConfig.TestInterceptor] =
         ConfigWriter.toString(_ => "None")
-      implicit val unsafeOnlinePartyReplicationConfigWriter
-          : ConfigWriter[UnsafeOnlinePartyReplicationConfig] =
-        deriveWriter[UnsafeOnlinePartyReplicationConfig]
+      implicit val alphaOnlinePartyReplicationConfigWriter
+          : ConfigWriter[AlphaOnlinePartyReplicationConfig] =
+        deriveWriter[AlphaOnlinePartyReplicationConfig]
       implicit val reassignmentsConfigWriter: ConfigWriter[ReassignmentsConfig] =
         deriveWriter[ReassignmentsConfig]
       deriveWriter[ParticipantNodeParameterConfig]

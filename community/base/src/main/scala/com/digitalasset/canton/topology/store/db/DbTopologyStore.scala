@@ -50,7 +50,7 @@ import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.Materializer
 import org.apache.pekko.stream.scaladsl.Source
 import slick.jdbc.canton.SQLActionBuilder
-import slick.jdbc.{GetResult, TransactionIsolation}
+import slick.jdbc.{GetResult, SetParameter, TransactionIsolation}
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.ExecutionContext
@@ -87,30 +87,31 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
       case Profile.Postgres(_) => false
     }
 
-    // TODO(#29400) try out whether the array based unnesting provides another win
-    /*
+    import cats.syntax.foldable.*
     val (codes, nss, ids, validUntils) = items.foldMap { stateKeyFetch =>
       val id = stateKeyFetch.identifier.map(_.str).getOrElse("")
       (
-        Seq(stateKeyFetch.code.code),
+        Seq(stateKeyFetch.code.dbInt),
         Seq(stateKeyFetch.namespace.unwrap),
         Seq(id),
-        Seq(stateKeyFetch.validUntilCutoff.value),
+        Seq(stateKeyFetch.validUntilCutoff.value.toMicros),
       )
     }
-    sql"unnest(${codes.toArray}, ${nss.toArray}, ${ids.toArray}, ${validUntils.toArray}) criteria(tx_type, ns, ident, v_until) "
-     */
+    import DbStorage.Implicits.BuilderChain.*
 
-    val criteriaSql = {
-      val criteria = items
-        .map { stateKeyFetch =>
-          val id = stateKeyFetch.identifier.map(_.str).getOrElse("")
-          sql"(${stateKeyFetch.code}, ${stateKeyFetch.namespace}, $id, ${stateKeyFetch.validUntilCutoff.value})"
-        }
-        .intercalate(sql",")
-        .toActionBuilder
-      (sql"(VALUES" ++ criteria ++ sql") AS criteria(tx_type, ns, ident, v_until) ").toActionBuilder
-    }
+    // No idea why but without this the compiler remained unhappy
+    implicit val setParameterArrayString: SetParameter[Array[String]] =
+      com.digitalasset.canton.resource.DbStorage.Implicits.setParameterArrayString
+
+    val codesA = codes.toArray
+    val nssA = nss.toArray
+    val idsA = ids.toArray
+    val validUntilsA = validUntils.toArray
+
+    // this construct allows us to use prepared statements
+    val criteriaSql =
+      sql"unnest($codesA, $nssA, $idsA, $validUntilsA) as criteria(tx_type, ns, ident, v_until) "
+
     val query =
       sql"SELECT t.instance, t.sequenced, t.valid_from, t.valid_until, t.rejection_reason FROM " ++
         criteriaSql ++

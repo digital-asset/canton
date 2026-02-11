@@ -755,6 +755,43 @@ abstract class EventStorageBackendTemplate(
         """
       .asVectorOf(long("event_sequential_id"))(connection)
 
+  def addActivationsToACHS(
+      startExclusive: Long,
+      endInclusive: Long,
+      activeAtEventSeqId: Long,
+  )(connection: Connection): Unit =
+    SQL"""
+      INSERT INTO lapi_filter_achs_stakeholder
+      SELECT *
+      FROM lapi_filter_activate_stakeholder filters
+      WHERE
+        filters.event_sequential_id > $startExclusive
+        AND filters.event_sequential_id <= $endInclusive
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_events_deactivate_contract deactivate_evs
+          WHERE
+            filters.event_sequential_id = deactivate_evs.deactivated_event_sequential_id
+            AND deactivate_evs.event_sequential_id <= $activeAtEventSeqId
+        )
+    """.execute()(connection).discard
+
+  def removeDeactivatedFromACHS(
+      startExclusive: Long,
+      endInclusive: Long,
+  )(connection: Connection): Unit =
+    SQL"""
+      DELETE FROM lapi_filter_achs_stakeholder
+      WHERE EXISTS (
+        SELECT 1
+        FROM lapi_events_deactivate_contract deactivate_evs
+        WHERE
+          lapi_filter_achs_stakeholder.event_sequential_id = deactivate_evs.deactivated_event_sequential_id
+          AND deactivate_evs.event_sequential_id <= $endInclusive
+          AND deactivate_evs.event_sequential_id > $startExclusive
+      )
+    """.execute()(connection).discard
+
   override def firstSynchronizerOffsetAfterOrAt(
       synchronizerId: SynchronizerId,
       afterOrAtRecordTimeInclusive: Timestamp,

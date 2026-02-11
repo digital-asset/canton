@@ -12,6 +12,7 @@ import com.digitalasset.canton.environment.BaseMetrics
 import com.digitalasset.canton.logging.pretty.PrettyNameOnlyCase
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.metrics.{
+  CacheMetrics,
   DbStorageHistograms,
   DbStorageMetrics,
   DeclarativeApiMetrics,
@@ -599,6 +600,9 @@ class BftOrderingMetrics private[metrics] (
         ),
         0,
       )
+
+      val batchCache: CacheMetrics =
+        new CacheMetrics("batch-cache", openTelemetryMetricsFactory)
     }
 
     object regression {

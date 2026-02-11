@@ -25,7 +25,6 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.admin.AdminWorkflowService
 import com.digitalasset.canton.participant.admin.party.PartyReplicationAdminWorkflow.*
 import com.digitalasset.canton.participant.admin.workflows.java.canton.internal as M
-import com.digitalasset.canton.participant.config.UnsafeOnlinePartyReplicationConfig
 import com.digitalasset.canton.participant.ledger.api.client.{
   CommandResult,
   CommandSubmitterWithRetry,
@@ -33,14 +32,12 @@ import com.digitalasset.canton.participant.ledger.api.client.{
 }
 import com.digitalasset.canton.participant.sync.CantonSyncService
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{ParticipantId, PartyId, SequencerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
 import com.google.common.annotations.VisibleForTesting
-import org.apache.pekko.actor.ActorSystem
 
 import scala.concurrent.ExecutionContext
 import scala.jdk.CollectionConverters.*
@@ -52,34 +49,16 @@ class PartyReplicationAdminWorkflow(
     ledgerClient: LedgerClient,
     participantId: ParticipantId,
     syncService: CantonSyncService,
+    partyReplicator: PartyReplicator,
     clock: Clock,
-    config: UnsafeOnlinePartyReplicationConfig,
-    storage: Storage,
     futureSupervisor: FutureSupervisor,
-    exitOnFatalFailures: Boolean,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit
-    executionContext: ExecutionContext,
-    actorSystem: ActorSystem,
+    executionContext: ExecutionContext
 ) extends AdminWorkflowService
     with FlagCloseable
     with NamedLogging {
-
-  // See the note in the PartyReplicator pertaining to lifetime.
-  val partyReplicator =
-    new PartyReplicator(
-      participantId,
-      syncService,
-      clock,
-      config,
-      markOnPRAgreementDone,
-      storage,
-      futureSupervisor,
-      exitOnFatalFailures,
-      timeouts,
-      loggerFactory,
-    )
 
   /** Have the target/current participant submit a Daml PartyReplication.PartyReplicationProposal
     * contract to agree on with the source participant.
@@ -342,7 +321,7 @@ class PartyReplicationAdminWorkflow(
     * @return
     *   {@code true} if the agreement was successfully marked as done, {@code false} otherwise.
     */
-  private def markOnPRAgreementDone(
+  private[party] def markOnPRAgreementDone(
       ap: PartyReplicationAgreementParams,
       damlAgreementCid: LfContractId,
       tc: TraceContext,

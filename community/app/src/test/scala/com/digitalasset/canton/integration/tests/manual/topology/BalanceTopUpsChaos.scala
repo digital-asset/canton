@@ -283,6 +283,8 @@ class BalanceTopUpsChaos(override val logger: TracedLogger)
     setBalanceRequestSubmissionWindowSize = config.PositiveFiniteDuration.ofMinutes(5L),
     enforceRateLimiting = true,
     baseEventCost = NonNegativeLong.tryCreate(100L),
+    // False on purpose to maximize the amount of traffic charged
+    freeConfirmationResponses = false,
   )
 
   override def additionalSetupPhase()(implicit env: TestConsoleEnvironment): Unit = {

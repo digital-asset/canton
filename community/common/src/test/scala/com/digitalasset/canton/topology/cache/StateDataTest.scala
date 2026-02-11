@@ -59,8 +59,7 @@ class StateDataTest extends BaseTestWordSpec with HasExecutionContext {
     val ns1k1_k1_1_1_r =
       toStored(ns1k1_k1_unsupportedScheme, ts(1), ts(1).some, Some(rejection.message))
     val ns1k2_k1_1_3 = toStored(ns1k2_k1, ts(1), ts(3).some)
-    val ns1k2_k1_1_3rm = toStored(mkRemoveTx(ns1k2_k1), ts(3), ts(3).some)
-    val ns1k3_k2_2_N = toStored(ns1k3_k2, ts(3), None)
+    val ns1k2_k1_1_3rm = toStored(mkRemoveTx(ns1k2_k1), ts(3), None)
   }
   import Txs.*
 
@@ -161,8 +160,12 @@ class StateDataTest extends BaseTestWordSpec with HasExecutionContext {
       // now test with items being in head and in tail
       val s5 = s4.transferArchivedToTail(true)
       Seq(s4, s5).foreach { ss =>
-        // TODO(#29400) removed is not really state so doesn't show up here
-        validate(ss.filterState(ts(3), asOfInclusive = true, op = TopologyChangeOp.Remove), Seq())
+        validate(
+          ss.filterState(ts(3), asOfInclusive = true, op = TopologyChangeOp.Remove),
+          Seq(
+            ns1k2_k1_1_3rm // remove is the new state as this is the last known tx so the next one needs to be validated against this one being inStore
+          ),
+        )
         // find correct txs
         validate(
           ss.filterState(ts(3), asOfInclusive = true, op = TopologyChangeOp.Replace),

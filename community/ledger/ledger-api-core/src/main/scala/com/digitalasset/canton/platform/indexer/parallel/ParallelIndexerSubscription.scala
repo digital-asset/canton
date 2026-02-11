@@ -37,7 +37,6 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.InMemoryState
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater
-import com.digitalasset.canton.platform.indexer.TransactionTraversalUtils
 import com.digitalasset.canton.platform.indexer.ha.Handle
 import com.digitalasset.canton.platform.indexer.parallel.AsyncSupport.*
 import com.digitalasset.canton.platform.store.LedgerApiContractStore
@@ -451,9 +450,11 @@ object ParallelIndexerSubscription {
 
       Option(update)
         .collect { case synchronizerUpdate: SynchronizerUpdate =>
-          synchronizerUpdate.synchronizerIndex
+          checkAndUpdateSynchronizerIndex(offset)(
+            synchronizerId = synchronizerUpdate.synchronizerId,
+            synchronizerIndex = synchronizerUpdate.synchronizerIndex,
+          )
         }
-        .map(idAndIndex => checkAndUpdateSynchronizerIndex(offset)(idAndIndex._1, idAndIndex._2))
         .getOrElse(Future.unit)
         .map(_ => (offset, update))(executionContext)
     }
@@ -476,15 +477,15 @@ object ParallelIndexerSubscription {
         prevIndex.sequencerIndex.zip(synchronizerIndex.sequencerIndex).foreach {
           case (prevSeqIndex, currSeqIndex) =>
             assertMonotonicityCondition(
-              prevSeqIndex.sequencerTimestamp < currSeqIndex.sequencerTimestamp,
-              s"Monotonicity violation detected: sequencer timestamp did not increase from ${prevSeqIndex.sequencerTimestamp} to ${currSeqIndex.sequencerTimestamp} at offset $offset and synchronizer $synchronizerId",
+              prevSeqIndex < currSeqIndex,
+              s"Monotonicity violation detected: sequencer timestamp did not increase from $prevSeqIndex to $currSeqIndex at offset $offset and synchronizer $synchronizerId",
             )
         }
         prevIndex.repairIndex.zip(synchronizerIndex.repairIndex).foreach {
           case (prevRepairIndex, currRepairIndex) =>
             assertMonotonicityCondition(
-              prevRepairIndex <= currRepairIndex,
-              s"Monotonicity violation detected: repair index decreases from $prevRepairIndex to $currRepairIndex at offset $offset and synchronizer $synchronizerId",
+              prevRepairIndex < currRepairIndex,
+              s"Monotonicity violation detected: repair index did not increase from $prevRepairIndex to $currRepairIndex at offset $offset and synchronizer $synchronizerId",
             )
         }
     }
@@ -505,13 +506,16 @@ object ParallelIndexerSubscription {
     metrics.indexer.inputMapping.batchSize.update(input.size)(MetricsContext.Empty)
 
     val batch = input.iterator.flatMap { case (offset, update) =>
-      val prefix = update match {
-        case _: Update.TransactionAccepted => "Phase 7: "
-        case _ => ""
+      update match {
+        case _: Update.TransactionAccepted =>
+          logger.info(
+            s"Phase 7: Storing at offset=${offset.unwrap} $update"
+          )(update.traceContext)
+        case _ =>
+          logger.debug(
+            s"Storing at offset=${offset.unwrap} $update"
+          )(update.traceContext)
       }
-      logger.info(
-        s"${prefix}Storing at offset=${offset.unwrap} $update"
-      )(update.traceContext)
       toDbDto(offset)(update)
     }.toVector
 
@@ -852,7 +856,7 @@ object ParallelIndexerSubscription {
             batchOfBatches
               .flatMap(_.offsetsUpdates)
               .collect { case (_, update: SynchronizerUpdate) =>
-                update.synchronizerIndex
+                update.synchronizerId -> update.synchronizerIndex
               }
           ),
         ).map(_ => batchOfBatches)(executionContext)
@@ -908,7 +912,7 @@ object ParallelIndexerSubscription {
           val synchronizerIndexesForBatchOfBatches = batchOfBatches
             .flatMap(_.offsetsUpdates)
             .collect { case (_, update: SynchronizerUpdate) =>
-              update.synchronizerIndex
+              update.synchronizerId -> update.synchronizerIndex
             }
           val newSynchronizerIndexes =
             ledgerEndSynchronizerIndexFrom(
@@ -1039,10 +1043,9 @@ object ParallelIndexerSubscription {
     case (_, u: SequencerIndexMoved) => LightWeight
     case (_, u: EmptyAcsPublicationRequired) => LightWeight
     case (_, u: TransactionAccepted) =>
-      (2 + TransactionTraversalUtils
-        .executionOrderTraversalForIngestion(u.transaction.transaction)
+      (2 + u.transactionInfo.executionOrder.view
         .map(_.nodeId)
-        .flatMap(u.blindingInfo.disclosure.get)
+        .flatMap(u.transactionInfo.blindingInfo.disclosure.get)
         .map(_.size + 1)
         .sum) * InsertWeight
     case (_, TopologyTransactionEffective(_, events, _, _)) => (events.size + 1) * InsertWeight

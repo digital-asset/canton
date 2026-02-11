@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.{DbConfig, NonNegativeDuration}
 import com.digitalasset.canton.console.LocalParticipantReference
@@ -13,7 +12,7 @@ import com.digitalasset.canton.integration.EnvironmentDefinition.S2M2
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
-import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils.SynchronizerNodes
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import monocle.macros.syntax.lens.*
 
@@ -36,8 +35,6 @@ LSU:
 - (s2, m2) upgrade
 - p2 and p3 automatically connect to the new synchronizer
  */
-// TODO (#30569): this is known to be flaky
-@UnstableTest
 final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
   override protected def testName: String = "lsu-late-sequencer"
 

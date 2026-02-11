@@ -96,7 +96,7 @@ sealed trait OnlinePartyReplicationFileBasedTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1
       .addConfigTransforms(
-        ConfigTransforms.unsafeEnableOnlinePartyReplication(
+        ConfigTransforms.enableAlphaOnlinePartyReplicationSupport(
           Map("participant2" -> (() => createTargetParticipantTestInterceptor()))
         )*
       )

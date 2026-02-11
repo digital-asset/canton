@@ -11,7 +11,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
+import com.digitalasset.canton.config.{SessionSigningKeysConfig, SynchronizerTimeTrackerConfig}
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
   InstanceReference,
@@ -21,8 +21,7 @@ import com.digitalasset.canton.console.{
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UsePostgres
-import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils
-import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils.SynchronizerNodes
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
@@ -51,7 +50,7 @@ trait LsuBase
 
   protected def upgradeTime: CantonTimestamp
 
-  protected def configTransforms: List[ConfigTransform] = newOldSequencers.keySet
+  protected def configTransforms: Seq[ConfigTransform] = newOldSequencers.keySet
     .map(sequencerName =>
       ConfigTransforms
         .updateSequencerConfig(sequencerName)(
@@ -62,6 +61,8 @@ trait LsuBase
     ++ List(
       ConfigTransforms.disableAutoInit(newOldNodesResolution.keySet),
       ConfigTransforms.useStaticTime,
+      // TODO(#30068): Enable session keys after sim clock advances are synced
+      ConfigTransforms.setSessionSigningKeys(SessionSigningKeysConfig.disabled),
     ) ++ ConfigTransforms.enableAlphaVersionSupport
 
   /** Prepare the environment for LSU with default values.
@@ -76,14 +77,7 @@ trait LsuBase
 
     val participants = participantsOverride.getOrElse(env.participants.all)
 
-    participants.synchronizers.connect(
-      SynchronizerConnectionConfig(
-        synchronizerAlias = daName,
-        sequencerConnections = sequencer1,
-        timeTracker =
-          SynchronizerTimeTrackerConfig(observationLatency = config.NonNegativeFiniteDuration.Zero),
-      )
-    )
+    participants.synchronizers.connect(defaultSynchronizerConnectionConfig())
 
     participants.dars.upload(CantonExamplesPath)
 
@@ -96,6 +90,19 @@ trait LsuBase
 
     oldSynchronizerNodes = SynchronizerNodes(Seq(sequencer1), Seq(mediator1))
     newSynchronizerNodes = SynchronizerNodes(Seq(sequencer2), Seq(mediator2))
+  }
+
+  protected def defaultSynchronizerConnectionConfig()(implicit
+      env: TestConsoleEnvironment
+  ): SynchronizerConnectionConfig = {
+    import env.*
+
+    SynchronizerConnectionConfig(
+      synchronizerAlias = daName,
+      sequencerConnections = sequencer1,
+      timeTracker =
+        SynchronizerTimeTrackerConfig(observationLatency = config.NonNegativeFiniteDuration.Zero),
+    )
   }
 
   protected def synchronizerConnectionConfig(

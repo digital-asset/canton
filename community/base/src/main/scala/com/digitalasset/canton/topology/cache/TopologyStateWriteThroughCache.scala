@@ -89,7 +89,6 @@ trait TopologyStateLookupByNamespace {
       asOfInclusive: Boolean,
       ns: Namespace,
       transactionTypes: Set[Code],
-      // TODO(#29400) clarify if Remove is even needed (don't think so). Otherwise, simplify API
       op: TopologyChangeOp = TopologyChangeOp.Replace,
       warnIfUncached: Boolean = false,
   )(implicit
@@ -945,10 +944,11 @@ class TopologyStateWriteThroughCache(
   def lookupActiveForMapping(
       timeHint: EffectiveTime,
       mapping: TopologyMapping,
+      warnIfUncached: Boolean = true,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[GenericStoredTopologyTransaction]] =
-    get(StateKey(mapping), timeHint.value, warnIfUncached = true).flatMap { loaded =>
+    get(StateKey(mapping), timeHint.value, warnIfUncached = warnIfUncached).flatMap { loaded =>
       // if we are checking for consistency, make sure we load all transactions
       val stateF =
         if (enableConsistencyChecks)

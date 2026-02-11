@@ -453,7 +453,7 @@ trait LedgerApiTopologyTransactionsTest extends CommunityIntegrationTest with Sh
         logger.info(
           s"Sequenced time: $sequencedTime, current record time: ${synchronizerIndex.recordTime}, effective time: $effectiveTime"
         )
-        synchronizerIndex.sequencerIndex.value.sequencerTimestamp should be >= sequencedTime
+        synchronizerIndex.sequencerIndex.value should be >= sequencedTime
       }
 
       participant3.synchronizers.disconnect(acmeName)

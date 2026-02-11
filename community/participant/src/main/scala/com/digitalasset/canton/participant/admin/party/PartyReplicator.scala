@@ -18,7 +18,7 @@ import com.digitalasset.canton.participant.admin.party.PartyReplicationAdminWork
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus.*
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
-import com.digitalasset.canton.participant.config.UnsafeOnlinePartyReplicationConfig
+import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
 import com.digitalasset.canton.participant.protocol.party.{
   PartyReplicationFileImporter,
   PartyReplicationProcessor,
@@ -49,6 +49,7 @@ import com.digitalasset.canton.util.{
   FutureUnlessShutdownUtil,
   MonadUtil,
   SimpleExecutionQueue,
+  SingleUseCell,
   retry,
 }
 import org.apache.pekko.actor.ActorSystem
@@ -58,32 +59,15 @@ import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.chaining.scalaUtilChainingOps
 
-/** The party replicator acts on behalf of the participant's online party replication requests:
-  *   - In response to an operator request to initiate online party replication, triggers admin
-  *     workflow proposal.
-  *   - Exposes callbacks to the admin workflow to validate and process channel proposals and
-  *     agreements.
-  *
-  * The party replicator conceptually owns the party replication admin workflow and implements the
-  * gRPC party management service endpoints related to online party replication, but for practical
-  * reasons its lifetime is controlled by the admin workflow service. This helps ensure that upon
-  * participant HA-activeness changes, the party replication-related classes are all created or
-  * closed in unison.
-  *
-  * @param markOnPRAgreementDone
-  *   callback to archive the party replication agreement Daml contract and returning whether the
-  *   contract is archived.
+/** The party replicator acts on behalf of the participant's online party replication requests
+  * handling asynchronous requests and driving progress in its execution queue and based on state
+  * from the PartyReplicationStateManager.
   */
 final class PartyReplicator(
     participantId: ParticipantId,
     syncService: CantonSyncService,
     clock: Clock,
-    config: UnsafeOnlinePartyReplicationConfig,
-    markOnPRAgreementDone: (
-        PartyReplicationAgreementParams,
-        LfContractId,
-        TraceContext,
-    ) => FutureUnlessShutdown[Boolean],
+    config: AlphaOnlinePartyReplicationConfig,
     storage: Storage,
     futureSupervisor: FutureSupervisor,
     exitOnFatalFailures: Boolean,
@@ -124,16 +108,17 @@ final class PartyReplicator(
   private val topologyWorkflow =
     new PartyReplicationTopologyWorkflow(participantId, timeouts, loggerFactory)
 
+  private val damlAdminWorkflowO = new SingleUseCell[PartyReplicationAdminWorkflow]
+
   private val testInterceptorO: Option[PartyReplicationTestInterceptor] =
     config.testInterceptor.map(_())
 
   /** Validates online party replication arguments and propose party replication via the provided
     * admin workflow service.
     */
-  private[admin] def addPartyAsync(
-      args: PartyReplicationArguments,
-      adminWorkflow: PartyReplicationAdminWorkflow,
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Hash] =
+  private[admin] def addPartyAsync(args: PartyReplicationArguments)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Hash] =
     executionQueue.executeEUS(
       {
         val PartyReplicationArguments(
@@ -150,6 +135,11 @@ final class PartyReplicator(
               s"Initiating replication of party $partyId from participant $sourceParticipantId on synchronizer $synchronizerId"
             ),
             s"Participant $participantId is inactive",
+          )
+          adminWorkflow <- EitherT.fromEither[FutureUnlessShutdown](
+            damlAdminWorkflowO.get.toRight(
+              "The `add_party_async` requests requires the `unsafe_sequencer_channel_support` configuration flag to be true"
+            )
           )
           connectedSynchronizer <-
             EitherT.fromEither[FutureUnlessShutdown](
@@ -396,6 +386,9 @@ final class PartyReplicator(
       )
     } yield partyToParticipantTopologyHeadTx.validFrom
   }
+
+  private[admin] def initializeDamlAdminWorkflow(workflow: PartyReplicationAdminWorkflow): Unit =
+    damlAdminWorkflowO.putIfAbsent(workflow).discard
 
   /** Validates a channel proposal at the source participant and chooses a sequencer to participate
     * in party replication and respond accordingly by invoking the provided admin workflow callback.
@@ -999,14 +992,17 @@ final class PartyReplicator(
           ) =>
         for {
           isAgreementArchived <- EitherT.right[String](
-            agreementO match {
-              case Some(SequencerChannelAgreement(damlAgreementCid, sequencerId)) =>
-                markOnPRAgreementDone(
+            (agreementO, damlAdminWorkflowO.get) match {
+              case (
+                    Some(SequencerChannelAgreement(damlAgreementCid, sequencerId)),
+                    Some(workflow),
+                  ) =>
+                workflow.markOnPRAgreementDone(
                   PartyReplicationAgreementParams.fromAgreedReplicationStatus(params, sequencerId),
                   damlAgreementCid,
                   traceContext,
                 )
-              case None => FutureUnlessShutdown.pure(false)
+              case _ => FutureUnlessShutdown.pure(false)
             }
           )
           isOnboardingFlagVerifiedCleared <-

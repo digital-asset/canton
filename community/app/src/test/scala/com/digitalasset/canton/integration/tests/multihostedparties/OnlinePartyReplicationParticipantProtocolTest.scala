@@ -80,7 +80,8 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
       .addConfigTransforms(
-        ConfigTransforms.unsafeEnableOnlinePartyReplication()*
+        ConfigTransforms
+          .enableAlphaOnlinePartyReplicationSupport(enableUnsafeSequencerChannelSupport = true)*
       )
       .withSetup { implicit env =>
         import env.*

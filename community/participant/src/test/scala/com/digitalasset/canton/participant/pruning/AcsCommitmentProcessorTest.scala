@@ -29,7 +29,6 @@ import com.digitalasset.canton.ledger.participant.state.{
   AcsChange,
   ContractStakeholdersAndReassignmentCounter,
   RepairIndex,
-  SequencerIndex,
   SynchronizerIndex,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -389,6 +388,7 @@ sealed trait AcsCommitmentProcessorBaseTest
       new SimClock(loggerFactory = loggerFactory),
       exitOnFatalFailures = true,
       BatchingConfig(),
+      asynchronousInitialization = true,
       // do not delay sending commitments for testing, because tests often expect to see commitments after an interval
       Some(CommitmentSendDelay(Some(NonNegativeProportion.zero), Some(NonNegativeProportion.zero))),
       increasePerceivedComputationTimeForCommitments = Option.when(
@@ -1467,9 +1467,7 @@ class AcsCommitmentProcessorTest
           .latestSafeToPruneTick(
             requestJournalStore,
             Some(
-              SynchronizerIndex.of(
-                SequencerIndex(CantonTimestamp.Epoch)
-              )
+              SynchronizerIndex.forSequencedUpdate(CantonTimestamp.Epoch)
             ),
             constantSortedReconciliationIntervalsProvider(defaultReconciliationInterval),
             acsCommitmentStore,
@@ -1573,9 +1571,7 @@ class AcsCommitmentProcessorTest
             Some(
               SynchronizerIndex(
                 None,
-                Some(
-                  SequencerIndex(ts2)
-                ),
+                Some(ts2),
                 recordTime = ts2, // record time cannot include pending request at ts3
               )
             ),
@@ -1600,7 +1596,7 @@ class AcsCommitmentProcessorTest
             Some(
               SynchronizerIndex(
                 None,
-                Some(SequencerIndex(ts3)),
+                Some(ts3),
                 recordTime = ts3,
               )
             ),
@@ -1665,9 +1661,7 @@ class AcsCommitmentProcessorTest
                     counter = RepairCounter.Genesis,
                   )
                 ),
-                Some(
-                  SequencerIndex(tsCleanRequest)
-                ),
+                Some(tsCleanRequest),
                 recordTime = tsCleanRequest, // record time cannot include pending request at ts3
               )
             ),
@@ -1763,7 +1757,7 @@ class AcsCommitmentProcessorTest
                       counter = RepairCounter.Genesis,
                     )
                   ),
-                  Some(SequencerIndex(tsCleanRequest2)),
+                  Some(tsCleanRequest2),
                   recordTime = tsCleanRequest2,
                 )
               ),

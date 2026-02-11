@@ -67,8 +67,9 @@ sealed trait OnlinePartyReplicationRecoverFromDisruptionsTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(
-        ConfigTransforms.unsafeEnableOnlinePartyReplication(
-          Map("participant1" -> (() => createSourceParticipantTestInterceptor()))
+        ConfigTransforms.enableAlphaOnlinePartyReplicationSupport(
+          Map("participant1" -> (() => createSourceParticipantTestInterceptor())),
+          enableUnsafeSequencerChannelSupport = true,
         )*
       )
       .withSetup { implicit env =>

@@ -572,7 +572,7 @@ object TopologyTransactionProcessor {
       loggerFactory,
     )
 
-    val topologyClientF = TopologyClientFactory.create(
+    val topologyClientF = WriteThroughCacheSynchronizerTopologyClient.create(
       clock,
       staticSynchronizerParameters,
       topologyStore,

@@ -40,6 +40,8 @@ class LargeTransactionTest(
 ) extends AnyWordSpec
     with Matchers {
 
+  private val verbose = false
+
   private[this] implicit def logContext: LoggingContext = LoggingContext.ForTesting
 
   /** Tiny wrapper around IdeLedger that provides
@@ -117,7 +119,8 @@ class LargeTransactionTest(
   private[this] val party = Party.assertFromString("party")
 
   private def report(name: String, quantity: Quantity[Double]): Unit =
-    println(s"$name: $quantity")
+    if (verbose) println(s"$name: $quantity")
+
 
   private val engine = Engine.DevEngine
 

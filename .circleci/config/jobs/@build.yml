@@ -36,8 +36,6 @@ static_tests:
     - check_pr_skip_ci
     - restore_sbt_cache
     - execute_sbt_command:
-        cmd: checkJavaDamlDependencies
-    - execute_sbt_command:
         cmd: "google-common-protos-scala/protocGenerate ledger-api-value/protocGenerate"
     - execute_sbt_command:
         cmd: "lint"

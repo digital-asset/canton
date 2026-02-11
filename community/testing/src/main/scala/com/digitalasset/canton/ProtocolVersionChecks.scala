@@ -59,14 +59,14 @@ trait TestPredicateFiltersFixtureAnyWordSpec {
       new OnlyRunWhenWordSpecStringWrapper(verb, condition(testedProtocolVersion))
 
     def onlyRunLessThan(
-        minProtocolVersion: ProtocolVersion
+        pvUpperBoundExclusive: ProtocolVersion
     ): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, testedProtocolVersion < minProtocolVersion)
+      new OnlyRunWhenWordSpecStringWrapper(verb, testedProtocolVersion < pvUpperBoundExclusive)
 
     def onlyRunWithOrLessThan(
-        minProtocolVersion: ProtocolVersion
+        pvUpperBoundInclusive: ProtocolVersion
     ): OnlyRunWhenWordSpecStringWrapper =
-      new OnlyRunWhenWordSpecStringWrapper(verb, testedProtocolVersion <= minProtocolVersion)
+      new OnlyRunWhenWordSpecStringWrapper(verb, testedProtocolVersion <= pvUpperBoundInclusive)
   }
 
   implicit class ProtocolCheckTaggedString(verb: ResultOfTaggedAsInvocationOnString) {

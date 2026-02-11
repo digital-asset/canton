@@ -61,6 +61,7 @@ final case class Cli(
     manualStart: Boolean = false,
     exitAfterBootstrap: Boolean = false,
     devProtocol: Boolean = false,
+    multiSync: Boolean = false,
     dars: Seq[String] = Seq.empty,
 ) {
 
@@ -394,6 +395,9 @@ object Cli {
           opt[Unit]("dev")
             .text("Run sandbox with dev version of the protocol")
             .action((_, cli) => cli.copy(devProtocol = true)),
+          opt[Unit]("multi-sync")
+            .text("Run sandbox in a multi-synchronizer constellation")
+            .action((_, cli) => cli.copy(multiSync = true)),
           opt[Int]("ledger-api-port")
             .text("Port for the sandbox Ledger API")
             .action((port, cli) =>

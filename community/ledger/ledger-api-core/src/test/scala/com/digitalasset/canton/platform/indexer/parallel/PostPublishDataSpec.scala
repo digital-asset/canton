@@ -10,6 +10,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.{
   RepairTransactionAccepted,
   SequencedCommandRejected,
   SequencedTransactionAccepted,
+  TransactionAccepted,
   UnSequencedCommandRejected,
 }
 import com.digitalasset.canton.ledger.participant.state.{
@@ -74,7 +75,8 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
           )
         ),
         transactionMeta = transactionMeta,
-        transaction = CommittedTransaction(TransactionBuilder.Empty),
+        transactionInfo =
+          TransactionAccepted.TransactionInfo(CommittedTransaction(TransactionBuilder.Empty)),
         updateId = updateId,
         synchronizerId = synchronizerId,
         recordTime = cantonTime2,
@@ -106,7 +108,8 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
       update = SequencedTransactionAccepted(
         completionInfoO = None,
         transactionMeta = transactionMeta,
-        transaction = CommittedTransaction(TransactionBuilder.Empty),
+        transactionInfo =
+          TransactionAccepted.TransactionInfo(CommittedTransaction(TransactionBuilder.Empty)),
         updateId = updateId,
         synchronizerId = synchronizerId,
         recordTime = cantonTime2,
@@ -122,7 +125,8 @@ class PostPublishDataSpec extends AnyFlatSpec with Matchers with NamedLogging {
     PostPublishData.from(
       update = RepairTransactionAccepted(
         transactionMeta = transactionMeta,
-        transaction = CommittedTransaction(TransactionBuilder.Empty),
+        transactionInfo =
+          TransactionAccepted.TransactionInfo(CommittedTransaction(TransactionBuilder.Empty)),
         updateId = updateId,
         synchronizerId = synchronizerId,
         repairCounter = RepairCounter(65),

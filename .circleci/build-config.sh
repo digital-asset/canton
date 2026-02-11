@@ -10,4 +10,4 @@ echo '# GENERATED FILE, DO NOT EDIT' > $CONF
 echo '# If you need to change the CircleCI configuration, edit the relevant fragment in the .circleci/config directory and run `.circleci/build-config.sh`' >> $CONF
 circleci config pack "${ABSDIR}/config" >> $CONF
 chmod ug-w $CONF
-circleci config validate $CONF --org-slug github/DACH-NY
+circleci config validate $CONF

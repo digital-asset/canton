@@ -1,9 +1,39 @@
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.version.ProtocolVersion
 
-val staticSynchronizerParameters = StaticSynchronizerParameters.defaults(sequencer1.config.crypto, ProtocolVersion.forSynchronizer, topologyChangeDelay=NonNegativeFiniteDuration.Zero)
-val synchronizerOwners = Seq(sequencer1, mediator1)
-bootstrap.synchronizer("mysynchronizer", Seq(sequencer1), Seq(mediator1), synchronizerOwners, PositiveInt.one, staticSynchronizerParameters)
-sandbox.synchronizers.connect_local(sequencer1, "mysynchronizer")
-println(s"Listening at ports: ${sandbox.config.ledgerApi.port.unwrap}(gRPC) and ${sandbox.config.httpLedgerApi.port.unwrap}(HTTP)")
+val protocol = if(sequencer1.config.parameters.alphaVersionSupport) ProtocolVersion.dev else ProtocolVersion.forSynchronizer
+
+case class SyncDef(
+  mediator: com.digitalasset.canton.console.LocalMediatorReference,
+  sequencer: com.digitalasset.canton.console.LocalSequencerReference,
+  name: String
+)
+
+val syncDefs = mediators.local
+  .zip(sequencers.local)
+  .zipWithIndex
+  .map{case ((m,s),i)=>SyncDef(m,s,s"synchronizer-${i+1}")}
+
+syncDefs.foreach{ syncDef =>
+  val staticSynchronizerParameters = StaticSynchronizerParameters.defaults(
+    syncDef.sequencer.config.crypto,
+    protocol,
+    topologyChangeDelay=NonNegativeFiniteDuration.Zero
+  )
+  val synchronizerOwners = Seq(syncDef.sequencer, syncDef.mediator)
+  bootstrap.synchronizer(
+    syncDef.name,
+    Seq(syncDef.sequencer),
+    Seq(syncDef.mediator),
+    synchronizerOwners,
+    PositiveInt.one,
+    staticSynchronizerParameters
+  )
+
+  participants.local.foreach(p => p.synchronizers.connect_local(syncDef.sequencer, syncDef.name))
+}
+
+participants.local.foreach{p =>
+  println(s"${p.name} listening at ports: ${p.config.ledgerApi.port.unwrap}(gRPC) and ${p.config.httpLedgerApi.port.unwrap}(HTTP)")}
+
 println("Canton sandbox is ready.")

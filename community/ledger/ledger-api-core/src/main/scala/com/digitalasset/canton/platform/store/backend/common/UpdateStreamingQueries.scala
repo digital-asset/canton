@@ -11,6 +11,7 @@ import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.{
   SqlStringInterpolation,
 }
 import com.digitalasset.canton.platform.store.backend.common.SimpleSqlExtensions.*
+import com.digitalasset.canton.platform.store.backend.common.UpdateStreamingQueries.eventNotDeactivated
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   IdFilterInput,
   IdFilterPaginationInput,
@@ -121,16 +122,20 @@ class UpdateStreamingQueries(
       tableName = "lapi_filter_activate_stakeholder",
       witnessO = stakeholderO,
       templateIdO = templateIdO,
-      idFilter = Some(
-        cSQL"""
-          NOT EXISTS (
-            SELECT 1
-            FROM lapi_events_deactivate_contract deactivate_evs
-            WHERE
-              filters.event_sequential_id = deactivate_evs.deactivated_event_sequential_id
-              AND deactivate_evs.event_sequential_id <= $activeAtEventSeqId
-          )"""
-      ),
+      idFilter = Some(eventNotDeactivated(activeAtEventSeqId)),
+      stringInterning = stringInterning,
+      hasFirstPerSequentialId = true,
+    )(connection)
+
+  def fetchACHSIds(
+      stakeholderO: Option[Ref.Party],
+      templateIdO: Option[NameTypeConRef],
+  )(connection: Connection): IdFilterPaginationInput => Vector[Long] =
+    UpdateStreamingQueries.fetchEventIds(
+      tableName = "lapi_filter_achs_stakeholder",
+      witnessO = stakeholderO,
+      templateIdO = templateIdO,
+      idFilter = None,
       stringInterning = stringInterning,
       hasFirstPerSequentialId = true,
     )(connection)
@@ -278,4 +283,18 @@ object UpdateStreamingQueries {
       case _ => _ => Vector.empty
     }
   }
+
+  /** Checks if an event is not deactivated. It requires that the table with the activations is
+    * called "filters" in the query that will be called.
+    */
+  def eventNotDeactivated(activeAtEventSeqId: Long): CompositeSql =
+    cSQL"""
+      NOT EXISTS (
+        SELECT 1
+        FROM lapi_events_deactivate_contract deactivate_evs
+        WHERE
+          filters.event_sequential_id = deactivate_evs.deactivated_event_sequential_id
+          AND deactivate_evs.event_sequential_id <= $activeAtEventSeqId
+      )
+    """
 }

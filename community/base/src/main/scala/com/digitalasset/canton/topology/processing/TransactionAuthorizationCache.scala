@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.topology.processing
 
+import cats.syntax.functorFilter.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.data.CantonTimestamp
@@ -10,8 +11,8 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.topology.cache.TopologyStateLookupByNamespace
-import com.digitalasset.canton.topology.store.StoredTopologyTransactions
-import com.digitalasset.canton.topology.store.StoredTopologyTransactions.PositiveStoredTopologyTransactions
+import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
+import com.digitalasset.canton.topology.store.TopologyTransactions
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.TopologyMapping.ReferencedAuthorizations
 import com.digitalasset.canton.topology.transaction.TopologyMapping.RequiredAuth.RequiredNamespaces
@@ -83,7 +84,6 @@ trait TransactionAuthorizationCache[+PureCrypto <: CryptoPureApi] {
   implicit protected def executionContext: ExecutionContext
 
   final def evict(): Unit =
-    // TODO(#29400) implement proper eviction strategy
     if (namespaceCache.sizeIs > 2000) {
       reset()
     }
@@ -144,12 +144,13 @@ trait TransactionAuthorizationCache[+PureCrypto <: CryptoPureApi] {
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
 
     def extract[T <: TopologyMapping: ClassTag](
-        transactions: PositiveStoredTopologyTransactions
+        transactions: Seq[GenericStoredTopologyTransaction]
     ): Seq[SignedTopologyTransaction[TopologyChangeOp.Replace, T]] =
-      transactions
-        .collectOfMapping[T]
-        .collectLatestByUniqueKey
-        .result
+      TopologyTransactions
+        .collectLatestByUniqueKey(
+          transactions
+            .mapFilter(_.selectOp[TopologyChangeOp.Replace].mapFilter(_.selectMapping[T]))
+        )
         .map(_.transaction)
 
     // only load the ones we don't already hold in memory
@@ -176,13 +177,9 @@ trait TransactionAuthorizationCache[+PureCrypto <: CryptoPureApi] {
                    transactionTypes = codes.toSet,
                    op = TopologyChangeOp.Replace,
                  )
-                 .map { res =>
-                   StoredTopologyTransactions(res.flatMap { case (_, v) =>
-                     v.flatMap(_.selectOp[TopologyChangeOp.Replace])
-                   }.toSeq)
-                 }
+                 .map(_.flatMap { case (_, v) => v }.toSeq)
              ))
-          .getOrElse(FutureUnlessShutdown.pure(StoredTopologyTransactions.empty))
+          .getOrElse(FutureUnlessShutdown.pure(Seq.empty))
       decentralizedNamespaceDefinitions = extract[DecentralizedNamespaceDefinition](
         storedDecentralizedAndOrdinaryNamespaces
       ).filter(x => decentralizedNamespacesToLoad.contains(x.mapping.namespace))
@@ -217,15 +214,9 @@ trait TransactionAuthorizationCache[+PureCrypto <: CryptoPureApi] {
                    ),
                    op = TopologyChangeOp.Replace,
                  )
-                 .map { res =>
-                   // TODO(#29400) to minimise the change, we'll map this into the original result value
-                   //   but we could refactor this method here a bit to preserve the map (also applies to above)
-                   StoredTopologyTransactions(res.flatMap { case (_, v) =>
-                     v.flatMap(_.selectOp[TopologyChangeOp.Replace])
-                   }.toSeq)
-                 }
+                 .map(_.flatMap { case (_, v) => v }.toSeq)
              })
-          .getOrElse(FutureUnlessShutdown.pure(StoredTopologyTransactions.empty))
+          .getOrElse(FutureUnlessShutdown.pure(Seq.empty))
       remainingNamespaceDelegations = extract[NamespaceDelegation](
         storedRemainingNamespaceDelegations
       )

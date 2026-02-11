@@ -1,19 +1,7 @@
 blackduck:
   executor: canton-large-docker
   steps:
-    - checkout_and_restore_precompiled_classes:
-        reset_classes_if_requested: true
-    - restore_sbt_cache
-    - track_cpu_and_memory
-    - run:
-        command: |
-          echo "export EXECUTOR_JVM_METASPACE_SIZE=1500M" >> $BASH_ENV
-          echo "export EXECUTOR_JVM_HEAP_SIZE=4000M" >> $BASH_ENV
-      # not using our usual packaging circleci commands for this as we don't need to stash artifacts for later jobs
-    - execute_sbt_command:
-        cmd: "compile community-app/bundle"
-        fail_on_error_in_output: true
-        use_maven_mirror: false
+    - checkout_and_restore_caches
     - run:
         name: Run Blackduck Detect
         no_output_timeout: 30m
@@ -44,7 +32,6 @@ blackduck:
     - store_artifacts:
         name: Blackduck Run Artifacts
         path: /home/circleci/blackduck/runs
-    - save_sbt_cache
     - cleanup_build_job
 
 nightly_reporting:

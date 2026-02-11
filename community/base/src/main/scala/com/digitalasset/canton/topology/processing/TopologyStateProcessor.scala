@@ -172,7 +172,7 @@ class TopologyStateProcessorImpl private[processing] (
 
         case None =>
           EitherT
-            // TODO(#29400) we could move the flush into the async result immediate to make processing even faster
+            // Note we could move the cache.flush into the async part and thereby make the processing even faster
             .right[Lft](cache.flush(sequenced, effective))
             .map { _ =>
               logger.info(
@@ -294,11 +294,6 @@ class TopologyStateProcessorImpl private[processing] (
     cache.fetch(effective, prefetch, storeIsEmpty)
   }
 
-  // TODO(#29400) we do need to drop caches here as in the topology manager we need to read from the synchroniser store
-  //    but we might add temporarily some changes to it.
-  //    if we don't drop the full cache we might end up with stale caches
-  //    however, if we instead of loading from the db populate the cache here using the processing cache,
-  //    then we might save quite a bit of additional queries
   private def dropCaches(): Unit = {
     cache.dropPending()
     authValidator.reset()

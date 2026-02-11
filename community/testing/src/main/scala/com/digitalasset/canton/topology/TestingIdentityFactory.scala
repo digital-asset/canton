@@ -957,6 +957,15 @@ class TestingOwnerWithKeys(
       )
     )
 
+    val p2_pdp_submission = mkAdd(
+      ParticipantSynchronizerPermission(
+        synchronizerId,
+        participant2,
+        ParticipantPermission.Submission,
+        None,
+        None,
+      )
+    )
   }
 
   def mkTrans[Op <: TopologyChangeOp: ClassTag, M <: TopologyMapping: ClassTag](

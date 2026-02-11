@@ -186,7 +186,7 @@ final class UpgradeTimeOldSynchronizerIntegrationTest
         * time equal upgrade time.
         */
       cleanSynchronizerIndex.recordTime shouldBe upgradeTime
-      cleanSynchronizerIndex.sequencerIndex.value.sequencerTimestamp should be < upgradeTime
+      cleanSynchronizerIndex.sequencerIndex.value should be < upgradeTime
     }
   }
 }

@@ -313,11 +313,17 @@ class GrpcInternalSequencerConnectionX private[sequencing] (
           logPolicy = CantonGrpcUtil.SilentLogPolicy,
         )
         .leftMap(SequencerConnectionXInternalError.StubError.apply)
+
       handshakePV <- EitherT
         .fromEither[FutureUnlessShutdown](handshakeResponse match {
           case success: HandshakeResponse.Success =>
             Right(success.serverProtocolVersion)
-          case _ => Left(SequencerConnectionXInternalError.ValidationError(s"Failed handshake"))
+          case failure: HandshakeResponse.Failure =>
+            Left(
+              SequencerConnectionXInternalError.ValidationError(
+                s"Failed handshake: ${failure.reason}"
+              )
+            )
         })
       _ = logger.debug(s"Handshake successful with PV $handshakePV")
 
@@ -336,8 +342,7 @@ class GrpcInternalSequencerConnectionX private[sequencing] (
         config.expectedSequencerIdO.forall(_ == sequencerId),
         (),
         SequencerConnectionXInternalError.ValidationError(
-          s"Connection is not on expected sequencer:" +
-            s" expected ${config.expectedSequencerIdO}, got $sequencerId"
+          s"Connection is not on expected sequencer: expected ${config.expectedSequencerIdO}, got $sequencerId"
         ),
       )
 

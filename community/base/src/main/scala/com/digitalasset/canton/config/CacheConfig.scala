@@ -149,7 +149,9 @@ final case class CachingConfigs(
     kmsMetadataCache: CacheConfig = CachingConfigs.defaultKmsMetadataCache,
     finalizedMediatorConfirmationRequests: CacheConfig =
       CachingConfigs.defaultFinalizedMediatorConfirmationRequestsCache,
-    sequencerPayloadCache: CacheConfigWithMemoryBounds = CachingConfigs.defaultSequencerPayloadCache,
+    sequencerPayloadCache: CacheConfigWithMemoryBounds =
+      CachingConfigs.defaultSequencerPayloadCache,
+    bftOrderingBatchCache: CacheConfigWithMemoryBounds = CachingConfigs.defaultBftOrderingBatchCache,
 )
 
 object CachingConfigs {
@@ -182,6 +184,11 @@ object CachingConfigs {
   val defaultFinalizedMediatorConfirmationRequestsCache =
     CacheConfig(maximumSize = PositiveNumeric.tryCreate(1000))
   val defaultSequencerPayloadCache: CacheConfigWithMemoryBounds =
+    CacheConfigWithMemoryBounds(
+      maximumMemory = PositiveNumeric.tryCreate(BytesUnit.MB(64L)),
+      expireAfterAccess = NonNegativeFiniteDuration.ofMinutes(10),
+    )
+  val defaultBftOrderingBatchCache: CacheConfigWithMemoryBounds =
     CacheConfigWithMemoryBounds(
       maximumMemory = PositiveNumeric.tryCreate(BytesUnit.MB(64L)),
       expireAfterAccess = NonNegativeFiniteDuration.ofMinutes(10),

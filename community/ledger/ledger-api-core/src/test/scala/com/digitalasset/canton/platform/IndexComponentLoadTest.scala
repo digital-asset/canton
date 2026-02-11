@@ -643,7 +643,7 @@ class IndexComponentLoadTest extends AnyFlatSpec with IndexComponentTest {
         optNodeSeeds = None,
         optByKeyNodes = None,
       ),
-      transaction = transaction,
+      transactionInfo = Update.TransactionAccepted.TransactionInfo(transaction),
       updateId = randomUpdateId,
       synchronizerId = synchronizerId,
       recordTime = recordTime,

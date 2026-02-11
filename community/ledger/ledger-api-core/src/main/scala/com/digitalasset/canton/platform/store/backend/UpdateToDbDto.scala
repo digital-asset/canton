@@ -16,7 +16,6 @@ import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccept
 import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Reassignment, Update}
 import com.digitalasset.canton.metrics.{IndexerMetrics, LedgerApiServerMetrics}
 import com.digitalasset.canton.platform.*
-import com.digitalasset.canton.platform.indexer.TransactionTraversalUtils
 import com.digitalasset.canton.platform.indexer.TransactionTraversalUtils.NodeInfo
 import com.digitalasset.canton.platform.store.backend.Conversions.{
   authorizationEventInt,
@@ -233,11 +232,7 @@ object UpdateToDbDto {
       event_sequential_id_last = 0, // this is filled later
     )
 
-    val events: Iterator[DbDto] = TransactionTraversalUtils
-      .executionOrderTraversalForIngestion(
-        transactionAccepted.transaction.transaction
-      )
-      .iterator
+    val events: Iterator[DbDto] = transactionAccepted.transactionInfo.executionOrder.iterator
       .flatMap {
         case NodeInfo(nodeId, create: Create, _) =>
           createNodeToDbDto(
@@ -316,7 +311,8 @@ object UpdateToDbDto {
           ) =>
         representativePackageId
     }
-    val witnesses = transactionAccepted.blindingInfo.disclosure.getOrElse(nodeId, Set.empty)
+    val witnesses =
+      transactionAccepted.transactionInfo.blindingInfo.disclosure.getOrElse(nodeId, Set.empty)
     val internal_contract_id = contractInfo.internalContractId
 
     if (transactionAccepted.isAcsDelta(create.coid)) {
@@ -378,7 +374,8 @@ object UpdateToDbDto {
     val (exerciseArgument, exerciseResult, _) =
       translation.serialize(exercise)
     val templateId = templateIdWithPackageName(exercise)
-    val witnesses = transactionAccepted.blindingInfo.disclosure.getOrElse(nodeId, Set.empty)
+    val witnesses =
+      transactionAccepted.transactionInfo.blindingInfo.disclosure.getOrElse(nodeId, Set.empty)
     if (exercise.consuming && transactionAccepted.isAcsDelta(exercise.targetCoid)) {
       val additional_witnesses = witnesses.diff(exercise.stakeholders)
       DbDto.consumingExerciseDbDtos(

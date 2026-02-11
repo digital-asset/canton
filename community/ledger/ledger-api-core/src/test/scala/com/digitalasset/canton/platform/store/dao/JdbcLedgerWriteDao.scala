@@ -278,7 +278,7 @@ private class JdbcLedgerWriteDao(
                 optNodeSeeds = None, // not used for DbDto generation
                 optByKeyNodes = None, // not used for DbDto generation
               ),
-              transaction = transaction,
+              transactionInfo = state.Update.TransactionAccepted.TransactionInfo(transaction),
               updateId = updateId,
               synchronizerId = SynchronizerId.tryFromString("invalid::deadbeef"),
               recordTime = CantonTimestamp(recordTime),

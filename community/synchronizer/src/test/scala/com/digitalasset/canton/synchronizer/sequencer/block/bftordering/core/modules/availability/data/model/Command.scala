@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.model
 
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequestBatch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.BatchId
 
@@ -14,4 +15,6 @@ object Command {
   final case class FetchBatches(batches: Seq[BatchId]) extends Command
 
   final case class GC(staleBatchIds: Seq[BatchId]) extends Command
+
+  final case class Prune(epoch: EpochNumber) extends Command
 }

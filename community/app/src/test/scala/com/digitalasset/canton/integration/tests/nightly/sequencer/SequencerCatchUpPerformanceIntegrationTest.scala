@@ -344,6 +344,7 @@ class SequencerCatchUpPerformanceIntegrationTest
     setBalanceRequestSubmissionWindowSize = config.PositiveFiniteDuration.ofMinutes(5L),
     enforceRateLimiting = true,
     baseEventCost = NonNegativeLong.tryCreate(1),
+    freeConfirmationResponses = true,
   )
 
   def blockEventCount(sequencer: LocalSequencerReference): Long =

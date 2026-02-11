@@ -38,10 +38,10 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
 
   behavior of "IntegrityStorageBackend"
 
-  it should "find duplicate event ids" in {
+  it should "find duplicate offsets" in {
     val updates = Vector(
-      dtosCreate(event_offset = 7, event_sequential_id = 7L)(),
-      dtosCreate(event_offset = 7, event_sequential_id = 7L)(), // duplicate id
+      dtosCreate(event_offset = 7, event_sequential_id = 6L)(),
+      dtosCreate(event_offset = 7, event_sequential_id = 7L)(), // duplicate offset
     ).flatten
 
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
@@ -51,10 +51,10 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       intercept[RuntimeException](executeSql(backend.integrity.verifyIntegrity()))
 
     // Error message should contain the duplicate event sequential id
-    failure.getMessage should include("7")
+    failure.getMessage should include regex "duplicate offsets.* 7"
   }
 
-  it should "find duplicate event ids with different offsets" in {
+  it should "find duplicate event ids" in {
     val updates = Vector(
       dtosCreate(event_offset = 6, event_sequential_id = 7L)(),
       dtosCreate(event_offset = 7, event_sequential_id = 7L)(), // duplicate id
@@ -67,7 +67,66 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
       intercept[RuntimeException](executeSql(backend.integrity.verifyIntegrity()))
 
     // Error message should contain the duplicate event sequential id
-    failure.getMessage should include("7")
+    failure.getMessage should include regex "duplicate event sequential ids.* 7"
+  }
+
+  it should "find duplicate entries for lapi_filter_achs_stakeholder filter table" in {
+    val updates = Vector(
+      dtosCreate(event_offset = 7, event_sequential_id = 7L)()
+    ).flatten
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(updates, _))
+    executeSql(
+      backend.event
+        .addActivationsToACHS(startExclusive = 0, endInclusive = 10, activeAtEventSeqId = 10)
+    )
+    executeSql(
+      backend.event
+        .addActivationsToACHS(startExclusive = 0, endInclusive = 10, activeAtEventSeqId = 10)
+    )
+    executeSql(updateLedgerEnd(offset(10), 10L))
+    val failure =
+      intercept[RuntimeException](executeSql(backend.integrity.verifyIntegrity()))
+
+    failure.getMessage should include regex "duplicate entries found .* in filter table lapi_filter_achs_stakeholder.* at event sequential id 7"
+  }
+
+  it should "find lapi_filter_achs_stakeholder's entries not present in lapi_filter_activate_stakeholder" in {
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+
+    executeSql { connection =>
+      SQL"""
+        INSERT INTO lapi_filter_achs_stakeholder (event_sequential_id, template_id, party_id) VALUES (42, 2, 3), (999, 4, 5)
+      """.execute()(connection)
+    }
+
+    val failure =
+      intercept[RuntimeException](executeSql(backend.integrity.verifyIntegrity()))
+
+    failure.getMessage should include regex
+      "lapi_filter_achs_stakeholder contains entries not present in lapi_filter_activate_stakeholder at event sequential ids.*: 42, 999"
+  }
+
+  it should "verify lapi_achs_state contains at most one row" in {
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+
+    // Insert multiple rows into lapi_achs_state to simulate the error
+    executeSql { connection =>
+      SQL"""
+        INSERT INTO lapi_achs_state (valid_at, last_removed, last_populated) VALUES (1, 2, 3)
+      """.execute()(connection)
+    }
+    executeSql { connection =>
+      SQL"""
+        INSERT INTO lapi_achs_state (valid_at, last_removed, last_populated) VALUES (4, 5, 6)
+      """.execute()(connection)
+    }
+
+    val failure =
+      intercept[RuntimeException](executeSql(backend.integrity.verifyIntegrity()))
+
+    failure.getMessage should include("lapi_achs_state table contains more than one row")
   }
 
   it should "find non-consecutive event ids" in {

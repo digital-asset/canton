@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.manual
 
-import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt, PositiveNumeric}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
@@ -20,6 +20,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.bftsequencer.AwaitsBftSequencerAuthenticationDisseminationQuorum
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
+  ConfigTransforms,
   EnvironmentDefinition,
   SharedEnvironment,
 }
@@ -37,6 +38,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.performa
   BftBenchmarkTool,
 }
 import com.digitalasset.canton.tracing.TracingConfig
+import com.digitalasset.canton.util.BytesUnit
 import eu.rekawek.toxiproxy
 import eu.rekawek.toxiproxy.model.ToxicDirection
 import monocle.macros.syntax.lens.*
@@ -113,6 +115,10 @@ class BftOrderingBenchmark
     Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.max-batches-per-block-proposal"))
       .map(_.toShort)
       .getOrElse(DefaultMaxBatchesPerProposal)
+
+  private val batchCacheSizeMb: Option[Long] =
+    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.batch-cache-size-in-mb"))
+      .map(_.toLong)
 
   private val dedicatedExecutionContextDivisor: Option[Int] =
     Option(
@@ -224,6 +230,15 @@ class BftOrderingBenchmark
           prefix = BFTOrderingBenchmarkPrefix,
         )*
       )
+      .addConfigTransform(ConfigTransforms.updateAllSequencerConfigs { case (_, config) =>
+        batchCacheSizeMb.fold(config) { batchSizeInMb =>
+          config
+            .focus(_.parameters.caching.bftOrderingBatchCache)
+            .modify(
+              _.copy(maximumMemory = PositiveNumeric.tryCreate(BytesUnit.MB(batchSizeInMb)))
+            )
+        }
+      })
       .addConfigTransforms(
         _.focus(_.monitoring.tracing.tracer).replace(
           TracingConfig.Tracer(

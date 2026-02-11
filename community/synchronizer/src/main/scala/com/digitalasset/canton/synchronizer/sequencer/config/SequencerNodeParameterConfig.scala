@@ -57,7 +57,7 @@ final case class SequencerNodeParameterConfig(
     override val batching: BatchingConfig = BatchingConfig(),
     override val caching: CachingConfigs = CachingConfigs(),
     override val watchdog: Option[WatchdogConfig] = None,
-    unsafeEnableOnlinePartyReplication: Boolean = false,
+    unsafeSequencerChannelSupport: Boolean = false,
     sequencingTimeLowerBoundExclusive: Option[CantonTimestamp] =
       SequencerNodeParameterConfig.DefaultSequencingTimeLowerBoundExclusive,
     asyncWriter: AsyncWriterConfig = AsyncWriterConfig(),

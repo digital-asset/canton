@@ -68,6 +68,7 @@ import com.digitalasset.canton.protocol.{
   TransactionMetadata,
   WellFormedTransaction,
 }
+import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.sequencing.protocol.{Batch, MediatorGroupRecipient, Recipients}
 import com.digitalasset.canton.sequencing.traffic.TrafficStateController
 import com.digitalasset.canton.store.SessionKeyStore
@@ -140,7 +141,7 @@ class TrafficCostEstimator(
       },
     )
 
-    def estimateCost = for {
+    def estimateCost(freeConfirmationResponses: Boolean) = for {
       transactionMetadata <- EitherT.fromEither[FutureUnlessShutdown](
         TransactionMetadata.fromTransactionMeta(
           transactionMeta.ledgerEffectiveTime,
@@ -168,12 +169,16 @@ class TrafficCostEstimator(
         costHints,
         disclosedContractInstances,
       )
-      confirmationResponseEstimatedCost <- estimateConfirmationResponseCost(
-        trafficStateController,
-        submitterInfo,
-        client,
-        snapshot,
-      )
+      confirmationResponseEstimatedCost <-
+        if (freeConfirmationResponses)
+          EitherT.pure[FutureUnlessShutdown, String](NonNegativeLong.zero)
+        else
+          estimateConfirmationResponseCost(
+            trafficStateController,
+            submitterInfo,
+            client,
+            snapshot,
+          )
     } yield SubmissionCostEstimation(
       snapshot.timestamp,
       confirmationRequestEstimatedCost,
@@ -181,13 +186,13 @@ class TrafficCostEstimator(
     )
 
     EitherT
-      .liftF[FutureUnlessShutdown, String, Boolean](
-        snapshot.trafficControlParameters(psid.protocolVersion).map(_.isDefined)
+      .liftF[FutureUnlessShutdown, String, Option[TrafficControlParameters]](
+        snapshot.trafficControlParameters(psid.protocolVersion)
       )
       .flatMap {
         // If traffic control is disabled, cost is 0.
         // Short circuit early to avoid unnecessarily generation a confirmation request / response
-        case false =>
+        case None =>
           EitherT.pure(
             SubmissionCostEstimation(
               snapshot.timestamp,
@@ -195,7 +200,7 @@ class TrafficCostEstimator(
               NonNegativeLong.zero,
             )
           )
-        case true => estimateCost
+        case Some(params) => estimateCost(params.freeConfirmationResponses)
       }
   }
 

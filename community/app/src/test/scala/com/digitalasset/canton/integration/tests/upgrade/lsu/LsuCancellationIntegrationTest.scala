@@ -3,13 +3,8 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.digitalasset.canton.admin.api.client.data.{
-  DynamicSynchronizerParameters as ConsoleDynamicSynchronizerParameters,
-  SequencerConnections,
-  SynchronizerConnectionConfig,
-}
+import com.digitalasset.canton.admin.api.client.data.DynamicSynchronizerParameters as ConsoleDynamicSynchronizerParameters
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.discard.Implicits.*
@@ -19,8 +14,9 @@ import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils.SynchronizerNodes
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
+import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.topology.{PartyId, TopologyManagerError}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -108,21 +104,9 @@ final class LsuCancellationIntegrationTest extends LsuBase {
       .addConfigTransforms(configTransforms*)
       .withSetup { implicit env =>
         import env.*
-
-        val daSequencerConnection =
-          SequencerConnections.single(sequencer1.sequencerConnection.withAlias(daName.toString))
-
         participants.local.start()
 
-        participants.all.synchronizers.connect(
-          SynchronizerConnectionConfig(
-            synchronizerAlias = daName,
-            sequencerConnections = daSequencerConnection,
-            timeTracker = SynchronizerTimeTrackerConfig(observationLatency =
-              config.NonNegativeFiniteDuration.Zero
-            ),
-          )
-        )
+        participants.all.synchronizers.connect(defaultSynchronizerConnectionConfig())
 
         participants.all.dars.upload(CantonExamplesPath)
         participant1.health.ping(participant1)

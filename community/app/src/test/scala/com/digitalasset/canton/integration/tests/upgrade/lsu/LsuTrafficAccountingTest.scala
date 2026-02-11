@@ -31,7 +31,7 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.Mu
 import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils.SynchronizerNodes
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality.Optional
 import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTrafficControlParameters
 import com.digitalasset.canton.sequencing.protocol.TrafficState
@@ -74,6 +74,7 @@ abstract class LsuTrafficAccountingTest extends LsuBase with TrafficBalanceSuppo
     setBalanceRequestSubmissionWindowSize = config.PositiveFiniteDuration.ofMinutes(5L),
     enforceRateLimiting = true,
     baseEventCost = NonNegativeLong.tryCreate(baseEventCost),
+    freeConfirmationResponses = true,
   )
 
   private def updateBalanceForMember(

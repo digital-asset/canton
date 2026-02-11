@@ -91,6 +91,7 @@ class SynchronizerConfiguration(
       setBalanceRequestSubmissionWindowSize = config.PositiveFiniteDuration.ofMinutes(5L),
       enforceRateLimiting = true,
       baseEventCost = NonNegativeLong.zero,
+      freeConfirmationResponses = true,
     )
 
     // Update topology to enable traffic control on the synchronizer

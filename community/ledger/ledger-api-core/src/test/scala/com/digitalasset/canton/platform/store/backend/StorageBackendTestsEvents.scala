@@ -28,6 +28,7 @@ import com.digitalasset.canton.platform.store.backend.common.{
   EventPayloadSourceForUpdatesAcsDelta,
   EventPayloadSourceForUpdatesLedgerEffects,
 }
+import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   IdFilterInput,
   PaginationInput,
@@ -3047,4 +3048,220 @@ private[backend] trait StorageBackendTestsEvents
       )
     ) shouldBe Vector(4L, 11L)
   }
+
+  behavior of "addActivationsToACHS"
+  private val signatory = Ref.Party.assertFromString("signatory")
+
+  it should "add activations to ACHS respecting the limits" in {
+    val dtos: Vector[DbDto] = (1L to 5L).zipWithIndex
+      .map { case (id, index) =>
+        dtosCreate(
+          event_offset = index + 1L,
+          event_sequential_id = index + 1L,
+          internal_contract_id = id,
+        )(
+          stakeholders = Set(signatory),
+          template_id = someTemplateId,
+        )
+      }
+      .toVector
+      .flatten
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(dtos, _))
+
+    executeSql(
+      backend.event
+        .addActivationsToACHS(startExclusive = 1L, endInclusive = 3L, activeAtEventSeqId = 1000L)
+    )
+
+    val achs = executeSql(
+      backend.event.updateStreamingQueries
+        .fetchACHSIds(stakeholderO = Some(signatory), templateIdO = None)(_)(
+          PaginatingAsyncStream.PaginationInput(
+            startExclusive = 0L,
+            endInclusive = 1000L,
+            limit = 1000,
+          )
+        )
+    )
+
+    achs shouldBe Vector(2L, 3L)
+  }
+
+  private val dtos: Vector[DbDto] = Vector(
+    dtosCreate(
+      event_offset = 1L,
+      event_sequential_id = 1L,
+    )(
+      stakeholders = Set(signatory),
+      template_id = someTemplateId,
+    ),
+    dtosAssign(
+      event_offset = 2L,
+      event_sequential_id = 2L,
+      synchronizer_id = someSynchronizerId2,
+    )(
+      stakeholders = Set(signatory),
+      template_id = someTemplateId,
+    ),
+    dtosUnassign(
+      event_offset = 3L,
+      event_sequential_id = 3L,
+      deactivated_event_sequential_id = Some(1L),
+      stakeholders = Set(signatory),
+      template_id = someTemplateId,
+    ),
+    dtosConsumingExercise(
+      event_offset = 4L,
+      event_sequential_id = 4L,
+      deactivated_event_sequential_id = Some(2L),
+      stakeholders = Set(signatory),
+      template_id = someTemplateId,
+    ),
+  ).flatten
+
+  it should "correctly handle deactivated contracts (when activeAt is at ledger end)" in {
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(dtos, _))
+    executeSql(
+      backend.event
+        .addActivationsToACHS(startExclusive = 0L, endInclusive = 2L, activeAtEventSeqId = 2L)
+    )
+    executeSql(
+      updateLedgerEnd(offset(4), 4L)
+    )
+
+    val achsActiveAt2 = executeSql(
+      backend.event.updateStreamingQueries
+        .fetchACHSIds(stakeholderO = Some(signatory), templateIdO = None)(_)(
+          PaginatingAsyncStream.PaginationInput(
+            startExclusive = 0L,
+            endInclusive = 1000L,
+            limit = 1000,
+          )
+        )
+    )
+
+    achsActiveAt2 shouldBe Vector(1L, 2L)
+
+  }
+
+  it should "correctly handle deactivated contracts (when activeAt contains a deactivation)" in {
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(dtos, _))
+    executeSql(
+      backend.event
+        .addActivationsToACHS(startExclusive = 0L, endInclusive = 3L, activeAtEventSeqId = 3L)
+    )
+
+    val achsActiveAt3 = executeSql(
+      backend.event.updateStreamingQueries
+        .fetchACHSIds(stakeholderO = Some(signatory), templateIdO = None)(_)(
+          PaginatingAsyncStream.PaginationInput(
+            startExclusive = 0L,
+            endInclusive = 1000L,
+            limit = 1000,
+          )
+        )
+    )
+
+    achsActiveAt3 shouldBe Vector(2L)
+  }
+
+  it should "correctly handle deactivated contracts (when activeAt contains a deactivation for all activations)" in {
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(dtos, _))
+    executeSql(
+      backend.event
+        .addActivationsToACHS(startExclusive = 0L, endInclusive = 3L, activeAtEventSeqId = 4L)
+    )
+    executeSql(
+      updateLedgerEnd(offset(4), 4L)
+    )
+
+    val achsActiveAt4 = executeSql(
+      backend.event.updateStreamingQueries
+        .fetchACHSIds(stakeholderO = Some(signatory), templateIdO = None)(_)(
+          PaginatingAsyncStream.PaginationInput(
+            startExclusive = 0L,
+            endInclusive = 1000L,
+            limit = 1000,
+          )
+        )
+    )
+
+    achsActiveAt4 shouldBe empty
+  }
+
+  behavior of "removeActivationsFromACHS"
+
+  it should "correctly remove deactivated contracts" in {
+    val signatory = Ref.Party.assertFromString("signatory")
+
+    val activations = Vector(1L, 2L, 4L, 6L, 7L, 8L, 10L).map { i =>
+      dtosCreate(
+        event_offset = i,
+        event_sequential_id = i,
+      )(
+        stakeholders = Set(signatory),
+        template_id = someTemplateId,
+      )
+    }
+
+    // deactivations: at 3 deactivates 2, at 5 deactivates 1, at 9 deactivates 4
+    val deactivations = Vector(3L -> 2L, 5L -> 1L, 9L -> 4L).map { case (i, deactivatedId) =>
+      dtosConsumingExercise(
+        event_offset = i,
+        event_sequential_id = i,
+        deactivated_event_sequential_id = Some(deactivatedId),
+      )
+    }
+
+    val dtos: Vector[DbDto] = (activations ++ deactivations).flatten
+
+    executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
+    executeSql(ingest(dtos, _))
+    executeSql(
+      backend.event
+        .addActivationsToACHS(startExclusive = 0L, endInclusive = 4L, activeAtEventSeqId = 4L)
+    )
+    executeSql(
+      updateLedgerEnd(offset(4), 4L)
+    )
+
+    val achs = executeSql(
+      backend.event.updateStreamingQueries
+        .fetchACHSIds(stakeholderO = Some(signatory), templateIdO = None)(_)(
+          PaginatingAsyncStream.PaginationInput(
+            startExclusive = 0L,
+            endInclusive = 1000L,
+            limit = 1000,
+          )
+        )
+    )
+
+    achs shouldBe Vector(1L, 4L)
+
+    executeSql(
+      backend.event
+        .removeDeactivatedFromACHS(startExclusive = 4L, endInclusive = 8L)
+    )
+    val achsAfter = executeSql(
+      backend.event.updateStreamingQueries
+        .fetchACHSIds(stakeholderO = Some(signatory), templateIdO = None)(_)(
+          PaginatingAsyncStream.PaginationInput(
+            startExclusive = 0L,
+            endInclusive = 1000L,
+            limit = 1000,
+          )
+        )
+    )
+
+    achsAfter shouldBe Vector(4L)
+  }
+
 }

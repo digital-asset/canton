@@ -8,6 +8,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   AddBatch,
   FetchBatches,
   GC,
+  Prune,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.BatchId
@@ -66,11 +67,13 @@ class Generator(random: Random, inMemoryStore: InMemoryAvailabilityStore) {
   }
 
   def generateCommand: Gen[Command] = _ => {
-    random.nextInt(3) match {
+    random.nextInt(4) match {
       case 0 =>
         GC(genSeq(genBatchId).apply(()))
       case 1 =>
         FetchBatches(genSeq(genBatchId).apply(()))
+      case 2 =>
+        Prune(genEpochNumber(()))
       case _ =>
         AddBatch(genBatchId.apply(()), genBatch.apply(()))
     }

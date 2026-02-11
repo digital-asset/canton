@@ -16,10 +16,10 @@ import com.digitalasset.canton.config.{
 import com.digitalasset.canton.console.FeatureFlag
 import com.digitalasset.canton.http.{JsonApiConfig, WebsocketConfig}
 import com.digitalasset.canton.participant.config.{
+  AlphaOnlinePartyReplicationConfig,
   ParticipantNodeConfig,
   RemoteParticipantConfig,
   TestingTimeServiceConfig,
-  UnsafeOnlinePartyReplicationConfig,
 }
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
 import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
@@ -882,27 +882,30 @@ object ConfigTransforms {
     ),
   )
 
-  def unsafeEnableOnlinePartyReplication(
+  def enableAlphaOnlinePartyReplicationSupport(
       participantsWithOnPRInterceptor: Map[
         String,
-        UnsafeOnlinePartyReplicationConfig.TestInterceptor,
-      ] = Map.empty
-  ): Seq[ConfigTransform] = Seq(
-    updateAllParticipantConfigs { case (name, config) =>
-      config
-        .focus(_.parameters.unsafeOnlinePartyReplication)
-        .replace(
-          Some(
-            UnsafeOnlinePartyReplicationConfig(
-              testInterceptor = participantsWithOnPRInterceptor.get(name)
-            )
+        AlphaOnlinePartyReplicationConfig.TestInterceptor,
+      ] = Map.empty,
+      enableUnsafeSequencerChannelSupport: Boolean = false,
+  ): Seq[ConfigTransform] = Seq(updateAllParticipantConfigs { case (name, config) =>
+    config
+      .focus(_.parameters.alphaOnlinePartyReplicationSupport)
+      .replace(
+        Some(
+          AlphaOnlinePartyReplicationConfig(
+            testInterceptor = participantsWithOnPRInterceptor.get(name),
+            unsafeSequencerChannelSupport = enableUnsafeSequencerChannelSupport,
           )
         )
-    },
-    updateAllSequencerConfigs_(
-      _.focus(_.parameters.unsafeEnableOnlinePartyReplication).replace(true)
-    ),
-  )
+      )
+  }) ++ (if (enableUnsafeSequencerChannelSupport)
+           Seq(
+             updateAllSequencerConfigs_(
+               _.focus(_.parameters.unsafeSequencerChannelSupport).replace(true)
+             )
+           )
+         else Seq.empty)
 
   def setDelayLoggingThreshold(duration: config.NonNegativeFiniteDuration): ConfigTransform =
     _.focus(_.monitoring.logging.delayLoggingThreshold).replace(duration)

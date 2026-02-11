@@ -5,21 +5,22 @@ package com.digitalasset.daml.lf
 package testing.snapshot
 
 import com.digitalasset.daml.lf.data.Ref
-import com.digitalasset.canton.integration.{CommunityIntegrationTest, ConfigTransforms, EnvironmentDefinition, SharedEnvironment, TestConsoleEnvironment}
+import com.digitalasset.canton.integration.{
+  CommunityIntegrationTest,
+  ConfigTransforms,
+  EnvironmentDefinition,
+  SharedEnvironment,
+  TestConsoleEnvironment,
+}
 import org.scalatest.BeforeAndAfterAll
 import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.util.SetupPackageVetting
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.integration.util.EntitySyntax
-import com.digitalasset.daml.lf.archive.DarDecoder
+import com.digitalasset.daml.lf.archive.DarSchemaDecoder
 import monocle.macros.syntax.lens.*
-import com.digitalasset.daml.lf.engine.script.{RunnerMain, RunnerMainConfig}
-import com.digitalasset.daml.lf.engine.script.RunnerMainConfig.RunMode.RunOne
-import com.daml.tls.TlsConfiguration
-import com.digitalasset.daml.lf.engine.script.ParticipantMode.RemoteParticipantHost
 import org.scalatest.Assertion
-import com.digitalasset.daml.lf.engine.script.ScriptTimeMode.Static
 
 import java.nio.file.{FileSystems, Files, Path}
 
@@ -47,7 +48,7 @@ abstract class GenerateSnapshotsBase
     assume(
       Seq("DAR_FILE", "SCRIPT_NAME", "SNAPSHOT_DIR")
         .forall(envVar => sys.env.contains(envVar)),
-      "The environment variables DAR_FILE, SCRIPT_NAME and SNAPSHOT_DIR all need to be set"
+      "The environment variables DAR_FILE, SCRIPT_NAME and SNAPSHOT_DIR all need to be set",
     )
 
     snapshotBaseDir = Path.of(sys.env("SNAPSHOT_DIR"))
@@ -57,7 +58,8 @@ abstract class GenerateSnapshotsBase
     super.beforeAll()
   }
 
-  lazy val snapshotDir = snapshotBaseDir.resolve(s"${scriptDarPath.getFileName}/${scriptEntryPoint.name}")
+  lazy val snapshotDir =
+    snapshotBaseDir.resolve(s"${scriptDarPath.getFileName}/${scriptEntryPoint.name}")
   lazy val participantId = Ref.ParticipantId.assertFromString("participant1")
   lazy val snapshotFileMatcher =
     FileSystems
@@ -112,33 +114,44 @@ abstract class GenerateSnapshotsBase
 
   runWhenEnvVarSet("Generate snapshot data") { implicit env =>
     import env.*
-
     println(s"Using script ${scriptDarPath.getFileName}/${scriptEntryPoint.name}")
-
-    val scriptConfig = getConfig(
+    runScript(
       participant1.config.ledgerApi.address,
       participant1.config.ledgerApi.port,
     )
-
-    RunnerMain.main(scriptConfig)
-
     val snapshotFiles = Files.list(snapshotDir).filter(snapshotFileMatcher.matches).toList
     snapshotFiles.size() should be(1)
   }
 
   private def getPkgId(darPath: Path): LfPackageId =
-    DarDecoder.assertReadArchiveFromFile(darPath.toFile).main._1
+    DarSchemaDecoder.assertReadArchiveFromFile(darPath.toFile).main._1
 
-  private def getConfig(host: String, port: Port): RunnerMainConfig =
-    RunnerMainConfig(
-      darPath = scriptDarPath.toFile,
-      runMode = RunOne(scriptEntryPoint.toString, None, None),
-      participantMode = RemoteParticipantHost(host, port.unwrap),
-      timeMode = Static,
-      accessTokenFile = None,
-      tlsConfig = TlsConfiguration(enabled = false),
-      maxInboundMessageSize = RunnerMainConfig.DefaultMaxInboundMessageSize,
-      userId = None,
-      uploadDar = true,
-    )
+  private def runScript(host: String, port: Port): Unit = {
+    assert(sys.env.contains("DAML_VERSION"), "DAML_VERSION environment variable is not set")
+
+    val cmd = List(
+      List("dpm", "script"),
+      List("--dar", scriptDarPath.toFile.toString),
+      List("--script-name", scriptEntryPoint.toString),
+      List("--ledger-host", host),
+      List("--ledger-port", port.unwrap.toString),
+      List("--static-time"),
+      List("--max-inbound-message-size", Int.MaxValue.toString),
+      List("--upload-dar", "true"),
+    ).flatten
+
+    val stderr = new StringBuilder
+    val tmpDir = Files.createTempDirectory("dpm-script").toFile
+
+    try {
+      val logger = sys.process.ProcessLogger(_ => (), stderr.append(_).append("\n"))
+      sys.process.Process(cmd, cwd = Some(tmpDir)) ! logger
+    } catch {
+      case scala.util.control.NonFatal(cause) =>
+        throw new Error(s"daml script failed: ${cause.getMessage}\n" + stderr.toString(), cause)
+    } finally {
+      // The call should not create any files
+      tmpDir.delete()
+    }
+  }
 }

@@ -52,6 +52,7 @@ sealed trait MetricRegistryIntegrationTest
     readVsWriteScalingFactor = InternalTrafficControlParameters.DefaultReadVsWriteScalingFactor,
     enforceRateLimiting = true,
     baseEventCost = NonNegativeLong.zero,
+    freeConfirmationResponses = true,
   )
 
   override lazy val environmentDefinition: EnvironmentDefinition =

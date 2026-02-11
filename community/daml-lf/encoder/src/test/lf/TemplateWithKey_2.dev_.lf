@@ -30,7 +30,7 @@ module TemplateWithKeyMod {
   val lookupByKey: Party -> Update (Option (ContractId TemplateWithKeyMod:Person)) =
     \(p: Party) -> lookup_by_key @TemplateWithKeyMod:Person p;
 
-  val queryByKey: Int64 -> Party -> Update (List (ContractId TemplateWithKeyMod:Person)) =
+  val queryByKey: Int64 -> Party -> Update (List ('5aee9b21b8e9a4c4975b5f4c4198e6e6e8469df49e2010820e792f393db870f4':DA.Types:Tuple2 (ContractId TemplateWithKeyMod:Person) TemplateWithKeyMod:Person)) =
     \(n : Int64) (p: Party) -> query_n_by_key @TemplateWithKeyMod:Person n p;
 
 }

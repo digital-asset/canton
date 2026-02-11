@@ -9,8 +9,6 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.participant.state.Update
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted
 import com.digitalasset.canton.metrics.IndexerMetrics
-import com.digitalasset.daml.lf.data.Ref
-import com.digitalasset.daml.lf.transaction.TransactionNodeStatistics
 
 object EventMetricsUpdater {
   def apply(
@@ -26,10 +24,7 @@ object EventMetricsUpdater {
           .collect { case (_, ta: TransactionAccepted) => ta }
           .flatMap(ta => ta.completionInfoO.iterator.map(_ -> ta))
         userId = completionInfo.userId
-        statistics = TransactionNodeStatistics(
-          transactionAccepted.transaction,
-          Set.empty[Ref.PackageId],
-        )
+        statistics = transactionAccepted.transactionInfo.statistics
       } yield (userId, statistics.committed.actions + statistics.rolledBack.actions)).toList
         .groupMapReduce(_._1)(_._2)(_ + _)
         .toList

@@ -14,7 +14,10 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.indexer.parallel.PostPublishData
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.*
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.PruneUptoInclusiveAndLedgerEnd
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
+  ACHSState,
+  PruneUptoInclusiveAndLedgerEnd,
+}
 import com.digitalasset.canton.platform.store.backend.common.{
   EventPayloadSourceForUpdatesAcsDelta,
   EventPayloadSourceForUpdatesLedgerEffects,
@@ -154,6 +157,29 @@ trait ParameterStorageBackend {
   /** Returns the ledger identity parameters, or None if the database hasn't been initialized yet.
     */
   def ledgerIdentity(connection: Connection): Option[ParameterStorageBackend.IdentityParams]
+
+  /** Fetches the current state of the Active Contracts Head Snapshot (ACHS) from the database, or
+    * None if it hasn't been initialized yet.
+    */
+  def fetchACHSState(connection: Connection): Option[ACHSState]
+
+  /** Inserts the state of the Active Contracts Head Snapshot (ACHS) in the database. Assumes that
+    * the ACHS state is not yet present.
+    */
+  def insertACHSState(achsState: ACHSState)(connection: Connection): Unit
+
+  /** Updates the validAt of the state of the Active Contracts Head Snapshot (ACHS) in the database.
+    * Throws an IllegalStateException if the update was not successful.
+    */
+  def updateACHSValidAt(validAt: Long)(connection: Connection): Unit
+
+  /** Updates the lastRemoved and the lastPopulated of the state of the Active Contracts Head
+    * Snapshot (ACHS) in the database. Throws an IllegalStateException if the update was not
+    * successful.
+    */
+  def updateACHSLastPointers(lastRemoved: Long, lastPopulated: Long)(connection: Connection): Unit
+
+  def clearACHSState(connection: Connection): Unit
 }
 
 object ParameterStorageBackend {
@@ -172,6 +198,27 @@ object ParameterStorageBackend {
   final case class PruneUptoInclusiveAndLedgerEnd(
       pruneUptoInclusive: Option[Offset],
       ledgerEnd: Option[Offset],
+  )
+
+  /** Represents the state of the Active Contracts Head Snapshot (ACHS) in the database. The ACHS is
+    * a snapshot of the active contracts at a specific event sequential ID. However, due to the
+    * nature of contract activations and deactivations, the ACHS may not be fully populated up to
+    * that event sequential ID and be populated only partially. The fields in this case class help
+    * track the state of the ACHS and keep it updated.
+    *
+    * @param validAt
+    *   The event sequential ID at which the ACHS is valid.
+    * @param lastRemoved
+    *   The last event sequential ID for which deactivations were looked up and the corresponding
+    *   activation was removed from the ACHS. At the end of the update of the ACHS this should be
+    *   equal to validAt.
+    * @param lastPopulated
+    *   The last event sequential ID that was populated into the ACHS.
+    */
+  final case class ACHSState(
+      validAt: Long,
+      lastRemoved: Long,
+      lastPopulated: Long,
   )
 }
 
@@ -321,6 +368,39 @@ trait EventStorageBackend {
       requestingPartiesForTx: Option[Set[Party]],
       requestingPartiesForReassignment: Option[Set[Party]],
   )(connection: Connection): Vector[RawThinLedgerEffectsEvent]
+
+  /** Adds activations to the Active Contracts Head Snapshot (ACHS) for a specified range of event
+    * sequential IDs that are still active at a given event sequential ID.
+    *
+    * @param startExclusive
+    *   The starting event sequential ID (exclusive).
+    * @param endInclusive
+    *   The ending event sequential ID (inclusive).
+    * @param activeAtEventSeqId
+    *   The event sequential ID at which the contracts are still active.
+    * @param connection
+    *   The database connection to be used for the operation.
+    */
+  def addActivationsToACHS(
+      startExclusive: Long,
+      endInclusive: Long,
+      activeAtEventSeqId: Long,
+  )(connection: Connection): Unit
+
+  /** Removes activations from the Active Contracts Head Snapshot (ACHS) looking at a specified
+    * range of event sequential IDs in the deactivations table.
+    *
+    * @param startExclusive
+    *   The starting event sequential ID (exclusive).
+    * @param endInclusive
+    *   The ending event sequential ID (inclusive).
+    * @param connection
+    *   The database connection to be used for the operation.
+    */
+  def removeDeactivatedFromACHS(
+      startExclusive: Long,
+      endInclusive: Long,
+  )(connection: Connection): Unit
 }
 
 object EventStorageBackend {
