@@ -307,6 +307,8 @@ private[validation] object Typing {
         alpha.name -> KStar,
         TText ->: TFailureCategory ->: TText ->: TTextMap(TText) ->: alpha,
       ),
+      // External Call
+      BExternalCall -> (TText ->: TText ->: TText ->: TText ->: TUpdate(TText)),
     )
   }
 
