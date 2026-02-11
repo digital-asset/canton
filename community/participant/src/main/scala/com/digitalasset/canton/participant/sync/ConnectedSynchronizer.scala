@@ -1253,6 +1253,7 @@ object ConnectedSynchronizer {
           clock,
           exitOnFatalFailures = parameters.exitOnFatalFailures,
           parameters.batchingConfig,
+          asynchronousInitialization = parameters.commitmentAsynchronousInitialization,
           doNotAwaitOnCheckingIncomingCommitments =
             parameters.doNotAwaitOnCheckingIncomingCommitments,
           commitmentCheckpointInterval = parameters.commitmentCheckpointInterval,

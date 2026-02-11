@@ -461,6 +461,8 @@ class MediatorNodeBootstrap(
           clock = clock,
           crypto = crypto,
           staticSynchronizerParameters = staticSynchronizerParameters,
+          parameters.batchingConfig.topologyCacheAggregator,
+          config.topology,
           store = synchronizerTopologyStore,
           outboxQueue = outboxQueue,
           disableOptionalTopologyChecks = config.topology.disableOptionalTopologyChecks,
@@ -505,7 +507,6 @@ class MediatorNodeBootstrap(
                   synchronizerTopologyStore,
                   topologyManagerStatus = TopologyManagerStatus
                     .combined(authorizedTopologyManager, synchronizerTopologyManager),
-                  config.topology,
                   synchronizerOutboxFactory,
                 ),
               storage.isActive,
@@ -562,7 +563,6 @@ class MediatorNodeBootstrap(
       staticSynchronizerParameters: StaticSynchronizerParameters,
       synchronizerTopologyStore: TopologyStore[SynchronizerStore],
       topologyManagerStatus: TopologyManagerStatus,
-      topologyConfig: TopologyConfig,
       synchronizerOutboxFactory: SynchronizerOutboxFactory,
   ): EitherT[FutureUnlessShutdown, String, MediatorRuntime] = {
     val synchronizerLoggerFactory = loggerFactory.append("psid", psid.toString)
@@ -618,6 +618,7 @@ class MediatorNodeBootstrap(
               arguments.config.topology,
               arguments.clock,
               staticSynchronizerParameters,
+              metrics.topologyCache,
               arguments.futureSupervisor,
               synchronizerLoggerFactory,
             )()
@@ -763,8 +764,10 @@ class MediatorNodeBootstrap(
             new InitialTopologySnapshotValidator(
               new SynchronizerCryptoPureApi(staticSynchronizerParameters, crypto.pureCrypto),
               synchronizerTopologyStore,
+              parameters.batchingConfig.topologyCacheAggregator,
+              config.topology,
               Some(staticSynchronizerParameters),
-              validateInitialSnapshot = topologyConfig.validateInitialTopologySnapshot,
+              timeouts,
               synchronizerLoggerFactory,
             ),
             topologyClient,

@@ -121,6 +121,13 @@ final case class DbParametersConfig(
   *   number of parallel queries to the db. defaults to 8
   * @param aggregator
   *   batching configuration for DB queries
+  * @param inFlightAggregationsQueryInterval
+  *   (optionally) split aggregator queries into intervals of this duration to avoid sequential
+  *   scans. When too many query intervals are generated, query interval splitting does not occur.
+  * @param mediatorFetchFinalizedResponsesAggregator
+  *   batching configuration for the mediator for fetching finalized responses
+  * @param mediatorStoreFinalizedResponsesAggregator
+  *   batching configuration for the mediator for storing finalized responses
   * @param maxPruningBatchSize
   *   maximum number of events to prune from a participant at a time, used to break up canton
   *   participant-internal batches
@@ -140,10 +147,17 @@ final case class BatchingConfig(
     maxAcsImportBatchSize: PositiveNumeric[Int] = BatchingConfig.defaultMaxAcsImportBatchSize,
     parallelism: PositiveNumeric[Int] = BatchingConfig.defaultBatchingParallelism,
     aggregator: BatchAggregatorConfig = BatchingConfig.defaultAggregator,
+    inFlightAggregationsQueryInterval: Option[PositiveFiniteDuration] =
+      BatchingConfig.defaultInFlightAggregationsQueryInterval,
     contractStoreAggregator: BatchAggregatorConfig = BatchingConfig.defaultContractStoreAggregator,
+    mediatorFetchFinalizedResponsesAggregator: BatchAggregatorConfig =
+      BatchingConfig.defaultAggregator,
+    mediatorStoreFinalizedResponsesAggregator: BatchAggregatorConfig =
+      BatchingConfig.defaultAggregator,
     maxPruningBatchSize: PositiveNumeric[Int] = BatchingConfig.defaultMaxPruningBatchSize,
     maxPruningTimeInterval: PositiveFiniteDuration = BatchingConfig.defaultMaxPruningTimeInterval,
     pruningParallelism: PositiveNumeric[Int] = BatchingConfig.defaultPruningParallelism,
+    topologyCacheAggregator: BatchAggregatorConfig = BatchingConfig.defaultAggregator,
 ) extends UniformCantonConfigValidation
 
 object BatchingConfig {
@@ -158,6 +172,7 @@ object BatchingConfig {
   private val defaultBatchingParallelism: PositiveInt = PositiveNumeric.tryCreate(8)
   private val defaultLedgerApiPruningBatchSize: PositiveInt = PositiveNumeric.tryCreate(50000)
   private val defaultMaxAcsImportBatchSize: PositiveNumeric[Int] = PositiveNumeric.tryCreate(1000)
+  private val defaultInFlightAggregationsQueryInterval: Option[PositiveFiniteDuration] = None
   private val defaultAggregator: BatchAggregatorConfig.Batching = BatchAggregatorConfig.Batching()
   private val defaultContractStoreAggregator: BatchAggregatorConfig.Batching =
     BatchAggregatorConfig.Batching(

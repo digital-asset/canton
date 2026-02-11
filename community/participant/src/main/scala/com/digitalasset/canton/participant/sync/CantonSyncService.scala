@@ -1670,7 +1670,7 @@ class CantonSyncService(
           .map { case (psid, loader) => s"$psid at ${loader.timestamp}" }
           .mkString(", ")
 
-        logger.info(
+        logger.debug(
           show"Routing state contains connected synchronizers $connectedSynchronizers and topology $topologySnapshotInfo"
         )
 

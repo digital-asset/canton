@@ -37,6 +37,7 @@ import com.digitalasset.canton.topology.store.StoredTopologyTransactions.{
 }
 import com.digitalasset.canton.topology.store.TopologyStore.{
   EffectiveStateChange,
+  StateKeyFetch,
   TopologyStoreDeactivations,
 }
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransaction.GenericValidatedTopologyTransaction
@@ -170,6 +171,13 @@ final case class StoredTopologyTransaction[+Op <: TopologyChangeOp, +M <: Topolo
   def selectOp[TargetOp <: TopologyChangeOp: ClassTag] = transaction
     .selectOp[TargetOp]
     .map(_ => this.asInstanceOf[StoredTopologyTransaction[TargetOp, M]])
+
+  def isActiveAsOf(asOf: EffectiveTime, asOfInclusive: Boolean): Boolean =
+    if (asOfInclusive)
+      validFrom.value <= asOf.value && validUntil.forall(x => x.value > asOf.value)
+    else
+      validFrom.value < asOf.value && validUntil.forall(x => x.value >= asOf.value)
+
 }
 
 object StoredTopologyTransaction
@@ -341,6 +349,17 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
       filterUid: Option[NonEmpty[Seq[UniqueIdentifier]]],
       filterNamespace: Option[NonEmpty[Seq[Namespace]]],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[NegativeStoredTopologyTransactions]
+
+  /** Fetch all items for the given state keys in descending order
+    *
+    * This function is used by the batch loader. As such, we assume that the request is already
+    * batched and therefore that the number of items is capped
+    */
+  def fetchAllDescending(
+      items: Seq[StateKeyFetch]
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[GenericStoredTopologyTransactions]
 
   /** Updates topology transactions. The method proceeds as follows: For each mapping hash, it will
     * have optionally a serial and a set of tx hashes. The tx hashes represent proposals which must
@@ -683,6 +702,34 @@ object TopologyStore {
       case _ => ()
     }
     validParties.toSet
+  }
+
+  /** Data type to instruct state fetching
+    *
+    * @param identifier
+    *   the identifier if we are fetching by uid, empty for NSD and DND
+    * @param validUntilCutoff
+    *   fetch all state changes which are relevant starting from validUntilCutOff (including) until
+    *   infinity
+    */
+  final case class StateKeyFetch(
+      code: TopologyMapping.Code,
+      namespace: Namespace,
+      identifier: Option[String185],
+      validUntilCutoff: EffectiveTime,
+  ) extends PrettyPrinting {
+    override protected def pretty: Pretty[StateKeyFetch] = StateKeyFetch.pretty
+  }
+  object StateKeyFetch {
+    import com.digitalasset.canton.logging.pretty.PrettyUtil.*
+    import com.digitalasset.canton.util.ShowUtil.*
+
+    val pretty: Pretty[StateKeyFetch] = prettyOfClass[StateKeyFetch](
+      param("code", _.code.code.unquoted),
+      param("namespace", _.namespace),
+      paramIfDefined("identifier", _.identifier.map(_.str.unquoted)),
+      param("cutoff", _.validUntilCutoff.value),
+    )
   }
 
 }

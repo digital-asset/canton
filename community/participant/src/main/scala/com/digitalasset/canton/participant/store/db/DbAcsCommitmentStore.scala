@@ -59,6 +59,7 @@ import slick.jdbc.{
   TransactionIsolation,
 }
 
+import scala.collection.immutable
 import scala.collection.immutable.SortedSet
 import scala.concurrent.ExecutionContext
 
@@ -175,7 +176,7 @@ class DbAcsCommitmentStore(
   }
 
   override def markOutstanding(
-      periods: NonEmpty[Set[CommitmentPeriod]],
+      periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
       counterParticipants: NonEmpty[Set[ParticipantId]],
   )(implicit
       traceContext: TraceContext
@@ -201,7 +202,7 @@ class DbAcsCommitmentStore(
         on conflict do nothing"""
 
     storage.queryAndUpdate(
-      DbStorage.bulkOperation_(insertOutstanding, crossProduct.toSeq, storage.profile)(setParams),
+      DbStorage.bulkOperation_(insertOutstanding, crossProduct, storage.profile)(setParams),
       operationName = "commitments: storeOutstanding",
     )
   }
@@ -291,7 +292,7 @@ class DbAcsCommitmentStore(
 
   override def markPeriod(
       counterParticipant: ParticipantId,
-      periods: NonEmpty[Set[CommitmentPeriod]],
+      periods: NonEmpty[immutable.Iterable[CommitmentPeriod]],
       matchingState: CommitmentPeriodStateInOutstanding,
   )(implicit
       traceContext: TraceContext

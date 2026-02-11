@@ -33,7 +33,7 @@ libraryDependencies += "com.esotericsoftware.yamlbeans" % "yamlbeans" % "1.13"
 
 // Assembly plugin to build fat-jars
 // We can not upgrade to 2.x due to shapeless: https://github.com/sbt/sbt-assembly/issues/496
-addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "1.2.0")
+addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "2.3.1")
 
 // Need better files for building the config file when doing the 'did we break Protobuf compatibility?' check
 libraryDependencies += "com.github.pathikrit" %% "better-files" % "3.8.0"

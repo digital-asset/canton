@@ -13,9 +13,8 @@ import sbt.Tests.{Group, SubProcess}
 import sbt.{File, *}
 import sbt.internal.util.ManagedLogger
 import sbt.nio.Keys.*
-import sbtassembly.AssemblyKeys.*
-import sbtassembly.AssemblyPlugin.autoImport.assembly
-import sbtassembly.{MergeStrategy, PathList}
+import sbtassembly.AssemblyPlugin.autoImport.*
+import sbtassembly.{CustomMergeStrategy, MergeStrategy, PathList}
 import sbtbuildinfo.BuildInfoPlugin
 import sbtbuildinfo.BuildInfoPlugin.autoImport.*
 import sbtide.Keys.ideExcludedDirectories
@@ -93,11 +92,11 @@ object BuildCommon {
       // Reload on build changes
       Global / onChangedBuildSource := ReloadOnSourceChanges,
       // allow setting number of tasks via environment
-      Global / concurrentRestrictions ++= sys.env
-        .get("MAX_CONCURRENT_SBT_TEST_TASKS")
-        .map(_.toInt)
-        .map(Tags.limit(Tags.Test, _))
-        .toSeq,
+      Global / concurrentRestrictions ++=
+        // run assembly tasks in total isolation, because they have high memory usage
+        Seq(Tags.exclusive(Assembly.assemblyTag)) ++
+          // allow setting number of concurrent test tasks via environment
+          maxConcurrentSbtTestTasks,
       //  Global / concurrentRestrictions += Tags.limitAll(1), // re-enable if you want to serialize compilation (to not mess up the Ystatistics output)
       Global / excludeLintKeys += Compile / damlBuildOrder,
       Global / excludeLintKeys += `community-app` / Compile / damlCompileDirectory,
@@ -188,6 +187,9 @@ object BuildCommon {
       optError: Option[String] = None,
   ): String =
     runProcess(scala.sys.process.Process(command), command.mkString(" "), log, optError)
+
+  private def maxConcurrentSbtTestTasks: Option[Tags.Rule] =
+    sys.env.get("MAX_CONCURRENT_SBT_TEST_TASKS").map(v => Tags.limit(Tags.Test, v.toInt))
 
   private def formatCoverageExcludes(excludes: String): String =
     excludes.stripMargin.trim.split(System.lineSeparator).mkString(";")
@@ -424,17 +426,6 @@ object BuildCommon {
         log,
       )
     }
-
-  class RenameMergeStrategy(target: String) extends MergeStrategy {
-    override def name: String = s"Rename to $target"
-
-    override def apply(
-        tempDir: File,
-        path: String,
-        files: Seq[File],
-    ): Either[String, Seq[(File, String)]] =
-      Right(files.map(_ -> target))
-  }
 
   def mergeStrategy(oldStrategy: String => MergeStrategy): String => MergeStrategy = {
     case PathList("LICENSE") => MergeStrategy.last
@@ -757,7 +748,7 @@ object BuildCommon {
         ),
         additionalBundleSources := Seq.empty,
         assemblyMergeStrategy := {
-          case "LICENSE-open-source-bundle.txt" => new RenameMergeStrategy("LICENSE-DA.txt")
+          case "LICENSE-open-source-bundle.txt" => CustomMergeStrategy.rename(_ => "LICENSE-DA.txt")
           // this file comes in multiple flavors, from io.get-coursier:interface and from org.scala-lang.modules:scala-collection-compat. Since the content differs it is resolve this explicitly with this MergeStrategy.
           case path if path.endsWith("scala-collection-compat.properties") => MergeStrategy.first
           case x =>

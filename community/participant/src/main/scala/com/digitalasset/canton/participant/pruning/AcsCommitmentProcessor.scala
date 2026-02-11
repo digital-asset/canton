@@ -225,7 +225,7 @@ class AcsCommitmentProcessor private (
     contractStore: ContractStore,
     acsCounterParticipantConfigStore: AcsCounterParticipantConfigStore,
     /* An in-memory, mutable running ACS snapshot, updated on every call to [[publish]]  */
-    val runningCommitments: InternalizedRunningCommitments,
+    runningCommitmentsAsync: FutureUnlessShutdown[InternalizedRunningCommitments],
     endLastProcessedPeriod: Option[CantonTimestampSecond],
     enableAdditionalConsistencyChecks: Boolean,
     protected val loggerFactory: NamedLoggerFactory,
@@ -295,8 +295,19 @@ class AcsCommitmentProcessor private (
   private val readyForRemote: AtomicReference[Option[CantonTimestampSecond]] =
     new AtomicReference[Option[CantonTimestampSecond]](endLastProcessedPeriod)
 
-  @volatile private[this] var lastCheckpointTs: CantonTimestamp =
-    runningCommitments.watermark.timestamp
+  /** Initialized by [[initRunningCommitments()]]. Since this field is accessed only from one of the
+    * queues and [[initRunningCommitments()]] runs on the [[publishQueue]] as the first task, this
+    * field will always be initialized by the time it is accessed.
+    */
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
+  private[this] var runningCommitments: InternalizedRunningCommitments = _
+
+  /** Initialized by [[initRunningCommitments()]]. Since this field is accessed only from one of the
+    * queues and [[initRunningCommitments()]] runs on the [[publishQueue]] as the first task, this
+    * field will always be initialized by the time it is accessed.
+    */
+  @SuppressWarnings(Array("org.wartremover.warts.Null"))
+  @volatile private[this] var lastCheckpointTs: CantonTimestamp = _
 
   /** Denotes the last period queued for processing. Always increasing because we schedule periods
     * for processing in monotonically order of their timestamps.
@@ -335,8 +346,7 @@ class AcsCommitmentProcessor private (
     * synchronizer.
     */
   private val counterParticipantLastMessage =
-    TrieMap
-      .empty[ParticipantId, CantonTimestamp]
+    TrieMap.empty[ParticipantId, CantonTimestamp]
 
   /** A future checking whether the node should enter catch-up mode by computing the catch-up
     * timestamp. At most one future runs computing this
@@ -411,6 +421,21 @@ class AcsCommitmentProcessor private (
       logTaskTiming = true,
       crashOnFailure = exitOnFatalFailures,
     )
+
+  // Immediately spawn a first task on the publish queue that initializes the running commitments
+  locally {
+    import TraceContext.Implicits.Empty.*
+    FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+      publishQueue.executeUS(initRunningCommitments(), "initialize running commitments"),
+      "initialize running commitments failed",
+    )
+  }
+
+  private def initRunningCommitments(): FutureUnlessShutdown[Unit] =
+    runningCommitmentsAsync.map { rc =>
+      runningCommitments = rc
+      lastCheckpointTs = rc.watermark.timestamp
+    }
 
   private def processBufferedAtInit(
       timestamp: Option[CantonTimestampSecond]
@@ -1839,6 +1864,7 @@ class AcsCommitmentProcessor private (
         completedPeriod.fromExclusive.forgetRefinement,
         completedPeriod.toInclusive.forgetRefinement,
       )
+      intervalCount = intervals.size
 
       reconIntervals <- getReconciliationIntervals(
         completedPeriod.toInclusive.forgetRefinement
@@ -1860,10 +1886,10 @@ class AcsCommitmentProcessor private (
 
             lastPruningTime <- store.pruningStatus
 
-            _ = if (counterCommitmentList.sizeIs > intervals.size) {
+            _ = if (counterCommitmentList.sizeIs > intervalCount) {
               AcsCommitmentAlarm
                 .Warn(
-                  s"""There should be at most ${intervals.size} commitments from counter-participant
+                  s"""There should be at most $intervalCount commitments from counter-participant
                      |$counterParticipant covering the period ${completedPeriod.fromExclusive} to ${completedPeriod.toInclusive}),
                      |but we have the following ${counterCommitmentList.size}""".stripMargin
                 )
@@ -2383,37 +2409,21 @@ class AcsCommitmentProcessor private (
       completedPeriod: CommitmentPeriod,
       participants: Set[ParticipantId],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    for {
-      splitPeriod <- sortedReconciliationIntervalsProvider.splitCommitmentPeriod(
-        completedPeriod
-      )
-      counterParticipantsNE = NonEmpty.from(participants)
-      _ <- counterParticipantsNE.fold(FutureUnlessShutdown.unit)(counterParticipants =>
-        splitPeriod.fold(FutureUnlessShutdown.unit) { periods =>
-          MonadUtil
-            .batchedSequentialTraverse[
-              CommitmentPeriod,
-              FutureUnlessShutdown,
-              Unit,
-            ](
-              batchingConfig.parallelism,
-              batchingConfig.maxItemsInBatch,
-            )(periods.forgetNE.toSeq) { chunk =>
-              NonEmpty.from(chunk) match {
-                case Some(chunkNE) =>
-                  store
-                    .markOutstanding(
-                      chunkNE.toSet,
-                      counterParticipants,
-                    )
-                    .map(_ => Seq(()))
-                case None => FutureUnlessShutdown.pure(Seq.empty[Unit])
-              }
-            }
-            .map(_ => ())
+    NonEmpty.from(participants).traverse_ { counterParticipants =>
+      for {
+        splitPeriod <- sortedReconciliationIntervalsProvider.splitCommitmentPeriod(
+          completedPeriod
+        )
+        _ <- splitPeriod.traverse_ { periods =>
+          MonadUtil.batchedSequentialTraverseNE_(
+            batchingConfig.parallelism,
+            batchingConfig.maxItemsInBatch,
+          )(periods) { chunk =>
+            store.markOutstanding(chunk, counterParticipants)
+          }
         }
-      )
-    } yield ()
+      } yield ()
+    }
 
   private def markPeriods(
       cmt: AcsCommitmentData,
@@ -2423,26 +2433,21 @@ class AcsCommitmentProcessor private (
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     for {
       splitPeriods <- sortedReconciliationIntervalsProvider.splitCommitmentPeriod(cmt.period)
-      reconIntervals <- getReconciliationIntervals(
-        cmt.period.toInclusive.forgetRefinement
-      )
+      reconIntervals <- getReconciliationIntervals(cmt.period.toInclusive.forgetRefinement)
       reconIntervalLength = reconIntervals.intervals.headOption.fold(0L)(
         _.intervalLength.duration.toMillis
       )
-
-      _ <- splitPeriods match {
-        case Some(periods) =>
-          val isMatch =
-            matches(
-              cmt,
-              commitments,
-              lastPruningTime.map(_.timestamp),
-              possibleCatchUp,
-              reconIntervalLength,
-            )
-          if (isMatch) store.markSafe(cmt.sender, periods)
-          else store.markUnsafe(cmt.sender, periods)
-        case None => FutureUnlessShutdown.unit
+      _ <- splitPeriods.traverse_ { periods =>
+        val isMatch =
+          matches(
+            cmt,
+            commitments,
+            lastPruningTime.map(_.timestamp),
+            possibleCatchUp,
+            reconIntervalLength,
+          )
+        if (isMatch) store.markSafe(cmt.sender, periods)
+        else store.markUnsafe(cmt.sender, periods)
       }
     } yield ()
 
@@ -2769,6 +2774,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       clock: Clock,
       exitOnFatalFailures: Boolean,
       batchingConfig: BatchingConfig,
+      asynchronousInitialization: Boolean,
       maxCommitmentSendDelayMillis: Option[CommitmentSendDelay] = None,
       increasePerceivedComputationTimeForCommitments: Option[java.time.Duration] = None,
       doNotAwaitOnCheckingIncomingCommitments: Boolean,
@@ -2785,35 +2791,35 @@ object AcsCommitmentProcessor extends HasLoggerName {
     implicit val loggingContext: NamedLoggingContext =
       NamedLoggingContext(loggerFactory, traceContext)
 
-    def initCommitmentProcessor(store: AcsCommitmentStore)(implicit
-        ec: ExecutionContext,
-        traceContext: TraceContext,
-    ): FutureUnlessShutdown[(Option[CantonTimestampSecond], InternalizedRunningCommitments)] = {
+    def loadInitialState(): FutureUnlessShutdown[
+      (Option[CantonTimestampSecond], FutureUnlessShutdown[InternalizedRunningCommitments])
+    ] = for {
+      endOfLastProcessedPeriod <- store.lastComputedAndSent
+      _ = endOfLastProcessedPeriod.foreach { ts =>
+        loggingContext.info(s"Last computed and sent timestamp: $ts")
+      }
+      runningCommitmentsAsync = initRunningCommitments(store, stringInterning).map {
+        runningCommitments =>
+          // we have no cached commitments for the first computation after recovery
+          val snapshot = runningCommitments.snapshot()
+          loggingContext.info(
+            s"Initialized from stored snapshot at ${runningCommitments.watermark} (might be incomplete) with $snapshot"
+          )
+          runningCommitments
+      }
+      // TODO(#28164) Remove asynchronous loading again when it's no longer needed
+      runningCommitments <-
+        if (asynchronousInitialization) FutureUnlessShutdown.pure(runningCommitmentsAsync)
+        else runningCommitmentsAsync.map(FutureUnlessShutdown.pure)
+    } yield (endOfLastProcessedPeriod, runningCommitments)
 
-      val executed = for {
-        lastComputed <- store.lastComputedAndSent
-        _ = lastComputed.foreach { ts =>
-          loggingContext.info(s"Last computed and sent timestamp: $ts")
-        }
-        runningCommitments <- initRunningCommitments(store, stringInterning)
-        // we have no cached commitments for the first computation after recovery
-        snapshot = runningCommitments.snapshot()
-        _ = loggingContext.info(
-          s"Initialized from stored snapshot at ${runningCommitments.watermark} (might be incomplete) with $snapshot"
-        )
-      } yield (lastComputed, runningCommitments)
-      FutureUnlessShutdownUtil.logOnFailureUnlessShutdown(
-        executed,
-        "Failed to initialize the ACS commitment processor.",
-        logPassiveInstanceAtInfo = true,
-      )
-    }
     // Ensure that the initialization runs first. We don't care about initialization having
     // completed by the time we return - only that it runs first.
-    for {
-      init <- initCommitmentProcessor(store)
-      (endOfLastProcessedPeriod, runningCommitments) = init
-      processor = new AcsCommitmentProcessor(
+    val executed = for {
+      initialState <- loadInitialState()
+    } yield {
+      val (endOfLastProcessedPeriod, runningCommitments) = initialState
+      val processor = new AcsCommitmentProcessor(
         participantId,
         sequencerClient,
         synchronizerCrypto,
@@ -2849,11 +2855,21 @@ object AcsCommitmentProcessor extends HasLoggerName {
       // lags behind the replayed change timestamp. In normal processing, we publish ACS changes only after the ledger
       // end has moved, which should mean that all topology events for a given timestamp have been processed before
       // processing the ACS change for the same timestamp
-      _ = processor.processBufferedAtInit(endOfLastProcessedPeriod)
-      _ = loggingContext.info(
+      FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+        processor.processBufferedAtInit(endOfLastProcessedPeriod),
+        "processing of buffered commitments at init failed",
+      )
+      loggingContext.info(
         s"Initialized the ACS commitment processor DB queue and started processing buffered commitments until $endOfLastProcessedPeriod"
       )
-    } yield processor
+      processor
+    }
+
+    FutureUnlessShutdownUtil.logOnFailureUnlessShutdown(
+      executed,
+      "Failed to initialize the ACS commitment processor.",
+      logPassiveInstanceAtInfo = true,
+    )
   }
 
   /* Extracted as a pure function for testing */

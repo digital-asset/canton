@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block
 
+import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
@@ -246,23 +247,45 @@ object BlockSequencerThroughputCap {
       lazy val overKbps = usageByMember.bytes > allowedBytesForMember
       lazy val overThresholdLevel = requestLevel > currentThresholdLevel
 
-      for {
+      def explain(criteria: String) =
+        "You are experiencing backpressure because your validator is exceeding the rate limits for a single validator " +
+          "as configured by the synchronizer operators. If you need more bandwidth, please reach out to the operators. " +
+          "The limit enforced is: " + criteria
+
+      val result = for {
         _ <- Either.cond(
           !overTps,
           (),
-          s"${usageByMember.count} transactions over the past $observationPeriodSeconds seconds is more than the allowed $allowedTransactionsForMember for the period",
+          explain(
+            s"${usageByMember.count} transactions over the past $observationPeriodSeconds seconds is more than the allowed ${f"$allowedTransactionsForMember%.1f"} for the period"
+          ),
         )
         _ <- Either.cond(
           !overKbps,
           (),
-          s"${usageByMember.bytes} bytes over the past $observationPeriodSeconds seconds is more than the allowed $allowedBytesForMember for the period",
+          explain(
+            s"${usageByMember.bytes} bytes over the past $observationPeriodSeconds seconds is more than the allowed ${f"$allowedBytesForMember%.1f"} for the period"
+          ),
         )
         _ <- Either.cond(
           !overThresholdLevel,
           (),
-          s"Request at level $requestLevel is higher than the current threshold $currentThresholdLevel",
+          explain(
+            s"Request at level $requestLevel is higher than the current threshold $currentThresholdLevel"
+          ),
         )
       } yield ()
+
+      result.left.foreach { _ =>
+        metrics.rejections.mark()(
+          MetricsContext(
+            "member" -> key.member.toProtoPrimitive,
+            "rejection_type" -> "per_member",
+          )
+        )
+      }
+
+      result
     }
 
     // R_t = (R_max - R_A) / (1 + V_active) + B_i
@@ -270,26 +293,46 @@ object BlockSequencerThroughputCap {
     private def aboveThrottledRate(key: ThroughputCapKey): Either[String, Unit] =
       if (currentThresholdLevel > 0) Right(())
       else {
-        val vActive = memberUsage.size.toDouble
-        val throttledCountForMember = maximumGlobalTransactionsPerObservationPeriod / (1 + vActive)
-        val throttledBytesForMember = maximumGlobalBytesPerObservationPeriod / (1 + vActive)
+        val vActive = memberUsage.size
+        val throttledCountForMember =
+          maximumGlobalTransactionsPerObservationPeriod / (1 + vActive.toDouble)
+        val throttledBytesForMember =
+          maximumGlobalBytesPerObservationPeriod / (1 + vActive.toDouble)
         val usageByMember = memberUsage.getOrElse(key, ThroughputCapValue(0, 0)) // N_i
 
         lazy val overThrottledTps = usageByMember.count > throttledCountForMember
         lazy val overThrottledKbps = usageByMember.bytes > throttledBytesForMember
 
-        for {
+        def explain(criteria: String, globalCap: Double, individualUse: Long) =
+          "You are experiencing backpressure because the network is congested and exceeds the " +
+            s"configured global limits on the sequencer. Therefore, the sequencer is " +
+            s"allocating the same bandwidth of ${f"$globalCap%.1f"} $criteria over $observationPeriodSeconds seconds to all " +
+            s"$vActive active validators until the global usage rate drops again below the enforcement level. " +
+            s"Please wait a few seconds and retry, as your current rate is $individualUse $criteria over $observationPeriodSeconds seconds."
+
+        val result = for {
           _ <- Either.cond(
             !overThrottledTps,
             (),
-            s"${usageByMember.count} transactions over the past $observationPeriodSeconds seconds is more than the allowed $throttledCountForMember throttled amount for the period",
+            explain("transactions", throttledCountForMember, usageByMember.count.toLong),
           )
           _ <- Either.cond(
             !overThrottledKbps,
             (),
-            s"${usageByMember.bytes} bytes over the past $observationPeriodSeconds seconds is more than the allowed $throttledBytesForMember throttled amount for the period",
+            explain("bytes", throttledBytesForMember, usageByMember.bytes),
           )
         } yield ()
+
+        result.left.foreach { _ =>
+          metrics.rejections.mark()(
+            MetricsContext(
+              "member" -> key.member.toProtoPrimitive,
+              "rejection_type" -> "global",
+            )
+          )
+        }
+
+        result
       }
 
     // assumes that transactions are added in order of CantonTimestamp

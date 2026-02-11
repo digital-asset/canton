@@ -374,6 +374,7 @@ class SequencerRestartTest
     setBalanceRequestSubmissionWindowSize = config.PositiveFiniteDuration.ofMinutes(5L),
     enforceRateLimiting = true,
     baseEventCost = NonNegativeLong.tryCreate(baseEventCost),
+    freeConfirmationResponses = true,
   )
 
   "sequencer operates normally after restarting and participants reconnect to it automatically" in {

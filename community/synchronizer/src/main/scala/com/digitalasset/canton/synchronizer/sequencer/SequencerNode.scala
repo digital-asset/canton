@@ -437,6 +437,8 @@ class SequencerNodeBootstrap(
           clock,
           SynchronizerCrypto(crypto, synchronizerParameters),
           synchronizerParameters,
+          parameters.batchingConfig.topologyCacheAggregator,
+          config.topology,
           topologyStore,
           outboxQueue = new SynchronizerOutboxQueue(loggerFactory),
           dispatchQueueBackpressureLimit = parameters.general.dispatchQueueBackpressureLimit,
@@ -515,8 +517,10 @@ class SequencerNodeBootstrap(
                 val topologySnapshotValidator = new InitialTopologySnapshotValidator(
                   crypto.pureCrypto,
                   synchronizerTopologyStore,
+                  parameters.batchingConfig.topologyCacheAggregator,
+                  config.topology,
                   Some(crypto.staticSynchronizerParameters),
-                  validateInitialSnapshot = config.topology.validateInitialTopologySnapshot,
+                  timeouts,
                   loggerFactory,
                   // only filter out completed proposals if this is a bootstrap from genesis.
                   cleanupTopologySnapshot = sequencerSnapshot.isEmpty,
@@ -599,6 +603,7 @@ class SequencerNodeBootstrap(
                 arguments.config.topology,
                 clock,
                 crypto.staticSynchronizerParameters,
+                metrics.topologyCache,
                 futureSupervisor,
                 synchronizerLoggerFactory,
               )(sequencerSnapshotTimestamp)
