@@ -33,6 +33,8 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.util.NoCopy
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{LfChoiceName, LfInterfaceId, LfPackageId, LfPartyId, LfVersioned}
+import com.digitalasset.daml.lf.data.ImmArray
+import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import com.digitalasset.daml.lf.value.{Value, ValueCoder, ValueOuterClass}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
@@ -136,6 +138,7 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
             exerciseResult,
             _key,
             byKey,
+            externalCallResults,
             version,
           ) =>
         for {
@@ -152,6 +155,7 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
             seed,
             failed = exerciseResult.isEmpty, // absence of exercise result indicates failure
             protocolVersionRepresentativeFor(protocolVersion),
+            externalCallResults,
           )
         } yield actionDescription
 
@@ -216,32 +220,30 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
       e: v30.ActionDescription.ExerciseActionDescription,
       pv: RepresentativeProtocolVersion[ActionDescription.type],
   ): ParsingResult[ExerciseActionDescription] = {
-    val v30.ActionDescription.ExerciseActionDescription(
-      inputContractIdP,
-      choiceP,
-      chosenValueB,
-      actorsP,
-      byKey,
-      seedP,
-      failed,
-      interfaceIdP,
-      templateIdP,
-      packagePreferenceP,
-    ) = e
     for {
-      inputContractId <- ProtoConverter.parseLfContractId(inputContractIdP)
-      templateId <- RefIdentifierSyntax.fromProtoPrimitive(templateIdP)
-      packagePreference <- packagePreferenceP.traverse(ProtoConverter.parsePackageId).map(_.toSet)
-      choice <- choiceFromProto(choiceP)
-      interfaceId <- interfaceIdP.traverse(RefIdentifierSyntax.fromProtoPrimitive)
+      inputContractId <- ProtoConverter.parseLfContractId(e.inputContractId)
+      templateId <- RefIdentifierSyntax.fromProtoPrimitive(e.templateId)
+      packagePreference <- e.packagePreference.traverse(ProtoConverter.parsePackageId).map(_.toSet)
+      choice <- choiceFromProto(e.choice)
+      interfaceId <- e.interfaceId.traverse(RefIdentifierSyntax.fromProtoPrimitive)
       chosenValueP <- ProtoConverter.protoParser(ValueOuterClass.VersionedValue.parseFrom)(
-        chosenValueB
+        e.chosenValue
       )
       chosenValue <- ValueCoder
         .decodeVersionedValue(chosenValueP)
         .leftMap(err => ValueDeserializationError("chosen_value", err.errorMessage))
-      actors <- actorsP.traverse(ProtoConverter.parseLfPartyId(_, field = "actors")).map(_.toSet)
-      seed <- LfHash.fromProtoPrimitive("node_seed", seedP)
+      actors <- e.actors.traverse(ProtoConverter.parseLfPartyId(_, field = "actors")).map(_.toSet)
+      seed <- LfHash.fromProtoPrimitive("node_seed", e.nodeSeed)
+      externalCallResults = ImmArray.from(e.externalCallResults.map { r =>
+        ExternalCallResult(
+          extensionId = r.extensionId,
+          functionId = r.functionId,
+          configHash = r.configHash,
+          inputHex = r.inputHex,
+          outputHex = r.outputHex,
+          callIndex = r.callIndex,
+        )
+      })
       actionDescription <- ExerciseActionDescription
         .create(
           inputContractId,
@@ -251,10 +253,11 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
           packagePreference,
           chosenValue,
           actors,
-          byKey,
+          e.byKey,
           seed,
-          failed,
+          e.failed,
           pv,
+          externalCallResults,
         )
         .leftMap(err => OtherError(err.message))
     } yield actionDescription
@@ -357,6 +360,7 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
       override val byKey: Boolean,
       seed: LfHash,
       failed: Boolean,
+      externalCallResults: ImmArray[ExternalCallResult],
   )(
       override val representativeProtocolVersion: RepresentativeProtocolVersion[
         ActionDescription.type
@@ -381,6 +385,16 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
           byKey = byKey,
           nodeSeed = seed.toProtoPrimitive,
           failed = failed,
+          externalCallResults = externalCallResults.toSeq.map { r =>
+            v30.ActionDescription.ExternalCallResultProto(
+              extensionId = r.extensionId,
+              functionId = r.functionId,
+              configHash = r.configHash,
+              inputHex = r.inputHex,
+              outputHex = r.outputHex,
+              callIndex = r.callIndex,
+            )
+          },
         )
       )
 
@@ -408,6 +422,7 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
         byKey: Boolean = this.byKey,
         seed: LfHash = this.seed,
         failed: Boolean = this.failed,
+        externalCallResults: ImmArray[ExternalCallResult] = this.externalCallResults,
     ): ExerciseActionDescription =
       ExerciseActionDescription(
         inputContractId,
@@ -420,6 +435,7 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
         byKey,
         seed,
         failed,
+        externalCallResults,
       )(representativeProtocolVersion)
 
   }
@@ -437,6 +453,7 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
         seed: LfHash,
         failed: Boolean,
         protocolVersion: RepresentativeProtocolVersion[ActionDescription.type],
+        externalCallResults: ImmArray[ExternalCallResult] = ImmArray.Empty,
     ): ExerciseActionDescription = create(
       inputContractId,
       templateId,
@@ -449,6 +466,7 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
       seed,
       failed,
       protocolVersion,
+      externalCallResults,
     ).fold(err => throw err, identity)
 
     def create(
@@ -463,6 +481,7 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
         seed: LfHash,
         failed: Boolean,
         protocolVersion: RepresentativeProtocolVersion[ActionDescription.type],
+        externalCallResults: ImmArray[ExternalCallResult] = ImmArray.Empty,
     ): Either[InvalidActionDescription, ExerciseActionDescription] =
       Either.catchOnly[InvalidActionDescription](
         ExerciseActionDescription(
@@ -476,6 +495,7 @@ object ActionDescription extends VersioningCompanion[ActionDescription] {
           byKey,
           seed,
           failed,
+          externalCallResults,
         )(protocolVersion)
       )
 

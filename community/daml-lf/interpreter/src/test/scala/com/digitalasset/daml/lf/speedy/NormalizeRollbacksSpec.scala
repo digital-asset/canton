@@ -327,6 +327,7 @@ object NormalizeRollbackSpec {
       exerciseResult = None,
       keyOpt = None,
       byKey = false,
+      externalCallResults = ImmArray.empty,
       version = SerializationVersion.minVersion,
     )
 }
