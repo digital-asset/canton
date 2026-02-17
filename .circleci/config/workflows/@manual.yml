@@ -229,13 +229,6 @@ manual_open_source_code_drop:
   when:
     equal: [ open-source-code-drop, << pipeline.parameters.manual_job >> ]
   jobs:
-    - compile:
-        context:
-          - datadog
-          - artifactory
-          - azure-self-cache
-          - maven-mirror
-          - da-images
     - publish_canton_open_source_code_drop:
         enforce_date: false
         context:
@@ -244,8 +237,6 @@ manual_open_source_code_drop:
           - azure-self-cache
           - maven-mirror
           - da-images
-        requires:
-          - compile
 
 manual_topology_chaos_test:
   when:

@@ -22,7 +22,11 @@ class PekkoStreamGrpcServerResource(
   override protected def construct(source: Materializer): ServerWithChannelProvider = {
 
     runningServices = constructServices(actorMaterializerResource.value)
-    ServerWithChannelProvider.fromServices(runningServices, address, "server")
+    ServerWithChannelProvider.fromServices(
+      runningServices,
+      address,
+      "serverPekkoStreamGrpcServerResource",
+    )
 
   }
 

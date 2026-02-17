@@ -3,10 +3,6 @@
 
 package com.daml.grpc.adapter.client.rs
 
-import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
-import java.util.concurrent.{ExecutorService, Executors}
-import java.util.function.BiConsumer
-
 import com.daml.grpc.adapter.TestExecutionSequencerFactory
 import com.daml.grpc.adapter.server.rs.MockClientCallStreamObserver
 import io.grpc.stub.{ClientResponseObserver, StreamObserver}
@@ -15,6 +11,9 @@ import org.reactivestreams.tck.PublisherVerification
 import org.slf4j.{Logger, LoggerFactory}
 import org.testng.annotations.{AfterMethod, BeforeMethod}
 
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
+import java.util.concurrent.{ExecutorService, Executors}
+import java.util.function.BiConsumer
 import scala.concurrent.{ExecutionContext, Future}
 import scala.util.control.NoStackTrace
 
@@ -73,7 +72,7 @@ trait PublisherCreation {
               logger.trace("RECEIVED DEMAND FOR {} elements", integer)
               Future {
                 1.to(integer)
-                  .foreach(_ => {
+                  .foreach { _ =>
                     if (testRunning) {
                       if (!completed.get()) {
                         val emitted = emittedElements.getAndIncrement()
@@ -88,7 +87,7 @@ trait PublisherCreation {
                         "Stopping emission of elements due to test termination"
                       ) with NoStackTrace
                     }
-                  })
+                  }
               }(ec)
               ()
 

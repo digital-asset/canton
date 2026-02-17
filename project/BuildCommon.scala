@@ -2451,6 +2451,7 @@ object BuildCommon {
       `nonempty-cats`,
       `rs-grpc-bridge`,
       `rs-grpc-pekko`,
+      `rs-grpc-pekko-test`,
       `logging-entries`,
       `contextualized-logging`,
       `daml-resources`,
@@ -2527,8 +2528,11 @@ object BuildCommon {
 
     lazy val `rs-grpc-bridge` = project
       .in(file("base/rs-grpc-bridge"))
+      .dependsOn(
+        `rs-grpc-testing-utils`
+      )
       .settings(
-        javaOnlySettings,
+        libsScalaSettings,
         Compile / javacOptions ++= Seq("--release", "17"),
         organization := "com.daml",
         scalacOptions += "-Wconf:src=src_managed/.*:silent",
@@ -2537,7 +2541,11 @@ object BuildCommon {
           grpc_api,
           grpc_stub,
           reactivestreams,
+          reactivestreams_tck,
+          reactivestreams_examples,
+          scalatestTestNG,
           slf4j_api,
+          scalatest,
         ),
         coverageEnabled := false,
         publish / skip := false,
@@ -2557,8 +2565,36 @@ object BuildCommon {
           pekko_actor,
           pekko_stream,
           reactivestreams,
+          scalatest % Test,
+          scalatest_wordspec % Test,
+          scalatest_shouldmatchers % Test,
         ),
         publish / skip := false,
+      )
+
+    lazy val `rs-grpc-pekko-test` = project
+      .in(file("base/rs-grpc-pekko-test"))
+      .disablePlugins(WartRemover)
+      .dependsOn(
+        `rs-grpc-bridge` % "test->test;test->compile",
+        `rs-grpc-pekko`,
+        `sample-service` % "test->test;test->compile",
+      )
+      .settings(
+        libsScalaSettings,
+        libraryDependencies ++= Seq(
+          grpc_api,
+          grpc_stub,
+          pekko_actor,
+          pekko_stream,
+          reactivestreams,
+          scalatest % Test,
+          scalatest_wordspec % Test,
+          scalatest_shouldmatchers % Test,
+          awaitility % Test,
+          slf4j_nop % Test,
+          pekko_slf4j % Test,
+        ),
       )
 
     lazy val `logging-entries` = project
