@@ -179,6 +179,19 @@ message ActionDescription {
     optional string interface_id = 9;
     string template_id = 10;
     repeated string package_preference = 11;
+    repeated ExternalCallResultProto external_call_results = 12;
+  }
+
+  // Result of an external call made during transaction execution.
+  // External calls are deterministic HTTP calls to extension services.
+  // Results are stored and replayed during validation.
+  message ExternalCallResultProto {
+    string extension_id = 1;    // Extension service identifier
+    string function_id = 2;     // Function identifier within the extension
+    string config_hash = 3;     // Hash of the extension configuration
+    string input_hex = 4;       // Hex-encoded input data
+    string output_hex = 5;      // Hex-encoded output data
+    int32 call_index = 6;       // Index of this call within the exercise
   }
 
   message FetchActionDescription {

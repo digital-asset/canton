@@ -187,6 +187,7 @@ class NodeHashV1Spec extends AnyWordSpec with Matchers with HashUtils {
     exerciseResult = Some(VA.text.inj("result")),
     keyOpt = None,
     byKey = false,
+    externalCallResults = ImmArray.empty,
     version = SerializationVersion.V1,
   )
 
