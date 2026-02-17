@@ -61,12 +61,12 @@ sealed trait BftSynchronizerBootstrapTemplateTest
 
       // STEP 3: allocate a plain-old-party
       val testPartyP1 =
-        participant1.parties.enable(
+        participant1.parties.testing.enable(
           "test-party-p1",
           synchronizeParticipants = Seq(participant2),
         )
       val testPartyP2 =
-        participant2.parties.enable(
+        participant2.parties.testing.enable(
           "test-party-p2",
           synchronizeParticipants = Seq(participant1),
         )

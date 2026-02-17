@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration
 
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.admin.api.client.commands.TopologyAdminCommands.Write.GenerateTransactions.Proposal
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.ParticipantReference
@@ -13,19 +14,50 @@ import com.digitalasset.canton.crypto.{
   SigningKeysWithThreshold,
   SigningPublicKey,
 }
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
-import org.scalatest.{LoneElement, OptionValues}
+import org.scalatest.{EitherValues, LoneElement, OptionValues}
 
 /** Utility methods for test to modify the PartyToParticipant state of a Party (local or external)
   * This is only useful to invoke the authority of the party.
   */
-trait PartyTopologyUtils extends LoneElement with OptionValues {
+trait PartyTopologyUtils extends LoneElement with OptionValues with EitherValues {
   implicit class EnrichedParty(party: Party) {
+
     private[canton] object topology {
+
+      /** Disable this party on the target participant
+        */
+      private[canton] def disable(
+          participant: ParticipantReference,
+          forceFlags: ForceFlags = ForceFlags.none,
+          synchronizer: Option[SynchronizerAlias] = None,
+      ): Unit = {
+        val synchronizerId =
+          participant.parties.testing.external.lookupOrDetectSynchronizerId(synchronizer).value
+        party match {
+          case _: ExternalParty =>
+            this.party_to_participant_mappings
+              .propose_delta(
+                node = participant,
+                removes = Seq(participant.id),
+                forceFlags = forceFlags,
+                store = synchronizerId,
+              )
+              .discard
+          case _: PartyId =>
+            participant.parties.disable(
+              party = party.partyId,
+              forceFlags = forceFlags,
+              synchronizer = synchronizer,
+            )
+        }
+      }
+
       private[canton] object party_to_participant_mappings {
         @VisibleForTesting
         private[canton] def propose(

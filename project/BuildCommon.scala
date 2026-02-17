@@ -2595,19 +2595,27 @@ object BuildCommon {
       .dependsOn(
         `logging-entries`,
         `contextualized-logging`,
+        `timer-utils`,
       )
       .settings(
         libsScalaSettings,
+        libraryDependencies ++= Seq(
+          scalatest % Test
+        ),
         publish / skip := false,
       )
 
     lazy val `resources-pekko` = project
       .in(file("base/resources-pekko"))
       .dependsOn(
-        `daml-resources`
+        `daml-resources` % "compile->compile;test->test",
+        `scala-utils` % Test,
       )
       .settings(
         libsScalaSettings,
+        libraryDependencies ++= Seq(
+          scalatest % Test
+        ),
         publish / skip := false,
       )
 
@@ -2672,6 +2680,9 @@ object BuildCommon {
       .settings(
         libsScalaSettings,
         scalacOptions += "-Wconf:msg=unused:silent",
+        libraryDependencies ++= Seq(
+          scalatest % Test
+        ),
         publish / skip := false,
       )
 
@@ -2852,7 +2863,8 @@ object BuildCommon {
       .settings(
         libsScalaSettings,
         libraryDependencies ++= Seq(
-          scalaz_core
+          scalaz_core,
+          scalatest % Test,
         ),
         publish / skip := false,
       )

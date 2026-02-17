@@ -133,7 +133,7 @@ class SequencerConnectionSuccessorListener(
           configStore
             .put(
               config = updated,
-              status = SynchronizerConnectionConfigStore.UpgradingTarget,
+              status = SynchronizerConnectionConfigStore.LsuTarget,
               configuredPSId = KnownPhysicalSynchronizerId(successorPSId),
               synchronizerPredecessor = Some(
                 SynchronizerPredecessor(topologyClient.psid, upgradeTime, isLateUpgrade = false)

@@ -355,7 +355,7 @@ final class LsuAnnouncementTopologyIntegrationTest
       currentConfig.status shouldBe SynchronizerConnectionConfigStore.Active
       val successorConfig =
         configStore.get(daName, KnownPhysicalSynchronizerId(latestSuccessorPSId.get().value)).value
-      successorConfig.status shouldBe SynchronizerConnectionConfigStore.UpgradingTarget
+      successorConfig.status shouldBe SynchronizerConnectionConfigStore.LsuTarget
 
       val currentSequencers = currentConfig.config.sequencerConnections.aliasToConnection.map {
         case (seqAlias, conn) =>

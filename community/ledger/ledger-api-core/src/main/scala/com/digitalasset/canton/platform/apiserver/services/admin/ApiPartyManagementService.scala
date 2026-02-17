@@ -838,6 +838,10 @@ private[apiserver] final class ApiPartyManagementService private (
       ErrorLoggingContext(logger, loggingContext.toPropertiesMap, loggingContext.traceContext)
     import com.digitalasset.canton.config.NonNegativeFiniteDuration
 
+    // The default value (empty) should default to true (pre-existing behavior)
+    // So this is only false if explicitly set to false
+    val waitForAllocation = !request.waitForAllocation.contains(false)
+
     withValidation {
       for {
         synchronizerId <- requireSynchronizerId(request.synchronizer, "synchronizer")
@@ -907,10 +911,10 @@ private[apiserver] final class ApiPartyManagementService private (
             _ <- checkSubmissionResult(result)
           } yield ()
 
-          // Only track the party if we expect it to be fully authorized
+          // Only track the party if we expect it to be fully authorized (and it hasn't explicitly been disabled in the request)
           // Otherwise the party won't be fully onboarded here so this would time out
           val partyIdF =
-            if (externalPartyOnboardingDetails.fullyAllocatesParty) {
+            if (externalPartyOnboardingDetails.fullyAllocatesParty && waitForAllocation) {
               partyAllocationTracker
                 .track(
                   trackerKey,

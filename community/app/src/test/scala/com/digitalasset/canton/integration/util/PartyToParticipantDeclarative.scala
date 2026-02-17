@@ -26,7 +26,6 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.version.HashingSchemeVersion
 import org.scalatest.Assertions.fail
-import org.scalatest.EitherValues.*
 
 import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.math.Ordering.Implicits.*

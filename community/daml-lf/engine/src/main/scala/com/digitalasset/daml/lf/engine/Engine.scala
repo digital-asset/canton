@@ -20,6 +20,7 @@ import com.digitalasset.daml.lf.speedy.SValue.SContractId
 import com.digitalasset.daml.lf.speedy.Speedy.{Machine, PureMachine, UpdateMachine}
 import com.digitalasset.daml.lf.speedy._
 import com.digitalasset.daml.lf.transaction.{
+  ContractStateMachine,
   FatContractInstance,
   GlobalKey,
   Node,
@@ -472,7 +473,7 @@ class Engine(val config: EngineConfig) {
       authorizationChecker = config.authorizationChecker,
       validating = validating,
       traceLog = EngineLogger.toTraceLog(engineLogger),
-      contractKeyUniqueness = config.contractKeyUniqueness,
+      contractStateMode = config.contractStateMode,
       contractIdVersion = contractIdVersion,
       packageResolution = packageResolution,
       limits = config.limits,
@@ -1010,7 +1011,10 @@ object Engine {
   }
 
   def DevEngine: Engine = new Engine(
-    EngineConfig(allowedLanguageVersions = LanguageVersion.allLfVersionsRange)
+    EngineConfig(
+      allowedLanguageVersions = LanguageVersion.allLfVersionsRange,
+      contractStateMode = ContractStateMachine.Mode.UCK
+    )
   )
 
   private def mkInterpretationError(error: IError) =

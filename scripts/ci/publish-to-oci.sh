@@ -78,6 +78,12 @@ info_done "Login ${c_lyellow}GCP ${c_lgreen}successful${c_reset}."
 fi
 
 
+# We only want to set the floaty release label for full releases and snapshot releases from main/release line.
+extra_tags=''
+if [[ "$current_version" != *"ad-hoc"* ]]; then
+  extra_tags="--extra-tags $(get_major_minor ${current_version})"
+fi
+
 # Subroutine for proccessing by component line
 for i in ${component_line[@]}; do
   info_step "Prepare ${c_white}canton ${c_lgreen}${i}${c_reset} for upload..."
@@ -95,9 +101,9 @@ for i in ${component_line[@]}; do
       info "Generate ${i} component manifest"
       ${ABSDIR}/generate-manifest.sh ${i} | tee "${workspace_oci}/${artifact_location[${i}]}/component.yaml"; echo "";
       echo "$linked_daml_version" > "${workspace_oci}/${artifact_location[${i}]}/linked-daml-version"
-      cat ${ABSDIR}/../../LICENSE.txt > "${workspace_oci}/${artifact_location[${i}]}/LICENSE" 
+      cat ${ABSDIR}/../../LICENSE.txt > "${workspace_oci}/${artifact_location[${i}]}/LICENSE"
       info "Uploading..."
-      dpm repo publish-component "canton-${i}" "${current_version}" --extra-tags "$(get_major_minor ${current_version})" --platform generic=. --registry "${oci_path}"
+      dpm repo publish-component "canton-${i}" "${current_version}" ${extra_tags} --platform generic=. --registry "${oci_path}"
       info_done "Component ${c_white}canton ${c_lgreen}${i}${c_reset} published.\n"
       unset DPM_EDITION
     else

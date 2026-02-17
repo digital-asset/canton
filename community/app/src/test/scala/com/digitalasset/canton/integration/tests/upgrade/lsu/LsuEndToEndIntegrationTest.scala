@@ -106,7 +106,7 @@ final class LsuEndToEndIntegrationTest extends LsuBase {
 
       // Subsequent call should be successful
       participant1.underlying.value.sync
-        .upgradeSynchronizerTo(daId, fixture.synchronizerSuccessor)
+        .performLsu(daId, fixture.synchronizerSuccessor)
         .futureValueUS
         .value shouldBe ()
     }

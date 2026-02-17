@@ -8,7 +8,6 @@ import com.digitalasset.daml.lf.data.Ref.{ChoiceName, Location, PackageName, Par
 import com.digitalasset.daml.lf.data.{BackStack, ImmArray, Time}
 import com.digitalasset.daml.lf.ledger.Authorize
 import com.digitalasset.daml.lf.speedy.Speedy.{CachedKey, ContractInfo}
-import com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode
 import com.digitalasset.daml.lf.transaction.{
   ContractStateMachine,
   GlobalKeyWithMaintainers,
@@ -184,7 +183,7 @@ private[lf] object PartialTransaction {
   }
 
   def initial(
-      contractKeyUniqueness: ContractKeyUniquenessMode,
+      contractKeyUniqueness: ContractStateMachine.Mode,
       initialSeeds: InitialSeeding,
       committers: Set[Party],
       authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,

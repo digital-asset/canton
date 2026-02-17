@@ -30,3 +30,38 @@ In summary:
 * We run conformance tests against multiple versions of Postgres.
 * We did pen and paper proofs / analysis of our architecture, proving privacy, transparency and integrity properties.
 * We did partial theoretical verifications of our ledger model and our protocol.
+
+Integration testing with the BFT sequencer
+------------------------------------------
+
+The BFT sequencer largely replaces the reference sequencer in integration tests and there are some important things
+to keep in mind when using it:
+
+- While the number of sequencers is not important when using the reference sequencer (which is really a centralized
+  DB-based sequencer under the hood), it is very important when using the BFT sequencer
+  (and decentralized sequencers in general) since it affects liveness and sequencing time behavior.
+  - E.g.: sequencers set grows from 1 to 2, sequencer 2 enters the ordering topology but is still onboarding
+    and unresponsive for a few seconds; during that time there is no quorum so nothing gets ordered and `getTime`
+    is also stuck in the past. Only once sequencer 2 is caught up and responsive does the network resume ordering and `getTime`
+    (and sequencing time) aligns again with the wall clocks after a few empty blocks.
+  - This is an inherent problem of consensus-based sequencers (like BFT sequencers), i.e., sequencing time
+    is also a result of consensus, so when no consensus is possible, sequencing time doesn't advance either.
+  - Using 4 sequencers to start with (as to tolerate 1 unresponsive or otherwise broken sequencer node)
+    and reducing the `consensusBlockCompletionTimeout` config (view change timeout) is a way to mitigate the issue.
+    Another way is being tolerant to sequencing time lagging behind for a while.
+- With the BFT sequencer, the base sequencing time of events in a block is determined based on the previous block.
+  - This isn't generally a problem even in the absence of traffic because the BFT sequencers order empty blocks at
+    regular time intervals to make sequencing time advance, This interval is set to 250ms in tests,
+    so pretty short (the default for production is currently 5s).
+  - However, when using the `SimClock`, it's not enough to advance it to obtain an up-to-date sequencing time
+    for the subsequent events, but a block must also be ordered after advancing the clock but before
+    sequencing those events, for example by submitting a time proof.
+    - Consider that the BFT orderer ignores the `SimClock` and uses the local wall-clock for
+      internally generated timeouts, like the timeout before ordering an empty block to let sequencing time advance,
+      or the view change timeout.
+      - On the one hand, this allows the protocol to work correctly.
+      - On the other hand, since sequencing time is based on the wall-clock of the sequencers, if the
+        `SimClock` is not advanced, sequencing time is only advancing minimally or not at all, regardless if
+        there is traffic or if empty blocks are being ordered.
+    - Many flakes of this kind have however been fixed already.
+

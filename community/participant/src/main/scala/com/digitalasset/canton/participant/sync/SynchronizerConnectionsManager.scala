@@ -162,6 +162,25 @@ private[sync] class SynchronizerConnectionsManager(
 
   val connectedSynchronizers: ConnectedSynchronizers = new ConnectedSynchronizers()
 
+  lazy val automaticLogicalSynchronizerUpgrade: AutomaticLogicalSynchronizerUpgrade =
+    new AutomaticLogicalSynchronizerUpgrade(
+      synchronizerConnectionConfigStore,
+      ledgerApiIndexer,
+      syncPersistentStateManager,
+      connectQueue,
+      connectedSynchronizers,
+      connectSynchronizer = (alias: Traced[SynchronizerAlias]) =>
+        connectSynchronizer(
+          alias.value,
+          keepRetrying = true,
+          connectSynchronizer = ConnectSynchronizer.Connect,
+        )(alias.traceContext),
+      disconnectSynchronizer = (alias: Traced[SynchronizerAlias]) =>
+        disconnectSynchronizer(alias.value)(alias.traceContext),
+      timeouts,
+      loggerFactory,
+    )
+
   connectedSynchronizersLookupContainer.registerDelegate(connectedSynchronizers)
 
   private val reassignmentCoordination: ReassignmentCoordination =
@@ -618,10 +637,14 @@ private[sync] class SynchronizerConnectionsManager(
 
       case Right(configs) =>
         val filteredConfigs = if (onlyActive) {
-          val active = configs.filter(_.status.isActive)
+          val (active, inactive) = configs.partition(_.status.isActive)
+
           NonEmpty
             .from(active)
-            .toRight(SyncServiceError.SyncServiceSynchronizerIsNotActive.Error(synchronizerAlias))
+            .toRight(
+              SyncServiceError.SyncServiceSynchronizerIsNotActive
+                .Error(synchronizerAlias, inactive.map(c => (c.configuredPSId, c.status)))
+            )
         } else configs.asRight
 
         filteredConfigs.map(_.maxBy1(_.configuredPSId))
@@ -1251,7 +1274,7 @@ private[sync] class SynchronizerConnectionsManager(
     * Note: The upgrade involve operations that are retried, so the method can take some time to
     * complete.
     */
-  def upgradeSynchronizerTo(
+  def performLsu(
       currentPSId: PhysicalSynchronizerId,
       synchronizerSuccessor: SynchronizerSuccessor,
   )(implicit
@@ -1281,24 +1304,7 @@ private[sync] class SynchronizerConnectionsManager(
         s"Upgrade time ${synchronizerSuccessor.upgradeTime} not reached: last event in the sequenced event store has timestamp ${event.timestamp}",
       )
 
-      _ <- new AutomaticLogicalSynchronizerUpgrade(
-        synchronizerConnectionConfigStore,
-        ledgerApiIndexer,
-        syncPersistentStateManager,
-        connectQueue,
-        connectedSynchronizers,
-        connectSynchronizer = (alias: Traced[SynchronizerAlias]) =>
-          connectSynchronizer(
-            alias.value,
-            keepRetrying = true,
-            connectSynchronizer = ConnectSynchronizer.Connect,
-          )(alias.traceContext),
-        disconnectSynchronizer = (alias: Traced[SynchronizerAlias]) =>
-          disconnectSynchronizer(alias.value)(alias.traceContext),
-        timeouts,
-        loggerFactory,
-      ).upgrade(alias, currentPSId, synchronizerSuccessor)
-
+      _ <- automaticLogicalSynchronizerUpgrade.upgrade(alias, currentPSId, synchronizerSuccessor)
     } yield ()
   }
 

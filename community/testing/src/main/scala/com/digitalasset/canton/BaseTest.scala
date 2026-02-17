@@ -611,6 +611,8 @@ object BaseTest {
     case object MultiPartySubmission extends UnsupportedExternalPartyTest
     // TODO(i29530): Support multi root node submissions for external parties
     case object MultiRootNodeSubmission extends UnsupportedExternalPartyTest
+    // TODO(i30278): Either support command tracking for external parties or drop it entirely
+    case object CommandTracking extends UnsupportedExternalPartyTest
     // TODO(i30256): Synchronizer routing for external parties
     case object MultiSynchronizerParties extends UnsupportedExternalPartyTest
   }

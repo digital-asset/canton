@@ -13,10 +13,6 @@ import com.digitalasset.canton.sequencing.protocol.{
   SequencersOfSynchronizer,
   SubmissionRequest,
 }
-import com.digitalasset.canton.synchronizer.block.update.{
-  BlockChunkProcessor,
-  BlockUpdateGeneratorImpl,
-}
 import com.digitalasset.canton.synchronizer.metrics.SequencerTestMetrics
 import com.digitalasset.canton.synchronizer.sequencer.SubmissionOutcome
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
@@ -64,6 +60,7 @@ class BlockChunkProcessorTest extends AsyncWordSpec with BaseTest {
             sequencerId,
             rateLimitManagerMock,
             OrderingTimeFixMode.ValidateOnly,
+            None,
             BatchingConfig(),
             loggerFactory,
             SequencerTestMetrics,

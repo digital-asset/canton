@@ -712,6 +712,13 @@ final class AvailabilityModule[E <: Env[E]](
                 disseminationProgress.acks.sizeIs < currentOrderingTopology.size
               ) {
                 // Needs more votes
+
+                // TODO(#30843): we don't record the peers that were already asked to store the batch,
+                //  nor check that the topology has effectively changed, so we'll re-send in-progress batches
+                //  to all nodes that didn't ack having stored them, unless their dissemination completes
+                //  within the time a local block is ordered.
+                //  This high frequency could end up spamming the network and DB at remote nodes
+                //  whenever ordering slows down.
                 batchesThatNeedMoreVotes.addOne(tracedBatchId -> disseminationProgress)
               }
               Some(batchId -> disseminationProgress)

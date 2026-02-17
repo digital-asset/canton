@@ -27,11 +27,6 @@ SPHINX_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file
 COMMUNITY_LIB_DIR = os.path.abspath(os.path.join(SPHINX_DIR, '..', '..', '..', 'community', 'lib'))
 PROJECT_DIR = os.path.abspath(os.path.join(SPHINX_DIR, '..', '..', '..'))
 
-# TODO(Andreas): When internal architecture documents are fully integrated
-# point to new location of exts directory
-DOCS_EXTS_DIR = os.path.abspath(
-    os.path.join(PROJECT_DIR, 'docs', 'src', 'sphinx', 'exts'))
-
 DOCS_OPEN_EXTS_DIR = os.path.abspath(
     os.path.join(SPHINX_DIR, 'exts'))
 
@@ -39,7 +34,6 @@ DOCS_OPEN_EXTS_DIR = os.path.abspath(
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 # sys.path.insert(0, os.path.abspath('./support'))
-sys.path.insert(0, DOCS_EXTS_DIR)
 sys.path.insert(0, DOCS_OPEN_EXTS_DIR)
 sys.path.insert(0, COMMUNITY_LIB_DIR)
 
@@ -54,7 +48,6 @@ sys.path.insert(0, COMMUNITY_LIB_DIR)
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'more_named_targets',
     'pygments_daml_lexer',
     'ref',
     'wip',

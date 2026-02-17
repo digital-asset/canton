@@ -29,10 +29,27 @@ import com.google.common.annotations.VisibleForTesting
   *             Use [[scala.Unit]] for iteration.
   *
   * @see com.digitalasset.daml.lf.transaction.HasTxNodes.contractKeyInputs for an iteration in mode
-  *      [[com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode.Strict]] and
+  *       [[Model.UCK]] and [[Mode.LegacyNuck]]
   * @see ContractStateMachineSpec.visitSubtree for iteration in all modes
   */
 object ContractStateMachine {
+
+  /** Controls whether the engine should error out when it encounters duplicate keys.  */
+  sealed abstract class Mode extends Product with Serializable
+
+  object Mode {
+
+    /** Disable key uniqueness checks and only consider byKey operations.
+      * Note that no stable semantics are provided for LegacyNUCK mode.
+      */
+    case object LegacyNUCK extends Mode
+
+    /** Considers all nodes mentioning keys as byKey operations and checks for contract key uniqueness. */
+    case object UCK extends Mode
+
+    /* Disable key completly contract keys. For know all key operations crash at runtime */
+    case object NoContractKey extends Mode
+  }
 
   sealed abstract class State[Nid] {
 
@@ -55,11 +72,11 @@ object ContractStateMachine {
       *
       * The map `globalKeyInputs` can be used to resolve keys during re-interpretation.
       *
-      * In mode [[com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode.Strict]],
+      * In mode [[Model.UCK]],
       * `globalKeyInputs` stores the contract key states required at the beginning of the transaction.
       * The first node involving a key determines the state of the key in `globalKeyInputs`.
       *
-      * In mode [[com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode.Off]],
+      * In mode [[Model.LegacyNUCK]],
       * `globalKeyInputs(k)` is defined by the first node `n` referring to the key `k`:
       *   - If `n` is a fetch-by-key or exercise-by-key, then `globalKeyInputs(k)` is [[Transaction.KeyActive]].
       *   - If `n` is lookup-by-key, then `globalKeyInputs(k)` is [[Transaction.KeyActive]] (positive lookup)
@@ -67,7 +84,7 @@ object ContractStateMachine {
       *   - If `n` is a create, then `globalKeyInputs(k)` is [[Transaction.KeyCreate]].
       *     Note: a plain fetch or exercise (with `byKey == false`) does not impact `globalKeyInputs`.
       */
-    val globalKeyInputs: Map[GlobalKey, KeyInput]
+    def globalKeyInputs: Map[GlobalKey, KeyInput]
 
     /** Summarizes the active state of the partial transaction that was visited so far.
       * When a rollback scope is left, this is restored to the state at the beginning of the rollback,
@@ -80,9 +97,18 @@ object ContractStateMachine {
       * - Some(Right(())) -- inactive, because the (local) contract creation has been rolled-back
       * - None -- neither consumed nor inactive
       */
-    def consumedByOrInactive(cid: Value.ContractId): Option[Either[Nid, Unit]]
-
-    def mode: ContractKeyUniquenessMode
+    final def consumedByOrInactive(cid: Value.ContractId): Option[Either[Nid, Unit]] = {
+      activeState.consumedBy.get(cid) match {
+        case Some(nid) => Some(Left(nid)) // consumed
+        case None =>
+          if (locallyCreated(cid) && !activeState.locallyCreatedThisTimeline.contains(cid)) {
+            Some(Right(())) // inactive
+          } else {
+            None // neither
+          }
+      }
+    }
+    def mode: Mode
 
     private[lf] def visitCreate(
         contractId: ContractId,
@@ -103,7 +129,7 @@ object ContractStateMachine {
         consuming: Boolean,
     ): Either[InconsistentContractKey, State[Nid]]
 
-    /** Must be used to handle lookups iff in [[com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode.Strict]] mode
+    /** Must be used to handle lookups iff in [[Model.UCK]] mode
       */
     private[transaction] def handleLookup(
         lookup: Node.LookupByKey
@@ -131,7 +157,7 @@ object ContractStateMachine {
     /** Utility method that takes a node and computes the corresponding next state.
       * The method does not handle any children of `node`; it is up to the caller to do that.
       *
-      * @param keyInput will only be used in mode [[ContractKeyUniquenessMode.Off]] and if the node is a lookupByKey
+      * @param keyInput will only be used in mode [[Mode.LegacyNUCK]] and if the node is a lookupByKey
       */
     def handleNode(
         id: Nid,
@@ -168,15 +194,15 @@ object ContractStateMachine {
       * the iteration over the subtree rooted at `n` starting from `this` fails, but the error may be different.
       *
       * @param resolver
-      * In mode [[ContractKeyUniquenessMode.Strict]], this parameter has no effect.
-      * In mode [[ContractKeyUniquenessMode.Off]], `resolver` must be the resolver used while iterating over `tx`
+      * In mode [[Mode.UCK]] and [[Mode.NoContractKey]], this parameter has no effect.
+      * In mode [[Mode.LegacyNuck]], `resolver` must be the resolver used while iterating over `tx`
       * until just before `n`.
       * While iterating over the subtree rooted at `n`, [[projectKeyResolver]](`resolver`) must be used as resolver.
       * @param substate
       * The state obtained after fully iterating over the subtree `n` starting from [[State.empty]].
       * Consumed contracts ([[activeState.consumedBy]]) in `this` and `substate` must be disjoint.
       * @see com.digitalasset.daml.lf.transaction.HasTxNodes.contractKeyInputs for an iteration in mode
-      *      [[com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode.Strict]] and
+      *      [[Model.UCK]] and [[Mode.LegacyNuck]]
       * @see ContractStateMachineSpec.visitSubtree for iteration in all modes
       */
     def advance(resolver: KeyResolver, substate: State[Nid]): Either[KeyInputError, State[Nid]]
@@ -188,8 +214,7 @@ object ContractStateMachine {
     private[lf] def withLocalContractKey(contractId: ContractId, key: GlobalKey): State[Nid]
   }
 
-
-  final case class UniqueContractKeyState[Nid] private[lf](
+  final case class UniqueContractKeyState[Nid] private[lf] (
       override val locallyCreated: Set[ContractId],
       override val inputContractIds: Set[ContractId],
       override val globalKeyInputs: Map[GlobalKey, KeyInput],
@@ -197,19 +222,7 @@ object ContractStateMachine {
       rollbackStack: List[ContractStateMachine.ActiveLedgerState[Nid]],
   ) extends State[Nid] {
 
-    override def mode: ContractKeyUniquenessMode = ContractKeyUniquenessMode.Strict
-
-    override def consumedByOrInactive(cid: Value.ContractId): Option[Either[Nid, Unit]] = {
-      activeState.consumedBy.get(cid) match {
-        case Some(nid) => Some(Left(nid)) // consumed
-        case None =>
-          if (locallyCreated(cid) && !activeState.locallyCreatedThisTimeline.contains(cid)) {
-            Some(Right(())) // inactive
-          } else {
-            None // neither
-          }
-      }
-    }
+    override def mode: Mode = Mode.UCK
 
     /** Lookup the given key k. Returns
       * - Some(KeyActive(cid)) if k maps to cid and cid is active.
@@ -323,13 +336,17 @@ object ContractStateMachine {
 
     override private[lf] def resolveKey(
         gkey: GlobalKey
-    ): Either[Option[ContractId] => (KeyMapping, UniqueContractKeyState[Nid]), (KeyMapping, UniqueContractKeyState[Nid])] = {
+    ): Either[Option[
+      ContractId
+    ] => (KeyMapping, UniqueContractKeyState[Nid]), (KeyMapping, UniqueContractKeyState[Nid])] = {
       lookupActiveKey(gkey) match {
         case Some(keyMapping) => Right(keyMapping -> this)
         case None =>
           // if we cannot find it here, send help, and make sure to update keys after
           // that.
-          def handleResult(result: Option[ContractId]): (KeyMapping, UniqueContractKeyState[Nid]) = {
+          def handleResult(
+              result: Option[ContractId]
+          ): (KeyMapping, UniqueContractKeyState[Nid]) = {
             // Update key inputs. Create nodes never call this method,
             // so NegativeKeyLookup is the right choice for the global key input.
             val keyInput = result match {
@@ -448,10 +465,10 @@ object ContractStateMachine {
       } yield {
         val next = this.activeState.advance(substate.activeState)
         val globalKeyInputs =
-            // In strict mode, `key`'s state is the same at `this` as at the beginning
-            // if `key` is not in `this.globalKeyInputs`.
-            // So just extend `this.globalKeyInputs` with the new stuff.
-            substate.globalKeyInputs ++ this.globalKeyInputs
+          // In strict mode, `key`'s state is the same at `this` as at the beginning
+          // if `key` is not in `this.globalKeyInputs`.
+          // So just extend `this.globalKeyInputs` with the new stuff.
+          substate.globalKeyInputs ++ this.globalKeyInputs
 
         this.copy(
           locallyCreated = this.locallyCreated.union(substate.locallyCreated),
@@ -474,14 +491,17 @@ object ContractStateMachine {
       }
     }
 
-    override private[lf] def withLocalContractKey(contractId: ContractId, key: GlobalKey): UniqueContractKeyState[Nid] =
+    override private[lf] def withLocalContractKey(
+        contractId: ContractId,
+        key: GlobalKey,
+    ): UniqueContractKeyState[Nid] =
       this.copy(
         locallyCreated = locallyCreated + contractId,
         activeState = activeState.createKey(key, contractId),
       )
   }
 
-  final case class NonUniqueContractKeyState[Nid] private[lf](
+  final case class NonUniqueContractKeyState[Nid] private[lf] (
       override val locallyCreated: Set[ContractId],
       override val inputContractIds: Set[ContractId],
       override val globalKeyInputs: Map[GlobalKey, KeyInput],
@@ -489,31 +509,19 @@ object ContractStateMachine {
       rollbackStack: List[ContractStateMachine.ActiveLedgerState[Nid]],
   ) extends State[Nid] {
 
-    override val mode: ContractKeyUniquenessMode = ContractKeyUniquenessMode.Off
-
-    override def consumedByOrInactive(cid: Value.ContractId): Option[Either[Nid, Unit]] = {
-      activeState.consumedBy.get(cid) match {
-        case Some(nid) => Some(Left(nid)) // consumed
-        case None =>
-          if (locallyCreated(cid) && !activeState.locallyCreatedThisTimeline.contains(cid)) {
-            Some(Right(())) // inactive
-          } else {
-            None // neither
-          }
-      }
-    }
+    override val mode: Mode = Mode.LegacyNUCK
 
     /** Lookup the given key k. Returns
-     * - Some(KeyActive(cid)) if k maps to cid and cid is active.
-     * - Some(KeyInactive) if there is no active contract with the given key.
-     * - None if we know no mapping for that key.
-     */
+      * - Some(KeyActive(cid)) if k maps to cid and cid is active.
+      * - Some(KeyInactive) if there is no active contract with the given key.
+      * - None if we know no mapping for that key.
+      */
     private def lookupActiveKey(key: GlobalKey): Option[ContractStateMachine.KeyMapping] =
       activeState.getLocalActiveKey(key).orElse(lookupActiveGlobalKeyInput(key))
 
     private def lookupActiveGlobalKeyInput(
-                                            key: GlobalKey
-                                          ): Option[ContractStateMachine.KeyMapping] =
+        key: GlobalKey
+    ): Option[ContractStateMachine.KeyMapping] =
       globalKeyInputs.get(key).map {
         case Transaction.KeyActive(cid) if !activeState.consumedBy.contains(cid) =>
           ContractStateMachine.KeyActive(cid)
@@ -525,9 +533,9 @@ object ContractStateMachine {
       visitCreate(node.coid, node.gkeyOpt).left.map(KeyInputError.from)
 
     private[lf] def visitCreate(
-                                 contractId: ContractId,
-                                 mbKey: Option[GlobalKey],
-                               ): Either[CreateError, State[Nid]] = {
+        contractId: ContractId,
+        mbKey: Option[GlobalKey],
+    ): Either[CreateError, State[Nid]] = {
       if (locallyCreated.union(inputContractIds).contains(contractId)) {
         Left(CreateError.inject(DuplicateContractId(contractId)))
       } else {
@@ -567,12 +575,12 @@ object ContractStateMachine {
       ).left.map(KeyInputError.inject)
 
     private[lf] override def visitExercise(
-                                            nodeId: Nid,
-                                            targetId: ContractId,
-                                            mbKey: Option[GlobalKey],
-                                            byKey: Boolean,
-                                            consuming: Boolean,
-                                          ): Either[InconsistentContractKey, State[Nid]] = {
+        nodeId: Nid,
+        targetId: ContractId,
+        mbKey: Option[GlobalKey],
+        byKey: Boolean,
+        consuming: Boolean,
+    ): Either[InconsistentContractKey, State[Nid]] = {
       val state = witnessContractId(targetId)
       for {
         state <-
@@ -590,37 +598,36 @@ object ContractStateMachine {
 
     @VisibleForTesting
     private[transaction] override def handleLookup(
-                                                    lookup: Node.LookupByKey
-                                                  ): Either[KeyInputError, State[Nid]] =
+        lookup: Node.LookupByKey
+    ): Either[KeyInputError, State[Nid]] =
       // If the key has not yet been resolved, we use the resolution from the lookup node,
       // but this only makes sense if `activeState.keys` is updated by every node and not only by by-key nodes.
       throw new UnsupportedOperationException(
         "handleLookup can only be used if all key nodes are considered"
       )
 
-
-    /** Must be used to handle lookups iff in [[com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode.Off]] mode
-     * The second argument takes the contract key resolution to be given to the Daml interpreter instead of
-     * [[com.digitalasset.daml.lf.transaction.Node.LookupByKey.result]].
-     * This is because the iteration might currently be within a rollback scope
-     * that has already archived a contract with the key without a by-key operation
-     * (and for this reason the archival is not tracked in [[ContractStateMachine.ActiveLedgerState.keys]]),
-     * i.e., the lookup resolves to [[scala.None$]] but the correct key input is [[scala.Some$]] for some contract ID
-     * and this may matter after the rollback scope is left.
-     * Daml Engine will ask the ledger in that case to resolve the lookup and then perform an activeness check
-     * against the result potentially turning it into a negative lookup.
-     */
+    /** Must be used to handle lookups iff in [[Model.LegacyNUCK]] mode
+      * The second argument takes the contract key resolution to be given to the Daml interpreter instead of
+      * [[com.digitalasset.daml.lf.transaction.Node.LookupByKey.result]].
+      * This is because the iteration might currently be within a rollback scope
+      * that has already archived a contract with the key without a by-key operation
+      * (and for this reason the archival is not tracked in [[ContractStateMachine.ActiveLedgerState.keys]]),
+      * i.e., the lookup resolves to [[scala.None$]] but the correct key input is [[scala.Some$]] for some contract ID
+      * and this may matter after the rollback scope is left.
+      * Daml Engine will ask the ledger in that case to resolve the lookup and then perform an activeness check
+      * against the result potentially turning it into a negative lookup.
+      */
     private def handleLookupWith(
-                                  lookup: Node.LookupByKey,
-                                  keyInput: Option[ContractId],
-                                ): Either[KeyInputError, State[Nid]] =
+        lookup: Node.LookupByKey,
+        keyInput: Option[ContractId],
+    ): Either[KeyInputError, State[Nid]] =
       visitLookup(lookup.gkey, keyInput, lookup.result).left.map(KeyInputError.inject)
 
     override private[lf] def visitLookup(
-                                          gk: GlobalKey,
-                                          keyInput: Option[ContractId],
-                                          keyResolution: Option[ContractId],
-                                        ): Either[InconsistentContractKey, State[Nid]] = {
+        gk: GlobalKey,
+        keyInput: Option[ContractId],
+        keyResolution: Option[ContractId],
+    ): Either[InconsistentContractKey, State[Nid]] = {
       val state = keyInput match {
         case Some(contractId) => witnessContractId(contractId)
         case None => this
@@ -637,14 +644,18 @@ object ContractStateMachine {
     }
 
     override private[lf] def resolveKey(
-                                         gkey: GlobalKey
-                                       ): Either[Option[ContractId] => (KeyMapping, NonUniqueContractKeyState[Nid]), (KeyMapping, NonUniqueContractKeyState[Nid])] = {
+        gkey: GlobalKey
+    ): Either[Option[
+      ContractId
+    ] => (KeyMapping, NonUniqueContractKeyState[Nid]), (KeyMapping, NonUniqueContractKeyState[Nid])] = {
       lookupActiveKey(gkey) match {
         case Some(keyMapping) => Right(keyMapping -> this)
         case None =>
           // if we cannot find it here, send help, and make sure to update keys after
           // that.
-          def handleResult(result: Option[ContractId]): (KeyMapping, NonUniqueContractKeyState[Nid]) = {
+          def handleResult(
+              result: Option[ContractId]
+          ): (KeyMapping, NonUniqueContractKeyState[Nid]) = {
             // Update key inputs. Create nodes never call this method,
             // so NegativeKeyLookup is the right choice for the global key input.
             val keyInput = result match {
@@ -667,15 +678,15 @@ object ContractStateMachine {
 
     @VisibleForTesting
     override private[transaction] def handleFetch(
-                                                   node: Node.Fetch
-                                                 ): Either[KeyInputError, State[Nid]] =
+        node: Node.Fetch
+    ): Either[KeyInputError, State[Nid]] =
       visitFetch(node.coid, node.gkeyOpt, node.byKey).left.map(KeyInputError.inject)
 
     override private[lf] def visitFetch(
-                                         contractId: ContractId,
-                                         mbKey: Option[GlobalKey],
-                                         byKey: Boolean,
-                                       ): Either[InconsistentContractKey, State[Nid]] = {
+        contractId: ContractId,
+        mbKey: Option[GlobalKey],
+        byKey: Boolean,
+    ): Either[InconsistentContractKey, State[Nid]] = {
       val state = witnessContractId(contractId)
       if (byKey)
         state.assertKeyMapping(contractId, mbKey)
@@ -688,9 +699,9 @@ object ContractStateMachine {
       else this.copy(inputContractIds = inputContractIds + contractId)
 
     private def assertKeyMapping(
-                                  cid: Value.ContractId,
-                                  mbKey: Option[GlobalKey],
-                                ): Either[InconsistentContractKey, NonUniqueContractKeyState[Nid]] =
+        cid: Value.ContractId,
+        mbKey: Option[GlobalKey],
+    ): Either[InconsistentContractKey, NonUniqueContractKeyState[Nid]] =
       mbKey match {
         case None => Right(this)
         case Some(gk) =>
@@ -703,10 +714,10 @@ object ContractStateMachine {
       }
 
     override def handleNode(
-                             id: Nid,
-                             node: Node.Action,
-                             keyInput: => Option[ContractId],
-                           ): Either[KeyInputError, State[Nid]] = node match {
+        id: Nid,
+        node: Node.Action,
+        keyInput: => Option[ContractId],
+    ): Either[KeyInputError, State[Nid]] = node match {
       case create: Node.Create => handleCreate(create)
       case fetch: Node.Fetch => handleFetch(fetch)
       case lookup: Node.LookupByKey => handleLookupWith(lookup, keyInput)
@@ -729,9 +740,9 @@ object ContractStateMachine {
     override private[transaction] def withinRollbackScope: Boolean = rollbackStack.nonEmpty
 
     override def advance(
-                          resolver: KeyResolver,
-                          substate: State[Nid],
-                        ): Either[KeyInputError, State[Nid]] = {
+        resolver: KeyResolver,
+        substate: State[Nid],
+    ): Either[KeyInputError, State[Nid]] = {
       require(
         !substate.withinRollbackScope,
         "Cannot lift a state over a substate with unfinished rollback scopes",
@@ -809,24 +820,236 @@ object ContractStateMachine {
       }
     }
 
-    override private[lf] def withLocalContractKey(contractId: ContractId, key: GlobalKey): NonUniqueContractKeyState[Nid] =
+    override private[lf] def withLocalContractKey(
+        contractId: ContractId,
+        key: GlobalKey,
+    ): NonUniqueContractKeyState[Nid] =
       this.copy(
         locallyCreated = locallyCreated + contractId,
         activeState = activeState.createKey(key, contractId),
       )
   }
 
+  final case class NoContractKeyState[Nid] private[lf] (
+      override val locallyCreated: Set[ContractId],
+      override val inputContractIds: Set[ContractId],
+      override val activeState: ContractStateMachine.ActiveLedgerState[Nid],
+      rollbackStack: List[ContractStateMachine.ActiveLedgerState[Nid]],
+  ) extends State[Nid] {
+
+    override def globalKeyInputs: Map[GlobalKey, KeyInput] = Map.empty
+
+    private[this] def keyOperationError: Nothing = throw new UnsupportedOperationException(
+      "by-key operation are not supported by NoContractKeyMachine"
+    )
+
+    override val mode: Mode = Mode.NoContractKey
+
+    /** Lookup the given key k. Returns
+      * - Some(KeyActive(cid)) if k maps to cid and cid is active.
+      * - Some(KeyInactive) if there is no active contract with the given key.
+      * - None if we know no mapping for that key.
+      */
+    private def lookupActiveKey(key: GlobalKey): Option[ContractStateMachine.KeyMapping] =
+      keyOperationError
+
+    /** Visit a create node */
+    private def handleCreate(node: Node.Create): Either[KeyInputError, State[Nid]] =
+      visitCreate(node.coid, node.gkeyOpt).left.map(KeyInputError.from)
+
+    private[lf] def visitCreate(
+        contractId: ContractId,
+        mbKey: Option[GlobalKey],
+    ): Either[CreateError, State[Nid]] = {
+      mbKey.foreach(_ => keyOperationError)
+      if (locallyCreated.union(inputContractIds).contains(contractId)) {
+        Left(CreateError.inject(DuplicateContractId(contractId)))
+      } else {
+        val me =
+          this.copy(
+            locallyCreated = locallyCreated + contractId,
+            activeState = this.activeState
+              .copy(locallyCreatedThisTimeline =
+                this.activeState.locallyCreatedThisTimeline + contractId
+              ),
+          )
+        Right(me)
+      }
+    }
+
+    def handleExercise(nid: Nid, exe: Node.Exercise): Either[KeyInputError, State[Nid]] =
+      visitExercise(
+        nid,
+        exe.targetCoid,
+        exe.gkeyOpt,
+        exe.byKey,
+        exe.consuming,
+      ).left.map(KeyInputError.inject)
+
+    private[lf] override def visitExercise(
+        nodeId: Nid,
+        targetId: ContractId,
+        mbKey: Option[GlobalKey],
+        byKey: Boolean,
+        consuming: Boolean,
+    ): Either[InconsistentContractKey, State[Nid]] = {
+      val state = witnessContractId(targetId)
+      for {
+        state <-
+          if (byKey) keyOperationError else Right(state)
+      } yield {
+        if (consuming) {
+          val consumedState = state.activeState.consume(targetId, nodeId)
+          state.copy(activeState = consumedState)
+        } else state
+      }
+    }
+
+    @VisibleForTesting
+    private[transaction] override def handleLookup(
+        lookup: Node.LookupByKey
+    ): Either[KeyInputError, State[Nid]] =
+      // If the key has not yet been resolved, we use the resolution from the lookup node,
+      // but this only makes sense if `activeState.keys` is updated by every node and not only by by-key nodes.
+      throw new UnsupportedOperationException(
+        "handleLookup can only be used if all key nodes are considered"
+      )
+
+    override private[lf] def visitLookup(
+        gk: GlobalKey,
+        keyInput: Option[ContractId],
+        keyResolution: Option[ContractId],
+    ): Nothing =
+      keyOperationError
+
+    override private[lf] def resolveKey(
+        gkey: GlobalKey
+    ): Nothing = keyOperationError
+
+    @VisibleForTesting
+    override private[transaction] def handleFetch(
+        node: Node.Fetch
+    ): Either[KeyInputError, State[Nid]] =
+      visitFetch(node.coid, node.gkeyOpt, node.byKey).left.map(KeyInputError.inject)
+
+    override private[lf] def visitFetch(
+        contractId: ContractId,
+        mbKey: Option[GlobalKey],
+        byKey: Boolean,
+    ): Either[InconsistentContractKey, State[Nid]] = {
+      val state = witnessContractId(contractId)
+      if (byKey)
+        keyOperationError
+      else
+        Right(state)
+    }
+
+    private def witnessContractId(contractId: ContractId): NoContractKeyState[Nid] =
+      if (locallyCreated.contains(contractId)) this
+      else this.copy(inputContractIds = inputContractIds + contractId)
+
+    override def handleNode(
+        id: Nid,
+        node: Node.Action,
+        keyInput: => Option[ContractId],
+    ): Either[KeyInputError, State[Nid]] = node match {
+      case create: Node.Create => handleCreate(create)
+      case fetch: Node.Fetch => handleFetch(fetch)
+      case _: Node.LookupByKey => keyOperationError
+      case exercise: Node.Exercise => handleExercise(id, exercise)
+    }
+
+    override def beginRollback(): State[Nid] =
+      this.copy(rollbackStack = activeState :: rollbackStack)
+
+    override def endRollback(): State[Nid] = rollbackStack match {
+      case Nil => throw new IllegalStateException("Not inside a rollback scope")
+      case headState :: tailStack => this.copy(activeState = headState, rollbackStack = tailStack)
+    }
+
+    override private[lf] def dropRollback(): State[Nid] = rollbackStack match {
+      case Nil => throw new IllegalStateException("Not inside a rollback scope")
+      case _ :: tailStack => this.copy(rollbackStack = tailStack)
+    }
+
+    override private[transaction] def withinRollbackScope: Boolean = rollbackStack.nonEmpty
+
+    override def advance(
+        resolver: KeyResolver,
+        substate: State[Nid],
+    ): Either[KeyInputError, State[Nid]] = {
+      require(
+        !substate.withinRollbackScope,
+        "Cannot lift a state over a substate with unfinished rollback scopes",
+      )
+
+      // We want consistent key lookups within an action in any contract key mode.
+      def consistentGlobalKeyInputs: Either[KeyInputError, Unit] = {
+        substate.locallyCreated.find(locallyCreated.union(inputContractIds).contains) match {
+          case Some(contractId) =>
+            Left[KeyInputError, Unit](KeyInputError.inject(DuplicateContractId(contractId)))
+          case None =>
+            substate.globalKeyInputs
+              .find {
+                case (key, NegativeKeyLookup) => lookupActiveKey(key).exists(_ != KeyInactive)
+                case (key, Transaction.KeyActive(cid)) =>
+                  lookupActiveKey(key).exists(_ != KeyActive(cid))
+                case _ => false
+              } match {
+              case Some((key, KeyCreate)) =>
+                Left[KeyInputError, Unit](KeyInputError.inject(DuplicateContractKey(key)))
+              case Some((key, NegativeKeyLookup)) =>
+                Left[KeyInputError, Unit](KeyInputError.inject(InconsistentContractKey(key)))
+              case Some((key, Transaction.KeyActive(_))) =>
+                Left[KeyInputError, Unit](KeyInputError.inject(InconsistentContractKey(key)))
+              case _ => Right[KeyInputError, Unit](())
+            }
+        }
+      }
+
+      for {
+        _ <- consistentGlobalKeyInputs
+      } yield {
+        val next = this.activeState.advance(substate.activeState)
+        this.copy(
+          locallyCreated = this.locallyCreated.union(substate.locallyCreated),
+          inputContractIds =
+            this.inputContractIds.union(substate.inputContractIds.diff(this.locallyCreated)),
+          activeState = next,
+        )
+      }
+    }
+
+    override def projectKeyResolver(resolver: KeyResolver): KeyResolver = {
+      val consumed = activeState.consumedBy.keySet
+      resolver.map { case (key, keyMapping) =>
+        val newKeyInput = activeState.getLocalActiveKey(key) match {
+          case None => keyMapping.filterNot(consumed.contains)
+          case Some(localMapping) => localMapping
+        }
+        key -> newKeyInput
+      }
+    }
+
+    private[lf] def withLocalContractKey(
+        contractId: com.digitalasset.daml.lf.value.Value.ContractId,
+        key: com.digitalasset.daml.lf.transaction.GlobalKey,
+    ): Nothing =
+      keyOperationError
+
+  }
+
   object State {
     def apply[Nid](
-    locallyCreated: Set[ContractId],
-    inputContractIds: Set[ContractId],
-    globalKeyInputs: Map[GlobalKey, KeyInput],
-    activeState: ContractStateMachine.ActiveLedgerState[Nid],
-    rollbackStack: List[ContractStateMachine.ActiveLedgerState[Nid]],
-    mode: ContractKeyUniquenessMode
-  ) : State[Nid] =
+        locallyCreated: Set[ContractId],
+        inputContractIds: Set[ContractId],
+        globalKeyInputs: Map[GlobalKey, KeyInput],
+        activeState: ContractStateMachine.ActiveLedgerState[Nid],
+        rollbackStack: List[ContractStateMachine.ActiveLedgerState[Nid]],
+        mode: Mode,
+    ): State[Nid] =
       mode match {
-        case ContractKeyUniquenessMode.Strict =>
+        case Mode.UCK =>
           new UniqueContractKeyState(
             locallyCreated,
             inputContractIds,
@@ -834,7 +1057,7 @@ object ContractStateMachine {
             activeState,
             rollbackStack,
           )
-        case ContractKeyUniquenessMode.Off =>
+        case Mode.LegacyNUCK =>
           new NonUniqueContractKeyState(
             locallyCreated,
             inputContractIds,
@@ -842,9 +1065,17 @@ object ContractStateMachine {
             activeState,
             rollbackStack,
           )
+        case Mode.NoContractKey =>
+          assert(globalKeyInputs.isEmpty)
+          new NoContractKeyState(
+            locallyCreated,
+            inputContractIds,
+            activeState,
+            rollbackStack,
+          )
       }
 
-    private[ContractStateMachine] def empty[Nid](mode: ContractKeyUniquenessMode): State[Nid] =
+    private[ContractStateMachine] def empty[Nid](mode: Mode): State[Nid] =
       State(
         Set.empty,
         Set.empty,
@@ -855,7 +1086,7 @@ object ContractStateMachine {
       )
   }
 
-  def initial[Nid](mode: ContractKeyUniquenessMode): State[Nid] = State.empty(mode)
+  def initial[Nid](mode: Mode): State[Nid] = State.empty(mode)
 
   /** Represents the answers for [[com.digitalasset.daml.lf.engine.ResultNeedKey]] requests
     * that may arise during Daml interpretation.

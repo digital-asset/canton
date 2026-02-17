@@ -42,11 +42,7 @@ import com.digitalasset.daml.lf.transaction.Transaction.{
   KeyInput,
   NegativeKeyLookup,
 }
-import com.digitalasset.daml.lf.transaction.{
-  ContractKeyUniquenessMode,
-  ContractStateMachine,
-  CreationTime,
-}
+import com.digitalasset.daml.lf.transaction.{ContractStateMachine, CreationTime}
 import io.scalaland.chimney.dsl.*
 
 import java.util.UUID
@@ -387,7 +383,7 @@ class TransactionTreeFactoryImpl(
               for {
                 resolutionForModeOff <- suffixedNode match {
                   case lookupByKey: LfNodeLookupByKey
-                      if state.csmState.mode == ContractKeyUniquenessMode.Off =>
+                      if state.csmState.mode == ContractStateMachine.Mode.LegacyNUCK =>
                     val gkey = lookupByKey.key.globalKey
                     state.currentResolver.get(gkey).toRight(MissingContractKeyLookupError(gkey))
                   case _ => Right(KeyInactive) // dummy value, as resolution is not used
@@ -455,7 +451,7 @@ class TransactionTreeFactoryImpl(
         previousCsmState
           .advance(
             // advance ignores the resolver in mode Strict
-            if (state.csmState.mode == ContractKeyUniquenessMode.Strict) Map.empty
+            if (state.csmState.mode == ContractStateMachine.Mode.UCK) Map.empty
             else previousResolver,
             state.csmState,
           )
@@ -646,13 +642,13 @@ class TransactionTreeFactoryImpl(
     *
     * All resolved contract IDs in the map difference are core input contracts by the following
     * argument: Suppose that the map difference resolves a key `k` to a contract ID `cid`.
-    *   - In mode [[com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode.Strict]], the
-    *     first node (in execution order) involving the key `k` determines the key's resolution for
-    *     the view. So the first node `n` in execution order involving `k` is an Exercise, Fetch, or
+    *   - In mode [[com.digitalasset.daml.lf.transaction.ContractStateMachine.Mode.UCK]], the first
+    *     node (in execution order) involving the key `k` determines the key's resolution for the
+    *     view. So the first node `n` in execution order involving `k` is an Exercise, Fetch, or
     *     positive LookupByKey node.
-    *   - In mode [[com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode.Off]], the first
-    *     by-key node (in execution order, including Creates) determines the global key input of the
-    *     view. So the first by-key node `n` is an ExerciseByKey, FetchByKey, or positive
+    *   - In mode [[com.digitalasset.daml.lf.transaction.ContractStateMachine.Mode.LegacyNUCK]], the
+    *     first by-key node (in execution order, including Creates) determines the global key input
+    *     of the view. So the first by-key node `n` is an ExerciseByKey, FetchByKey, or positive
     *     LookupByKey node. In particular, `n` cannot be a Create node because then the resolution
     *     for the view would be
     *     [[com.digitalasset.daml.lf.transaction.ContractStateMachine.KeyInactive]]. If this node
@@ -962,7 +958,7 @@ object TransactionTreeFactoryImpl {
     )
 
   private val initialCsmState: ContractStateMachine.State[Unit] =
-    ContractStateMachine.initial[Unit](ContractKeyUniquenessMode.Off)
+    ContractStateMachine.initial[Unit](ContractStateMachine.Mode.LegacyNUCK)
 
   private class State(
       val mediator: MediatorGroupRecipient,

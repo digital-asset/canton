@@ -498,7 +498,7 @@ sealed abstract class HasTxNodes[Tx] {
   )
   def contractKeyInputs: Either[KeyInputError, Map[GlobalKey, KeyInput]] = {
     foldInExecutionOrder[Either[KeyInputError, ContractStateMachine.State[NodeId]]](
-      Right(ContractStateMachine.initial[NodeId](ContractKeyUniquenessMode.Strict))
+      Right(ContractStateMachine.initial[NodeId](ContractStateMachine.Mode.UCK))
     )(
       exerciseBegin = (acc, nid, exe) =>
         (acc.flatMap(_.handleExercise(nid, exe)), Transaction.ChildrenRecursion.DoRecurse),

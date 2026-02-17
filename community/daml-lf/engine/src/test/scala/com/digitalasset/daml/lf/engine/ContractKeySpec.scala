@@ -19,7 +19,7 @@ import com.digitalasset.daml.lf.language.Ast.Package
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.speedy.InitialSeeding
 import com.digitalasset.daml.lf.transaction.{
-  ContractKeyUniquenessMode,
+  ContractStateMachine,
   FatContractInstance,
   GlobalKey,
   GlobalKeyWithMaintainers,
@@ -281,14 +281,14 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
       val nonUckEngine = new Engine(
         EngineConfig(
           allowedLanguageVersions = LV.allLfVersionsRange,
-          contractKeyUniqueness = ContractKeyUniquenessMode.Off,
+          contractStateMode = ContractStateMachine.Mode.LegacyNUCK,
           forbidLocalContractIds = true,
         )
       )
       val uckEngine = new Engine(
         EngineConfig(
           allowedLanguageVersions = LV.allLfVersionsRange,
-          contractKeyUniqueness = ContractKeyUniquenessMode.Strict,
+          contractStateMode = ContractStateMachine.Mode.UCK,
           forbidLocalContractIds = true,
         )
       )

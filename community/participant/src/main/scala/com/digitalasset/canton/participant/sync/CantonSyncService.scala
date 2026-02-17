@@ -6,9 +6,11 @@ package com.digitalasset.canton.participant.sync
 import cats.Eval
 import cats.data.EitherT
 import cats.implicits.toBifunctorOps
+import cats.syntax.contravariantSemigroupal.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
+import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
@@ -76,7 +78,6 @@ import com.digitalasset.canton.participant.protocol.submission.routing.{
 import com.digitalasset.canton.participant.pruning.PruningProcessor
 import com.digitalasset.canton.participant.replica.ParticipantReplicaManager
 import com.digitalasset.canton.participant.store.*
-import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.UnknownAlias
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer.SubmissionReady
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
@@ -235,7 +236,6 @@ class CantonSyncService(
     participantId,
     isActive,
     connectedSynchronizersLookup,
-    timeouts,
     loggerFactory,
   )
 
@@ -1119,13 +1119,61 @@ class CantonSyncService(
   }
 
   @VisibleForTesting
-  def upgradeSynchronizerTo(
+  def performLsu(
       currentPSId: PhysicalSynchronizerId,
       synchronizerSuccessor: SynchronizerSuccessor,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] =
-    connectionsManager.upgradeSynchronizerTo(currentPSId, synchronizerSuccessor)
+    connectionsManager.performLsu(currentPSId, synchronizerSuccessor)
+
+  /** Complete unfinished LSUs.
+    *
+    * An LSU from psid1 to psid2 is unfinished if:
+    *   - psid2 is the successor of psid1
+    *   - Connection to psid1 is marked as LsuSource
+    *   - Connection to psid2 is marked as LsuTarget
+    *
+    * Such unfinished LSUs need to be finished "manually" because the normal flow is triggered by a
+    * connection to the synchronizer. However, `LsuSource` state is marks the connection as
+    * inactive, thus preventing further connections.
+    */
+  def finishLSUs()(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+    val psidToSuccessor: Map[PhysicalSynchronizerId, SynchronizerSuccessor] =
+      synchronizerConnectionConfigStore
+        .getAll()
+        .mapFilter { connection =>
+          if (connection.status == SynchronizerConnectionConfigStore.LsuTarget) {
+            (connection.predecessor, connection.configuredPSId.toOption).mapN {
+              case (predecessor, psid) =>
+                predecessor.psid -> SynchronizerSuccessor(psid, predecessor.upgradeTime)
+            }
+          } else None
+        }
+        .toMap
+
+    val unfinishedLsus = synchronizerConnectionConfigStore.getAll().mapFilter { connectionConfig =>
+      if (connectionConfig.status == SynchronizerConnectionConfigStore.LsuSource) {
+        connectionConfig.configuredPSId.toOption.flatMap { currentPSId =>
+          psidToSuccessor
+            .get(currentPSId)
+            .map((currentPSId, connectionConfig.config.synchronizerAlias, _))
+        }
+      } else None
+    }
+
+    logger.info(s"Found unfinished LSUs: $unfinishedLsus")
+
+    MonadUtil.sequentialTraverse_(unfinishedLsus) { case (currentPSId, alias, successor) =>
+      connectionsManager.automaticLogicalSynchronizerUpgrade.finishUpgradeWithoutChecks(
+        alias = alias,
+        currentPSId = currentPSId,
+        synchronizerSuccessor = successor,
+      )
+    }
+  }
 
   /* Verify that specified synchronizer has inactive status and prune synchronizer stores.
    */
@@ -1200,20 +1248,10 @@ class CantonSyncService(
   )(implicit
       traceContext: TraceContext
   ): Either[SyncServiceError, StoredSynchronizerConnectionConfig] =
-    synchronizerConnectionConfigStore.getAllFor(synchronizerAlias) match {
-      case Left(_: UnknownAlias) =>
-        SyncServiceError.SyncServiceUnknownSynchronizer.Error(synchronizerAlias).asLeft
-
-      case Right(configs) =>
-        val filteredConfigs = if (onlyActive) {
-          val active = configs.filter(_.status.isActive)
-          NonEmpty
-            .from(active)
-            .toRight(SyncServiceError.SyncServiceSynchronizerIsNotActive.Error(synchronizerAlias))
-        } else configs.asRight
-
-        filteredConfigs.map(_.maxBy1(_.configuredPSId))
-    }
+    connectionsManager.getSynchronizerConnectionConfigForAlias(
+      synchronizerAlias,
+      onlyActive = onlyActive,
+    )
 
   /** Perform a handshake with the given synchronizer.
     * @param psid

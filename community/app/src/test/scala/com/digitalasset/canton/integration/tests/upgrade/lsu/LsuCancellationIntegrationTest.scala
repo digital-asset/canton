@@ -219,7 +219,7 @@ final class LsuCancellationIntegrationTest extends LsuBase {
       // Call should fail if no upgrade is ongoing
       eventually() {
         participant1.underlying.value.sync
-          .upgradeSynchronizerTo(daId, fixture1.synchronizerSuccessor)
+          .performLsu(daId, fixture1.synchronizerSuccessor)
           .value
           .futureValueUS
           .left

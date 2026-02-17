@@ -151,6 +151,7 @@ class DatabaseSequencer(
       health,
       clock,
       SignatureVerifier(cryptoApi),
+      cryptoApi.psid.protocolVersion,
     )
     with FlagCloseable {
 

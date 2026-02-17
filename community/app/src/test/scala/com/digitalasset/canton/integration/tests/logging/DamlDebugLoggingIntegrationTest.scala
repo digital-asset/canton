@@ -56,7 +56,7 @@ class DamlDebugLoggingIntegrationTest extends CommunityIntegrationTest with Shar
           participant.synchronizers.connect_local(sequencer1, alias = daName)
           participant.dars.upload(CantonTestsPath)
           val alice =
-            participant.parties.enable("Alice")
+            participant.parties.testing.enable("Alice")
           participant.ledger_api.javaapi.commands
             .submit(Seq(alice), DebugTest.create(alice.toLf).commands().asScala.toSeq)
         }
@@ -68,7 +68,7 @@ class DamlDebugLoggingIntegrationTest extends CommunityIntegrationTest with Shar
       participant: ParticipantReference
   )(contract: DebugTest.Contract => Update[Exercised[T]]): Assertion = {
 
-    val alice = participant.parties.hosted("Alice").loneElement.party
+    val alice = participant.parties.testing.hosted("Alice").loneElement.partyResult
     val cid = participant.ledger_api.javaapi.state.acs.await(DebugTest.COMPANION)(alice)
 
     loggerFactory.assertLogs(
@@ -115,7 +115,7 @@ class DamlDebugLoggingIntegrationTest extends CommunityIntegrationTest with Shar
     }
     "not log if modules mismatches" in { implicit env =>
       import env.*
-      val alice = participant2.parties.hosted("Alice").loneElement.party
+      val alice = participant2.parties.testing.hosted("Alice").loneElement.partyResult
       val cid = participant2.ledger_api.javaapi.state.acs.await(DebugTest.COMPANION)(alice)
 
       loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(

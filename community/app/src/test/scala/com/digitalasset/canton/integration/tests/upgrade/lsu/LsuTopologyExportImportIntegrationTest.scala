@@ -138,9 +138,7 @@ final class LsuTopologyExportImportIntegrationTest extends LsuBase {
           filterMappings = TopologyMapping.Code.lsuMappings.toSeq,
           timeQuery = TimeQuery.Range(None, None),
         )
-        allLsuMappings.result.map(_.mapping.code).toSet shouldBe Set(
-          LsuAnnouncement.code
-        )
+        allLsuMappings.result.map(_.mapping.code).toSet shouldBe Set(LsuAnnouncement.code)
         allLsuMappings.result.map(
           _.selectMapping[LsuAnnouncement].value.mapping
         ) shouldBe oldSynchronizerAnnouncement

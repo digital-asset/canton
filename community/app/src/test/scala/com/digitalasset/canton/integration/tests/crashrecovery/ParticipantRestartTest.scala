@@ -128,6 +128,7 @@ import com.digitalasset.canton.time.{PositiveSeconds, SimClock}
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.topology.{
   KnownPhysicalSynchronizerId,
+  Party,
   PartyId,
   PhysicalSynchronizerId,
   SynchronizerId,
@@ -635,7 +636,7 @@ class ParticipantRestartCausalityIntegrationTest extends ParticipantRestartTest 
   }
 
   def reassign(
-      bob: PartyId,
+      bob: Party,
       obs: List[PartyId],
       pkg: String,
       participantBob: ParticipantReference,
@@ -708,24 +709,24 @@ class ParticipantRestartCausalityIntegrationTest extends ParticipantRestartTest 
     val participantAlice = participant1
     val participantBob = participant2
 
-    val alice = participantAlice.parties.enable(
+    val alice = participantAlice.parties.testing.enable(
       "Alice",
       synchronizeParticipants = Seq(participantBob),
       synchronizer = daName,
     )
-    participantAlice.parties.enable(
-      "Alice",
+    participantAlice.parties.testing.also_enable(
+      alice,
       synchronizeParticipants = Seq(participantBob),
       synchronizer = acmeName,
     )
 
-    val bob = participantBob.parties.enable(
+    val bob = participantBob.parties.testing.enable(
       "Bob",
       synchronizeParticipants = Seq(participantAlice),
       synchronizer = daName,
     )
-    participantBob.parties.enable(
-      "Bob",
+    participantBob.parties.testing.also_enable(
+      bob,
       synchronizeParticipants = Seq(participantAlice),
       synchronizer = acmeName,
     )
@@ -784,24 +785,24 @@ class ParticipantRestartCausalityIntegrationTest extends ParticipantRestartTest 
     val participantBob = participant2
 
     val alice =
-      participantAlice.parties.enable(
+      participantAlice.parties.testing.enable(
         "Alice",
         synchronizeParticipants = Seq(participantBob),
         synchronizer = daName,
       )
-    participantAlice.parties.enable(
-      "Alice",
+    participantAlice.parties.testing.also_enable(
+      alice,
       synchronizeParticipants = Seq(participantBob),
       synchronizer = acmeName,
     )
 
-    val bob = participantBob.parties.enable(
+    val bob = participantBob.parties.testing.enable(
       "Bob",
       synchronizeParticipants = Seq(participantAlice),
       synchronizer = daName,
     )
-    participantBob.parties.enable(
-      "Bob",
+    participantBob.parties.testing.also_enable(
+      bob,
       synchronizeParticipants = Seq(participantAlice),
       synchronizer = acmeName,
     )
@@ -1003,7 +1004,7 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
 
     // Use Alice instead of the P1 admin party at least until #16073 is fixed and the ledger api sees
     // participant admin parties.
-    val alice = participant1.parties.enable(
+    val alice = participant1.parties.testing.enable(
       "Alice",
       synchronizeParticipants = Nil,
       synchronizer = daName,
@@ -1308,23 +1309,23 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
     val stateInspection1 = stateInspectionFor(participant1)
     val participantBob = participant2
 
-    val alice = participant1.parties.enable(
+    val alice = participant1.parties.testing.enable(
       "Alice",
       synchronizeParticipants = Seq(participantBob),
       synchronizer = daName,
     )
-    participant1.parties.enable(
-      "Alice",
+    participant1.parties.testing.also_enable(
+      alice,
       synchronizeParticipants = Seq(participantBob),
       synchronizer = acmeName,
     )
-    val bob = participantBob.parties.enable(
+    val bob = participantBob.parties.testing.enable(
       "Bob",
       synchronizeParticipants = Seq(participant1),
       synchronizer = daName,
     )
-    participantBob.parties.enable(
-      "Bob",
+    participantBob.parties.testing.also_enable(
+      bob,
       synchronizeParticipants = Seq(participant1),
       synchronizer = acmeName,
     )
@@ -1398,26 +1399,26 @@ class ParticipantRestartRealClockIntegrationTest extends ParticipantRestartTest 
     val participantAlice = participant1
     val participantBob = participant2
 
-    val alice = participantAlice.parties.enable(
+    val alice = participantAlice.parties.testing.enable(
       "Alice",
       synchronizeParticipants = Seq(participantBob),
       synchronizer = daName,
     )
-    participantAlice.parties.enable(
-      "Alice",
+    participantAlice.parties.testing.also_enable(
+      alice,
       synchronizeParticipants = Seq(participantBob),
       synchronizer = acmeName,
     )
     val participantAliceId =
       participantAlice.id // Do not inline into policy because this internally performs a GRPC call
 
-    val bob = participantBob.parties.enable(
+    val bob = participantBob.parties.testing.enable(
       "Bob",
       synchronizeParticipants = Seq(participantAlice),
       synchronizer = daName,
     )
-    participantBob.parties.enable(
-      "Bob",
+    participantBob.parties.testing.also_enable(
+      bob,
       synchronizeParticipants = Seq(participantAlice),
       synchronizer = acmeName,
     )
@@ -1858,7 +1859,7 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
     val participant1 = startAndGet("participant1")
     connectToDa(participant1)
     participant1.dars.upload(CantonExamplesPath)
-    val alice = participant1.parties.enable("Alice", synchronizeParticipants = Nil)
+    val alice = participant1.parties.testing.enable("Alice", synchronizeParticipants = Nil)
     val participant1Id =
       participant1.id // Do not inline into the sequencer policy because this call has side effects
 
@@ -2031,7 +2032,7 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
         SendDecision.Process
     })
 
-    val severin = participant1.parties.enable("Severin", synchronizeParticipants = Nil)
+    val severin = participant1.parties.testing.enable("Severin", synchronizeParticipants = Nil)
 
     val semaphore = new Semaphore(1)
     val totalSubmissions = 6
@@ -2192,11 +2193,11 @@ class ParticipantRestartContractKeyIntegrationTest extends ParticipantRestartTes
 
       participants.all.dars.upload(CantonTestsDevPath)
 
-      val alice = participant1.parties.enable(
+      val alice = participant1.parties.testing.enable(
         "Alice",
         synchronizeParticipants = Seq(participant2),
       )
-      val bob = participant2.parties.enable(
+      val bob = participant2.parties.testing.enable(
         "Bob",
         synchronizeParticipants = Seq(participant1),
       )

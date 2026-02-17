@@ -27,8 +27,9 @@ import com.digitalasset.canton.error.{
 import com.digitalasset.canton.ledger.participant.state.SubmissionResult
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
+import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.synchronizer.SynchronizerRegistryError
-import com.digitalasset.canton.topology.PhysicalSynchronizerId
+import com.digitalasset.canton.topology.{ConfiguredPhysicalSynchronizerId, PhysicalSynchronizerId}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{LedgerSubmissionId, LfPartyId, SynchronizerAlias}
@@ -300,7 +301,10 @@ object SyncServiceError extends SyncServiceErrorGroup {
         ErrorCategory.InvalidGivenCurrentSystemStateOther,
       ) {
 
-    final case class Error(synchronizerAlias: SynchronizerAlias)(implicit
+    final case class Error(
+        synchronizerAlias: SynchronizerAlias,
+        inactive: Seq[(ConfiguredPhysicalSynchronizerId, SynchronizerConnectionConfigStore.Status)],
+    )(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = s"$synchronizerAlias is not active and can therefore not be connected to."

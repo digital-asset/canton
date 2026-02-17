@@ -182,8 +182,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "Create|Rb-Ex-LBK|LBK",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> expected,
-        ContractKeyUniquenessMode.Off -> expected,
+        ContractStateMachine.Mode.UCK -> expected,
+        ContractStateMachine.Mode.LegacyNUCK -> expected,
       ),
     )
   }
@@ -219,8 +219,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "multiple rollback",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> expected,
-        ContractKeyUniquenessMode.Off -> expected,
+        ContractStateMachine.Mode.UCK -> expected,
+        ContractStateMachine.Mode.LegacyNUCK -> expected,
       ),
     )
   }
@@ -252,8 +252,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "nested rollback",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> expected,
-        ContractKeyUniquenessMode.Off -> expected,
+        ContractStateMachine.Mode.UCK -> expected,
+        ContractStateMachine.Mode.LegacyNUCK -> expected,
       ),
     )
   }
@@ -288,8 +288,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "ArchiveRbLookupCreate",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> expected,
-        ContractKeyUniquenessMode.Off -> expected,
+        ContractStateMachine.Mode.UCK -> expected,
+        ContractStateMachine.Mode.LegacyNUCK -> expected,
       ),
     )
   }
@@ -318,8 +318,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       tx,
       resolver,
       Map(
-        ContractKeyUniquenessMode.Strict -> inconsistentContractKey(gkey("key1")),
-        ContractKeyUniquenessMode.Off -> expected,
+        ContractStateMachine.Mode.UCK -> inconsistentContractKey(gkey("key1")),
+        ContractStateMachine.Mode.LegacyNUCK -> expected,
       ),
     )
   }
@@ -344,8 +344,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "RbExeCreateFbk",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> expected,
-        ContractKeyUniquenessMode.Off -> // TODO This is a bug in the contract key logic
+        ContractStateMachine.Mode.UCK -> expected,
+        ContractStateMachine.Mode.LegacyNUCK -> // TODO This is a bug in the contract key logic
           inconsistentContractKey(gkey("key1")),
       ),
     )
@@ -363,8 +363,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "CreateAfterFetch",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> expected,
-        ContractKeyUniquenessMode.Off -> expected,
+        ContractStateMachine.Mode.UCK -> expected,
+        ContractStateMachine.Mode.LegacyNUCK -> expected,
       ),
     )
   }
@@ -380,8 +380,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "CreateAfterLookupByKey",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> expected,
-        ContractKeyUniquenessMode.Off -> expected,
+        ContractStateMachine.Mode.UCK -> expected,
+        ContractStateMachine.Mode.LegacyNUCK -> expected,
       ),
     )
   }
@@ -397,8 +397,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "CreateAfterConsumingExercise",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> expected,
-        ContractKeyUniquenessMode.Off -> expected,
+        ContractStateMachine.Mode.UCK -> expected,
+        ContractStateMachine.Mode.LegacyNUCK -> expected,
       ),
     )
   }
@@ -414,8 +414,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "CreateAfterNonConsumingExercise",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> expected,
-        ContractKeyUniquenessMode.Off -> expected,
+        ContractStateMachine.Mode.UCK -> expected,
+        ContractStateMachine.Mode.LegacyNUCK -> expected,
       ),
     )
   }
@@ -435,8 +435,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "DoubleCreate",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> expected,
-        ContractKeyUniquenessMode.Off -> expected,
+        ContractStateMachine.Mode.UCK -> expected,
+        ContractStateMachine.Mode.LegacyNUCK -> expected,
       ),
     )
   }
@@ -465,8 +465,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "DoubleCreateWithKey",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> duplicateContractKey(gkey("key1")),
-        ContractKeyUniquenessMode.Off -> expectedOff,
+        ContractStateMachine.Mode.UCK -> duplicateContractKey(gkey("key1")),
+        ContractStateMachine.Mode.LegacyNUCK -> expectedOff,
       ),
     )
   }
@@ -490,8 +490,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       tx,
       Map(gkey("key1") -> KeyInactive),
       Map(
-        ContractKeyUniquenessMode.Strict -> inconsistentContractKey(gkey("key1")),
-        ContractKeyUniquenessMode.Off -> expected,
+        ContractStateMachine.Mode.UCK -> inconsistentContractKey(gkey("key1")),
+        ContractStateMachine.Mode.LegacyNUCK -> expected,
       ),
     )
   }
@@ -516,8 +516,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "FetchByKey-then-Fetch",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> inconsistentContractKey(gkey("key1")),
-        ContractKeyUniquenessMode.Off -> expected,
+        ContractStateMachine.Mode.UCK -> inconsistentContractKey(gkey("key1")),
+        ContractStateMachine.Mode.LegacyNUCK -> expected,
       ),
     )
   }
@@ -542,8 +542,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "Archive other contract with key",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> inconsistentContractKey(gkey("key1")),
-        ContractKeyUniquenessMode.Off -> expected,
+        ContractStateMachine.Mode.UCK -> inconsistentContractKey(gkey("key1")),
+        ContractStateMachine.Mode.LegacyNUCK -> expected,
       ),
     )
   }
@@ -567,15 +567,15 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "CreateAfterRbExercise",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> duplicateContractKey(gkey("key1")),
-        ContractKeyUniquenessMode.Off -> expected,
+        ContractStateMachine.Mode.UCK -> duplicateContractKey(gkey("key1")),
+        ContractStateMachine.Mode.LegacyNUCK -> expected,
       ),
     )
   }
 
   def differingCause1: TestCase = {
     // [ Create c1 (key = k1), ExeN c2 [ Create c3 (key = k1), LookupByKey k1 -> None ] ]
-    // In ContractKeyUniquenessMode.Strict,
+    // In ContractStateMachine.Mode.UCK,
     // iterating over the ExeN subtree from an empty state fails with InconsistentKeys
     // but iterating over the whole transaction fails with DuplicateContractKey
     val builder = new TxBuilder()
@@ -589,15 +589,15 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "differing cause 1",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> expected,
-        ContractKeyUniquenessMode.Off -> inconsistentContractKey(gkey("key1")),
+        ContractStateMachine.Mode.UCK -> expected,
+        ContractStateMachine.Mode.LegacyNUCK -> inconsistentContractKey(gkey("key1")),
       ),
     )
   }
 
   def differingCause2: TestCase = {
     // [ Create c1 (key = k1), ExeN c2 [ Create c3 (key = k2), Create c4 (key=k1), Create c5 (key = k2) ]
-    // In ContractKeyUniquenessMode.Strict,
+    // In ContractStateMachine.Mode.UCK,
     // iterating over the ExeN subtree from an empty state fails with DuplicateContractKeys(k2)
     // while iterating over the whole transaction fails with DuplicateContractKeys(k1)
     val builder = new TxBuilder()
@@ -622,8 +622,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "differing cause 2",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> duplicateContractKey(gkey("key1")),
-        ContractKeyUniquenessMode.Off -> expectedOff,
+        ContractStateMachine.Mode.UCK -> duplicateContractKey(gkey("key1")),
+        ContractStateMachine.Mode.LegacyNUCK -> expectedOff,
       ),
     )
   }
@@ -642,8 +642,8 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "inconsistent fetch-by-key",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> expected,
-        ContractKeyUniquenessMode.Off -> expected,
+        ContractStateMachine.Mode.UCK -> expected,
+        ContractStateMachine.Mode.LegacyNUCK -> expected,
       ),
     )
   }
@@ -666,13 +666,13 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       "rbCreate",
       tx,
       Map(
-        ContractKeyUniquenessMode.Strict -> expected,
-        ContractKeyUniquenessMode.Off -> expected,
+        ContractStateMachine.Mode.UCK -> expected,
+        ContractStateMachine.Mode.LegacyNUCK -> expected,
       ),
     )
   }
 
-  // Note that we provide no stability for `ContractKeyUniquenessMode.Off`
+  // Note that we provide no stability for `ContractStateMachine.Mode.LegacyNUCK`
   // or for transactions with multiple keys.
   // So these tests serve only as an indication of the current behavior
   // but can be changed freely.
@@ -707,7 +707,7 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
           s"mode $mode" in {
             // We use `Unit` instead of `NodeId` so that we don't have to fiddle with node ids
             val actualResolver: KeyResolver =
-              if (mode == ContractKeyUniquenessMode.Strict) Map.empty else resolver
+              if (mode == ContractStateMachine.Mode.UCK) Map.empty else resolver
             val result = visitSubtrees(
               tx.nodes,
               tx.roots.toSeq,
@@ -793,16 +793,16 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
     * - [[com.digitalasset.daml.lf.transaction.Node.Exercise]] calls [[com.digitalasset.daml.lf.transaction.ContractStateMachine.State.handleExercise]]
     *   before visiting the children
     * - [[com.digitalasset.daml.lf.transaction.Node.LookupByKey]] calls [[com.digitalasset.daml.lf.transaction.ContractStateMachine.State.handleLookup]]
-    *   in mode [[com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode.Strict]] and
+    *   in mode [[com.digitalasset.daml.lf.transaction.ContractStateMachine.Mode.UCK]] and
     *   [[com.digitalasset.daml.lf.transaction.ContractStateMachine.State.handleLookupWith]]
-    *   in modes [[com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode.ContractByKeyUniquenessMode]] using the `resolver`.
+    *   in modes [[com.digitalasset.daml.lf.transaction.Mode.ContractByKeyUniquenessMode]] using the `resolver`.
     * - [[com.digitalasset.daml.lf.transaction.Node.Rollback]] calls [[com.digitalasset.daml.lf.transaction.ContractStateMachine.State.beginRollback]]
     *   before visiting the children and
     *   [[com.digitalasset.daml.lf.transaction.ContractStateMachine.State.endRollback]] after visiting the children.
     *
-    * @param resolver The resolver used in modes [[com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode.ContractByKeyUniquenessMode]]
+    * @param resolver The resolver used in modes [[com.digitalasset.daml.lf.transaction.Mode.ContractByKeyUniquenessMode]]
     *                 for handling [[com.digitalasset.daml.lf.transaction.Node.LookupByKey]].
-    *                 Ignored in mode [[com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode.Strict]].
+    *                 Ignored in mode [[com.digitalasset.daml.lf.transaction.ContractStateMachine.Mode.UCK]].
     */
   private def visitSubtree(
       nodes: Map[NodeId, Node],
@@ -848,7 +848,7 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
         // Now project the resolver and visit the subtree from a fresh state and check whether we end up the same using advance
         val fresh = ContractStateMachine.initial[Unit](state.mode)
         val projectedResolver: KeyResolver =
-          if (state.mode == ContractKeyUniquenessMode.Strict) Map.empty
+          if (state.mode == ContractStateMachine.Mode.UCK) Map.empty
           else state.projectKeyResolver(resolver)
         withClue(
           s"Advancing over subtree rooted at $node with projected resolver $projectedResolver; projection state=$state; original resolver=$resolver"
@@ -879,14 +879,14 @@ object ContractStateMachineSpec {
       name: String,
       transaction: HasTxNodes[_],
       resolver: KeyResolver,
-      expected: Map[ContractKeyUniquenessMode, TestResult],
+      expected: Map[ContractStateMachine.Mode, TestResult],
   )
 
   object TestCase {
     def apply(
         name: String,
         transaction: HasTxNodes[_],
-        expected: Map[ContractKeyUniquenessMode, TestResult],
+        expected: Map[ContractStateMachine.Mode, TestResult],
     ): TestCase = TestCase(name, transaction, resolverFromTx(transaction), expected)
   }
 

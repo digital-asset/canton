@@ -373,6 +373,28 @@ class AutomaticLogicalSynchronizerUpgrade(
     )
   }
 
+  /** Finish the upgrade. Fails if the upgrade cannot be performed.
+    *
+    * Is called to finish an upgrade after a crash.
+    *
+    * Prerequisite:
+    *   - Current/old connection was marked as LsuSource by this class. In particular, it means:
+    *     - Time on the current synchronizer has reached the upgrade time.
+    *     - `canBeUpgradedTo` returns Right(`ReadyToUpgrade`)
+    *     - Node is disconnected from the synchronizer
+    */
+  def finishUpgradeWithoutChecks(
+      alias: SynchronizerAlias,
+      currentPSId: PhysicalSynchronizerId,
+      synchronizerSuccessor: SynchronizerSuccessor,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+    implicit val logger = Lsu.Logger(loggerFactory, getClass, synchronizerSuccessor)
+
+    performUpgradeInternal(alias, currentPSId, synchronizerSuccessor, ())
+  }
+
   /** Performs the upgrade. Fails if the upgrade cannot be performed.
     *
     * Prerequisite:
@@ -399,7 +421,7 @@ class AutomaticLogicalSynchronizerUpgrade(
         .setStatus(
           alias,
           KnownPhysicalSynchronizerId(currentPSId),
-          SynchronizerConnectionConfigStore.Inactive,
+          SynchronizerConnectionConfigStore.LsuSource,
         )
         .leftMap(err => s"Unable to mark current synchronizer $currentPSId as inactive: $err")
 
@@ -656,7 +678,7 @@ class AutomaticLogicalSynchronizerUpgrade(
       _ <- synchronizerConnectionConfigStore
         .put(
           config = currentConfig.config.copy(sequencerConnections = newSequencerConnections),
-          status = SynchronizerConnectionConfigStore.UpgradingTarget,
+          status = SynchronizerConnectionConfigStore.LsuTarget,
           configuredPSId = KnownPhysicalSynchronizerId(synchronizerSuccessor.psid),
           synchronizerPredecessor = Some(
             SynchronizerPredecessor(
@@ -751,7 +773,7 @@ class ManualLogicalSynchronizerUpgrade(
         .setStatus(
           successorConfig.synchronizerAlias,
           KnownPhysicalSynchronizerId(currentPSId),
-          SynchronizerConnectionConfigStore.Inactive,
+          SynchronizerConnectionConfigStore.LsuSource,
         )
         .leftMap(_.message)
 
