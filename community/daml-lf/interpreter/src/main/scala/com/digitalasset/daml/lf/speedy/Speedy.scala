@@ -24,7 +24,7 @@ import com.digitalasset.daml.lf.speedy.Speedy.Machine.{newTraceLog, newWarningLo
 import com.digitalasset.daml.lf.stablepackages.StablePackages
 import com.digitalasset.daml.lf.transaction.ContractStateMachine.KeyMapping
 import com.digitalasset.daml.lf.transaction.{
-  ContractKeyUniquenessMode,
+  ContractStateMachine,
   FatContractInstance,
   GlobalKey,
   GlobalKeyWithMaintainers,
@@ -212,7 +212,7 @@ private[lf] object Speedy {
       val packageResolution: Map[Ref.PackageName, Ref.PackageId],
       val validating: Boolean, // TODO: Better: Mode = SubmissionMode | ValidationMode
       val preparationTime: Time.Timestamp,
-      val contractKeyUniqueness: ContractKeyUniquenessMode,
+      val contractKeyUniqueness: ContractStateMachine.Mode,
       val contractIdVersion: ContractIdVersion,
       /* The current partial transaction */
       private[speedy] var ptx: PartialTransaction,
@@ -680,27 +680,27 @@ private[lf] object Speedy {
 
     @throws[SErrorDamlException]
     def apply(
-        compiledPackages: CompiledPackages,
-        preparationTime: Time.Timestamp,
-        initialSeeding: InitialSeeding,
-        expr: SExpr,
-        committers: Set[Party],
-        readAs: Set[Party],
-        authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
-        iterationsBetweenInterruptions: Long = UpdateMachine.iterationsBetweenInterruptions,
-        packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
-        validating: Boolean = false,
-        traceLog: TraceLog = newTraceLog,
-        warningLog: WarningLog = newWarningLog,
-        contractKeyUniqueness: ContractKeyUniquenessMode = ContractKeyUniquenessMode.Strict,
-        contractIdVersion: ContractIdVersion = ContractIdVersion.V1,
-        commitLocation: Option[Location] = None,
-        limits: interpretation.Limits = interpretation.Limits.Lenient,
-        costModel: CostModel = CostModel.Empty,
-        initialGasBudget: Option[CostModel.Cost] = None,
-        initialEnvSize: Int = 512,
-        initialKontStackSize: Int = 128,
-        metricPlugins: Seq[MetricPlugin] = Seq.empty,
+               compiledPackages: CompiledPackages,
+               preparationTime: Time.Timestamp,
+               initialSeeding: InitialSeeding,
+               expr: SExpr,
+               committers: Set[Party],
+               readAs: Set[Party],
+               authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
+               iterationsBetweenInterruptions: Long = UpdateMachine.iterationsBetweenInterruptions,
+               packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
+               validating: Boolean = false,
+               traceLog: TraceLog = newTraceLog,
+               warningLog: WarningLog = newWarningLog,
+               contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoContractKey,
+               contractIdVersion: ContractIdVersion = ContractIdVersion.V1,
+               commitLocation: Option[Location] = None,
+               limits: interpretation.Limits = interpretation.Limits.Lenient,
+               costModel: CostModel = CostModel.Empty,
+               initialGasBudget: Option[CostModel.Cost] = None,
+               initialEnvSize: Int = 512,
+               initialKontStackSize: Int = 128,
+               metricPlugins: Seq[MetricPlugin] = Seq.empty,
     )(implicit loggingContext: LoggingContext): UpdateMachine =
       new UpdateMachine(
         sexpr = expr,
@@ -709,7 +709,7 @@ private[lf] object Speedy {
         preparationTime = preparationTime,
         ptx = PartialTransaction
           .initial(
-            contractKeyUniqueness,
+            contractStateMode,
             initialSeeding,
             committers,
             authorizationChecker,
@@ -717,7 +717,7 @@ private[lf] object Speedy {
         committers = committers,
         readAs = readAs,
         commitLocation = commitLocation,
-        contractKeyUniqueness = contractKeyUniqueness,
+        contractKeyUniqueness = contractStateMode,
         contractIdVersion = contractIdVersion,
         limits = limits,
         traceLog = traceLog,
@@ -1300,6 +1300,7 @@ private[lf] object Speedy {
         readAs: Set[Party] = Set.empty,
         authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
         packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
+        mode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoContractKey,
         limits: interpretation.Limits = interpretation.Limits.Lenient,
         traceLog: TraceLog = newTraceLog,
     )(implicit loggingContext: LoggingContext): UpdateMachine = {
@@ -1315,6 +1316,7 @@ private[lf] object Speedy {
         traceLog = traceLog,
         authorizationChecker = authorizationChecker,
         iterationsBetweenInterruptions = 10000,
+        contractStateMode = mode,
       )
     }
 

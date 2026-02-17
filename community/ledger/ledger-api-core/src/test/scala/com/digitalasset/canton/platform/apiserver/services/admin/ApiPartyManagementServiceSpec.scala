@@ -275,6 +275,7 @@ class ApiPartyManagementServiceSpec
             ),
             multiHashSignatures = Seq(signature),
             identityProviderId = "",
+            waitForAllocation = Some(true),
           ).update(requestTransform)
           result <- apiService
             .allocateExternalParty(request)

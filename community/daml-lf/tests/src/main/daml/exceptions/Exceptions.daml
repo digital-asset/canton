@@ -14,9 +14,17 @@ exception E
   where
     message "E"
 
-exception Ecid with cid: ContractId K
+exception Ecid with cid: ContractId T
   where
     message "Ecid"
+
+template T
+  with
+    p : Party
+    v : Int
+    t : Text
+  where
+    signatory p
 
 template K
   with
@@ -30,7 +38,7 @@ template K
 
 data Rollback = NoException | Throw
 
-template T
+template Helper
   with
     p : Party
   where
@@ -40,7 +48,7 @@ template T
       with
         i : Int
       controller p
-      do cid <- create (K p i "")
+      do cid <- create (T p i "")
          try (archive cid >> throw E)
          catch
            E -> pure ()
@@ -50,7 +58,7 @@ template T
       with
         i : Int
       controller p
-      do cid <- create (K p i "")
+      do cid <- create (T p i "")
          try archive cid >> pure ()
          catch
            E -> pure ()
@@ -67,7 +75,7 @@ template T
 
     nonconsuming choice ArchiveNonTransient : ()
       with
-        cid : ContractId K
+        cid : ContractId T
       controller p
       do try archive cid >> pure ()
          catch
@@ -103,7 +111,7 @@ template T
       controller p
       do
         try do
-          cid <- create (K p 1 "")
+          cid <- create (T p 1 "")
           throw (Ecid cid)
         catch (Ecid cid) -> archive cid
 

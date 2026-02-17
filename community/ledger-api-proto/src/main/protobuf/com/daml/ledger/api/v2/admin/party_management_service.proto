@@ -240,6 +240,14 @@ message AllocateExternalPartyRequest {
   // If not set, assume the party is managed by the default identity provider.
   // Optional
   string identity_provider_id = 4;
+
+  // When true, this RPC will attempt to wait for the party to be allocated on the synchronizer before returning.
+  // When false, the allocation will happen asynchronously.
+  // This is a best effort only as this synchronization is only possible for non decentralized parties (single hosting node).
+  // For decentralized parties, this flag is ignored.
+  // Defaults to true.
+  // Optional
+  optional bool wait_for_allocation = 5;
 }
 
 message AllocateExternalPartyResponse {

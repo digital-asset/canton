@@ -299,6 +299,7 @@ object LedgerApiCommands {
         synchronizerId: SynchronizerId,
         transactions: Seq[(GenericTopologyTransaction, Seq[Signature])],
         multiHashSignatures: Seq[Signature],
+        synchronize: Boolean,
     ) extends BaseCommand[
           AllocateExternalPartyRequest,
           AllocateExternalPartyResponse,
@@ -317,6 +318,7 @@ object LedgerApiCommands {
             multiHashSignatures =
               multiHashSignatures.map(_.toProtoV30.transformInto[lapicrypto.Signature]),
             identityProviderId = "",
+            waitForAllocation = Some(synchronize),
           )
         )
       override protected def submitRequest(

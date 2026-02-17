@@ -29,7 +29,6 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.logging.{LogEntry, SuppressingLogger, SuppressionRule}
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError.UnsafeToPrune
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceSynchronizerDisabledUs
-import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.topology.store.TimeQuery
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{
   Confirmation,
@@ -42,6 +41,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
   TopologyMapping,
 }
+import com.digitalasset.canton.topology.{PartyKind, SynchronizerId}
 import com.digitalasset.canton.{LfPartyId, config}
 import org.scalatest.Assertion
 import org.scalatest.Inside.inside
@@ -124,14 +124,17 @@ trait LedgerApiTopologyTransactionsTest extends CommunityIntegrationTest with Sh
     val participants = List(participant1, participant2)
     val startOffsets = List(participant1, participant2).map(_.ledger_api.state.end())
 
-    val mahavishnu = participant1.parties.enable(
+    val mahavishnu = participant1.parties.testing.enable(
       "JohnMcLaughlin",
       synchronizeParticipants = participants,
     )
-    val zappa = participant1.parties.enable(
+    val zappa = participant1.parties.testing.enable(
       "FrankZappa",
       synchronizeParticipants = participants,
     )
+    val permission =
+      if (partiesKind == PartyKind.Local) PARTICIPANT_PERMISSION_SUBMISSION
+      else PARTICIPANT_PERMISSION_CONFIRMATION
 
     participants.zip(startOffsets).foreach { case (participant, startOffset) =>
       val txs = participant.ledger_api.updates
@@ -154,13 +157,13 @@ trait LedgerApiTopologyTransactionsTest extends CommunityIntegrationTest with Sh
         assertAuthorizationAdded(
           zappa.toProtoPrimitive,
           participant1.adminParty.toProtoPrimitive,
-          PARTICIPANT_PERMISSION_SUBMISSION,
+          permission,
         )(_)
       )
       assertAuthorizationAdded(
         mahavishnu.toProtoPrimitive,
         participant1.adminParty.toProtoPrimitive,
-        PARTICIPANT_PERMISSION_SUBMISSION,
+        permission,
       )(txsWild.headOption)
     }
   }
@@ -171,10 +174,12 @@ trait LedgerApiTopologyTransactionsTest extends CommunityIntegrationTest with Sh
 
       val participants = List(participant1, participant2)
 
-      val alice = participant1.parties.enable(
+      val alice = participant1.parties.testing.enable(
         "Alice" + "LedgerApiTopologyTransactionsTest",
         synchronizeParticipants = participants,
       )
+      // Bob is not using the .testing package on purpose because it tests permission change towards confirmation
+      // and external parties are already hosted with confirmation permission
       val bob = participant1.parties.enable(
         "Bob" + "LedgerApiTopologyTransactionsTest",
         synchronizeParticipants = participants,
@@ -182,6 +187,14 @@ trait LedgerApiTopologyTransactionsTest extends CommunityIntegrationTest with Sh
 
       val startOffsets = participants.map(_.ledger_api.state.end())
 
+      // Get Alice's authorization for the update (needed because she gets hosted on new nodes)
+      alice.topology.party_to_participant_mappings.propose_delta(
+        participant1,
+        adds = participants.map(hostingParticipant => (hostingParticipant.id, Observation)),
+        store = daId,
+      )
+
+      // Get the hosting nodes authorization
       participants.foreach(p =>
         p.topology.party_to_participant_mappings.propose_delta(
           alice,
@@ -259,11 +272,11 @@ trait LedgerApiTopologyTransactionsTest extends CommunityIntegrationTest with Sh
     val participants = List(participant1, participant2)
     val startOffsets = List(participant1, participant2).map(_.ledger_api.state.end())
 
-    val jon = participant1.parties.enable(
+    val jon = participant1.parties.testing.enable(
       "JonAnderson",
       synchronizeParticipants = participants,
     )
-    val ian = participant1.parties.enable(
+    val ian = participant1.parties.testing.enable(
       "IanAnderson",
       synchronizeParticipants = participants,
     )
@@ -274,8 +287,8 @@ trait LedgerApiTopologyTransactionsTest extends CommunityIntegrationTest with Sh
       participant.ledger_api.state.end()
     }
 
-    participant1.parties.disable(jon)
-    participant1.parties.disable(ian)
+    jon.topology.disable(participant1)
+    ian.topology.disable(participant1)
 
     participants.zip(midOffsets).foreach { case (participant, midOffset) =>
       val txs = participant.ledger_api.updates
@@ -307,11 +320,11 @@ trait LedgerApiTopologyTransactionsTest extends CommunityIntegrationTest with Sh
 
     val secondStartOffsets = List(participant1, participant2).map(_.ledger_api.state.end())
 
-    val jonA = participant1.parties.enable(
+    val jonA = participant1.parties.testing.enable(
       "JonAnderson",
       synchronizeParticipants = participants,
     )
-    participant1.parties.disable(jonA)
+    jonA.topology.disable(participant1)
 
     participants.zip(secondStartOffsets).map { case (participant, startOffset) =>
       // wait for both enable and disable to arrive at the Ledger API
@@ -327,7 +340,7 @@ trait LedgerApiTopologyTransactionsTest extends CommunityIntegrationTest with Sh
     val participants = List(participant1)
     val startOffset = participant1.ledger_api.state.end()
 
-    val bagheera = participant1.parties.enable(
+    val bagheera = participant1.parties.testing.enable(
       "Bagheera",
       synchronizeParticipants = participants,
     )
@@ -338,7 +351,7 @@ trait LedgerApiTopologyTransactionsTest extends CommunityIntegrationTest with Sh
       participant1.ledger_api.state.end()
     }
 
-    participant1.parties.disable(bagheera)
+    bagheera.topology.disable(participant1)
 
     val txs = participant1.ledger_api.updates
       .topology_transactions(1, Seq(bagheera), midOffset)
@@ -360,7 +373,7 @@ trait LedgerApiTopologyTransactionsTest extends CommunityIntegrationTest with Sh
     val participants = List(participant1, participant2)
     val startOffset = participant1.ledger_api.state.end()
 
-    val zawinul = participant1.parties.enable(
+    val zawinul = participant1.parties.testing.enable(
       "JoeZawinul",
       synchronizeParticipants = participants,
     )
@@ -418,7 +431,7 @@ trait LedgerApiTopologyTransactionsTest extends CommunityIntegrationTest with Sh
       participant3.synchronizers.connect_local(sequencer2, acmeName)
       participant3.health.ping(participant3, synchronizerId = acmeId)
 
-      val babayaga = participant3.parties.enable(
+      val babayaga = participant3.parties.testing.enable(
         "Babayaga",
         synchronizeParticipants = Seq(),
         synchronize = None,
@@ -433,7 +446,7 @@ trait LedgerApiTopologyTransactionsTest extends CommunityIntegrationTest with Sh
           )
           .result
           .flatMap(_.selectMapping[PartyToParticipant])
-          .find(_.transaction.mapping.partyId == babayaga)
+          .find(_.transaction.mapping.partyId == babayaga.partyId)
           .map(topologyTx =>
             (
               topologyTx.sequenced.value,

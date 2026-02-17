@@ -7,10 +7,8 @@ import cats.data.EitherT
 import cats.implicits.showInterpolator
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
-import cats.syntax.traverse.*
 import com.digitalasset.canton.LedgerSubmissionId
 import com.digitalasset.canton.config.CantonRequireTypes.String255
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.ledger.participant.state.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -33,7 +31,6 @@ private[sync] class PartyAllocation(
     participantId: ParticipantId,
     isActive: () => Boolean,
     connectedSynchronizersLookup: ConnectedSynchronizersLookup,
-    timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, val tracer: Tracer)
     extends Spanning
@@ -110,33 +107,6 @@ private[sync] class PartyAllocation(
             case IdentityManagerParentError(e) => reject(e.cause, e.code.category.grpcCode)
             case e => reject(e.cause, e.code.category.grpcCode)
           }
-        // TODO(i25076) remove this waiting logic once topology events are published on the ledger api
-        // wait for parties to be available on the specified connected synchronizers
-        waitingSuccessful <- EitherT
-          .right[SubmissionResult](
-            if (externalPartyOnboardingDetails.forall(_.fullyAllocatesParty)) {
-              connectedSynchronizersLookup.get(synchronizerId).traverse { connectedSynchronizer =>
-                connectedSynchronizer.topologyClient
-                  .awaitUS(
-                    _.inspectKnownParties(
-                      partyId.filterString,
-                      participantId.filterString,
-                      limit = 1,
-                    )
-                      .map(_.nonEmpty),
-                    timeouts.network.duration,
-                  )
-                  .map(synchronizerId -> _)
-              }
-            } else FutureUnlessShutdown.pure(None)
-          )
-        _ = waitingSuccessful.foreach { case (synchronizerId, successful) =>
-          if (!successful)
-            logger.warn(
-              s"Waiting for allocation of $partyId on synchronizer $synchronizerId timed out."
-            )
-        }
-
       } yield SubmissionResult.Acknowledged
 
     result.fold(

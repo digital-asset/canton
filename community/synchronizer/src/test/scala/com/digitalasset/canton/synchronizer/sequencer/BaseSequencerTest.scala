@@ -16,7 +16,6 @@ import com.digitalasset.canton.scheduler.PruningScheduler
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
-import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.RegisterError
 import com.digitalasset.canton.synchronizer.sequencer.admin.data.{
   SequencerAdminStatus,
@@ -44,6 +43,7 @@ import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.{Member, SequencerId, UniqueIdentifier}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, FailOnShutdown}
 import com.google.protobuf.ByteString
 import org.apache.pekko.Done
@@ -83,16 +83,26 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
         None,
         new SimClock(CantonTimestamp.Epoch, loggerFactory),
         new SignatureVerifier {
-          override def verifySignature[A <: ProtocolVersionedMemoizedEvidence](
-              signedContent: SignedContent[A],
+          override def verifySubmissionRequestSignature(
+              signedSubmissionRequest: SignedContent[SubmissionRequest],
               hashPurpose: HashPurpose,
-              sender: A => Member,
               estimatedSequencingTimestamp: CantonTimestamp,
           )(implicit
               traceContext: TraceContext
-          ): EitherT[FutureUnlessShutdown, String, SignedContent[A]] =
-            EitherT.rightT(signedContent)
+          ): EitherT[FutureUnlessShutdown, String, SignedContent[SubmissionRequest]] =
+            EitherT.rightT(signedSubmissionRequest)
+
+          override def verifyAcknowledgeRequestSignature(
+              signedAcknowledgeRequest: SignedContent[AcknowledgeRequest],
+              hashPurpose: HashPurpose,
+              timestampToVerify: Option[CantonTimestamp],
+              protocolVersion: ProtocolVersion,
+          )(implicit
+              traceContext: TraceContext
+          ): EitherT[FutureUnlessShutdown, String, SignedContent[AcknowledgeRequest]] =
+            EitherT.rightT(signedAcknowledgeRequest)
         },
+        testedProtocolVersion,
       )
       with FlagCloseable {
     val newlyRegisteredMembers =

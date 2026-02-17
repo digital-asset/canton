@@ -20,6 +20,7 @@ import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{
+  ContractStateMachine,
   FatContractInstance,
   GlobalKeyWithMaintainers,
   SerializationVersion,
@@ -100,6 +101,9 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
         transactionSeed = crypto.Hash.hashPrivateKey("ExceptionTest.scala"),
         updateSE = sexpr,
         committers = Set(alice),
+        // we test only with contract key mode,
+        // the state machine should no have any impact for this test.
+        mode = ContractStateMachine.Mode.UCK,
       )
     SpeedyTestLib
       .run(machine, getContract = getContract, getKey = getKey)
@@ -134,7 +138,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
      val unhandled4 : Update Int64 = upure @Int64 (throw @Int64 @M:E2 (M:E2 {})) ;
 
      record @serializable E3 = { } ;
-     exception E3 = { 
+     exception E3 = {
        message \(e: M:E3) -> FAIL_WITH_STATUS @Text "E3_failure_status" INVALID_GIVEN_CURRENT_SYSTEM_STATE_OTHER "something went wrong" (TEXTMAP_EMPTY @Text)
      } ; //throw failure status from the message function
      val unhandled5 : Update Int64 = upure @Int64 (throw @Int64 @M:E3 (M:E3 {})) ;

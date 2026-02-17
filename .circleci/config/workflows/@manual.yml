@@ -416,12 +416,13 @@ manual_snapshot_release:
           - da-images
         requires:
           - compile
-    - build_systematic_testing_inventory:
-        context:
-          - artifactory
-          - azure-self-cache
-        requires:
-          - compile
+# TODO(i29845): Fix and re-enable
+#    - build_systematic_testing_inventory:
+#        context:
+#          - artifactory
+#          - azure-self-cache
+#        requires:
+#          - compile
     - publish_libraries:
         context:
         - datadog
@@ -450,7 +451,8 @@ manual_snapshot_release:
           - package_sequencer_driver_api
           - assembly_ledger_api_test_tool
           - package_kms_driver
-          - build_systematic_testing_inventory
+# TODO(i29845): Fix and re-enable
+#          - build_systematic_testing_inventory
           - build_scaladoc
     - build_and_publish_docker:
         context:

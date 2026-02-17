@@ -129,6 +129,7 @@ class BlockUpdateGeneratorImpl(
       sequencerId,
       rateLimitManager,
       orderingTimeFixMode,
+      sequencingTimeLowerBoundExclusive,
       batchingConfig,
       loggerFactory,
       metrics,

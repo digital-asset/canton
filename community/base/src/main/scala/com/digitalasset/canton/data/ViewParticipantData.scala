@@ -65,7 +65,7 @@ import monocle.macros.GenLens
   *   view's global key inputs [[com.digitalasset.canton.data.TransactionView.globalKeyInputs]] and
   *   the aggregated global key inputs from the subviews (see
   *   [[com.digitalasset.canton.data.TransactionView.globalKeyInputs]] for the aggregation
-  *   algorithm). In [[com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode.Strict]], the
+  *   algorithm). In [[com.digitalasset.daml.lf.transaction.ContractStateMachine.Mode.UCK]], the
   *   [[com.digitalasset.canton.data.FreeKey]] resolutions must be checked during conflict
   *   detection.
   * @param actionDescription

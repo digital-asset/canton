@@ -219,6 +219,37 @@ class ParticipantPartiesAdministrationGroup(
       loggerFactory,
     )
 
+    @Help.Summary("List parties hosted by this participant")
+    @Help.Description(
+      """Inspect the parties hosted by this participant as used for synchronisation.
+        |The response is built from the timestamped topology transactions of each synchronizer,
+        |excluding the authorized store of the given node. The search will include all hosted
+        |parties and is equivalent to running the `list` method using the participant id of the
+        |invoking participant.
+        |
+        |Parameters:
+        |- filterParty: Filter by parties starting with the given string.
+        |- filterSynchronizerId: Filter by synchronizers whose id starts with the given string.
+        |- asOf: Optional timestamp to inspect the topology state at a given point in time.
+        |- limit: How many items to return (defaults to canton.parameters.console.default-limit)
+        |
+        |Example: participant1.parties.hosted(filterParty="alice")
+      """
+    )
+    def hosted(
+        filterParty: String = "",
+        synchronizerIds: Set[SynchronizerId] = Set.empty,
+        asOf: Option[Instant] = None,
+        limit: PositiveInt = defaultLimit,
+    )(implicit partyKind: PartyKind): Seq[ListPartiesResult] =
+      this.list(
+        filterParty,
+        filterParticipant = participantId.filterString,
+        synchronizerIds = synchronizerIds,
+        asOf = asOf,
+        limit = limit,
+      )
+
     @Help.Summary("Find a party from a filter string")
     @Help.Description(
       """Will search for all parties that match this filter string. If it finds exactly one party, it

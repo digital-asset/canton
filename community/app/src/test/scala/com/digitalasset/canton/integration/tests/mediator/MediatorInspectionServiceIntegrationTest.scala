@@ -332,7 +332,7 @@ sealed trait MediatorInspectionServiceIntegrationTest
 
       // now set the mediator's prehead to the prehead of request 1.
       // this should trigger a replay of request 1 and therefore the verdict for request 2 should not be emitted
-      // and we should also see a a verdict of request 1.
+      // and we should also see a verdict of request 1.
       mediator.sequencerCounterTrackerStore
         .rewindPreheadSequencerCounter(Some(preheadAtStart))
         .futureValueUS

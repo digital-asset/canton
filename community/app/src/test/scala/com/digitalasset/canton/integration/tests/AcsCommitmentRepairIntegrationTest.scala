@@ -179,6 +179,12 @@ trait AcsCommitmentRepairIntegrationTest
       // P1 reinitializes commitments on da and acme. We should see the reinit in the DB, but no errors or warnings
       // in particular regarding inconsistencies or commitment mismatches.
       val ts = simClock.now
+      // da might not have progressed time as acme when using BFTOrderer (since with BFT Time, the time of a block is
+      // decided by the previous block). So we make sure the sequencers have observed this time.
+      sequencers.local.foreach(
+        _.underlying.value.sequencer.timeTracker.awaitTick(ts).foreach(_.futureValue)
+      )
+
       val reinitCmtsResult =
         participant1.commitments.reinitialize_commitments(
           Seq.empty,

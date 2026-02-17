@@ -100,7 +100,6 @@ abstract class BaseEngineModeIT(supportDevLanguageVersions: Boolean)
           partyDetails <- client.partyManagementClient.allocateParty(Some(party))
           // Uploading the package is not enough.
           // We have to submit a request that forces the engine to load the package.
-          _ = println(s"diff head: ${(pkgsAfter diff pkgsBefore).head}")
           request = buildRequest(
             (pkgsAfter diff pkgsBefore).head.packageId,
             partyDetails.party,

@@ -32,7 +32,7 @@ trait StaticTimeIntegrationTest extends CommunityIntegrationTest with SharedEnvi
 
     participant1.synchronizers.connect_local(sequencer1, daName)
     participant1.dars.upload(CantonTestsPath)
-    val alice = participant1.parties.enable("Alice")
+    val alice = participant1.parties.testing.enable("Alice")
 
     val now = clock.now
     assertResult(CantonTimestamp.Epoch)(now)

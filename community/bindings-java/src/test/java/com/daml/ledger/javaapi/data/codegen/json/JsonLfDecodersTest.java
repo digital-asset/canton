@@ -10,6 +10,7 @@ import static java.util.Collections.emptyMap;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.daml.ledger.javaapi.data.Unit;
+
 import java.io.IOException;
 import java.time.Month;
 import java.time.format.DateTimeParseException;
@@ -18,6 +19,7 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 
 import org.junit.Test;
+import com.daml.ledger.javaapi.data.codegen.UnknownTrailingFieldPolicy;
 
 public class JsonLfDecodersTest {
 
@@ -561,65 +563,79 @@ public class JsonLfDecodersTest {
   }
 
   @Test
-  public void testUnknownValue() throws JsonLfDecoder.Error {
-    JsonLfReader.UnknownValue.read(new JsonLfReader("1")).decodeWith(JsonLfDecoders.int64);
-    JsonLfReader.UnknownValue.read(new JsonLfReader("\"88\""))
-        .decodeWith(JsonLfDecoders.numeric(2));
-    JsonLfReader.UnknownValue.read(new JsonLfReader("[\"hi\", \"there\"]"))
-        .decodeWith(JsonLfDecoders.list(JsonLfDecoders.text));
-
-    JsonLfReader.UnknownValue.read(
-            new JsonLfReader("[1,2]").moveNext() // Skip [
-            )
-        .decodeWith(JsonLfDecoders.int64);
-
-    JsonLfReader.UnknownValue.read(
-            new JsonLfReader("[1,false , 2]")
-                .moveNext() // Skip [
-                .moveNext() // Skip 1
-            )
-        .decodeWith(JsonLfDecoders.bool);
-
-    JsonLfReader.UnknownValue.read(
-            new JsonLfReader("{\"a\":{}}")
-                .moveNext() // Skip {
-                .moveNext() // Skip "a"
-            )
-        .decodeWith(JsonLfDecoders.unit);
-
-    JsonLfReader.UnknownValue.read(
-            new JsonLfReader("[ [\n[ 42]\t] ,[]]").moveNext() // Skip [
-            )
-        .decodeWith(
-            JsonLfDecoders.optionalNested(
-                JsonLfDecoders.optionalNested(JsonLfDecoders.optional(JsonLfDecoders.int64))));
-
-    JsonLfReader.UnknownValue.read(
-            new JsonLfReader("[ \"hello\", \"world\" ]").moveNext() // Skip [
-            )
-        .decodeWith(JsonLfDecoders.text);
+  public void testRecordIgnorePolicyAllowsUnknownObjectFields() throws JsonLfDecoder.Error {
+    checkReadAll(
+        JsonLfDecoders.record(
+            asList("i", "b"),
+            name -> {
+              switch (name) {
+                case "i":
+                  return JsonLfDecoders.JavaArg.at(0, JsonLfDecoders.list(JsonLfDecoders.int64));
+                case "b":
+                  return JsonLfDecoders.JavaArg.at(1, JsonLfDecoders.bool, false);
+                default:
+                  return null;
+              }
+            },
+            args -> new SomeRecord((List<Long>) args[0], (Boolean) args[1])),
+        // unknown non-null fields are skipped under IGNORE policy
+        eq(
+            "{\"i\":[1],\"extra\":42,\"b\":true}",
+            new SomeRecord(asList(1L), true),
+            UnknownTrailingFieldPolicy.IGNORE),
+        eq(
+            "{\"extra\": {\"x\": 1}, \"i\":[1],\"b\":true}",
+            new SomeRecord(asList(1L), true),
+            UnknownTrailingFieldPolicy.IGNORE));
   }
 
   @Test
-  public void testUnknownValueErrors() throws JsonLfDecoder.Error {
-    unknownValueDecodeErrors(
-        "42", r -> r, JsonLfDecoders.bool, "Expected boolean but was 42 at line: 1, column: 1");
-    unknownValueDecodeErrors(
-        "[ 1 , 2, 3]",
-        r -> r.moveNext(),
-        JsonLfDecoders.bool,
-        "Expected boolean but was 1 at line: 1, column: 3");
-    unknownValueDecodeErrors(
-        "{\n  \"x\": 1,\n  \"y\" : [\n    \"hello\",\n    [ 42]\n    ]\n}",
-        r ->
-            r.moveNext() // Skip {
-                .moveNext() // Skip "x"
-                .moveNext() // Skip 1
-                .moveNext() // Skip "y"
-                .moveNext() // Skip [
-                .moveNext(), // Skip "hello"
-        JsonLfDecoders.list(JsonLfDecoders.bool),
-        "Expected boolean but was 42 at line: 5, column: 7");
+  public void testRecordStrictPolicyRejectsUnknownObjectFields() throws JsonLfDecoder.Error {
+    checkReadAll(
+        JsonLfDecoders.record(
+            asList("i", "b"),
+            name -> {
+              switch (name) {
+                case "i":
+                  return JsonLfDecoders.JavaArg.at(0, JsonLfDecoders.list(JsonLfDecoders.int64));
+                case "b":
+                  return JsonLfDecoders.JavaArg.at(1, JsonLfDecoders.bool, false);
+                default:
+                  return null;
+              }
+            },
+            args -> new SomeRecord((List<Long>) args[0], (Boolean) args[1])),
+        errors(
+            "{\"i\":[1],\"extra\":42,\"b\":true}",
+            "Unknown field extra (known fields are [i, b])"));
+  }
+
+  @Test
+  public void testRecordArrayTrailingElementsAreRejectedEvenWithIgnore()
+      throws JsonLfDecoder.Error {
+
+    JsonLfDecoder<SomeRecord> decoder =
+        JsonLfDecoders.record(
+            asList("i", "b"),
+            name -> {
+              switch (name) {
+                case "i":
+                  return JsonLfDecoders.JavaArg.at(0, JsonLfDecoders.list(JsonLfDecoders.int64));
+                case "b":
+                  return JsonLfDecoders.JavaArg.at(1, JsonLfDecoders.bool, false);
+                default:
+                  return null;
+              }
+            },
+            args -> new SomeRecord((List<Long>) args[0], (Boolean) args[1]));
+
+    checkReadAll(
+        decoder,
+        errors("[[1], true, 42]", "Expected end of array but was 42 at line: 1, column: 13"),
+        eq(
+            "[[1], true, 42]",
+            new SomeRecord(List.of(1L), true),
+            UnknownTrailingFieldPolicy.IGNORE));
   }
 
   private <T> void checkReadAll(JsonLfDecoder<T> decoder, TestCase<T>... testCases)
@@ -638,8 +654,12 @@ public class JsonLfDecodersTest {
   }
 
   private <T> TestCase<T> eq(String input, T expected) {
+    return eq(input, expected, UnknownTrailingFieldPolicy.STRICT);
+  }
+
+  private <T> TestCase<T> eq(String input, T expected, UnknownTrailingFieldPolicy policy) {
     return (JsonLfDecoder<T> decoder) -> {
-      T actual = decoder.decode(new JsonLfReader(input));
+      T actual = decoder.decode(new JsonLfReader(input), policy);
       assertEquals(
           expected,
           actual,
@@ -675,19 +695,6 @@ public class JsonLfDecodersTest {
         this.<T, E>checkDecodeError(
                 d -> decoder.decode(new JsonLfReader(input)), input, errorMessage, causeClass)
             .check(decoder);
-  }
-
-  private <T> void unknownValueDecodeErrors(
-      String input,
-      FunctionThrowsError<JsonLfReader, JsonLfReader> updateReader,
-      JsonLfDecoder<T> decoder,
-      String errorMessage)
-      throws JsonLfDecoder.Error {
-    JsonLfReader.UnknownValue unknown =
-        JsonLfReader.UnknownValue.read(updateReader.apply(new JsonLfReader(input)));
-    this.<T, Throwable>checkDecodeError(
-            unknown::decodeWith, input, Pattern.compile(Pattern.quote(errorMessage)), null)
-        .check(decoder);
   }
 
   private <T, E extends Throwable> TestCase<T> checkDecodeError(

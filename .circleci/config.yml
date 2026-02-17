@@ -1800,35 +1800,6 @@ jobs:
                     - scaladoc.tar.gz
                 root: target
             - cleanup_test_job
-    build_systematic_testing_inventory:
-        executor: canton-large-docker
-        steps:
-            - run:
-                command: circleci-agent step halt
-            - checkout_and_restore_caches
-            - execute_sbt_command:
-                cmd: dumpTestClassPath "community-app/Test/runMain com.digitalasset.canton.SystematicTestingGenerator"
-                fail_on_error_in_output: false
-            - store_artifacts:
-                name: Store security tests inventory (json)
-                path: security-tests.json
-            - store_artifacts:
-                name: Store security tests inventory (csv)
-                path: security-tests.csv
-            - store_artifacts:
-                name: Store reliability tests inventory (json)
-                path: reliability-tests.json
-            - store_artifacts:
-                name: Store reliability tests inventory (csv)
-                path: reliability-tests.csv
-            - persist_to_workspace:
-                paths:
-                    - security-tests.json
-                    - security-tests.csv
-                    - reliability-tests.json
-                    - reliability-tests.csv
-                root: .
-            - cleanup_build_job
     compile:
         executor: canton-xlarge-docker
         steps:
@@ -2771,78 +2742,6 @@ workflows:
                 is_nightly_workflow: false
                 requires:
                     - compile
-            - package_sequencer_driver_api:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        only:
-                            - main
-                            - /^release-line.*/
-                    tags:
-                        only: /^v.*/
-                is_manual: false
-                is_nightly_workflow: false
-                requires:
-                    - compile
-            - package_jsonapi:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        only:
-                            - main
-                            - /^release-line.*/
-                    tags:
-                        only: /^v.*/
-                is_manual: false
-                is_nightly_workflow: false
-                requires:
-                    - compile
-            - assembly_ledger_api_test_tool:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        only:
-                            - main
-                            - /^release-line.*/
-                    tags:
-                        only: /^v.*/
-                is_manual: false
-                is_nightly_workflow: false
-                requires:
-                    - compile
-            - package_kms_driver:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        only:
-                            - main
-                            - /^release-line.*/
-                    tags:
-                        only: /^v.*/
-                is_manual: false
-                is_nightly_workflow: false
-                requires:
-                    - compile
             - verify_circleci_config_and_compliance_label:
                 filters:
                     branches:
@@ -2870,32 +2769,6 @@ workflows:
                     branches:
                         ignore:
                             - /^gh-readonly-queue\/main\/.*/
-                requires:
-                    - compile
-            - blackduck:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - blackduck
-                filters:
-                    branches:
-                        only: /^blackduck.*/
-            - build_systematic_testing_inventory:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                filters:
-                    branches:
-                        only:
-                            - main
-                            - /^release-line.*/
-                    tags:
-                        only: /^v.*/
                 requires:
                     - compile
             - build_scaladoc:
@@ -3065,27 +2938,6 @@ workflows:
                         only: /^v.*/
                 requires:
                     - compile
-            - release_test:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                    - aws_kms_testing
-                    - gcp_kms_testing
-                filters:
-                    branches:
-                        only:
-                            - main
-                            - /^release-line.*/
-                    tags:
-                        only: /^v.*/
-                is_manual: false
-                is_nightly_workflow: false
-                requires:
-                    - package_community
-                    - package_kms_driver
             - toxiproxy_test_fast:
                 context:
                     - datadog
@@ -3103,74 +2955,6 @@ workflows:
                         only: /^v.*/
                 requires:
                     - compile
-            - tag_new_releases:
-                filters:
-                    branches:
-                        only:
-                            - main
-                            - /release-line-.*/
-            - publish_libraries:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - gpg-signing
-                    - maven-mirror
-                    - maven-publish
-                    - da-images
-                filters:
-                    branches:
-                        only:
-                            - main
-                    tags:
-                        only: /^v.*/
-                is_manual: false
-                is_nightly_workflow: false
-                requires:
-                    - compile
-                    - tag_new_releases
-            - publish_release:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        only:
-                            - main
-                    tags:
-                        only: /^v.*/
-                is_manual: false
-                is_nightly_workflow: false
-                requires:
-                    - package_community
-                    - package_sequencer_driver_api
-                    - package_jsonapi
-                    - package_kms_driver
-                    - assembly_ledger_api_test_tool
-                    - build_scaladoc
-                    - compile
-                    - tag_new_releases
-                    - build_systematic_testing_inventory
-            - run_propose_script:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        ignore: /.*/
-                    tags:
-                        only: /^v.*/
-                name: Update main after release
-                requires:
-                    - publish_libraries
-                    - publish_release
-                script_argument: finish_release_process
             - test_data_continuity_dumps:
                 context:
                     - datadog
@@ -3184,33 +2968,6 @@ workflows:
                             - /^gh-readonly-queue\/main\/.*/
                 requires:
                     - compile
-            - generate_data_continuity_dumps:
-                context:
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
-                filters:
-                    branches:
-                        ignore: /.*/
-                    tags:
-                        only: /^v.*/
-                is_manual: false
-                is_nightly_workflow: false
-                requires:
-                    - compile
-            - build_and_publish_docker:
-                context:
-                    - da-images
-                filters:
-                    branches:
-                        ignore: /.*/
-                    tags:
-                        only: /^v.*/
-                is_manual: false
-                is_nightly_workflow: false
-                requires:
-                    - package_community
         max_auto_reruns: 1
         when:
             and:
@@ -3801,12 +3558,6 @@ workflows:
                     - da-images
                 requires:
                     - compile
-            - build_systematic_testing_inventory:
-                context:
-                    - artifactory
-                    - azure-self-cache
-                requires:
-                    - compile
             - publish_libraries:
                 context:
                     - datadog
@@ -3835,7 +3586,6 @@ workflows:
                     - package_sequencer_driver_api
                     - assembly_ledger_api_test_tool
                     - package_kms_driver
-                    - build_systematic_testing_inventory
                     - build_scaladoc
             - build_and_publish_docker:
                 context:

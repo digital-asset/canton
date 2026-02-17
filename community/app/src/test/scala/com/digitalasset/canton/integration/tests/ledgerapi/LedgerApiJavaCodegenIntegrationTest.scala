@@ -12,14 +12,14 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.Party
 
 import scala.jdk.CollectionConverters.*
 
 trait LedgerApiJavaCodegenIntegrationTest extends CommunityIntegrationTest with SharedEnvironment {
 
-  var alice: PartyId = _
-  var bob: PartyId = _
+  var alice: Party = _
+  var bob: Party = _
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
@@ -27,14 +27,14 @@ trait LedgerApiJavaCodegenIntegrationTest extends CommunityIntegrationTest with 
         import env.*
         participant1.synchronizers.connect_local(sequencer1, alias = daName)
         participant1.dars.upload(CantonTestsPath)
-        alice = participant1.parties.enable("alice")
-        bob = participant1.parties.enable("bob")
+        alice = participant1.parties.testing.enable("alice")
+        bob = participant1.parties.testing.enable("bob")
 
         eventually() {
           // wait until
-          participant1.parties
+          participant1.parties.testing
             .list(asOf = Some(environment.clock.now.toInstant))
-            .map(_.party) should contain allElementsOf (Seq(alice, bob))
+            .map(_.partyResult) should contain allElementsOf (Seq(alice, bob))
         }
       }
 

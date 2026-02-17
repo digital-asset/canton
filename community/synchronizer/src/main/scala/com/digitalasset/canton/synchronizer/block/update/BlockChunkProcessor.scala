@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.block.update
 
+import cats.data.EitherT
 import cats.syntax.alternative.*
 import cats.syntax.functor.*
 import cats.syntax.traverse.*
@@ -50,6 +51,7 @@ final class BlockChunkProcessor(
     sequencerId: SequencerId,
     rateLimitManager: SequencerRateLimitManager,
     orderingTimeFixMode: OrderingTimeFixMode,
+    sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
     batchingConfig: BatchingConfig,
     override val loggerFactory: NamedLoggerFactory,
     metrics: SequencerMetrics,
@@ -492,13 +494,21 @@ final class BlockChunkProcessor(
       traceContext: TraceContext,
   ): FutureUnlessShutdown[
     (Map[Member, CantonTimestamp], Seq[(Member, CantonTimestamp, BaseAlarm)])
-  ] =
+  ] = {
+    val previousTimestampO =
+      state.latestSequencerEventTimestamp.orElse(sequencingTimeLowerBoundExclusive)
     for {
       snapshot <- SyncCryptoClient.getSnapshotForTimestamp(
         synchronizerSyncCryptoApi,
         state.lastBlockTs,
-        state.latestSequencerEventTimestamp,
-        warnIfApproximate = false,
+        if (protocolVersion < ProtocolVersion.v35) state.latestSequencerEventTimestamp
+        else previousTimestampO,
+        // When the sequencer starts, we may encounter a situation where both
+        // `latestSequencerEventTimestamp` and `sequencingTimeLowerBoundExclusive` are undefined.
+        // In that case, we are forced to use an approximate timestamp.
+        warnIfApproximate =
+          !(protocolVersion < ProtocolVersion.v35 || state.latestSequencerEventTimestamp.isEmpty &&
+            sequencingTimeLowerBoundExclusive.isEmpty),
       )
       synchronizerSuccessorO <- snapshot.ipsSnapshot
         .synchronizerUpgradeOngoing()
@@ -541,21 +551,34 @@ final class BlockChunkProcessor(
       sigChecks <- FutureUnlessShutdown.sequence(goodTsAcks.map(_.withTraceContext {
         implicit traceContext => signedAck =>
           val ack = signedAck.content
-          signedAck
-            .verifySignature(
-              snapshot,
-              ack.member,
-              HashPurpose.AcknowledgementSignature,
+          for {
+            snapshotToVerify <- EitherT.right(
+              if (protocolVersion < ProtocolVersion.v35)
+                FutureUnlessShutdown.pure(snapshot)
+              else {
+                SyncCryptoClient.getSnapshotForTimestamp(
+                  synchronizerSyncCryptoApi,
+                  ack.timestamp,
+                  previousTimestampO,
+                )
+              }
             )
-            .leftMap(error =>
-              (
+            acksR <- signedAck
+              .verifySignature(
+                snapshotToVerify,
                 ack.member,
-                ack.timestamp,
-                SequencerError.InvalidAcknowledgementSignature
-                  .Error(signedAck, state.lastBlockTs, error): BaseAlarm,
+                HashPurpose.AcknowledgementSignature,
               )
-            )
-            .map(_ => (ack.member, ack.timestamp))
+              .leftMap(error =>
+                (
+                  ack.member,
+                  ack.timestamp,
+                  SequencerError.InvalidAcknowledgementSignature
+                    .Error(signedAck, state.lastBlockTs, error): BaseAlarm,
+                )
+              )
+              .map(_ => (ack.member, ack.timestamp))
+          } yield acksR
       }.value))
       (invalidSigAcks, validSigAcks) = sigChecks.separate
       acksByMember = validSigAcks
@@ -563,6 +586,7 @@ final class BlockChunkProcessor(
         .groupBy { case (member, _) => member }
         .fmap(NonEmptyUtil.fromUnsafe(_).maxBy1(_._2)._2)
     } yield (acksByMember, invalidTsAcks ++ invalidSigAcks)
+  }
 
   private def recordSubmissionMetrics(
       value: Seq[Traced[LedgerBlockEvent]]

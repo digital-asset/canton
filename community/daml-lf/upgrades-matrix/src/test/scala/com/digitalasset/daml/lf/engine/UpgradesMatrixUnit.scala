@@ -35,7 +35,7 @@ class UpgradesMatrixUnit3 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2Dev, 2
   * (~5000s) because it does not need to spin up Canton, so we can use this for
   * sanity checking before running UpgradesMatrixIT.
   */
-abstract class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: Int)
+class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: Int)
     extends UpgradesMatrix[Error, (SubmittedTransaction, Transaction.Metadata)](
       upgradesMatrixCases,
       Some((n, k)),

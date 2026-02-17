@@ -32,13 +32,13 @@ trait LedgerApiPartyAllocationIntegrationTest
     import env.*
 
     participant1.synchronizers.connect_local(sequencer1, alias = daName)
-    val bob = participant1.parties.enable("bob")
+    val bob = participant1.parties.testing.enable("bob")
 
     eventually() {
       // eventually bob's party allocation will be published to the synchronizer,
       // together with the automatic package vetting of the admin workflows
       participant1.ledger_api.parties.list().map(_.party) should contain allElementsOf List(
-        bob,
+        bob.partyId,
         participant1.id.adminParty,
       )
     }

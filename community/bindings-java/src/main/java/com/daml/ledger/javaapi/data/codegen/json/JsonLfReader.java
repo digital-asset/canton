@@ -3,6 +3,7 @@
 
 package com.daml.ledger.javaapi.data.codegen.json;
 
+import com.daml.ledger.javaapi.data.codegen.UnknownTrailingFieldPolicy;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonLocation;
 import com.fasterxml.jackson.core.JsonParseException;
@@ -77,8 +78,13 @@ public class JsonLfReader {
     }
 
     public <T> T decodeWith(JsonLfDecoder<T> decoder) throws JsonLfDecoder.Error {
+      return decodeWith(decoder, UnknownTrailingFieldPolicy.STRICT);
+    }
+
+    public <T> T decodeWith(JsonLfDecoder<T> decoder, UnknownTrailingFieldPolicy policy)
+        throws JsonLfDecoder.Error {
       try {
-        return decoder.decode(new JsonLfReader(this.jsonRepr));
+        return decoder.decode(new JsonLfReader(this.jsonRepr), policy);
       } catch (JsonLfDecoder.Error e) {
         throw e.fromStartLocation(this.start); // Adjust location to offset by the start position.
       }

@@ -1177,6 +1177,7 @@ final class PartyManagementServiceIT extends PartyManagementITBase {
             )
           ),
           identityProviderId = "",
+          waitForAllocation = Some(true),
         ),
         minSynchronizers = Some(1),
       )

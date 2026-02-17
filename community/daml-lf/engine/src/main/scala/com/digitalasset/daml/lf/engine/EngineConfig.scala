@@ -11,7 +11,7 @@ import com.digitalasset.daml.lf.speedy.{
 }
 
 import java.nio.file.Path
-import com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode
+import com.digitalasset.daml.lf.transaction.ContractStateMachine
 
 /** The Engine configurations describes the versions of language and
   * transaction the engine is allowed to read and write together with
@@ -46,20 +46,20 @@ import com.digitalasset.daml.lf.transaction.ContractKeyUniquenessMode
   *     to the new `ResultNeedContract` question.
   */
 final case class EngineConfig(
-    allowedLanguageVersions: VersionRange[language.LanguageVersion],
-    packageValidation: Boolean = true,
-    transactionTraceMaxLength: Int = 10,
-    stackTraceMode: Boolean = false,
-    profileDir: Option[Path] = None,
-    snapshotDir: Option[Path] = None,
-    contractKeyUniqueness: ContractKeyUniquenessMode = ContractKeyUniquenessMode.Strict,
-    forbidLocalContractIds: Boolean = false,
-    limits: interpretation.Limits = interpretation.Limits.Lenient,
-    checkAuthorization: Boolean = true,
-    iterationsBetweenInterruptions: Long = 10000,
-    paranoid: Boolean = false,
-    useDefensiveContractLookup: Boolean = false,
-    gasBudget: Option[Long] = None,
+  allowedLanguageVersions: VersionRange[language.LanguageVersion],
+  packageValidation: Boolean = true,
+  transactionTraceMaxLength: Int = 10,
+  stackTraceMode: Boolean = false,
+  profileDir: Option[Path] = None,
+  snapshotDir: Option[Path] = None,
+  contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoContractKey,
+  forbidLocalContractIds: Boolean = false,
+  limits: interpretation.Limits = interpretation.Limits.Lenient,
+  checkAuthorization: Boolean = true,
+  iterationsBetweenInterruptions: Long = 10000,
+  paranoid: Boolean = false,
+  useDefensiveContractLookup: Boolean = false,
+  gasBudget: Option[Long] = None,
 ) {
   private[lf] def getCompilerConfig: speedy.Compiler.Config =
     speedy.Compiler.Config(

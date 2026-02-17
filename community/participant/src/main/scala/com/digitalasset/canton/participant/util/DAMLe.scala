@@ -28,7 +28,7 @@ import com.digitalasset.daml.lf.engine.{Enricher as _, *}
 import com.digitalasset.daml.lf.interpretation.Error as LfInterpretationError
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.language.LanguageVersion.v2_dev
-import com.digitalasset.daml.lf.transaction.{ContractKeyUniquenessMode, FatContractInstance}
+import com.digitalasset.daml.lf.transaction.{ContractStateMachine, FatContractInstance}
 import com.digitalasset.daml.lf.value.ContractIdVersion
 
 import java.nio.file.Path
@@ -67,7 +67,7 @@ object DAMLe {
         profileDir = profileDir,
         snapshotDir = snapshotDir,
         forbidLocalContractIds = true,
-        contractKeyUniqueness = ContractKeyUniquenessMode.Off,
+        contractStateMode = ContractStateMachine.Mode.LegacyNUCK,
         iterationsBetweenInterruptions = iterationsBetweenInterruptions,
         paranoid = paranoidMode,
       )

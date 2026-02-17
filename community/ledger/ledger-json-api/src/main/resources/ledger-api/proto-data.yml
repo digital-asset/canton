@@ -497,10 +497,6 @@ fileComments:
         message:
           comments: 'Required authorization: ``HasRight(ParticipantAdmin) OR IsAuthenticatedIdentityProviderAdmin(identity_provider_id)``'
           fieldComments:
-            synchronizer: |-
-              TODO(#27670) support synchronizer aliases
-              Synchronizer ID on which to onboard the party
-              Required
             onboarding_transactions: |-
               TopologyTransactions to onboard the external party
               Can contain:
@@ -513,13 +509,24 @@ fileComments:
               - A PartyToParticipant to register the hosting relationship of the party.
               Must be provided.
               Required
-            multi_hash_signatures: |-
-              Optional signatures of the combined hash of all onboarding_transactions
-              This may be used instead of providing signatures on each individual transaction
+            synchronizer: |-
+              TODO(#27670) support synchronizer aliases
+              Synchronizer ID on which to onboard the party
+              Required
+            wait_for_allocation: |-
+              When true, this RPC will attempt to wait for the party to be allocated on the synchronizer before returning.
+              When false, the allocation will happen asynchronously.
+              This is a best effort only as this synchronization is only possible for non decentralized parties (single hosting node).
+              For decentralized parties, this flag is ignored.
+              Defaults to true.
+              Optional
             identity_provider_id: |-
               The id of the ``Identity Provider``
               If not set, assume the party is managed by the default identity provider.
               Optional
+            multi_hash_signatures: |-
+              Optional signatures of the combined hash of all onboarding_transactions
+              This may be used instead of providing signatures on each individual transaction
       AllocateExternalPartyResponse:
         message:
           comments: null

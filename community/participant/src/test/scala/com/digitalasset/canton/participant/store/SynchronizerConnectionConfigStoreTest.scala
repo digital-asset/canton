@@ -39,6 +39,7 @@ import com.digitalasset.canton.sequencing.{
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.DefaultTestIdentities.namespace
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
@@ -241,6 +242,33 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
           _ <- sut
             .put(config, Active, KnownPhysicalSynchronizerId(psid), None)
             .valueOrFail("first store of config")
+          _ <- sut
+            .put(config, Active, KnownPhysicalSynchronizerId(psid), None)
+            .valueOrFail("second store of config")
+        } yield succeed
+      }
+
+      "set the status" in {
+        for {
+          sut <- mk
+          _ <- sut
+            .put(config, Active, KnownPhysicalSynchronizerId(psid), None)
+            .valueOrFail("first store of config")
+
+          assertions <- MonadUtil.sequentialTraverse(
+            SynchronizerConnectionConfigStore.allStatuses
+          ) { status =>
+            for {
+              _ <- sut
+                .setStatus(daAlias, KnownPhysicalSynchronizerId(psid), status)
+                .valueOrFail(s"set the status to $status")
+
+              retrievedStatus = sut.get(psid).value.status
+            } yield retrievedStatus shouldBe status
+          }
+
+          _ = forAll(assertions)(identity)
+
           _ <- sut
             .put(config, Active, KnownPhysicalSynchronizerId(psid), None)
             .valueOrFail("second store of config")

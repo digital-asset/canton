@@ -103,11 +103,13 @@ private[canton] class ExternalPartiesTestingAdministration(
       )
       (onboardingTxs, externalParty) = onboardingData
 
-      _ = reference.ledger_api.parties.allocate_external(
-        psid.logical,
-        onboardingTxs.transactionsWithSingleSignature,
-        onboardingTxs.multiTransactionSignatures,
-      )
+      _ =
+        reference.ledger_api.parties.allocate_external(
+          psid.logical,
+          onboardingTxs.transactionsWithSingleSignature,
+          onboardingTxs.multiTransactionSignatures,
+          synchronize = synchronize.isDefined,
+        )
 
       _ <- EitherT.fromEither[FutureUnlessShutdown](
         Applicative[Either[String, *]].whenA(synchronize.nonEmpty)(
@@ -693,7 +695,7 @@ private[canton] class ExternalPartiesTestingAdministration(
     *   SynchronizerAlias is not set, the synchronizer id of the only connected synchronizer. if the
     *   participant is connected to multiple synchronizers, it returns an error.
     */
-  private def lookupOrDetectSynchronizerId(
+  private[canton] def lookupOrDetectSynchronizerId(
       alias: Option[SynchronizerAlias]
   ): Either[String, PhysicalSynchronizerId] = {
     lazy val singleConnectedSynchronizer = reference.synchronizers.list_connected() match {

@@ -61,7 +61,7 @@ class LsuCallbackImpl(
         .foreach { _ =>
           if (registered.get().contains(successor)) {
             val upgradeResultF = synchronizerConnectionsManager
-              .upgradeSynchronizerTo(psid, successor)
+              .performLsu(psid, successor)
               .value
               .map(
                 _.fold(

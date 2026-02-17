@@ -97,6 +97,7 @@ import com.digitalasset.canton.util.Thereafter.syntax.ThereafterAsyncOps
 import com.digitalasset.canton.util.TryUtil.*
 import com.digitalasset.canton.util.collection.IterableUtil
 import com.digitalasset.canton.util.retry.AllExceptionRetryPolicy
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, SequencerCounter, lifecycle, time}
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.Status
@@ -926,12 +927,13 @@ abstract class SequencerClientImpl(
     def ack(
         request: AcknowledgeRequest,
         approximateSnapshot: SyncCryptoApi,
+        approximateTimestampOverride: Option[CantonTimestamp],
     ): EitherT[FutureUnlessShutdown, String, Boolean] = for {
       signedRequest <- requestSigner.signRequest(
         request,
         HashPurpose.AcknowledgementSignature,
         approximateSnapshot,
-        Some(clock.now),
+        approximateTimestampOverride,
       )
       ackRes <-
         if (config.useNewConnectionPool) {
@@ -944,18 +946,23 @@ abstract class SequencerClientImpl(
     if (LogicalUpgradeTime.canProcessKnowingPredecessor(synchronizerPredecessor, timestamp)) {
       val request = AcknowledgeRequest(member, timestamp, protocolVersion)
       for {
-        approximateSnapshot <- EitherT.liftF(syncCryptoClient.currentSnapshotApproximation)
-        successor <- EitherT
-          .liftF(approximateSnapshot.ipsSnapshot.synchronizerUpgradeOngoing())
+        snapshotAndTimestamp <- EitherT.liftF(
+          if (protocolVersion < ProtocolVersion.v35)
+            syncCryptoClient.currentSnapshotApproximation.map((_, Some(clock.now)))
+          else syncCryptoClient.snapshot(timestamp).map((_, None))
+        )
+        (snapshotToSign, approximateTimestampOverride) = snapshotAndTimestamp
+        synchronizerSuccessor <- EitherT
+          .liftF(snapshotToSign.ipsSnapshot.synchronizerUpgradeOngoing())
           .map(_.map { case (successor, _) => successor })
 
         result <-
-          if (LogicalUpgradeTime.canProcessKnowingSuccessor(successor, timestamp))
-            ack(request, approximateSnapshot)
-          else {
+          if (LogicalUpgradeTime.canProcessKnowingSuccessor(synchronizerSuccessor, timestamp)) {
+            ack(request, snapshotToSign, approximateTimestampOverride)
+          } else {
             logger.debug(
               s"Not acknowledging timestamp $timestamp past the upgrade time of the successor " +
-                s"synchronizer ${successor.map(_.upgradeTime)}."
+                s"synchronizer ${synchronizerSuccessor.map(_.upgradeTime)}."
             )
             EitherT.rightT[FutureUnlessShutdown, String](true)
           }

@@ -133,9 +133,7 @@ object ParticipantNodeBootstrapFactoryImpl extends ParticipantNodeBootstrapFacto
       arguments.config.storage,
       exitOnFatalFailures = arguments.parameters.exitOnFatalFailures,
       arguments.config.replication,
-      () =>
-        replicaManager
-          .setActive(),
+      () => replicaManager.setActive(),
       () => replicaManager.setPassive(),
       DbLockCounters.PARTICIPANT_WRITE,
       DbLockCounters.PARTICIPANT_WRITERS,

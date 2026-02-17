@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests
 
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
+import com.digitalasset.canton.BaseTest.UnsupportedExternalPartyTest.MultiRootNodeSubmission
 import com.digitalasset.canton.damltests.java.transientcontracts.TransientContractsTest
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.{
@@ -23,56 +24,57 @@ trait TransientContractIntegrationTest extends CommunityIntegrationTest with Sha
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
 
-  "Transient contracts split across views are properly archived" in { implicit env =>
-    import env.*
+  "Transient contracts split across views are properly archived" onlyRunWithLocalParty (MultiRootNodeSubmission) in {
+    implicit env =>
+      import env.*
 
-    participant1.synchronizers.connect_local(sequencer1, alias = daName)
-    participant2.synchronizers.connect_local(sequencer1, alias = daName)
+      participant1.synchronizers.connect_local(sequencer1, alias = daName)
+      participant2.synchronizers.connect_local(sequencer1, alias = daName)
 
-    val alice = participant1.parties.enable(
-      "Alice",
-      synchronizeParticipants = Seq(participant2),
-    )
-    val bob = participant2.parties.enable(
-      "Bob",
-      synchronizeParticipants = Seq(participant1),
-    )
+      val alice = participant1.parties.testing.enable(
+        "Alice",
+        synchronizeParticipants = Seq(participant2),
+      )
+      val bob = participant2.parties.testing.enable(
+        "Bob",
+        synchronizeParticipants = Seq(participant1),
+      )
 
-    participants.all.dars.upload(CantonTestsPath)
+      participants.all.dars.upload(CantonTestsPath)
 
-    val aliceAndBobCreateCmd =
-      new TransientContractsTest(
-        alice.toProtoPrimitive,
-        Some(bob.toProtoPrimitive).toJava,
-      ).create.commands.asScala.toSeq
-    val aliceAndBobCreateTx =
-      participant1.ledger_api.javaapi.commands.submit(Seq(alice), aliceAndBobCreateCmd)
-    val Seq(aliceAndBobContract) =
-      JavaDecodeUtil.decodeAllCreated(TransientContractsTest.COMPANION)(aliceAndBobCreateTx)
+      val aliceAndBobCreateCmd =
+        new TransientContractsTest(
+          alice.toProtoPrimitive,
+          Some(bob.toProtoPrimitive).toJava,
+        ).create.commands.asScala.toSeq
+      val aliceAndBobCreateTx =
+        participant1.ledger_api.javaapi.commands.submit(Seq(alice), aliceAndBobCreateCmd)
+      val Seq(aliceAndBobContract) =
+        JavaDecodeUtil.decodeAllCreated(TransientContractsTest.COMPANION)(aliceAndBobCreateTx)
 
-    val transientCmd =
-      new TransientContractsTest(alice.toProtoPrimitive, None.toJava).createAnd
-        .exerciseEntryPoint(aliceAndBobContract.id)
-        .commands
-        .asScala
-        .toSeq
-    // use `submit` with TRANSACTION_SHAPE_LEDGER_EFFECTS here because the AcsDelta omits transient contracts
-    val transientTx = participant1.ledger_api.javaapi.commands
-      .submit(Seq(alice), transientCmd, transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS)
-    val transientIds =
-      JavaDecodeUtil
-        .decodeAllCreated(TransientContractsTest.COMPANION)(transientTx)
-        .map(_.id.toLf)
-    val archivedContracts = aliceAndBobContract.id.toLf +: transientIds
+      val transientCmd =
+        new TransientContractsTest(alice.toProtoPrimitive, None.toJava).createAnd
+          .exerciseEntryPoint(aliceAndBobContract.id)
+          .commands
+          .asScala
+          .toSeq
+      // use `submit` with TRANSACTION_SHAPE_LEDGER_EFFECTS here because the AcsDelta omits transient contracts
+      val transientTx = participant1.ledger_api.javaapi.commands
+        .submit(Seq(alice), transientCmd, transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS)
+      val transientIds =
+        JavaDecodeUtil
+          .decodeAllCreated(TransientContractsTest.COMPANION)(transientTx)
+          .map(_.id.toLf)
+      val archivedContracts = aliceAndBobContract.id.toLf +: transientIds
 
-    archivedContracts should have size 4
+      archivedContracts should have size 4
 
-    eventually() {
-      val pcs = participant1.testing.pcs_search(daName)
-      forAll(archivedContracts) { cid =>
-        assert(pcs.exists(entry => entry._2.contractId == cid && !entry._1))
+      eventually() {
+        val pcs = participant1.testing.pcs_search(daName)
+        forAll(archivedContracts) { cid =>
+          assert(pcs.exists(entry => entry._2.contractId == cid && !entry._1))
+        }
       }
-    }
   }
 }
 

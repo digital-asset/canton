@@ -93,6 +93,7 @@ final class AllocateExternalPartyAuthIT
           ),
           multiHashSignatures = Seq.empty,
           identityProviderId = context.identityProviderId,
+          waitForAllocation = Some(true),
         )
       )
 }

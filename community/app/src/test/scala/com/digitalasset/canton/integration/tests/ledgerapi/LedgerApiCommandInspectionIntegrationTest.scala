@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.ledgerapi
 
 import com.daml.ledger.api.v2.admin.command_inspection_service.CommandState
 import com.digitalasset.base.error.ErrorCode
+import com.digitalasset.canton.BaseTest.UnsupportedExternalPartyTest.CommandTracking
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.damltests.java.damldebug as T
@@ -25,7 +26,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   ProgrammableSequencer,
   SendDecision,
 }
-import com.digitalasset.canton.topology.PartyId
+import com.digitalasset.canton.topology.Party
 import monocle.macros.syntax.lens.*
 
 import scala.collection.concurrent.TrieMap
@@ -46,12 +47,12 @@ class LedgerApiCommandInspectionIntegrationTest
         import env.*
         participant1.synchronizers.connect_local(sequencer1, alias = daName)
         participant1.dars.upload(CantonExamplesPath)
-        participant1.parties.enable("Alice")
+        participant1.parties.testing.enable("Alice")
       }
 
-  private val parties = new TrieMap[String, PartyId]()
-  private def party(name: String)(implicit env: TestConsoleEnvironment): PartyId =
-    parties.getOrElseUpdate(name, env.participant1.parties.find(name))
+  private val parties = new TrieMap[String, Party]()
+  private def party(name: String)(implicit env: TestConsoleEnvironment): Party =
+    parties.getOrElseUpdate(name, env.participant1.parties.testing.find(name))
 
   private def submitAndFail(
       commandId: String,
@@ -98,7 +99,7 @@ class LedgerApiCommandInspectionIntegrationTest
       )
     }
 
-    "report failures for invalid commands" when {
+    "report failures for invalid commands" onlyRunWithLocalParty (CommandTracking) when {
       "failing on invalid command" in { implicit env =>
         submitAndFail(
           "invalidcommand",
@@ -140,7 +141,7 @@ class LedgerApiCommandInspectionIntegrationTest
 
     }
 
-    "report failures for contention" when {
+    "report failures for contention" onlyRunWithLocalParty (CommandTracking) when {
       "failing on contract-contention" in { implicit env =>
         import env.*
         val alice = party("Alice")
@@ -217,7 +218,7 @@ class LedgerApiCommandInspectionIntegrationTest
       }
     }
 
-    "report nice stats on success" in { implicit env =>
+    "report nice stats on success" onlyRunWithLocalParty (CommandTracking) in { implicit env =>
       import env.*
 
       val alice = party("Alice")
@@ -260,7 +261,7 @@ class LedgerApiCommandInspectionOffIntegrationTest
 
   "ledger_api.commands" should {
 
-    "fail when command inspection is turned off" in { env =>
+    "fail when command inspection is turned off" onlyRunWithLocalParty (CommandTracking) in { env =>
       import env.*
       loggerFactory.assertLogs(
         a[CommandFailure] shouldBe thrownBy(
