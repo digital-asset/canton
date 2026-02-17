@@ -613,7 +613,7 @@ object Ast {
   final case class UpdateLookupByKey(templateId: TypeConId) extends Update
   final case class UpdateQueryNByKey(templateId: TypeConId) extends Update
   final case class UpdateEmbedExpr(typ: Type, body: Expr) extends Update
-  final case class UpdateTryCatch(
+  final case class UpdateTryCatchV1(
       typ: Type,
       body: Expr,
       binder: ExprVarName,

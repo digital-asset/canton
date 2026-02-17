@@ -272,7 +272,7 @@ class TopologyStateProcessorImpl private[processing] (
     }
 
     val start = this.store.storeId.forSynchronizer
-      .map(psid => uidKey(Code.SynchronizerUpgradeAnnouncement, psid.uid))
+      .map(psid => uidKey(Code.LsuAnnouncement, psid.uid))
       .toList
       .toSet
 

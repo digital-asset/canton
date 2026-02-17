@@ -20,7 +20,6 @@ import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSeq
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.topology.{PartyId, TopologyManagerError}
 import com.digitalasset.canton.version.ProtocolVersion
-import monocle.macros.syntax.lens.*
 
 import scala.annotation.nowarn
 
@@ -66,21 +65,9 @@ final class LsuCancellationIntegrationTest extends LsuBase {
   )
 
   override protected def configTransforms: List[ConfigTransform] = {
-    val lowerBound1 = ConfigTransforms
-      .updateSequencerConfig("sequencer2")(
-        _.focus(_.parameters.sequencingTimeLowerBoundExclusive).replace(Some(upgradeTime1))
-      )
-
-    val lowerBound2 = ConfigTransforms
-      .updateSequencerConfig("sequencer3")(
-        _.focus(_.parameters.sequencingTimeLowerBoundExclusive).replace(Some(upgradeTime2))
-      )
-
     val allNewNodes = Set("sequencer2", "sequencer3", "mediator2", "mediator3")
 
     List(
-      lowerBound1,
-      lowerBound2,
       ConfigTransforms.disableAutoInit(allNewNodes),
       ConfigTransforms.useStaticTime,
     ) ++ ConfigTransforms.enableAlphaVersionSupport

@@ -240,6 +240,7 @@ class GrpcSequencerService(
         requestP.serializedSize,
         signedSubmissionRequest.content,
         senderFromMetadata,
+        maxRequestSize,
       )
     } yield signedSubmissionRequest
 
@@ -285,6 +286,7 @@ class GrpcSequencerService(
       requestSize: Int,
       request: SubmissionRequest,
       memberFromMetadata: Option[Member],
+      maxRequestSize: MaxRequestSize,
   )(implicit traceContext: TraceContext): Either[SequencerDeliverError, Unit] = {
     val messageId = request.messageId
 
@@ -297,6 +299,15 @@ class GrpcSequencerService(
         sender: Member
     )(condition: Boolean, message: => String): Either[SequencerDeliverError, Unit] =
       Either.cond(condition, (), invalid(messageId.toProtoPrimitive, sender)(message))
+
+    def maxBytesExceededUnless(
+        sender: Member
+    )(condition: Boolean, message: => String): Either[SequencerDeliverError, Unit] =
+      Either.cond(
+        condition,
+        (),
+        maxBytesExceeded(messageId.toProtoPrimitive, sender, maxRequestSize)(message),
+      )
 
     val sender = request.sender
     for {
@@ -322,6 +333,10 @@ class GrpcSequencerService(
       _ <- invalidUnless(sender)(
         request.batch.envelopes.forall(!_.bytes.isEmpty),
         "Batch contains envelope without content.",
+      )
+      _ <- maxBytesExceededUnless(sender)(
+        request.batch.envelopes.forall(_.toClosedUncompressedEnvelopeResult.isRight),
+        s"Batch contains envelope with max bytes exceeded. The limit is ${maxRequestSize.value.value} bytes.",
       )
       _ <- refuseUnless(sender)(
         SubmissionRequestValidations.checkToAtMostOneMediator(request),
@@ -367,6 +382,16 @@ class GrpcSequencerService(
     SequencerErrors.SubmissionRequestRefused(
       s"Request '$messageIdP' from '$sender' refused: $message"
     )
+  }
+
+  private def maxBytesExceeded(messageIdP: String, sender: Member, maxRequestSize: MaxRequestSize)(
+      message: String
+  )(implicit traceContext: TraceContext): SequencerDeliverError = {
+    val alarm =
+      SequencerError.MaxRequestSizeExceeded.Error(message, maxRequestSize)
+    alarm.report()
+
+    SequencerErrors.SubmissionRequestMalformed.Error(sender.toString, messageIdP, message)
   }
 
   private def checkRate(

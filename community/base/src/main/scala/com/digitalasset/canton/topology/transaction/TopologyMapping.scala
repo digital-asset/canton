@@ -195,8 +195,7 @@ object TopologyMapping {
     case object PartyToKeyMapping
         extends Code("ptk", v30Code.TOPOLOGY_MAPPING_CODE_PARTY_TO_KEY_MAPPING)
 
-    case object SynchronizerUpgradeAnnouncement
-        extends Code("sua", v30Code.TOPOLOGY_MAPPING_CODE_SYNCHRONIZER_MIGRATION_ANNOUNCEMENT)
+    case object LsuAnnouncement extends Code("lsu", v30Code.TOPOLOGY_MAPPING_CODE_LSU_ANNOUNCEMENT)
     case object SequencerConnectionSuccessor
         extends Code("scs", v30Code.TOPOLOGY_MAPPING_CODE_SEQUENCER_CONNECTION_SUCCESSOR)
 
@@ -214,15 +213,18 @@ object TopologyMapping {
       SequencerSynchronizerState,
       SequencingDynamicParametersState,
       PartyToKeyMapping,
-      SynchronizerUpgradeAnnouncement,
+      LsuAnnouncement,
       SequencerConnectionSuccessor,
     )
 
     val lsuMappings: Set[Code] =
-      Set[Code](Code.SynchronizerUpgradeAnnouncement, Code.SequencerConnectionSuccessor)
+      Set[Code](Code.LsuAnnouncement, Code.SequencerConnectionSuccessor)
 
+    // Note: we keep the effective LSU announcement even after the upgrade has happened
     val lsuMappingsExcludedFromUpgrade: NonEmpty[Set[Code]] =
-      NonEmpty(Set, Code.SynchronizerUpgradeAnnouncement, Code.SequencerConnectionSuccessor: Code)
+      NonEmpty(Set, Code.SequencerConnectionSuccessor: Code)
+
+    val mappingsIncludedInUpgrade: Set[Code] = all.toSet -- lsuMappingsExcludedFromUpgrade
 
     def fromString(code: String): ParsingResult[Code] =
       all
@@ -407,7 +409,7 @@ object TopologyMapping {
 
     code match {
       // Promote level for LSU-related activity to at least INFO.
-      case Code.SynchronizerUpgradeAnnouncement | Code.SequencerConnectionSuccessor =>
+      case Code.LsuAnnouncement | Code.SequencerConnectionSuccessor =>
         maxLevel(default, Level.INFO)
       case _ => default
     }
@@ -2309,7 +2311,7 @@ object LsuAnnouncement extends TopologyMappingCompanion {
   def uniqueKey(synchronizerId: SynchronizerId): MappingHash =
     TopologyMapping.buildUniqueKey(code)(_.addString(synchronizerId.toProtoPrimitive))
 
-  override def code: TopologyMapping.Code = Code.SynchronizerUpgradeAnnouncement
+  override def code: TopologyMapping.Code = Code.LsuAnnouncement
 
   def fromProtoV30(
       value: v30.LsuAnnouncement

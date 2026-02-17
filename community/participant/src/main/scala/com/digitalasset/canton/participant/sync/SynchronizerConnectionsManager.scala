@@ -25,8 +25,7 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.*
-import com.digitalasset.canton.health.{HealthQuasiComponent, MutableHealthComponent}
-import com.digitalasset.canton.ledger.api.health.HealthStatus
+import com.digitalasset.canton.health.{HealthQuasiComponent, HealthStatus, MutableHealthComponent}
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.*
 import com.digitalasset.canton.ledger.participant.state.SyncService.ConnectedSynchronizerResponse
@@ -243,6 +242,11 @@ private[sync] class SynchronizerConnectionsManager(
       psid: PhysicalSynchronizerId
   ): Option[SynchronizerTopologyClientWithInit] =
     connectedSynchronizers.get(psid).map(_.topologyClient)
+
+  def lookupTopologyManager(
+      psid: PhysicalSynchronizerId
+  ): Option[SynchronizerTopologyManager] =
+    connectedSynchronizers.get(psid).map(_.topologyManager)
 
   def validateSequencerConnection(
       config: SynchronizerConnectionConfig,
@@ -976,6 +980,7 @@ private[sync] class SynchronizerConnectionsManager(
                 parameters.cachingConfigs.sessionEncryptionKeyCache,
                 onboardingClearanceScheduler,
                 participantId,
+                synchronizerLoggerFactory,
               )
           )
 

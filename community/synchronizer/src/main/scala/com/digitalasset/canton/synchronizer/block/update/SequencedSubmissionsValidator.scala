@@ -62,7 +62,6 @@ private[update] final class SequencedSubmissionsValidator(
       signedSubmissionRequest,
       orderingSequencerId,
       _,
-      _,
       trafficConsumption,
       errorOrResolvedGroups,
     ) = sequencedValidatedSubmissionRequest

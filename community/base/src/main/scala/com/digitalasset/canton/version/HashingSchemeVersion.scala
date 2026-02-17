@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.version
 
+import com.daml.ledger.api.v2.interactive.interactive_submission_service.HashingSchemeVersion as ApiHashingSchemeVersion
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.ProtoDeserializationError.{FieldNotSet, UnrecognizedEnum}
 import com.digitalasset.canton.protocol.*
@@ -10,9 +11,10 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 
 import scala.collection.immutable.{SortedMap, SortedSet}
 
-sealed abstract class HashingSchemeVersion(val index: Int) {
+sealed abstract class HashingSchemeVersion(val index: Int) extends Product with Serializable {
   def toProtoV30: v30.ExternalAuthorization.HashingSchemeVersion
   def toProtoV31: v31.ExternalAuthorization.HashingSchemeVersion
+  def toLedgerApiProto: ApiHashingSchemeVersion
 }
 
 object HashingSchemeVersion {
@@ -22,13 +24,16 @@ object HashingSchemeVersion {
       v30.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2
     override def toProtoV31: v31.ExternalAuthorization.HashingSchemeVersion =
       v31.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_V2
-
+    def toLedgerApiProto: ApiHashingSchemeVersion =
+      ApiHashingSchemeVersion.HASHING_SCHEME_VERSION_V2
   }
   case object V3 extends HashingSchemeVersion(3) {
     override def toProtoV30: v30.ExternalAuthorization.HashingSchemeVersion =
       throw new IllegalStateException(s"Hashing scheme V3 is not supported in proto v30")
     override def toProtoV31: v31.ExternalAuthorization.HashingSchemeVersion =
       v31.ExternalAuthorization.HashingSchemeVersion.HASHING_SCHEME_VERSION_V3
+    def toLedgerApiProto: ApiHashingSchemeVersion =
+      ApiHashingSchemeVersion.HASHING_SCHEME_VERSION_V3
   }
 
   implicit val hashingSchemeVersionOrdering: Ordering[HashingSchemeVersion] =
@@ -42,11 +47,7 @@ object HashingSchemeVersion {
   private[canton] val MinimumProtocolVersionToHashingVersion =
     SortedMap[ProtocolVersion, NonEmpty[SortedSet[HashingSchemeVersion]]](
       ProtocolVersion.v34 -> NonEmpty.mk(SortedSet, V2),
-
-      // TODO(#30463): Enable once V3 is supported in v35
-      // ProtocolVersion.v35 -> NonEmpty.mk(SortedSet, V2, V3),
-
-      ProtocolVersion.dev -> NonEmpty.mk(SortedSet, V2, V3),
+      ProtocolVersion.v35 -> NonEmpty.mk(SortedSet, V2, V3),
     )
 
   def minProtocolVersionForHSV(version: HashingSchemeVersion): Option[ProtocolVersion] =

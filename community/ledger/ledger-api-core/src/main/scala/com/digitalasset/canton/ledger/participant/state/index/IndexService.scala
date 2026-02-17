@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.ledger.participant.state.index
 
-import com.digitalasset.canton.ledger.api.health.ReportsHealth
+import com.digitalasset.canton.health.ReportsHealth
 
 trait IndexService
     extends IndexCompletionsService

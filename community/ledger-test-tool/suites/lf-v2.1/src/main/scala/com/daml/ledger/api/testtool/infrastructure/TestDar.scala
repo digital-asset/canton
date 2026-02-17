@@ -24,23 +24,23 @@ object TestDar {
   )
 }
 
-case object ExperimentalTestDar extends TestDar { val path = "experimental-tests-3.1.0.dar" }
-case object ModelTestDar extends TestDar { val path = "model-tests-3.1.0.dar" }
-case object SemanticTestDar extends TestDar { val path = "semantic-tests-3.1.0.dar" }
+case object ExperimentalTestDar extends TestDar { val path = "experimental-tests-1.0.0.dar" }
+case object ModelTestDar extends TestDar { val path = "model-tests-1.0.0.dar" }
+case object SemanticTestDar extends TestDar { val path = "semantic-tests-1.0.0.dar" }
 case object OngoingStreamPackageUploadTestDar extends TestDar {
-  val path = "ongoing-stream-package-upload-tests-3.1.0.dar"
+  val path = "ongoing-stream-package-upload-tests-1.0.0.dar"
 }
 case object PackageManagementTestDar extends TestDar {
-  val path = "package-management-tests-3.1.0.dar"
+  val path = "package-management-tests-1.0.0.dar"
 }
-case object Carbonv1TestDar extends TestDar { val path = "carbonv1-tests-3.1.0.dar" }
-case object Carbonv2TestDar extends TestDar { val path = "carbonv2-tests-3.1.0.dar" }
+case object Carbonv1TestDar extends TestDar { val path = "carbonv1-tests-1.0.0.dar" }
+case object Carbonv2TestDar extends TestDar { val path = "carbonv2-tests-1.0.0.dar" }
 case object UpgradeTestDar1_0_0 extends TestDar { val path = "upgrade-tests-1.0.0.dar" }
 case object UpgradeTestDar2_0_0 extends TestDar { val path = "upgrade-tests-2.0.0.dar" }
 case object UpgradeTestDar3_0_0 extends TestDar { val path = "upgrade-tests-3.0.0.dar" }
 case object UpgradeFetchTestDar1_0_0 extends TestDar { val path = "upgrade-fetch-tests-1.0.0.dar" }
 case object UpgradeFetchTestDar2_0_0 extends TestDar { val path = "upgrade-fetch-tests-2.0.0.dar" }
-case object UpgradeIfaceDar extends TestDar { val path = "upgrade-iface-tests-3.1.0.dar" }
+case object UpgradeIfaceDar extends TestDar { val path = "upgrade-iface-tests-1.0.0.dar" }
 
 case object VettingMainDar_1_0_0 extends TestDar { val path = "vetting-main-1.0.0.dar" }
 case object VettingMainDar_2_0_0 extends TestDar { val path = "vetting-main-2.0.0.dar" }

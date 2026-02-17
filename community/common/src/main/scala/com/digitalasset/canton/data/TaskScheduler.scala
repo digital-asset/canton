@@ -469,9 +469,7 @@ class TaskScheduler[Task <: TimedTask](
     val taskName = s"${task.getClass.getName}(${task.timestamp})"
     val queued = queue
       .executeUS(
-        futureSupervisor.supervisedUS(taskName, timeouts.slowFutureWarn.duration)(
-          task.perform()
-        ),
+        futureSupervisor.supervisedUS(taskName, timeouts.slowFutureWarn.duration)(task.perform()),
         taskName,
       )
       // Close the task if the queue is shutdown or if it has failed
@@ -560,7 +558,6 @@ object TaskScheduler {
 
     /** Perform the task. The future completes when the task is completed */
     def perform(): FutureUnlessShutdown[Unit]
-
   }
 
   trait TimedTaskWithSequencerCounter extends TimedTask {

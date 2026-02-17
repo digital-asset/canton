@@ -13,6 +13,7 @@ import com.digitalasset.canton.participant.protocol.TestProcessingSteps.{
   TestPendingRequestData,
   TestPendingRequestDataType,
 }
+import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
@@ -42,6 +43,7 @@ class Phase37SynchronizerTest extends AnyWordSpec with BaseTest with HasExecutio
         locallyRejectedF = FutureUnlessShutdown.pure(false),
         abortEngine = _ => (),
         engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
+        PublishUpdateViaRecordOrderPublisher.noop,
       )
     )
 

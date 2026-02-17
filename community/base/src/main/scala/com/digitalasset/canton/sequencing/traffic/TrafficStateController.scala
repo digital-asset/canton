@@ -186,7 +186,7 @@ class TrafficStateController(
         )
     } yield {
       val costDetails = eventCostCalculator.computeEventCost(
-        batch.map(_.closeEnvelope),
+        batch.map(_.toClosedUncompressedEnvelope),
         trafficControl.readVsWriteScalingFactor,
         groupToMembers,
         protocolVersion,

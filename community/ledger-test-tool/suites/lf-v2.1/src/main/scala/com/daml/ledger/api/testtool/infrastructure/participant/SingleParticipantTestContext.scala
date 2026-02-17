@@ -1239,6 +1239,7 @@ final class SingleParticipantTestContext private[participant] (
       prefetchContractKeys = Seq.empty,
       maxRecordTime = Option.empty,
       estimateTrafficCost = estimateTrafficCost,
+      hashingSchemeVersion = Some(HashingSchemeVersion.HASHING_SCHEME_VERSION_V2),
     )
 
   override def executeSubmissionRequest(

@@ -31,7 +31,6 @@ import scala.util.chaining.*
 
 private[sync] class PartyAllocation(
     participantId: ParticipantId,
-    partyOps: PartyOps,
     isActive: () => Boolean,
     connectedSynchronizersLookup: ConnectedSynchronizersLookup,
     timeouts: ProcessingTimeout,
@@ -77,9 +76,8 @@ private[sync] class PartyAllocation(
         )
         // Allow party allocation via ledger API only if the participant is connected to the synchronizer.
         // Otherwise the gRPC call will just timeout without a meaningful error message
-        _ <- EitherT.cond[FutureUnlessShutdown](
-          connectedSynchronizersLookup.isConnected(synchronizerId),
-          (),
+        connectedSynchronizer <- EitherT.fromOption[FutureUnlessShutdown](
+          connectedSynchronizersLookup.get(synchronizerId),
           SubmissionResult.SynchronousError(
             SyncServiceInjectionError.NotConnectedToSynchronizer
               .Error(synchronizerId.toProtoPrimitive)
@@ -88,8 +86,19 @@ private[sync] class PartyAllocation(
         )
         _ <- (externalPartyOnboardingDetails match {
           case Some(details) =>
-            partyOps.allocateExternalParty(participantId, details, synchronizerId)
-          case None => partyOps.allocateParty(partyId, participantId, synchronizerId)
+            PartyOps.allocateExternalParty(
+              participantId,
+              details,
+              synchronizerId,
+              connectedSynchronizer.topologyManager,
+            )
+          case None =>
+            PartyOps.allocateParty(
+              partyId,
+              participantId,
+              synchronizerId,
+              connectedSynchronizer.topologyManager,
+            )
         })
           .leftMap[SubmissionResult] {
             case IdentityManagerParentError(e) if e.code == MappingAlreadyExists =>

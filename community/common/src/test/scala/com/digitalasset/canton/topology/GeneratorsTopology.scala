@@ -6,7 +6,7 @@ package com.digitalasset.canton.topology
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.crypto.Fingerprint
 import com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import magnolify.scalacheck.auto.*
 import org.scalacheck.{Arbitrary, Gen}
 
@@ -40,7 +40,10 @@ final class GeneratorsTopology(protocolVersion: ProtocolVersion) {
       partyId <- Arbitrary.arbitrary[PartyId]
       signingFingerprints <- nonEmptyListGen[Fingerprint]
       keyThreshold <- Arbitrary.arbitrary[PositiveInt]
-    } yield ExternalParty(partyId, signingFingerprints, keyThreshold)
+      version <- Gen.oneOf[HashingSchemeVersion](
+        Seq(HashingSchemeVersion.V2, HashingSchemeVersion.V3)
+      )
+    } yield ExternalParty(partyId, signingFingerprints, keyThreshold, version)
   )
   implicit val identityArb: Arbitrary[Identity] = genArbitrary
 

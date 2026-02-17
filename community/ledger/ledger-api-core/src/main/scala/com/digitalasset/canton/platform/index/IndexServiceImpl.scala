@@ -16,7 +16,7 @@ import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.data.Offset
-import com.digitalasset.canton.ledger.api.health.HealthStatus
+import com.digitalasset.canton.health.HealthStatus
 import com.digitalasset.canton.ledger.api.{
   CumulativeFilter,
   EventFormat,

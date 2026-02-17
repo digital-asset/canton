@@ -1,9 +1,12 @@
-override-components: 
-  damlc: 
+# Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+override-components:
+  damlc:
     version: $DAML_VERSION
-  daml-script: 
+  daml-script:
     version: $DAML_VERSION
-  codegen: 
+  codegen:
     version: $DAML_VERSION
 name: ifoo
 source: IFoo.daml

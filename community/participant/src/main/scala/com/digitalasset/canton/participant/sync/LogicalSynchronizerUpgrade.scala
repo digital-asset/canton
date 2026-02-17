@@ -304,7 +304,7 @@ class AutomaticLogicalSynchronizerUpgrade(
     // Ensure upgraded is not attempted if announcement was revoked
     def ensureUpgradeOngoing(): EitherT[FutureUnlessShutdown, String, Unit] = for {
       topologyStore <- EitherT.fromOption[FutureUnlessShutdown](
-        syncPersistentStateManager.get(currentPSId).map(_.topologyManager.store),
+        syncPersistentStateManager.get(currentPSId).map(_.topologyStore),
         "Unable to find topology store",
       )
 
@@ -314,7 +314,7 @@ class AutomaticLogicalSynchronizerUpgrade(
             asOf = synchronizerSuccessor.upgradeTime,
             asOfInclusive = false,
             isProposal = false,
-            types = Seq(TopologyMapping.Code.SynchronizerUpgradeAnnouncement),
+            types = Seq(TopologyMapping.Code.LsuAnnouncement),
             filterUid = None,
             filterNamespace = None,
           )

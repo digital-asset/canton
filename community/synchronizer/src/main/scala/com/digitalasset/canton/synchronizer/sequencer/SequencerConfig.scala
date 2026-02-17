@@ -4,7 +4,8 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.syntax.option.*
-import com.digitalasset.canton.config.RequireTypes.{PositiveDouble, PositiveInt}
+import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
 import com.digitalasset.canton.config.{
   DbLockedConnectionPoolConfig,
   NonNegativeFiniteDuration,
@@ -222,11 +223,25 @@ object BlockSequencerConfig {
       ),
   )
 
+  /** configure an individual cap
+    *
+    * Strict mode means that if we reach the cap, we'll allocate the same bandwidth to everyone. If
+    * false, then we sort by usage descending and compute the usage cap for the highest spenders at
+    * which their spend will fall below the threshold
+    *
+    * @param strict
+    *   how should the per member rate cap be computed
+    * @param updateEveryMs
+    *   how often should the new caps be computed (only used in non-strict mode)
+    */
   final case class IndividualThroughputCapConfig(
       globalTpsCap: PositiveDouble = PositiveDouble.tryCreate(10.0),
       globalKbpsCap: PositiveDouble = PositiveDouble.tryCreate(2000.0),
       perClientTpsCap: PositiveDouble = PositiveDouble.tryCreate(4.0),
       perClientKbpsCap: PositiveDouble = PositiveDouble.tryCreate(1000.0),
+      strict: Boolean = true,
+      thresholds: NonEmpty[Seq[PositiveDouble]] = NonEmpty.mk(Seq, PositiveDouble.tryCreate(0.9)),
+      updateEveryMs: NonNegativeInt = NonNegativeInt.tryCreate(100),
   )
 
   final case class CircuitBreakerConfig(

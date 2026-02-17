@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.store
 
 import com.daml.ledger.resources.ResourceOwner
-import com.digitalasset.canton.ledger.api.health.ReportsHealth
+import com.digitalasset.canton.health.ReportsHealth
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.config.ServerRole

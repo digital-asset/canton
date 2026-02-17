@@ -82,8 +82,7 @@ class PartyReplicationTopologyWorkflow(
         _,
       ) = params
     val topologyStore = connectedSynchronizer.synchronizerHandle.syncPersistentState.topologyStore
-    val topologyManager =
-      connectedSynchronizer.synchronizerHandle.syncPersistentState.topologyManager
+    val topologyManager = connectedSynchronizer.topologyManager
     for {
       _ <- EitherT(
         partyToParticipantTopologyHeadO(partyId, topologyStore).map(txO =>
@@ -380,8 +379,7 @@ class PartyReplicationTopologyWorkflow(
     val synchronizerId = connectedSynchronizer.psid.logical
     val requestIdLogPart = if (requestId.nonEmpty) s"For request $requestId: " else ""
     val synchronizerTimeTracker = connectedSynchronizer.ephemeral.timeTracker
-    val topologyManager =
-      connectedSynchronizer.synchronizerHandle.syncPersistentState.topologyManager
+    val topologyManager = connectedSynchronizer.topologyManager
     val topologyStore = connectedSynchronizer.synchronizerHandle.syncPersistentState.topologyStore
     val topologyClient = connectedSynchronizer.synchronizerHandle.topologyClient
     for {

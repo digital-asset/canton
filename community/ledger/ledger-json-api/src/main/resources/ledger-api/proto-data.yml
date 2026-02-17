@@ -2367,13 +2367,6 @@ fileComments:
         message:
           comments: null
           fieldComments:
-            command_id: |-
-              Uniquely identifies the command.
-              The triple (user_id, act_as, command_id) constitutes the change ID for the intended ledger change,
-              where act_as is interpreted as a set of party names.
-              The change ID can be used for matching the intended ledger changes with all their completions.
-              Must be a valid LedgerString (as described in ``value.proto``).
-              Required
             max_record_time: |-
               Maximum timestamp at which the transaction can be recorded onto the ledger via the synchronizer specified in the `PrepareSubmissionResponse`.
               If submitted after it will be rejected even if otherwise valid, in which case it needs to be prepared and signed again
@@ -2409,6 +2402,16 @@ fileComments:
               Limitation: Only single command transaction are currently supported by the API.
               The field is marked as repeated in preparation for future support of multiple commands.
               Required
+            command_id: |-
+              Uniquely identifies the command.
+              The triple (user_id, act_as, command_id) constitutes the change ID for the intended ledger change,
+              where act_as is interpreted as a set of party names.
+              The change ID can be used for matching the intended ledger changes with all their completions.
+              Must be a valid LedgerString (as described in ``value.proto``).
+              Required
+            hashing_scheme_version: |-
+              Optional - defaults to HASHING_SCHEME_VERSION_V2
+              The hashing scheme version to be used when building the hash
             read_as: |-
               Set of parties on whose behalf (in addition to all parties listed in ``act_as``) contracts can be retrieved.
               This affects Daml operations such as ``fetch``, ``fetchByKey``, ``lookupByKey``, ``exercise``, and ``exerciseByKey``.

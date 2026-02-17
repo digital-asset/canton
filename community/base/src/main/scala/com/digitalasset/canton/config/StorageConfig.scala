@@ -124,6 +124,10 @@ final case class DbParametersConfig(
   * @param inFlightAggregationsQueryInterval
   *   (optionally) split aggregator queries into intervals of this duration to avoid sequential
   *   scans. When too many query intervals are generated, query interval splitting does not occur.
+  * @param mediatorFetchFinalizedResponsesAggregator
+  *   batching configuration for the mediator for fetching finalized responses
+  * @param mediatorStoreFinalizedResponsesAggregator
+  *   batching configuration for the mediator for storing finalized responses
   * @param maxPruningBatchSize
   *   maximum number of events to prune from a participant at a time, used to break up canton
   *   participant-internal batches
@@ -148,6 +152,10 @@ final case class BatchingConfig(
     inFlightAggregationsQueryInterval: Option[PositiveFiniteDuration] =
       BatchingConfig.defaultInFlightAggregationsQueryInterval,
     contractStoreAggregator: BatchAggregatorConfig = BatchingConfig.defaultContractStoreAggregator,
+    mediatorFetchFinalizedResponsesAggregator: BatchAggregatorConfig =
+      BatchingConfig.defaultAggregator,
+    mediatorStoreFinalizedResponsesAggregator: BatchAggregatorConfig =
+      BatchingConfig.defaultAggregator,
     maxPruningBatchSize: PositiveNumeric[Int] = BatchingConfig.defaultMaxPruningBatchSize,
     maxPruningTimeInterval: PositiveFiniteDuration = BatchingConfig.defaultMaxPruningTimeInterval,
     pruningParallelism: PositiveNumeric[Int] = BatchingConfig.defaultPruningParallelism,

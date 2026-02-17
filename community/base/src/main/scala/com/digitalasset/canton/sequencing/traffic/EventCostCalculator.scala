@@ -12,6 +12,7 @@ import com.digitalasset.canton.sequencing.traffic.EventCostCalculator.{
   EnvelopeCostDetails,
   EventCostDetails,
 }
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ErrorUtil
@@ -100,41 +101,45 @@ class EventCostCalculator(override val loggerFactory: NamedLoggerFactory) extend
     }
 
   @VisibleForTesting
-  protected def payloadSize(envelope: ClosedEnvelope): Int = envelope.bytes.size()
+  protected def payloadSize(envelope: ClosedEnvelope): ParsingResult[Int] =
+    envelope.toClosedUncompressedEnvelopeResult.map(_.bytes.size())
 
   @VisibleForTesting
   def computeEnvelopeCost(
       costMultiplier: PositiveInt,
       groupToMembers: Map[GroupRecipient, Set[Member]],
-  )(envelope: ClosedEnvelope): EnvelopeCostDetails = {
-    val writeCost = payloadSize(envelope).toLong
+  )(envelope: ClosedEnvelope): EnvelopeCostDetails = payloadSize(envelope) match {
+    case Right(size) =>
+      val writeCost = size.toLong
 
-    val allRecipients: NonEmpty[Seq[Recipient]] = envelope.recipients.allRecipients.toSeq
-    val recipientsSize = allRecipients.map {
-      case recipient: GroupRecipient => groupToMembers.get(recipient).map(_.size).getOrElse(0)
-      case _: MemberRecipient => 1
-    }.sum
+      val allRecipients: NonEmpty[Seq[Recipient]] = envelope.recipients.allRecipients.toSeq
+      val recipientsSize = allRecipients.map {
+        case recipient: GroupRecipient => groupToMembers.get(recipient).map(_.size).getOrElse(0)
+        case _: MemberRecipient => 1
+      }.sum
 
-    // read costs are based on the write costs and multiplied by the number of recipients with a readVsWrite cost multiplier
-    try {
-      // `writeCosts` and `recipientsSize` are originally Int, so multiplying them together cannot overflow a long
-      val readCost =
-        math.multiplyExact(writeCost * recipientsSize.toLong, costMultiplier.value.toLong) / 10000
-      val finalCost = math.addExact(readCost, writeCost)
-      EnvelopeCostDetails(
-        writeCost = writeCost,
-        readCost = readCost,
-        finalCost = finalCost,
-        allRecipients,
-      )
-    } catch {
-      case _: ArithmeticException =>
-        throw new IllegalStateException(
-          s"""Overflow in cost computation:
-           |  writeCosts = $writeCost
-           |  recipientsSize = $recipientsSize
-           |  costMultiplier = $costMultiplier""".stripMargin
+      // read costs are based on the write costs and multiplied by the number of recipients with a readVsWrite cost multiplier
+      try {
+        // `writeCosts` and `recipientsSize` are originally Int, so multiplying them together cannot overflow a long
+        val readCost =
+          math.multiplyExact(writeCost * recipientsSize.toLong, costMultiplier.value.toLong) / 10000
+        val finalCost = math.addExact(readCost, writeCost)
+        EnvelopeCostDetails(
+          writeCost = writeCost,
+          readCost = readCost,
+          finalCost = finalCost,
+          allRecipients,
         )
-    }
+      } catch {
+        case _: ArithmeticException =>
+          throw new IllegalStateException(
+            s"""Overflow in cost computation:
+             |  writeCosts = $writeCost
+             |  recipientsSize = $recipientsSize
+             |  costMultiplier = $costMultiplier""".stripMargin
+          )
+      }
+    case Left(error) =>
+      throw new IllegalArgumentException(error.message)
   }
 }

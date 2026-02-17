@@ -401,12 +401,12 @@ private[lf] object Speedy {
       @tailrec
       def unwind(
           ptx: PartialTransaction
-      ): Option[Either[KTryCatchHandler, KConvertingException[Question.Update]]] =
+      ): Option[Either[KTryCatchV1Handler, KConvertingException[Question.Update]]] =
         if (kontDepth() == 0) {
           None
         } else {
           popKont() match {
-            case handler: KTryCatchHandler =>
+            case handler: KTryCatchV1Handler =>
               // The machine's ptx is updated even if the handler does not catch the exception.
               // This may cause the transaction trace to report the error from the handler's location.
               // Ideally we should embed the trace into the exception directly.
@@ -1694,12 +1694,12 @@ private[lf] object Speedy {
     }
   }
 
-  /** KTryCatchHandler marks the kont-stack to allow unwinding when throw is executed. If
+  /** KTryCatchV1Handler marks the kont-stack to allow unwinding when throw is executed. If
     * the continuation is entered normally, the environment is restored but the handler is
     * not executed.  When a throw is executed, the kont-stack is unwound to the nearest
-    * enclosing KTryCatchHandler (if there is one), and the code for the handler executed.
+    * enclosing KTryCatchV1Handler (if there is one), and the code for the handler executed.
     */
-  private[speedy] final case class KTryCatchHandler private (
+  private[speedy] final case class KTryCatchV1Handler private(
       machine: UpdateMachine,
       savedBase: Int,
       frame: Frame,
@@ -1714,7 +1714,7 @@ private[lf] object Speedy {
     }
 
     override def execute(machine: Machine[Question.Update], v: SValue): Control[Question.Update] = {
-      machine.updateGasBudget(_.KTryCatchHandler.cost)
+      machine.updateGasBudget(_.KTryCatchV1Handler.cost)
 
       machine.asUpdateMachine(getClass.getSimpleName) { machine =>
         restore()
@@ -1724,9 +1724,9 @@ private[lf] object Speedy {
     }
   }
 
-  object KTryCatchHandler {
-    def apply(machine: UpdateMachine, handler: SExpr): KTryCatchHandler =
-      KTryCatchHandler(
+  object KTryCatchV1Handler {
+    def apply(machine: UpdateMachine, handler: SExpr): KTryCatchV1Handler =
+      KTryCatchV1Handler(
         machine,
         machine.markBase(),
         machine.currentFrame,

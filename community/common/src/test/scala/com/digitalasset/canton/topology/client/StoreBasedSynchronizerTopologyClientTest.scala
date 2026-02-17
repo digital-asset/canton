@@ -221,9 +221,8 @@ trait StoreBasedTopologySnapshotTest
             sequencerSnapshotTimestamp = Some(ts6.plusMillis(50))
           )
           _ = newClient4.latestSequencedTimestamp shouldBe ts6.plusMillis(50)
-        } yield {
-          succeed
-        }
+          _ = newClient4.approximateTimestamp shouldBe ts6.plusMillis(50).immediateSuccessor
+        } yield succeed
       }
     }
 

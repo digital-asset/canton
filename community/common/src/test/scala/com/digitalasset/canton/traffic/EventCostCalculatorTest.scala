@@ -7,7 +7,7 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt
 import com.digitalasset.canton.sequencing.protocol.{
   AllMembersOfSynchronizer,
   Batch,
-  ClosedEnvelope,
+  ClosedUncompressedEnvelope,
   Recipients,
 }
 import com.digitalasset.canton.sequencing.traffic.EventCostCalculator
@@ -33,7 +33,7 @@ class EventCostCalculatorTest
       PositiveInt.tryCreate(5000),
       Map.empty,
     )(
-      ClosedEnvelope.create(
+      ClosedUncompressedEnvelope.create(
         ByteString.copyFrom(Array.fill(5)(1.toByte)),
         recipients,
         Seq.empty,
@@ -53,7 +53,7 @@ class EventCostCalculatorTest
       PositiveInt.tryCreate(5000),
       Map(AllMembersOfSynchronizer -> Set(recipient1, recipient2)),
     )(
-      ClosedEnvelope.create(
+      ClosedUncompressedEnvelope.create(
         ByteString.copyFrom(Array.fill(5)(1.toByte)),
         recipients,
         Seq.empty,
@@ -78,7 +78,7 @@ class EventCostCalculatorTest
       PositiveInt.tryCreate(200),
       Map(AllMembersOfSynchronizer -> manyRecipients),
     )(
-      ClosedEnvelope.create(
+      ClosedUncompressedEnvelope.create(
         ByteString.copyFrom(Array.fill(25000)(1.toByte)),
         recipients,
         Seq.empty,
@@ -100,7 +100,7 @@ class EventCostCalculatorTest
         PositiveInt.tryCreate(1_000_000_000),
         Map(AllMembersOfSynchronizer -> manyRecipients),
       )(
-        ClosedEnvelope.create(
+        ClosedUncompressedEnvelope.create(
           ByteString.copyFrom(Array.fill(10_000_000)(1.toByte)),
           Recipients.cc(AllMembersOfSynchronizer),
           Seq.empty,
@@ -124,7 +124,7 @@ class EventCostCalculatorTest
     new EventCostCalculator(loggerFactory).computeEventCost(
       Batch.fromClosed(
         testedProtocolVersion,
-        ClosedEnvelope.create(
+        ClosedUncompressedEnvelope.create(
           ByteString.copyFrom(Array.fill(5)(1.toByte)),
           recipients,
           Seq.empty,

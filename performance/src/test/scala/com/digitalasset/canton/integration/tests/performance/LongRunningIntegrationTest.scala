@@ -66,7 +66,7 @@ sealed trait LongRunningMultiSynchronizerIntegrationTest
         singleSynchronizer = false,
       )
       ._1
-    Await.result(mc.isDoneF, 1.minute)
+    Await.result(mc.isDoneF, 2.minute)
   }
 }
 

@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-REPO="DACH-NY/canton"
+REPO="${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}"
 LABELS=( "Standard-Change" )
 COMPLIANCE_PATH_PREFIXES=( ".ci" ".github" "release" "deployment" "scripts/ci" "nix" "shell.nix" "project" "build.sbt" "shared_dependencies.json" ) # See <root>/CODEOWNERS
 PULL_NUMBER=$((echo "${CIRCLE_PULL_REQUEST-}" | grep -o -E '[0-9]+$') || true)

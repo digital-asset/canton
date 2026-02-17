@@ -44,11 +44,6 @@ object DamlPlugin extends AutoPlugin {
     val damlFixedDars = settingKey[Seq[String]](
       "Which DARs do we check in to avoid problems with package id versioning across daml updates"
     )
-    val damlProjectVersionOverride =
-      settingKey[Option[String]]("Allows hardcoding daml project version")
-    val damlEnableProjectVersionOverride =
-      settingKey[Boolean]("Enables overriding the Daml project-version key")
-
     // Java codegen settings and tasks
     val damlJavaCodegenOutput =
       settingKey[File]("Directory to put Java sources generated from DARs")
@@ -69,12 +64,6 @@ object DamlPlugin extends AutoPlugin {
     val damlDependencies = taskKey[Seq[File]]("Paths to DARs that this project depends on")
     val damlBuild = taskKey[Seq[File]]("Build a Daml Archive from Daml source")
     val damlStudio = taskKey[Unit]("Open Daml studio for all projects in scope")
-    val damlCheckProjectVersions =
-      taskKey[Unit]("Ensure that the versions specified in our SBT project match Daml projects")
-    val damlUpdateProjectVersions =
-      taskKey[Unit](
-        "Update the versions used by our Daml projects to match the current values of the SBT project"
-      )
     val damlUpdateFixedDars =
       taskKey[Unit]("Update the checked in DAR with a DAR built with the current Daml version")
 
@@ -99,36 +88,6 @@ object DamlPlugin extends AutoPlugin {
       damlBuild := damlBuildTask.value,
       // Declare dependency so that Daml packages in test scope may depend on packages in compile scope.
       (Test / damlBuild) := (Test / damlBuild).dependsOn(Compile / damlBuild).value,
-      damlCheckProjectVersions := {
-        val projectVersionOverride = ProjectVersionOverride(
-          damlEnableProjectVersionOverride.value,
-          damlProjectVersionOverride.value.getOrElse(version.value),
-        )
-        val damlProjectFiles = (damlSourceDirectory.value ** "daml.yaml").get
-
-        damlProjectFiles.foreach(checkProjectVersions(projectVersionOverride, _))
-      },
-      damlUpdateProjectVersions := {
-        val log = streams.value.log
-        // With Daml 0.13.56 characters are no longer allowed in project versions as
-        // GHC does not like non-numbers in versions.
-        val projectVersion = {
-          val reg = "^([0-9]+\\.[0-9]+\\.[0-9]+)(-[^\\s]+)?$".r
-          version.value match {
-            case reg(vers, _) => vers
-            case _ => throw new IllegalArgumentException(s"can not parse version ${version.value}")
-          }
-        }
-
-        val overrideVersion = damlProjectVersionOverride.value
-        val damlProjectFiles = (damlSourceDirectory.value ** "daml.yaml").get
-
-        val projectVersionOverride = ProjectVersionOverride(
-          damlEnableProjectVersionOverride.value,
-          overrideVersion.getOrElse(projectVersion),
-        )
-        damlProjectFiles.foreach(updateProjectVersions(projectVersionOverride, _, log))
-      },
       damlUpdateFixedDars := {
         val sourceDirectory = damlDarOutput.value
         val destinationDirectory = resourceDirectory.value / "dar"
@@ -240,8 +199,6 @@ object DamlPlugin extends AutoPlugin {
     dpmRegistry := Dependencies.dpm_registry,
     damlInstall := installDaml.value,
     damlFixedDars := Seq(),
-    damlProjectVersionOverride := None,
-    damlEnableProjectVersionOverride := false,
   )
 
   override lazy val projectSettings: Seq[Def.Setting[_]] =
@@ -289,8 +246,7 @@ object DamlPlugin extends AutoPlugin {
     * a mismatch is found a [[sbt.internal.MessageOnlyException]] will be thrown.
     */
   private def checkProjectVersions(
-      projectVersionOverride: ProjectVersionOverride,
-      damlProjectFile: File,
+      damlProjectFile: File
   ): Unit = {
     require(
       damlProjectFile.exists,
@@ -312,32 +268,6 @@ object DamlPlugin extends AutoPlugin {
           s"daml.yaml $fieldName value [$damlVersion] does not match the '-SNAPSHOT'-stripped value in our sbt project [$sbtVersion] in file [$damlProjectFile]"
         )
       }
-    }
-
-    projectVersionOverride.foreach(ensureMatchingVersion(_, "version"))
-  }
-
-  /** Write the project and daml versions of our sbt project to the given daml.yaml project file.
-    */
-  private def updateProjectVersions(
-      projectVersionOverride: ProjectVersionOverride,
-      damlProjectFile: File,
-      log: Logger,
-  ): Unit = {
-    require(
-      damlProjectFile.exists,
-      s"supplied daml.yaml must exist [${damlProjectFile.absolutePath}]",
-    )
-
-    val values = readYaml(damlProjectFile)
-    if (values != null) {
-      projectVersionOverride.foreach(values.put("version", _))
-      writeYaml(damlProjectFile, values)
-    } else {
-      log.warn(
-        s"Could not read daml.yaml file [${damlProjectFile.getAbsoluteFile}] most likely because another concurrent " +
-          "damlUpdateProjectVersions task has already updated it. (Likely ledger-common-dars updating the same files from multiple projects)"
-      )
     }
   }
 
@@ -741,23 +671,6 @@ object DamlPlugin extends AutoPlugin {
       case NonFatal(cause) =>
         val logs = logger.output(s"$commandName: ")
         throw new MessageOnlyException(s"$failureMessage: ${cause.getMessage}\n" + logs)
-    }
-  }
-
-  sealed trait ProjectVersionOverride extends Product with Serializable {
-    def foreach(f: String => Unit): Unit
-  }
-
-  object ProjectVersionOverride {
-    def apply(enableOverride: Boolean, overrideValue: => String): ProjectVersionOverride =
-      if (enableOverride) Override(overrideValue) else DoNotOverride
-
-    final case object DoNotOverride extends ProjectVersionOverride {
-      override def foreach(f: String => Unit): Unit = ()
-    }
-
-    final case class Override(overrideVersion: String) extends ProjectVersionOverride {
-      override def foreach(f: String => Unit): Unit = f(overrideVersion)
     }
   }
 }

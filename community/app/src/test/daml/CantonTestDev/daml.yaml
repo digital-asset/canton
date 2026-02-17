@@ -1,16 +1,19 @@
-override-components: 
-  damlc: 
+# Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+override-components:
+  damlc:
     version: $DAML_VERSION
-  daml-script: 
+  daml-script:
     version: $DAML_VERSION
-  codegen: 
+  codegen:
     version: $DAML_VERSION
-build-options: 
+build-options:
 - --target=2.dev
 name: CantonTestsDev
 source: CantonTests.daml
-version: 3.4.0
-dependencies: 
+version: 1.0.0
+dependencies:
 - daml-prim
 - daml-stdlib
 - daml-script

@@ -15,13 +15,13 @@ import org.apache.pekko.http.scaladsl.model.*
 object AbstractHttpServiceIntegrationTestFuns {
   val dar1 = JarResourceUtils.resourceFile(com_daml_ledger_test_ModelTestDar_path)
 
-  val dar2 = JarResourceUtils.resourceFile("Account-3.4.0.dar")
+  val dar2 = JarResourceUtils.resourceFile("Account-1.0.0.dar")
 
   val dar3 = JarResourceUtils.resourceFile(com_daml_ledger_test_SemanticTestDar_path)
 
-  val userDar = JarResourceUtils.resourceFile("User-3.4.0.dar")
+  val userDar = JarResourceUtils.resourceFile("User-1.0.0.dar")
 
-  val ciouDar = JarResourceUtils.resourceFile("CIou-3.4.0.dar")
+  val ciouDar = JarResourceUtils.resourceFile("CIou-1.0.0.dar")
 
   val fooV1Dar = JarResourceUtils.resourceFile("foo-0.0.1.dar")
   val fooV2Dar = JarResourceUtils.resourceFile("foo-0.0.2.dar")

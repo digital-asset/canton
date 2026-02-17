@@ -9,18 +9,13 @@ import cats.syntax.functor.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.{
-  DefaultProcessingTimeouts,
-  SessionEncryptionKeyCacheConfig,
-  TopologyConfig,
-}
+import com.digitalasset.canton.config.{DefaultProcessingTimeouts, SessionEncryptionKeyCacheConfig}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.{SymbolicCrypto, SymbolicPureCrypto}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ViewType.AssignmentViewType
 import com.digitalasset.canton.lifecycle.{DefaultPromiseUnlessShutdownFactory, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.{LedgerApiIndexer, LedgerApiStore}
@@ -68,6 +63,7 @@ import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.{pureCrypto, submitter}
+import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
@@ -192,17 +188,10 @@ final class AssignmentProcessingStepsTest
       )
 
     val physical = new InMemoryPhysicalSyncPersistentState(
-      participant,
-      clock,
       SynchronizerCrypto(crypto, defaultStaticSynchronizerParameters),
       IndexedPhysicalSynchronizer.tryCreate(targetPSId.unwrap, 1),
       defaultStaticSynchronizerParameters,
-      packageMetadataView = mock[PackageMetadataView],
-      ledgerApiStore = Eval.now(mock[LedgerApiStore]),
-      logicalSyncPersistentState = logical,
       loggerFactory = loggerFactory,
-      parameters = ParticipantNodeParameters.forTestingOnly(testedProtocolVersion),
-      topologyConfig = TopologyConfig.forTesting,
       timeouts = timeouts,
       futureSupervisor = futureSupervisor,
     )
@@ -613,6 +602,7 @@ final class AssignmentProcessingStepsTest
               engineController =
                 EngineController(participant, RequestId(CantonTimestamp.Epoch), loggerFactory),
               DummyTickRequest,
+              PublishUpdateViaRecordOrderPublisher.noop,
             )
         )("construction of pending data and response failed").failOnShutdown
       } yield {
@@ -672,6 +662,7 @@ final class AssignmentProcessingStepsTest
               engineController =
                 EngineController(participant, RequestId(CantonTimestamp.Epoch), loggerFactory),
               DummyTickRequest,
+              PublishUpdateViaRecordOrderPublisher.noop,
             )
             .failOnShutdown
         confirmationResponse <- result.confirmationResponsesF.failOnShutdown
@@ -757,6 +748,7 @@ final class AssignmentProcessingStepsTest
                   engineController =
                     EngineController(participant, RequestId(CantonTimestamp.Epoch), loggerFactory),
                   DummyTickRequest,
+                  PublishUpdateViaRecordOrderPublisher.noop,
                 )
             )("construction of pending data and response failed").failOnShutdown
 
@@ -815,6 +807,7 @@ final class AssignmentProcessingStepsTest
       abortEngine = _ => (),
       engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
       DummyTickRequest,
+      PublishUpdateViaRecordOrderPublisher.noop,
     )
     val mockDeliver = mock[Deliver[DefaultOpenEnvelope]]
     when(mockDeliver.timestamp).thenReturn(CantonTimestamp.Epoch)

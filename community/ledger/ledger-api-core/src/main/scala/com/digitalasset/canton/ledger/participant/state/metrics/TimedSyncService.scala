@@ -9,7 +9,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.error.{TransactionError, TransactionRoutingError}
-import com.digitalasset.canton.ledger.api.health.HealthStatus
+import com.digitalasset.canton.health.HealthStatus
 import com.digitalasset.canton.ledger.api.{
   EnrichedVettedPackages,
   ListVettedPackagesOpts,

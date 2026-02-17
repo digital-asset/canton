@@ -79,9 +79,6 @@ update_daml_project_versions() {
   echo "Attempting upgrading to Daml $NEWEST_DAML_VERSION"
   echo "Updating DamlVersions.version"
   sed -i project/project/DamlVersions.scala -e "s/\"${CANTON_DAML_VERSION}\"/\"${DAML_VERSION_TO_UPGRADE_TO}\"/"
-
-  echo "Updating daml project versions"
-  $_SBT updateDamlProjectVersions
 }
 
 # Only takes x.y.z into account for comparison (not snapshot suffix)

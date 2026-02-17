@@ -39,19 +39,6 @@ post_to_datadog:
             ./scripts/ci/post-to-datadog.sh "$TIMESTAMP" << parameters.metric_type >> "$TAGS" << parameters.data >>
           fi
 
-post_log_metrics:
-  steps:
-    - run:
-        name: Compute log statistics (if log exists)
-        command: |
-          statistics=$(./scripts/ci/compute-log-metrics.sh ./log/canton_test.log)
-          echo "$statistics"
-          echo "$statistics" >> $BASH_ENV
-    - post_to_datadog:
-        label: "Post canton.log metrics to Datadog"
-        when: on_success
-        data: "canton.log.size=$LOG_SIZE canton.log.line_count=$LOG_LINE_COUNT canton.log.avg_line_length=$AVG_LOG_LINE_LENGTH canton.log.max_line_length=$MAX_LOG_LINE_LENGTH canton.log.avg_entry_size=$AVG_LOG_ENTRY_SIZE canton.log.max_entry_size=$MAX_LOG_ENTRY_SIZE"
-
 post_benchmark_metrics:
   steps:
     - run:

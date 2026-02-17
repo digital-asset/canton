@@ -736,13 +736,13 @@ private[lf] final class PhaseOne(
         Return(t.QueryNByKeyDefRef(templateId)())
       case UpdateFetchByKey(templateId) =>
         Return(t.FetchByKeyDefRef(templateId)())
-      case UpdateTryCatch(_, body, binder, handler) =>
+      case UpdateTryCatchV1(_, body, binder, handler) =>
         unaryFunction(env) { (tokenPos, env) =>
           compileExp(env, body) { body =>
             val env1 = env.pushExprVar(binder)
             compileExp(env1, handler) { handler =>
               Return(
-                SETryCatch(
+                SETryCatchV1WithHandler(
                   app(body, env.toSEVar(tokenPos)),
                   SBTryHandler(
                     handler,

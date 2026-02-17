@@ -199,15 +199,15 @@ class StackSafeTyping extends AnyFreeSpec with Matchers with TableDrivenProperty
         ),
       )
     def uembed = (x: Expr) => consume(updateT, EUpdate(UpdateEmbedExpr(unitT, embed(x, updateT))))
-    def utrycatch1 = (x: Expr) =>
+    def utrycatchV1A = (x: Expr) =>
       consume(
         updateT,
-        EUpdate(UpdateTryCatch(unitT, embed(x, updateT), var1, mk(optional(updateT)))),
+        EUpdate(UpdateTryCatchV1(unitT, embed(x, updateT), var1, mk(optional(updateT)))),
       )
-    def utrycatch2 = (x: Expr) =>
+    def utrycatchV1B = (x: Expr) =>
       consume(
         updateT,
-        EUpdate(UpdateTryCatch(unitT, mk(updateT), var1, embed(x, optional(updateT)))),
+        EUpdate(UpdateTryCatchV1(unitT, mk(updateT), var1, embed(x, optional(updateT)))),
       )
     def structUpd1 = (x: Expr) => consume(structT, EStructUpd(field, embed(x, structT), mk(unitT)))
     def structUpd2 = (x: Expr) => consume(structT, EStructUpd(field, mk(structT), x))
@@ -287,8 +287,8 @@ class StackSafeTyping extends AnyFreeSpec with Matchers with TableDrivenProperty
         ("ublock2", ublock2),
         ("ublock3", ublock3),
         ("uembed", uembed),
-        ("utrycatch1", utrycatch1),
-        ("utrycatch2", utrycatch2),
+        ("utrycatchV1A", utrycatchV1A),
+        ("utrycatchV1B", utrycatchV1B),
         ("structUpd1", structUpd1),
         ("structUpd2", structUpd2),
         ("caseScrut", caseScrut),

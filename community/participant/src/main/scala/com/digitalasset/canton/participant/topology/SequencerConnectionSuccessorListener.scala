@@ -121,7 +121,8 @@ class SequencerConnectionSuccessorListener(
 
       currentSuccessorConfigO =
         configStore.get(alias, KnownPhysicalSynchronizerId(successorPSId)).toOption
-      _ <- currentSuccessorConfigO match {
+
+      updatedSuccessorConfig <- currentSuccessorConfigO match {
         case None =>
           val updated = activeConfig.config
             .copy(
@@ -139,14 +140,23 @@ class SequencerConnectionSuccessorListener(
               ),
             )
             .toOption
+            .map(_ => updated)
+
         // TODO(#28724) Use subsumeMerge to reduce impact of races
         case Some(currentSuccessorConfig) =>
           val updated =
             currentSuccessorConfig.config.copy(sequencerConnections = sequencerConnections)
-          configStore.replace(currentSuccessorConfig.configuredPSId, updated).toOption
+          configStore
+            .replace(currentSuccessorConfig.configuredPSId, updated)
+            .toOption
+            .map(_ => updated)
       }
 
-      _ = if (automaticallyConnectToUpgradedSynchronizer)
+      sequencerConnectionsChanged = !currentSuccessorConfigO
+        .map(_.config.sequencerConnections)
+        .contains(updatedSuccessorConfig.sequencerConnections)
+
+      _ = if (automaticallyConnectToUpgradedSynchronizer && sequencerConnectionsChanged)
         performHandshake(successorPSId)
     } yield ()
 

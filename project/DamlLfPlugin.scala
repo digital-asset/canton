@@ -10,22 +10,89 @@ import xsbti.compile.CompileAnalysis
 import java.io.File
 import scala.jdk.CollectionConverters.*
 
+import _root_.io.circe._
+import _root_.io.circe.syntax._
+import _root_.io.circe.generic.auto._
+
 object DamlLfPlugin extends AutoPlugin {
+
+  object LfVersions {
+    private val v2_1 = "2.1"
+    private val v2_2 = "2.2"
+    private val v2_3 = "2.3-rc1"
+    private val v2_dev = "2.dev"
+
+    val explicitVersions: Map[String, String] = Map(
+      "v2_1" -> v2_1,
+      "v2_2" -> v2_2,
+      "v2_3" -> v2_3,
+      "v2_dev" -> v2_dev,
+    )
+
+    private val defaultLfVersion = v2_2
+    private val devLfVersion = v2_dev
+    private val latestStableLfVersion = v2_2
+
+    val namedVersions: Map[String, String] = Map(
+      "defaultLfVersion" -> defaultLfVersion,
+      "devLfVersion" -> devLfVersion,
+      "latestStableLfVersion" -> latestStableLfVersion,
+    )
+
+    private[DamlLfPlugin] val allLfVersions = List(v2_1, v2_2, v2_3, v2_dev)
+    private val stableLfVersions = List(v2_1, v2_2)
+    // DEPRECATED langauge lists
+    private val compilerLfVersions = allLfVersions
+
+    val versionLists = Map(
+      "allLfVersions" -> allLfVersions,
+      "stableLfVersions" -> stableLfVersions,
+      // DEPRECATED langauge lists
+      "compilerLfVersions" -> compilerLfVersions,
+    )
+
+    case class LfVersionReport(
+        explicitVersions: Map[String, String],
+        namedVersions: Map[String, String],
+        versionLists: Map[String, List[String]],
+    )
+  }
 
   object autoImport {
     val lfSourceDirectory = settingKey[File]("Directory containing lf files")
     val lfVersions = settingKey[Seq[String]]("List of LF versions to generate DARs for")
     val lfDarOutput = settingKey[File]("Directory where DAR will be outputted")
+    val generateLfVersionJson = taskKey[Seq[File]]("Generates the LF version JSON file")
   }
 
   import autoImport.*
 
   private val unscopedProjectSettings = Seq(
     lfSourceDirectory := sourceDirectory.value / "lf",
-    lfVersions := Seq("2.1", "2.2", "2.3-rc1", "2.dev"),
+    lfVersions := LfVersions.allLfVersions,
     lfDarOutput := { target.value / "lf-dars" / configuration.value.name },
     resourceGenerators += generateDar.taskValue,
   )
+
+  def generateJsonLogic = Def.task {
+    // 1. Gather data
+    val report = LfVersions.LfVersionReport(
+      explicitVersions = LfVersions.explicitVersions,
+      namedVersions = LfVersions.namedVersions,
+      versionLists = LfVersions.versionLists,
+    )
+
+    // 2. Generate JSON
+    val jsonString = report.asJson.spaces2
+
+    // 3. Write file (to target/scala-2.12/resource_managed/main/...)
+    val outputFile = (Compile / resourceManaged).value / "daml-lf-versions.json"
+    IO.write(outputFile, jsonString)
+
+    streams.value.log.info(s"Generated LF version JSON at: $outputFile")
+
+    Seq(outputFile)
+  }
 
   override def projectSettings: Seq[Def.Setting[_]] =
     inConfig(Test)(unscopedProjectSettings)

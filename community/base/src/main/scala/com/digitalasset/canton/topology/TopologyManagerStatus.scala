@@ -3,27 +3,20 @@
 
 package com.digitalasset.canton.topology
 
-import com.digitalasset.canton.crypto.BaseCrypto
-import com.digitalasset.canton.topology.store.TopologyStoreId
-
 trait TopologyManagerStatus {
   def queueSize: Int
 }
 
 object TopologyManagerStatus {
 
-  /** @param managers
-    *   a collection of topology managers. It uses [[com.digitalasset.canton.crypto.BaseCrypto]]
-    *   because it may include different types of
-    *   [[com.digitalasset.canton.topology.TopologyManager]]s, such as
-    *   [[com.digitalasset.canton.topology.LocalTopologyManager]] or
-    *   [[com.digitalasset.canton.topology.SynchronizerTopologyManager]], which rely on different
-    *   crypto types.
+  /** @param statusProviders
+    *   a collection of [[TopologyManagerStatus]] instances that are combined into an aggregated
+    *   status.
     */
   def combined(
-      managers: TopologyManager[TopologyStoreId, BaseCrypto]*
+      statusProviders: TopologyManagerStatus*
   ): TopologyManagerStatus =
     new TopologyManagerStatus {
-      override def queueSize: Int = managers.map(_.queueSize).sum
+      override def queueSize: Int = statusProviders.map(_.queueSize).sum
     }
 }

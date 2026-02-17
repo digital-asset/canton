@@ -8,9 +8,8 @@ import com.daml.timer.Delayed
 import com.digitalasset.base.error.ErrorCode.LoggedApiException
 import com.digitalasset.canton.ledger.api.messages.command.submission.SubmitRequest
 import com.digitalasset.canton.ledger.api.services.CommandSubmissionService
-import com.digitalasset.canton.ledger.api.util.TimeProvider
+import com.digitalasset.canton.ledger.api.util.{TimeProvider, TimeProviderType}
 import com.digitalasset.canton.ledger.api.{Commands as ApiCommands, SubmissionId}
-import com.digitalasset.canton.ledger.configuration.LedgerTimeModel
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.LoggingContextWithTrace.{
@@ -30,11 +29,7 @@ import com.digitalasset.canton.platform.apiserver.execution.{
   CommandExecutionResult,
   CommandExecutor,
 }
-import com.digitalasset.canton.platform.apiserver.services.{
-  RejectionGenerators,
-  TimeProviderType,
-  logging,
-}
+import com.digitalasset.canton.platform.apiserver.services.{RejectionGenerators, logging}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -190,7 +185,6 @@ private[apiserver] final class CommandSubmissionServiceImpl private[services] (
         // the submission to the SyncService is delayed.
         val submitAt =
           commandExecutionResult.commandInterpretationResult.transactionMeta.ledgerEffectiveTime.toInstant
-            .minus(LedgerTimeModel.maximumToleranceTimeModel.avgTransactionLatency)
         val submissionDelay = Duration.between(timeProvider.getCurrentTime, submitAt)
         if (submissionDelay.isNegative)
           submitTransaction(commandExecutionResult)

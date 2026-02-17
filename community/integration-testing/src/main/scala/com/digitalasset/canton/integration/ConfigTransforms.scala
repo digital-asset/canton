@@ -870,17 +870,15 @@ object ConfigTransforms {
 
   def setTopologyTransactionRegistrationTimeout(
       timeout: config.NonNegativeFiniteDuration
-  ): Seq[ConfigTransform] = Seq(
-    updateAllParticipantConfigs_(
-      _.focus(_.topology.topologyTransactionRegistrationTimeout).replace(timeout)
-    ),
-    updateAllMediatorConfigs_(
-      _.focus(_.topology.topologyTransactionRegistrationTimeout).replace(timeout)
-    ),
-    updateAllSequencerConfigs_(
-      _.focus(_.topology.topologyTransactionRegistrationTimeout).replace(timeout)
-    ),
-  )
+  ): Seq[ConfigTransform] =
+    updateAllNodesTopologyConfig(_.focus(_.topologyTransactionRegistrationTimeout).replace(timeout))
+
+  def updateAllNodesTopologyConfig(update: TopologyConfig => TopologyConfig): Seq[ConfigTransform] =
+    Seq(
+      updateAllParticipantConfigs_(_.focus(_.topology).modify(update)),
+      updateAllMediatorConfigs_(_.focus(_.topology).modify(update)),
+      updateAllSequencerConfigs_(_.focus(_.topology).modify(update)),
+    )
 
   def enableAlphaOnlinePartyReplicationSupport(
       participantsWithOnPRInterceptor: Map[

@@ -18,7 +18,7 @@ import sbt.nio.Keys.*
 import sbtassembly.AssemblyPlugin.autoImport.*
 import sbtassembly.{CustomMergeStrategy, MergeStrategy, PathList}
 import sbtbuildinfo.BuildInfoPlugin
-import sbtbuildinfo.BuildInfoPlugin.autoImport.*
+import sbtbuildinfo.BuildInfoPlugin.autoImport.{BuildInfoKey, *}
 import sbtide.Keys.ideExcludedDirectories
 import sbtprotoc.ProtocPlugin.autoImport.{AsProtocPlugin, PB}
 import scalafix.sbt.ScalafixPlugin
@@ -43,13 +43,11 @@ object BuildCommon {
     def alsoTest(taskName: String) = s";$taskName; Test / $taskName"
 
     val commandAliases = Def.settings(
-      addCommandAlias("checkDamlProjectVersions", alsoTest("damlCheckProjectVersions")),
-      addCommandAlias("updateDamlProjectVersions", alsoTest("damlUpdateProjectVersions")),
       addCommandAlias("checkLicenseHeaders", alsoTest("headerCheck")),
       addCommandAlias("createLicenseHeaders", alsoTest("headerCreate")),
       addCommandAlias(
         "lint",
-        "; bufFormatCheck ; bufLintCheck ; bufWrapperValueCheck ; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; javafmtCheck; damlCheckProjectVersions",
+        "; bufFormatCheck ; bufLintCheck ; bufWrapperValueCheck ; scalafmtCheck ; Test / scalafmtCheck ; scalafmtSbtCheck; checkLicenseHeaders; javafmtCheck",
       ),
       addCommandAlias("scalafixCheck", s"${alsoTest("scalafix --check")}"),
       addCommandAlias(
@@ -663,7 +661,6 @@ object BuildCommon {
       `kms-driver-testing`,
       `aws-kms-driver`,
       `mock-kms-driver`,
-      `ledger-common`,
       `ledger-common-dars`,
       `ledger-common-dars-lf-v2-1`,
       `ledger-common-dars-lf-v2-dev`,
@@ -778,6 +775,7 @@ object BuildCommon {
         `sequencer-driver-api-conformance-tests` % Test,
         `mock-kms-driver` % Test,
         `performance-driver` % Test,
+        `ledger-common-dars-lf-v2-1` % Test,
       )
       .enablePlugins(DamlPlugin)
       .settings(
@@ -826,7 +824,7 @@ object BuildCommon {
         // add the test DARs generated in daml-lf-encoder by DamlLfPlugin
         Test / managedResources ++= (DamlProjects.`daml-lf-encoder` / Test / resources).value,
         // Explicit set the Daml project dependency to common
-        Test / damlDependencies := (`community-common` / Compile / damlBuild).value :+ (`ledger-common` / Test / resourceDirectory).value / "test-models" / "model-tests-1.15.dar",
+        Test / damlDependencies := (`community-common` / Compile / damlBuild).value,
         Test / damlBuildOrder := Seq(
           "daml/JsonApiTest/Upgrades/Iface",
           "daml/JsonApiTest/Upgrades/V1",
@@ -839,43 +837,38 @@ object BuildCommon {
         Test / damlJavaCodegen := Seq(
           (
             (Test / sourceDirectory).value / "daml" / "CantonTest",
-            (Test / damlDarOutput).value / "CantonTests-3.4.0.dar",
+            (Test / damlDarOutput).value / "CantonTests-1.0.0.dar",
             "com.digitalasset.canton.damltests",
           ),
           (
             (Test / sourceDirectory).value / "daml" / "CantonTestDev",
-            (Test / damlDarOutput).value / "CantonTestsDev-3.4.0.dar",
+            (Test / damlDarOutput).value / "CantonTestsDev-1.0.0.dar",
             "com.digitalasset.canton.damltestsdev",
           ),
           (
             (Test / sourceDirectory).value / "daml" / "CantonLfDev",
-            (Test / damlDarOutput).value / "CantonLfDev-3.4.0.dar",
+            (Test / damlDarOutput).value / "CantonLfDev-1.0.0.dar",
             "com.digitalasset.canton.lfdev",
           ),
           (
             (Test / sourceDirectory).value / "daml" / "CantonLfV21",
-            (Test / damlDarOutput).value / "CantonLfV21-3.4.0.dar",
+            (Test / damlDarOutput).value / "CantonLfV21-1.0.0.dar",
             "com.digitalasset.canton.lfv21",
           ),
           (
             (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "Account",
-            (Test / damlDarOutput).value / "Account-3.4.0.dar",
+            (Test / damlDarOutput).value / "Account-1.0.0.dar",
             "com.digitalasset.canton.http.json.tests.account",
           ),
           (
             (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "CIou",
-            (Test / damlDarOutput).value / "CIou-3.4.0.dar",
+            (Test / damlDarOutput).value / "CIou-1.0.0.dar",
             "com.digitalasset.canton.http.json.tests.ciou",
           ),
           (
             (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "User",
-            (Test / damlDarOutput).value / "User-3.4.0.dar",
+            (Test / damlDarOutput).value / "User-1.0.0.dar",
             "com.digitalasset.canton.http.json.tests.user",
-          ),
-          (
-            (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "model-tests",
-            (Test / damlDarOutput).value / "model-tests-1.0.0.dar",
-            "com.digitalasset.canton.http.json.tests.iou",
           ),
           (
             (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "Upgrades" / "Iface",
@@ -900,14 +893,12 @@ object BuildCommon {
         ),
         Test / damlTsCodegen := Seq(
           (
-            (Test / sourceDirectory).value / "daml" / "JsonApiTest" / "model-tests",
-            (Test / damlDarOutput).value / "model-tests-1.0.0.dar",
+            (`ledger-common-dars-lf-v2-1` / Compile / damlSourceDirectory).value / "main" / "daml" / "model",
+            (`ledger-common-dars-lf-v2-1` / Compile / damlDarOutput).value / "model-tests-1.0.0.dar",
           )
         ),
-        // LedgerJsonApiDemoExampleIntegrationTest needs codegen-js output
         Test / fullClasspath := (Test / fullClasspath).dependsOn(Test / damlGenerateTs).value,
         Test / useVersionedDarName := true,
-        Test / damlEnableProjectVersionOverride := false,
         Test / PB.targets := Seq(
           scalapb.gen() -> (Test / sourceManaged).value / "protobuf"
         ),
@@ -1666,50 +1657,6 @@ object BuildCommon {
           addFilesToHeaderCheck("*.daml", "daml", Compile),
         )
 
-    lazy val `ledger-common` = project
-      .in(file("community/ledger/ledger-common"))
-      .dependsOn(
-        `wartremover-annotations`,
-        `community-testing` % "test",
-        DamlProjects.`bindings-java` % "test->test",
-        DamlProjects.`daml-jwt`,
-        DamlProjects.`daml-lf-data`,
-        DamlProjects.`daml-lf-engine`,
-        DamlProjects.`daml-lf-transaction`,
-        DamlProjects.`daml-jwt`,
-        DamlProjects.`bindings-java` % "test->test",
-        DamlProjects.`ledger-api-value`,
-        DamlProjects.`ledger-api-scala`,
-        DamlProjects.`ledger-resources`,
-        DamlProjects.`ports` % Test,
-        DamlProjects.`rs-grpc-bridge`,
-        DamlProjects.`rs-grpc-pekko`,
-        `util-observability` % "compile->compile;test->test",
-        `ledger-common-dars-lf-v2-1` % "test",
-        `util-external`,
-      )
-      .settings(
-        sharedCantonCommunitySettings,
-        organization := "com.daml",
-        publish / skip := false,
-        Compile / PB.targets := Seq(
-          PB.gens.java -> (Compile / sourceManaged).value / "protobuf",
-          scalapb.gen(flatPackage = false) -> (Compile / sourceManaged).value / "protobuf",
-        ),
-        Test / unmanagedResourceDirectories += (`ledger-common-dars-lf-v2-1` / Compile / resourceManaged).value,
-        addProtobufFilesToHeaderCheck(Compile),
-        libraryDependencies ++= Seq(
-          slf4j_api,
-          grpc_api,
-          grpc_netty_shaded,
-          scalapb_runtime,
-          scalatest % Test,
-          scalacheck % Test,
-        ),
-        Test / parallelExecution := true,
-        coverageEnabled := false,
-      )
-
     def createLedgerCommonDarsProject(lfVersion: String) =
       Project(
         s"ledger-common-dars-lf-v$lfVersion".replace('.', '-'),
@@ -1728,7 +1675,6 @@ object BuildCommon {
     def ledgerCommonDarsSharedSettings(lfVersion: String) = Seq(
       Compile / damlSourceDirectory := baseDirectory.value / ".." / "src",
       Compile / useVersionedDarName := true,
-      Compile / damlEnableProjectVersionOverride := false,
       Compile / damlJavaCodegen := (for (
         name <- Seq(
           "model",
@@ -1743,7 +1689,7 @@ object BuildCommon {
       )
         yield (
           (Compile / damlSourceDirectory).value / "main" / "daml" / s"$name",
-          (Compile / damlDarOutput).value / s"${name.replace("_", "-")}-tests-3.1.0.dar",
+          (Compile / damlDarOutput).value / s"${name.replace("_", "-")}-tests-1.0.0.dar",
           s"com.daml.ledger.test.java.$name",
         )) ++ Seq(
         (
@@ -1918,7 +1864,6 @@ object BuildCommon {
       .settings(
         sharedCommunitySettings,
         scalaVersion := scala3_version,
-        Compile / damlEnableProjectVersionOverride := false,
         Compile / damlBuildOrder := Seq("examples-interfaces", "examples"),
       )
 
@@ -1948,6 +1893,7 @@ object BuildCommon {
         DamlProjects.`daml-lf-encoder`,
         DamlProjects.`grpc-test-utils` % Test,
         DamlProjects.`http-test-utils` % Test,
+        DamlProjects.`ledger-resources`,
         DamlProjects.`observability-metrics` % Test,
         DamlProjects.`observability-tracing` % "test->compile;test->test",
         DamlProjects.ports,
@@ -1956,9 +1902,9 @@ object BuildCommon {
         DamlProjects.`timer-utils`,
         `base-errors` % "test->test",
         `daml-tls` % "test->test",
-        `ledger-common` % "compile->compile;test->test",
         `community-common` % "compile->compile;test->test",
         `daml-adjustable-clock` % "test->test",
+        `ledger-common-dars-lf-v2-1` % "test",
       )
       .settings(
         sharedCantonCommunitySettings,
@@ -1992,7 +1938,6 @@ object BuildCommon {
           DamlProjects.`scalatest-utils` % Test,
           DamlProjects.`timer-utils`,
           `ledger-api-core` % "compile->compile;test->test",
-          `ledger-common` % "test->test",
           `community-testing` % "test->test",
           `transcode-daml-lf`,
           `transcode-codec-json`,
@@ -2164,7 +2109,6 @@ object BuildCommon {
       .dependsOn(
         `wartremover-annotations`,
         `ledger-api-core`,
-        `ledger-common` % "compile->compile;compile->test",
         `community-base`,
         `community-app` % "test->test",
         `daml-adjustable-clock`,
@@ -2207,7 +2151,6 @@ object BuildCommon {
           `community-base`,
           `base-errors`,
           `ledger-api-core`,
-          `ledger-common`,
           `ledger-json-api`,
           darsProject,
           DamlProjects.`grpc-test-utils`,
@@ -2314,7 +2257,6 @@ object BuildCommon {
         sharedCantonCommunitySettings,
         excludeTranscodeConflictingDependencies,
         Test / useVersionedDarName := true,
-        Test / damlEnableProjectVersionOverride := false,
         Test / damlBuildOrder := Seq(
           "daml/DvP/Assets",
           "daml/DvP/Offer",
@@ -3343,12 +3285,20 @@ object BuildCommon {
 
     lazy val `daml-lf-language` = project
       .in(file("community/daml-lf/language"))
+      .enablePlugins(BuildInfoPlugin)
       .disablePlugins(
         ScalafixPlugin,
         ScalafmtPlugin,
         WartRemover,
       )
       .settings(
+        buildInfoKeys ++= Seq[BuildInfoKey](
+          BuildInfoKey("explicitVersions" -> DamlLfPlugin.LfVersions.explicitVersions),
+          BuildInfoKey("namedVersions" -> DamlLfPlugin.LfVersions.namedVersions),
+          BuildInfoKey("versionLists" -> DamlLfPlugin.LfVersions.versionLists),
+        ),
+        generateLfVersionJson := DamlLfPlugin.generateJsonLogic.value,
+        Compile / resourceGenerators += generateLfVersionJson.taskValue,
         sharedCommunitySettings,
         organization := "com.daml",
         scalacOptions := lf_scalaopts_stricter,
@@ -3357,6 +3307,9 @@ object BuildCommon {
         publish / skip := false,
         coverageEnabled := false,
         libraryDependencies ++= Seq(
+          circe_core,
+          circe_generic,
+          circe_parser,
           google_protobuf_java,
           scalatest % Test,
         ),
@@ -3750,7 +3703,8 @@ object BuildCommon {
       .disablePlugins(WartRemover)
       .enablePlugins(JmhPlugin)
       .settings(
-        sharedCommunitySettings
+        sharedCommunitySettings,
+        Compile / unmanagedResourceDirectories += (CommunityProjects.`ledger-common-dars-lf-v2-1` / Compile / resourceManaged).value,
       )
       .dependsOn(
         `contextualized-logging`,

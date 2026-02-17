@@ -5,6 +5,8 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.data.{EitherT, Nested, NonEmptyChain}
 import cats.syntax.either.*
+import cats.syntax.foldable.*
+import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricsContext
@@ -20,7 +22,7 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.TransactionError
-import com.digitalasset.canton.ledger.participant.state.SequencedUpdate
+import com.digitalasset.canton.ledger.participant.state.SequencedEventUpdate
 import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   PromiseUnlessShutdownFactory,
@@ -52,6 +54,7 @@ import com.digitalasset.canton.participant.store
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.protocol.*
@@ -66,7 +69,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.*
-import com.digitalasset.canton.util.EitherTUtil.{condUnitET, ifThenET}
+import com.digitalasset.canton.util.EitherTUtil.condUnitET
 import com.digitalasset.canton.util.EitherUtil.RichEither
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, checked}
@@ -118,7 +121,7 @@ abstract class ProtocolProcessor[
       crypto,
       sequencerClient,
     )
-    with RequestProcessor[RequestViewType] {
+    with RequestProcessor[RequestViewType, SequencedEventUpdate] {
 
   import ProtocolProcessor.*
   import com.digitalasset.canton.util.ShowUtil.*
@@ -601,13 +604,11 @@ abstract class ProtocolProcessor[
         steps.RequestError,
         EitherT[FutureUnlessShutdown, steps.RequestError, Unit],
       ],
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, steps.RequestError, EitherT[
+  )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
     steps.RequestError,
-    Unit,
-  ]] = {
+    EitherT[FutureUnlessShutdown, steps.RequestError, Unit],
+  ] = {
 
     def doLog[T](
         result: EitherT[FutureUnlessShutdown, steps.RequestError, T]
@@ -625,17 +626,16 @@ abstract class ProtocolProcessor[
       rc: RequestCounter,
       sc: SequencerCounter,
       batch: steps.RequestBatch,
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   )(implicit traceContext: TraceContext): HandlerResult = {
     val RequestAndRootHashMessage(_viewMessages, _rootHashMessage, _mediatorId, _isReceipt) = batch
     val requestId = RequestId(ts)
 
     if (precedesCleanReplay(requestId)) {
       // The `MessageDispatcher` should not call this method for requests before the clean replay starting point
-      HandlerResult.synchronous(
-        ErrorUtil.internalErrorAsyncShutdown(
-          new IllegalArgumentException(
-            s"Request with timestamp $ts precedes the clean replay starting point"
-          )
+      ErrorUtil.internalErrorAsyncShutdown(
+        new IllegalArgumentException(
+          s"Request with timestamp $ts precedes the clean replay starting point"
         )
       )
     } else {
@@ -650,21 +650,28 @@ abstract class ProtocolProcessor[
         s"ProtocolProcess.processRequest(rc=$rc, sc=$sc, traceId=${traceContext.traceId})"
       ) {
         // registering the request has to be done synchronously
-        EitherT
-          .rightT[FutureUnlessShutdown, ProtocolProcessor.this.steps.RequestError](
-            ephemeral.phase37Synchronizer
-              .registerRequest(steps.requestType)(RequestId(ts))
+        val registeredET =
+          EitherT.rightT[FutureUnlessShutdown, ProtocolProcessor.this.steps.RequestError](
+            ephemeral.phase37Synchronizer.registerRequest(steps.requestType)(RequestId(ts))
           )
-          .map { requestDataHandle =>
+        registeredET.map { requestDataHandle =>
+          processRequestInternal(
+            ts,
+            rc,
+            sc,
+            batch,
+            requestDataHandle,
+            freshOwnTimelyTxF,
+            publishUpdate,
+          )
             // If the result is not a success, we still need to complete the request data in some way
-            processRequestInternal(ts, rc, sc, batch, requestDataHandle, freshOwnTimelyTxF)
-              .thereafter {
-                case Failure(exception) => requestDataHandle.failed(exception)
-                case Success(UnlessShutdown.Outcome(Left(_))) => requestDataHandle.complete(None)
-                case Success(UnlessShutdown.AbortedDueToShutdown) => requestDataHandle.shutdown()
-                case _ =>
-              }
-          }
+            .thereafter {
+              case Failure(exception) => requestDataHandle.failed(exception)
+              case Success(UnlessShutdown.Outcome(Left(_))) => requestDataHandle.complete(None)
+              case Success(UnlessShutdown.AbortedDueToShutdown) => requestDataHandle.shutdown()
+              case _ =>
+            }
+        }
       }
       handlerResultForRequest(ts, processedET)
     }
@@ -680,6 +687,7 @@ abstract class ProtocolProcessor[
         steps.requestType.PendingRequestData
       ],
       freshOwnTimelyTxF: FutureUnlessShutdown[Boolean],
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, steps.RequestError, Unit] = {
@@ -715,9 +723,7 @@ abstract class ProtocolProcessor[
         )
       } else FutureUnlessShutdown.unit
 
-    synchronizeWithClosing(
-      s"$functionFullName(rc=$rc, sc=$sc, traceId=${traceContext.traceId})"
-    ) {
+    synchronizeWithClosing(show"$functionFullName(rc=$rc, sc=$sc, traceId=$traceContext)") {
       val preliminaryChecksET = for {
         snapshot <- EitherT.right(
           crypto.awaitSnapshotUSSupervised(s"await crypto snapshot $ts")(ts)
@@ -736,9 +742,9 @@ abstract class ProtocolProcessor[
               )
             )
         )
-        decryptedViews <- steps
+        uncheckedDecryptedViews <- steps
           .decryptViews(viewMessages, snapshot, ephemeral.sessionKeyStore.convertStore)
-      } yield (snapshot, decryptedViews, synchronizerParameters)
+      } yield (snapshot, uncheckedDecryptedViews, synchronizerParameters)
 
       for {
         preliminaryChecks <- preliminaryChecksET.leftMap { err =>
@@ -746,13 +752,13 @@ abstract class ProtocolProcessor[
           err
         }
         (snapshot, uncheckedDecryptedViews, synchronizerParameters) = preliminaryChecks
-
         DecryptedViews(decryptedViewsWithSignatures, rawDecryptionErrors) =
           uncheckedDecryptedViews
         _ = rawDecryptionErrors.foreach { decryptionError =>
           logger.warn(s"Request $rc: Decryption error: $decryptionError")
         }
         decryptionErrors = rawDecryptionErrors.map(ViewMessageError(_))
+
         (incorrectRootHashes, viewsWithCorrectRootHash) = checkRootHash(
           decryptedViewsWithSignatures
         )
@@ -837,6 +843,7 @@ abstract class ProtocolProcessor[
                     rootHash,
                     freshOwnTimelyTxF,
                     error,
+                    publishUpdate,
                   )
                 } yield ()
 
@@ -854,6 +861,7 @@ abstract class ProtocolProcessor[
                   mediator,
                   snapshot,
                   malformedPayloads,
+                  publishUpdate,
                 )
             }
 
@@ -908,6 +916,7 @@ abstract class ProtocolProcessor[
                 _ <- processRequestWithGoodViews(
                   parsedRequest,
                   requestDataHandle,
+                  publishUpdate,
                 )
               } yield ()
             } else {
@@ -920,7 +929,7 @@ abstract class ProtocolProcessor[
               )
               EitherT
                 .right[steps.RequestError](
-                  prepareForMediatorResultOfBadRequest(rc, sc, ts)
+                  prepareForMediatorResultOfBadRequest(rc, sc, ts, publishUpdate)
                 )
                 .thereafter(_ => requestDataHandle.complete(None))
             }
@@ -945,6 +954,7 @@ abstract class ProtocolProcessor[
       rootHash: RootHash,
       freshOwnTimelyTxF: FutureUnlessShutdown[Boolean],
       error: TransactionError,
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, steps.RequestError, Unit] =
@@ -980,7 +990,7 @@ abstract class ProtocolProcessor[
       )
       _ <- EitherT.right[steps.RequestError] {
         requestDataHandle.complete(None)
-        invalidRequest(rc, sc, ts, eventToPublishO)
+        invalidRequest(rc, sc, ts, eventToPublishO, publishUpdate)
       }
     } yield ()
 
@@ -989,6 +999,7 @@ abstract class ProtocolProcessor[
       requestDataHandle: Phase37Synchronizer.PendingRequestDataHandle[
         steps.requestType.PendingRequestData
       ],
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ProtocolProcessor.this.steps.RequestError, Unit] = {
@@ -1011,6 +1022,7 @@ abstract class ProtocolProcessor[
               parsedRequest,
               activenessSet,
               requestDataHandle,
+              publishUpdate,
             )
           } yield ()
         else {
@@ -1036,6 +1048,7 @@ abstract class ProtocolProcessor[
             parsedRequest.rootHash,
             FutureUnlessShutdown.pure(parsedRequest.isFreshOwnTimelyRequest),
             error,
+            publishUpdate,
           )
         }
     } yield ()
@@ -1050,6 +1063,7 @@ abstract class ProtocolProcessor[
       requestDataHandle: Phase37Synchronizer.PendingRequestDataHandle[
         steps.requestType.PendingRequestData
       ],
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, steps.RequestError, Unit] = {
@@ -1089,7 +1103,7 @@ abstract class ProtocolProcessor[
           val responses = EitherT.pure[FutureUnlessShutdown, steps.RequestError](
             Option.empty[(ConfirmationResponses, Recipients)]
           )
-          val timeoutEvent = Either.right(Option.empty[SequencedUpdate])
+          val timeoutEvent = Either.right(Option.empty[SequencedEventUpdate])
           EitherT.pure[FutureUnlessShutdown, steps.RequestError](
             (pendingData, responses, () => timeoutEvent)
           )
@@ -1107,6 +1121,7 @@ abstract class ProtocolProcessor[
               requestFuturesF.flatMap(_.activenessResult),
               engineController,
               decisionTimeTick,
+              publishUpdate,
             )
 
             steps.StorePendingDataAndSendResponseAndCreateTimeout(
@@ -1147,7 +1162,6 @@ abstract class ProtocolProcessor[
         .flatMap(
           handleTimeout(
             parsedRequest,
-            sc,
             decisionTime,
             timeoutEvent(),
           )
@@ -1211,6 +1225,7 @@ abstract class ProtocolProcessor[
       mediatorGroup: MediatorGroupRecipient,
       snapshot: SynchronizerSnapshotSyncCryptoApi,
       malformedPayloads: Seq[MalformedPayload],
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, steps.RequestError, Unit] = {
@@ -1244,7 +1259,9 @@ abstract class ProtocolProcessor[
         }
         _ = requestDataHandle.complete(None)
 
-        _ <- EitherT.right[steps.RequestError](terminateRequest(rc, sc, ts, ts, None))
+        _ <- EitherT.right[steps.RequestError](
+          terminateRequest(rc, ts, ts, None, publishUpdate)
+        )
       } yield ()
     }
   }
@@ -1536,7 +1553,8 @@ abstract class ProtocolProcessor[
 
     val PendingRequestData(requestCounter, requestSequencerCounter, _, locallyRejectedF) =
       pendingRequestDataOrReplayData
-    val cleanReplay = isCleanReplay(requestCounter, pendingRequestDataOrReplayData)
+    val publishUpdateO =
+      publishUpdateUnlessCleanReplay(requestCounter, pendingRequestDataOrReplayData)
     val pendingSubmissionDataO = removePendingSubmissionForRequest(pendingRequestDataOrReplayData)
 
     for {
@@ -1595,7 +1613,7 @@ abstract class ProtocolProcessor[
         ephemeral.contractStore.storeContracts(contractsToBeStored)
       )
 
-      _ <- ifThenET(!cleanReplay) {
+      _ <- publishUpdateO.traverse_ { publishUpdate =>
         logger.debug(
           show"Finalizing ${steps.requestKind.unquoted} request=${requestId.unwrap}."
         )
@@ -1609,10 +1627,10 @@ abstract class ProtocolProcessor[
           _unit <- EitherT.right[steps.ResultError](
             terminateRequest(
               requestCounter,
-              requestSequencerCounter,
               requestTimestamp,
               commitTime,
               eventO,
+              publishUpdate,
             )
           )
         } yield pendingSubmissionDataO.foreach(steps.postProcessResult(verdict, _))
@@ -1761,9 +1779,8 @@ abstract class ProtocolProcessor[
 
   private def handleTimeout(
       parsedRequest: steps.ParsedRequestType,
-      sequencerCounter: SequencerCounter,
       decisionTime: CantonTimestamp,
-      timeoutEvent: => Either[steps.ResultError, Option[SequencedUpdate]],
+      timeoutEvent: => Either[steps.ResultError, Option[SequencedEventUpdate]],
   )(
       result: TimeoutResult
   )(implicit
@@ -1777,17 +1794,19 @@ abstract class ProtocolProcessor[
         show"${steps.requestKind.unquoted} request at $requestId timed out without a transaction result message."
       )
 
-      def publishEvent(): EitherT[FutureUnlessShutdown, steps.ResultError, Unit] =
+      def publishEvent(
+          publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate]
+      ): EitherT[FutureUnlessShutdown, steps.ResultError, Unit] =
         for {
           maybeEvent <- EitherT.fromEither[FutureUnlessShutdown](timeoutEvent)
           requestTimestamp = requestId.unwrap
           _ <- EitherT.right[steps.ResultError](
             terminateRequest(
               requestCounter,
-              sequencerCounter,
               requestTimestamp,
               decisionTime,
               maybeEvent,
+              publishUpdate,
             )
           )
         } yield ()
@@ -1810,24 +1829,28 @@ abstract class ProtocolProcessor[
         )
 
         // No need to clean up the pending submissions because this is handled (concurrently) by schedulePendingSubmissionRemoval
-        cleanReplay = isCleanReplay(requestCounter, pendingRequestDataOrReplayData)
+        publishUpdateO = publishUpdateUnlessCleanReplay(
+          requestCounter,
+          pendingRequestDataOrReplayData,
+        )
 
         _ <- steps.handleTimeout(parsedRequest)
 
-        _ <- ifThenET(!cleanReplay)(publishEvent())
+        _ <- publishUpdateO.traverse_(publishEvent)
       } yield ()
     } else EitherT.pure[FutureUnlessShutdown, steps.ResultError](())
 
-  private[this] def isCleanReplay(
+  private[this] def publishUpdateUnlessCleanReplay(
       requestCounter: RequestCounter,
       pendingData: PendingRequestData,
-  ): Boolean = {
+  ): Option[PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate]] = {
     val cleanReplay = isCleanReplay(requestCounter)
-    if (cleanReplay != pendingData.isCleanReplay)
+    val publishUpdateO = pendingData.publishUpdateO
+    if (cleanReplay != publishUpdateO.isEmpty)
       throw new IllegalStateException(
         s"Request $requestCounter is before the starting point at ${ephemeral.startingPoints.processing.nextRequestCounter}, but not a replay"
       )
-    cleanReplay
+    publishUpdateO
   }
 
   /** A request precedes the clean replay if it came before the

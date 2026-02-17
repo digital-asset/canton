@@ -43,7 +43,7 @@ object HttpServiceTestFixture {
 
   lazy val staticPkgIdAccount: Ref.PackageRef = {
     import com.digitalasset.daml.lf.{archive, typesig}
-    val darFile = JarResourceUtils.resourceFile("Account-3.4.0.dar")
+    val darFile = JarResourceUtils.resourceFile("Account-1.0.0.dar")
     val dar = archive.UniversalArchiveReader.assertReadFile(darFile)
     Ref.PackageRef.assertFromString(typesig.PackageSignature.read(dar.main)._2.packageId)
   }

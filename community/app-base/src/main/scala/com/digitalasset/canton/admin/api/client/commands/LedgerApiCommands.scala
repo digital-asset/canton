@@ -1600,6 +1600,7 @@ object LedgerApiCommands {
         prefetchContractKeys: Seq[PrefetchContractKey],
         maxRecordTime: Option[CantonTimestamp],
         costEstimationHints: Option[CostEstimationHints],
+        hashingSchemeVersion: HashingSchemeVersion,
     ) extends BaseCommand[
           PrepareSubmissionRequest,
           PrepareSubmissionResponse,
@@ -1625,6 +1626,7 @@ object LedgerApiCommands {
             prefetchContractKeys = prefetchContractKeys,
             maxRecordTime = maxRecordTime.map(_.toProtoTimestamp),
             estimateTrafficCost = costEstimationHints,
+            hashingSchemeVersion = Some(hashingSchemeVersion),
           )
         )
 

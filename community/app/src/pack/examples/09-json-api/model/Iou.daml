@@ -1,1 +1,1 @@
-../../../../test/daml/JsonApiTest/model-tests/Iou.daml
+../../../../../../ledger/ledger-common-dars/src/main/daml/model/Iou.daml

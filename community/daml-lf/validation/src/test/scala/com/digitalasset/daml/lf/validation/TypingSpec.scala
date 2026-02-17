@@ -276,7 +276,7 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
           T"AnyException → (( Option Mod:E ))",
         // AnyException built-ins
         E"ANY_EXCEPTION_MESSAGE" -> T"AnyException → Text",
-        // UpdTryCatch
+        // UpdTryCatchV1
         E"Λ (σ : ⋆). λ (e₁ : Update σ) (e₂: AnyException → Option (Update σ)) → (( try @σ e₁ catch x → e₂ x ))" ->
           T"∀ (σ : ⋆). Update σ → (AnyException → Option (Update σ)) → Update σ",
         // EExperimental

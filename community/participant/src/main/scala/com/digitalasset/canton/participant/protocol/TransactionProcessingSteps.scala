@@ -79,6 +79,7 @@ import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTrack
 import com.digitalasset.canton.platform.store.cache.OnlyForTestingTransactionInMemoryStore
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.ContractIdAbsolutizer.ContractIdAbsolutizationDataV1
+import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithSuffixesAndMerged,
   WithoutSuffixes,
@@ -702,6 +703,7 @@ class TransactionProcessingSteps(
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       engineController: EngineController,
       decisionTimeTickRequest: SynchronizerTimeTracker.TickRequest,
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -943,6 +945,7 @@ class TransactionProcessingSteps(
             freshOwnTimelyTx,
             engineController,
             decisionTimeTickRequest,
+            publishUpdate,
           )
         StorePendingDataAndSendResponseAndCreateTimeout(
           pendingTransaction,
@@ -980,7 +983,7 @@ class TransactionProcessingSteps(
       error: TransactionError,
   )(implicit
       traceContext: TraceContext
-  ): (Option[SequencedUpdate], Option[PendingSubmissionId]) = {
+  ): (Option[SequencedEventUpdate], Option[PendingSubmissionId]) = {
     val rejection = Update.CommandRejected.FinalReason(error.rpcStatus())
     completionInfoFromSubmitterMetadataO(submitterMetadata, freshOwnTimelyTx).map {
       completionInfo =>
@@ -1002,7 +1005,7 @@ class TransactionProcessingSteps(
 
   override def createRejectionEvent(rejectionArgs: TransactionProcessingSteps.RejectionArgs)(
       implicit traceContext: TraceContext
-  ): Either[TransactionProcessorError, Option[SequencedUpdate]] = {
+  ): Either[TransactionProcessorError, Option[SequencedEventUpdate]] = {
     val RejectionArgs(pendingTransaction, errorDetails) = rejectionArgs
 
     val PendingTransaction(
@@ -1016,6 +1019,7 @@ class TransactionProcessingSteps(
       _engineController,
       _abortedF,
       _decisionTimeTickRequest,
+      _publishUpdate,
     ) = pendingTransaction
     val submitterMetaO = transactionValidationResult.submitterMetadataO
     val completionInfoO =
@@ -1062,6 +1066,7 @@ class TransactionProcessingSteps(
       freshOwnTimelyTx: Boolean,
       engineController: EngineController,
       decisionTimeTickRequest: SynchronizerTimeTracker.TickRequest,
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   )(implicit
       traceContext: TraceContext
   ): PendingTransaction = {
@@ -1087,6 +1092,7 @@ class TransactionProcessingSteps(
       engineController.abort,
       engineAbortStatusF,
       decisionTimeTickRequest,
+      publishUpdate,
     )
   }
 

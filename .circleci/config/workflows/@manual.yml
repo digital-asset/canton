@@ -909,6 +909,29 @@ manual_external_party_tests:
         requires:
           - compile
 
+manual_variations_test:
+  when:
+    equal: [ variations-test, << pipeline.parameters.manual_job >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - variations_test:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+          - aws_kms_testing
+          - gcp_kms_testing
+        requires:
+          - compile
+
 manual_postgres_conformance_tests:
   when:
     equal: [ postgres-conformance-tests, << pipeline.parameters.manual_job >> ]

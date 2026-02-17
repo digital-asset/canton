@@ -52,6 +52,7 @@ parameters:
       unstable-test,
       update-canton-build-docker-image,
       upload-new-test-artifact-dars,
+      variations-test,
       none
     ]
 

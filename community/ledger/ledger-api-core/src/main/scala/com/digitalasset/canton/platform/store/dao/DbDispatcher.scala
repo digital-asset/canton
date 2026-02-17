@@ -11,8 +11,7 @@ import com.daml.metrics.api.MetricHandle.Timer
 import com.daml.metrics.api.MetricName
 import com.daml.metrics.{DatabaseMetrics, Timed}
 import com.digitalasset.canton.concurrent.DirectExecutionContext
-import com.digitalasset.canton.health.ComponentHealthState
-import com.digitalasset.canton.ledger.api.health.{HealthStatus, ReportsHealth}
+import com.digitalasset.canton.health.{ComponentHealthState, HealthStatus, ReportsHealth}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace.{
   implicitExtractTraceContext,

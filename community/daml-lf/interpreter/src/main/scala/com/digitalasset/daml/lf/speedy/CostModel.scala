@@ -144,7 +144,7 @@ abstract class CostModel {
   val KLabelClosure: CostConstant = NotDefined // only use when profiling is on
   val KLeaveClosure: CostConstant = NotDefined // only use when profiling is on
 
-  val KTryCatchHandler: CostConstant
+  val KTryCatchV1Handler: CostConstant
   val KPreventException: CostConstant
   val KConvertingException: CostConstant
 
@@ -328,7 +328,7 @@ object CostModel {
     override val KFoldr: CostFunction1[Int] = CostFunction1.Null
     override val KCacheVal: CostConstant = CostConstant.Null
     override val KCloseExercise: CostFunction1[SValue] = CostFunction1.Null
-    override val KTryCatchHandler: CostConstant = CostConstant.Null
+    override val KTryCatchV1Handler: CostConstant = CostConstant.Null
     override val KPreventException: CostConstant = CostConstant.Null
     override val KConvertingException: CostConstant = CostConstant.Null
   }
@@ -703,7 +703,7 @@ object CostModel {
 
     val KCLOSEEXERCISE_SHELL_BYTES = 0L
 
-    val KTRYCATCHHANDLER_SHELL_BYTES = roundTo8(
+    val KTRYCATCHV1HANDLER_SHELL_BYTES = roundTo8(
       OBJECT_HEADER_BYTES + // Header
         REFERENCE_BYTES + // .machine
         INT_BYTES + // .savedBase
@@ -740,7 +740,7 @@ object CostModel {
         KFOLDR_SHELL_BYTES max
         KCACHEVAL_SHELL_BYTES max
         KCLOSEEXERCISE_SHELL_BYTES max
-        KTRYCATCHHANDLER_SHELL_BYTES max
+        KTRYCATCHV1HANDLER_SHELL_BYTES max
         KLABELCLOSURE_SHELL_BYTES max
         KLEAVECLOSURE_SHELL_BYTES max
         KPREVENTEXCEPTION_SHELL_BYTES max
@@ -949,7 +949,7 @@ object CostModel {
       0L
     ) // We do not charge for caching the result
     override val KCloseExercise: CostFunction1[SValue] = CostFunction1.Null // no memory allocation
-    override val KTryCatchHandler: CostConstant = CostConstant.Null // no memory allocation
+    override val KTryCatchV1Handler: CostConstant = CostConstant.Null // no memory allocation
     override val KPreventException: CostConstant = CostConstant.Null // no memory allocation
     override val KConvertingException: CostConstant = CostConstant.Null // no memory allocation
   }

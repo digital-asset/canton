@@ -3,8 +3,11 @@
 
 package com.digitalasset.canton.participant.topology
 
+import cats.Eval
 import cats.data.EitherT
+import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{
   BatchingConfig,
   CachingConfigs,
@@ -21,9 +24,12 @@ import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationCon
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing
+import com.digitalasset.canton.participant.store.SyncPersistentState
+import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.sync.LsuCallback
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.store.SequencedEventStore
+import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.cache.TopologyStateWriteThroughCache
 import com.digitalasset.canton.topology.client.*
@@ -38,7 +44,16 @@ import com.digitalasset.canton.topology.store.{
   PackageDependencyResolver,
   TopologyStore,
 }
-import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.transaction.HostingParticipant
+import com.digitalasset.canton.topology.{
+  ForceFlags,
+  ParticipantId,
+  PartyId,
+  PhysicalSynchronizerId,
+  SynchronizerOutboxQueue,
+  SynchronizerTopologyManager,
+  TopologyManagerError,
+}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import org.apache.pekko.stream.Materializer
 
@@ -144,6 +159,101 @@ class TopologyComponentFactory(
         processor
       }
     }
+  }
+
+  def createTopologyManager(
+      participantId: ParticipantId,
+      syncPersistentState: SyncPersistentState,
+      ledgerApiStore: Eval[LedgerApiStore],
+      packageMetadataView: PackageMetadataView,
+      crypto: SynchronizerCrypto,
+      synchronizerLoggerFactory: NamedLoggerFactory,
+      disableOptionalTopologyChecks: Boolean,
+      dispatchQueueBackpressureLimit: NonNegativeInt,
+      disableUpgradeValidation: Boolean,
+  ): SynchronizerTopologyManager = {
+    val synchronizerOutboxQueue = new SynchronizerOutboxQueue(loggerFactory)
+    val topologyManager: SynchronizerTopologyManager = new SynchronizerTopologyManager(
+      participantId.uid,
+      clock = clock,
+      crypto = crypto,
+      staticSynchronizerParameters = crypto.staticSynchronizerParameters,
+      topologyCacheAggregatorConfig = batching.topologyCacheAggregator,
+      topologyConfig = topology,
+      store = syncPersistentState.topologyStore,
+      outboxQueue = synchronizerOutboxQueue,
+      disableOptionalTopologyChecks = disableOptionalTopologyChecks,
+      dispatchQueueBackpressureLimit = dispatchQueueBackpressureLimit,
+      exitOnFatalFailures = exitOnFatalFailures,
+      timeouts = timeouts,
+      futureSupervisor = futureSupervisor,
+      loggerFactory = synchronizerLoggerFactory,
+    ) with ParticipantTopologyValidation {
+
+      // override, so that the logger used is SynchronizerTopologyManager, and not SyncEphemeralStateFactoryImpl$$anon$1
+      override protected def classForLogger: Class[?] = classOf[SynchronizerTopologyManager]
+
+      override def validatePackageVetting(
+          currentlyVettedPackages: Set[LfPackageId],
+          nextPackageIds: Set[LfPackageId],
+          dryRunSnapshot: Option[PackageMetadata],
+          forceFlags: ForceFlags,
+      )(implicit
+          traceContext: TraceContext
+      ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
+        validatePackageVetting(
+          currentlyVettedPackages,
+          nextPackageIds,
+          packageMetadataView,
+          dryRunSnapshot,
+          forceFlags,
+          disableUpgradeValidation,
+        )
+
+      override def checkCannotDisablePartyWithActiveContracts(
+          partyId: PartyId,
+          forceFlags: ForceFlags,
+      )(implicit
+          traceContext: TraceContext
+      ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
+        checkCannotDisablePartyWithActiveContracts(
+          partyId,
+          forceFlags,
+          acsInspections = () => Map(syncPersistentState.lsid -> syncPersistentState.acsInspection),
+        )
+
+      override def checkInsufficientSignatoryAssigningParticipantsForParty(
+          partyId: PartyId,
+          currentThreshold: PositiveInt,
+          nextThreshold: Option[PositiveInt],
+          nextConfirmingParticipants: Seq[HostingParticipant],
+          forceFlags: ForceFlags,
+      )(implicit
+          traceContext: TraceContext
+      ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
+        checkInsufficientSignatoryAssigningParticipantsForParty(
+          partyId,
+          currentThreshold,
+          nextThreshold,
+          nextConfirmingParticipants,
+          forceFlags,
+          () => Map(syncPersistentState.lsid -> syncPersistentState.reassignmentStore),
+          () => ledgerApiStore.value.ledgerEnd,
+        )
+
+      override def checkInsufficientParticipantPermissionForSignatoryParty(
+          partyId: PartyId,
+          forceFlags: ForceFlags,
+      )(implicit
+          traceContext: TraceContext
+      ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
+        checkInsufficientParticipantPermissionForSignatoryParty(
+          partyId,
+          forceFlags,
+          acsInspections = () => Map(syncPersistentState.lsid -> syncPersistentState.acsInspection),
+        )
+    }
+    topologyManager
   }
 
   def createInitialTopologySnapshotValidator()(implicit

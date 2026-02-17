@@ -28,7 +28,7 @@ class JsonApiReferenceDocsTest extends AnyWordSpecLike with BaseTest with Checkp
   private val existingAsyncApi = File(JsonApiReferenceDocsTest.AsyncApiYaml).contentAsString
 
   "Canton JSON API v2" should {
-    "output golden openapi definitions " ignore {
+    "output golden openapi definitions" ignore {
       GenerateJSONApiDocs.regenerateAll()
     }
 

@@ -7,12 +7,12 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.auth.Authorizer
 import com.digitalasset.canton.config
+import com.digitalasset.canton.health.HealthChecks
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
 import com.digitalasset.canton.ledger.api.SubmissionIdGenerator
 import com.digitalasset.canton.ledger.api.auth.services.*
 import com.digitalasset.canton.ledger.api.grpc.GrpcHealthService
-import com.digitalasset.canton.ledger.api.health.HealthChecks
-import com.digitalasset.canton.ledger.api.util.TimeProvider
+import com.digitalasset.canton.ledger.api.util.{TimeProvider, TimeProviderType}
 import com.digitalasset.canton.ledger.api.validation.*
 import com.digitalasset.canton.ledger.localstore.api.{
   IdentityProviderConfigStore,

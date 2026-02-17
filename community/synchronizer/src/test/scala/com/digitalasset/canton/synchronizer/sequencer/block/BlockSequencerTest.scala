@@ -14,7 +14,7 @@ import com.digitalasset.canton.config.{
   TopologyConfig,
 }
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
-import com.digitalasset.canton.data.{CantonTimestamp, SequencingTimeBound}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.CantonPrettyPrinter
@@ -37,7 +37,6 @@ import com.digitalasset.canton.synchronizer.block.update.{
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
-import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameterConfig
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.store.InMemorySequencerStore
 import com.digitalasset.canton.synchronizer.sequencer.{BlockSequencerConfig, SequencerIntegration}
@@ -189,7 +188,7 @@ class BlockSequencerTest
         clock = new SimClock(loggerFactory = loggerFactory),
         blockRateLimitManager = defaultRateLimiter,
         orderingTimeFixMode = OrderingTimeFixMode.MakeStrictlyIncreasing,
-        SequencingTimeBound(SequencerNodeParameterConfig.DefaultSequencingTimeLowerBoundExclusive),
+        sequencingTimeLowerBoundExclusive = None,
         processingTimeouts = BlockSequencerTest.this.timeouts,
         logEventDetails = true,
         prettyPrinter = new CantonPrettyPrinter(

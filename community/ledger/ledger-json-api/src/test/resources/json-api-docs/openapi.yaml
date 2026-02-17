@@ -5231,6 +5231,15 @@ components:
 
             Optional - Traffic cost estimation is enabled by default if this field is not set
             To turn off cost estimation, set the CostEstimationHints#disabled field to true
+        hashingSchemeVersion:
+          description: |-
+            Optional - defaults to HASHING_SCHEME_VERSION_V2
+            The hashing scheme version to be used when building the hash
+          type: string
+          enum:
+          - HASHING_SCHEME_VERSION_UNSPECIFIED
+          - HASHING_SCHEME_VERSION_V2
+          - HASHING_SCHEME_VERSION_V3
     JsPrepareSubmissionResponse:
       title: JsPrepareSubmissionResponse
       description: '[docs-entry-end: HashingSchemeVersion]'

@@ -287,6 +287,10 @@ class ConfirmationRequestAndResponseProcessorTest
       syncCryptoApi,
       timeTracker,
       mediatorState,
+      // this test calls processRequest and processResponses directly,
+      // which is not affected by the asynchronous processing flag, which is handled in the enclosing scope
+      // calling these methods
+      asynchronousProcessing = true,
       loggerFactory,
       timeouts,
       BatchingConfig(),

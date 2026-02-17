@@ -115,7 +115,9 @@ final class SerializationDeserializationTest
 
         test(AcknowledgeRequest, version)
         test(AggregationRule, version)
-        test(ClosedEnvelope, version)
+        if (version < ProtocolVersion.v35) {
+          test(ClosedUncompressedEnvelope, version)
+        }
         test(SequencingSubmissionCost, version)
         testVersioned(ContractMetadata, version)(
           generators.protocol.contractMetadataArb(canHaveEmptyKey = true)
@@ -166,11 +168,7 @@ final class SerializationDeserializationTest
         // the generated recipient trees can be quite big, even they are already limited
         testContext(Batch, defaultMaxBytesToDecompress, version)
         test(SetTrafficPurchasedMessage, version)
-        testContext(
-          SubmissionRequest,
-          defaultMaxBytesToDecompress,
-          version,
-        )
+        testContext(SubmissionRequest, defaultMaxBytesToDecompress, version)
         testVersioned(SequencerConnections, version)
         testVersioned(CounterParticipantIntervalsBehind, version)
         test(GetTrafficStateForMemberRequest, version)

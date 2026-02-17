@@ -518,7 +518,7 @@ private[daml] class EncodeV2(minorLanguageVersion: LV.Minor) {
           builder.setQueryNByKey(PLF.Update.QueryNByKey.newBuilder().setTemplate(tmplId).build())
         case UpdateEmbedExpr(typ, body) =>
           builder.setEmbedExpr(PLF.Update.EmbedExpr.newBuilder().setType(typ).setBody(body))
-        case UpdateTryCatch(retTy, tryExpr, binder, catchExpr) =>
+        case UpdateTryCatchV1(retTy, tryExpr, binder, catchExpr) =>
           val b = PLF.Update.TryCatch.newBuilder()
           b.setReturnType(retTy)
           b.setTryExpr(tryExpr)

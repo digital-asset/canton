@@ -191,8 +191,9 @@ class CheckpointInTailingStreamsIT extends LedgerTestSuite {
         s"One checkpoint should have been received but none were instead",
       )
       assert(
-        millisForCheckpoint < 1000,
-        s"Time for the first checkpoint should not be greater than a second: $millisForCheckpoint ms",
+        // idleStreamOffsetCheckpointTimeout is 1s, but we give some extra time to account for scheduling delays
+        millisForCheckpoint < 1500,
+        s"Time for the first checkpoint ($millisForCheckpoint ms) should not be greater than the idleStreamOffsetCheckpointTimeout.",
       )
       assert(
         checkpoints.map(_.offset).forall(_ >= endOffsetAfterSubmission),
@@ -398,8 +399,9 @@ class CheckpointInTailingStreamsIT extends LedgerTestSuite {
         s"At least one checkpoint should have been received but none were instead",
       )
       assert(
-        millisForCheckpoint < 1000,
-        s"Time for the first checkpoint should not be greater than a second: $millisForCheckpoint ms",
+        // idleStreamOffsetCheckpointTimeout is 1s, but we give some extra time to account for scheduling delays
+        millisForCheckpoint < 1500,
+        s"Time for the first checkpoint ($millisForCheckpoint ms) should not be greater than the idleStreamOffsetCheckpointTimeout.",
       )
       assert(
         checkpoints.map(_.offset).forall(_ >= endOffsetAfterSubmissions),

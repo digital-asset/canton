@@ -51,7 +51,7 @@ object BlockInfo {
     initial.snapshot.latestBlockHeight,
     initial.snapshot.lastTs,
     initial.latestSequencerEventTimestamp,
-    None,
+    initial.latestPendingTopologyTransactionTimestamp,
   )
 }
 

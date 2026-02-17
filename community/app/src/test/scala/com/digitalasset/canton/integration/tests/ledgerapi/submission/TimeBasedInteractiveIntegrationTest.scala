@@ -134,6 +134,7 @@ final class TimeBasedInteractiveIntegrationTest
         Seq(command),
         disclosedContracts = Seq(passContract),
         minLedgerTimeAbs = Some(ledgerTimeSet),
+        hashingSchemeVersion = testedApiHashingSchemeVersion,
       )
       prepared.preparedTransaction.value.metadata.value.minLedgerEffectiveTime shouldBe Some(
         ledgerTimeSet.toEpochMilli * 1000
@@ -152,6 +153,7 @@ final class TimeBasedInteractiveIntegrationTest
         Seq(aliceE.partyId),
         Seq(createPassCmd(aliceE)),
         minLedgerTimeAbs = Some(simClock.now.toInstant.plusSeconds(20)),
+        hashingSchemeVersion = testedApiHashingSchemeVersion,
       )
       prepared.preparedTransaction.value.metadata.value.minLedgerEffectiveTime shouldBe None
       prepared.preparedTransaction.value.metadata.value.maxLedgerEffectiveTime shouldBe None
@@ -169,6 +171,7 @@ final class TimeBasedInteractiveIntegrationTest
             aliceE.toProtoPrimitive,
           ).create.commands.loneElement
         ),
+        hashingSchemeVersion = testedApiHashingSchemeVersion,
       )
       val signatures = Map(
         aliceE.partyId -> global_secret.sign(prepared.preparedTransactionHash, aliceE)
@@ -186,12 +189,12 @@ final class TimeBasedInteractiveIntegrationTest
       def test(maxRecordTimeAdjustment: FiniteDuration, expectSuccess: Boolean): Unit = {
 
         val maxRecordTime = simClock.now.add(maxRecordTimeAdjustment)
-        // TODO(#30463): Test using HashingSchemeVersion.V2 and HashingSchemeVersion.V3
         val prepared =
           cpn.ledger_api.interactive_submission.prepare(
             Seq(johnE),
             Seq(createCycleCommand(johnE, "test")),
             maxRecordTime = Some(maxRecordTime),
+            hashingSchemeVersion = testedApiHashingSchemeVersion,
           )
 
         val signatures = Map(
@@ -243,6 +246,7 @@ final class TimeBasedInteractiveIntegrationTest
             Seq(johnE),
             Seq(createCycleCommand(johnE, "test")),
             maxRecordTime = Some(maxRecordTime),
+            hashingSchemeVersion = testedApiHashingSchemeVersion,
           )
 
         val signatures = Map(
@@ -317,6 +321,7 @@ final class TimeBasedInteractiveIntegrationTest
             aliceE.toProtoPrimitive,
           ).create.commands.loneElement
         ),
+        hashingSchemeVersion = testedApiHashingSchemeVersion,
       )
       val signatures = Map(
         aliceE.partyId -> global_secret.sign(prepared.preparedTransactionHash, aliceE)
@@ -359,6 +364,7 @@ final class TimeBasedInteractiveIntegrationTest
           Seq(command),
           disclosedContracts = Seq(passContract),
           minLedgerTimeAbs = Some(ledgerTimeSet),
+          hashingSchemeVersion = testedApiHashingSchemeVersion,
         )
       val ledgerTimeUsed = Time
         .Timestamp(prepared.preparedTransaction.value.metadata.value.minLedgerEffectiveTime.value)
@@ -375,6 +381,7 @@ final class TimeBasedInteractiveIntegrationTest
         Seq(aliceE.partyId),
         Seq(command),
         minLedgerTimeAbs = Some(expected),
+        hashingSchemeVersion = testedApiHashingSchemeVersion,
       )
       val actual =
         Time.Timestamp(prepared.preparedTransaction.value.metadata.value.preparationTime).toInstant
@@ -400,6 +407,7 @@ final class TimeBasedInteractiveIntegrationTest
           Seq(command),
           disclosedContracts = Seq(passContract),
           minLedgerTimeAbs = Some(expected.toInstant),
+          hashingSchemeVersion = testedApiHashingSchemeVersion,
         )
 
       prepared.getPreparedTransaction.getMetadata.getMinLedgerEffectiveTime shouldBe expected.micros

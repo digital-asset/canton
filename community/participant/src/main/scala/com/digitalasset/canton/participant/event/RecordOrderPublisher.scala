@@ -36,7 +36,7 @@ import com.digitalasset.canton.util.{ErrorUtil, MonadUtil}
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 
 import java.util.concurrent.atomic.AtomicReference
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.ExecutionContext
 import scala.util.chaining.*
 import scala.util.{Failure, Success}
 
@@ -126,33 +126,42 @@ class RecordOrderPublisher private (
     * @param rcO
     *   The optional request counter for logging as RCs are more human-readable than timestamps.
     */
-  def tick(event: SequencedUpdate, sequencerCounter: SequencerCounter, rcO: Option[RequestCounter])(
-      implicit traceContext: TraceContext
-  ): FutureUnlessShutdown[Unit] =
-    synchronizeWithClosingF(functionFullName) {
-      if (event.recordTime > initTimestamp) {
-        rcO
-          .foreach(requestCounter =>
-            logger.debug(s"Schedule publication for request counter $requestCounter")
-          )
-        taskScheduler.scheduleTask(EventPublicationTask(event, sequencerCounter))
+  def tick(
+      event: SequencedUpdate,
+      sequencerCounter: SequencerCounter,
+      rcO: Option[RequestCounter],
+  )(implicit
+      traceContext: TraceContext
+  ): UnlessShutdown[Unit] =
+    synchronizeWithClosingSync(functionFullName) {
+      val recordTime = event.recordTime
+      if (recordTime > initTimestamp) {
+        rcO.foreach { requestCounter =>
+          logger.debug(s"Schedule publication for request counter $requestCounter")
+        }
         logger.debug(
-          s"Observing time ${event.recordTime} for sequencer counter $sequencerCounter for publishing (with event:$event, requestCounterO:$rcO)"
+          s"Publishing event for record time ${event.recordTime} and sequencer counter $sequencerCounter. (event:$event, requestCounterO:$rcO)"
         )
-        taskScheduler.addTick(sequencerCounter, event.recordTime)
-        // this adds backpressure from indexer queue to protocol processing:
-        //   indexer pekko source queue back-pressures via offer Future,
-        //   this propagates via in RecoveringQueue,
-        //   which propagates here in the taskScheduler's SimpleExecutionQueue,
-        //   which bubble up exactly here: waiting for all the possible event enqueueing to happen after the tick.
-        taskScheduler.flush()
+        taskScheduler.scheduleTask(EventPublicationTask(event, sequencerCounter))
+        taskScheduler.addTick(sequencerCounter, recordTime)
       } else {
         logger.debug(
-          s"Skipping tick at sequencerCounter:$sequencerCounter timestamp:${event.recordTime} (publication of event $event)"
+          s"Skipping tick at sequencerCounter:$sequencerCounter timestamp:$recordTime"
         )
-        Future.unit
       }
     }
+
+  /** Add backpressure from the indexer queue to protocol processing. The returned future completes
+    * if all currently possible publication tasks have completed.
+    *
+    * In detail:
+    *   - The indexer pekko source queue back-pressures via the offer Future
+    *   - This propagates via in [[com.digitalasset.canton.util.PekkoUtil.RecoveringQueue]]
+    *   - This propagates in the `taskScheduler`'s
+    *     [[com.digitalasset.canton.util.SimpleExecutionQueue]].
+    */
+  def backpressure(): FutureUnlessShutdown[Unit] =
+    FutureUnlessShutdown.outcomeF(taskScheduler.flush())
 
   /** Schedule a floating event, if the current synchronizer time is earlier than timestamp.
     * @param timestamp
@@ -367,7 +376,7 @@ class RecordOrderPublisher private (
   )(implicit val traceContext: TraceContext)
       extends SequencedPublicationTask {
 
-    override val timestamp: CantonTimestamp = event.recordTime
+    override def timestamp: CantonTimestamp = event.recordTime
 
     override def perform(): FutureUnlessShutdown[Unit] =
       publishOrBuffer(event, s"event with synchronizer index ${event.synchronizerIndex}")

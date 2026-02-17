@@ -81,6 +81,8 @@ final class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with HasTe
       }
 
       withClue("Second, perform Offline Party Replication") {
+        val offsetBeforePartyUpdate = participant1.ledger_api.state.end()
+
         // Authorize alice on participant2, with onboarding flag set.
         participant2.topology.party_to_participant_mappings.propose_delta(
           party = alice.partyId,
@@ -88,21 +90,20 @@ final class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with HasTe
           store = fixture.newPSId,
           requiresPartyToBeOnboarded = true,
         )
-        participant2.synchronizers.disconnect_all()
         alice.topology.party_to_participant_mappings.propose_delta(
           participant1,
           adds = Seq(participant2.id -> ParticipantPermission.Submission),
           store = fixture.newPSId,
           requiresPartyToBeOnboarded = true,
         )
-        val beforeExportOffset = participant1.ledger_api.state.end()
+        participant2.synchronizers.disconnect_all()
 
         // Physically export and import
         participant1.parties.export_party_acs(
           party = alice,
           synchronizerId = fixture.newPSId,
           targetParticipantId = participant2.id,
-          beginOffsetExclusive = beforeExportOffset,
+          beginOffsetExclusive = offsetBeforePartyUpdate,
           exportFilePath = acsSnapshotFile.path.toString,
         )
         participant2.parties.import_party_acsV2(acsSnapshotFile.path.toString, fixture.newPSId)

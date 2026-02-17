@@ -13,7 +13,7 @@ import com.digitalasset.canton.config.{
   TopologyConfig,
 }
 import com.digitalasset.canton.crypto.*
-import com.digitalasset.canton.data.{CantonTimestamp, SequencingTimeBound}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.protocol.TestSynchronizerParameters
@@ -26,7 +26,6 @@ import com.digitalasset.canton.synchronizer.block.update.BlockUpdateGeneratorImp
 import com.digitalasset.canton.synchronizer.metrics.{SequencerMetrics, SequencerTestMetrics}
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
-import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameterConfig
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   InvalidAcknowledgementSignature,
   InvalidAcknowledgementTimestamp,
@@ -204,6 +203,7 @@ class SequencerStateManagerTest
           ),
           None,
           None,
+          None,
         )
 
       "resolve all earlier valid acknowledgements" onlyRunWhen (!testedUseUnifiedSequencer) in withEnv(
@@ -369,7 +369,7 @@ class SequencerStateManagerTest
       sequencer1,
       defaultRateLimiter,
       orderingTimeFixMode = OrderingTimeFixMode.MakeStrictlyIncreasing,
-      SequencingTimeBound(SequencerNodeParameterConfig.DefaultSequencingTimeLowerBoundExclusive),
+      sequencingTimeLowerBoundExclusive = None,
       producePostOrderingTopologyTicks = false,
       SequencerTestMetrics,
       BatchingConfig(),

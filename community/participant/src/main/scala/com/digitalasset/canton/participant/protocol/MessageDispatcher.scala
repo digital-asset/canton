@@ -5,9 +5,13 @@ package com.digitalasset.canton.participant.protocol
 
 import cats.data.Chain
 import cats.syntax.alternative.*
+import cats.syntax.foldable.*
+import cats.syntax.functor.*
 import cats.syntax.functorFilter.*
+import cats.syntax.parallel.*
 import cats.{Foldable, Monoid}
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.data.ViewType.{
   AssignmentViewType,
   TransactionViewType,
@@ -15,11 +19,21 @@ import com.digitalasset.canton.data.ViewType.{
 }
 import com.digitalasset.canton.data.{CantonTimestamp, ViewType}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.ledger.participant.state.Update.SequencerIndexMoved
+import com.digitalasset.canton.ledger.participant.state.{SequencedEventUpdate, SequencedUpdate}
+import com.digitalasset.canton.lifecycle.{
+  FutureUnlessShutdown,
+  PromiseUnlessShutdown,
+  PromiseUnlessShutdownFactory,
+}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ConnectedSynchronizerMetrics
+import com.digitalasset.canton.participant.protocol.MessageDispatcher.TicksAfter.{
+  EventPublicationData,
+  FutureEventPublication,
+}
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
 import com.digitalasset.canton.participant.protocol.reassignment.{
   AssignmentProcessor,
@@ -31,6 +45,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
 }
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
+import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.select
 import com.digitalasset.canton.protocol.{
@@ -47,7 +62,7 @@ import com.digitalasset.canton.topology.processing.{SequencedTime, TopologyTrans
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{Checked, ErrorUtil}
+import com.digitalasset.canton.util.{Checked, ErrorUtil, OptionUtil}
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 import com.google.common.annotations.VisibleForTesting
 import com.google.rpc.status.Status
@@ -68,12 +83,13 @@ trait MessageDispatcher { this: NamedLogging =>
   protected def participantId: ParticipantId
 
   protected type ProcessingAsyncResult
-  protected implicit def processingAsyncResultMonoid: Monoid[ProcessingAsyncResult]
+  protected def processingAsyncResultMonoid: Monoid[ProcessingAsyncResult]
+  @inline private[this] implicit def processingAsyncResultMonoidInternal
+      : Monoid[ProcessingAsyncResult] =
+    processingAsyncResultMonoid
 
-  protected type ProcessingResult = FutureUnlessShutdown[ProcessingAsyncResult]
-  protected def doProcess(
-      kind: MessageKind
-  ): ProcessingResult
+  protected type ProcessingResult = FutureUnlessShutdown[(ProcessingAsyncResult, TicksAfter)]
+  protected def doProcess(kind: MessageKind): ProcessingResult
   protected def pureProcessingResult: ProcessingResult = Monoid[ProcessingResult].empty
 
   protected def requestTracker: RequestTracker
@@ -88,6 +104,7 @@ trait MessageDispatcher { this: NamedLogging =>
   protected def badRootHashMessagesRequestProcessor: BadRootHashMessagesRequestProcessor
   protected def inFlightSubmissionSynchronizerTracker: InFlightSubmissionSynchronizerTracker
   protected def metrics: ConnectedSynchronizerMetrics
+  protected def promiseFactory: PromiseUnlessShutdownFactory
 
   implicit protected val ec: ExecutionContext
 
@@ -126,7 +143,7 @@ trait MessageDispatcher { this: NamedLogging =>
 
   private def tryProtocolProcessor(
       viewType: ViewType
-  )(implicit traceContext: TraceContext): RequestProcessor[viewType.type] =
+  )(implicit traceContext: TraceContext): RequestProcessor[viewType.type, SequencedEventUpdate] =
     requestProcessors
       .get(viewType)
       .getOrElse(
@@ -324,10 +341,21 @@ trait MessageDispatcher { this: NamedLogging =>
           goodRequest.mediator,
           isReceipt,
         )
+        val publishUpdatePromise = promiseFactory.mkPromise[Option[SequencedEventUpdate]](
+          s"Publication promise for request counter $rc / id $ts",
+          // No need for supervision: This promise delays the ticking of the record order publisher
+          // whose task scheduler monitors missing ticks.
+          FutureSupervisor.Noop,
+        )
+        val publishUpdateHandle = new PublishUpdateViaRecordOrderPublisherImpl(publishUpdatePromise)
         doProcess(
           RequestKind(
             goodRequest.rootHashMessage.viewType,
-            () => processor.processRequest(ts, rc, sc, batch),
+            publishUpdatePromise.futureUS.map { eventO =>
+              val event = eventO.getOrElse(sequencerIndexMovedEvent(ts))
+              EventPublicationData(event, rc)
+            },
+            () => processor.processRequest(ts, rc, sc, batch, publishUpdateHandle),
           )
         )
       }
@@ -622,6 +650,11 @@ trait MessageDispatcher { this: NamedLogging =>
       ).discard
     }
 
+  protected def sequencerIndexMovedEvent(timestamp: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): SequencerIndexMoved =
+    SequencerIndexMoved(synchronizerId = synchronizerId.logical, recordTime = timestamp)
+
   protected def alarm(sc: SequencerCounter, ts: CantonTimestamp, msg: String)(implicit
       traceContext: TraceContext
   ): Unit =
@@ -710,18 +743,222 @@ trait MessageDispatcher { this: NamedLogging =>
 
 private[participant] object MessageDispatcher {
 
-  final case class TickDecision(
-      tickTopologyProcessor: Boolean = true,
-      tickRequestTracker: Boolean = true,
-      tickRecordOrderPublisher: Boolean = true,
-  ) {
+  private final class PublishUpdateViaRecordOrderPublisherImpl(
+      promise: PromiseUnlessShutdown[Option[SequencedEventUpdate]]
+  ) extends PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate] {
+    override def apply(event: Option[SequencedEventUpdate]): Unit = promise.outcome_(event)
+  }
 
-    /** Not ticking always wins */
-    def combine(other: TickDecision): TickDecision = TickDecision(
-      tickTopologyProcessor = tickTopologyProcessor && other.tickTopologyProcessor,
-      tickRequestTracker = tickRequestTracker && other.tickRequestTracker,
-      tickRecordOrderPublisher = tickRecordOrderPublisher && other.tickRecordOrderPublisher,
+  /** A [[TickMoment]] defines the earliest point in time after which it is safe to tick a given
+    * tracker from the perspective of a particular strand of message processing.
+    */
+  sealed trait TickMoment extends Product with Serializable
+
+  object TickMoment {
+
+    /** Indicates that the tracker may be ticked as soon as the synchronous part of processing a
+      * particular strand of envelopes has finished, i.e., when the outer future in the
+      * [[com.digitalasset.canton.sequencing.HandlerResult]] completes.
+      *
+      * The asynchronous processing of the strand must not schedule anything on the tracker.
+      * Processing of the strand must not internally tick the tracker.
+      *
+      * This moment is not suitable for trackers that matter for crash recovery, as we must tick
+      * such a tracker only when the whole processing for the strand of envelopes has finished.
+      */
+    case object AfterSynchronous extends TickMoment
+
+    /** Inidcates that the tracker may be ticked when both the synchronous and asynchronous parts of
+      * processing a particular strand of envelopes have finished, i.e., when the outer and the
+      * inner future in the [[com.digitalasset.canton.sequencing.HandlerResult]] complete.
+      *
+      * Processing of the strand must not internally tick the tracker. This is the only
+      * [[TickMoment]] suitable for trackers that matter for crash recovery.
+      */
+    case object AfterAsynchronous extends TickMoment
+
+    /** Indicates that the strand processing may internally tick the tracker. At most one strand of
+      * envelopes in a single batch may use this moment for any given tracker.
+      *
+      * The message dispatcher will nevertheless tick the tracker again after the asynchronous
+      * processing of the strand has finished to make sure that the tick is not lost.
+      */
+    case object TickMayHappenDuringProcessing extends TickMoment
+  }
+
+  /** Defines the [[TickMoment]]s for the three Canton trackers for a particular strand of envelopes
+    * within a batch of envelopes.
+    */
+  final case class TickDecision(
+      tickTopologyProcessor: TickMoment,
+      tickRequestTracker: TickMoment,
+  )
+
+  object TickDecision {
+    val tickSynchronous: TickDecision = TickDecision(
+      tickTopologyProcessor = TickMoment.AfterSynchronous,
+      tickRequestTracker = TickMoment.AfterSynchronous,
     )
+  }
+
+  /** Indicates that a tracker can be ticked after `tickAfter` completes.
+    *
+    * @param exclusive
+    *   At most one strand of messages may have the exclusive flag set for any given tracker. Must
+    *   be set if the tracker may be ticked internally by the corresponding strand of processing.
+    */
+  final case class TickAfter[+A](exclusive: Boolean, tickAfter: FutureUnlessShutdown[A])
+
+  /** Aggregates the [[TickDecision]]s for different strands of envelopes within a batch of
+    * envelopes. For example, if a batch of envelopes contains a confirmation request, an ACS
+    * commitment, and a traffic control transaction, then there are three strands of envelopes, and
+    * three elements in each chain, one for each strand.
+    *
+    * The corresponding tracker shall be ticked if all futures have completed normally. A tick does
+    * not happen if a future fails or completes with
+    * [[com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown]] as these results
+    * indicate that the corresponding strand processing may not have finished and processing must
+    * stop anyway.
+    *
+    * Importantly, at most one [[TickAfter]] for each tracker may set [[TickAfter.exclusive]] to
+    * indicate that it *may* tick the tracker internally. The [[MessageDispatcher]] ticks the
+    * tracker again, because it is typically very hard to ensure that strand processing ticks a
+    * given tracker in all possible code paths. Ticking must therefore be idempotent.
+    */
+  final case class TicksAfter(
+      topologyProcessor: Chain[TickAfter[?]],
+      requestTracker: Chain[TickAfter[?]],
+      recordOrderPublisher: Chain[TickAfter[FutureEventPublication]],
+  ) {
+    def combine(other: TicksAfter): TicksAfter = TicksAfter(
+      topologyProcessor = topologyProcessor ++ other.topologyProcessor,
+      requestTracker = requestTracker ++ other.requestTracker,
+      recordOrderPublisher = recordOrderPublisher ++ other.recordOrderPublisher,
+    )
+
+    def tickTopologyProcessorAfter(implicit
+        errorLoggingContext: ErrorLoggingContext,
+        ec: ExecutionContext,
+    ): FutureUnlessShutdown[Unit] =
+      TicksAfter.toFuture_(topologyProcessor, "topology processor")
+
+    def tickRequestTrackerAfter(implicit
+        errorLoggingContext: ErrorLoggingContext,
+        ec: ExecutionContext,
+    ): FutureUnlessShutdown[Unit] =
+      TicksAfter.toFuture_(requestTracker, "request tracker")
+
+    def tickRecordOrderPublisherAfter(implicit
+        errorLoggingContext: ErrorLoggingContext,
+        ec: ExecutionContext,
+    ): FutureUnlessShutdown[FutureEventPublication] = {
+      implicit val monoid: Monoid[FutureEventPublication] =
+        FutureEventPublication.monoidFutureEventPublication
+      TicksAfter.toFuture(recordOrderPublisher, "record order publisher")
+    }
+  }
+
+  object TicksAfter {
+    final case class EventPublicationData(
+        event: SequencedUpdate,
+        requestCounter: RequestCounter,
+    )
+
+    final case class FutureEventPublication(
+        futureEventO: Option[FutureUnlessShutdown[EventPublicationData]]
+    )
+
+    object FutureEventPublication {
+      val empty: FutureEventPublication = FutureEventPublication(None)
+
+      private[TicksAfter] val monoidFutureEventPublication: Monoid[FutureEventPublication] =
+        new Monoid[FutureEventPublication] {
+          override def empty: FutureEventPublication = FutureEventPublication.empty
+
+          override def combine(
+              x: FutureEventPublication,
+              y: FutureEventPublication,
+          ): FutureEventPublication = {
+            val futureEventO = OptionUtil.mergeWith(x.futureEventO, y.futureEventO)((_, _) =>
+              throw new IllegalStateException(
+                s"Combining two event publication data items should not happen"
+              )
+            )
+            FutureEventPublication(futureEventO)
+          }
+        }
+    }
+
+    val empty: TicksAfter = TicksAfter(Chain.empty, Chain.empty, Chain.empty)
+
+    def single(
+        topologyProcessor: TickAfter[?],
+        requestTracker: TickAfter[?],
+        recordOrderPublisher: TickAfter[FutureEventPublication],
+    ): TicksAfter = TicksAfter(
+      Chain.one(topologyProcessor),
+      Chain.one(requestTracker),
+      Chain.one(recordOrderPublisher),
+    )
+
+    implicit val monoidTicksAfter: Monoid[TicksAfter] = new Monoid[TicksAfter] {
+      override def empty: TicksAfter = TicksAfter.empty
+
+      override def combine(x: TicksAfter, y: TicksAfter): TicksAfter = x.combine(y)
+    }
+
+    def fromTickDecision[A](
+        tickDecision: TickDecision,
+        asyncF: AsyncResult[A],
+        sequencedEventUpdate: Option[FutureEventPublication],
+    )(implicit ec: ExecutionContext): TicksAfter = {
+      def fromTickMoment(tickMoment: TickMoment): TickAfter[?] =
+        tickMoment match {
+          case TickMoment.AfterSynchronous =>
+            TickAfter(exclusive = false, FutureUnlessShutdown.unit)
+          case TickMoment.AfterAsynchronous => TickAfter(exclusive = false, asyncF.unwrap)
+          case TickMoment.TickMayHappenDuringProcessing =>
+            TickAfter(exclusive = true, asyncF.unwrap)
+        }
+
+      val tickAfterROP = {
+        val futureEventPublication = sequencedEventUpdate.getOrElse(FutureEventPublication.empty)
+        TickAfter(exclusive = false, asyncF.unwrap.map(_ => futureEventPublication))
+      }
+
+      TicksAfter.single(
+        fromTickMoment(tickDecision.tickTopologyProcessor),
+        fromTickMoment(tickDecision.tickRequestTracker),
+        tickAfterROP,
+      )
+    }
+
+    private def toFuture_(ticksAfter: Chain[TickAfter[?]], tracker: String)(implicit
+        errorLoggingContext: ErrorLoggingContext,
+        ec: ExecutionContext,
+    ): FutureUnlessShutdown[Unit] = {
+      checkExclusive(ticksAfter, tracker)
+      ticksAfter.parTraverse_(_.tickAfter)
+    }
+
+    private def toFuture[A](ticksAfter: Chain[TickAfter[A]], tracker: String)(implicit
+        errorLoggingContext: ErrorLoggingContext,
+        ec: ExecutionContext,
+        A: Monoid[A],
+    ): FutureUnlessShutdown[A] = {
+      checkExclusive(ticksAfter, tracker)
+      ticksAfter.parTraverse(_.tickAfter).map(_.fold)
+    }
+
+    private def checkExclusive(ticksAfter: Chain[TickAfter[?]], tracker: String)(implicit
+        errorLoggingContext: ErrorLoggingContext
+    ): Unit = {
+      val countExclusive = ticksAfter.foldLeft(0)((sum, tp) => sum + (if (tp.exclusive) 1 else 0))
+      ErrorUtil.requireArgument(
+        countExclusive <= 1,
+        s"At most one exclusive tick is allowed, found $countExclusive for $tracker",
+      )
+    }
   }
 
   type ParticipantTopologyProcessor = (
@@ -735,8 +972,10 @@ private[participant] object MessageDispatcher {
     /* A bit of a round-about way to make the Scala compiler recognize that pattern matches on `viewType` refine
      * the type Processor.
      */
-    protected def getInternal[P](viewType: ViewType { type Processor = P }): Option[P]
-    def get(viewType: ViewType): Option[viewType.Processor] =
+    protected def getInternal[P[_]](viewType: ViewType {
+      type Processor[Event] = P[Event]
+    }): Option[P[SequencedEventUpdate]]
+    def get(viewType: ViewType): Option[viewType.Processor[SequencedEventUpdate]] =
       getInternal[viewType.Processor](viewType)
   }
 
@@ -774,7 +1013,11 @@ private[participant] object MessageDispatcher {
   final case class TopologyTransaction(run: () => HandlerResult) extends MessageKind
   final case class TrafficControlTransaction(runSync: () => FutureUnlessShutdown[Unit])
       extends MessageKind
-  final case class RequestKind(viewType: ViewType, run: () => HandlerResult) extends MessageKind {
+  final case class RequestKind(
+      viewType: ViewType,
+      futureEventPublication: FutureUnlessShutdown[EventPublicationData],
+      run: () => HandlerResult,
+  ) extends MessageKind {
     override protected def pretty: Pretty[RequestKind] = prettyOfParam(_.viewType)
   }
   final case class ResultKind(viewType: ViewType, run: () => HandlerResult) extends MessageKind {
@@ -783,7 +1026,6 @@ private[participant] object MessageDispatcher {
   final case class AcsCommitment(run: () => HandlerResult) extends MessageKind
   final case class MalformedMessage(run: () => FutureUnlessShutdown[Unit]) extends MessageKind
   final case class UnspecifiedMessageKind(run: () => FutureUnlessShutdown[Unit]) extends MessageKind
-  final case class CausalityMessageKind(run: () => FutureUnlessShutdown[Unit]) extends MessageKind
   final case class DeliveryMessageKind(run: () => FutureUnlessShutdown[Unit]) extends MessageKind
 
   @VisibleForTesting
@@ -815,6 +1057,7 @@ private[participant] object MessageDispatcher {
         inFlightSubmissionSynchronizerTracker: InFlightSubmissionSynchronizerTracker,
         loggerFactory: NamedLoggerFactory,
         metrics: ConnectedSynchronizerMetrics,
+        promiseFactory: PromiseUnlessShutdownFactory,
     )(implicit ec: ExecutionContext, tracer: Tracer): T
 
     def create(
@@ -833,9 +1076,12 @@ private[participant] object MessageDispatcher {
         inFlightSubmissionSynchronizerTracker: InFlightSubmissionSynchronizerTracker,
         loggerFactory: NamedLoggerFactory,
         metrics: ConnectedSynchronizerMetrics,
+        promiseFactory: PromiseUnlessShutdownFactory,
     )(implicit ec: ExecutionContext, tracer: Tracer): T = {
       val requestProcessors = new RequestProcessors {
-        override def getInternal[P](viewType: ViewType { type Processor = P }): Option[P] =
+        override def getInternal[P[_]](
+            viewType: ViewType { type Processor[Event] = P[Event] }
+        ): Option[P[SequencedEventUpdate]] =
           viewType match {
             case AssignmentViewType => Some(assignmentProcessor)
             case UnassignmentViewType => Some(unassignmentProcessor)
@@ -858,6 +1104,7 @@ private[participant] object MessageDispatcher {
         inFlightSubmissionSynchronizerTracker,
         loggerFactory,
         metrics,
+        promiseFactory,
       )
     }
   }

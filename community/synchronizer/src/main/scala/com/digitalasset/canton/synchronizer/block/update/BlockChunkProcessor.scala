@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.block.update
 
 import cats.syntax.alternative.*
 import cats.syntax.functor.*
-import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
@@ -423,16 +422,33 @@ final class BlockChunkProcessor(
                       }
                       .value
                 )
-                topologyOrSequencingSnapshot <- topologySnapshotOrErrO match {
-                  case Some(Right(topologySnapshot)) =>
+                (topologyTimestampFromRequestError, topologySnapshotFromRequestO) =
+                  topologySnapshotOrErrO.separate
+                /* In PV34<= The sequencer verifies submission request signatures using a topology snapshot taken at
+                 * either the sequencing time or at the `topologyTimestamp` provided in the request.
+                 * For example confirmation responses/results set this timestamp to the referenced confirmation request
+                 * time.
+                 * However, this is incorrect and is fixed for PV >= 35. Submission request signatures are always
+                 * created using an approximate snapshot and must therefore be verified using the sequencing time.
+                 * This keeps signing and verification timestamps aligned. Otherwise, delayed confirmation
+                 * responses/results may cause the session key (when enabled) to appear expired at verification time
+                 * and lead to valid requests being rejected.
+                 */
+                snapshotToValidateSubmissionRequest <- topologySnapshotFromRequestO match {
+                  case Some(ts) if protocolVersion < ProtocolVersion.v35 =>
                     logger.debug(
                       s"Block $height, chunk $index, request $requestIndex sequenced at $sequencingTimestamp: " +
                         "obtained and using topology snapshot at successfully validated request-specified " +
                         s"topology timestamp ${submissionRequest.topologyTimestamp}; " +
                         s"latestSequencerEventTimestamp: $latestSequencerEventTimestamp"
                     )
-                    FutureUnlessShutdown.pure(topologySnapshot)
+                    FutureUnlessShutdown.pure(ts)
                   case _ =>
+                    logger.debug(
+                      s"Block $height, chunk $index, request $requestIndex sequenced at $sequencingTimestamp: " +
+                        "obtained and using topology snapshot at request sequencing time; " +
+                        s"latestSequencerEventTimestamp: $latestSequencerEventTimestamp"
+                    )
                     SyncCryptoClient
                       .getSnapshotForTimestamp(
                         synchronizerSyncCryptoApi,
@@ -440,24 +456,15 @@ final class BlockChunkProcessor(
                         latestSequencerEventTimestamp,
                         warnIfApproximate,
                       )
-                      .map { snapshot =>
-                        logger.debug(
-                          s"Block $height, chunk $index, request $requestIndex sequenced at $sequencingTimestamp: " +
-                            "no request-specified topology timestamp or its validation failed), " +
-                            "so obtained and using topology snapshot at request sequencing time; " +
-                            s"latestSequencerEventTimestamp: $latestSequencerEventTimestamp"
-                        )
-                        snapshot
-                      }
                 }
-                topologyTimestampError = topologySnapshotOrErrO.mapFilter(_.swap.toOption)
                 sequencedValidatedSubmission <- {
                   submissionRequestValidator
                     .performIndependentValidations(
                       sequencingTimestamp,
                       signedSubmissionRequest,
-                      topologyOrSequencingSnapshot,
-                      topologyTimestampError,
+                      snapshotToValidateSubmissionRequest,
+                      topologySnapshotFromRequestO,
+                      topologyTimestampFromRequestError,
                     )(traceContext, executionContext)
                     .value
                     .run
@@ -466,8 +473,7 @@ final class BlockChunkProcessor(
                         sequencingTimestamp,
                         signedSubmissionRequest,
                         orderingSequencerId,
-                        topologyOrSequencingSnapshot,
-                        topologyTimestampError,
+                        topologyTimestampFromRequestError,
                         trafficConsumption,
                         errorOrResolvedGroups,
                       )(traceContext)

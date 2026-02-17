@@ -303,16 +303,16 @@ object TopologyTransactionRejection {
     }
 
     final case class InvalidSynchronizerSuccessor(
-        currentSynchronizerId: PhysicalSynchronizerId,
         successorSynchronizerId: PhysicalSynchronizerId,
+        inStoreSuccessorSynchronizerId: PhysicalSynchronizerId,
     ) extends TopologyTransactionRejection {
       override def asString: String =
-        s"The declared successor $successorSynchronizerId of synchronizer $currentSynchronizerId is not valid."
+        s"The declared successor $successorSynchronizerId is not greater than prior synchronizer $inStoreSuccessorSynchronizerId."
 
       override def toTopologyManagerError(implicit elc: ErrorLoggingContext): TopologyManagerError =
-        TopologyManagerError.InvalidSynchronizerSuccessor.Reject.conflictWithCurrentPSId(
-          currentSynchronizerId,
+        TopologyManagerError.InvalidSynchronizerSuccessor.Reject.conflictWithPreviousAnnouncement(
           successorSynchronizerId,
+          inStoreSuccessorSynchronizerId,
         )
     }
 

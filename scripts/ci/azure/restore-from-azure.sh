@@ -34,7 +34,7 @@ for key in "${array[@]}"; do
  	else 
  		echo "Copying file ${TAR_NAME}"
 		azcopy copy "${ORB_CONTAINER}/${TAR_NAME}" "${TEMP_FILE_NAME}" --log-level ERROR --output-level essential
-		tar xPvzf "${TEMP_FILE_NAME}" 
+		tar xPzf "${TEMP_FILE_NAME}"
 		rm "${TEMP_FILE_NAME}"  
 		echo "Removed ${TAR_NAME} from local system"
 		echo "Restore complete .... Exiting"

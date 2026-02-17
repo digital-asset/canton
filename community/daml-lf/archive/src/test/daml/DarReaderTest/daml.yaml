@@ -7,9 +7,11 @@ override-components:
   daml-script:
     version: $DAML_VERSION
 name: DarReaderTest
-version: 3.5.0
-dependencies:
-  - daml-prim
-  - daml-stdlib
-parties: [Alice, Bob]
+parties:
+- Alice
+- Bob
 source: .
+version: 1.0.0
+dependencies:
+- daml-prim
+- daml-stdlib

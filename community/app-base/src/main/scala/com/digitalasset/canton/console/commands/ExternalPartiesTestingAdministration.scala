@@ -45,7 +45,7 @@ import com.digitalasset.canton.topology.{
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.EitherTUtil
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.canton.{SynchronizerAlias, config}
 import com.google.common.annotations.VisibleForTesting
 
@@ -87,7 +87,7 @@ private[canton] class ExternalPartiesTestingAdministration(
       // External party specifics
       keysCount: PositiveInt = PositiveInt.one,
       keysThreshold: PositiveInt = PositiveInt.one,
-  ): ExternalParty = {
+  )(implicit preferredHashingSchemeVersion: HashingSchemeVersion): ExternalParty = {
 
     val onboardingET = for {
       psid <- EitherT
@@ -99,6 +99,7 @@ private[canton] class ExternalPartiesTestingAdministration(
         synchronizer,
         keysCount = keysCount,
         keysThreshold = keysThreshold,
+        preferredHashingSchemeVersion = preferredHashingSchemeVersion,
       )
       (onboardingTxs, externalParty) = onboardingData
 
@@ -147,6 +148,14 @@ private[canton] class ExternalPartiesTestingAdministration(
           .distinct
           .headOption match {
           case Some(singleSynchronizer) =>
+            val preferredHashingSchemeVersion = reference.synchronizers
+              .list_registered()
+              .collectFirst { case (_, KnownPhysicalSynchronizerId(psid), _) =>
+                HashingSchemeVersion
+                  .getHashingSchemeVersionsForProtocolVersion(psid.protocolVersion)
+                  .max1
+              }
+              .getOrElse(HashingSchemeVersion.V2)
             val updatedParty = reference.topology.party_to_participant_mappings
               .list(
                 singleSynchronizer,
@@ -159,6 +168,7 @@ private[canton] class ExternalPartiesTestingAdministration(
                   result.party,
                   keys.map(_.fingerprint).toSeq,
                   threshold,
+                  preferredHashingSchemeVersion,
                 )
               }
               .getOrElse(result.party)
@@ -286,6 +296,7 @@ private[canton] class ExternalPartiesTestingAdministration(
       keysThreshold: PositiveInt = PositiveInt.one,
       decentralizedNamespaceOwners: Set[Namespace] = Set.empty,
       namespaceThreshold: PositiveInt = PositiveInt.one,
+      preferredHashingSchemeVersion: HashingSchemeVersion = HashingSchemeVersion.V2,
   ): EitherT[FutureUnlessShutdown, String, (OnboardingTransactions, ExternalParty)] = {
     // In the simple case of a non-decentralized party with a single key we can use the generate endpoint
     if (decentralizedNamespaceOwners.isEmpty && keysCount == PositiveInt.one) {
@@ -325,7 +336,12 @@ private[canton] class ExternalPartiesTestingAdministration(
         )
       } yield (
         bundledTransaction,
-        ExternalParty(partyId, NonEmpty.mk(Seq, partyKey.fingerprint), keysThreshold),
+        ExternalParty(
+          partyId,
+          NonEmpty.mk(Seq, partyKey.fingerprint),
+          keysThreshold,
+          preferredHashingSchemeVersion,
+        ),
       )
     } else {
       for {
@@ -427,7 +443,12 @@ private[canton] class ExternalPartiesTestingAdministration(
         )
       } yield (
         onboardingTransactions,
-        ExternalParty(partyId, protocolSigningKeys.map(_.fingerprint), keysThreshold),
+        ExternalParty(
+          partyId,
+          protocolSigningKeys.map(_.fingerprint),
+          keysThreshold,
+          preferredHashingSchemeVersion,
+        ),
       )
     }
   }

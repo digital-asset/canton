@@ -265,7 +265,7 @@ class ParticipantPartiesAdministrationGroup(
       case PartyKind.Local =>
         reference.parties
           .list(filterParty, filterParticipant, synchronizerIds, asOf, limit)
-      case PartyKind.External =>
+      case PartyKind.External(_) =>
         external.list(
           filterParty,
           filterParticipant,
@@ -298,13 +298,13 @@ class ParticipantPartiesAdministrationGroup(
           synchronizeParticipants = synchronizeParticipants,
           synchronize = synchronize,
         )
-      case PartyKind.External =>
+      case PartyKind.External(preferredHashingSchemeVersion) =>
         external.enable(
           name,
           synchronizer = synchronizer,
           synchronizeParticipants = synchronizeParticipants,
           synchronize = synchronize,
-        )
+        )(preferredHashingSchemeVersion)
     }
 
     /** Enable an existing party hosted on `reference`. Unlike `enable`, this command assumes the

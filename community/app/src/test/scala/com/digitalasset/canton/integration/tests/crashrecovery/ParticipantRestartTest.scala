@@ -94,7 +94,6 @@ import com.digitalasset.canton.participant.metrics.ParticipantTestMetrics
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
 import com.digitalasset.canton.participant.protocol.{RequestJournal, TransactionProcessor}
 import com.digitalasset.canton.participant.pruning.PruningProcessor
-import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.store.{
   ParticipantNodePersistentState,
   StoredSynchronizerConnectionConfig,
@@ -455,7 +454,6 @@ abstract class ParticipantRestartTest
             (staticSynchronizerParameters: StaticSynchronizerParameters) =>
               SynchronizerCrypto(crypto, staticSynchronizerParameters),
             env.environment.clock,
-            mock[PackageMetadataView],
             Eval.now(pnps.ledgerApiStore),
             Eval.now(pnps.contractStore),
             ParticipantTestMetrics,

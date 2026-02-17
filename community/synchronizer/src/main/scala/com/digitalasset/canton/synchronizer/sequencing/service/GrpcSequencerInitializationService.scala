@@ -43,7 +43,6 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   OnboardingStateForSequencerV2,
   SequencerSnapshot,
 }
-import com.digitalasset.canton.topology.TopologyManagerError
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
 import com.digitalasset.canton.topology.store.StoredTopologyTransaction.GenericStoredTopologyTransaction
 import com.digitalasset.canton.topology.store.StoredTopologyTransactions.GenericStoredTopologyTransactions
@@ -52,10 +51,13 @@ import com.digitalasset.canton.topology.store.{
   StoredTopologyTransactions,
 }
 import com.digitalasset.canton.topology.transaction.{
+  LsuAnnouncement,
+  SequencerSynchronizerState,
   SignedTopologyTransaction,
   TopologyChangeOp,
   TopologyMapping,
 }
+import com.digitalasset.canton.topology.{PhysicalSynchronizerId, TopologyManagerError}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.{EitherTUtil, GrpcStreamingUtils}
 import com.google.protobuf.ByteString
@@ -208,6 +210,51 @@ class GrpcSequencerInitializationService(
       // reset effective time and sequenced time if we are initializing the sequencer from the beginning
       genesisState: StoredTopologyTransactions[TopologyChangeOp, TopologyMapping] =
         if (doResetTimes) resetTimes(topologyState) else topologyState
+
+      synchronizerIds = genesisState
+        .collectOfMapping[SequencerSynchronizerState]
+        .collectLatestByUniqueKey
+        .result
+        .map(_.mapping.synchronizerId)
+        .toSet
+
+      _ <- EitherTUtil.condUnitET[Future](
+        synchronizerIds.sizeIs <= 1,
+        TopologyManagerError.InconsistentTopologySnapshot.MultipleLogicalSynchronizerIds(
+          synchronizerIds
+        ),
+      )
+
+      synchronizerId <- EitherT.fromEither[Future](
+        synchronizerIds.headOption.toRight[RpcError](
+          TopologyManagerError.InconsistentTopologySnapshot.MissingSynchronizerSequencerState()
+        )
+      )
+
+      physicalSynchronizerId = PhysicalSynchronizerId(synchronizerId, synchronizerParameters)
+      expectedUpgradePSIdO = genesisState
+        .collectOfMapping[LsuAnnouncement]
+        .collectLatestByUniqueKey
+        .collectOfType[
+          TopologyChangeOp.Replace
+        ] // must happen after collectLatestByUniqueKey, not to miss a possible LSU cancellation
+        .result
+        .map(_.mapping.successorSynchronizerId)
+        .headOption
+
+      // If there's an announcement in the topology snapshot, we expect that the sequencer being initialized is the successor
+      _ <- EitherT.fromEither[Future](
+        expectedUpgradePSIdO.fold(Right(()): Either[RpcError, Unit])(expectedUpgradePSId =>
+          Either.cond(
+            expectedUpgradePSId == physicalSynchronizerId,
+            (),
+            TopologyManagerError.InconsistentTopologySnapshot.UnexpectedPhysicalSynchronizerId(
+              physicalSynchronizerId,
+              expectedUpgradePSId,
+            ),
+          )
+        )
+      )
 
       // check that the snapshot is consistent with respect to effective proposals and effective fully authorized transactions
       multipleEffectivePerUniqueKey = genesisState.result

@@ -932,7 +932,99 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
     )(implicit consoleEnvironment: ConsoleEnvironment): Unit = {
       import consoleEnvironment.*
 
-      val commandTimeout = customCommandTimeout.getOrElse(commandTimeouts.bounded)
+      upload_new_sequencer_identity_transactions(synchronizerId, newSequencer, existingSequencer)
+
+      propose_new_sequencer_state(
+        synchronizerId,
+        newSequencer,
+        existingSequencer,
+        synchronizerOwners,
+        Some(consoleEnvironment.commandTimeouts.unbounded),
+      )
+
+      wait_for_sequencer_state_to_be_effective(
+        synchronizerId,
+        newSequencer,
+        existingSequencer,
+        isBftSequencer,
+        customCommandTimeout.getOrElse(commandTimeouts.bounded),
+      )
+
+      complete_new_sequencer_initialization(newSequencer, existingSequencer)
+    }
+
+    @Help.Summary("Upload new sequencer's identity transactions")
+    @Help.Description(
+      "First step of sequencer onboarding. In most cases, the onboarding command is preferred."
+    )
+    def upload_new_sequencer_identity_transactions(
+        synchronizerId: SynchronizerId,
+        newSequencer: SequencerReference,
+        existingSequencer: SequencerReference,
+    ): Unit = {
+      // extract onboarding sequencer's identity transactions
+      val onboardingSequencerIdentity =
+        newSequencer.topology.transactions.identity_transactions()
+
+      // upload onboarding sequencer's identity transactions
+      existingSequencer.topology.transactions
+        .load(onboardingSequencerIdentity, synchronizerId, ForceFlag.AlienMember)
+
+      logger.info("Uploaded a new sequencer identity")
+    }
+
+    @Help.Summary("Propose new sequencer state")
+    @Help.Description(
+      "Second step of sequencer onboarding. In most cases, the onboarding command is preferred."
+    )
+    def propose_new_sequencer_state(
+        synchronizerId: SynchronizerId,
+        newSequencer: SequencerReference,
+        existingSequencer: SequencerReference,
+        synchronizerOwners: Set[InstanceReference],
+        synchronize: Option[NonNegativeDuration],
+    )(implicit consoleEnvironment: ConsoleEnvironment): Unit = {
+      import consoleEnvironment.*
+
+      val synchronizerOwnersNE = NonEmpty
+        .from(synchronizerOwners)
+        .getOrElse(raiseError("synchronizerOwners must not be empty"))
+
+      // fetch the latest SequencerSynchronizerState mapping
+      val seqState1 = existingSequencer.topology.sequencers
+        .list(store = synchronizerId)
+        .headOption
+        .getOrElse(raiseError("No sequencer state found"))
+        .item
+
+      // propose the SequencerSynchronizerState that adds the new sequencer
+      synchronizerOwnersNE
+        .foreach(
+          _.topology.sequencers
+            .propose(
+              synchronizerId,
+              threshold = seqState1.threshold,
+              active = seqState1.active :+ newSequencer.id,
+              synchronize = synchronize,
+            )
+            .discard
+        )
+
+      logger.info("Proposed a sequencer synchronizer state with the new sequencer")
+    }
+
+    @Help.Summary("Wait for new sequencer state to be effective")
+    @Help.Description(
+      "Third step of sequencer onboarding. In most cases, the onboarding command is preferred."
+    )
+    def wait_for_sequencer_state_to_be_effective(
+        synchronizerId: SynchronizerId,
+        newSequencer: SequencerReference,
+        existingSequencer: SequencerReference,
+        isBftSequencer: Boolean,
+        commandTimeout: config.NonNegativeDuration,
+    )(implicit consoleEnvironment: ConsoleEnvironment): Unit = {
+      import consoleEnvironment.*
 
       def synchronizeTopologyAfterAddingSequencer(
           newSequencerId: SequencerId,
@@ -955,41 +1047,6 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
           existingSequencer.bft.get_ordering_topology().sequencerIds.contains(newSequencerId)
         }
 
-      val synchronizerOwnersNE = NonEmpty
-        .from(synchronizerOwners)
-        .getOrElse(raiseError("synchronizerOwners must not be empty"))
-
-      // extract onboarding sequencer's identity transactions
-      val onboardingSequencerIdentity =
-        newSequencer.topology.transactions.identity_transactions()
-
-      // upload onboarding sequencer's identity transactions
-      existingSequencer.topology.transactions
-        .load(onboardingSequencerIdentity, synchronizerId, ForceFlag.AlienMember)
-
-      logger.info("Uploaded a new sequencer identity")
-
-      // fetch the latest SequencerSynchronizerState mapping
-      val seqState1 = existingSequencer.topology.sequencers
-        .list(store = synchronizerId)
-        .headOption
-        .getOrElse(raiseError("No sequencer state found"))
-        .item
-
-      // propose the SequencerSynchronizerState that adds the new sequencer
-      synchronizerOwnersNE
-        .foreach(
-          _.topology.sequencers
-            .propose(
-              synchronizerId,
-              threshold = seqState1.threshold,
-              active = seqState1.active :+ newSequencer.id,
-            )
-            .discard
-        )
-
-      logger.info("Proposed a sequencer synchronizer state with the new sequencer")
-
       // wait for SequencerSynchronizerState to be observed by the sequencer
       ConsoleMacros.utils.retry_until_true(commandTimeout) {
         val sequencerStates =
@@ -1002,14 +1059,22 @@ trait ConsoleMacros extends NamedLogging with NoTracing {
         sequencerState.item.active.contains(newSequencer.id)
       }
       logger.info("New sequencer synchronizer state has been observed")
-
       if (isBftSequencer) {
         synchronizeTopologyAfterAddingBftSequencer(newSequencer.id, existingSequencer)
         logger.info("The new sequencer is part of the ordering topology")
       } else {
         synchronizeTopologyAfterAddingSequencer(newSequencer.id, existingSequencer)
       }
+    }
 
+    @Help.Summary("Complete new sequencer initialization")
+    @Help.Description(
+      "Fourth step of sequencer onboarding. In most cases, the onboarding command is preferred."
+    )
+    def complete_new_sequencer_initialization(
+        newSequencer: SequencerReference,
+        existingSequencer: SequencerReference,
+    ): Unit = {
       // now we can establish the sequencer snapshot
       val onboardingState =
         existingSequencer.setup.onboarding_state_for_sequencerV2(newSequencer.id)

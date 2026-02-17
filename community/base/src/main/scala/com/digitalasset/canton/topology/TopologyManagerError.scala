@@ -687,7 +687,34 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
     )(implicit
         override val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = s"The topology snapshot was rejected because it was inconsistent."
+          cause = "The topology snapshot was rejected because it was inconsistent."
+        )
+        with TopologyManagerError
+
+    final case class MissingSynchronizerSequencerState()(implicit
+        override val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            "The topology snapshot was rejected because it is missing the synchronizer sequencer state."
+        )
+        with TopologyManagerError
+
+    final case class MultipleLogicalSynchronizerIds(synchronizerIds: Set[SynchronizerId])(implicit
+        override val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause =
+            s"The topology snapshot was rejected because it contains synchronizer sequencer states with multiple differing syncrhonizer ids: $synchronizerIds."
+        )
+        with TopologyManagerError
+
+    final case class UnexpectedPhysicalSynchronizerId(
+        fromParameters: PhysicalSynchronizerId,
+        fromAnnouncement: PhysicalSynchronizerId,
+    )(implicit val loggingContext: ErrorLoggingContext)
+        extends CantonError.Impl(
+          cause =
+            s"Sequencer is being initialized with physical synchronizer id $fromParameters, " +
+              s"not matching the announced upgrade successor id $fromAnnouncement in the provided topology snapshot."
         )
         with TopologyManagerError
   }
@@ -975,7 +1002,9 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         Reject(
           successorSynchronizerId = successorSynchronizerId,
           details =
-            s"conflicts with previous announcement with successor $previouslyAnnouncedSuccessor",
+            s"conflicts with previous announcement with successor $previouslyAnnouncedSuccessor. " +
+              s"Changing the announcement (including the upgrade time) requires a new announcement " +
+              s"with an increasing synchronizer id",
         )
     }
   }

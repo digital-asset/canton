@@ -466,7 +466,7 @@ class StoreBasedSynchronizerTopologyClient(
         (adjustedStoreMaxTimestamp.toList ++ upgradeTimes.toList).maxByOption {
           case (_, effectiveTime: EffectiveTime) =>
             effectiveTime
-        }.toList ++ sequencerSnapshotTimes.toList
+        }.toList
       storeLatestTopologyChangeTimestamp.foreach { case (sequencedTime, effectiveTime) =>
         logger.debug(
           s"Taking into account latest topology change at $sequencedTime, $effectiveTime"
@@ -479,10 +479,18 @@ class StoreBasedSynchronizerTopologyClient(
         )
       }
       initialHeadTimestamps.foreach { case (sequencedTime, effectiveTime) =>
+        // do not let the approximate time be higher than the provided timestamp from
+        // sequencerSnapshotTimestamp, which is the highest sequenced timestamp
+        val approximateTime = sequencerSnapshotTimestamp.fold(effectiveTime.toApproximate) {
+          maxSequencedTs => ApproximateTime(maxSequencedTs.value.min(effectiveTime.value))
+        }
+        updateHead(sequencedTime, effectiveTime, approximateTime)
+      }
+      sequencerSnapshotTimes.toList.foreach { case (sequencedTime, effectiveTime) =>
         updateHead(
           sequencedTime,
           effectiveTime,
-          effectiveTime.toApproximate,
+          sequencedTime.toApproximate,
         )
       }
     }

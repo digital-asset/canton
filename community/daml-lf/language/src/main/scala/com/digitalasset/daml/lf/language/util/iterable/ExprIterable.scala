@@ -118,7 +118,7 @@ private[lf] object ExprIterable {
         Iterator.empty
       case UpdateEmbedExpr(typ @ _, body) =>
         Iterator(body)
-      case UpdateTryCatch(typ @ _, body, binder @ _, handler) =>
+      case UpdateTryCatchV1(typ @ _, body, binder @ _, handler) =>
         Iterator(body, handler)
     }
   }

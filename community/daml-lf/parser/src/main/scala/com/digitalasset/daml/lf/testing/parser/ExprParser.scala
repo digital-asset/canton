@@ -509,7 +509,7 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
 
   private lazy val updateCatch =
     Id("try") ~>! argTyp ~ expr0 ~ `catch` ~ id ~ `->` ~ expr ^^ {
-      case typ ~ body ~ _ ~ binder ~ _ ~ handler => UpdateTryCatch(typ, body, binder, handler)
+      case typ ~ body ~ _ ~ binder ~ _ ~ handler => UpdateTryCatchV1(typ, body, binder, handler)
     }
 
   private lazy val update: Parser[Update] =

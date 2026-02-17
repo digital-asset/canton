@@ -1048,7 +1048,7 @@ private[lf] final class Compiler(
 
   private[this] def catchEverything(e: s.SExpr): s.SExpr =
     unaryFunction(Env.Empty) { (tokenPos, env0) =>
-      s.SETryCatch(
+      s.SETryCatchV1WithHandler(
         app(e, env0.toSEVar(tokenPos)), {
           val binderPos = env0.nextPosition
           val env1 = env0.pushVar

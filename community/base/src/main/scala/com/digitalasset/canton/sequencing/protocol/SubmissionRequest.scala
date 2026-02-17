@@ -5,11 +5,10 @@ package com.digitalasset.canton.sequencing.protocol
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.digitalasset.canton.ProtoDeserializationError
 import com.digitalasset.canton.config.RequireTypes.InvariantViolation
 import com.digitalasset.canton.crypto.{HashOps, HashPurpose}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.{v30, v31}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{
   DeterministicEncoding,
@@ -34,7 +33,8 @@ import com.google.protobuf.ByteString
   *   The optional timestamp of the topology to use for processing this submission request. If
   *   [[scala.None$]], the snapshot at the sequencing time of the submission request should be used
   *   instead. The topology timestamp is used for:
-  *   - resolving group addresses to members
+  *   - resolving group addresses to members (NOTE: we can remove it because we don't have party
+  *     group addresses)
   *   - checking signatures on closed envelopes
   *   - determining the signing key for the sequencer on the [[SequencedEvent]]s.
   *
@@ -81,6 +81,16 @@ final case class SubmissionRequest private (
     submissionCost = submissionCost.map(_.toProtoV30),
   )
 
+  lazy val toProtoV31: v31.SubmissionRequest = v31.SubmissionRequest(
+    sender = sender.toProtoPrimitive,
+    messageId = messageId.toProtoPrimitive,
+    batch = Some(batch.toProtoV31),
+    maxSequencingTime = maxSequencingTime.toProtoPrimitive,
+    topologyTimestamp = topologyTimestamp.map(_.toProtoPrimitive),
+    aggregationRule = aggregationRule.map(_.toProtoV30),
+    submissionCost = submissionCost.map(_.toProtoV30),
+  )
+
   def updateAggregationRule(aggregationRule: AggregationRule): SubmissionRequest =
     copy(aggregationRule = Some(aggregationRule))
 
@@ -115,30 +125,34 @@ final case class SubmissionRequest private (
   /** Returns the [[AggregationId]] for grouping if this is an aggregatable submission. The
     * aggregation ID computationally authenticates the relevant contents of the submission request,
     * namely,
-    *   - Envelope contents [[com.digitalasset.canton.sequencing.protocol.ClosedEnvelope.bytes]],
-    *     the recipients [[com.digitalasset.canton.sequencing.protocol.ClosedEnvelope.recipients]]
-    *     of the [[batch]], and whether there are signatures.
+    *   - Envelope contents
+    *     [[com.digitalasset.canton.sequencing.protocol.ClosedUncompressedEnvelope.bytes]], the
+    *     recipients
+    *     [[com.digitalasset.canton.sequencing.protocol.ClosedUncompressedEnvelope.recipients]] of
+    *     the [[batch]], and whether there are signatures.
     *   - The [[maxSequencingTime]]
     *   - The [[topologyTimestamp]]
     *   - The [[aggregationRule]]
     *
     * The [[AggregationId]] does not authenticate the following pieces of a submission request:
-    *   - The signatures [[com.digitalasset.canton.sequencing.protocol.ClosedEnvelope.signatures]]
-    *     on the closed envelopes because the signatures differ for each sender. Aggregating the
+    *   - The signatures
+    *     [[com.digitalasset.canton.sequencing.protocol.ClosedUncompressedEnvelope.signatures]] on
+    *     the closed envelopes because the signatures differ for each sender. Aggregating the
     *     signatures is the whole point of an aggregatable submission. In contrast, the presence of
     *     signatures is relevant for the ID because it determines how the
-    *     [[com.digitalasset.canton.sequencing.protocol.ClosedEnvelope.bytes]] are interpreted.
+    *     [[com.digitalasset.canton.sequencing.protocol.ClosedUncompressedEnvelope.bytes]] are
+    *     interpreted.
     *   - The [[sender]] and the [[messageId]], as they are specific to the sender of a particular
     *     submission request
     *   - The [[isConfirmationRequest]] flag because it is irrelevant for delivery or aggregation
     */
-  def aggregationId(hashOps: HashOps): Either[ProtoDeserializationError, Option[AggregationId]] = {
+  def aggregationId(hashOps: HashOps): ParsingResult[Option[AggregationId]] = {
     // TODO(#12075) Use a deterministic serialization scheme for the recipients
-    val recipientsSerializerE: Either[ProtoDeserializationError, Recipients => ByteString] =
+    val recipientsSerializerE: ParsingResult[Recipients => ByteString] =
       SubmissionRequest.converterFor(representativeProtocolVersion).map(_.dependencySerializer)
 
     aggregationRule.traverse { rule =>
-      recipientsSerializerE.map { recipientsSerializer =>
+      recipientsSerializerE.flatMap { recipientsSerializer =>
         aggregationIdInternal(hashOps, rule, recipientsSerializer)
       }
     }
@@ -148,30 +162,34 @@ final case class SubmissionRequest private (
       hashOps: HashOps,
       rule: AggregationRule,
       recipientsSerializer: Recipients => ByteString,
-  ): AggregationId = {
-    val builder = hashOps.build(HashPurpose.AggregationId)
-    builder.addInt(batch.envelopes.length)
-    batch.envelopes.foreach { envelope =>
-      val ClosedEnvelope(content, recipients, signatures) = envelope
-      builder.addByteString(DeterministicEncoding.encodeBytes(content))
-      builder.addByteString(
-        DeterministicEncoding.encodeBytes(
-          recipientsSerializer(recipients)
+  ): ParsingResult[AggregationId] =
+    batch.toClosedUncompressedBatchResult.map { uncompressedBatch =>
+      val uncompressedEnvelopes = uncompressedBatch.envelopes
+      val builder = hashOps.build(HashPurpose.AggregationId)
+      builder.addInt(uncompressedEnvelopes.length)
+
+      uncompressedEnvelopes.foreach { uncompressedEnvelope =>
+        val ClosedUncompressedEnvelope(content, recipients, signatures) = uncompressedEnvelope
+        builder.addByteString(DeterministicEncoding.encodeBytes(content))
+        builder.addByteString(
+          DeterministicEncoding.encodeBytes(
+            recipientsSerializer(recipients)
+          )
         )
-      )
-      builder.addByteString(
-        DeterministicEncoding.encodeByte(if (signatures.isEmpty) 0x00 else 0x01)
-      )
+        builder.addByteString(
+          DeterministicEncoding.encodeByte(if (signatures.isEmpty) 0x00 else 0x01)
+        )
+      }
+      builder.addLong(maxSequencingTime.underlying.micros)
+      // CantonTimestamp's microseconds can never be Long.MinValue, so the encoding remains injective if we use Long.MaxValue as the default.
+      builder.addLong(topologyTimestamp.fold(Long.MinValue)(_.underlying.micros))
+      builder.addInt(rule.eligibleSenders.size)
+      rule.eligibleSenders.foreach(member => builder.addString(member.toProtoPrimitive))
+      builder.addInt(rule.threshold.value)
+      val hash = builder.finish()
+
+      AggregationId(hash)
     }
-    builder.addLong(maxSequencingTime.underlying.micros)
-    // CantonTimestamp's microseconds can never be Long.MinValue, so the encoding remains injective if we use Long.MaxValue as the default.
-    builder.addLong(topologyTimestamp.fold(Long.MinValue)(_.underlying.micros))
-    builder.addInt(rule.eligibleSenders.size)
-    rule.eligibleSenders.foreach(member => builder.addString(member.toProtoPrimitive))
-    builder.addInt(rule.threshold.value)
-    val hash = builder.finish()
-    AggregationId(hash)
-  }
 }
 
 object SubmissionRequest
@@ -190,7 +208,14 @@ object SubmissionRequest
       supportedProtoVersionMemoized(_)(fromProtoV30),
       _.toProtoV30, // Serialization of SubmissionRequest
       _.toProtoV30, // Serialization of Recipients
-    )
+    ),
+    ProtoVersion(31) -> VersionedProtoCodec.withDependency(
+      ProtocolVersion.v35
+    )(v31.SubmissionRequest)(
+      supportedProtoVersionMemoized(_)(fromProtoV31),
+      _.toProtoV31, // Serialization of SubmissionRequest
+      _.toProtoV30, // Serialization of Recipients
+    ),
   )
 
   lazy val submissionCostDefaultValue
@@ -253,32 +278,90 @@ object SubmissionRequest
       protocolVersionRepresentativeFor(protocolVersion),
     ).valueOr(err => throw new IllegalArgumentException(err.message))
 
+  sealed private trait ProtoSubmissionRequest {
+    def batch: Option[ProtoBatch]
+  }
+  private final case class ProtoSubmissionRequestV30(wrapped: v30.SubmissionRequest)
+      extends ProtoSubmissionRequest {
+    def batch: Option[ProtoBatchV30] = wrapped.batch.map(ProtoBatchV30.apply)
+  }
+  private final case class ProtoSubmissionRequestV31(wrapped: v31.SubmissionRequest)
+      extends ProtoSubmissionRequest {
+    def batch: Option[ProtoBatchV31] = wrapped.batch.map(ProtoBatchV31.apply)
+  }
+
   def fromProtoV30(
       maxRequestSize: MaxBytesToDecompress,
       requestP: v30.SubmissionRequest,
+  )(bytes: ByteString): ParsingResult[SubmissionRequest] =
+    fromProtoGeneric(maxRequestSize, ProtoSubmissionRequestV30(requestP))(bytes)
+
+  def fromProtoV31(
+      maxRequestSize: MaxBytesToDecompress,
+      requestP: v31.SubmissionRequest,
+  )(bytes: ByteString): ParsingResult[SubmissionRequest] =
+    fromProtoGeneric(maxRequestSize, ProtoSubmissionRequestV31(requestP))(bytes)
+
+  private def fromProtoGeneric(
+      maxRequestSize: MaxBytesToDecompress,
+      protoSubmissionRequest: ProtoSubmissionRequest,
   )(bytes: ByteString): ParsingResult[SubmissionRequest] = {
-    val v30.SubmissionRequest(
+    def batchFromProto: ParsingResult[Batch[ClosedEnvelope]] = protoSubmissionRequest match {
+      case ProtoSubmissionRequestV30(wrapped) =>
+        ProtoConverter.parseRequired(
+          Batch.fromProtoV30(maxRequestSize, _),
+          "SubmissionRequest.batch",
+          wrapped.batch,
+        )
+      case ProtoSubmissionRequestV31(wrapped) =>
+        ProtoConverter.parseRequired(
+          Batch.fromProtoV31(maxRequestSize, _),
+          "SubmissionRequest.batch",
+          wrapped.batch,
+        )
+    }
+
+    val (
       senderP,
       messageIdP,
-      batchP,
       maxSequencingTimeP,
       topologyTimestamp,
       aggregationRuleP,
       submissionCostP,
-    ) = requestP
+    ) = protoSubmissionRequest match {
+      case ProtoSubmissionRequestV30(wrapped) =>
+        (
+          wrapped.sender,
+          wrapped.messageId,
+          wrapped.maxSequencingTime,
+          wrapped.topologyTimestamp,
+          wrapped.aggregationRule,
+          wrapped.submissionCost,
+        )
+      case ProtoSubmissionRequestV31(wrapped) =>
+        (
+          wrapped.sender,
+          wrapped.messageId,
+          wrapped.maxSequencingTime,
+          wrapped.topologyTimestamp,
+          wrapped.aggregationRule,
+          wrapped.submissionCost,
+        )
+    }
+
+    val protoVersion = protoSubmissionRequest match {
+      case ProtoSubmissionRequestV30(_) => ProtoVersion(30)
+      case ProtoSubmissionRequestV31(_) => ProtoVersion(31)
+    }
 
     for {
       sender <- Member.fromProtoPrimitive(senderP, "sender")
       messageId <- MessageId.fromProtoPrimitive(messageIdP)
       maxSequencingTime <- CantonTimestamp.fromProtoPrimitive(maxSequencingTimeP)
-      batch <- ProtoConverter.parseRequired(
-        Batch.fromProtoV30(maxRequestSize, _),
-        "SubmissionRequest.batch",
-        batchP,
-      )
+      batch <- batchFromProto
       ts <- topologyTimestamp.traverse(CantonTimestamp.fromProtoPrimitive)
       aggregationRule <- aggregationRuleP.traverse(AggregationRule.fromProtoV30)
-      rpv <- protocolVersionRepresentativeFor(ProtoVersion(30))
+      rpv <- protocolVersionRepresentativeFor(protoVersion)
       submissionCost <- submissionCostP.traverse(SequencingSubmissionCost.fromProtoV30)
     } yield new SubmissionRequest(
       sender,

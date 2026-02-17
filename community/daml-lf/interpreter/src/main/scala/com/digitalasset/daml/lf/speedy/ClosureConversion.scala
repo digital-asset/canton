@@ -151,12 +151,12 @@ private[speedy] object ClosureConversion {
           boundsDone: List[target.SExpr]
       ) extends Cont
 
-      final case class TryCatch1(
+      final case class TryCatchV1WithHandler(
           env: Env,
           handler: source.SExpr,
       ) extends Cont
 
-      final case class TryCatch2(
+      final case class TryCatchV1WithBody(
           body: target.SExpr
       ) extends Cont
 
@@ -215,8 +215,8 @@ private[speedy] object ClosureConversion {
                   loop(Down(bound, env), Cont.Let1(Nil, 0, env, bounds, body) :: conts)
               }
 
-            case source.SETryCatch(body, handler) =>
-              loop(Down(body, env), Cont.TryCatch1(env, handler) :: conts)
+            case source.SETryCatchV1WithHandler(body, handler) =>
+              loop(Down(body, env), Cont.TryCatchV1WithHandler(env, handler) :: conts)
 
             case source.SEScopeExercise(body) =>
               loop(Down(body, env), Cont.ScopeExercise :: conts)
@@ -305,13 +305,13 @@ private[speedy] object ClosureConversion {
                   val body = result
                   loop(Up(target.SELet(boundsDone.reverse, body)), conts)
 
-                case Cont.TryCatch1(env, handler) =>
+                case Cont.TryCatchV1WithHandler(env, handler) =>
                   val body = result
-                  loop(Down(handler, env.extend(1)), Cont.TryCatch2(body) :: conts)
+                  loop(Down(handler, env.extend(1)), Cont.TryCatchV1WithBody(body) :: conts)
 
-                case Cont.TryCatch2(body) =>
+                case Cont.TryCatchV1WithBody(body) =>
                   val handler = result
-                  loop(Up(target.SETryCatch(body, handler)), conts)
+                  loop(Up(target.SETryCatchV1(body, handler)), conts)
 
                 case Cont.ScopeExercise =>
                   val body = result
@@ -362,7 +362,7 @@ private[speedy] object ClosureConversion {
               go(acc, scrut :: bodies ++ work)
             case source.SELet(bounds, body) => go(acc, body :: bounds ++ work)
             case source.SELabelClosure(_, expr) => go(acc, expr :: work)
-            case source.SETryCatch(body, handler) => go(acc, handler :: body :: work)
+            case source.SETryCatchV1WithHandler(body, handler) => go(acc, handler :: body :: work)
             case source.SEScopeExercise(body) => go(acc, body :: work)
             case source.SEPreventCatch(body) => go(acc, body :: work)
           }

@@ -35,8 +35,8 @@ class ClosureConversionTest extends AnyFreeSpec with Matchers with TableDrivenPr
   private val let1 = (x: SExpr) => SELet(List(x, leaf), leaf)
   private val let2 = (x: SExpr) => SELet(List(leaf, x), leaf)
   private val letBody = (x: SExpr) => SELet(List(leaf, leaf), x)
-  private val tryCatch1 = (x: SExpr) => SETryCatch(leaf, x)
-  private val tryCatch2 = (x: SExpr) => SETryCatch(x, leaf)
+  private val tryCatchV1WithHandlerA = (x: SExpr) => SETryCatchV1WithHandler(leaf, x)
+  private val tryCatchV1WithHandlerB = (x: SExpr) => SETryCatchV1WithHandler(x, leaf)
   private val scopeExercise = (x: SExpr) => SEScopeExercise(x)
   private val preventCatch = (x: SExpr) => SEPreventCatch(x)
   private val labelClosure = (x: SExpr) => SELabelClosure(label, x)
@@ -80,8 +80,8 @@ class ClosureConversionTest extends AnyFreeSpec with Matchers with TableDrivenPr
         ("Let1", let1),
         ("Let2", let2),
         ("LetBody", letBody),
-        ("TryCatch1", tryCatch1),
-        ("TryCatch2", tryCatch2),
+        ("TryCatchV1WithHandlerA", tryCatchV1WithHandlerA),
+        ("TryCatchV1WithHandlerB", tryCatchV1WithHandlerB),
         ("scopeExercise", scopeExercise),
         ("preventCatch", preventCatch),
         ("Labelclosure", labelClosure),
@@ -134,8 +134,8 @@ class ClosureConversionTest extends AnyFreeSpec with Matchers with TableDrivenPr
             ("Let1", let1),
             ("Let2", let2),
             ("LetBody", letBody),
-            ("TryCatch1", tryCatch1),
-            ("TryCatch2", tryCatch2),
+            ("TryCatchV1WithHandlerA", tryCatchV1WithHandlerA),
+            ("TryCatchV1WithHandlerB", tryCatchV1WithHandlerB),
             ("scopeExercise", scopeExercise),
             ("Labelclosure", labelClosure),
           )

@@ -217,8 +217,8 @@ private[daml] class AstRewriter(
         UpdateQueryNByKey(apply(templateId))
       case UpdateEmbedExpr(typ, body) =>
         UpdateEmbedExpr(apply(typ), apply(body))
-      case UpdateTryCatch(typ, body, binder, handler) =>
-        UpdateTryCatch(apply(typ), apply(body), binder, apply(handler))
+      case UpdateTryCatchV1(typ, body, binder, handler) =>
+        UpdateTryCatchV1(apply(typ), apply(body), binder, apply(handler))
     }
 
   def apply(binding: Binding): Binding = binding match {

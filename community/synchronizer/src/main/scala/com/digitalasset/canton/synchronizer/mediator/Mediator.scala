@@ -41,6 +41,7 @@ import com.digitalasset.canton.topology.{
   MediatorId,
   PhysicalSynchronizerId,
   SynchronizerOutboxHandle,
+  SynchronizerTopologyManager,
   TopologyManagerStatus,
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -65,10 +66,12 @@ private[mediator] class Mediator(
     val topologyClient: SynchronizerTopologyClientWithInit,
     private[canton] val syncCrypto: SynchronizerCryptoClient,
     topologyTransactionProcessor: TopologyTransactionProcessor,
+    val topologyManager: SynchronizerTopologyManager,
     val topologyManagerStatus: TopologyManagerStatus,
     val synchronizerOutboxHandle: SynchronizerOutboxHandle,
     val timeTracker: SynchronizerTimeTracker,
     val state: MediatorState,
+    asynchronousProcessing: Boolean,
     private[canton] val sequencerCounterTrackerStore: SequencerCounterTrackerStore,
     sequencedEventStore: SequencedEventStore,
     parameters: CantonNodeParameters,
@@ -102,6 +105,7 @@ private[mediator] class Mediator(
     syncCrypto,
     timeTracker,
     state,
+    asynchronousProcessing = asynchronousProcessing,
     loggerFactory,
     timeouts,
     parameters.batchingConfig,
@@ -337,6 +341,7 @@ private[mediator] class Mediator(
       SyncCloseable(
         "mediator",
         LifeCycle.close(
+          topologyManager,
           topologyTransactionProcessor,
           syncCrypto,
           timeTracker,

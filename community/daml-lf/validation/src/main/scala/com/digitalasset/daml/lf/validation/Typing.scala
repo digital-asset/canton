@@ -1350,7 +1350,7 @@ private[validation] object Typing {
         Ret(
           TInt64 ->: keyType ->: TUpdate(TApp(TBuiltin(BTList), TTuple2(TContractId(TTyCon(templateId)), TTyCon(templateId))))
         )
-      case UpdateTryCatch(typ, body, binder, handler) =>
+      case UpdateTryCatchV1(typ, body, binder, handler) =>
         checkType(typ, KStar)
         val updTyp = TUpdate(typ)
         checkExpr(body, updTyp) {

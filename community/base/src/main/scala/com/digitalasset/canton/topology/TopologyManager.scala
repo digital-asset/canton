@@ -51,7 +51,6 @@ import com.digitalasset.canton.topology.store.TopologyStoreId.{
 }
 import com.digitalasset.canton.topology.store.ValidatedTopologyTransaction.GenericValidatedTopologyTransaction
 import com.digitalasset.canton.topology.store.{
-  TimeQuery,
   TopologyStore,
   TopologyStoreId,
   ValidatedTopologyTransaction,
@@ -937,7 +936,7 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
 
     case upgradeAnnouncement: LsuAnnouncement =>
       if (transaction.operation == TopologyChangeOp.Replace)
-        checkSynchronizerUpgradeAnnouncementIsNotDangerous(upgradeAnnouncement, transaction.serial)
+        checkSynchronizerUpgradeAnnouncementIsNotDangerous(upgradeAnnouncement)
       else EitherT.pure(())
 
     case _ => EitherT.rightT(())
@@ -1047,51 +1046,22 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
     } yield ()
 
   private def checkSynchronizerUpgradeAnnouncementIsNotDangerous(
-      upgradeAnnouncement: LsuAnnouncement,
-      serial: PositiveInt,
+      upgradeAnnouncement: LsuAnnouncement
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] = {
-
-    val resF = store
-      .inspect(
-        proposals = false,
-        timeQuery = TimeQuery.Range(None, None),
-        asOfExclusiveO = None,
-        op = None,
-        types = Seq(TopologyMapping.Code.SynchronizerUpgradeAnnouncement),
-        idFilter = None,
-        namespaceFilter = None,
-      )
-      .map { result =>
-        result
-          .collectOfMapping[LsuAnnouncement]
-          .result
-          .maxByOption(_.serial) match {
-          case None => ().asRight
-
-          case Some(latestUpgradeAnnouncement) =>
-            // If the latest is another upgrade, we want the PSId to be strictly greater
-            if (serial == latestUpgradeAnnouncement.serial)
-              ().asRight
-            else {
-              val previouslyAnnouncedSuccessorPSId =
-                latestUpgradeAnnouncement.mapping.successorSynchronizerId
-
-              Either.cond(
-                previouslyAnnouncedSuccessorPSId < upgradeAnnouncement.successorSynchronizerId,
-                (),
-                InvalidSynchronizerSuccessor.Reject.conflictWithPreviousAnnouncement(
-                  successorSynchronizerId = upgradeAnnouncement.successorSynchronizerId,
-                  previouslyAnnouncedSuccessor = previouslyAnnouncedSuccessorPSId,
-                ),
-              )
-            }
-        }
-      }
-
-    EitherT(resF)
-  }
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
+    EitherT.fromEither(store.storeId.forSynchronizer match {
+      case Some(psid) =>
+        Either.cond(
+          upgradeAnnouncement.successorSynchronizerId >= psid,
+          (),
+          InvalidSynchronizerSuccessor.Reject.conflictWithCurrentPSId(
+            successorSynchronizerId = upgradeAnnouncement.successorSynchronizerId,
+            currentSynchronizerId = psid,
+          ),
+        )
+      case None => Right(())
+    })
 
   private def checkSigningThresholdCanBeReached(
       threshold: PositiveInt,

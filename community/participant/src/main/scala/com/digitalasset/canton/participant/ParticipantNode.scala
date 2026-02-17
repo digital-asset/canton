@@ -51,7 +51,6 @@ import com.digitalasset.canton.participant.pruning.{AcsCommitmentProcessor, Prun
 import com.digitalasset.canton.participant.replica.ParticipantReplicaManager
 import com.digitalasset.canton.participant.scheduler.ParticipantPruningScheduler
 import com.digitalasset.canton.participant.store.*
-import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.Active
 import com.digitalasset.canton.participant.store.memory.MutablePackageMetadataViewImpl
 import com.digitalasset.canton.participant.sync.*
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer.SubmissionReady
@@ -134,9 +133,9 @@ class ParticipantNodeBootstrap(
       .map(_.topologyStore)
 
   override protected def sequencedTopologyManagers: Seq[SynchronizerTopologyManager] =
-    cantonSyncService.get.toList
-      .flatMap(_.syncPersistentStateManager.getAll.values)
-      .map(_.topologyManager)
+    sequencedTopologyStores.flatMap(store =>
+      cantonSyncService.get.toList.flatMap(_.lookupTopologyManager(store.storeId.psid))
+    )
 
   override protected def lookupTopologyClient(
       storeId: TopologyStoreId
@@ -355,9 +354,7 @@ class ParticipantNodeBootstrap(
         stateManager = manager,
         topologyLookup = new TopologyLookup(
           lookupTopologyManagerByPsid = psid =>
-            cantonSyncService.get
-              .flatMap(_.syncPersistentStateManager.get(psid))
-              .map(_.topologyManager),
+            cantonSyncService.get.flatMap(_.lookupTopologyManager(psid)),
           lookupActivePsidByLsid = lookupActivePSId,
           lookupTopologyClientByPsid = psId => lookupTopologyClient(SynchronizerStore(psId)),
         ),
@@ -454,7 +451,6 @@ class ParticipantNodeBootstrap(
           (staticSynchronizerParameters: StaticSynchronizerParameters) =>
             SynchronizerCrypto(crypto, staticSynchronizerParameters),
           clock,
-          mutablePackageMetadataView,
           persistentState.map(_.ledgerApiStore),
           persistentState.map(_.contractStore),
           arguments.metrics,
@@ -466,6 +462,8 @@ class ParticipantNodeBootstrap(
           authorizedTopologyManager,
           participantId,
           syncPersistentStateManager,
+          topologyManagerLookup = psid =>
+            cantonSyncService.get.flatMap(_.lookupTopologyManager(psid)),
           config.topology,
           crypto,
           clock,
@@ -657,19 +655,6 @@ class ParticipantNodeBootstrap(
             )
             .mapK(FutureUnlessShutdown.outcomeK)
 
-        /*
-        Returns the topology manager corresponding to an active configuration. Restricting to active is fine since
-        the topology manager is used for party allocation which would fail for inactive configurations.
-         */
-        activeTopologyManagerGetter = (id: PhysicalSynchronizerId) =>
-          synchronizerConnectionConfigStore
-            .get(id)
-            .toOption
-            .filter(_.status == Active)
-            .flatMap(_.configuredPSId.toOption)
-            .flatMap(syncPersistentStateManager.get)
-            .map(_.topologyManager)
-
         // Sync Service
         sync = CantonSyncService.create(
           participantId,
@@ -681,7 +666,6 @@ class ParticipantNodeBootstrap(
           syncPersistentStateManager,
           replicaManager,
           packageService,
-          new PartyOps(activeTopologyManagerGetter, loggerFactory),
           topologyDispatcher,
           syncCryptoSignerWithSessionKeys,
           engine,

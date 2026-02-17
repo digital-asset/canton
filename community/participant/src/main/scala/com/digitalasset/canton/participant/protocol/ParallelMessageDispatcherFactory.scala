@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.protocol
 
 import com.digitalasset.canton.data.ViewType
 import com.digitalasset.canton.data.ViewType.TransactionViewType
+import com.digitalasset.canton.lifecycle.PromiseUnlessShutdownFactory
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ConnectedSynchronizerMetrics
@@ -41,6 +42,7 @@ object ParallelMessageDispatcherFactory
       inFlightSubmissionSynchronizerTracker: InFlightSubmissionSynchronizerTracker,
       loggerFactory: NamedLoggerFactory,
       metrics: ConnectedSynchronizerMetrics,
+      promiseFactory: PromiseUnlessShutdownFactory,
   )(implicit ec: ExecutionContext, tracer: Tracer): ParallelMessageDispatcher =
     new ParallelMessageDispatcher(
       psid,
@@ -57,5 +59,6 @@ object ParallelMessageDispatcherFactory
       processAsynchronously,
       loggerFactory,
       metrics,
+      promiseFactory,
     )
 }

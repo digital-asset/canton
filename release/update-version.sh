@@ -24,21 +24,12 @@ update_version_sbt_and_VERSION() {
   update_VERSION_file "${version}" "community/ledger-api/VERSION"
 }
 
-update_version() {
-  update_version_sbt_and_VERSION "$1"
-
-  # we use a sbt task to update the daml.yaml files to match the sbt project version
-  # therefore `update_version_sbt_and_VERSION` MUST be run first
-  info "Updating daml project versions to match sbt project (this uses sbt so can take a while)"
-  run "Updating daml.yaml versions" sbt updateDamlProjectVersions
-}
-
 update_version_command() {
   local -r new_version="$1"
 
   if [[ -n "$new_version" ]]; then
     info "Updating canton to version [$new_version]"
-    update_version "$new_version"
+    update_version_sbt_and_VERSION "$new_version"
     info "Version successfully updated"
     echo "HINT: Run 'reload' in any active sbt sessions to pick up the new version"
     echo "Now smoke testing that the release works by running a Ping (this takes ~1-2min)"

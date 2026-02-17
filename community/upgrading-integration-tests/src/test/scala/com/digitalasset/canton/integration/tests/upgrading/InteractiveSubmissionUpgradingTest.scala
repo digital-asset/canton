@@ -91,6 +91,7 @@ class InteractiveSubmissionUpgradingTest
         Seq(bob.partyId),
         Seq(fetchQuote.id.exerciseFQ_ExFetch(quoteCid).commands().loneElement),
         disclosedContracts = Seq(disclosedQuote, disclosedFetch),
+        hashingSchemeVersion = testedApiHashingSchemeVersion,
       )
 
       // Set Bob confirmer to participant3 where V2 is not available
@@ -120,6 +121,7 @@ class InteractiveSubmissionUpgradingTest
       Seq(party.partyId),
       Seq(fetchQuote.id.exerciseFQ_ExFetch(quoteCid).commands().loneElement),
       disclosedContracts = Seq(disclosedQuote),
+      hashingSchemeVersion = testedApiHashingSchemeVersion,
     )
     participant.ledger_api.commands.external.submit_prepared(party, preparedExercise)
   }

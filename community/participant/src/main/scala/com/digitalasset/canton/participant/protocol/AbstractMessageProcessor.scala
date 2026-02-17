@@ -10,12 +10,12 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.crypto.{SynchronizerCryptoClient, SynchronizerSnapshotSyncCryptoApi}
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.ledger.participant.state.SequencedUpdate
-import com.digitalasset.canton.ledger.participant.state.Update.SequencerIndexMoved
+import com.digitalasset.canton.ledger.participant.state.SequencedEventUpdate
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.participant.protocol.conflictdetection.ActivenessSet
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
+import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.RequestId
 import com.digitalasset.canton.protocol.messages.{
   ConfirmationResponses,
@@ -50,10 +50,10 @@ abstract class AbstractMessageProcessor(
 
   protected def terminateRequest(
       requestCounter: RequestCounter,
-      requestSequencerCounter: SequencerCounter,
       requestTimestamp: CantonTimestamp,
       commitTime: CantonTimestamp,
-      eventO: Option[SequencedUpdate],
+      eventO: Option[SequencedEventUpdate],
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     for {
       _ <- ephemeral.requestJournal.terminate(
@@ -61,18 +61,7 @@ abstract class AbstractMessageProcessor(
         requestTimestamp,
         commitTime,
       )
-      _ <- ephemeral.recordOrderPublisher.tick(
-        // providing directly a SequencerIndexMoved with RequestCounter for the non-submitting participant rejections
-        eventO.getOrElse(
-          SequencerIndexMoved(
-            synchronizerId = psid.logical,
-            recordTime = requestTimestamp,
-          )
-        ),
-        requestSequencerCounter,
-        Some(requestCounter),
-      )
-    } yield ()
+    } yield publishUpdate(eventO)
 
   /** A clean replay replays a request whose request counter is below the clean head in the request
     * journal. Since the replayed request is clean, its effects are not persisted.
@@ -164,6 +153,7 @@ abstract class AbstractMessageProcessor(
       requestCounter: RequestCounter,
       sequencerCounter: SequencerCounter,
       timestamp: CantonTimestamp,
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     crypto.ips
       .awaitSnapshot(timestamp)
@@ -180,9 +170,14 @@ abstract class AbstractMessageProcessor(
             s"Bad request $requestCounter: Timed out without a confirmation result message."
           )
           synchronizeWithClosing(functionFullName) {
-
             decisionTimeF.flatMap(
-              terminateRequest(requestCounter, sequencerCounter, timestamp, _, None)
+              terminateRequest(
+                requestCounter,
+                timestamp,
+                _,
+                None,
+                publishUpdate,
+              )
             )
 
           }
@@ -240,7 +235,8 @@ abstract class AbstractMessageProcessor(
       requestCounter: RequestCounter,
       sequencerCounter: SequencerCounter,
       timestamp: CantonTimestamp,
-      eventO: Option[SequencedUpdate],
+      eventO: Option[SequencedEventUpdate],
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     // Let the request immediately timeout (upon the next message) rather than explicitly adding an empty commit set
     // because we don't have a sequencer counter to associate the commit set with.
@@ -250,7 +246,13 @@ abstract class AbstractMessageProcessor(
       sequencerCounter,
       timestamp,
       FutureUnlessShutdown.pure(decisionTime),
-      terminateRequest(requestCounter, sequencerCounter, timestamp, decisionTime, eventO),
+      terminateRequest(
+        requestCounter,
+        timestamp,
+        decisionTime,
+        eventO,
+        publishUpdate,
+      ),
     )
   }
 }

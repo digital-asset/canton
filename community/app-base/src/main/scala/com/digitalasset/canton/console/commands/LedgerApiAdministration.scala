@@ -704,6 +704,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           prefetchContractKeys: Seq[PrefetchContractKey] = Seq.empty,
           maxRecordTime: Option[CantonTimestamp] = None,
           estimateTrafficCost: Option[CostEstimationHints] = None,
+          hashingSchemeVersion: HashingSchemeVersion =
+            HashingSchemeVersion.HASHING_SCHEME_VERSION_V2,
       ): PrepareResponseProto =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -721,6 +723,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               prefetchContractKeys,
               maxRecordTime,
               estimateTrafficCost,
+              hashingSchemeVersion,
             )
           )
         }
@@ -1419,6 +1422,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             userPackageSelectionPreference = userPackageSelectionPreference,
             verboseHashing = verboseHashing,
             prefetchContractKeys = Seq(),
+            hashingSchemeVersion = actAs.preferredHashingSchemeVersion.toLedgerApiProto,
           )
 
           submit_prepared_async(
@@ -1462,6 +1466,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             userPackageSelectionPreference = userPackageSelectionPreference,
             verboseHashing = verboseHashing,
             prefetchContractKeys = Seq(),
+            hashingSchemeVersion = actAs.preferredHashingSchemeVersion.toLedgerApiProto,
           )
 
           submit_prepared(
@@ -2804,6 +2809,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             prefetchContractKeys: Seq[javab.data.PrefetchContractKey] = Seq.empty,
             maxRecordTime: Option[CantonTimestamp] = None,
             estimateTrafficCost: Option[CostEstimationHints] = None,
+            hashingSchemeVersion: HashingSchemeVersion =
+              HashingSchemeVersion.HASHING_SCHEME_VERSION_V2,
         ): PrepareResponseProto =
           consoleEnvironment.run {
             ledgerApiCommand(
@@ -2821,6 +2828,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 prefetchContractKeys.map(k => PrefetchContractKey.fromJavaProto(k.toProto)),
                 maxRecordTime,
                 estimateTrafficCost,
+                hashingSchemeVersion,
               )
             )
           }

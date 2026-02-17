@@ -151,8 +151,6 @@ The rest of the onboarding process is similar to single node hosting.
     .. shell:: curl -sS -f -d "$ALLOCATE" -H "Content-Type: application/json" \
         -X POST ${PARTICIPANT1}/v2/parties/external/allocate
 
-.. _tutorial_onboard_external_party_lapi_multi_hosted_pn_approves:
-
 Finally, the last step required is to call the allocate endpoint on Participant 2 as well.
 
 .. snippet:: party_management_multi_hosted

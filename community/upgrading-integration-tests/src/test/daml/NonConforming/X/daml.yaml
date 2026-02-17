@@ -1,22 +1,25 @@
-module-prefixes: 
+# Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+module-prefixes:
   NonConforming-1.0.0: NonConformingV1
   NonConforming-2.0.0: NonConformingV2
-override-components: 
-  damlc: 
+override-components:
+  damlc:
     version: $DAML_VERSION
-  daml-script: 
+  daml-script:
     version: $DAML_VERSION
-  codegen: 
+  codegen:
     version: $DAML_VERSION
-build-options: 
+build-options:
 - --target=2.1
 - --enable-interfaces=yes
 name: NonConformingX
-data-dependencies: 
+data-dependencies:
 - ../../../scala-2.13/resource_managed/test/NonConforming-1.0.0.dar
 - ../../../scala-2.13/resource_managed/test/NonConforming-2.0.0.dar
 source: NonConformingX.daml
 version: 1.0.0
-dependencies: 
+dependencies:
 - daml-prim
 - daml-stdlib

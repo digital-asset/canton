@@ -20,7 +20,7 @@ sealed trait ViewType extends Product with Serializable with PrettyPrinting {
 
   type ViewSubmitterMetadata <: HasSubmissionTrackerData
 
-  type Processor = RequestProcessor[this.type]
+  type Processor[Event] = RequestProcessor[this.type, Event]
 
   def toProtoEnum: v30.ViewType
 

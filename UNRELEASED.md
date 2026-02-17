@@ -25,7 +25,6 @@ Template for a bigger topic
 
 
 ### Minor Improvements
-
 - JSON Ledger API OpenAPI/AsyncAPI spec corrections
   - Fields not marked as required in the Ledger API `.proto` specification are now also optional in the OpenAPI/AsyncAPI specifications.
     If your client code is using code generated using previous versions of these specifications, it may not compile or function correctly with the new version. To migrate:
@@ -106,6 +105,8 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
 - Additional metrics for the ACS commitment processor: `daml.participant.sync.commitments.last-incoming-received`, `daml.participant.sync.commitments.last-incoming-processed`, `daml.participant.sync.commitments.last-locally-completed`, and `daml.participant.sync.commitments.last-locally-checkpointed`.
 - *BREAKING* Removed the `LastErrorsAppender` along with the Admin API endpoints `StatusService.GetLastErrors` and `StatusServiceGetLastErrorTrace`, as
   well as the corresponding console commands `last_errors` and `last_error_trace`.
+- Changed the `CompressedBatch` structure in the sequencer protocol for protocol version 35 to separately keep recipients and envelopes (from `gzip(Seq((recp1, payload1), (recp2, payload2)))` to `gzip(Seq(recp1, recp2)), Seq(gzip(payload1), gzip(payload2)))`).
+- The configuration parameters `topology.use-new-processor` and `topology.use-new-client` have been deprecated and now default to true. Configuring those parameters to false will be ignored.
 
 ### Preview Features
 - preview feature

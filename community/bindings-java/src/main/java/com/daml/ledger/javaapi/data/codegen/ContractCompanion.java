@@ -3,11 +3,8 @@
 
 package com.daml.ledger.javaapi.data.codegen;
 
-import com.daml.ledger.javaapi.data.CreatedEvent;
+import com.daml.ledger.javaapi.data.*;
 import com.daml.ledger.javaapi.data.DamlRecord;
-import com.daml.ledger.javaapi.data.Identifier;
-import com.daml.ledger.javaapi.data.PackageVersion;
-import com.daml.ledger.javaapi.data.Value;
 import com.daml.ledger.javaapi.data.codegen.json.JsonLfDecoder;
 import java.util.List;
 import java.util.Optional;
@@ -19,8 +16,8 @@ import java.util.function.Function;
  * made from that template.
  *
  * <p>Application code <em>should not</em> instantiate or subclass; instead, refer to the {@code
- * COMPANION} field on generated {@link com.daml.ledger.javaapi.data.Template} subclasses. All
- * {@code protected} members herein are considered part of the <strong>INTERNAL API</strong>.
+ * COMPANION} field on generated {@link Template} subclasses. All {@code protected} members herein
+ * are considered part of the <strong>INTERNAL API</strong>.
  *
  * <p>Every instance is either a {@link WithKey} or {@link WithoutKey}, depending on whether the
  * template defined a {@code key} type. {@link WithKey} defines extra utilities for working with
@@ -28,13 +25,21 @@ import java.util.function.Function;
  *
  * @param <Ct> The {@link Contract} subclass generated within the template class.
  * @param <Id> The {@link ContractId} subclass generated within the template class.
- * @param <Data> The generated {@link com.daml.ledger.javaapi.data.Template} subclass named after
- *     the template, whose instances contain only the payload.
+ * @param <Data> The generated {@link Template} subclass named after the template, whose instances
+ *     contain only the payload.
  */
 public abstract class ContractCompanion<Ct, Id, Data>
     extends ContractTypeCompanion<Ct, Id, Data, Data> {
+  /**
+   * @hidden
+   * @deprecated Use {@link #valueDecoder} instead. This field is retained for backward
+   *     compatibility. Both perform the same underlying logic, but {@code valueDecoder} provides a
+   *     more robust API for decoding data with unknown fields.
+   */
+  @Deprecated protected final Function<DamlRecord, Data> fromValue;
+
   /** @hidden */
-  protected final Function<DamlRecord, Data> fromValue;
+  private final ValueDecoder<Data> valueDecoder;
 
   @FunctionalInterface // Defines the function type which throws.
   public static interface FromJson<T> {
@@ -42,6 +47,10 @@ public abstract class ContractCompanion<Ct, Id, Data>
   }
 
   protected final FromJson<Data> fromJson;
+
+  protected ValueDecoder<Data> getValueDecoder() {
+    return this.valueDecoder;
+  }
 
   /**
    * Static method to generate an implementation of {@code ValueDecoder} of type {@code Data} with
@@ -54,14 +63,19 @@ public abstract class ContractCompanion<Ct, Id, Data>
       ContractCompanion<?, ? extends ContractId<Data>, Data> companion) {
     return new ValueDecoder<>() {
       @Override
-      public Data decode(Value value) {
+      public Data decode(Value value, UnknownTrailingFieldPolicy policy) {
         DamlRecord record =
             value
                 .asRecord()
                 .orElseThrow(
                     () ->
                         new IllegalArgumentException("Contracts must be constructed from Records"));
-        return companion.fromValue.apply(record);
+        return companion.getValueDecoder().decode(record, policy);
+      }
+
+      @Override
+      public Data decode(Value value) {
+        return decode(value, UnknownTrailingFieldPolicy.STRICT);
       }
 
       @Override
@@ -74,7 +88,7 @@ public abstract class ContractCompanion<Ct, Id, Data>
   /**
    * <strong>INTERNAL API</strong>: this is meant for use by {@link WithoutKey} and {@link WithKey},
    * and <em>should not be referenced directly</em>. Applications should refer to the {@code
-   * COMPANION} field on generated {@link com.daml.ledger.javaapi.data.Template} subclasses instead.
+   * COMPANION} field on generated {@link Template} subclasses instead.
    *
    * @hidden
    */
@@ -89,6 +103,28 @@ public abstract class ContractCompanion<Ct, Id, Data>
     super(packageInfo, templateId, templateClassName, newContractId, choices);
     this.fromValue = fromValue;
     this.fromJson = fromJson;
+    this.valueDecoder = value -> value.asRecord().map(fromValue).orElseThrow();
+  }
+
+  /**
+   * <strong>INTERNAL API</strong>: this is meant for use by {@link WithoutKey} and {@link WithKey},
+   * and <em>should not be referenced directly</em>. Applications should refer to the {@code
+   * COMPANION} field on generated {@link Template} subclasses instead.
+   *
+   * @hidden
+   */
+  protected ContractCompanion(
+      ContractTypeCompanion.Package packageInfo,
+      String templateClassName,
+      Identifier templateId,
+      Function<String, Id> newContractId,
+      FromJson<Data> fromJson,
+      List<Choice<Data, ?, ?>> choices,
+      ValueDecoder<Data> valueDecoder) {
+    super(packageInfo, templateId, templateClassName, newContractId, choices);
+    this.fromValue = valueDecoder::decode;
+    this.fromJson = fromJson;
+    this.valueDecoder = valueDecoder;
   }
 
   public Data fromJson(String json) throws JsonLfDecoder.Error {
@@ -102,8 +138,35 @@ public abstract class ContractCompanion<Ct, Id, Data>
      * <strong>INTERNAL API</strong>: this is meant for use by <a
      * href="https://docs.daml.com/app-dev/bindings-java/codegen.html">the Java code generator</a>,
      * and <em>should not be referenced directly</em>. Applications should refer to the {@code
-     * COMPANION} field on generated {@link com.daml.ledger.javaapi.data.Template} subclasses
-     * instead.
+     * COMPANION} field on generated {@link Template} subclasses instead.
+     *
+     * @hidden
+     */
+    public WithoutKey(
+        ContractTypeCompanion.Package packageInfo,
+        String templateClassName,
+        Identifier templateId,
+        Function<String, Id> newContractId,
+        FromJson<Data> fromJson,
+        NewContract<Ct, Id, Data> newContract,
+        List<Choice<Data, ?, ?>> choices,
+        ValueDecoder<Data> valueDecoder) {
+      super(
+          packageInfo,
+          templateClassName,
+          templateId,
+          newContractId,
+          fromJson,
+          choices,
+          valueDecoder);
+      this.newContract = newContract;
+    }
+
+    /**
+     * <strong>INTERNAL API</strong>: this is meant for use by <a
+     * href="https://docs.daml.com/app-dev/bindings-java/codegen.html">the Java code generator</a>,
+     * and <em>should not be referenced directly</em>. Applications should refer to the {@code
+     * COMPANION} field on generated {@link Template} subclasses instead.
      *
      * @hidden
      */
@@ -152,8 +215,7 @@ public abstract class ContractCompanion<Ct, Id, Data>
      * <strong>INTERNAL API</strong>: this is meant for use by <a
      * href="https://docs.daml.com/app-dev/bindings-java/codegen.html">the Java code generator</a>,
      * and <em>should not be referenced directly</em>. Applications should refer to the {@code
-     * COMPANION} field on generated {@link com.daml.ledger.javaapi.data.Template} subclasses
-     * instead.
+     * COMPANION} field on generated {@link Template} subclasses instead.
      *
      * @hidden
      */
