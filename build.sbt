@@ -476,6 +476,7 @@ lazy val `nonempty` = DamlProjects.`nonempty`
 lazy val `nonempty-cats` = DamlProjects.`nonempty-cats`
 lazy val `rs-grpc-bridge` = DamlProjects.`rs-grpc-bridge`
 lazy val `rs-grpc-pekko` = DamlProjects.`rs-grpc-pekko`
+lazy val `rs-grpc-pekko-test` = DamlProjects.`rs-grpc-pekko-test`
 lazy val `logging-entries` = DamlProjects.`logging-entries`
 lazy val `contextualized-logging` = DamlProjects.`contextualized-logging`
 lazy val `daml-resources` = DamlProjects.`daml-resources`

@@ -38,7 +38,7 @@ set +o pipefail
 # Check for errors and warnings
 cat "$LOGFILE" |
   join_daml_error_lines |
-  rg -a -v -f <(echo "$IGNORE_PATTERNS") |
+  rg -U -a -v -f <(echo "$IGNORE_PATTERNS") |
   rg -a -e "$MIN_LOG_LEVEL_WARNING" |
   sed "s/ \\[[^ ]*\\] / [⋮] /" |  # replaces non-whitespace [canton-env-execution-context-123] with [⋮]
   output_problems "problems" "$LOGFILE"

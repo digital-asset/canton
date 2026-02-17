@@ -6,11 +6,11 @@ package com.daml.grpc.adapter.server.rs
 import com.daml.grpc.adapter.TestExecutionSequencerFactory
 import org.reactivestreams.tck.flow.support.HelperPublisher
 import org.scalatest.concurrent.AsyncTimeLimitedTests
-import org.scalatest.time.Span
-import org.scalatest.time.SpanSugar._
-import org.scalatest.{Assertion, BeforeAndAfterEach}
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.time.Span
+import org.scalatest.time.SpanSugar.*
 import org.scalatest.wordspec.AsyncWordSpec
+import org.scalatest.{Assertion, BeforeAndAfterEach}
 
 import scala.concurrent.ExecutionContext.global
 import scala.concurrent.Future
@@ -57,11 +57,10 @@ class ServerSubscriberStressTest
     }
   }
 
-  private def verifyExpectedElementsArrivedInOrder(): Future[Assertion] = {
+  private def verifyExpectedElementsArrivedInOrder(): Future[Assertion] =
     serverCallStreamObserver.elementsWhenCompleted.map { receivedElements =>
       receivedElements should contain theSameElementsInOrderAs expectedElemRange
     }
-  }
 
   override def timeLimit: Span = 10.seconds
 }

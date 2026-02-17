@@ -3,10 +3,9 @@
 
 package com.daml.grpc.adapter.server.rs
 
-import java.util.concurrent.atomic.AtomicReference
-
 import org.reactivestreams.{Subscriber, Subscription}
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{Future, Promise}
 
 class BufferingSubscriber[T] extends Subscriber[T] {

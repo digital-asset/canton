@@ -5,4 +5,4 @@ package com.daml.grpc.adapter.server.rs
 
 import scala.util.control.NoStackTrace
 
-case class TestingException(msg: String) extends RuntimeException(msg) with NoStackTrace
+final case class TestingException(msg: String) extends RuntimeException(msg) with NoStackTrace

@@ -42,15 +42,14 @@ class BufferingSubscriptionTest extends AnyWordSpecLike with Matchers {
   }
   private def newBufferingSubscription(
       observer: MockClientCallStreamObserver
-  ) = {
+  ) =
     new BufferingSubscription[String](
-      (_: Subscriber[_ >: String]) => (),
+      (_: Subscriber[? >: String]) => (),
       () => observer,
       sequencePool.getExecutionSequencer,
       NoOpSubscriber,
       "test",
     )
-  }
 }
 
 object BufferingSubscriptionTest {
