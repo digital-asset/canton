@@ -49,7 +49,9 @@ class LogicalSynchronizerUpgradeCallbackImpl(
 
   def registerCallback(
       successor: SynchronizerSuccessor
-  )(implicit traceContext: TraceContext): Unit =
+  )(implicit traceContext: TraceContext): Unit = {
+    implicit val logger = LSU.Logger(loggerFactory, getClass, successor)
+
     if (registered.compareAndSet(None, Some(successor))) {
       logger.info(s"Registering callback for upgrade of $psid to ${successor.psid}")
 
@@ -59,10 +61,15 @@ class LogicalSynchronizerUpgradeCallbackImpl(
         .foreach { _ =>
           if (registered.get().contains(successor)) {
             val upgradeResultF = synchronizerConnectionsManager
-              .upgradeSynchronizerTo(psid, successor)
+              .performLsu(psid, successor)
               .value
               .map(
-                _.fold(err => logger.error(s"Upgrade to ${successor.psid} failed: $err"), _ => ())
+                _.fold(
+                  err => logger.error(s"""Upgrade to ${successor.psid} failed: $err
+                       |Consult the documentation to perform manual upgrade.
+                       |""".stripMargin),
+                  _ => (),
+                )
               )
 
             FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
@@ -76,6 +83,7 @@ class LogicalSynchronizerUpgradeCallbackImpl(
       logger.info(
         s"Not registering callback for upgrade of $psid to ${successor.psid} because it was already done"
       )
+  }
 
   override def unregisterCallback(): Unit = registered.set(None)
 }

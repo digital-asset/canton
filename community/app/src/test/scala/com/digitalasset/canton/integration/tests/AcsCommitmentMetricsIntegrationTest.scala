@@ -61,8 +61,6 @@ trait AcsCommitmentMetricsIntegrationTest
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         ConfigTransforms.updateMaxDeduplicationDurations(maxDedupDuration),
-      )
-      .addConfigTransform(
         _.focus(_.monitoring.metrics)
           .replace(
             MetricsConfig(
@@ -76,7 +74,7 @@ trait AcsCommitmentMetricsIntegrationTest
                 )
               ),
             )
-          )
+          ),
       )
       .updateTestingConfig(
         _.focus(_.commitmentSendDelay).replace(

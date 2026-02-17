@@ -120,6 +120,7 @@ object ProtocolVersion {
       v: Int
   ): ProtocolVersionWithStatus[ProtocolVersionAnnotation.Alpha] =
     createWithStatus[ProtocolVersionAnnotation.Alpha](v)
+
   private[version] def createBeta(
       v: Int
   ): ProtocolVersionWithStatus[ProtocolVersionAnnotation.Beta] =
@@ -249,7 +250,7 @@ object ProtocolVersion {
     NonEmpty.mk(List, ProtocolVersion.dev)
 
   val beta: List[ProtocolVersionWithStatus[ProtocolVersionAnnotation.Beta]] =
-    parseFromBuildInfo(BuildInfo.betaProtocolVersions.toSeq)
+    parseFromBuildInfo(BuildInfo.betaProtocolVersions)
       .map(pv => ProtocolVersion.createBeta(pv.v))
 
   val supported: NonEmpty[List[ProtocolVersion]] = (alpha ++ beta ++ stable).sorted

@@ -778,13 +778,15 @@ final class SequencerClientTest
           val psid = DefaultTestIdentities.physicalSynchronizerId
           val nextPSid = PhysicalSynchronizerId(
             psid.logical,
-            psid.protocolVersion,
             psid.serial.increment.toNonNegative,
+            psid.protocolVersion,
           )
 
           val upgradeTime = CantonTimestamp.now()
           val synchronizerPredecessor =
-            Option.when(usePredecessor)(SynchronizerPredecessor(psid, upgradeTime))
+            Option.when(usePredecessor)(
+              SynchronizerPredecessor(psid, upgradeTime, isLateUpgrade = false)
+            )
 
           val env = RichEnvFactory.create(
             psid = nextPSid,

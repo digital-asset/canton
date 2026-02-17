@@ -25,6 +25,18 @@ class ThroughputCapMetrics(
       0d,
     )(MetricsContext.Empty)
 
+  val tpsCap: Gauge[Double] =
+    openTelemetryMetricsFactory.gauge(
+      MetricInfo(
+        name = prefix :+ "member-tps",
+        summary = "Enforced member cap of transactions per second",
+        description =
+          """Current member cap transactions per second computed based on a configurable window""".stripMargin,
+        qualification = MetricQualification.Traffic,
+      ),
+      0d,
+    )(MetricsContext.Empty)
+
   val bps: Gauge[Double] =
     openTelemetryMetricsFactory.gauge(
       MetricInfo(
@@ -32,6 +44,18 @@ class ThroughputCapMetrics(
         summary = "Global bytes per second",
         description =
           """Current global bytes per second computed based on a configurable window""".stripMargin,
+        qualification = MetricQualification.Traffic,
+      ),
+      0d,
+    )(MetricsContext.Empty)
+
+  val bpsCap: Gauge[Double] =
+    openTelemetryMetricsFactory.gauge(
+      MetricInfo(
+        name = prefix :+ "member-bps",
+        summary = "Enforced member cap of bytes per second ",
+        description =
+          """Current member cap bytes per second computed based on a configurable window""".stripMargin,
         qualification = MetricQualification.Traffic,
       ),
       0d,
@@ -55,5 +79,7 @@ class ThroughputCapMetrics(
   override def close(): Unit = {
     tps.close()
     bps.close()
+    bpsCap.close()
+    tpsCap.close()
   }
 }

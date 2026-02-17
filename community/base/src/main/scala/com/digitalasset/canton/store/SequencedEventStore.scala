@@ -223,6 +223,10 @@ trait SequencedEventStore
     PossiblyIgnoredSerializedEvent
   ]]
 
+  /** Retrieve a list of sequenced events, ordered by sequencing time ascending
+    * @param limit
+    *   Maximum number of events to return
+    */
   def sequencedEvents(limit: Option[Int] = None)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Seq[PossiblyIgnoredSerializedEvent]]

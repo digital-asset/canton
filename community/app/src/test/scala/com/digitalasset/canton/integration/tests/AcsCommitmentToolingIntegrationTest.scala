@@ -48,7 +48,6 @@ import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionCo
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.ContractIdSyntax
 import com.digitalasset.canton.protocol.ReassignmentId
 import com.digitalasset.canton.protocol.messages.AcsCommitment
-import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
   ProgrammableSequencerPolicies,
@@ -128,19 +127,16 @@ trait AcsCommitmentToolingIntegrationTest
         def connect(
             participant: ParticipantReference,
             minObservationDuration: NonNegativeFiniteDuration,
-        ): Unit = {
-          val daSequencerConnection =
-            SequencerConnections.single(sequencer1.sequencerConnection.withAlias(daName.toString))
+        ): Unit =
           participant.synchronizers.connect_by_config(
             SynchronizerConnectionConfig(
               synchronizerAlias = daName,
-              sequencerConnections = daSequencerConnection,
+              sequencerConnections = sequencer1,
               timeTracker = SynchronizerTimeTrackerConfig(minObservationDuration =
                 minObservationDuration.toConfig
               ),
             )
           )
-        }
 
         connect(participant1, minObservationDuration1)
         connect(participant2, minObservationDuration2)

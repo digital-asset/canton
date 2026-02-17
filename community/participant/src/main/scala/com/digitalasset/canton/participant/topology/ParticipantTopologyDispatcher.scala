@@ -403,7 +403,6 @@ private class SynchronizerOnboardingOutbox(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SequencerConnectClient.Error, Unit] =
     sequencerConnectClient.registerOnboardingTopologyTransactions(
-      synchronizerAlias,
       participantId,
       transactions,
     )

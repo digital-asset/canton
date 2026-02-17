@@ -11,7 +11,7 @@ import com.digitalasset.canton.error.{CantonBaseError, CantonError}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
 import com.digitalasset.canton.participant.store.AcsInspectionError
 import com.digitalasset.canton.protocol.LfContractId
-import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 
 sealed trait RepairServiceError extends Product with Serializable with CantonBaseError
@@ -156,12 +156,8 @@ object RepairServiceError extends RepairServiceErrorGroup {
         with RepairServiceError
   }
 
-  @Explanation(
-    "The assignation of a contract cannot be changed due to an error."
-  )
-  @Resolution(
-    "Retry after operator intervention."
-  )
+  @Explanation("The assignation of a contract cannot be changed due to an error.")
+  @Resolution("Retry after operator intervention.")
   object ContractAssignationChangeError
       extends ErrorCode(
         id = "CONTRACT_ASSIGNATION_CHANGE_ERROR",
@@ -173,12 +169,8 @@ object RepairServiceError extends RepairServiceErrorGroup {
         with RepairServiceError
   }
 
-  @Explanation(
-    "Import ACS has failed."
-  )
-  @Resolution(
-    "Retry after operator intervention."
-  )
+  @Explanation("Import ACS has failed.")
+  @Resolution("Retry after operator intervention.")
   object ImportAcsError
       extends ErrorCode(
         id = "IMPORT_ACS_ERROR",
@@ -233,4 +225,17 @@ object RepairServiceError extends RepairServiceErrorGroup {
         )
         RepairServiceError.InvalidArgument.Error(errorMessage)
     }
+
+  @Explanation("Manual logical synchronizer upgrade failed")
+  @Resolution("Retry after operator intervention.")
+  object SynchronizerUpgradeError
+      extends ErrorCode(
+        id = "MANUAL_LOGICAL_SYNCHRONIZER_UPGRADE_ERROR",
+        ErrorCategory.InvalidGivenCurrentSystemStateOther,
+      ) {
+    final case class Error(successorPSId: PhysicalSynchronizerId, reason: String)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(cause = reason)
+        with RepairServiceError
+  }
 }

@@ -1580,7 +1580,7 @@ trait TopologyManagementIntegrationTest
       val announcementMapping = synchronizerOwners1
         .map { owner =>
           owner.topology.synchronizer_upgrade.announcement.propose(
-            PhysicalSynchronizerId(daId, testedProtocolVersion, serial = NonNegativeInt.two),
+            PhysicalSynchronizerId(daId, NonNegativeInt.two, testedProtocolVersion),
             upgradeTime,
           )
         }
@@ -1600,7 +1600,7 @@ trait TopologyManagementIntegrationTest
       }
       synchronizerOwners1.foreach(
         _.topology.synchronizer_upgrade.announcement.revoke(
-          PhysicalSynchronizerId(daId, testedProtocolVersion, serial = NonNegativeInt.two),
+          PhysicalSynchronizerId(daId, NonNegativeInt.two, testedProtocolVersion),
           upgradeTime,
         )
       )

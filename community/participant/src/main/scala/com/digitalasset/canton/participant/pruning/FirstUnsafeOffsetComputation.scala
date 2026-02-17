@@ -25,8 +25,9 @@ import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigSto
   HardMigratingSource,
   HardMigratingTarget,
   Inactive,
+  LsuSource,
+  LsuTarget,
   UnknownId,
-  UpgradingTarget,
 }
 import com.digitalasset.canton.participant.sync.SyncPersistentStateManager
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SynchronizerOffset
@@ -94,21 +95,20 @@ class FirstUnsafeOffsetComputation(
 
   private def checkForNoOngoingMigrationForSynchronizer(
       synchronizerId: SynchronizerId
-  )(implicit traceContext: TraceContext) =
+  )(implicit traceContext: TraceContext): Either[LedgerPruningError, Unit] =
     synchronizerConnectionConfigStore.getAllStatusesFor(synchronizerId) match {
       case Left(_: UnknownId) =>
-        Left[LedgerPruningError, Seq[SyncPersistentState]](
-          LedgerPruningInternalError(s"No synchronizer status for $synchronizerId")
-        )
+        Left(LedgerPruningInternalError(s"No synchronizer status for $synchronizerId"))
+
       case Right(configs) =>
         configs.forgetNE
           .traverse_ {
-            case Active | Inactive => Right(())
-            case migratingStatus @ (HardMigratingSource | HardMigratingTarget | UpgradingTarget) =>
+            case Active | Inactive | LsuSource => Right(())
+            case migratingStatus @ (HardMigratingSource | HardMigratingTarget | LsuTarget) =>
               logger.info(
                 s"Unable to prune while $synchronizerId is being migrated ($migratingStatus)"
               )
-              Left(LedgerPruningNotPossibleDuringHardMigration(synchronizerId, migratingStatus))
+              Left(LedgerPruningNotPossibleDuringUpgrade(synchronizerId, migratingStatus))
           }
     }
 

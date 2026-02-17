@@ -4,8 +4,9 @@
 package com.digitalasset.canton.synchronizer.sequencer.block
 
 import com.daml.metrics.api.{HistogramInventory, MetricName}
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.config.RequireTypes.PositiveDouble
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.metrics.{MetricValue, MetricsUtils}
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
@@ -51,11 +52,17 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       globalKbpsCap: Double = defaultGlobalKbpsCap,
       perClientTpsCap: Double = defaultPerClientTpsCap,
       perClientKbpsCap: Double = defaultPerClientKbpsCap,
+      strict: Boolean = true,
+      thresholds: NonEmpty[Seq[PositiveDouble]] =
+        NonEmpty.mk(Seq, 0.9, 0.8, 0.7).map(PositiveDouble.tryCreate),
   ): IndividualThroughputCapConfig = IndividualThroughputCapConfig(
     globalTpsCap = PositiveDouble.tryCreate(globalTpsCap),
     globalKbpsCap = PositiveDouble.tryCreate(globalKbpsCap),
     perClientTpsCap = PositiveDouble.tryCreate(perClientTpsCap),
     perClientKbpsCap = PositiveDouble.tryCreate(perClientKbpsCap),
+    thresholds = thresholds,
+    strict = strict,
+    updateEveryMs = NonNegativeInt.zero,
   )
 
   private def createConfig(
@@ -722,6 +729,171 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
         metric.attributes.get("member").contains(m3.toProtoPrimitive)
       }
       m3Rejections shouldBe empty
+    }
+
+    "cap TPS sensibly in non-strict mode" in {
+      val observationPeriodSeconds = 1
+      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
+      val tpsCap = new IndividualBlockSequencerThroughputCap(
+        observationPeriodSeconds,
+        createIndividualConfig(
+          globalTpsCap = 4.0,
+          globalKbpsCap = 1000,
+          perClientTpsCap = 4.0,
+          perClientKbpsCap = 1000,
+          strict = false,
+          thresholds = NonEmpty.mk(Seq, 0.001).map(PositiveDouble.tryCreate),
+        ),
+        SubmissionRequestType.ConfirmationRequest,
+        clock,
+        sequencerMetrics,
+        timeouts,
+        loggerFactory = loggerFactory,
+      )
+      val eventSize: Long = 100
+
+      // Initialize the cap logic
+      tpsCap.addEvent(clock.now, m1, eventSize)
+      clock.advance(
+        Duration.ofSeconds(observationPeriodSeconds.toLong).plus(Duration.ofNanos(1000))
+      )
+      tpsCap.addEvent(clock.now, m1, eventSize)
+      tpsCap.addEvent(clock.now, m1, eventSize)
+      tpsCap.addEvent(clock.now, m1, eventSize)
+      // nothing should throttle us
+      tpsCap.shouldRejectTransaction(m1, 0).isRight shouldBe true
+      tpsCap.shouldRejectTransaction(m2, 0).isRight shouldBe true
+      // now, m2 enters the stage, which means that the cap must be halved
+      // so m1 no longer can submit transactions
+      tpsCap.addEvent(clock.now, m1, eventSize) // m1: 4; memberCap: 4
+      clock.advance(Duration.ofMillis(500))
+      tpsCap.addEvent(clock.now, m2, eventSize) // m1: 4, m2: 1; memberCap: 3
+      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+        "bandwidth of 3,0 transactions over 1 seconds to all 2 active validators"
+      )
+      tpsCap.shouldRejectTransaction(m2, 0).isRight shouldBe true
+      tpsCap.addEvent(clock.now, m2, eventSize) // m1: 4, m2: 2; memberCap: 2
+      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+        "bandwidth of 2,0 transactions over 1 seconds to all 2 active validators"
+      )
+      tpsCap.shouldRejectTransaction(m2, 0).isRight shouldBe true
+      // now we add more events for m3
+      tpsCap.addEvent(clock.now, m3, eventSize) // m1: 4, m2: 2, m3: 1; memberCap: 1.5
+      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+        "bandwidth of 1,5 transactions over 1 seconds to all 3 active validators"
+      )
+      tpsCap.shouldRejectTransaction(m2, 0).left.value should myInclude(
+        "bandwidth of 1,5 transactions over 1 seconds to all 3 active validators"
+      )
+      tpsCap.shouldRejectTransaction(m3, 0).isRight shouldBe true
+      tpsCap.addEvent(clock.now, m4, eventSize) // m1: 4, m2: 2, m3: 1, m4: 1; memberCap: 1
+      tpsCap.addEvent(clock.now, m4, eventSize) // m1: 4, m2: 2, m3: 1, m4: 2; memberCap: 1
+      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+        "bandwidth of 1,0 transactions over 1 seconds to all 4 active validators"
+      )
+      tpsCap.shouldRejectTransaction(m2, 0).left.value should myInclude(
+        "bandwidth of 1,0 transactions over 1 seconds to all 4 active validators"
+      )
+      tpsCap.shouldRejectTransaction(m3, 0).isRight shouldBe true
+      tpsCap.shouldRejectTransaction(m4, 0).left.value should myInclude(
+        "bandwidth of 1,0 transactions over 1 seconds to all 4 active validators"
+      )
+
+      // we expire all events of m1 but have two more of m4, this means we have
+      // m4: 2, m3: 1, m2: 2
+      // this means we are at 5 tps, while the max-cap is 4
+      // so (4 - (5 - (2+2))) / 2 = 1.5
+      // where 4 is target, 5 - 4 is the TPS spent without the "leading spenders"
+      // so the excess TPS that can be distributed is 1.5 to the leading spenders each
+      clock.advance(Duration.ofMillis(501))
+      tpsCap.advanceWindow()
+      tpsCap.shouldRejectTransaction(m1, 0).isRight shouldBe true
+      tpsCap.shouldRejectTransaction(m2, 0).isRight shouldBe false
+      tpsCap.shouldRejectTransaction(m3, 0).isRight shouldBe true
+      tpsCap.shouldRejectTransaction(m4, 0).isRight shouldBe false
+    }
+
+    "cap Kbps sensibly in non-strict mode" in {
+      val observationPeriodSeconds = 1
+      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
+      val tpsCap = new IndividualBlockSequencerThroughputCap(
+        observationPeriodSeconds,
+        createIndividualConfig(
+          globalTpsCap = 100.0, // high value we don't expect to exceed
+          globalKbpsCap = defaultPerClientKbpsCap,
+          perClientTpsCap = 100.0, // high value we don't expect to exceed
+          perClientKbpsCap = defaultPerClientKbpsCap,
+          strict = false,
+          thresholds = NonEmpty.mk(Seq, 0.001).map(PositiveDouble.tryCreate),
+        ),
+        SubmissionRequestType.ConfirmationRequest,
+        clock,
+        sequencerMetrics,
+        timeouts,
+        loggerFactory = loggerFactory,
+      )
+      val bytesCap = defaultPerClientKbpsCap * 1024 * observationPeriodSeconds
+      val eventSize: Long = (bytesCap * 0.25).toLong
+
+      // Initialize the cap logic
+      tpsCap.addEvent(clock.now, m1, eventSize)
+      clock.advance(
+        Duration.ofSeconds(observationPeriodSeconds.toLong).plus(Duration.ofNanos(1000))
+      )
+      tpsCap.addEvent(clock.now, m1, eventSize)
+      tpsCap.addEvent(clock.now, m1, eventSize)
+      tpsCap.addEvent(clock.now, m1, eventSize)
+      // nothing should throttle us
+      tpsCap.shouldRejectTransaction(m1, 0).isRight shouldBe true
+      tpsCap.shouldRejectTransaction(m2, 0).isRight shouldBe true
+      // now, m2 enters the stage, which means that the cap must be halved
+      // so m1 no longer can submit transactions
+      tpsCap.addEvent(clock.now, m1, eventSize) // m1: 4; memberCap: 1000 Kbps
+      clock.advance(Duration.ofMillis(500))
+      tpsCap.addEvent(clock.now, m2, eventSize) // m1: 4, m2: 1; memberCap: 750 Kbps
+      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+        "bandwidth of 768000,0 bytes over 1 seconds to all 2 active validators"
+      )
+      tpsCap.shouldRejectTransaction(m2, 0).isRight shouldBe true
+      tpsCap.addEvent(clock.now, m2, eventSize) // m1: 4, m2: 2; memberCap: 500 Kbps
+      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+        "bandwidth of 512000,0 bytes over 1 seconds to all 2 active validators"
+      )
+      tpsCap.shouldRejectTransaction(m2, 0).isRight shouldBe true
+      // now we add more events for m3
+      tpsCap.addEvent(clock.now, m3, eventSize) // m1: 4, m2: 2, m3: 1; memberCap: 375 Kbps
+      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+        "bandwidth of 384000,0 bytes over 1 seconds to all 3 active validators"
+      )
+      tpsCap.shouldRejectTransaction(m2, 0).left.value should myInclude(
+        "bandwidth of 384000,0 bytes over 1 seconds to all 3 active validators"
+      )
+      tpsCap.shouldRejectTransaction(m3, 0).isRight shouldBe true
+      tpsCap.addEvent(clock.now, m4, eventSize) // m1: 4, m2: 2, m3: 1, m4: 1; memberCap: 250 Kbps
+      tpsCap.addEvent(clock.now, m4, eventSize) // m1: 4, m2: 2, m3: 1, m4: 2; memberCap: 250 Kbps
+      tpsCap.shouldRejectTransaction(m1, 0).left.value should myInclude(
+        "bandwidth of 256000,0 bytes over 1 seconds to all 4 active validators"
+      )
+      tpsCap.shouldRejectTransaction(m2, 0).left.value should myInclude(
+        "bandwidth of 256000,0 bytes over 1 seconds to all 4 active validators"
+      )
+      tpsCap.shouldRejectTransaction(m3, 0).isRight shouldBe true
+      tpsCap.shouldRejectTransaction(m4, 0).left.value should myInclude(
+        "bandwidth of 256000,0 bytes over 1 seconds to all 4 active validators"
+      )
+
+      // we expire all events of m1 but have two more of m4, this means we have
+      // m4: 500 Kbps, m3: 250 Kbps, m2: 500 Kbps
+      // this means we are at 1250 Kbps, while the max-cap is 1000 Kbps
+      // so (1000 - (1250 - (500+500))) / 2 = 375
+      // where 1000 is target, 1250 - 1000 is the Kbps spent without the "leading spenders"
+      // so the excess Kbps that can be distributed is 375 to the leading spenders each
+      clock.advance(Duration.ofMillis(501))
+      tpsCap.advanceWindow()
+      tpsCap.shouldRejectTransaction(m1, 0).isRight shouldBe true
+      tpsCap.shouldRejectTransaction(m2, 0).isRight shouldBe false
+      tpsCap.shouldRejectTransaction(m3, 0).isRight shouldBe true
+      tpsCap.shouldRejectTransaction(m4, 0).isRight shouldBe false
     }
   }
 }

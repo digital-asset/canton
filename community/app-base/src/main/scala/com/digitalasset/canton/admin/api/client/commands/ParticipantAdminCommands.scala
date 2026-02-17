@@ -1183,6 +1183,49 @@ object ParticipantAdminCommands {
           response: v30.RollbackUnassignmentResponse
       ): Either[String, Unit] = Either.unit
     }
+
+    final case class PerformSynchronizerUpgrade(
+        currentPSId: PhysicalSynchronizerId,
+        successorPSId: PhysicalSynchronizerId,
+        upgradeTime: CantonTimestamp,
+        successorConfig: SynchronizerConnectionConfig,
+        sequencerConnectionValidation: SequencerConnectionValidation,
+    ) extends GrpcAdminCommand[
+          v30.PerformSynchronizerUpgradeRequest,
+          v30.PerformSynchronizerUpgradeResponse,
+          Unit,
+        ] {
+      override type Svc = ParticipantRepairServiceStub
+
+      override def createService(channel: ManagedChannel): ParticipantRepairServiceStub =
+        v30.ParticipantRepairServiceGrpc.stub(channel)
+
+      override protected def createRequest()
+          : Either[String, v30.PerformSynchronizerUpgradeRequest] =
+        Right(
+          v30.PerformSynchronizerUpgradeRequest(
+            physicalSynchronizerId = currentPSId.toProtoPrimitive,
+            successor = v30.PerformSynchronizerUpgradeRequest
+              .Successor(
+                physicalSynchronizerId = successorPSId.toProtoPrimitive,
+                announcedUpgradeTime = upgradeTime.toProtoTimestamp.some,
+                config = successorConfig.toProtoV30.some,
+                sequencerConnectionValidation = sequencerConnectionValidation.toProtoV30,
+              )
+              .some,
+          )
+        )
+
+      override protected def submitRequest(
+          service: ParticipantRepairServiceStub,
+          request: v30.PerformSynchronizerUpgradeRequest,
+      ): Future[v30.PerformSynchronizerUpgradeResponse] =
+        service.performSynchronizerUpgrade(request)
+
+      override protected def handleResponse(
+          response: v30.PerformSynchronizerUpgradeResponse
+      ): Either[String, Unit] = Either.unit
+    }
   }
 
   object Ping {

@@ -30,7 +30,6 @@ import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervalsHelpers
 import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.ContractIdSyntax
-import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import monocle.Monocle.toAppliedFocusOps
@@ -113,19 +112,16 @@ trait AcsCommitmentNoWaitCounterParticipantIntegrationTest
         def connect(
             participant: ParticipantReference,
             minObservationDuration: NonNegativeFiniteDuration,
-        ): Unit = {
-          val daSequencerConnection =
-            SequencerConnections.single(sequencer1.sequencerConnection.withAlias(daName.toString))
+        ): Unit =
           participant.synchronizers.connect_by_config(
             SynchronizerConnectionConfig(
               synchronizerAlias = daName,
-              sequencerConnections = daSequencerConnection,
+              sequencerConnections = sequencer1,
               timeTracker = SynchronizerTimeTrackerConfig(minObservationDuration =
                 minObservationDuration.toConfig
               ),
             )
           )
-        }
 
         connect(participant1, minObservationDuration)
         connect(participant2, minObservationDuration)

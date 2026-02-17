@@ -18,11 +18,9 @@ trait RegisteredSynchronizersStoreTest extends FailOnShutdown {
 
   private def alias(a: String): SynchronizerAlias = SynchronizerAlias.tryCreate(a)
   private def id(a: String, serial: Int = 0): PhysicalSynchronizerId = PhysicalSynchronizerId(
-    SynchronizerId(
-      UniqueIdentifier.tryFromProtoPrimitive(s"$a::default")
-    ),
-    testedProtocolVersion,
+    SynchronizerId(UniqueIdentifier.tryFromProtoPrimitive(s"$a::default")),
     NonNegativeInt.tryCreate(serial),
+    testedProtocolVersion,
   )
 
   def registeredSynchronizersStore(mk: () => RegisteredSynchronizersStore): Unit = {

@@ -20,7 +20,6 @@ import com.digitalasset.canton.integration.{
   HasCycleUtils,
   SharedEnvironment,
 }
-import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{ForceFlag, PartyId}
 
@@ -174,10 +173,7 @@ trait MediatorOnboardingConcurrentTrafficTest
         .forgetNE should contain(mediator2.id)
     }
 
-    mediator2.setup.assign(
-      synchronizer1Id,
-      SequencerConnections.single(sequencer1.sequencerConnection),
-    )
+    mediator2.setup.assign(synchronizer1Id, sequencer1)
     mediator2.health.wait_for_initialized()
 
     participant3.health.ping(participant1)

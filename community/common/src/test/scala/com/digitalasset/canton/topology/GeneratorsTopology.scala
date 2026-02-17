@@ -47,5 +47,5 @@ final class GeneratorsTopology(protocolVersion: ProtocolVersion) {
   implicit val physicalSynchronizerIdArb: Arbitrary[PhysicalSynchronizerId] = Arbitrary(for {
     synchronizerId <- synchronizerIdArb.arbitrary
     serial <- Arbitrary.arbitrary[NonNegativeInt]
-  } yield PhysicalSynchronizerId(synchronizerId, protocolVersion, serial))
+  } yield PhysicalSynchronizerId(synchronizerId, serial, protocolVersion))
 }

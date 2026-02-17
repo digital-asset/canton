@@ -327,7 +327,10 @@ message GenesisStateV2Response {
   bytes chunk = 1;
 }
 
-message LogicalUpgradeStateRequest {}
+message LogicalUpgradeStateRequest {
+  // Must be specified if the node is configured with more than one active synchronizer.
+  optional StoreId synchronizer_store = 1;
+}
 
 message LogicalUpgradeStateResponse {
   // versioned stored topology transactions

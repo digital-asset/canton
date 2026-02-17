@@ -5,6 +5,7 @@ package com.digitalasset.canton.console
 
 import better.files.*
 import cats.syntax.either.*
+import cats.syntax.foldable.*
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
 import com.digitalasset.canton.data.CantonTimestamp
@@ -27,6 +28,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.annotation.tailrec
 import scala.util.control.NonFatal
+import scala.util.{Failure, Success, Try}
 
 class RepairMacros(override val loggerFactory: NamedLoggerFactory)
     extends NamedLogging
@@ -350,6 +352,36 @@ class RepairMacros(override val loggerFactory: NamedLoggerFactory)
         )
         .toSeq
 
+    @Help.Summary("Write active contracts to a file")
+    @Help.Description(
+      """The file can be imported using command `import_acs`.
+        |
+        |The arguments are:
+        |- contracts: Contracts to be written
+        |- protocolVersion: Protocol version of the synchronizer of the contracts
+        |"""
+    )
+    def write_contracts_to_file(
+        contracts: Seq[com.daml.ledger.api.v2.state_service.ActiveContract],
+        exportFilePath: String = "canton-acs-export.gz",
+    )(implicit consoleEnvironment: ConsoleEnvironment): Unit = {
+      val output = File(exportFilePath).newGzipOutputStream()
+      val res = contracts.traverse_ { lapiContract =>
+        val contract = com.digitalasset.canton.participant.admin.data.ActiveContract
+          .tryCreate(lapiContract)
+
+        Try(contract.writeDelimitedTo(output))
+      }
+      output.close()
+
+      res match {
+        case Failure(exception) =>
+          consoleEnvironment.raiseError(
+            s"Unable to write contracts to file $exportFilePath: ${exception.getMessage}"
+          )
+        case Success(()) =>
+      }
+    }
   }
 
   @Help.Summary(

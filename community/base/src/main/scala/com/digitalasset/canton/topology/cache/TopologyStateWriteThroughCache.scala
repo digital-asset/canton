@@ -552,10 +552,11 @@ class TopologyStateWriteThroughCache(
         stateData.validUntilInclusive.value <= effective.value,
         s"Current state is too recent for $effective $stateData",
       )
-      logger.debug(s"Adding $toStore")
+      val loggerDebug = TopologyMapping.loggerDebug(tx.transaction.mapping.code)(_)
+      loggerDebug(s"Adding $toStore")
       def expire(toExpire: MaybeUpdatedTx): Unit = {
         val before = toExpire.expireAt(effective)
-        logger.debug("Marking transaction as expired:" + toExpire)
+        loggerDebug("Marking transaction as expired:" + toExpire)
         ErrorUtil.requireState(
           before.isEmpty,
           s"Trying to expire an already expired transaction $toExpire because of\n   $tx",
@@ -602,7 +603,7 @@ class TopologyStateWriteThroughCache(
           case None =>
             // This case might happen if somebody added an authorized transaction with serial > 1
             // It is odd but supported
-            logger.debug("No existing transaction to expire for " + tx.transaction)
+            loggerDebug("No existing transaction to expire for " + tx.transaction)
           case Some(toExpire) =>
             ErrorUtil.requireState(
               toExpire.stored.serial.value <= tx.serial.value,

@@ -64,10 +64,13 @@ import scala.util.{Random, Success}
   * @param customDbNames
   *   optionally defines a mapping from identifier to db name (String => String) and a suffix to add
   *   to the db name
+  * @param nodeDbMapping
+  *   Allow nodes to share the DB: if `node1` maps to `node2`, then `node1` will use `node2` DB.
   */
 class UsePostgres(
     protected val loggerFactory: NamedLoggerFactory,
     customDbNames: Option[(String => String, String)] = None,
+    nodeDbMapping: String => String = identity,
     customMaxConnectionsByNode: Option[String => Option[PositiveInt]] = None,
     forceTestContainer: Boolean = false,
 ) extends EnvironmentSetupPlugin
@@ -90,10 +93,11 @@ class UsePostgres(
 
   lazy val applicationName: String = loggerFactory.name
 
-  def generateDbName(nodeName: String): String = customDbNames match {
-    case Some((dbNames, suffix)) => dbNames(nodeName) + suffix
-    case None => s"${dbPrefix}_$nodeName"
-  }
+  def generateDbName(nodeName: String): String =
+    customDbNames match {
+      case Some((dbNames, suffix)) => dbNames(nodeName) + suffix
+      case None => s"${dbPrefix}_${nodeDbMapping(nodeName)}"
+    }
 
   // we have to keep the storage instance alive for the duration of the test as this could be
   // managing an external docker container and other resources

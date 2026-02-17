@@ -658,6 +658,15 @@ final class RepairService(
       persistentState <- EitherT.fromEither[FutureUnlessShutdown](
         lookUpSynchronizerPersistence(psid)
       )
+
+      synchronizerPredecessor <- EitherT
+        .fromEither[FutureUnlessShutdown](
+          syncPersistentStateLookup
+            .connectionConfig(psid)
+            .toRight(s"Unable to find connection config for $psid")
+        )
+        .map(_.predecessor)
+
       _ <- EitherT.right(
         ledgerApiIndexer.value
           .ensureNoProcessingForSynchronizer(psid.logical)
@@ -665,14 +674,6 @@ final class RepairService(
       synchronizerIndex <- EitherT.right(
         ledgerApiIndexer.value.ledgerApiStore.value.cleanSynchronizerIndex(psid.logical)
       )
-
-      synchronizerPredecessor <- EitherT
-        .fromEither[FutureUnlessShutdown](
-          syncPersistentStateLookup
-            .connectionConfig(psid)
-            .toRight(s"Cannot find connection config for $psid")
-        )
-        .map(_.predecessor)
 
       startingPoints <- EitherT.right(
         SyncEphemeralStateFactory.startingPoints(

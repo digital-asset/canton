@@ -463,7 +463,7 @@ trait BaseTest
 
   implicit class RichSynchronizerId(val id: SynchronizerId) {
     def toPhysical: PhysicalSynchronizerId =
-      PhysicalSynchronizerId(id, testedProtocolVersion, NonNegativeInt.zero)
+      PhysicalSynchronizerId(id, NonNegativeInt.zero, testedProtocolVersion)
   }
 
   implicit def toSynchronizerId(id: PhysicalSynchronizerId): SynchronizerId = id.logical
@@ -474,7 +474,7 @@ trait BaseTest
 object BaseTest {
   implicit class RichSynchronizerIdO(val id: SynchronizerId) {
     def toPhysical: PhysicalSynchronizerId =
-      PhysicalSynchronizerId(id, testedProtocolVersion, NonNegativeInt.zero)
+      PhysicalSynchronizerId(id, NonNegativeInt.zero, testedProtocolVersion)
   }
 
   /** Keeps evaluating `testCode` until it fails or a timeout occurs.

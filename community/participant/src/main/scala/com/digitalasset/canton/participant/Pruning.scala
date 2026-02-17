@@ -45,7 +45,7 @@ object Pruning {
       show"Unsafe to prune offset $offset due to the event for $synchronizerId with record time $recordTime"
   }
 
-  final case class LedgerPruningNotPossibleDuringHardMigration(
+  final case class LedgerPruningNotPossibleDuringUpgrade(
       synchronizerId: SynchronizerId,
       status: SynchronizerConnectionConfigStore.Status,
   ) extends LedgerPruningError {

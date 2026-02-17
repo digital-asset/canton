@@ -36,7 +36,6 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
 }
 import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
-import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.sequencing.authentication.MemberAuthentication.MemberAccessDisabled
 import com.digitalasset.canton.sequencing.protocol.{MemberRecipient, SubmissionRequest}
 import com.digitalasset.canton.synchronizer.sequencer.{
@@ -110,19 +109,16 @@ sealed trait AcsCommitmentProcessorIntegrationTest
         def connect(
             participant: ParticipantReference,
             minObservationDuration: NonNegativeFiniteDuration,
-        ): Unit = {
-          val daSequencerConnection =
-            SequencerConnections.single(sequencer1.sequencerConnection.withAlias(daName.toString))
+        ): Unit =
           participant.synchronizers.connect_by_config(
             SynchronizerConnectionConfig(
               synchronizerAlias = daName,
-              sequencerConnections = daSequencerConnection,
+              sequencerConnections = sequencer1,
               timeTracker = SynchronizerTimeTrackerConfig(minObservationDuration =
                 minObservationDuration.toConfig
               ),
             )
           )
-        }
 
         connect(participant1, minObservationDuration1)
         connect(participant2, minObservationDuration2)

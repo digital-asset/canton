@@ -4,8 +4,7 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.daml.ledger.javaapi.data.DisclosedContract
-import com.digitalasset.canton.config
-import com.digitalasset.canton.config.{DbConfig, SynchronizerTimeTrackerConfig}
+import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.*
@@ -14,15 +13,12 @@ import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
-import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
-import com.digitalasset.canton.sequencing.SequencerConnections
 
 import java.util.Optional
 import scala.jdk.CollectionConverters.*
 
-abstract class LSUExternalPartiesIntegrationTest extends LSUBase {
+abstract class LsuExternalPartiesIntegrationTest extends LsuBase {
 
   override protected def testName: String = "lsu-external-parties"
 
@@ -40,31 +36,7 @@ abstract class LSUExternalPartiesIntegrationTest extends LSUBase {
       }
       .addConfigTransforms(configTransforms*)
       .withSetup { implicit env =>
-        import env.*
-
-        val daSequencerConnection =
-          SequencerConnections.single(sequencer1.sequencerConnection.withAlias(daName.toString))
-        participants.all.synchronizers.connect(
-          SynchronizerConnectionConfig(
-            synchronizerAlias = daName,
-            sequencerConnections = daSequencerConnection,
-            timeTracker = SynchronizerTimeTrackerConfig(observationLatency =
-              config.NonNegativeFiniteDuration.Zero
-            ),
-          )
-        )
-
-        participants.all.dars.upload(CantonExamplesPath)
-
-        synchronizerOwners1.foreach(
-          _.topology.synchronizer_parameters.propose_update(
-            daId,
-            _.copy(reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)),
-          )
-        )
-
-        oldSynchronizerNodes = SynchronizerNodes(Seq(sequencer1), Seq(mediator1))
-        newSynchronizerNodes = SynchronizerNodes(Seq(sequencer2), Seq(mediator2))
+        defaultEnvironmentSetup()
       }
 
   "Logical synchronizer upgrade" should {
@@ -125,7 +97,7 @@ abstract class LSUExternalPartiesIntegrationTest extends LSUBase {
   }
 }
 
-final class LSUExternalPartiesReferenceIntegrationTest extends LSUExternalPartiesIntegrationTest {
+final class LsuExternalPartiesReferenceIntegrationTest extends LsuExternalPartiesIntegrationTest {
   registerPlugin(
     new UseReferenceBlockSequencer[DbConfig.Postgres](
       loggerFactory,

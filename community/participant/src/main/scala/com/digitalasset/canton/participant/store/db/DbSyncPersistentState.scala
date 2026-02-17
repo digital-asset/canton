@@ -157,7 +157,7 @@ class DbPhysicalSyncPersistentState(
 
   val parameterStore: DbSynchronizerParameterStore =
     new DbSynchronizerParameterStore(
-      physicalSynchronizerIdx.synchronizerId,
+      psid,
       storage,
       timeouts,
       loggerFactory,
@@ -177,7 +177,7 @@ class DbPhysicalSyncPersistentState(
   override val topologyStore =
     new DbTopologyStore(
       storage,
-      SynchronizerStore(physicalSynchronizerIdx.synchronizerId),
+      SynchronizerStore(psid),
       indexedTopologyStoreId,
       staticSynchronizerParameters.protocolVersion,
       timeouts,

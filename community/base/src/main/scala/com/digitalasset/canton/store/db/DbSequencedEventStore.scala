@@ -40,7 +40,7 @@ class DbSequencedEventStore(
       : SetParameter[IndexedPhysicalSynchronizer] = IndexedString.setParameterIndexedString
   override protected[this] def partitionColumn: String = "physical_synchronizer_idx"
 
-  private val protocolVersion = physicalSynchronizerIdx.synchronizerId.protocolVersion
+  private val protocolVersion = physicalSynchronizerIdx.psid.protocolVersion
   override protected[this] val partitionKey: IndexedPhysicalSynchronizer = physicalSynchronizerIdx
 
   override protected[this] def pruning_status_table: String = "common_sequenced_event_store_pruning"

@@ -1,4 +1,4 @@
-sdk-version: 3.4.11-snapshot.20260126.14382.0.v14430a1f
+sdk-version: 3.4.11
 name: tests-Token
 data-dependencies: 
 - ../../../scala-2.13/resource_managed/test/tests-Holding-v1-1.0.0.dar

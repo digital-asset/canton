@@ -15,7 +15,6 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
 import com.digitalasset.canton.participant.protocol.TransactionProcessor
-import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.topology.{ForceFlag, PhysicalSynchronizerId}
 import org.scalatest.matchers.{MatchResult, Matcher}
 
@@ -133,14 +132,8 @@ sealed trait MediatorTest extends CommunityIntegrationTest with SharedEnvironmen
       mdsSerial shouldBe Some(PositiveInt.tryCreate(3))
     }
 
-    mediator2.setup.assign(
-      synchronizerId,
-      SequencerConnections.single(sequencer2.sequencerConnection),
-    )
-    mediator3.setup.assign(
-      synchronizerId,
-      SequencerConnections.single(sequencer3.sequencerConnection),
-    )
+    mediator2.setup.assign(synchronizerId, sequencer2)
+    mediator3.setup.assign(synchronizerId, sequencer3)
   }
 
   s"Run ping on $synchronizer with BFT-mediators" in { implicit env =>
