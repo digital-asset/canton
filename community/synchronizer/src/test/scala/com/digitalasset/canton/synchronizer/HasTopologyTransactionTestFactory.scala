@@ -111,7 +111,8 @@ trait HasTopologyTransactionTestFactory {
   ): Future[SubmissionRequest] =
     for {
       envelope <- signEnvelope(
-        ClosedEnvelope.create(ByteString.EMPTY, recipients, Seq.empty, testedProtocolVersion),
+        ClosedUncompressedEnvelope
+          .create(ByteString.EMPTY, recipients, Seq.empty, testedProtocolVersion),
         badEnvelopeSignature,
         envelopeSigningKey,
       )
@@ -132,10 +133,10 @@ trait HasTopologyTransactionTestFactory {
     )
 
   protected final def signEnvelope(
-      envelope: ClosedEnvelope,
+      envelope: ClosedUncompressedEnvelope,
       badEnvelopeSignature: Boolean = false,
       envelopeSigningKey: Fingerprint = topologyTransactionFactory.SigningKeys.key5.fingerprint,
-  ): Future[ClosedEnvelope] = {
+  ): Future[ClosedUncompressedEnvelope] = {
     val bytes = if (badEnvelopeSignature) {
       ByteString.copyFromUtf8("wrong content")
     } else {

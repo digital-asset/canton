@@ -20,8 +20,8 @@ import com.digitalasset.canton.protocol.LfFatContractInst
 import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
-import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.Time.Timestamp
+import com.digitalasset.daml.lf.data.{ImmArray, Time}
 import com.digitalasset.daml.lf.engine.Enricher
 import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
@@ -77,6 +77,7 @@ private[interactive] sealed trait EnrichedTransactionData {
   private[codec] def synchronizerId: SynchronizerId
   private[codec] def mediatorGroup: Int
   private[codec] def transactionUUID: UUID
+  private[codec] def maxRecordTime: Option[Time.Timestamp]
 
   def computeHash(
       hashVersion: HashingSchemeVersion,
@@ -84,16 +85,16 @@ private[interactive] sealed trait EnrichedTransactionData {
       hashTracer: HashTracer = HashTracer.NoOp,
   ): Either[InteractiveSubmission.HashError, Hash] = {
     val metadataForHashing = TransactionMetadataForHashing.create(
-      submitterInfo.actAs.toSet,
-      submitterInfo.commandId,
-      transactionUUID,
-      mediatorGroup,
-      synchronizerId,
-      transactionMeta.timeBoundaries,
-      transactionMeta.preparationTime,
-      submitterInfo.externallySignedSubmission.flatMap(_.maxRecordTime),
+      actAs = submitterInfo.actAs.toSet,
+      commandId = submitterInfo.commandId,
+      transactionUUID = transactionUUID,
+      mediatorGroup = mediatorGroup,
+      synchronizerId = synchronizerId,
+      timeBoundaries = transactionMeta.timeBoundaries,
+      preparationTime = transactionMeta.preparationTime,
+      maxRecordTime = maxRecordTime,
       // The hash is computed from the enriched contract because that's what the external party signs
-      inputContracts.view.mapValues(_.enrichedContract).toMap,
+      disclosedContracts = inputContracts.view.mapValues(_.enrichedContract).toMap,
     )
     InteractiveSubmission.computeVersionedHash(
       hashVersion,
@@ -138,6 +139,8 @@ final case class ExecuteTransactionData(
 ) extends EnrichedTransactionData {
   override private[codec] val mediatorGroup: Int = externallySignedSubmission.mediatorGroup.value
   override private[codec] val transactionUUID: UUID = externallySignedSubmission.transactionUUID
+
+  override def maxRecordTime: Option[Timestamp] = externallySignedSubmission.maxRecordTime
 
   def impoverish: CommandInterpretationResult = {
     val normalizedTransaction = Enricher.impoverish(transaction)

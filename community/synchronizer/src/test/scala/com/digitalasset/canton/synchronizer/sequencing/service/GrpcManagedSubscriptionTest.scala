@@ -65,7 +65,7 @@ class GrpcManagedSubscriptionTest extends AnyWordSpec with BaseTest with HasExec
           Some(MessageId.tryCreate("test-deliver")),
           Batch(
             List(
-              ClosedEnvelope
+              ClosedUncompressedEnvelope
                 .create(message, Recipients.cc(member), Seq.empty, testedProtocolVersion)
             ),
             testedProtocolVersion,

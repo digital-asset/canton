@@ -112,7 +112,11 @@ sealed trait MultiHostingInteractiveSubmissionIntegrationTest
       // Stop one of the 2 CPNs - threshold is 2 so the transaction cannot be committed
       participant2.stop()
       val prepared = ppn.ledger_api.interactive_submission
-        .prepare(Seq(aliceE), Seq(createCycleCommand(aliceE, "test-external-signing")))
+        .prepare(
+          Seq(aliceE),
+          Seq(createCycleCommand(aliceE, "test-external-signing")),
+          hashingSchemeVersion = testedApiHashingSchemeVersion,
+        )
 
       val signatures = global_secret.sign(prepared.preparedTransactionHash, aliceE)
       val (submissionId, ledgerEnd) = exec(prepared, Map(aliceE.partyId -> signatures), epn)

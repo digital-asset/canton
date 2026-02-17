@@ -27,7 +27,6 @@ import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, config}
-import monocle.macros.syntax.lens.*
 
 /** This trait provides helpers for the logical synchronizer upgrade tests. The main goal is to
   * improve readability of each tests by focusing on the behavior we want to test and make it easier
@@ -50,20 +49,12 @@ trait LsuBase
 
   protected def upgradeTime: CantonTimestamp
 
-  protected def configTransforms: Seq[ConfigTransform] = newOldSequencers.keySet
-    .map(sequencerName =>
-      ConfigTransforms
-        .updateSequencerConfig(sequencerName)(
-          _.focus(_.parameters.sequencingTimeLowerBoundExclusive).replace(Some(upgradeTime))
-        )
-    )
-    .toList
-    ++ List(
-      ConfigTransforms.disableAutoInit(newOldNodesResolution.keySet),
-      ConfigTransforms.useStaticTime,
-      // TODO(#30068): Enable session keys after sim clock advances are synced
-      ConfigTransforms.setSessionSigningKeys(SessionSigningKeysConfig.disabled),
-    ) ++ ConfigTransforms.enableAlphaVersionSupport
+  protected def configTransforms: Seq[ConfigTransform] = List(
+    ConfigTransforms.disableAutoInit(newOldNodesResolution.keySet),
+    ConfigTransforms.useStaticTime,
+    // TODO(#30068): Enable session keys after sim clock advances are synced
+    ConfigTransforms.setSessionSigningKeys(SessionSigningKeysConfig.disabled),
+  ) ++ ConfigTransforms.enableAlphaVersionSupport
 
   /** Prepare the environment for LSU with default values.
     *   - Connect `participants.all` (except if override is used) to synchronizer and upload dar
@@ -238,6 +229,7 @@ private[lsu] object LsuBase {
       oldSynchronizerOwners: Set[InstanceReference],
       newPV: ProtocolVersion,
       newSerial: NonNegativeInt,
+      overridePSId: Option[PhysicalSynchronizerId] = None,
   ) {
     val newStaticSynchronizerParameters: StaticSynchronizerParameters =
       StaticSynchronizerParameters.defaultsWithoutKMS(
@@ -247,7 +239,9 @@ private[lsu] object LsuBase {
       )
 
     val newPSId: PhysicalSynchronizerId =
-      PhysicalSynchronizerId(currentPSId.logical, newStaticSynchronizerParameters.toInternal)
+      overridePSId.getOrElse(
+        PhysicalSynchronizerId(currentPSId.logical, newStaticSynchronizerParameters.toInternal)
+      )
 
     val synchronizerSuccessor: SynchronizerSuccessor = SynchronizerSuccessor(newPSId, upgradeTime)
   }

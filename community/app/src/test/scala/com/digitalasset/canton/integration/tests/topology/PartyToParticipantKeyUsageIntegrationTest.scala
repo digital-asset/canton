@@ -110,6 +110,7 @@ class PartyToParticipantKeyUsageIntegrationTest
           partyId,
           NonEmpty.mk(Seq, namespaceKey.fingerprint, protocolKey.fingerprint),
           PositiveInt.two,
+          preferredHashingSchemeVersion = testedHashingSchemeVersion,
         )
         participant1.ledger_api.javaapi.commands.submit(
           Seq(aliceE),

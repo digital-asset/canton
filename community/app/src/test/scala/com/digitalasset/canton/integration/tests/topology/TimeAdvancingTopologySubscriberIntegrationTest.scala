@@ -132,11 +132,14 @@ trait TimeAdvancingTopologySubscriberIntegrationTest
         )
         .value
       p1SequencerClientInterceptor.setDelayPolicy(new SequencedEventDelayPolicy {
-        private def isBroadcastEvent(event: SequencedEvent[ClosedEnvelope]): Boolean = event match {
-          case deliver: Deliver[ClosedEnvelope] =>
-            deliver.envelopes.exists(_.recipients.allRecipients.contains(AllMembersOfSynchronizer))
-          case _ => false
-        }
+        private def isBroadcastEvent(event: SequencedEvent[ClosedEnvelope]): Boolean =
+          event match {
+            case deliver: Deliver[ClosedEnvelope] =>
+              deliver.envelopes.exists(
+                _.recipients.allRecipients.contains(AllMembersOfSynchronizer)
+              )
+            case _ => false
+          }
 
         override def apply(event: SequencedSerializedEvent): DelaySequencerClient = {
           if (isBroadcastEvent(event.underlying.value.content))

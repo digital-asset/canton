@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.integration.tests.security
 
+import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest
-import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApi}
+import com.digitalasset.canton.crypto.{CryptoPureApi, HashOps, SyncCryptoApi}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.MerkleTree.VersionedMerkleTree
 import com.digitalasset.canton.protocol.messages.*
@@ -15,6 +16,7 @@ import com.digitalasset.canton.sequencing.protocol.{
   Recipients,
   SubmissionRequest,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.GenLens
 import monocle.{Lens, Traversal}
 import org.scalactic.source.Position
@@ -66,7 +68,7 @@ trait SecurityTestLensUtils {
       : Traversal[SubmissionRequest, SignedProtocolMessage[M]] =
     GenLens[SubmissionRequest](_.batch.envelopes)
       .andThen(Traversal.fromTraverse[List, ClosedEnvelope])
-      .andThen(ClosedEnvelope.tryDefaultOpenEnvelope(pureCrypto, testedProtocolVersion))
+      .andThen(tryDefaultOpenEnvelope(pureCrypto, testedProtocolVersion))
       .andThen(
         Lens[DefaultOpenEnvelope, SignedProtocolMessage[M]](
           _.protocolMessage.asInstanceOf[SignedProtocolMessage[M]]
@@ -109,4 +111,14 @@ trait SecurityTestLensUtils {
           Recipients,
         ]
       )
+
+  private def tryDefaultOpenEnvelope(
+      hashOps: HashOps,
+      protocolVersion: ProtocolVersion,
+  ): Lens[ClosedEnvelope, DefaultOpenEnvelope] =
+    Lens[ClosedEnvelope, DefaultOpenEnvelope](
+      _.toOpenEnvelope(hashOps, protocolVersion).valueOr(err =>
+        throw new IllegalArgumentException(s"Failed to open envelope: $err")
+      )
+    )(newOpenEnvelope => _ => newOpenEnvelope.toClosedUncompressedEnvelope)
 }

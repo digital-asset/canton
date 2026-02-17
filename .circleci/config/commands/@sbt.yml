@@ -10,6 +10,7 @@ save_sbt_cache:
         job_name: "Uploading Coursier cache with non-pecific key to populate 'older cache'"
         key: >-
           cache=canton-coursier
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           dependencies=$(checksum project/Dependencies.scala)
         path: "${HOME}/.cache/coursier/v1/"
     - save_to_azure:
@@ -18,6 +19,7 @@ save_sbt_cache:
         # The cache is stored only when the build definition or dependencies change
         key: >-
           cache=canton-coursier
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           dependencies=$(checksum project/Dependencies.scala)
           dockerfile=$(checksum .ci/Dockerfile.canton-build)
           projectplugins=$(checksum project/project/plugins.sbt)
@@ -40,6 +42,7 @@ save_sbt_cache:
         job_name: "Uploading Ivy caches with non-specific key to populate 'older cache'"
         key: >-
           cache=canton-ivy
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           dependencies=$(checksum project/Dependencies.scala)
         path: "${HOME}/.ivy2/cache/" # despite sbt 1.3 using coursier it appears a handful of dependencies are placed in the ivy cache (core sbt plugins and coursier itself)
     - save_to_azure:
@@ -48,6 +51,7 @@ save_sbt_cache:
         # The cache is stored only when the build definition or dependencies change
         key: >-
           cache=canton-ivy
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           dependencies=$(checksum project/Dependencies.scala)
           dockerfile=$(checksum .ci/Dockerfile.canton-build)
           projectplugins=$(checksum project/project/plugins.sbt)
@@ -68,6 +72,7 @@ save_sbt_cache:
         job_name: "Uploading Sbt caches with non-specific key to populate 'older cache'"
         key: >-
           cache=canton-sbt
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           dependencies=$(checksum project/Dependencies.scala)
         path: "${HOME}/.sbt/" # despite sbt 1.3 using coursier it appears a handful of dependencies are placed in the ivy cache (core sbt plugins and coursier itself)
     - save_to_azure:
@@ -76,6 +81,7 @@ save_sbt_cache:
         # The cache is stored only when the build definition or dependencies change
         key: >-
           cache=canton-sbt
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           dependencies=$(checksum project/Dependencies.scala)
           dockerfile=$(checksum .ci/Dockerfile.canton-build)
           projectplugins=$(checksum project/project/plugins.sbt)
@@ -110,6 +116,7 @@ restore_sbt_cache:
         # This will speed up compilation, because most libraries are already in the cache.
         key: >-
           cache=canton-coursier
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           dependencies=$(checksum project/Dependencies.scala)
           dockerfile=$(checksum .ci/Dockerfile.canton-build)
           projectplugins=$(checksum project/project/plugins.sbt)
@@ -121,6 +128,7 @@ restore_sbt_cache:
           build=$(checksum build.sbt)
           :
           cache=canton-coursier
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           dependencies=$(checksum project/Dependencies.scala)
         # If dependencies have changed, continue with an empty cache.
     - restore_from_azure:
@@ -129,6 +137,7 @@ restore_sbt_cache:
         job_name: "Restoring Sbt caches - then if that is not present trying slightly older cache"
         key: >-
           cache=canton-sbt
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           dependencies=$(checksum project/Dependencies.scala)
           dockerfile=$(checksum .ci/Dockerfile.canton-build)
           projectplugins=$(checksum project/project/plugins.sbt)
@@ -140,11 +149,13 @@ restore_sbt_cache:
           build=$(checksum build.sbt)
           :
           cache=canton-sbt
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           dependencies=$(checksum project/Dependencies.scala)
     - restore_from_azure:
         job_name: "Restoring Ivy caches - then if that is not present trying slightly older cache"
         key: >-
           cache=canton-ivy
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           dependencies=$(checksum project/Dependencies.scala)
           dockerfile=$(checksum .ci/Dockerfile.canton-build)
           projectplugins=$(checksum project/project/plugins.sbt)
@@ -156,6 +167,7 @@ restore_sbt_cache:
           build=$(checksum build.sbt)
           :
           cache=canton-ivy
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           dependencies=$(checksum project/Dependencies.scala)
 
     - run:

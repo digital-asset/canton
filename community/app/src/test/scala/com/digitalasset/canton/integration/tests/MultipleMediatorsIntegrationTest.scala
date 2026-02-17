@@ -271,8 +271,9 @@ class MultipleMediatorsIntegrationTest
                 }
 
               val mediator = submissionRequest.batch.envelopes.collectFirst {
-                case ClosedEnvelope(_bytes, recipients, _) if findMediator(recipients).nonEmpty =>
-                  findMediator(recipients).value
+                case closedEnvelope: ClosedEnvelope
+                    if findMediator(closedEnvelope.recipients).nonEmpty =>
+                  findMediator(closedEnvelope.recipients).value
               }
               mediator match {
                 case Some(MediatorGroupRecipient(MediatorGroupIndex.zero)) =>

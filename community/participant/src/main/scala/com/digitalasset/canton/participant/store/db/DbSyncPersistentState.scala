@@ -4,17 +4,12 @@
 package com.digitalasset.canton.participant.store.db
 
 import cats.Eval
-import cats.data.EitherT
-import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.TopologyConfig
 import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCrypto}
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, LifeCycle}
+import com.digitalasset.canton.lifecycle.LifeCycle
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
-import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.store.{
   AcsCounterParticipantConfigStore,
   AcsInspection,
@@ -22,11 +17,9 @@ import com.digitalasset.canton.participant.store.{
   LogicalSyncPersistentState,
   PhysicalSyncPersistentState,
 }
-import com.digitalasset.canton.participant.topology.ParticipantTopologyValidation
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.store.db.DbSequencedEventStore
-import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.store.{
   IndexedPhysicalSynchronizer,
   IndexedStringStore,
@@ -34,19 +27,9 @@ import com.digitalasset.canton.store.{
   IndexedTopologyStoreId,
   SendTrackerStore,
 }
-import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.db.DbTopologyStore
-import com.digitalasset.canton.topology.transaction.HostingParticipant
-import com.digitalasset.canton.topology.{
-  ForceFlags,
-  ParticipantId,
-  PartyId,
-  SynchronizerOutboxQueue,
-  SynchronizerTopologyManager,
-  TopologyManagerError,
-}
-import com.digitalasset.canton.tracing.{NoTracing, TraceContext}
+import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ReassignmentTag
 
 import scala.concurrent.ExecutionContext
@@ -116,18 +99,12 @@ class DbLogicalSyncPersistentState(
 }
 
 class DbPhysicalSyncPersistentState(
-    participantId: ParticipantId,
     override val physicalSynchronizerIdx: IndexedPhysicalSynchronizer,
     indexedTopologyStoreId: IndexedTopologyStoreId,
     val staticSynchronizerParameters: StaticSynchronizerParameters,
-    clock: Clock,
     storage: DbStorage,
     crypto: SynchronizerCrypto,
     parameters: ParticipantNodeParameters,
-    topologyConfig: TopologyConfig,
-    packageMetadataView: PackageMetadataView,
-    ledgerApiStore: Eval[LedgerApiStore],
-    logicalSyncPersistentState: LogicalSyncPersistentState,
     val loggerFactory: NamedLoggerFactory,
     val futureSupervisor: FutureSupervisor,
 )(implicit ec: ExecutionContext)
@@ -185,92 +162,9 @@ class DbPhysicalSyncPersistentState(
       loggerFactory,
     )
 
-  override val synchronizerOutboxQueue = new SynchronizerOutboxQueue(loggerFactory)
-
-  override val topologyManager: SynchronizerTopologyManager = new SynchronizerTopologyManager(
-    participantId.uid,
-    clock = clock,
-    crypto = crypto,
-    staticSynchronizerParameters = staticSynchronizerParameters,
-    topologyCacheAggregatorConfig = parameters.batchingConfig.topologyCacheAggregator,
-    topologyConfig = topologyConfig,
-    store = topologyStore,
-    outboxQueue = synchronizerOutboxQueue,
-    disableOptionalTopologyChecks = parameters.disableOptionalTopologyChecks,
-    dispatchQueueBackpressureLimit = parameters.general.dispatchQueueBackpressureLimit,
-    exitOnFatalFailures = parameters.exitOnFatalFailures,
-    timeouts = timeouts,
-    futureSupervisor = futureSupervisor,
-    loggerFactory = loggerFactory,
-  ) with ParticipantTopologyValidation {
-
-    override def validatePackageVetting(
-        currentlyVettedPackages: Set[LfPackageId],
-        nextPackageIds: Set[LfPackageId],
-        dryRunSnapshot: Option[PackageMetadata],
-        forceFlags: ForceFlags,
-    )(implicit
-        traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
-      validatePackageVetting(
-        currentlyVettedPackages,
-        nextPackageIds,
-        packageMetadataView,
-        dryRunSnapshot,
-        forceFlags,
-        parameters.disableUpgradeValidation,
-      )
-
-    override def checkCannotDisablePartyWithActiveContracts(
-        partyId: PartyId,
-        forceFlags: ForceFlags,
-    )(implicit
-        traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
-      checkCannotDisablePartyWithActiveContracts(
-        partyId,
-        forceFlags,
-        acsInspections =
-          () => Map(logicalSyncPersistentState.lsid -> logicalSyncPersistentState.acsInspection),
-      )
-
-    override def checkInsufficientSignatoryAssigningParticipantsForParty(
-        partyId: PartyId,
-        currentThreshold: PositiveInt,
-        nextThreshold: Option[PositiveInt],
-        nextConfirmingParticipants: Seq[HostingParticipant],
-        forceFlags: ForceFlags,
-    )(implicit
-        traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
-      checkInsufficientSignatoryAssigningParticipantsForParty(
-        partyId,
-        currentThreshold,
-        nextThreshold,
-        nextConfirmingParticipants,
-        forceFlags,
-        () => Map(logicalSyncPersistentState.lsid -> logicalSyncPersistentState.reassignmentStore),
-        () => ledgerApiStore.value.ledgerEnd,
-      )
-
-    override def checkInsufficientParticipantPermissionForSignatoryParty(
-        partyId: PartyId,
-        forceFlags: ForceFlags,
-    )(implicit
-        traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
-      checkInsufficientParticipantPermissionForSignatoryParty(
-        partyId,
-        forceFlags,
-        acsInspections =
-          () => Map(logicalSyncPersistentState.lsid -> logicalSyncPersistentState.acsInspection),
-      )
-  }
-
   override def close(): Unit =
     LifeCycle.close(
       topologyStore,
-      topologyManager,
       sequencedEventStore,
       requestJournalStore,
       parameterStore,

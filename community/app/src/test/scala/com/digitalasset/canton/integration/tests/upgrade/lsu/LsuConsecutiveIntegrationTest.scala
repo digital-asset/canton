@@ -17,7 +17,6 @@ import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.version.ProtocolVersion
-import monocle.macros.syntax.lens.*
 
 import java.time.Duration
 import scala.annotation.nowarn
@@ -55,21 +54,9 @@ final class LsuConsecutiveIntegrationTest extends LsuBase {
   )
 
   override protected def configTransforms: List[ConfigTransform] = {
-    val lowerBound1 = ConfigTransforms
-      .updateSequencerConfig("sequencer2")(
-        _.focus(_.parameters.sequencingTimeLowerBoundExclusive).replace(Some(upgradeTime1))
-      )
-
-    val lowerBound2 = ConfigTransforms
-      .updateSequencerConfig("sequencer3")(
-        _.focus(_.parameters.sequencingTimeLowerBoundExclusive).replace(Some(upgradeTime2))
-      )
-
     val allNewNodes = Set("sequencer2", "sequencer3", "mediator2", "mediator3")
 
     List(
-      lowerBound1,
-      lowerBound2,
       ConfigTransforms.disableAutoInit(allNewNodes),
       ConfigTransforms.useStaticTime,
     ) ++ ConfigTransforms.enableAlphaVersionSupport

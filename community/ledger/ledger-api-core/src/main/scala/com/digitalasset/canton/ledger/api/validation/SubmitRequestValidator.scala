@@ -70,11 +70,18 @@ class SubmitRequestValidator(
         // If not set, defaults to the default instance which enables estimation without hints
         req.estimateTrafficCost.getOrElse(CostEstimationHintsP.defaultInstance)
       )
+      hashingSchemeVersion <- req.hashingSchemeVersion match {
+        case Some(hashingSchemeVersionP) =>
+          validateHashingSchemeVersion(hashingSchemeVersionP).leftMap(_.asGrpcError)
+        case None =>
+          Right(HashingSchemeVersion.V2) // Default to V2 for backward compatibility if not set
+      }
     } yield InteractiveSubmissionService.PrepareRequest(
       validatedCommands,
       req.verboseHashing,
       maxRecordTime,
       costEstimationHints,
+      hashingSchemeVersion,
     )
 
   private def validatePartySignatures(
@@ -135,7 +142,9 @@ class SubmitRequestValidator(
       )
       partySignaturesP <- requirePresence(partySignaturesOP, "parties_signatures")
       partySignatures <- validatePartySignatures(partySignaturesP)
-      version <- validateHashingSchemeVersion(hashingSchemeVersionP).leftMap(_.asGrpcError)
+      hashingSchemeVersion <- validateHashingSchemeVersion(hashingSchemeVersionP).leftMap(
+        _.asGrpcError
+      )
       synchronizerIdString <- requirePresence(
         preparedTransactionP.flatMap(_.metadata.map(_.synchronizerId)),
         "synchronizer_id",
@@ -153,7 +162,7 @@ class SubmitRequestValidator(
         deduplicationPeriod,
         partySignatures,
         preparedTransaction,
-        version,
+        hashingSchemeVersion,
         synchronizerId,
         ledgerEffectiveTime,
       )

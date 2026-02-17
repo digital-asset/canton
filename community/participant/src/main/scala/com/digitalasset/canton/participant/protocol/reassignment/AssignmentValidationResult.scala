@@ -15,7 +15,7 @@ import com.digitalasset.canton.ledger.participant.state.{
   CompletionInfo,
   Reassignment,
   ReassignmentInfo,
-  SequencedUpdate,
+  SequencedEventUpdate,
   Update,
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -76,7 +76,7 @@ final case class AssignmentValidationResult private[reassignment] (
       recordTime: CantonTimestamp,
   )(implicit
       traceContext: TraceContext
-  ): AcsChangeFactory => InternalContractIds => SequencedUpdate = {
+  ): AcsChangeFactory => InternalContractIds => SequencedEventUpdate = {
     val updateId = rootHash
     val completionInfo =
       Option.when(participantId == submitterMetadata.submittingParticipant)(

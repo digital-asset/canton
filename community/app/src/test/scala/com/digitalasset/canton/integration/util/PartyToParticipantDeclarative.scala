@@ -24,6 +24,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
   TopologyTransaction,
 }
+import com.digitalasset.canton.version.HashingSchemeVersion
 import org.scalatest.Assertions.fail
 import org.scalatest.EitherValues.*
 
@@ -54,7 +55,7 @@ sealed trait PartyToParticipantDeclarativeCommon[P] extends PartyTopologyUtils {
 
   def allRelevantParties: Set[P]
 
-  protected def partyReference: PartyToParticipant => P
+  protected def partyReference: (PartyToParticipant, HashingSchemeVersion) => P
 
   protected val participantReferences: Map[ParticipantId, ParticipantReference] =
     participants.map(p => p.id -> p).toMap
@@ -80,13 +81,19 @@ sealed trait PartyToParticipantDeclarativeCommon[P] extends PartyTopologyUtils {
   ): Map[P, Map[PhysicalSynchronizerId, (Serial, PartyHostingState)]] =
     synchronizerIds
       .flatMap { synchronizerId =>
+        val preferredHashingScheme = HashingSchemeVersion
+          .getHashingSchemeVersionsForProtocolVersion(synchronizerId.protocolVersion)
+          .max1
+
         val relevantResults = participant.topology.party_to_participant_mappings
           .list(synchronizerId.logical)
-          .filter(result => allRelevantParties.contains(partyReference(result.item)))
+          .filter(result =>
+            allRelevantParties.contains(partyReference(result.item, preferredHashingScheme))
+          )
 
         relevantResults.map { result =>
           val ptp = result.item
-          val party = partyReference(ptp)
+          val party = partyReference(ptp, preferredHashingScheme)
 
           (
             party,
@@ -162,13 +169,14 @@ class PartyToParticipantDeclarative(
 )(implicit executionContext: ExecutionContext, env: TestEnvironment)
     extends PartyToParticipantDeclarativeCommon[Party] {
 
-  override protected def partyReference: PartyToParticipant => Party = ptp => {
-    ptp.partySigningKeysWithThreshold match {
-      case Some(SigningKeysWithThreshold(keys, threshold)) =>
-        ExternalParty(ptp.partyId, keys.map(_.fingerprint).toSeq, threshold)
-      case None => ptp.partyId
+  override protected def partyReference: (PartyToParticipant, HashingSchemeVersion) => Party =
+    (ptp, hashingSchemeVersion) => {
+      ptp.partySigningKeysWithThreshold match {
+        case Some(SigningKeysWithThreshold(keys, threshold)) =>
+          ExternalParty(ptp.partyId, keys.map(_.fingerprint).toSeq, threshold, hashingSchemeVersion)
+        case None => ptp.partyId
+      }
     }
-  }
 
   override def allRelevantParties: Set[Party] =
     owningParticipants.keySet ++ externalParties
@@ -493,7 +501,8 @@ class PartiesAllocator(
 
   override def allRelevantParties: Set[String] = newParties.map { case (name, _) => name }.toSet
 
-  override protected def partyReference: PartyToParticipant => String = _.partyId.identifier.str
+  override protected def partyReference: (PartyToParticipant, HashingSchemeVersion) => String =
+    (ptp, _) => ptp.partyId.identifier.str
 
   def run(): Seq[PartyId] = {
     val result = for {

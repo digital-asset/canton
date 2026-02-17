@@ -5,7 +5,7 @@ package com.digitalasset.canton.topology.store
 
 import cats.syntax.option.*
 import com.digitalasset.canton.config.CantonRequireTypes.String300
-import com.digitalasset.canton.data.{CantonTimestamp, SequencingTimeBound}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
@@ -107,7 +107,7 @@ trait DownloadTopologyStateForInitializationServiceTest
           store <- initializeStore(bootstrapTransactions)
           service = new StoreBasedTopologyStateForInitializationService(
             store,
-            sequencingTimeLowerBoundExclusive = SequencingTimeBound(None),
+            sequencingTimeLowerBoundExclusive = None,
             loggerFactory,
           )
           result <- toFuture(service.initialSnapshot(dtc_p2_synchronizer1.mapping.participantId))
@@ -122,7 +122,7 @@ trait DownloadTopologyStateForInitializationServiceTest
           store <- initializeStore(bootstrapTransactionsWithUpdates)
           service = new StoreBasedTopologyStateForInitializationService(
             store,
-            sequencingTimeLowerBoundExclusive = SequencingTimeBound(None),
+            sequencingTimeLowerBoundExclusive = None,
             loggerFactory,
           )
           result <- toFuture(service.initialSnapshot(dtc_p2_synchronizer1.mapping.participantId))
@@ -139,7 +139,7 @@ trait DownloadTopologyStateForInitializationServiceTest
           store <- initializeStore(bootstrapTransactionsWithUpdates)
           service = new StoreBasedTopologyStateForInitializationService(
             store,
-            sequencingTimeLowerBoundExclusive = SequencingTimeBound(Some(ts6)),
+            sequencingTimeLowerBoundExclusive = Some(ts6),
             loggerFactory,
           )
           result <- toFuture(service.initialSnapshot(dtc_p2_synchronizer1.mapping.participantId))
@@ -158,7 +158,7 @@ trait DownloadTopologyStateForInitializationServiceTest
           store <- initializeStore(bootstrapTransactions)
           service = new StoreBasedTopologyStateForInitializationService(
             store,
-            sequencingTimeLowerBoundExclusive = SequencingTimeBound(None),
+            sequencingTimeLowerBoundExclusive = None,
             loggerFactory,
           )
           result <- toFuture(service.initialSnapshot(med1Id))
@@ -179,7 +179,7 @@ trait DownloadTopologyStateForInitializationServiceTest
           store <- initializeStore(bootstrapTransactionsWithUpdates)
           service = new StoreBasedTopologyStateForInitializationService(
             store,
-            sequencingTimeLowerBoundExclusive = SequencingTimeBound(None),
+            sequencingTimeLowerBoundExclusive = None,
             loggerFactory,
           )
           result <- toFuture(service.initialSnapshot(med1Id))
@@ -226,7 +226,7 @@ trait DownloadTopologyStateForInitializationServiceTest
         store <- initializeStore(snapshot)
         service = new StoreBasedTopologyStateForInitializationService(
           store,
-          sequencingTimeLowerBoundExclusive = SequencingTimeBound(None),
+          sequencingTimeLowerBoundExclusive = None,
           loggerFactory,
         )
         result <- toFuture(service.initialSnapshot(p2Id))

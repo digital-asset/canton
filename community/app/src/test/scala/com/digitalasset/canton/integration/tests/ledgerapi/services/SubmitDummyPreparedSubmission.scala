@@ -45,6 +45,7 @@ trait SubmitDummyPreparedSubmission extends SubmitDummyCommand {
       prefetchContractKeys = Seq.empty,
       maxRecordTime = Option.empty,
       estimateTrafficCost = None,
+      hashingSchemeVersion = None,
     )
 
   protected def dummyExecuteSubmissionRequest(

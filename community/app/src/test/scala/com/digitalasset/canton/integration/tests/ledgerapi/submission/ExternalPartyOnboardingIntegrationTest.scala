@@ -242,6 +242,7 @@ class ExternalPartyOnboardingIntegrationTest extends ExternalPartyOnboardingInte
             "Alice",
             additionalConfirming = Seq(participant2),
             confirmationThreshold = PositiveInt.two,
+            preferredHashingSchemeVersion = testedHashingSchemeVersion,
           )
           .futureValueUS
           .value

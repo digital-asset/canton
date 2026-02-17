@@ -170,7 +170,7 @@ trait AcsCommitmentToolingIntegrationTest
               if (countCmts.getAndIncrement() == 0) {
                 logger.debug(
                   s"Withholding first commitment from participant2 ${submissionRequest.batch.envelopes
-                      .map(_.openEnvelope(participant1.crypto.pureCrypto, testedProtocolVersion))}"
+                      .map(_.toOpenEnvelope(participant1.crypto.pureCrypto, testedProtocolVersion))}"
                 )
                 SendDecision.HoldBack(delayP2FirstCmt.future)
               } else SendDecision.Process

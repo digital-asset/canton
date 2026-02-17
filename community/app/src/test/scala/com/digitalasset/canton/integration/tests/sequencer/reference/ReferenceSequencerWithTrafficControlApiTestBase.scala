@@ -17,7 +17,7 @@ import com.digitalasset.canton.config.{
   ProcessingTimeout,
 }
 import com.digitalasset.canton.crypto.{HashPurpose, SynchronizerCryptoClient}
-import com.digitalasset.canton.data.{CantonTimestamp, SequencingTimeBound}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.integration.tests.sequencer.reference.ReferenceSequencerWithTrafficControlApiTestBase.RateLimitManagerImplTest
@@ -38,6 +38,7 @@ import com.digitalasset.canton.sequencing.traffic.{
   TrafficPurchased,
   TrafficReceipt,
 }
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.store.db.DbTest
 import com.digitalasset.canton.synchronizer.block.AsyncWriterParameters
 import com.digitalasset.canton.synchronizer.metrics.{SequencerHistograms, SequencerMetrics}
@@ -106,7 +107,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
   private def eventCostFunction(
       @unused recipients: Recipients,
       config: TrafficControlParameters,
-  ): Batch[ClosedEnvelope] => Option[SequencingSubmissionCost] = { batch =>
+  ): Batch[ClosedUncompressedEnvelope] => Option[SequencingSubmissionCost] = { batch =>
     Some(
       SequencingSubmissionCost(
         eventCostCalculator
@@ -297,7 +298,6 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
         dontWarnOnDeprecatedPV = false,
       ),
       maxConfirmationRequestsBurstFactor = PositiveDouble.tryCreate(1.0),
-      sequencingTimeLowerBoundExclusive = None,
       asyncWriter = AsyncWriterParameters(),
       timeAdvancingTopology = TimeAdvancingTopologyConfig(),
     )
@@ -423,7 +423,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
         ),
         FutureSupervisor.Noop,
         SequencerTrafficConfig(),
-        SequencingTimeBound(None),
+        sequencingTimeLowerBoundExclusive = None,
         runtimeReady = FutureUnlessShutdown.unit,
       )
       .futureValueUS
@@ -724,7 +724,8 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
 
       val customCostCalculator = new EventCostCalculator(loggerFactory) {
         // Set a fixed payload size, so we can reliably compute what the cost should be based on the number of recipients
-        override protected def payloadSize(envelope: ClosedEnvelope): Int = 100
+        override protected def payloadSize(envelope: ClosedEnvelope): ParsingResult[Int] =
+          Right(100)
       }
 
       val trafficConfig = config.copy(readVsWriteScalingFactor = PositiveInt.tryCreate(200))
@@ -925,9 +926,16 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
                                      |  trafficState = TrafficState(extraTrafficLimit = 0, extraTrafficConsumed = 0, baseTrafficRemainder = 0, lastConsumedCost = 0, timestamp = ${event.timestamp}, serial = 1, availableTraffic = 0)
                                      |)""".stripMargin
           }
-          // 134L == raw byte size of the signed submission request
+
+          // 134L or 154L == raw byte size of the signed submission request
+          val expectedWastedSequencing =
+            if (testedProtocolVersion >= ProtocolVersion.v35) 154L else 134L
+
           eventually() {
-            assertLongValue("daml.sequencer.traffic-control.wasted-sequencing", 134L)
+            assertLongValue(
+              "daml.sequencer.traffic-control.wasted-sequencing",
+              expectedWastedSequencing,
+            )
           }
           assertMemberIsInContext("daml.sequencer.traffic-control.wasted-sequencing", sender)
           assertInContext(

@@ -15,12 +15,7 @@ import com.digitalasset.canton.config
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.crypto.SyncCryptoError.KeyNotAvailable
 import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi, SyncCryptoClient}
-import com.digitalasset.canton.data.{
-  CantonTimestamp,
-  LogicalUpgradeTime,
-  SequencingTimeBound,
-  SynchronizerSuccessor,
-}
+import com.digitalasset.canton.data.{CantonTimestamp, LogicalUpgradeTime, SynchronizerSuccessor}
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
@@ -116,7 +111,7 @@ class SequencerReader(
     syncCryptoApi: SyncCryptoClient[SyncCryptoApi],
     eventSignaller: EventSignaller,
     topologyClientMember: Member,
-    sequencingTimeBoundExclusiveO: SequencingTimeBound,
+    sequencingTimeBoundExclusiveO: Option[CantonTimestamp],
     metrics: SequencerMetrics,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
@@ -197,7 +192,7 @@ class SequencerReader(
             requestedTimestampInclusive
           }
         val predecessorSequencingTimeUpperBoundExclusive =
-          sequencingTimeBoundExclusiveO.get.map(_.immediateSuccessor)
+          sequencingTimeBoundExclusiveO.map(_.immediateSuccessor)
 
         readFromTimestampInclusive.max(predecessorSequencingTimeUpperBoundExclusive)
       }
@@ -224,11 +219,11 @@ class SequencerReader(
                 lowerBoundTopologyClientAddressedTimestamp
               }
             }
-            if (fromStoreOrLowerBound < sequencingTimeBoundExclusiveO.get) {
+            if (fromStoreOrLowerBound < sequencingTimeBoundExclusiveO) {
               logger.debug(
                 s"The latest topology client timesetamp from store or the lower bound $fromStoreOrLowerBound is before the predecessor's upgrade time $sequencingTimeBoundExclusiveO.get. Will commence with the upgrade time."
               )
-              sequencingTimeBoundExclusiveO.get
+              sequencingTimeBoundExclusiveO
             } else {
               fromStoreOrLowerBound
             }
@@ -403,7 +398,7 @@ class SequencerReader(
       else topologyClientTimestampBefore
     }
 
-    private val emptyBatch = Batch.empty[ClosedEnvelope](protocolVersion)
+    private val emptyBatch = Batch.empty[ClosedUncompressedEnvelope](protocolVersion)
     private type TopologyClientTimestampAfter = Option[CantonTimestamp]
 
     case class ValidatedSnapshotWithEvent[P](
@@ -778,7 +773,9 @@ class SequencerReader(
         topologyClientTimestampBeforeO: Option[
           CantonTimestamp
         ], // None for until the first topology event, otherwise contains the latest topology event timestamp
-    )(implicit traceContext: TraceContext): FutureUnlessShutdown[SequencedEvent[ClosedEnvelope]] = {
+    )(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[SequencedEvent[ClosedEnvelope]] = {
       val timestamp = event.timestamp
       event.event match {
         case DeliverStoreEvent(
@@ -879,7 +876,7 @@ class SequencerReader(
               trafficReceiptO,
             ) =>
           FutureUnlessShutdown.pure(
-            Deliver.create[ClosedEnvelope](
+            Deliver.create[ClosedUncompressedEnvelope](
               previousTimestamp,
               timestamp,
               psid,

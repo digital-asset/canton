@@ -9,7 +9,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors.SubmissionRequestRefused
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
-  ClosedEnvelope,
+  ClosedUncompressedEnvelope,
   Deliver,
   DeliverError,
   MessageId,
@@ -40,10 +40,10 @@ object SequencerTestUtils extends BaseTest {
       messageId: Option[MessageId] = Some(MessageId.tryCreate("mock-deliver")),
       topologyTimestampO: Option[CantonTimestamp] = None,
       previousTimestamp: Option[CantonTimestamp] = None,
-  ): Deliver[ClosedEnvelope] = {
+  ): Deliver[ClosedUncompressedEnvelope] = {
     val batch = Batch.empty(testedProtocolVersion)
 
-    val deliver = Deliver.create[ClosedEnvelope](
+    val deliver = Deliver.create[ClosedUncompressedEnvelope](
       previousTimestamp,
       timestamp,
       synchronizerId,
@@ -59,7 +59,7 @@ object SequencerTestUtils extends BaseTest {
         SequencedEvent
           .fromProtoV30(defaultMaxBytesToDecompress, deliver.toProtoV30)(bytes)
           .value
-          .asInstanceOf[Deliver[ClosedEnvelope]]
+          .asInstanceOf[Deliver[ClosedUncompressedEnvelope]]
 
       case None => deliver
     }

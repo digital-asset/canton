@@ -105,7 +105,12 @@ trait HasCycleUtils {
     val cycle = new M.Cycle(id, party.toProtoPrimitive).create.commands.loneElement
 
     val tx = participant.ledger_api.javaapi.commands
-      .submit(Seq(party), Seq(cycle), commandId = commandId, optTimeout = optTimeout)
+      .submit(
+        Seq(party),
+        Seq(cycle),
+        commandId = commandId,
+        optTimeout = optTimeout,
+      )
 
     JavaDecodeUtil.decodeAllCreated(Cycle.COMPANION)(tx).loneElement
   }

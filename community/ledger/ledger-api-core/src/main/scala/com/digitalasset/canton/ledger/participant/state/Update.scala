@@ -81,6 +81,8 @@ sealed trait FloatingUpdate extends SynchronizerUpdate {
     SynchronizerIndex.forFloatingUpdate(recordTime)
 }
 
+sealed trait SequencedEventUpdate extends SequencedUpdate
+
 sealed trait RepairUpdate extends SynchronizerUpdate {
   def repairCounter: RepairCounter
 
@@ -287,7 +289,7 @@ object Update {
       externalTransactionHash: Option[Hash] = None,
   )(implicit override val traceContext: TraceContext)
       extends TransactionAccepted
-      with SequencedUpdate
+      with SequencedEventUpdate
       with AcsChangeSequencedUpdate {
     override def isAcsDelta(contractId: Value.ContractId): Boolean =
       acsChangeFactory.contractActivenessChanged(contractId)
@@ -385,7 +387,7 @@ object Update {
       acsChangeFactory: AcsChangeFactory,
   )(implicit override val traceContext: TraceContext)
       extends ReassignmentAccepted
-      with SequencedUpdate
+      with SequencedEventUpdate
       with AcsChangeSequencedUpdate {
 
     override protected def pretty: Pretty[SequencedReassignmentAccepted] =
@@ -511,7 +513,7 @@ object Update {
       recordTime: CantonTimestamp,
   )(implicit override val traceContext: TraceContext)
       extends CommandRejected
-      with SequencedUpdate
+      with SequencedEventUpdate
 
   final case class UnSequencedCommandRejected(
       completionInfo: CompletionInfo,

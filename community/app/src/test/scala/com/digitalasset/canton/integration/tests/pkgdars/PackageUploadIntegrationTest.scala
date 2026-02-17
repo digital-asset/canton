@@ -544,9 +544,9 @@ trait PackageUploadIntegrationTest
           PackageRemovalErrorCode.code,
           s"The DAR ${DarDescription(
               DarMainPackageId.tryCreate(cantonTestsMainPackageId),
-              String255.tryCreate("CantonTests-3.4.0"),
+              String255.tryCreate("CantonTests-1.0.0"),
               String255.tryCreate("CantonTests"),
-              String255.tryCreate("3.4.0"),
+              String255.tryCreate("1.0.0"),
             )} cannot be removed because its main package $cantonTestsMainPackageId is in-use",
         ),
       )

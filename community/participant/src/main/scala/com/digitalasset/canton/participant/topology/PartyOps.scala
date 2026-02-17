@@ -11,7 +11,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.participant.topology.ParticipantTopologyManagerError.{
   ExternalPartyAlreadyExists,
   IdentityManagerParentError,
@@ -22,7 +22,6 @@ import com.digitalasset.canton.topology.TopologyManagerError.{
   InvalidTopologyMapping,
   ParticipantErrorGroup,
 }
-import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.transaction.{
   HostingParticipant,
   ParticipantPermission,
@@ -33,26 +32,19 @@ import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.ExecutionContext
 
-class PartyOps(
-    topologyManagerLookup: PhysicalSynchronizerId => Option[SynchronizerTopologyManager],
-    val loggerFactory: NamedLoggerFactory,
-) extends NamedLogging {
+object PartyOps {
 
   def allocateParty(
       partyId: PartyId,
       participantId: ParticipantId,
       synchronizerId: PhysicalSynchronizerId,
+      topologyManager: SynchronizerTopologyManager,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
+      errorLoggingContext: ErrorLoggingContext,
   ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] =
     for {
-      topologyManager <- EitherT.fromOption[FutureUnlessShutdown](
-        topologyManagerLookup(synchronizerId),
-        ParticipantTopologyManagerError.IdentityManagerParentError(
-          TopologyManagerError.TopologyStoreUnknown.Failure(SynchronizerStore(synchronizerId))
-        ),
-      )
       storedTransactions <- EitherT
         .right(
           topologyManager.store.findPositiveTransactions(
@@ -147,17 +139,13 @@ class PartyOps(
       participantId: ParticipantId,
       externalPartyOnboardingDetails: ExternalPartyOnboardingDetails,
       synchronizerId: PhysicalSynchronizerId,
+      topologyManager: SynchronizerTopologyManager,
   )(implicit
       traceContext: TraceContext,
       ec: ExecutionContext,
+      errorLoggingContext: ErrorLoggingContext,
   ): EitherT[FutureUnlessShutdown, ParticipantTopologyManagerError, Unit] =
     for {
-      topologyManager <- EitherT.fromOption[FutureUnlessShutdown](
-        topologyManagerLookup(synchronizerId),
-        ParticipantTopologyManagerError.IdentityManagerParentError(
-          TopologyManagerError.TopologyStoreUnknown.Failure(SynchronizerStore(synchronizerId))
-        ),
-      )
       // If the party already has a fully authorized P2P mapping, then it is allocated.
       // Since this function only supports allocation of fresh parties, we fail here.
       // Futher changes to the party topology should be handled via the admin API for now,

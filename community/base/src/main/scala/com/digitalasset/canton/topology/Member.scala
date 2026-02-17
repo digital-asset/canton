@@ -18,7 +18,7 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.admin.v30 as adminProtoV30
 import com.digitalasset.canton.topology.admin.v30.Synchronizer.Kind
-import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.canton.{LedgerParticipantId, LfPartyId, ProtoDeserializationError}
 import com.google.common.annotations.VisibleForTesting
 import io.circe.Encoder
@@ -388,6 +388,7 @@ final case class ExternalParty private (
     partyId: PartyId,
     signingFingerprints: NonEmpty[Seq[Fingerprint]],
     signingThreshold: PositiveInt,
+    preferredHashingSchemeVersion: HashingSchemeVersion,
 ) extends Party {
   override def uid: UniqueIdentifier = partyId.uid
 
@@ -398,8 +399,9 @@ final case class ExternalParty private (
       partyId: PartyId = partyId,
       signingFingerprints: NonEmpty[Seq[Fingerprint]] = signingFingerprints,
       signingThreshold: PositiveInt = signingThreshold,
+      preferredHashingSchemeVersion: HashingSchemeVersion = preferredHashingSchemeVersion,
   ): ExternalParty =
-    new ExternalParty(partyId, signingFingerprints, signingThreshold)
+    new ExternalParty(partyId, signingFingerprints, signingThreshold, preferredHashingSchemeVersion)
 }
 
 object ExternalParty {
@@ -411,7 +413,9 @@ object ExternalParty {
       partyId: PartyId,
       signingFingerprints: NonEmpty[Seq[Fingerprint]],
       signingThreshold: PositiveInt,
-  ) = new ExternalParty(partyId, signingFingerprints, signingThreshold)
+      preferredHashingSchemeVersion: HashingSchemeVersion,
+  ) =
+    new ExternalParty(partyId, signingFingerprints, signingThreshold, preferredHashingSchemeVersion)
 }
 
 /** A party identifier based on a unique identifier

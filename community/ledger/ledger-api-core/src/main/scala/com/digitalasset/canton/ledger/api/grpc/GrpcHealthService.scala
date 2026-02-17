@@ -5,8 +5,8 @@ package com.digitalasset.canton.ledger.api.grpc
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.tracing.Telemetry
+import com.digitalasset.canton.health.HealthChecks
 import com.digitalasset.canton.ledger.api.grpc.GrpcHealthService.*
-import com.digitalasset.canton.ledger.api.health.HealthChecks
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import io.grpc.health.v1.health.{HealthCheckRequest, HealthCheckResponse, HealthGrpc}

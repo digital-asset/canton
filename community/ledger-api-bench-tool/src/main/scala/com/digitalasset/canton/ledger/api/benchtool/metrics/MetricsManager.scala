@@ -5,9 +5,9 @@ package com.digitalasset.canton.ledger.api.benchtool.metrics
 
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api.benchtool.util.ReportFormatter
+import org.apache.pekko.actor.Cancellable
 import org.apache.pekko.actor.typed.scaladsl.AskPattern.*
 import org.apache.pekko.actor.typed.{ActorRef, ActorSystem, Props, SpawnProtocol}
-import org.apache.pekko.actor.{Cancellable, CoordinatedShutdown}
 import org.apache.pekko.util.Timeout
 import org.slf4j.LoggerFactory
 
@@ -48,14 +48,6 @@ final case class MetricsManagerImpl[T](
         if (atLeastOneObjectiveViolated) BenchmarkResult.ObjectivesViolated
         else BenchmarkResult.Ok
       }(system.executionContext)
-  }
-
-  CoordinatedShutdown(system).addTask(
-    phase = CoordinatedShutdown.PhaseBeforeServiceUnbind,
-    taskName = "report-results",
-  ) { () =>
-    logger.debug(s"Shutting down infrastructure for stream: $observedMetric")
-    result().map(_ => org.apache.pekko.Done)(system.executionContext)
   }
 
   private val periodicRequest: Cancellable =

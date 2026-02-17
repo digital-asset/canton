@@ -95,7 +95,7 @@ private[compiler] object SExpr1 {
   final case class SELabelClosure(label: Profile.Label, expr: SExpr) extends SExpr
 
   /** Exception handler */
-  final case class SETryCatch(body: SExpr, handler: SExpr) extends SExpr
+  final case class SETryCatchV1(body: SExpr, handler: SExpr) extends SExpr
 
   /** Exercise scope (begin..end) */
   final case class SEScopeExercise(body: SExpr) extends SExpr

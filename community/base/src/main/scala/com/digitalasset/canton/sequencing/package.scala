@@ -79,7 +79,8 @@ package object sequencing {
 
   type OrdinarySerializedEvent = BoxedEnvelope[OrdinarySequencedEvent, ClosedEnvelope]
 
-  type PossiblyIgnoredSerializedEvent = BoxedEnvelope[PossiblyIgnoredSequencedEvent, ClosedEnvelope]
+  type PossiblyIgnoredSerializedEvent =
+    BoxedEnvelope[PossiblyIgnoredSequencedEvent, ClosedEnvelope]
 
   type OrdinaryEventOrError = Either[SequencedEventError, OrdinarySerializedEvent]
 

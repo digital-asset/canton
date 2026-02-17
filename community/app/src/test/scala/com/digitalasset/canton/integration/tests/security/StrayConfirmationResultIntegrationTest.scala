@@ -20,7 +20,7 @@ import com.digitalasset.canton.integration.{
   HasCycleUtils,
   SharedEnvironment,
 }
-import com.digitalasset.canton.sequencing.protocol.{MemberRecipient, RecipientsTree}
+import com.digitalasset.canton.sequencing.protocol.{MemberRecipient, Recipients, RecipientsTree}
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
   ProgrammableSequencer,
@@ -89,9 +89,18 @@ class StrayConfirmationResultIntegrationTest
           ) {
             val alsoSendToP2 = submissionRequest
               .focus(_.batch.envelopes)
-              .modify(_.map(_.focus(_.recipients.trees).modify { rts =>
-                RecipientsTree(NonEmpty.mk(Set, MemberRecipient(participant2Id)), Seq.empty) +: rts
-              }))
+              .modify(
+                _.map { envelope =>
+                  envelope.withRecipients(
+                    Recipients(
+                      RecipientsTree(
+                        NonEmpty.mk(Set, MemberRecipient(participant2Id)),
+                        Seq.empty,
+                      ) +: envelope.recipients.trees
+                    )
+                  )
+                }
+              )
             replacedSubmissionRequest.set(true)
             val signedModifiedRequest = signModifiedSubmissionRequest(
               alsoSendToP2,

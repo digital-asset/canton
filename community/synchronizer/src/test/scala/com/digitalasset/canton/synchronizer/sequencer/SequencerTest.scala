@@ -12,7 +12,7 @@ import com.digitalasset.canton.config.{
   ProcessingTimeout,
 }
 import com.digitalasset.canton.crypto.{HashPurpose, SynchronizerCryptoClient}
-import com.digitalasset.canton.data.{CantonTimestamp, SequencingTimeBound}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.messages.{EnvelopeContent, UnsignedProtocolMessage}
@@ -22,7 +22,6 @@ import com.digitalasset.canton.sequencing.SequencedSerializedEvent
 import com.digitalasset.canton.sequencing.client.RequestSigner
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
-import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameterConfig
 import com.digitalasset.canton.synchronizer.sequencer.store.{InMemorySequencerStore, SequencerStore}
 import com.digitalasset.canton.time.WallClock
 import com.digitalasset.canton.topology.*
@@ -136,7 +135,7 @@ class SequencerTest
         DefaultProcessingTimeouts.testing,
         storage,
         sequencerStore,
-        SequencingTimeBound(SequencerNodeParameterConfig.DefaultSequencingTimeLowerBoundExclusive),
+        sequencingTimeLowerBoundExclusive = None,
         clock,
         topologyClientMember,
         crypto,
@@ -268,11 +267,15 @@ class SequencerTest
         aliceDeliverEvent.batch.envelopes shouldBe empty // as we didn't send a message to ourself
 
         bobDeliverEvent.messageIdO shouldBe None
-        bobDeliverEvent.batch.envelopes.map(_.bytes) should contain only
+        bobDeliverEvent.batch.envelopes.map(
+          _.toClosedUncompressedEnvelopeUnsafe.bytes
+        ) should contain only
           EnvelopeContent(message1, testedProtocolVersion).toByteString
 
         caroleDeliverEvent.messageIdO shouldBe None
-        caroleDeliverEvent.batch.envelopes.map(_.bytes) should contain only
+        caroleDeliverEvent.batch.envelopes.map(
+          _.toClosedUncompressedEnvelopeUnsafe.bytes
+        ) should contain only
           EnvelopeContent(message2, testedProtocolVersion).toByteString
       }
     }

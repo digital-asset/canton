@@ -66,6 +66,7 @@ class LocalContractIntegrationTest extends LocalContractIntegrationTestSetup {
       val preparedTransaction = aliceHost.ledger_api.javaapi.interactive_submission.prepare(
         Seq(aliceE.partyId),
         Seq(exerciseCommand.commands().loneElement),
+        hashingSchemeVersion = testedApiHashingSchemeVersion,
       )
 
       aliceHost.ledger_api.commands.external.submit_prepared(

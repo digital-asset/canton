@@ -16,7 +16,7 @@ import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, H
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
-  ClosedEnvelope,
+  ClosedUncompressedEnvelope,
   MessageId,
   Recipients,
   SequencerErrors,
@@ -85,7 +85,7 @@ trait SequencerStoreTest
 
     val batch = Batch(
       List(
-        ClosedEnvelope.create(
+        ClosedUncompressedEnvelope.create(
           ByteString.copyFromUtf8("1"),
           Recipients.cc(alice, bob, carole),
           Seq.empty,
@@ -1076,6 +1076,7 @@ trait SequencerStoreTest
             snapshot = snapshot,
             latestSequencerEventTimestamp = None,
             initialTopologyEffectiveTimestamp = None,
+            latestPendingTopologyTransactionTimestamp = None,
           )
           for {
             _ <- store.initializeFromSnapshot(initialState).value.map {

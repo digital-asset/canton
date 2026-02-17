@@ -16,28 +16,17 @@ class HashingSchemeVersionSpec extends AnyWordSpec with Matchers with OptionValu
     HashingSchemeVersion.minProtocolVersionForHSV(HashingSchemeVersion.V2) shouldBe Some(
       ProtocolVersion.v34
     )
-    // TODO(#30463): Enable once V3 is supported in v35
-    // HashingSchemeVersion.minProtocolVersionForHSV(HashingSchemeVersion.V3) shouldBe Some(
-    //   ProtocolVersion.v35
-    // )
     HashingSchemeVersion.minProtocolVersionForHSV(HashingSchemeVersion.V3) shouldBe Some(
-      ProtocolVersion.dev
+      ProtocolVersion.v35
     )
   }
   "return the protocol hashing version" in {
 
     HashingSchemeVersion
       .getHashingSchemeVersionsForProtocolVersion(
-        ProtocolVersion.v34
+        ProtocolVersion.v35
       )
-      .forgetNE shouldBe SortedSet[HashingSchemeVersion](V2)
-
-    // TODO(#30463): Enable once V3 is supported in v35
-    //    HashingSchemeVersion
-    //      .getHashingSchemeVersionsForProtocolVersion(
-    //        ProtocolVersion.v35
-    //      )
-    //      .forgetNE shouldBe SortedSet[HashingSchemeVersion](V2, V3)
+      .forgetNE shouldBe SortedSet[HashingSchemeVersion](V2, V3)
 
     HashingSchemeVersion
       .getHashingSchemeVersionsForProtocolVersion(

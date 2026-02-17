@@ -28,7 +28,6 @@ import com.digitalasset.canton.protocol.LocalRejectError.TimeRejects.LocalTimeou
 import com.digitalasset.canton.synchronizer.mediator.MediatorNodeConfig
 import com.digitalasset.canton.{UniquePortGenerator, config}
 import monocle.macros.syntax.lens.*
-import org.scalatest.Assertion
 import org.slf4j.event.Level
 
 trait ReplicatedMediatorTestSetup extends ReplicatedNodeHelper {
@@ -152,24 +151,19 @@ trait ReplicatedMediatorIntegrationTest
       logger.debug(s"Stopping active mediator $activeMediator")
       activeMediator.stop()
 
-      def expectedMsg(entries: Seq[LogEntry]): Assertion = {
-        val valid =
-          Seq(
-            LocalTimeout.id,
-            "as exceeded the max-sequencing-time",
-            "Sequencing result message timed out",
-          )
-        forAll(entries) { entry =>
-          assert(valid.exists(entry.message.contains), entry)
-        }
-      }
-
       logger.debug("Starting second ping")
       loggerFactory.assertLogsSeq(SuppressionRule.LevelAndAbove(Level.WARN))(
         eventually() {
           participant1.health.ping(participant1)
         },
-        expectedMsg,
+        LogEntry.assertLogSeq(
+          Seq.empty,
+          Seq(
+            _.message should include(LocalTimeout.id),
+            _.message should include("as exceeded the max-sequencing-time"),
+            _.message should include("Sequencing result message timed out"),
+          ),
+        ),
       )
 
       logger.debug(s"Bring back former active mediator $activeMediator")

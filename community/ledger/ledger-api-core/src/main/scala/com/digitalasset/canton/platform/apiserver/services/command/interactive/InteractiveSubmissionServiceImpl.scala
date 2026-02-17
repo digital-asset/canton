@@ -68,7 +68,7 @@ import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.TryUtil
-import com.digitalasset.canton.version.HashingSchemeVersionConverter
+import com.digitalasset.canton.version.{HashingSchemeVersion, HashingSchemeVersionConverter}
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.crypto
 import io.grpc.Context
@@ -190,6 +190,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
           request.verboseHashing,
           request.maxRecordTime,
           request.costEstimationHints,
+          request.hashingSchemeVersion,
         )
       }
     }
@@ -200,6 +201,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
       verboseHashing: Boolean,
       maxRecordTime: Option[LfTimestamp],
       costEstimationHints: Option[CostEstimationHints],
+      hashingSchemeVersion: HashingSchemeVersion,
   )(implicit
       loggingContext: LoggingContextWithTrace,
       errorLoggingContext: ErrorLoggingContext,
@@ -235,6 +237,7 @@ private[apiserver] final class InteractiveSubmissionServiceImpl private[services
           config.contractLookupParallelism,
           hashTracer,
           maxRecordTime,
+          hashingSchemeVersion,
         )
         .leftWiden[RpcError]
       hashingDetails = hashTracer match {

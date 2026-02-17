@@ -30,8 +30,7 @@ import com.digitalasset.canton.error.TransactionRoutingError.{
   MalformedInputErrors,
   RoutingInternalError,
 }
-import com.digitalasset.canton.health.{HealthQuasiComponent, MutableHealthComponent}
-import com.digitalasset.canton.ledger.api.health.HealthStatus
+import com.digitalasset.canton.health.{HealthQuasiComponent, HealthStatus, MutableHealthComponent}
 import com.digitalasset.canton.ledger.api.{
   EnrichedVettedPackages,
   ListVettedPackagesOpts,
@@ -152,7 +151,6 @@ class CantonSyncService(
     participantNodeEphemeralState: ParticipantNodeEphemeralState,
     private[canton] val syncPersistentStateManager: SyncPersistentStateManager,
     private[canton] val packageService: PackageService,
-    partyOps: PartyOps,
     identityPusher: ParticipantTopologyDispatcher,
     val syncCrypto: SyncCryptoApiParticipantProvider,
     val pruningProcessor: PruningProcessor,
@@ -235,7 +233,6 @@ class CantonSyncService(
 
   private val partyAllocation = new PartyAllocation(
     participantId,
-    partyOps,
     isActive,
     connectedSynchronizersLookup,
     timeouts,
@@ -924,6 +921,11 @@ class CantonSyncService(
       synchronizerId: PhysicalSynchronizerId
   ): Option[SynchronizerTopologyClientWithInit] =
     connectionsManager.lookupTopologyClient(synchronizerId)
+
+  def lookupTopologyManager(
+      synchronizerId: PhysicalSynchronizerId
+  ): Option[SynchronizerTopologyManager] =
+    connectionsManager.lookupTopologyManager(synchronizerId)
 
   /** Adds a new synchronizer to the sync service's configuration.
     *
@@ -1693,7 +1695,6 @@ object CantonSyncService {
       syncPersistentStateManager: SyncPersistentStateManager,
       replicaManager: ParticipantReplicaManager,
       packageService: PackageService,
-      partyOps: PartyOps,
       identityPusher: ParticipantTopologyDispatcher,
       syncCrypto: SyncCryptoApiParticipantProvider,
       engine: Engine,
@@ -1729,7 +1730,6 @@ object CantonSyncService {
         participantNodeEphemeralState,
         syncPersistentStateManager,
         packageService,
-        partyOps,
         identityPusher,
         syncCrypto,
         pruningProcessor,

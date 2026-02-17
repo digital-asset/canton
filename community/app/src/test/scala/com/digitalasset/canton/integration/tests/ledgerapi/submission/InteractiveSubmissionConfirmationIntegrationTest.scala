@@ -147,6 +147,7 @@ final class InteractiveSubmissionConfirmationIntegrationTest
             externalParty.toProtoPrimitive,
           ).create.commands.loneElement
         ),
+        hashingSchemeVersion = testedApiHashingSchemeVersion,
       )
       val signatures = signaturesModifier(
         Map(
@@ -313,7 +314,11 @@ final class InteractiveSubmissionConfirmationIntegrationTest
           .createAnd()
           .exerciseGetTime()
       val prepared = cpn.ledger_api.javaapi.interactive_submission
-        .prepare(Seq(aliceE.partyId), Seq(pass.commands().loneElement))
+        .prepare(
+          Seq(aliceE.partyId),
+          Seq(pass.commands().loneElement),
+          hashingSchemeVersion = testedApiHashingSchemeVersion,
+        )
       val signatures = Map(
         aliceE.partyId -> global_secret.sign(
           prepared.preparedTransactionHash,
@@ -354,6 +359,7 @@ final class InteractiveSubmissionConfirmationIntegrationTest
       val prepared = cpn.ledger_api.javaapi.interactive_submission.prepare(
         Seq(aliceE.partyId),
         Seq(exerciseRepeatOnCycleContract),
+        hashingSchemeVersion = testedApiHashingSchemeVersion,
       )
 
       val decoder = new PreparedTransactionDecoder(loggerFactory)

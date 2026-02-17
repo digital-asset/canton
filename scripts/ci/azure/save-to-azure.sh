@@ -34,7 +34,7 @@ azcopy list "${ORB_CONTAINER}"/"${AZURE_TAR_NAME}" --log-level ERROR | grep -iqa
 echo "${FILE_PRESENT_CHECK}"
 if [ -z "${FILE_PRESENT_CHECK}" ] ; then 
 	echo "Compressing"
-	tar cPvzf "${TEMP_FILE_NAME}" "${array[@]}" --ignore-failed-read
+	tar cPzf "${TEMP_FILE_NAME}" "${array[@]}" --ignore-failed-read
 	echo "Copying"
 	set +e
 	azcopy copy "${TEMP_FILE_NAME}" "${ORB_CONTAINER}/${AZURE_TAR_NAME}"  --overwrite=false --output-level essential --log-level ERROR || (echo "Save to cache could have filed please check logs" && true)

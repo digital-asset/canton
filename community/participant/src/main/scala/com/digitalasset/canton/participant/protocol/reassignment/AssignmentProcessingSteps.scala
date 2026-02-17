@@ -11,6 +11,7 @@ import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.crypto.{DecryptionError as _, EncryptionError as _, *}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ViewType.AssignmentViewType
+import com.digitalasset.canton.ledger.participant.state.SequencedEventUpdate
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
@@ -34,6 +35,7 @@ import com.digitalasset.canton.participant.protocol.{EngineController, Processin
 import com.digitalasset.canton.participant.store.*
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.serialization.DefaultDeserializationError
@@ -348,6 +350,7 @@ private[reassignment] class AssignmentProcessingSteps(
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       engineController: EngineController,
       decisionTimeTickRequest: SynchronizerTimeTracker.TickRequest,
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -430,6 +433,7 @@ private[reassignment] class AssignmentProcessingSteps(
         engineController.abort,
         engineAbortStatusF,
         decisionTimeTickRequest,
+        publishUpdate,
       )
 
       StorePendingDataAndSendResponseAndCreateTimeout(
@@ -468,6 +472,7 @@ private[reassignment] class AssignmentProcessingSteps(
       _engineController,
       _abortedF,
       _decisionTimeTickRequest,
+      _publishUpdate,
     ) = pendingRequestData
 
     def rejected(
@@ -622,6 +627,7 @@ object AssignmentProcessingSteps {
       override val abortEngine: String => Unit,
       override val engineAbortStatusF: FutureUnlessShutdown[EngineAbortStatus],
       decisionTimeTickRequest: SynchronizerTimeTracker.TickRequest,
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   ) extends PendingReassignment {
 
     override def rootHashO: Option[RootHash] = Some(assignmentValidationResult.rootHash)
@@ -630,6 +636,10 @@ object AssignmentProcessingSteps {
       assignmentValidationResult.submitterMetadata
 
     override def cancelDecisionTimeTickRequest(): Unit = decisionTimeTickRequest.cancel()
+
+    override def publishUpdateO
+        : Option[PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate]] =
+      Some(publishUpdate)
   }
 
   private[reassignment] def makeFullAssignmentTree(

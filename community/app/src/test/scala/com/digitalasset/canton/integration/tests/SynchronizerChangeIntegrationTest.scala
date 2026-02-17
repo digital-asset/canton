@@ -611,7 +611,7 @@ abstract class SynchronizerChangeSimClockIntegrationTest
           // paintOffer is assigned to IouSynchronizer (assignment has completed)
           assertInAcsSync(Seq(P4, P5), iouSynchronizerAlias, paintOfferId)
 
-          // Trigger the automatic assignment after a assignment has already been completed
+          // Trigger the automatic assignment after an assignment has already been completed
           val automaticAssignmentTime = exclusivityTimeout.unwrap
           val baseTime = clock.now
           clock.advance(automaticAssignmentTime)
@@ -619,6 +619,9 @@ abstract class SynchronizerChangeSimClockIntegrationTest
 
           // paintOffer is still in the IouSynchronizer
           assertInAcsSync(Seq(P4, P5), iouSynchronizerAlias, paintOfferId)
+
+          // sequence something to obtain an up-to-date synchronizer time
+          assertPingSucceeds(P4, P4)
 
           // Wait for the PaintSynchronizer to reach a time exceeding the exclusivity timeout P4
           P4.testing.await_synchronizer_time(

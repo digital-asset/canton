@@ -273,10 +273,10 @@ private[lf] object SExpr {
   }
 
   /** Exception handler */
-  final case class SETryCatch(body: SExpr, handler: SExpr) extends SExpr {
+  final case class SETryCatchV1(body: SExpr, handler: SExpr) extends SExpr {
     override def execute[Q](machine: Machine[Q]): Control[Q] =
       machine.asUpdateMachine(productPrefix) { machine =>
-        machine.pushKont(KTryCatchHandler(machine, handler))
+        machine.pushKont(KTryCatchV1Handler(machine, handler))
         machine.ptx = machine.ptx.beginTry
         Control.Expression(body)
       }

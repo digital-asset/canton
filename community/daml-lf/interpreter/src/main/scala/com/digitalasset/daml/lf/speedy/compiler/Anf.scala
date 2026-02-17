@@ -312,12 +312,12 @@ private[compiler] object Anf {
           }
         }
 
-      case source.SETryCatch(body, handler0) =>
+      case source.SETryCatchV1(body, handler0) =>
         // we must not lift applications from either the body or the handler outside of
         // the try-catch block, so we flatten each separately:
         flattenExp(depth, env, body).flatMap { body =>
           flattenExp(depth.incr(1), trackBindings(depth, env, 1), handler0).flatMap { handler =>
-            transform(depth, target.SETryCatch(body, handler))
+            transform(depth, target.SETryCatchV1(body, handler))
           }
         }
 

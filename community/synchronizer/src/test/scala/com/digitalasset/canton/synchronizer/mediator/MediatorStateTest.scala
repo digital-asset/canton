@@ -150,7 +150,9 @@ class MediatorStateTest
         loggerFactory,
       )
       sut.initialize(CantonTimestamp.MinValue).futureValueUS
-      sut.add(currentVersion).futureValueUS
+      currentVersion
+        .asFinalized(testedProtocolVersion)
+        .fold(sut.registerPendingRequest(currentVersion))(sut.add(_).futureValueUS)
       sut
     }
 

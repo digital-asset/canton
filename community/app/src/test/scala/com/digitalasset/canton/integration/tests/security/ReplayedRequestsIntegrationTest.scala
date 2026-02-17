@@ -154,9 +154,7 @@ trait ReplayedRequestsIntegrationTest
             if (allRecipients == Set(MemberRecipient(participant1.id), mediatorGroup)) {
               // This is the envelope corresponding to the root hash message.
               // Remove the mediator from the recipients.
-              envelope
-                .focus(_.recipients)
-                .replace(Recipients.cc((allRecipients - mediatorGroup).loneElement))
+              envelope.withRecipients(Recipients.cc((allRecipients - mediatorGroup).loneElement))
             } else {
               envelope
             }

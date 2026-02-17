@@ -49,6 +49,7 @@ trait SyncEphemeralStateFactory {
       sessionKeyCacheConfig: SessionEncryptionKeyCacheConfig,
       onboardingClearanceScheduler: OnboardingClearanceScheduler,
       participantId: ParticipantId,
+      synchronizerLoggerFactory: NamedLoggerFactory,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[SyncEphemeralState]
@@ -77,6 +78,7 @@ class SyncEphemeralStateFactoryImpl(
       sessionKeyCacheConfig: SessionEncryptionKeyCacheConfig,
       onboardingClearanceScheduler: OnboardingClearanceScheduler,
       participantId: ParticipantId,
+      synchronizerLoggerFactory: NamedLoggerFactory,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[SyncEphemeralState] =
@@ -115,7 +117,7 @@ class SyncEphemeralStateFactoryImpl(
         metrics.recordOrderPublisher,
         exitOnFatalFailures = exitOnFatalFailures,
         timeouts,
-        loggerFactory,
+        synchronizerLoggerFactory,
         futureSupervisor,
         clock,
       )
@@ -149,7 +151,7 @@ class SyncEphemeralStateFactoryImpl(
         exitOnFatalFailures = exitOnFatalFailures,
         sessionKeyCacheConfig,
         timeouts,
-        loggerFactory.append("psid", persistentState.psid.toString),
+        synchronizerLoggerFactory,
         futureSupervisor,
         clock,
       )

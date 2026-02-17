@@ -23,6 +23,7 @@ import com.digitalasset.canton.sequencer.api.v30.SequencerServiceGrpc.SequencerS
 import com.digitalasset.canton.sequencing.client.ResilientSequencerSubscription.LostSequencerSubscription
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
+import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import io.grpc.{ConnectivityState, ManagedChannel, StatusRuntimeException}
 import monocle.macros.syntax.lens.*
@@ -156,7 +157,7 @@ trait InvalidRequestSequencerIntegrationTest
     setMaxRequestSizeAndRestart(maxRequestSizeDefault)
 
     val bigEnvelope =
-      ClosedEnvelope.create(
+      ClosedUncompressedEnvelope.create(
         ByteString.copyFromUtf8("A" * 50000),
         Recipients.cc(participant2.id),
         Seq.empty,
@@ -170,12 +171,16 @@ trait InvalidRequestSequencerIntegrationTest
         .replace(List(bigEnvelope))
 
     val alarmMsg =
-      s"Max bytes to decompress is exceeded. The limit is ${maxRequestSizeDefault.unwrap} bytes."
+      if (testedProtocolVersion >= ProtocolVersion.v35)
+        s"Batch contains envelope with max bytes exceeded. The limit is ${maxRequestSizeDefault.unwrap} bytes."
+      else
+        s"Max bytes to decompress is exceeded. The limit is ${maxRequestSizeDefault.unwrap} bytes."
+
     val responseF = loggerFactory.assertLogs(
       SequencerTestHelper.sendSubmissionRequest(sequencerServiceStub, requestThatCanBeCompressed),
       _.shouldBeCantonError(
         SequencerError.MaxRequestSizeExceeded,
-        _ shouldBe alarmMsg,
+        _ should include(alarmMsg),
       ),
     )
 
@@ -201,7 +206,7 @@ trait InvalidRequestSequencerIntegrationTest
     setMaxRequestSizeAndRestart(maxRequestSizeDefault)
 
     val bigEnvelope =
-      ClosedEnvelope.create(
+      ClosedUncompressedEnvelope.create(
         ByteString.copyFromUtf8(scala.util.Random.nextString(50000)), // cannot be compressed
         Recipients.cc(participant2.id),
         Seq.empty,

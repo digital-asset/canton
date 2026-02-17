@@ -11,6 +11,7 @@ echo $CANTON_DIR
 
 cd $CANTON_DIR/dashboards
 
+make install # Takes a long time only on the first run
 ./generate-all.sh
 
 cd generated/v11.0.0

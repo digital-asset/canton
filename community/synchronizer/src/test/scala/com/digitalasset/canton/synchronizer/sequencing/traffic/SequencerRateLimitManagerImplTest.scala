@@ -206,7 +206,7 @@ class SequencerRateLimitManagerImplTest
       .failOnShutdown
 
   private def mkEnvelope(content: String): ClosedEnvelope =
-    ClosedEnvelope.create(
+    ClosedUncompressedEnvelope.create(
       ByteString.copyFromUtf8(content),
       Recipients.cc(DefaultTestIdentities.participant1),
       Seq.empty,

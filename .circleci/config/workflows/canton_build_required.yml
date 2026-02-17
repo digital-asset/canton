@@ -28,6 +28,9 @@ jobs:
       filters:
         tags:
           only: /^v.*/
+        branches:
+          ignore:
+            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
       requires:
         - compile # optional dependency, introduced to save credits in case of compile errors
   - package_sequencer_driver_api:
@@ -129,6 +132,10 @@ jobs:
         - da-images
       requires:
         - compile
+      filters:
+        branches:
+          ignore:
+            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
   - blackduck:
       context:
         - datadog
@@ -167,6 +174,9 @@ jobs:
       filters:
         tags:
           only: /^v.*/
+        branches:
+          ignore:
+            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
       requires:
         - compile # optional dependency, introduced to save credits in case of compile errors
   - build_docs:
@@ -177,6 +187,9 @@ jobs:
         - maven-mirror
         - da-images
       filters:
+        branches:
+          ignore:
+            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
         tags:
           only: /^v.*/
       requires:
@@ -212,6 +225,10 @@ jobs:
         - gcp_kms_testing
       requires:
         - compile
+      filters:
+        branches:
+          ignore:
+            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
   - test:
       name: test_protocol_version_dev
       protocol_version: "DEV"
@@ -260,6 +277,10 @@ jobs:
         - aws_kms_testing
         - gcp_kms_testing
       filters:
+        branches:
+          only:
+            - main
+            - /^release-line.*/
         tags:
           only: /^v.*/
       requires:
@@ -317,6 +338,9 @@ jobs:
         - aws_kms_testing
         - gcp_kms_testing
       filters:
+        branches:
+          ignore:
+            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
         tags:
           only: /^v.*/
       requires:
@@ -352,6 +376,9 @@ jobs:
         - aws_kms_testing
         - gcp_kms_testing
       filters:
+        branches:
+          ignore:
+            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
         tags:
           only: /^v.*/
       requires:
@@ -438,6 +465,10 @@ jobs:
         - da-images
       requires:
         - compile
+      filters:
+        branches:
+          ignore:
+            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
 
 ## Generate and publish data continuity dumps for the releases (will only run within tag's "create" workflow)
   - generate_data_continuity_dumps:

@@ -22,7 +22,6 @@ import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.metrics.ParticipantMetrics
 import com.digitalasset.canton.participant.store.*
-import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.synchronizer.{
   SynchronizerAliasResolution,
   SynchronizerRegistryError,
@@ -129,7 +128,6 @@ class SyncPersistentStateManager(
     synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
     synchronizerCryptoFactory: StaticSynchronizerParameters => SynchronizerCrypto,
     clock: Clock,
-    packageMetadataView: PackageMetadataView,
     ledgerApiStore: Eval[LedgerApiStore],
     val contractStore: Eval[ContractStore],
     participantMetrics: ParticipantMetrics,
@@ -166,8 +164,7 @@ class SyncPersistentStateManager(
         )
 
     def initializePhysicalPersistentState(
-        psid: PhysicalSynchronizerId,
-        logical: LogicalSyncPersistentState,
+        psid: PhysicalSynchronizerId
     ): EitherT[FutureUnlessShutdown, String, Unit] =
       for {
 
@@ -184,7 +181,6 @@ class SyncPersistentStateManager(
           psidIndexed,
           indexedTopologyStoreId,
           staticSynchronizerParameters,
-          logical,
         )
         _ = logger.debug(s"Discovered existing state for $psid")
       } yield {
@@ -201,11 +197,11 @@ class SyncPersistentStateManager(
       for {
         // first create the logical store
         synchronizerIdIndexed <- IndexedSynchronizer.indexed(indexedStringStore)(lsid)
-        logical = logicalPersistentStates
+        _ = logicalPersistentStates
           .getOrElseUpdate(lsid, createLogicalPersistentState(synchronizerIdIndexed))
-        // then create all corresponding physical stores, reusing the shared logical stores
+        // then create all corresponding physical stores
         _ <- MonadUtil.sequentialTraverse_(aliasResolution.physicalSynchronizerIds(lsid)) { psid =>
-          initializePhysicalPersistentState(psid, logical)
+          initializePhysicalPersistentState(psid)
             .valueOr(error => logger.debug(s"No state for $psid discovered: $error"))
         }
       } yield ()
@@ -263,7 +259,6 @@ class SyncPersistentStateManager(
               physicalSynchronizerIdx,
               indexedTopologyStoreId,
               synchronizerParameters,
-              logical,
             ),
           )
         }
@@ -300,13 +295,11 @@ class SyncPersistentStateManager(
       physicalSynchronizerIdx: IndexedPhysicalSynchronizer,
       indexedTopologyStoreId: IndexedTopologyStoreId,
       staticSynchronizerParameters: StaticSynchronizerParameters,
-      logicalSyncPersistentState: LogicalSyncPersistentState,
   )(implicit writeLockHandle: lock.WriteLockHandle): PhysicalSyncPersistentState =
     mkPhysicalPersistentState(
       physicalSynchronizerIdx,
       indexedTopologyStoreId,
       staticSynchronizerParameters,
-      logicalSyncPersistentState,
     )
 
   private def checkAndUpdateSynchronizerParameters(
@@ -435,22 +428,15 @@ class SyncPersistentStateManager(
       physicalSynchronizerIdx: IndexedPhysicalSynchronizer,
       indexedTopologyStoreId: IndexedTopologyStoreId,
       staticSynchronizerParameters: StaticSynchronizerParameters,
-      logicalSyncPersistentState: LogicalSyncPersistentState,
   )(implicit @unused writeLockHandle: lock.WriteLockHandle): PhysicalSyncPersistentState =
     PhysicalSyncPersistentState
       .create(
-        participantId,
         storage,
         physicalSynchronizerIdx,
         indexedTopologyStoreId,
         staticSynchronizerParameters,
-        clock,
         synchronizerCryptoFactory(staticSynchronizerParameters),
         parameters,
-        topologyConfig,
-        packageMetadataView,
-        ledgerApiStore,
-        logicalSyncPersistentState,
         psidLoggerFactory(physicalSynchronizerIdx.psid),
         futureSupervisor,
       )

@@ -705,7 +705,7 @@ private[lf] object Pretty {
           prettySExpr(index)(SELet1General(SEAppAtomicSaturatedBuiltin(builtin, args), body))
         case SELet1BuiltinArithmetic(builtin, args, body) =>
           prettySExpr(index)(SELet1General(SEAppAtomicSaturatedBuiltin(builtin, args), body))
-        case SETryCatch(body, handler) =>
+        case SETryCatchV1(body, handler) =>
           text("try-catch") + char('(') + prettySExpr(index)(body) + text(", ") +
             prettySExpr(index)(handler) + char(')')
 

@@ -140,6 +140,7 @@ final class InteractiveSubmissionTrafficCostEstimationTest
       commandId = UUID.randomUUID().toString,
       estimateTrafficCost = hints,
       disclosedContracts = disclosedContracts,
+      hashingSchemeVersion = testedApiHashingSchemeVersion,
     )
     logger.debug(s"Estimated traffic cost: ${prepared.costEstimation.value}")
     val estimatedTrafficCost = prepared.costEstimation.value.totalTrafficCostEstimation
@@ -154,7 +155,7 @@ final class InteractiveSubmissionTrafficCostEstimationTest
     )
   }
 
-  def createCycleCmdFromParty(party: Party) =
+  def createCycleCmdFromParty(party: Party): Command =
     createCycleCommandJava(party, UUID.randomUUID().toString)
 
   private def runCostEstimateOnAllNodeCombinations(
@@ -163,7 +164,7 @@ final class InteractiveSubmissionTrafficCostEstimationTest
       disclosedContracts: Seq[DisclosedContract] = Seq.empty,
   )(implicit
       env: TestConsoleEnvironment
-  ) =
+  ): Unit =
     // Try all combinations of ppn / epn.
     // The accuracy will vary because of how hosting relationships affect view decomposition
     // and confirmation responses but it at least allows to check that the estimation is bounded
@@ -372,6 +373,7 @@ final class InteractiveSubmissionTrafficCostEstimationTest
           Seq(createCycleCmdFromParty(aliceE)),
           commandId = UUID.randomUUID().toString,
           estimateTrafficCost = Some(CostEstimationHints.defaultInstance.withDisabled(true)),
+          hashingSchemeVersion = testedApiHashingSchemeVersion,
         )
         .costEstimation shouldBe empty
     }
@@ -388,6 +390,7 @@ final class InteractiveSubmissionTrafficCostEstimationTest
           Seq(aliceE.partyId),
           Seq(createCycleCmdFromParty(aliceE)),
           commandId = UUID.randomUUID().toString,
+          hashingSchemeVersion = testedApiHashingSchemeVersion,
         )
         .costEstimation
         .value

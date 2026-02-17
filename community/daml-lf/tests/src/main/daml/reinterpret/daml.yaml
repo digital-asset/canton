@@ -1,4 +1,4 @@
-# Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+# Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 override-components:
@@ -6,13 +6,15 @@ override-components:
     version: $DAML_VERSION
   daml-script:
     version: $DAML_VERSION
-name: ReinterpretTests-v2
-version: 3.5.0
 build-options:
-  - --target=2.1
-  - -Wupgrade-exceptions
-dependencies:
-  - daml-prim
-  - daml-stdlib
-parties: [Alice, Bob]
+- --target=2.1
+- -Wupgrade-exceptions
+name: ReinterpretTests-v2
+parties:
+- Alice
+- Bob
 source: .
+version: 1.0.0
+dependencies:
+- daml-prim
+- daml-stdlib

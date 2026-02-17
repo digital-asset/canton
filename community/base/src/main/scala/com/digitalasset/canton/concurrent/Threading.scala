@@ -146,6 +146,10 @@ object Threading {
       logger: Logger,
       parallelism: PositiveInt,
       maxExtraThreads: PositiveInt = PositiveInt.tryCreate(256),
+      keepAliveMillis: PositiveInt = PositiveInt.tryCreate(60000),
+      corePoolSize: Option[PositiveInt] = None,
+      maxPoolSize: Option[PositiveInt] = None,
+      minRunnable: Option[PositiveInt] = None,
       exitOnFatal: Boolean = true,
   ): ExecutionContextIdlenessExecutorService = {
     val reporter = createReporter(name, logger, exitOnFatal)(_)
@@ -164,7 +168,17 @@ object Threading {
       .newInstance(Boolean.box(true), Int.box(maxExtraThreads.value), name, handler)
       .asInstanceOf[ForkJoinPool.ForkJoinWorkerThreadFactory]
 
-    val forkJoinPool = createForkJoinPool(parallelism, threadFactory, handler, logger)
+    val forkJoinPool =
+      createForkJoinPool(
+        parallelism,
+        keepAliveMillis,
+        threadFactory,
+        handler,
+        logger,
+        corePoolSize,
+        maxPoolSize,
+        minRunnable,
+      )
 
     new ForkJoinIdlenessExecutorService(forkJoinPool, forkJoinPool, reporter, name)
   }
@@ -177,9 +191,13 @@ object Threading {
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   private def createForkJoinPool(
       parallelism: PositiveInt,
+      keepAliveMillis: PositiveInt,
       threadFactory: ForkJoinPool.ForkJoinWorkerThreadFactory,
       handler: Thread.UncaughtExceptionHandler,
       logger: Logger,
+      corePoolSize: Option[PositiveInt],
+      maxPoolSize: Option[PositiveInt],
+      minRunnable: Option[PositiveInt],
   ): ForkJoinPool = {
     val tunedParallelism =
       if (parallelism >= minParallelismForForkJoinPool) parallelism
@@ -198,15 +216,15 @@ object Threading {
       threadFactory,
       handler,
       true,
-      tunedParallelism.unwrap,
-      Int.MaxValue,
+      corePoolSize.getOrElse(tunedParallelism).unwrap,
+      maxPoolSize.map(_.value).getOrElse(Int.MaxValue),
       //
       // Choosing tunedParallelism here instead of the default of 1.
       // With the default, we would get only 1 running thread in the presence of blocking calls.
-      tunedParallelism.unwrap,
+      minRunnable.getOrElse(tunedParallelism).unwrap,
       null,
-      60L,
-      TimeUnit.SECONDS,
+      keepAliveMillis.value.toLong,
+      TimeUnit.MILLISECONDS,
     )
   }
 

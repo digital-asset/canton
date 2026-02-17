@@ -41,7 +41,7 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.reference.store
 }
 import com.digitalasset.canton.time.TimeProvider
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{ErrorUtil, PekkoUtil}
+import com.digitalasset.canton.util.PekkoUtil
 import com.digitalasset.canton.{RichGeneratedMessage, config}
 import com.google.protobuf.ByteString
 import io.grpc.ServerServiceDefinition
@@ -73,7 +73,7 @@ class ReferenceSequencerDriver(
 
     PekkoUtil.runSupervised(
       Source
-        .queue[Traced[TimestampedRequest]](bufferSize = 100)
+        .queue[Traced[TimestampedRequest]](bufferSize = config.bufferSize)
         .groupedWithin(n = config.maxBlockSize, d = config.maxBlockCutMillis.millis)
         .map { requests =>
           implicit val traceContext: TraceContext =
@@ -166,8 +166,7 @@ class ReferenceSequencerDriver(
       tag: String,
       body: ByteString,
   )(implicit
-      errorLoggingContext: ErrorLoggingContext,
-      traceContext: TraceContext,
+      traceContext: TraceContext
   ): Unit = {
     val microsecondsSinceEpoch = timeProvider.nowInMicrosecondsSinceEpoch
     sendQueue
@@ -179,11 +178,8 @@ class ReferenceSequencerDriver(
           s"enqueued reference sequencer store request with tag $tag and sequencing time (ms since epoch) $microsecondsSinceEpoch"
         )
       case QueueOfferResult.Dropped =>
-        // This should not happen
-        ErrorUtil.internalError(
-          new IllegalStateException(
-            s"dropped reference store request with tag $tag and sequencing time (ms since epoch) $microsecondsSinceEpoch"
-          )
+        logger.warn(
+          s"Silently dropped send to reference store with tag $tag and sequencing time (ms since epoch) $microsecondsSinceEpoch due to send queue being overloaded"
         )
       case _: QueueCompletionResult =>
         logger.debug(
@@ -206,6 +202,7 @@ object ReferenceSequencerDriver {
       pollInterval: config.NonNegativeFiniteDuration =
         config.NonNegativeFiniteDuration.ofMillis(100),
       logQueryCost: Option[QueryCostMonitoringConfig] = None,
+      bufferSize: Int = 5000,
       maxBlockSize: Int = 500,
       maxBlockCutMillis: Int = 1,
       maxQueryBlockCount: Int = 100,

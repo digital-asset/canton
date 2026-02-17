@@ -33,6 +33,7 @@ object InteractiveSubmissionService {
       verboseHashing: Boolean,
       maxRecordTime: Option[LfTimestamp],
       costEstimationHints: Option[CostEstimationHints],
+      hashingSchemeVersion: HashingSchemeVersion,
   )
 
   final case class ExecuteRequest(

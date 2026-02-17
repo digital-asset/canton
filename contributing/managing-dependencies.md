@@ -48,8 +48,7 @@ A full FAQ on setting up and using Blackduck at Digital Asset can be found here:
 We have tools to update the underlying Daml version consistently.
 
 1. Update `version` in [`project/project/DamlVersions.scala`](../project/project/DamlVersions.scala) to the new Daml version.
-2. Run `sbt updateDamlProjectVersions` to update the `daml.yaml` project files.
-3. Create a PR with the resulting changes and if all required checks on CI succeed merge to the underlying protected branch (e.g. `main`).
+2. Create a PR with the resulting changes and if all required checks on CI succeed merge to the underlying protected branch (e.g. `main`).
 
 The `sbt` build should automatically pull down the new damlc, daml-script dars, and scala codegen of the corresponding Daml version,
 so no action should be required locally.
@@ -81,10 +80,6 @@ This works only locally and not in CI.
    "mixed" set of artifacts particularly before the initial compile.
    ```
    git clean -Xfd
-   ```
-5. Update the daml.yaml sdk-versions to the head version to ensure damlc does not get upset.
-   ```
-   sbt updateDamlProjectVersions
    ```
 
 ## Updating static Daml test artifacts

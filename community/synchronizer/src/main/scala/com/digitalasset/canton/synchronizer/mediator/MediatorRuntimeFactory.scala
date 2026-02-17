@@ -119,6 +119,7 @@ object MediatorRuntimeFactory {
       syncCrypto: SynchronizerCryptoClient,
       topologyClient: SynchronizerTopologyClientWithInit,
       topologyTransactionProcessor: TopologyTransactionProcessor,
+      topologyManager: SynchronizerTopologyManager,
       topologyManagerStatus: TopologyManagerStatus,
       synchronizerOutboxFactory: SynchronizerOutboxFactory,
       timeTracker: SynchronizerTimeTracker,
@@ -139,6 +140,10 @@ object MediatorRuntimeFactory {
       syncCrypto.pureCrypto,
       sequencerClient.protocolVersion,
       nodeParameters.cachingConfigs.finalizedMediatorConfirmationRequests,
+      fetchAggregatorConfig =
+        nodeParameters.batchingConfig.mediatorFetchFinalizedResponsesAggregator,
+      storeAggregatorConfig =
+        nodeParameters.batchingConfig.mediatorStoreFinalizedResponsesAggregator,
       nodeParameters.processingTimeouts,
       loggerFactory,
     )
@@ -162,6 +167,7 @@ object MediatorRuntimeFactory {
       )
 
     val synchronizerOutbox = synchronizerOutboxFactory.create(
+      topologyManager,
       topologyClient,
       sequencerClient,
       timeTracker,
@@ -175,10 +181,12 @@ object MediatorRuntimeFactory {
       topologyClient,
       syncCrypto,
       topologyTransactionProcessor,
+      topologyManager,
       topologyManagerStatus,
       synchronizerOutbox,
       timeTracker,
       state,
+      asynchronousProcessing = config.asynchronousProcessing,
       sequencerCounterTrackerStore,
       sequencedEventStore,
       nodeParameters,

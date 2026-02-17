@@ -57,7 +57,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
   val messageId = MessageId.tryCreate("test-message-id")
   def mkBatch(recipients: Set[Member]): Batch[ClosedEnvelope] =
     Batch[ClosedEnvelope](
-      ClosedEnvelope.create(
+      ClosedUncompressedEnvelope.create(
         ByteString.EMPTY,
         Recipients.ofSet(recipients).value,
         Seq.empty,

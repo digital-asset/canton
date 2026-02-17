@@ -62,6 +62,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.daml.lf.data.Ref.PackageId
 
 import scala.concurrent.ExecutionContext
+import scala.math.Ordered.orderingToOrdered
 import scala.reflect.ClassTag
 
 /** Base topology snapshot loader to share implementation between StoreBased- and
@@ -695,21 +696,24 @@ abstract class BaseTopologySnapshot(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[(SynchronizerSuccessor, EffectiveTime)]] =
     findTransactionsByUids(
-      types = Seq(TopologyMapping.Code.SynchronizerUpgradeAnnouncement),
+      types = Seq(TopologyMapping.Code.LsuAnnouncement),
       filterUid = NonEmpty(Seq, psid.uid),
-    ).map(_.collectOfMapping[LsuAnnouncement].result.toList match {
-      case atMostOne @ (_ :: Nil | Nil) =>
-        atMostOne
-          .map(tx =>
+    ).map(
+      _.collectOfMapping[LsuAnnouncement].result
+        .filter(_.mapping.successorSynchronizerId > psid)
+        .toList match {
+        case Nil => None
+        case one :: Nil =>
+          Some(
             (
-              SynchronizerSuccessor(tx.mapping.successorSynchronizerId, tx.mapping.upgradeTime),
-              tx.validFrom,
+              SynchronizerSuccessor(one.mapping.successorSynchronizerId, one.mapping.upgradeTime),
+              one.validFrom,
             )
           )
-          .headOption
-      case _moreThanOne =>
-        ErrorUtil.invalidState("Found more than one SynchronizerUpgradeAnnouncement mapping")
-    })
+        case _moreThanOne =>
+          ErrorUtil.invalidState("Found more than one LsuAnnouncement mapping")
+      }
+    )
 
   protected def collectLatestMapping[T <: TopologyMapping](
       typ: TopologyMapping.Code,

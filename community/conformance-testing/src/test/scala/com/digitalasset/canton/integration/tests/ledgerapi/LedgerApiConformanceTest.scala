@@ -224,7 +224,8 @@ object LedgerApiConformanceBase {
   )
 }
 
-trait LedgerApiShardedConformanceBase extends SingleVersionLedgerApiConformanceBase {
+abstract class LedgerApiShardedConformanceBase(shard: Int)
+    extends SingleVersionLedgerApiConformanceBase {
 
   override def connectedSynchronizersCount = 1
 
@@ -232,8 +233,11 @@ trait LedgerApiShardedConformanceBase extends SingleVersionLedgerApiConformanceB
     EnvironmentDefinition.P3_S1M1
       .withSetup(setupLedgerApiConformanceEnvironment)
 
-  protected val numShards: Int = 3
-  protected def shard: Int
+  protected val numShards: Int = 6
+  assert(shard < numShards)
+
+  registerPlugin(new UsePostgres(loggerFactory))
+  registerPlugin(new UseBftSequencer(loggerFactory))
 
   "Ledger Api Test Tool" can {
     s"pass semantic tests block $shard" in { implicit env =>
@@ -244,6 +248,12 @@ trait LedgerApiShardedConformanceBase extends SingleVersionLedgerApiConformanceB
     }
   }
 }
+class LedgerApiShard0ConformanceTestPostgres extends LedgerApiShardedConformanceBase(0)
+class LedgerApiShard1ConformanceTestPostgres extends LedgerApiShardedConformanceBase(1)
+class LedgerApiShard2ConformanceTestPostgres extends LedgerApiShardedConformanceBase(2)
+class LedgerApiShard3ConformanceTestPostgres extends LedgerApiShardedConformanceBase(3)
+class LedgerApiShard4ConformanceTestPostgres extends LedgerApiShardedConformanceBase(4)
+class LedgerApiShard5ConformanceTestPostgres extends LedgerApiShardedConformanceBase(5)
 
 // Conformance test that need a suppressing rule on canton side
 trait LedgerApiConformanceSuppressedLogs extends SingleVersionLedgerApiConformanceBase {
@@ -302,39 +312,6 @@ trait LedgerApiConformanceSuppressedLogs extends SingleVersionLedgerApiConforman
 }
 
 class LedgerApiConformanceSuppressedLogsPostgres extends LedgerApiConformanceSuppressedLogs {
-  registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
-}
-
-trait LedgerApiShard0ConformanceTest extends LedgerApiShardedConformanceBase {
-  override def shard: Int = 0
-}
-
-// not testing in-memory/H2, as we have observed flaky h2 persistence problems in the indexer
-
-class LedgerApiShard0ConformanceTestPostgres extends LedgerApiShard0ConformanceTest {
-  registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
-}
-
-trait LedgerApiShard1ConformanceTest extends LedgerApiShardedConformanceBase {
-  override def shard: Int = 1
-}
-
-// not testing in-memory/H2, as we have observed flaky h2 persistence problems in the indexer
-
-class LedgerApiShard1ConformanceTestPostgres extends LedgerApiShard1ConformanceTest {
-  registerPlugin(new UsePostgres(loggerFactory))
-  registerPlugin(new UseBftSequencer(loggerFactory))
-}
-
-trait LedgerApiShard2ConformanceTest extends LedgerApiShardedConformanceBase {
-  override def shard: Int = 2
-}
-
-// not testing in-memory/H2, as we have observed flaky h2 persistence problems in the indexer
-
-class LedgerApiShard2ConformanceTestPostgres extends LedgerApiShard2ConformanceTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
 }

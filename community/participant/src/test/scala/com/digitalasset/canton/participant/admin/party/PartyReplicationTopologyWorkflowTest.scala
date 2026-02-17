@@ -137,13 +137,13 @@ class PartyReplicationTopologyWorkflowTest
     mock[ConnectedSynchronizer].tap { cs =>
       val syncPersistentState = mock[SyncPersistentState].tap { ps =>
         when(ps.topologyStore).thenReturn(topologyStore)
-        when(ps.topologyManager).thenReturn(topologyManager)
       }
       val synchronizerHandle = mock[SynchronizerHandle].tap { sh =>
         when(sh.syncPersistentState).thenReturn(syncPersistentState)
       }
       when(cs.psid).thenReturn(physicalSynchronizerId)
       when(cs.synchronizerHandle).thenReturn(synchronizerHandle)
+      when(cs.topologyManager).thenReturn(topologyManager)
     }
 
   private def mockConnectedSynchronizer(
@@ -158,7 +158,6 @@ class PartyReplicationTopologyWorkflowTest
       }
       val syncPersistentState = mock[SyncPersistentState].tap { ps =>
         when(ps.topologyStore).thenReturn(topologyStore)
-        when(ps.topologyManager).thenReturn(topologyManager)
       }
       val synchronizerHandle = mock[SynchronizerHandle].tap { sh =>
         when(sh.syncPersistentState).thenReturn(syncPersistentState)
@@ -167,6 +166,7 @@ class PartyReplicationTopologyWorkflowTest
       when(cs.psid).thenReturn(physicalSynchronizerId)
       when(cs.ephemeral).thenReturn(ephemeralState)
       when(cs.synchronizerHandle).thenReturn(synchronizerHandle)
+      when(cs.topologyManager).thenReturn(topologyManager)
     }
 
   private def mockTopologyManager() =
@@ -216,8 +216,7 @@ class PartyReplicationTopologyWorkflowTest
         val tw = topologyWorkflow()
         val topologyManager = mockTopologyManager()
         val topologyStore = newTopologyStore()
-        val connectedSynchronizer =
-          mockConnectedSynchronizer(topologyStore, topologyManager)
+        val connectedSynchronizer = mockConnectedSynchronizer(topologyStore, topologyManager)
 
         when(
           topologyManager.proposeAndAuthorize(

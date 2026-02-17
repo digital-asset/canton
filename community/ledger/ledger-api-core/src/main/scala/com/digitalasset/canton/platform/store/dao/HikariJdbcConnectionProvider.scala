@@ -5,7 +5,7 @@ package com.digitalasset.canton.platform.store.dao
 
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.scalautil.Statement.discard
-import com.digitalasset.canton.ledger.api.health.{HealthStatus, Healthy, Unhealthy}
+import com.digitalasset.canton.health.{HealthStatus, Healthy, Unhealthy}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.config.ServerRole
 import com.digitalasset.canton.tracing.TraceContext

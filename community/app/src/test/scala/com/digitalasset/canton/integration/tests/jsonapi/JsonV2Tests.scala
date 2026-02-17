@@ -1715,6 +1715,7 @@ class JsonV2Tests
             "old_timestamp_check",
           )
         } yield {
+
           regularTime.toString() should be(""""2000-01-01T12:12:32.777111Z"""")
           oldTime.toString() should be(""""1930-04-14T12:12:32.777111Z"""")
         }

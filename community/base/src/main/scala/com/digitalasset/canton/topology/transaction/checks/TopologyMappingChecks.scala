@@ -306,12 +306,18 @@ class RequiredTopologyMappingChecks(
           )
 
       case (
-            Code.SynchronizerUpgradeAnnouncement,
-            None | Some(Code.SynchronizerUpgradeAnnouncement),
+            Code.LsuAnnouncement,
+            None | Some(Code.LsuAnnouncement),
           ) =>
         toValidate
           .select[TopologyChangeOp.Replace, LsuAnnouncement]
-          .map(checkSynchronizerUpgradeAnnouncement(effective, _))
+          .map(
+            checkLsuAnnouncement(
+              effective,
+              _,
+              inStore.flatMap(_.selectMapping[LsuAnnouncement]),
+            )
+          )
 
       case _otherwise => None
     }
@@ -338,28 +344,30 @@ class RequiredTopologyMappingChecks(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TopologyTransactionRejection, Unit] =
-    stateLookup.synchronizerId.fold(EitherTUtil.unitUS[TopologyTransactionRejection]) {
-      synchronizerId =>
-        for {
-          results <- loadFromStoreByUid(
-            effective,
-            Set(Code.SynchronizerUpgradeAnnouncement),
-            filterUid = NonEmpty.mk(Seq, synchronizerId.uid),
-          )
-          announcements = NonEmpty.from(
-            results.flatMap(_.selectMapping[LsuAnnouncement].toList)
-          )
-          _ <- announcements match {
-            case None => EitherTUtil.unitUS[TopologyTransactionRejection]
-            case Some(announcement) =>
-              EitherTUtil.condUnitET[FutureUnlessShutdown](
-                mappingsAllowedDuringSynchronizerUpgrade.contains(toValidate.mapping.code),
-                RequiredMappingRejection.OngoingSynchronizerUpgrade(
-                  announcement.head1.mapping.successorSynchronizerId.logical
-                ): TopologyTransactionRejection,
-              )
-          }
-        } yield {}
+    stateLookup.synchronizerId.fold(EitherTUtil.unitUS[TopologyTransactionRejection]) { psid =>
+      for {
+        results <- loadFromStoreByUid(
+          effective,
+          Set(Code.LsuAnnouncement),
+          filterUid = NonEmpty.mk(Seq, psid.uid),
+        )
+        announcements = NonEmpty.from(
+          results.flatMap(
+            _.selectMapping[LsuAnnouncement]
+              .filter(_.mapping.successorSynchronizerId > psid)
+          ) // past upgrades are irrelevant
+        )
+        _ <- announcements match {
+          case None => EitherTUtil.unitUS[TopologyTransactionRejection]
+          case Some(announcement) =>
+            EitherTUtil.condUnitET[FutureUnlessShutdown](
+              mappingsAllowedDuringSynchronizerUpgrade.contains(toValidate.mapping.code),
+              RequiredMappingRejection.OngoingSynchronizerUpgrade(
+                announcement.head1.mapping.successorSynchronizerId.logical
+              ): TopologyTransactionRejection,
+            )
+        }
+      } yield {}
     }
 
   private def loadSynchronizerParameters(
@@ -950,25 +958,33 @@ class RequiredTopologyMappingChecks(
         else checkKeyWasNotPreviouslyRevoked()
     } yield ()
   }
-
-  private def checkSynchronizerUpgradeAnnouncement(
+  private def checkLsuAnnouncement(
       effective: EffectiveTime,
       toValidate: SignedTopologyTransaction[
         TopologyChangeOp.Replace,
         LsuAnnouncement,
       ],
+      inStoreO: Option[
+        SignedTopologyTransaction[TopologyChangeOp, LsuAnnouncement]
+      ],
   ): EitherT[FutureUnlessShutdown, TopologyTransactionRejection, Unit] =
     for {
-      _ <- stateLookup.synchronizerId match {
-        case Some(psid) =>
+      _ <- inStoreO match {
+        case None => EitherTUtil.unitUS[TopologyTransactionRejection]
+        case Some(inStore) =>
+          // new announcement
+          val psidGreaterThanInStore =
+            toValidate.mapping.successorSynchronizerId > inStore.mapping.successorSynchronizerId
+          // existing announcement collecting signatures (we check that the mapping or serial hasn't been updated)
+          val announcementHasNotChanged =
+            inStore.mapping == toValidate.mapping && inStore.serial == toValidate.serial
           EitherTUtil.condUnitET[FutureUnlessShutdown][TopologyTransactionRejection](
-            psid < toValidate.mapping.successorSynchronizerId,
+            psidGreaterThanInStore || announcementHasNotChanged,
             RequiredMappingRejection.InvalidSynchronizerSuccessor(
-              psid,
               toValidate.mapping.successorSynchronizerId,
+              inStore.mapping.successorSynchronizerId,
             ),
           )
-        case None => EitherTUtil.unitUS
       }
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown][TopologyTransactionRejection](
         toValidate.mapping.upgradeTime > effective.value,

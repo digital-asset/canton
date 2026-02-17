@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-REPO="DACH-NY/canton"
+REPO="${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}"
 PULL_NUMBER=$((echo "${CIRCLE_PULL_REQUEST-}" | grep -o -E '[0-9]+$') || true)
 
 is_pull () {

@@ -1547,7 +1547,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
             decodeExpr(tryCatch.getTryExpr, definition) { body =>
               val binder = toName(internedStrings(tryCatch.getVarInternedStr))
               decodeExpr(tryCatch.getCatchExpr, definition) { handler =>
-                Ret(UpdateTryCatch(typ, body, binder, handler))
+                Ret(UpdateTryCatchV1(typ, body, binder, handler))
               }
             }
           }

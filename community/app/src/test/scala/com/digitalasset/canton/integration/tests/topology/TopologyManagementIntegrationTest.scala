@@ -25,7 +25,6 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.{PartiesAllocator, PartyToParticipantDeclarative}
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
-import com.digitalasset.canton.participant.store.SyncPersistentState
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.ForceFlag.{
   AllowInsufficientParticipantPermissionForSignatoryParty,
@@ -258,7 +257,7 @@ trait TopologyManagementIntegrationTest
       // ignores duplicate transaction
       loggerFactory.assertLogsSeq(
         SuppressionRule.LevelAndAbove(DEBUG) && SuppressionRule
-          .forLogger[SyncPersistentState]
+          .forLogger[SynchronizerTopologyManager]
       )(
         {
           participant1.topology.transactions.load(Seq(tx), daId)
@@ -294,7 +293,7 @@ trait TopologyManagementIntegrationTest
       // ignores duplicate transaction
       loggerFactory.assertLogsSeq(
         SuppressionRule.LevelAndAbove(DEBUG) && SuppressionRule
-          .forLogger[SyncPersistentState]
+          .forLogger[SynchronizerTopologyManager]
       )(
         participant1.topology.transactions.load(Seq(tx), daId),
         { logEntries =>

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol
 
 import com.digitalasset.canton.data.ViewType
+import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.metrics.ConnectedSynchronizerMetrics
@@ -27,6 +28,8 @@ class ParallelMessageDispatcherTest
     with MessageDispatcherTest {
 
   private def processAsynchronously(viewType: ViewType): Boolean = viewType == TestViewType
+
+  private lazy val promiseFactory = FlagCloseable.withCloseContext(logger, timeouts)
 
   private def create(
       psid: PhysicalSynchronizerId,
@@ -58,6 +61,7 @@ class ParallelMessageDispatcherTest
       processAsynchronously,
       loggerFactory,
       metrics,
+      promiseFactory,
     )
 
   "ParallelMessageDispatcher" should {

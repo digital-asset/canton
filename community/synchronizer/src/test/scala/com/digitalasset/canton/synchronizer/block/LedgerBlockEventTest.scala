@@ -8,15 +8,23 @@ import com.digitalasset.canton.ProtoDeserializationError.MaxBytesToDecompressExc
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.sequencing.protocol.ProtocolObjectTestUtils.{
+  assertEnvelopeType,
+  normalizeSubmissionRequest,
+}
 import com.digitalasset.canton.sequencing.protocol.{
   Batch,
   ClosedEnvelope,
+  ClosedUncompressedEnvelope,
+  Envelope,
   MessageId,
   Recipients,
   SignedContent,
   SubmissionRequest,
 }
+import com.digitalasset.canton.synchronizer.block.LedgerBlockEvent.Send
 import com.digitalasset.canton.synchronizer.block.RawLedgerBlock.RawBlockEvent
+import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
 import com.digitalasset.canton.topology.{DefaultTestIdentities, ParticipantId, SequencerId}
 import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.google.protobuf.ByteString
@@ -30,7 +38,7 @@ class LedgerBlockEventTest extends AnyWordSpec with BaseTest {
     MessageId.randomMessageId(),
     Batch[ClosedEnvelope](
       List(
-        ClosedEnvelope
+        ClosedUncompressedEnvelope
           .create(ByteString.EMPTY, Recipients.cc(member), Seq.empty, testedProtocolVersion)
       ),
       testedProtocolVersion,
@@ -53,12 +61,16 @@ class LedgerBlockEventTest extends AnyWordSpec with BaseTest {
     val byteString = signedSubmissionRequest.toByteString
 
     "deserialize submission request under the default max size limit" in {
-      LedgerBlockEvent.deserializeSignedSubmissionRequest(
-        testedProtocolVersion,
-        defaultMaxBytesToDecompress,
-      )(
-        byteString
-      ) shouldBe Right(signedSubmissionRequest)
+      LedgerBlockEvent
+        .deserializeSignedSubmissionRequest(
+          testedProtocolVersion,
+          defaultMaxBytesToDecompress,
+        )(
+          byteString
+        )
+        .map(normalizeSignedSubmissionRequest) shouldBe Right(
+        normalizeSignedSubmissionRequest(signedSubmissionRequest)
+      )
     }
 
     "not deserialize submission request over the max size limit" in {
@@ -73,19 +85,41 @@ class LedgerBlockEventTest extends AnyWordSpec with BaseTest {
     }
 
     "deserialize send" in {
-      LedgerBlockEvent.fromRawBlockEvent(
-        testedProtocolVersion,
-        defaultMaxBytesToDecompress,
-      )(
-        RawBlockEvent.Send(byteString, 0, sequencer.toProtoPrimitive)
-      ) shouldBe Right(
-        LedgerBlockEvent.Send(
+      inside(
+        LedgerBlockEvent
+          .fromRawBlockEvent(
+            testedProtocolVersion,
+            defaultMaxBytesToDecompress,
+          )(
+            RawBlockEvent.Send(byteString, 0, sequencer.toProtoPrimitive)
+          )
+      ) { case Right(send: Send) =>
+        send.signedSubmissionRequest.content.batch.envelopes.headOption.foreach { envelope =>
+          assertEnvelopeType(envelope, testedProtocolVersion)
+        }
+
+        normalizeSend(send) shouldBe LedgerBlockEvent.Send(
           CantonTimestamp.Epoch,
           signedSubmissionRequest,
           sequencer,
           byteString.size(),
         )
-      )
+      }
     }
+
+    def normalizeSignedSubmissionRequest[T <: Envelope[?]](
+        signedSubmissionRequest: SignedSubmissionRequest
+    ): SignedContent[SubmissionRequest] =
+      signedSubmissionRequest.copy(
+        content = normalizeSubmissionRequest(signedSubmissionRequest.content)
+      )
+
+    def normalizeSend(send: Send): Send =
+      send.copy(
+        signedSubmissionRequest = send.signedSubmissionRequest.copy(
+          content = normalizeSubmissionRequest(send.signedSubmissionRequest.content)
+        )
+      )
+
   }
 }

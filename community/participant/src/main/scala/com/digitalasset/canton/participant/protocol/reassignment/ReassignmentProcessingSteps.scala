@@ -25,7 +25,11 @@ import com.digitalasset.canton.data.{
   ViewPosition,
 }
 import com.digitalasset.canton.error.TransactionError
-import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, SequencedUpdate, Update}
+import com.digitalasset.canton.ledger.participant.state.{
+  CompletionInfo,
+  SequencedEventUpdate,
+  Update,
+}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{NamedLogging, TracedLogger}
@@ -325,7 +329,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
       error: TransactionError,
   )(implicit
       traceContext: TraceContext
-  ): (Option[SequencedUpdate], Option[PendingSubmissionId]) = {
+  ): (Option[SequencedEventUpdate], Option[PendingSubmissionId]) = {
     val rejection = Update.CommandRejected.FinalReason(error.rpcStatus())
     val isSubmittingParticipant = submitterMetadata.submittingParticipant == participantId
 
@@ -349,7 +353,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
 
   override def createRejectionEvent(rejectionArgs: RejectionArgs)(implicit
       traceContext: TraceContext
-  ): Either[ReassignmentProcessorError, Option[SequencedUpdate]] = {
+  ): Either[ReassignmentProcessorError, Option[SequencedEventUpdate]] = {
 
     val RejectionArgs(pendingReassignment, errorDetails) = rejectionArgs
     val isSubmittingParticipant =
@@ -625,8 +629,6 @@ object ReassignmentProcessingSteps {
     def requestSequencerCounter: SequencerCounter
 
     def submitterMetadata: ReassignmentSubmitterMetadata
-
-    override def isCleanReplay: Boolean = false
   }
 
   final case class RejectionArgs[T <: PendingReassignment](

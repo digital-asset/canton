@@ -11,9 +11,9 @@ import com.daml.scalautil.Statement.discard
 import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.grpc.sampleservice.HelloServiceReferenceImplementation
+import com.digitalasset.canton.health.HealthChecks.ComponentName
+import com.digitalasset.canton.health.{HealthChecks, ReportsHealth}
 import com.digitalasset.canton.ledger.api.grpc.{GrpcClientResource, GrpcHealthService}
-import com.digitalasset.canton.ledger.api.health.HealthChecks.ComponentName
-import com.digitalasset.canton.ledger.api.health.{HealthChecks, ReportsHealth}
 import com.digitalasset.canton.ledger.resources.TestResourceContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics

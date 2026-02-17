@@ -112,7 +112,6 @@ trait HttpJsonApiTestBase extends CantonFixture {
         createChannel(participant1)
         darFiles.foreach(path => participant1.dars.upload(path.toFile.getAbsolutePath))
       }
-
   def adHocHttp(participantSelector: ParticipantSelector, token: Option[String] = None)(implicit
       env: TestConsoleEnvironment
   ): Future[AbstractHttpServiceIntegrationTestFuns.HttpServiceTestFixtureData] = {

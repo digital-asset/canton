@@ -10,7 +10,7 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.crypto.{HashOps, Signature, SynchronizerSnapshotSyncCryptoApi}
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod, ViewType}
 import com.digitalasset.canton.error.TransactionError
-import com.digitalasset.canton.ledger.participant.state.{AcsChangeFactory, SequencedUpdate}
+import com.digitalasset.canton.ledger.participant.state.{AcsChangeFactory, SequencedEventUpdate}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -39,6 +39,7 @@ import com.digitalasset.canton.participant.protocol.validation.PendingTransactio
 import com.digitalasset.canton.participant.store.ReassignmentLookup
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.{ConfirmationRequestSessionKeyStore, SessionKeyStore}
@@ -455,7 +456,7 @@ trait ProcessingSteps[
       error: TransactionError,
   )(implicit
       traceContext: TraceContext
-  ): (Option[SequencedUpdate], Option[PendingSubmissionId])
+  ): (Option[SequencedEventUpdate], Option[PendingSubmissionId])
 
   /** Phase 3, step 2 (rejected submission, e.g. chosen mediator is inactive, invalid recipients)
     *
@@ -493,6 +494,7 @@ trait ProcessingSteps[
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       engineController: EngineController,
       decisionTimeTickRequest: SynchronizerTimeTracker.TickRequest,
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, RequestError, StorePendingDataAndSendResponseAndCreateTimeout]
@@ -532,7 +534,7 @@ trait ProcessingSteps[
     */
   def createRejectionEvent(rejectionArgs: RejectionArgs)(implicit
       traceContext: TraceContext
-  ): Either[ResultError, Option[SequencedUpdate]]
+  ): Either[ResultError, Option[SequencedEventUpdate]]
 
   // Phase 7: Result processing
 
@@ -576,7 +578,7 @@ trait ProcessingSteps[
   case class CommitAndStoreContractsAndPublishEvent(
       commitSet: Option[FutureUnlessShutdown[CommitSet]],
       contractsToBeStored: Seq[ContractInstance],
-      maybeEvent: Option[AcsChangeFactory => InternalContractIds => SequencedUpdate],
+      maybeEvent: Option[AcsChangeFactory => InternalContractIds => SequencedEventUpdate],
   )
 
   /** Phase 7, step 4:
@@ -749,7 +751,10 @@ object ProcessingSteps {
 
     def rootHashO: Option[RootHash]
 
-    def isCleanReplay: Boolean
+    /** Returns the handle that takes the event to be published to the record order publisher. Must
+      * be defined iff this is not a clean replay.
+      */
+    def publishUpdateO: Option[PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate]]
 
     def cancelDecisionTimeTickRequest(): Unit
   }
@@ -773,7 +778,6 @@ object ProcessingSteps {
   final case class Wrapped[+A <: PendingRequestData](unwrap: A) extends ReplayDataOr[A] {
     override def requestCounter: RequestCounter = unwrap.requestCounter
     override def requestSequencerCounter: SequencerCounter = unwrap.requestSequencerCounter
-    override def isCleanReplay: Boolean = false
     override def mediator: MediatorGroupRecipient = unwrap.mediator
 
     override def locallyRejectedF: FutureUnlessShutdown[Boolean] = unwrap.locallyRejectedF
@@ -786,6 +790,10 @@ object ProcessingSteps {
     override def toOption: Option[A] = Some(unwrap)
 
     override def cancelDecisionTimeTickRequest(): Unit = unwrap.cancelDecisionTimeTickRequest()
+
+    override def publishUpdateO
+        : Option[PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate]] =
+      unwrap.publishUpdateO
   }
 
   /** Minimal implementation of [[PendingRequestData]] to be used in case of a clean replay. */
@@ -797,13 +805,14 @@ object ProcessingSteps {
       override val abortEngine: String => Unit,
       override val engineAbortStatusF: FutureUnlessShutdown[EngineAbortStatus],
   ) extends ReplayDataOr[Nothing] {
-    override def isCleanReplay: Boolean = true
-
     override def rootHashO: Option[RootHash] = None
 
     override def toOption: Option[Nothing] = None
 
     override def cancelDecisionTimeTickRequest(): Unit = ()
+
+    override def publishUpdateO
+        : Option[PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate]] = None
   }
 
   type InternalContractIds = Map[LfContractId, Long]

@@ -255,6 +255,30 @@ final case class RetentionPeriodDefaults(
     mediator: config.NonNegativeFiniteDuration = config.NonNegativeFiniteDuration.ofDays(7),
 )
 
+/** Configure main execution contexts
+  *
+  * @param keepAlive
+  *   Keep alive time for fork-join pool excess threads.
+  * @param parallelism
+  *   Number of CPU cores to use for the main ec (derived automatically by default)
+  */
+final case class ThreadingConfig(
+    keepAlive: config.NonNegativeFiniteDuration = ThreadingConfig.defaultKeepAliveMillis,
+    maxExtraThreads: PositiveInt = PositiveInt.tryCreate(256),
+    parallelism: Option[PositiveInt] = None,
+    corePoolSize: Option[PositiveInt] = None,
+    maxPoolSize: Option[PositiveInt] = None,
+    minRunnable: Option[PositiveInt] = None,
+) {
+
+  def keepAliveMillis: PositiveInt =
+    PositiveInt.create(keepAlive.underlying.toMillis.toInt).getOrElse(PositiveInt.tryCreate(60000))
+
+}
+object ThreadingConfig {
+  private val defaultKeepAliveMillis = config.NonNegativeFiniteDuration.ofSeconds(60) // fj default
+}
+
 /** Parameters for testing Canton. Use default values in a production environment.
   *
   * @param enableAdditionalConsistencyChecks
@@ -282,6 +306,8 @@ final case class RetentionPeriodDefaults(
   * @param stateRefreshInterval
   *   If configured, the config file will be reread in the given interval to allow dynamic
   *   properties to be picked up immediately
+  * @param threading
+  *   Threading configurations
   */
 final case class CantonParameters(
     clock: ClockConfig = ClockConfig.WallClock(),
@@ -301,6 +327,7 @@ final case class CantonParameters(
     ),
     enableAlphaStateViaConfig: Boolean = false,
     stateRefreshInterval: Option[config.NonNegativeFiniteDuration] = None,
+    threading: ThreadingConfig = ThreadingConfig(),
 ) {
   def getStartupParallelism(numThreads: PositiveInt): PositiveInt =
     startupParallelism.getOrElse(numThreads)
@@ -480,8 +507,6 @@ final case class CantonConfig(
         protocol = CantonNodeParameterConverter.protocol(this, sequencerNodeConfig.parameters),
         maxConfirmationRequestsBurstFactor =
           sequencerNodeConfig.parameters.maxConfirmationRequestsBurstFactor,
-        sequencingTimeLowerBoundExclusive =
-          sequencerNodeConfig.parameters.sequencingTimeLowerBoundExclusive,
         asyncWriter = sequencerNodeConfig.parameters.asyncWriter.toParameters,
         timeAdvancingTopology = sequencerNodeConfig.parameters.timeAdvancingTopology,
         unsafeSequencerChannelSupport =
@@ -952,8 +977,28 @@ object CantonConfig {
       deriveReader[JsonApiConfig]
     }
 
-    lazy implicit final val topologyConfigReader: ConfigReader[TopologyConfig] =
-      deriveReader[TopologyConfig]
+    lazy implicit final val topologyConfigReader: ConfigReader[TopologyConfig] = {
+
+      implicit val deprecatedFields: DeprecatedFieldsFor[TopologyConfig] =
+        new DeprecatedFieldsFor[TopologyConfig] {
+
+          override def deprecatePath: List[DeprecatedConfigPath[?]] =
+            List(
+              DeprecatedConfigPath(
+                "use-new-processor",
+                since = "3.5.0",
+                valueFilter = Some(false),
+              ),
+              DeprecatedConfigPath(
+                "use-new-client",
+                since = "3.5.0",
+                valueFilter = Some(false),
+              ),
+            )
+        }
+
+      deriveReader[TopologyConfig].applyDeprecations
+    }
 
     lazy implicit val databaseSequencerExclusiveStorageConfigReader
         : ConfigReader[DatabaseSequencerExclusiveStorageConfig] =
@@ -1352,6 +1397,8 @@ object CantonConfig {
           deriveReader[ProcessingTimeout]
         deriveReader[TimeoutSettings]
       }
+      implicit val threadingConfigReader: ConfigReader[ThreadingConfig] =
+        deriveReader[ThreadingConfig]
       deriveReader[CantonParameters]
     }
     lazy implicit final val cantonFeaturesReader: ConfigReader[CantonFeatures] =
@@ -2023,6 +2070,8 @@ object CantonConfig {
           deriveWriter[ProcessingTimeout]
         deriveWriter[TimeoutSettings]
       }
+      implicit val threadingConfigWriter: ConfigWriter[ThreadingConfig] =
+        deriveWriter[ThreadingConfig]
       deriveWriter[CantonParameters]
     }
     lazy implicit final val cantonFeaturesWriter: ConfigWriter[CantonFeatures] =

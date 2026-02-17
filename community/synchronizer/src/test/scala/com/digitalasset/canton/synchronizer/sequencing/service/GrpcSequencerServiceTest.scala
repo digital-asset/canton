@@ -49,7 +49,7 @@ import com.digitalasset.canton.topology.store.{
   TopologyStateForInitializationService,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
+import com.digitalasset.canton.util.{EitherTUtil, MaxBytesToDecompress, MonadUtil}
 import com.digitalasset.canton.version.{ProtocolVersion, VersionedMessage}
 import com.digitalasset.canton.{
   BaseTest,
@@ -231,7 +231,8 @@ class GrpcSequencerServiceTest
     mkSubmissionRequest(
       Batch(
         List(
-          ClosedEnvelope.create(content, Recipients.cc(recipient), Seq.empty, testedProtocolVersion)
+          ClosedUncompressedEnvelope
+            .create(content, Recipients.cc(recipient), Seq.empty, testedProtocolVersion)
         ),
         testedProtocolVersion,
       ),
@@ -246,7 +247,7 @@ class GrpcSequencerServiceTest
     mkSubmissionRequest(
       Batch(
         List(
-          ClosedEnvelope.create(
+          ClosedUncompressedEnvelope.create(
             content,
             Recipients.cc(recipientPar, recipientMed),
             Seq.empty,
@@ -330,7 +331,18 @@ class GrpcSequencerServiceTest
     "reject envelopes with empty content" in { implicit env =>
       val request = defaultRequest
         .focus(_.batch.envelopes)
-        .modify(_.map(_.focus(_.bytes).replace(ByteString.EMPTY)))
+        .modify(_.map {
+          case closedEnvelope: ClosedEnvelope =>
+            if (testedProtocolVersion >= ProtocolVersion.v35) {
+              closedEnvelope.toClosedCompressedEnvelope
+                .copy(bytes = ByteString.empty)(maxBytesToDecompress =
+                  MaxBytesToDecompress.HardcodedDefault
+                )
+            } else {
+              closedEnvelope.toClosedUncompressedEnvelopeUnsafe.copy(bytes = ByteString.empty)
+            }
+          case other => other // Won't happen, but is required for the match to be exhaustive
+        })
 
       loggerFactory.assertLogs(
         sendAndCheckError(request) { case ex: StatusRuntimeException =>
@@ -365,15 +377,30 @@ class GrpcSequencerServiceTest
 
     "reject large messages" in { implicit env =>
       val bigEnvelope =
-        ClosedEnvelope.create(
+        ClosedUncompressedEnvelope.create(
           ByteString.copyFromUtf8(scala.util.Random.nextString(5000)),
           Recipients.cc(participant),
           Seq.empty,
           testedProtocolVersion,
         )
-      val request = defaultRequest.focus(_.batch.envelopes).replace(List(bigEnvelope))
 
-      val alarmMsg = s"Max bytes to decompress is exceeded. The limit is 1000 bytes."
+      val request =
+        defaultRequest
+          .focus(_.batch.envelopes)
+          .replace(
+            List(
+              bigEnvelope.copy(
+                recipients = Recipients.cc(participant)
+              )
+            )
+          )
+
+      val alarmMsg =
+        if (testedProtocolVersion >= ProtocolVersion.v35)
+          "Batch contains envelope with max bytes exceeded. The limit is 1000 bytes."
+        else
+          s"Max bytes to decompress is exceeded. The limit is 1000 bytes."
+
       loggerFactory.assertLogs(
         sendAndCheckError(request) { case ex: StatusRuntimeException =>
           ex.getMessage should include(alarmMsg)
@@ -448,13 +475,13 @@ class GrpcSequencerServiceTest
     ): FixtureParam => Future[Assertion] = { _ =>
       val differentEnvelopes = Batch.fromClosed(
         testedProtocolVersion,
-        ClosedEnvelope.create(
+        ClosedUncompressedEnvelope.create(
           ByteString.copyFromUtf8("message to first mediator"),
           Recipients(NonEmpty.mk(Seq, mediator1)),
           Seq.empty,
           testedProtocolVersion,
         ),
-        ClosedEnvelope.create(
+        ClosedUncompressedEnvelope.create(
           ByteString.copyFromUtf8("message to second mediator"),
           Recipients(NonEmpty.mk(Seq, mediator2)),
           Seq.empty,
@@ -463,7 +490,7 @@ class GrpcSequencerServiceTest
       )
       val sameEnvelope = Batch.fromClosed(
         testedProtocolVersion,
-        ClosedEnvelope.create(
+        ClosedUncompressedEnvelope.create(
           ByteString.copyFromUtf8("message to two mediators and the participant"),
           Recipients(
             NonEmpty(

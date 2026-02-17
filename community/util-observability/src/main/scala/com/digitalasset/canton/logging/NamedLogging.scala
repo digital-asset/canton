@@ -26,7 +26,9 @@ trait NamedLogging {
 
   private[this] lazy val underlying: slf4j.Logger = theLogger.underlying
 
-  private[this] lazy val theLogger: Logger = loggerFactory.getLogger(getClass)
+  protected def classForLogger: Class[?] = getClass
+
+  private[this] lazy val theLogger: Logger = loggerFactory.getLogger(classForLogger)
 
   private[this] lazy val theLoggerWithContext: TracedLogger =
     Logger.takingImplicit[TraceContext](underlying)

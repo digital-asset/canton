@@ -16,6 +16,7 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ViewType.UnassignmentViewType
+import com.digitalasset.canton.ledger.participant.state.SequencedEventUpdate
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -49,6 +50,7 @@ import com.digitalasset.canton.participant.store.ActiveContractStore.{
 }
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.messages.Verdict.MediatorReject
 import com.digitalasset.canton.sequencing.protocol.*
@@ -404,6 +406,7 @@ private[reassignment] class UnassignmentProcessingSteps(
       activenessF: FutureUnlessShutdown[ActivenessResult],
       engineController: EngineController,
       decisionTimeTickRequest: SynchronizerTimeTracker.TickRequest,
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -483,6 +486,7 @@ private[reassignment] class UnassignmentProcessingSteps(
         engineController.abort,
         engineAbortStatusF = engineAbortStatusF,
         decisionTimeTickRequest,
+        publishUpdate,
       )
 
       StorePendingDataAndSendResponseAndCreateTimeout(
@@ -522,6 +526,7 @@ private[reassignment] class UnassignmentProcessingSteps(
       _engineController,
       _abortedF,
       _decisionTimeTickRequest,
+      _publishUpdate,
     ) = pendingRequestData
 
     val isReassigningParticipant = unassignmentValidationResult.assignmentExclusivity.isDefined
@@ -747,6 +752,7 @@ object UnassignmentProcessingSteps {
       override val abortEngine: String => Unit,
       override val engineAbortStatusF: FutureUnlessShutdown[EngineAbortStatus],
       decisionTimeTickRequest: SynchronizerTimeTracker.TickRequest,
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   ) extends PendingReassignment {
 
     def isReassigningParticipant: Boolean =
@@ -758,5 +764,9 @@ object UnassignmentProcessingSteps {
       unassignmentValidationResult.submitterMetadata
 
     override def cancelDecisionTimeTickRequest(): Unit = decisionTimeTickRequest.cancel()
+
+    override def publishUpdateO
+        : Option[PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate]] =
+      Some(publishUpdate)
   }
 }

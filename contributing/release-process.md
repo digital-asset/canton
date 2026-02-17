@@ -283,7 +283,6 @@ First, create and merge a PR to bump Daml.
 - Updates in `community/common/src/main/scala/com/digitalasset/canton/version/CantonVersion.scala`
     - Add two new versions in `ReleaseVersion` (stable release and next snapshot).
     - Add two mappings in `CantonVersion`
-- Run `sbt updateDamlProjectVersions`
 - Push into a branch and run manual job `manual_update_canton_build_docker_image`
 - TODO checker will fail and the automated build should be cancelled to first have the build Docker image ready
 - Merge the PR in the `release-line-2.3`

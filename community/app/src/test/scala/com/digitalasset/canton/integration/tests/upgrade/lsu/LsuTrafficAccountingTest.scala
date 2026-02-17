@@ -345,11 +345,6 @@ abstract class LsuTrafficAccountingTest extends LsuBase with TrafficBalanceSuppo
 
       oldSynchronizerNodes.all.stop()
 
-//      environment.simClock.value.advance(Duration.ofSeconds(1))
-//
-//      waitForTargetTimeOnSequencer(sequencer2, environment.clock.now)
-//      waitForTargetTimeOnSequencer(sequencer4, environment.clock.now)
-
       val aliceIou =
         participant1.ledger_api.javaapi.state.acs.await(IouSyntax.modelCompanion)(alice)
       val bob = participant1.parties.enable("Bob")

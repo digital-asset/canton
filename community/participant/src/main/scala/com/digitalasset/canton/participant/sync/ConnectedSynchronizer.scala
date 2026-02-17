@@ -108,6 +108,7 @@ import com.digitalasset.canton.topology.{
   ParticipantId,
   PhysicalSynchronizerId,
   SynchronizerId,
+  SynchronizerTopologyManager,
   TopologyManagerError,
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -157,6 +158,7 @@ class ConnectedSynchronizer(
     contractValidator: ContractValidator,
     identityPusher: ParticipantTopologyDispatcher,
     topologyProcessor: TopologyTransactionProcessor,
+    val topologyManager: SynchronizerTopologyManager,
     missingKeysAlerter: MissingKeysAlerter,
     val sequencerConnectionListener: SequencerConnectionSuccessorListener,
     reassignmentCoordination: ReassignmentCoordination,
@@ -175,7 +177,8 @@ class ConnectedSynchronizer(
     with FlagCloseableAsync
     with ReassignmentSubmissionHandle
     with CloseableHealthComponent
-    with AtomicHealthComponent {
+    with AtomicHealthComponent
+    with HasCloseContext {
 
   val psid: PhysicalSynchronizerId = synchronizerHandle.psid
 
@@ -379,6 +382,7 @@ class ConnectedSynchronizer(
       ephemeral.inFlightSubmissionSynchronizerTracker,
       loggerFactory,
       metrics,
+      promiseFactory = this,
     )
 
   def addJournalGarageCollectionLock()(implicit
@@ -694,9 +698,6 @@ class ConnectedSynchronizer(
             protocolVersion,
             Set.empty,
           )
-
-        val topologyManager =
-          synchronizerHandle.syncPersistentState.topologyManager
 
         def updateSTCWithFeatureFlags(
             existingSynchronizerTrustCertificate: TopologyTransaction[
@@ -1220,7 +1221,7 @@ object ConnectedSynchronizer {
       val journalGarbageCollector = new JournalGarbageCollector(
         persistentState.requestJournalStore,
         tc =>
-          ephemeralState.ledgerApiIndexer.ledgerApiStore.value
+          participantNodePersistentState.value.ledgerApiStore
             .cleanSynchronizerIndex(synchronizerHandle.psid.logical)(tc, ec),
         sortedReconciliationIntervalsProvider,
         persistentState.acsCommitmentStore,
@@ -1266,6 +1267,18 @@ object ConnectedSynchronizer {
           acsCommitmentProcessor.scheduleTopologyTick
         )
 
+        topologyManager = synchronizerHandle.topologyFactory.createTopologyManager(
+          participantId,
+          persistentState,
+          ledgerApiStore = participantNodePersistentState.map(_.ledgerApiStore),
+          packageMetadataView = packageService.getPackageMetadataView,
+          crypto = synchronizerCrypto.crypto,
+          synchronizerLoggerFactory = loggerFactory,
+          disableOptionalTopologyChecks = parameters.disableOptionalTopologyChecks,
+          dispatchQueueBackpressureLimit = parameters.general.dispatchQueueBackpressureLimit,
+          disableUpgradeValidation = parameters.disableUpgradeValidation,
+        )
+
       } yield {
         val contractValidator = ContractValidator(
           synchronizerCrypto.pureCrypto,
@@ -1285,6 +1298,7 @@ object ConnectedSynchronizer {
           contractValidator,
           identityPusher,
           topologyProcessor,
+          topologyManager,
           missingKeysAlerter,
           sequencerConnectionSuccessorListener,
           reassignmentCoordination,

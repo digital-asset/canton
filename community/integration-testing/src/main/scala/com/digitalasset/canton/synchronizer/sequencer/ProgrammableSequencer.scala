@@ -57,6 +57,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.util.{FutureUtil, MonadUtil}
+import io.grpc.ServerServiceDefinition
 import monocle.macros.syntax.lens.*
 import org.apache.pekko.stream.KillSwitches
 import org.apache.pekko.stream.scaladsl.{Keep, Source}
@@ -431,6 +432,8 @@ class ProgrammableSequencer(
 
   override def adminStatus: SequencerAdminStatus = baseSequencer.adminStatus
 
+  override def adminServices: Seq[ServerServiceDefinition] = baseSequencer.adminServices
+
   override def isEnabled(member: Member)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean] =
@@ -533,10 +536,10 @@ object ProgrammableSequencer {
 
           val localVerdicts = submissionRequest.batch.envelopes
             .flatMap(
-              _.closeEnvelope
-                .openEnvelope(participant.crypto.pureCrypto, BaseTest.testedProtocolVersion)
-                .value
-                .protocolMessage match {
+              _.toOpenEnvelope(
+                participant.crypto.pureCrypto,
+                BaseTest.testedProtocolVersion,
+              ).value.protocolMessage match {
                 case SignedProtocolMessage(
                       TypedSignedProtocolMessageContent(confirmations: ConfirmationResponses),
                       _,

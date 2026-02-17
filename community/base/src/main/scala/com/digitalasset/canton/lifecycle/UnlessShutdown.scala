@@ -40,6 +40,9 @@ sealed trait UnlessShutdown[+A] extends Product with Serializable {
   /** Convert the outcome into an [[scala.Right$]] or [[scala.Left$]]`(aborted)` upon abortion. */
   def toRight[L](aborted: => L): Either[L, A]
 
+  /** Convert the outcome into a [[scala.Some]] and abortion to [[scala.None$]] */
+  def toOption: Option[A]
+
   /** Evaluate the argument upon abortion and otherwise return the outcome
     *
     * Analogue to [[scala.Option.getOrElse]].
@@ -61,6 +64,7 @@ object UnlessShutdown {
     override def traverse[F[_], B](f: A => F[B])(implicit F: Applicative[F]): F[UnlessShutdown[B]] =
       F.map(f(result))(Outcome(_))
     override def toRight[L](aborted: => L): Either[L, A] = Right(result)
+    override def toOption: Some[A] = Some(result)
     override def onShutdown[B >: A](ifShutdown: => B): A = result
     override def tapOnShutdown(ifShutdown: => Unit): this.type = this
     override def isOutcome: Boolean = true
@@ -76,6 +80,7 @@ object UnlessShutdown {
         F: Applicative[F]
     ): F[UnlessShutdown[B]] = F.pure(this)
     override def toRight[L](aborted: => L): Either[L, Nothing] = Left(aborted)
+    override def toOption: None.type = None
     override def onShutdown[B >: Nothing](ifShutdown: => B): B = ifShutdown
     override def tapOnShutdown(ifShutdown: => Unit): this.type = {
       ifShutdown

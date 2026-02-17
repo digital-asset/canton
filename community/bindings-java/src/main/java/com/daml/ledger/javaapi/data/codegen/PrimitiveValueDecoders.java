@@ -10,8 +10,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.IntStream;
+
+import com.daml.ledger.javaapi.data.DamlRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static java.util.Collections.unmodifiableList;
 
 /**
  * {@link ValueDecoder}s for Daml types that are not code-generated.
@@ -26,39 +31,55 @@ public final class PrimitiveValueDecoders {
   private PrimitiveValueDecoders() {}
 
   public static final ValueDecoder<Boolean> fromBool =
-      value -> value.asBool().orElseThrow(() -> mismatched(Bool.class)).getValue();
+      ValueDecoder.create(
+          (value, policy) -> value.asBool().orElseThrow(() -> mismatched(Bool.class)).getValue());
   public static final ValueDecoder<Long> fromInt64 =
-      value -> value.asInt64().orElseThrow(() -> mismatched(Int64.class)).getValue();
+      ValueDecoder.create(
+          (value, policy) -> value.asInt64().orElseThrow(() -> mismatched(Int64.class)).getValue());
   public static final ValueDecoder<String> fromText =
-      value -> value.asText().orElseThrow(() -> mismatched(Text.class)).getValue();
+      ValueDecoder.create(
+          (value, policy) -> value.asText().orElseThrow(() -> mismatched(Text.class)).getValue());
   public static final ValueDecoder<Instant> fromTimestamp =
-      value -> value.asTimestamp().orElseThrow(() -> mismatched(Timestamp.class)).getValue();
+      ValueDecoder.create(
+          (value, policy) ->
+              value.asTimestamp().orElseThrow(() -> mismatched(Timestamp.class)).getValue());
   public static final ValueDecoder<String> fromParty =
-      value -> value.asParty().orElseThrow(() -> mismatched(Party.class)).getValue();
+      ValueDecoder.create(
+          (value, policy) -> value.asParty().orElseThrow(() -> mismatched(Party.class)).getValue());
   public static final ValueDecoder<Unit> fromUnit =
-      value -> value.asUnit().orElseThrow(() -> mismatched(Unit.class));
+      ValueDecoder.create(
+          (value, policy) -> value.asUnit().orElseThrow(() -> mismatched(Unit.class)));
   public static final ValueDecoder<LocalDate> fromDate =
-      value -> value.asDate().orElseThrow(() -> mismatched(Date.class)).getValue();
+      ValueDecoder.create(
+          (value, policy) -> value.asDate().orElseThrow(() -> mismatched(Date.class)).getValue());
   public static final ValueDecoder<java.math.BigDecimal> fromNumeric =
-      value -> value.asNumeric().orElseThrow().getValue();
+      ValueDecoder.create(
+          (value, policy) ->
+              value.asNumeric().orElseThrow(() -> mismatched(Numeric.class)).getValue());
 
   public static <T> ValueDecoder<List<T>> fromList(ValueDecoder<T> element) {
-    return value ->
-        value.asList().orElseThrow(() -> mismatched(List.class)).toList(element::decode);
+    return ValueDecoder.create(
+        (value, policy) ->
+            value
+                .asList()
+                .orElseThrow(() -> mismatched(List.class))
+                .toList(currentValue -> element.decode(currentValue, policy)));
   }
 
   public static <T> ValueDecoder<Optional<T>> fromOptional(ValueDecoder<T> element) {
-    return value ->
-        value
-            .asOptional()
-            .orElseThrow(() -> mismatched(Optional.class))
-            .toOptional(element::decode);
+    return ValueDecoder.create(
+        (value, policy) ->
+            value
+                .asOptional()
+                .orElseThrow(() -> mismatched(Optional.class))
+                .toOptional(currentValue -> element.decode(currentValue, policy)));
   }
 
   public static <T> ValueDecoder<ContractId<T>> fromContractId(ValueDecoder<T> contractType) {
-    return value ->
-        contractType.fromContractId(
-            value.asContractId().orElseThrow(() -> mismatched(ContractId.class)).getValue());
+    return ValueDecoder.create(
+        (value, policy) ->
+            contractType.fromContractId(
+                value.asContractId().orElseThrow(() -> mismatched(ContractId.class)).getValue()));
   }
 
   /**
@@ -77,8 +98,12 @@ public final class PrimitiveValueDecoders {
    * @see #fromGenMap
    */
   public static <T> ValueDecoder<Map<String, T>> fromTextMap(ValueDecoder<T> valueType) {
-    return value ->
-        value.asTextMap().orElseThrow(() -> mismatched(Map.class)).toMap(valueType::decode);
+    return ValueDecoder.create(
+        (value, policy) ->
+            value
+                .asTextMap()
+                .orElseThrow(() -> mismatched(Map.class))
+                .toMap(currentValue -> valueType.decode(currentValue, policy)));
   }
 
   /**
@@ -88,11 +113,14 @@ public final class PrimitiveValueDecoders {
    */
   public static <K, V> ValueDecoder<Map<K, V>> fromGenMap(
       ValueDecoder<K> keyType, ValueDecoder<V> valueType) {
-    return value ->
-        value
-            .asGenMap()
-            .orElseThrow(() -> mismatched(Map.class))
-            .toMap(keyType::decode, valueType::decode);
+    return ValueDecoder.create(
+        (value, policy) ->
+            value
+                .asGenMap()
+                .orElseThrow(() -> mismatched(Map.class))
+                .toMap(
+                    curentValue -> keyType.decode(curentValue, policy),
+                    curentValue -> valueType.decode(curentValue, policy)));
   }
 
   /**
@@ -120,75 +148,102 @@ public final class PrimitiveValueDecoders {
    *
    * @hidden
    */
-  public static List<com.daml.ledger.javaapi.data.DamlRecord.Field> recordCheck(
+  public static List<DamlRecord.Field> recordCheck(
       int expectedFields, int trailingOptionalFields, Value maybeRecord) {
-    var record =
+    return checkAndPrepareRecord(
+            expectedFields, trailingOptionalFields, maybeRecord, UnknownTrailingFieldPolicy.STRICT)
+        .getExpectedFields();
+  }
+
+  /**
+   * <strong>INTERNAL API</strong>: this is meant for use by <a
+   * href="https://docs.daml.com/app-dev/bindings-java/codegen.html">the Java code generator</a>,
+   * and <em>should not be referenced directly</em>. Applications should use a code-generated {@code
+   * valueDecoder} method instead.
+   *
+   * @hidden
+   */
+  public static PreparedRecord checkAndPrepareRecord(
+      int expectedFields,
+      int trailingOptionalFields,
+      Value maybeRecord,
+      UnknownTrailingFieldPolicy policy) {
+    DamlRecord record =
         maybeRecord
             .asRecord()
             .orElseThrow(
                 () -> new IllegalArgumentException("Contracts must be constructed from Records"));
-    var fields = record.getFields();
-    var numberOfFields = fields.size();
-    if (numberOfFields == expectedFields) {
-      return fields;
+    List<DamlRecord.Field> fields = record.getFields();
+    if (fields.size() == expectedFields) {
+      return new PreparedRecord(unmodifiableList(fields));
     }
-    if (numberOfFields > expectedFields) {
-      // Downgrade, check that the additional fields are empty optionals.
-      for (var i = expectedFields; i < numberOfFields; i++) {
-        final var field = fields.get(i);
-        final var optValue = field.getValue().asOptional();
-        if (optValue.isEmpty()) {
-          throw new IllegalArgumentException(
-              "Expected "
-                  + expectedFields
-                  + " arguments, got "
-                  + numberOfFields
-                  + " and field "
-                  + i
-                  + " is not optional: "
-                  + field);
-        }
-        final var value = optValue.get();
-        if (!value.isEmpty()) {
-          throw new IllegalArgumentException(
-              "Expected "
-                  + expectedFields
-                  + " arguments, got "
-                  + numberOfFields
-                  + " and field "
-                  + i
-                  + " is Optional but not empty: "
-                  + field);
-        }
-      }
-      logger.trace(
-          "Downgrading record, dropping {} trailing optional fields",
-          numberOfFields - expectedFields);
-      return fields.subList(0, expectedFields);
+    int receivedFieldsCount = fields.size();
+    if (receivedFieldsCount > expectedFields) {
+      List<DamlRecord.Field> expectedFieldsList =
+          unmodifiableList(fields.subList(0, expectedFields));
+      List<DamlRecord.Field> unknownFields =
+          readUnknownFields(fields, expectedFields, receivedFieldsCount);
+      logger.trace("Found {} trailing expectedFields, policy is {}", unknownFields.size(), policy);
+      return prepareRecordOrFail(expectedFieldsList, unknownFields, policy);
+    } else if (receivedFieldsCount >= expectedFields - trailingOptionalFields) {
+      int missingFieldsCount = expectedFields - receivedFieldsCount;
+      logger.trace("Upgrading record, appending {} empty optional fields", missingFieldsCount);
+      return new PreparedRecord(combineFieldsWithTrailingOptionals(fields, missingFieldsCount));
     }
-    if (numberOfFields < expectedFields) {
-      // Upgrade, add empty optionals to the end.
-      if ((expectedFields - numberOfFields) <= trailingOptionalFields) {
-        final var newFields = new ArrayList<>(fields);
-        for (var i = 0; i < expectedFields - numberOfFields; i++) {
-          newFields.add(new com.daml.ledger.javaapi.data.DamlRecord.Field(DamlOptional.EMPTY));
-        }
-        logger.trace(
-            "Upgrading record, appending {} empty optional fields",
-            expectedFields - numberOfFields);
-        return newFields;
-      } else {
+    throw new IllegalArgumentException(
+        String.format(
+            "Expected %d fields, got %d and only the last %d of the expected type are optionals",
+            expectedFields, receivedFieldsCount, trailingOptionalFields));
+  }
+
+  private static PreparedRecord prepareRecordOrFail(
+      List<DamlRecord.Field> expectedFields,
+      List<DamlRecord.Field> unknownFields,
+      UnknownTrailingFieldPolicy policy) {
+    if (!unknownFields.isEmpty() && UnknownTrailingFieldPolicy.STRICT == policy) {
+      throw new IllegalArgumentException(
+          String.format(
+              "Unexpected non-empty %d fields were received and Strict policy is used",
+              unknownFields.size()));
+    }
+    return new PreparedRecord(expectedFields);
+  }
+
+  private static List<DamlRecord.Field> combineFieldsWithTrailingOptionals(
+      List<DamlRecord.Field> fields, int missingFieldsCount) {
+    List<DamlRecord.Field> newFields = new ArrayList<>(fields.size() + missingFieldsCount);
+    newFields.addAll(fields);
+    for (int i = 0; i < missingFieldsCount; i++) {
+      newFields.add(new DamlRecord.Field(DamlOptional.EMPTY));
+    }
+    return unmodifiableList(newFields);
+  }
+
+  private static List<DamlRecord.Field> readUnknownFields(
+      List<DamlRecord.Field> fields, int expectedFields, int receivedFieldsCount) {
+    List<DamlRecord.Field> unknownFields = fields.subList(expectedFields, receivedFieldsCount);
+    if (unknownFields.isEmpty()) {
+      return List.of();
+    }
+    for (int i = 0; i < unknownFields.size(); i++) {
+      if (unknownFields.get(i).getValue().asOptional().isEmpty()) {
         throw new IllegalArgumentException(
-            "Expected "
-                + expectedFields
-                + " arguments, got "
-                + numberOfFields
-                + " and only the last "
-                + trailingOptionalFields
-                + " of the expected type are optionals");
+            String.format(
+                "Expected %d fields, got %d and field %d is not optional: %s",
+                receivedFieldsCount, expectedFields, i, fields.get(i)));
       }
     }
-    return fields;
+    final int n = unknownFields.size();
+    final int idxFromEnd =
+        IntStream.range(0, n)
+            .filter(i -> !unknownFields.get(n - 1 - i).getValue().asOptional().get().isEmpty())
+            .findFirst()
+            .orElse(-1);
+    if (idxFromEnd == -1) {
+      return List.of();
+    } else {
+      return unmodifiableList(unknownFields.subList(0, n - idxFromEnd));
+    }
   }
 
   /**

@@ -33,6 +33,7 @@ import com.google.common.annotations.VisibleForTesting
 
 import java.util.concurrent.ConcurrentSkipListMap
 import java.util.concurrent.atomic.AtomicReference
+import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 import scala.jdk.CollectionConverters.*
 
@@ -60,6 +61,10 @@ private[mediator] class MediatorState(
   // a skip list is used to optimise for when we fetch all keys below a given timestamp
   private val pendingRequests =
     new ConcurrentSkipListMap[RequestId, ResponseAggregation[?]](implicitly[Ordering[RequestId]])
+
+  // The participant response timeout for requests. This extra data structure facilitates fully asynchronous
+  // request processing. MultiDict, because multiple requests could have the same response timeout.
+  private val participantResponseTimeouts = mutable.SortedMultiDict[CantonTimestamp, RequestId]()
 
   // tracks the highest record time that is safe to query for verdicts, in case there are no pending requests
   // consider the following scenario:
@@ -125,27 +130,29 @@ private[mediator] class MediatorState(
       )
     }
 
-  /** Adds an incoming ResponseAggregation */
-  def add(
-      responseAggregation: ResponseAggregation[?]
-  )(implicit
-      traceContext: TraceContext,
-      callerCloseContext: CloseContext,
-  ): FutureUnlessShutdown[Unit] = {
-    requireInitialized()
-    responseAggregation.asFinalized(protocolVersion) match {
-      case None =>
-        val requestId = responseAggregation.requestId
-        ErrorUtil.requireState(
-          Option(pendingRequests.putIfAbsent(requestId, responseAggregation)).isEmpty,
-          s"Unexpected pre-existing request for $requestId",
-        )
+  def registerTimeoutForRequest(requestId: RequestId, participantResponseTimeout: CantonTimestamp)(
+      implicit traceContext: TraceContext
+  ): Unit = {
+    participantResponseTimeouts.addOne(participantResponseTimeout -> requestId)
+    ErrorUtil.requireState(
+      !pendingRequests.containsKey(requestId),
+      s"Unexpectedly setting the decision time for the already pending request $requestId",
+    )
+  }
 
-        metrics.requests.mark()(MediatorMetrics.nonduplicateRejectContext)
-        updateNumRequests(1)
-        FutureUnlessShutdown.unit
-      case Some(finalizedResponse) => add(finalizedResponse)
-    }
+  /** Registers an incoming ResponseAggregation as pending request */
+  def registerPendingRequest(
+      responseAggregation: ResponseAggregation[?]
+  )(implicit traceContext: TraceContext): Unit = {
+    requireInitialized()
+    val requestId = responseAggregation.requestId
+    ErrorUtil.requireState(
+      pendingRequests.putIfAbsent(requestId, responseAggregation) eq null,
+      s"Unexpected pre-existing request for $requestId",
+    )
+
+    metrics.requests.mark()(MediatorMetrics.nonduplicateRejectContext)
+    updateNumRequests(1)
   }
 
   def add(
@@ -245,13 +252,14 @@ private[mediator] class MediatorState(
     pendingRequests.keySet().headSet(RequestId(cutoff)).asScala.toList
 
   /** Fetch pending requests that have a timeout below the provided `cutoff` */
-  def pendingTimedoutRequest(cutoff: CantonTimestamp): List[RequestId] =
-    pendingRequests
-      .values()
-      .asScala
-      .filter(resp => resp.responseTimeout < cutoff)
-      .map(resp => resp.requestId)
-      .toList
+  def pendingTimedoutRequest(cutoff: CantonTimestamp): List[RequestId] = {
+    val range = participantResponseTimeouts.rangeUntil(cutoff)
+    // `range` is "connected" to `participantResponseTimeouts. Therefore extract
+    // the request ids first, before removing the range from the original map.
+    val requestsToTimeOut = range.values.toList
+    range.keySet.foreach(participantResponseTimeouts.removeKey)
+    requestsToTimeOut
+  }
 
   /** Fetch a response aggregation from the pending requests collection. */
   def getPending(requestId: RequestId): Option[ResponseAggregation[?]] = Option(

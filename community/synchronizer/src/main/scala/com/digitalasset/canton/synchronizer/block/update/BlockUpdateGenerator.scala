@@ -6,8 +6,8 @@ package com.digitalasset.canton.synchronizer.block.update
 import cats.syntax.functorFilter.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.BatchingConfig
-import com.digitalasset.canton.crypto.{SyncCryptoApi, SynchronizerCryptoClient}
-import com.digitalasset.canton.data.{CantonTimestamp, LogicalUpgradeTime, SequencingTimeBound}
+import com.digitalasset.canton.crypto.SynchronizerCryptoClient
+import com.digitalasset.canton.data.{CantonTimestamp, LogicalUpgradeTime}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
@@ -107,7 +107,7 @@ class BlockUpdateGeneratorImpl(
     sequencerId: SequencerId,
     rateLimitManager: SequencerRateLimitManager,
     orderingTimeFixMode: OrderingTimeFixMode,
-    sequencingTimeLowerBoundExclusive: SequencingTimeBound,
+    sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
     producePostOrderingTopologyTicks: Boolean,
     metrics: SequencerMetrics,
     batchingConfig: BatchingConfig,
@@ -163,7 +163,7 @@ class BlockUpdateGeneratorImpl(
               None
 
             case Right(event) =>
-              sequencingTimeLowerBoundExclusive.get match {
+              sequencingTimeLowerBoundExclusive match {
                 case Some(boundExclusive)
                     if !LogicalUpgradeTime.canProcessKnowingPastUpgrade(
                       upgradeTime = Some(boundExclusive),
@@ -317,7 +317,6 @@ object BlockUpdateGeneratorImpl {
       sequencingTimestamp: CantonTimestamp,
       submissionRequest: SignedSubmissionRequest,
       orderingSequencerId: SequencerId,
-      topologyOrSequencingSnapshot: SyncCryptoApi,
       topologyTimestampError: Option[SequencerDeliverError],
       consumeTraffic: SubmissionRequestValidator.TrafficConsumption,
       errorOrResolvedGroups: Either[SubmissionOutcome, Map[GroupRecipient, Set[Member]]],

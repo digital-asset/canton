@@ -1,17 +1,20 @@
-module-prefixes: 
+# Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+module-prefixes:
   sub-views-asset-1.0.0: V1
   sub-views-asset-2.0.0: V2
-override-components: 
-  damlc: 
+override-components:
+  damlc:
     version: $DAML_VERSION
-  codegen: 
+  codegen:
     version: $DAML_VERSION
 name: sub-views-iface
-data-dependencies: 
+data-dependencies:
 - ../../../scala-2.13/resource_managed/test/sub-views-asset-1.0.0.dar
 - ../../../scala-2.13/resource_managed/test/sub-views-asset-2.0.0.dar
 source: .
 version: 1.0.0
-dependencies: 
+dependencies:
 - daml-prim
 - daml-stdlib

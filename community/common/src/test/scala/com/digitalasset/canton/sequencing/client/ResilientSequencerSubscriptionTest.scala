@@ -24,7 +24,11 @@ import com.digitalasset.canton.sequencing.client.TestSubscriptionError.{
   RetryableExn,
   UnretryableError,
 }
-import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, SequencedEvent, SignedContent}
+import com.digitalasset.canton.sequencing.protocol.{
+  ClosedUncompressedEnvelope,
+  SequencedEvent,
+  SignedContent,
+}
 import com.digitalasset.canton.sequencing.{SequencedEventHandler, SequencerTestUtils}
 import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
 import com.digitalasset.canton.topology.{SequencerId, SynchronizerId, UniqueIdentifier}
@@ -491,7 +495,7 @@ trait ResilientSequencerSubscriptionTestUtils {
 
     private def deliverEvent(
         offset: Long
-    ): SignedContent[SequencedEvent[ClosedEnvelope]] = {
+    ): SignedContent[SequencedEvent[ClosedUncompressedEnvelope]] = {
       val deliver = SequencerTestUtils.mockDeliver(
         timestamp = CantonTimestamp.Epoch.addMicros(offset)
       )

@@ -180,7 +180,7 @@ class SequencedEventTestFixture(
       val fullInformeeTree = factory.MultipleRootsAndViewNestings.fullInformeeTree
       InformeeMessage(fullInformeeTree, Signature.noSignature)(testedProtocolVersion)
     }
-    val envelope = ClosedEnvelope.create(
+    val envelope = ClosedUncompressedEnvelope.create(
       serializedOverride.getOrElse(
         EnvelopeContent(message, testedProtocolVersion).toByteString
       ),

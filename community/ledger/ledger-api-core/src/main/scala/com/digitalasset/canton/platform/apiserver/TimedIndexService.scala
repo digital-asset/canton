@@ -10,7 +10,7 @@ import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesRespo
 import com.daml.metrics.Timed
 import com.digitalasset.canton.config.CantonRequireTypes.String185
 import com.digitalasset.canton.data.Offset
-import com.digitalasset.canton.ledger.api.health.HealthStatus
+import com.digitalasset.canton.health.HealthStatus
 import com.digitalasset.canton.ledger.api.{EventFormat, UpdateFormat}
 import com.digitalasset.canton.ledger.participant.state.index.*
 import com.digitalasset.canton.logging.LoggingContextWithTrace

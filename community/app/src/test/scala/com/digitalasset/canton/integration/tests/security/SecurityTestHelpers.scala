@@ -190,7 +190,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
           blocking {
             requestsB.synchronized {
               val allProtocolMessages = message.batch.envelopes.map(
-                _.openEnvelope(hashOps, testedProtocolVersion)
+                _.toOpenEnvelope(hashOps, testedProtocolVersion)
                   .valueOrFail("open envelopes")
                   .protocolMessage
               )

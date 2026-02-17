@@ -14,7 +14,8 @@ save_compiled_classes:
         # - branch: to prevent re-usage of classes btw. branches
         # - dependencies: to prevent re-usage of classes with mismatching libraries (this can lead to subtle errors)
         key: >-
-          classes
+          cache=classes
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           branch=${CIRCLE_BRANCH}
           daml=$(checksum project/project/DamlVersions.scala)
           projectplugins=$(checksum project/project/plugins.sbt)
@@ -35,7 +36,8 @@ save_compiled_classes:
         # - dependencies: to prevent re-usage of classes with mismatching libraries (this can lead to subtle errors)
         # - rev: to allow for updating the cache when sources have changed
         key: >-
-          classes
+          cache=classes
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           branch=${CIRCLE_BRANCH}
           daml=$(checksum project/project/DamlVersions.scala)
           projectplugins=$(checksum project/project/plugins.sbt)
@@ -69,7 +71,8 @@ checkout_and_restore_precompiled_classes:
         # Make sure that library versions still match.
         job_name: "Downloading archive with compiled classes from cache"
         key: >-
-          classes
+          cache=classes
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           branch=${CIRCLE_BRANCH}
           daml=$(checksum project/project/DamlVersions.scala)
           projectplugins=$(checksum project/project/plugins.sbt)
@@ -82,7 +85,8 @@ checkout_and_restore_precompiled_classes:
           build=$(checksum build.sbt)
           rev=<< pipeline.git.revision >>
           :
-          classes
+          cache=classes
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           branch=${CIRCLE_BRANCH}
           daml=$(checksum project/project/DamlVersions.scala)
           projectplugins=$(checksum project/project/plugins.sbt)
@@ -94,7 +98,22 @@ checkout_and_restore_precompiled_classes:
           plugins=$(checksum project/plugins.sbt)
           build=$(checksum build.sbt)
           :
-          classes
+          cache=classes
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
+          branch=main
+          daml=$(checksum project/project/DamlVersions.scala)
+          projectplugins=$(checksum project/project/plugins.sbt)
+          buildprops=$(checksum project/build.properties)
+          buildinfo=$(checksum project/buildinfo.sbt)
+          damlplugin=$(checksum project/DamlPlugin.scala)
+          dependencies=$(checksum project/Dependencies.scala)
+          houserules=$(checksum project/Houserules.scala)
+          plugins=$(checksum project/plugins.sbt)
+          build=$(checksum build.sbt)
+          rev=$(git rev-parse origin/main)
+          :
+          cache=classes
+          repo=${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}
           branch=main
           daml=$(checksum project/project/DamlVersions.scala)
           projectplugins=$(checksum project/project/plugins.sbt)
@@ -162,7 +181,6 @@ cleanup_test_job:
         condition: << parameters.report_to_datadog >>
         steps:
           - collect_failing_test_data_and_send_to_datadog
-    - post_log_metrics
     - run: # Pack logfiles to speedup downloads.
         name: Pack Logfiles
         when: always

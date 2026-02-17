@@ -9,7 +9,7 @@ import com.digitalasset.canton.config.{ProcessingTimeout, TopologyConfig}
 import com.digitalasset.canton.connection.GrpcApiInfoService
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.crypto.{SigningKeyUsage, SynchronizerCryptoClient}
-import com.digitalasset.canton.data.{CantonTimestamp, SequencingTimeBound, SynchronizerSuccessor}
+import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.HealthListener
 import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
@@ -104,7 +104,7 @@ class SequencerRuntime(
     @VisibleForTesting val client: SequencerClient,
     staticSynchronizerParameters: StaticSynchronizerParameters,
     localNodeParameters: SequencerNodeParameters,
-    sequencingTimeLowerBoundExclusive: SequencingTimeBound,
+    sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
     val timeTracker: SynchronizerTimeTracker,
     val metrics: SequencerMetrics,
     physicalIndexedSynchronizer: IndexedPhysicalSynchronizer,
@@ -123,7 +123,7 @@ class SequencerRuntime(
     authenticationServices: AuthenticationServices,
     sequencerService: GrpcSequencerService,
     sequencerChannelServiceO: Option[GrpcSequencerChannelService],
-    maybeSynchronizerOutboxFactory: Option[SynchronizerOutboxFactorySingleCreate],
+    synchronizerOutbox: SynchronizerOutboxHandle,
     protected val loggerFactory: NamedLoggerFactory,
     runtimeReadyPromise: PromiseUnlessShutdown[Unit],
 )(implicit
@@ -219,7 +219,7 @@ class SequencerRuntime(
 
   def topologyQueue: TopologyQueueStatus = TopologyQueueStatus(
     manager = topologyManagerStatusO.map(_.queueSize).getOrElse(0),
-    dispatcher = synchronizerOutboxO.map(_.queueSize).getOrElse(0),
+    dispatcher = synchronizerOutbox.queueSize,
     clients = topologyClient.numPendingChanges,
   )
 
@@ -358,12 +358,12 @@ class SequencerRuntime(
     )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
       val removeO = transactions
         .find(tx =>
-          tx.operation == TopologyChangeOp.Remove && tx.mapping.code == Code.SynchronizerUpgradeAnnouncement
+          tx.operation == TopologyChangeOp.Remove && tx.mapping.code == Code.LsuAnnouncement
         )
         .map(_ => Option.empty[SynchronizerSuccessor])
       val replaceO = transactions.collectFirst {
         case tx
-            if tx.operation == TopologyChangeOp.Replace && tx.mapping.code == Code.SynchronizerUpgradeAnnouncement =>
+            if tx.operation == TopologyChangeOp.Replace && tx.mapping.code == Code.LsuAnnouncement =>
           tx.mapping.select[LsuAnnouncement].map(_.successor)
       }
       // Some(Some(successor)) - replacement, otherwise Some(None) - removal, otherwise None - noop
@@ -405,18 +405,6 @@ class SequencerRuntime(
     topologyProcessor.subscribe(timeAdvancingTopologySubscriber)
   }
 
-  private lazy val synchronizerOutboxO: Option[SynchronizerOutboxHandle] =
-    maybeSynchronizerOutboxFactory
-      .map(
-        _.createOnlyOnce(
-          topologyClient,
-          client,
-          timeTracker,
-          clock,
-          loggerFactory,
-        )
-      )
-
   private val topologyHandler = topologyProcessor.createHandler(psid)
   private val trafficProcessor =
     new TrafficControlProcessor(
@@ -445,10 +433,6 @@ class SequencerRuntime(
       loggerFactory,
     )
 
-  @VisibleForTesting
-  def setSequencingTimeLowerBoundExclusive(lowerBound: Option[CantonTimestamp]): Unit =
-    sequencingTimeLowerBoundExclusive.set(lowerBound)
-
   def initializeAll()(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] =
@@ -467,9 +451,7 @@ class SequencerRuntime(
             timeTracker,
           )
         )
-      _ <- synchronizerOutboxO
-        .map(_.startup())
-        .getOrElse(EitherT.rightT[FutureUnlessShutdown, String](()))
+      _ <- synchronizerOutbox.startup()
       // Note: we use head snapshot as we want the latest announced upgrade anyway, an overlapping update is idempotent
       synchronizerUpgradeO <- EitherT.right(
         topologyClient.headSnapshot.synchronizerUpgradeOngoing()

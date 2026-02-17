@@ -18,7 +18,7 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ViewPosition.MerkleSeqIndex
 import com.digitalasset.canton.error.TransactionError
-import com.digitalasset.canton.ledger.participant.state.SequencedUpdate
+import com.digitalasset.canton.ledger.participant.state.SequencedEventUpdate
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
@@ -31,6 +31,7 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{
 }
 import com.digitalasset.canton.participant.store.ReassignmentLookup
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
+import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageError.SyncCryptoDecryptError
 import com.digitalasset.canton.protocol.{
@@ -249,6 +250,7 @@ class TestProcessingSteps(
       activenessResultFuture: FutureUnlessShutdown[ActivenessResult],
       engineController: EngineController,
       decisionTimeTickRequest: SynchronizerTimeTracker.TickRequest,
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   )(implicit
       traceContext: TraceContext
   ): EitherT[
@@ -265,6 +267,7 @@ class TestProcessingSteps(
           locallyRejectedF = FutureUnlessShutdown.pure(false),
           abortEngine = _ => (),
           engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
+          publishUpdate,
         )
       ),
       EitherT.pure[FutureUnlessShutdown, RequestError](None),
@@ -290,12 +293,14 @@ class TestProcessingSteps(
       rootHash: RootHash,
       freshOwnTimelyTx: Boolean,
       error: TransactionError,
-  )(implicit traceContext: TraceContext): (Option[SequencedUpdate], Option[PendingSubmissionId]) =
+  )(implicit
+      traceContext: TraceContext
+  ): (Option[SequencedEventUpdate], Option[PendingSubmissionId]) =
     (None, None)
 
   override def createRejectionEvent(rejectionArgs: Unit)(implicit
       traceContext: TraceContext
-  ): Either[TestProcessingError, Option[SequencedUpdate]] =
+  ): Either[TestProcessingError, Option[SequencedEventUpdate]] =
     Right(None)
 
   override def getCommitSetAndContractsToBeStoredAndEventFactory(
@@ -375,13 +380,16 @@ object TestProcessingSteps {
       override val locallyRejectedF: FutureUnlessShutdown[Boolean],
       override val abortEngine: String => Unit,
       override val engineAbortStatusF: FutureUnlessShutdown[EngineAbortStatus],
+      publishUpdate: PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate],
   ) extends PendingRequestData {
 
     override def rootHashO: Option[RootHash] = None
 
-    override def isCleanReplay: Boolean = false
-
     override def cancelDecisionTimeTickRequest(): Unit = ()
+
+    override def publishUpdateO
+        : Option[PublishUpdateViaRecordOrderPublisher[SequencedEventUpdate]] =
+      Some(publishUpdate)
   }
 
   case object TestPendingRequestDataType extends RequestType {

@@ -7,6 +7,7 @@ import cats.implicits.{catsSyntaxParallelTraverse1, toTraverseOps}
 import com.daml.ledger.api.v2 as lapi
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.{
   ExecuteSubmissionRequest,
+  HashingSchemeVersion,
   PrepareSubmissionRequest,
   PrepareSubmissionResponse,
   PreparedTransaction,
@@ -1228,10 +1229,15 @@ class ProtocolConverters(
         )
       transcodedCommands <- SeqCommands.toJson(commandsWithTranscodingPackageIds)
       prefetchContractKeys <- lapiObj.prefetchContractKeys.map(PrefetchContractKey.toJson).sequence
+
     } yield lapiObj
       .into[JsPrepareSubmissionRequest]
       .withFieldConst(_.commands, transcodedCommands)
       .withFieldConst(_.prefetchContractKeys, prefetchContractKeys)
+      .withFieldComputed(
+        _.hashingSchemeVersion,
+        _.hashingSchemeVersion.getOrElse(HashingSchemeVersion.HASHING_SCHEME_VERSION_V2),
+      )
       .transform
   }
 

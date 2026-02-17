@@ -3,7 +3,9 @@
 
 package com.digitalasset.canton.sequencing.protocol
 
+import cats.syntax.either.*
 import com.digitalasset.canton.logging.pretty.PrettyPrinting
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.Member
 
 /** An [[Envelope]] wraps an envelope content such as a
@@ -21,6 +23,14 @@ trait Envelope[+M] extends PrettyPrinting {
       groupAddresses: Set[GroupRecipient],
   ): Option[Envelope[M]]
 
-  /** Closes the envelope by serializing the contents if necessary */
-  def closeEnvelope: ClosedEnvelope
+  def toClosedCompressedEnvelope: ClosedCompressedEnvelope
+
+  def toClosedUncompressedEnvelopeResult: ParsingResult[ClosedUncompressedEnvelope]
+
+  /** Should only be used in tests and where you are a 100% sure it won't throw an exception
+    */
+  def toClosedUncompressedEnvelopeUnsafe: ClosedUncompressedEnvelope =
+    toClosedUncompressedEnvelopeResult.valueOr(error =>
+      throw new IllegalArgumentException(error.message)
+    )
 }

@@ -11,13 +11,14 @@ import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.data.{CantonTimestamp, SequencingTimeBound}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.SuppressionRule.FullSuppression
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.sequencing.SequencedSerializedEvent
 import com.digitalasset.canton.sequencing.protocol.*
+import com.digitalasset.canton.sequencing.protocol.ProtocolObjectTestUtils.assertSequencedEventEquals
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
 import com.digitalasset.canton.synchronizer.metrics.{SequencerHistograms, SequencerMetrics}
 import com.digitalasset.canton.synchronizer.sequencer.SynchronizerSequencingTestUtils.*
@@ -154,7 +155,7 @@ class SequencerReaderTest
       cryptoD,
       eventSignaller,
       topologyClientMember,
-      SequencingTimeBound(None),
+      sequencingTimeBoundExclusiveO = None,
       sequencerMetrics,
       timeouts,
       loggerFactory,
@@ -758,7 +759,7 @@ class SequencerReaderTest
           )
           batch = Batch.fromClosed(
             testedProtocolVersion,
-            ClosedEnvelope.create(
+            ClosedUncompressedEnvelope.create(
               ByteString.copyFromUtf8("test envelope"),
               Recipients.cc(alice, bob),
               Seq.empty,
@@ -830,6 +831,7 @@ class SequencerReaderTest
 
       "read by the sender into deliver errors" in { env =>
         import env.*
+
         setup(env).flatMap {
           case (topologyTimestampTolerance, batch, delivers, previousTimestamps) =>
             for {
@@ -871,7 +873,11 @@ class SequencerReaderTest
                         ),
                         Option.empty[TrafficReceipt],
                       )
-                  delivered.signedEvent.content shouldBe expectedSequencedEvent
+                  assertSequencedEventEquals(
+                    actual = delivered.signedEvent.content,
+                    expected = expectedSequencedEvent,
+                    testedProtocolVersion = testedProtocolVersion,
+                  )
               }
             }
         }
@@ -918,7 +924,12 @@ class SequencerReaderTest
                         None,
                         Option.empty[TrafficReceipt],
                       )
-                  delivered.signedEvent.content shouldBe expectedSequencedEvent
+
+                  assertSequencedEventEquals(
+                    actual = delivered.signedEvent.content,
+                    expected = expectedSequencedEvent,
+                    testedProtocolVersion = testedProtocolVersion,
+                  )
               }
             }
         }

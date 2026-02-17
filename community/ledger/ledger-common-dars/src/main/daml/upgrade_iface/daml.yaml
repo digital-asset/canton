@@ -1,15 +1,18 @@
-override-components: 
-  damlc: 
+# Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+override-components:
+  damlc:
     version: $DAML_VERSION
-  daml-script: 
+  daml-script:
     version: $DAML_VERSION
-  codegen: 
+  codegen:
     version: $DAML_VERSION
-build-options: 
+build-options:
 - --enable-interfaces=yes
 name: upgrade-iface-tests
 source: .
-version: 3.1.0
-dependencies: 
+version: 1.0.0
+dependencies:
 - daml-prim
 - daml-stdlib

@@ -101,8 +101,8 @@ class PhaseOneTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
         ("ufetchbykey", ufetchbykey),
         ("ulookupbykey", ulookupbykey),
         ("uembed", uembed),
-        ("utrycatch1", utrycatch1),
-        ("utrycatch2", utrycatch2),
+        ("utrycatchV1A", utrycatchV1A),
+        ("utrycatchV2B", utrycatchV1B),
         ("structUpd1", structUpd1),
         ("structUpd2", structUpd2),
         ("recCon1", recCon1),
@@ -204,8 +204,8 @@ class PhaseOneTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
   private def ufetchbykey = (x: Expr) => EApp(EUpdate(UpdateFetchByKey(tcon)), x)
   private def ulookupbykey = (x: Expr) => EApp(EUpdate(UpdateLookupByKey(tcon)), x)
   private def uembed = (x: Expr) => EUpdate(UpdateEmbedExpr(ty, x))
-  private def utrycatch1 = (x: Expr) => EUpdate(UpdateTryCatch(ty, x, varname, exp))
-  private def utrycatch2 = (x: Expr) => EUpdate(UpdateTryCatch(ty, exp, varname, x))
+  private def utrycatchV1A = (x: Expr) => EUpdate(UpdateTryCatchV1(ty, x, varname, exp))
+  private def utrycatchV1B = (x: Expr) => EUpdate(UpdateTryCatchV1(ty, exp, varname, x))
 
   private def recCon1 = (x: Expr) => ERecCon(tapp, ImmArray((field, x), (field2, exp)))
   private def recCon2 = (x: Expr) => ERecCon(tapp, ImmArray((field, exp), (field2, x)))

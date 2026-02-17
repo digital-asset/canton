@@ -221,6 +221,7 @@ class ExternalTransactionProcessor(
       contractLookupParallelism: PositiveInt,
       hashTracer: HashTracer,
       maxRecordTime: Option[LfTimestamp],
+      hashingSchemeVersion: HashingSchemeVersion,
   )(implicit
       loggingContextWithTrace: LoggingContextWithTrace,
       executionContext: ExecutionContext,
@@ -247,15 +248,14 @@ class ExternalTransactionProcessor(
         .mapK(FutureUnlessShutdown.outcomeK)
       // Compute the pre-computed hash for convenience
       protocolVersion = commandExecutionResult.synchronizerRank.synchronizerId.protocolVersion
-      hashVersion = HashingSchemeVersion.V2
       hash <- EitherT
         .fromEither[FutureUnlessShutdown](
           enriched
-            .computeHash(hashVersion, protocolVersion, hashTracer)
+            .computeHash(hashingSchemeVersion, protocolVersion, hashTracer)
             .leftMap(error => InteractiveSubmissionPreparationError.Reject(error.message))
         )
     } yield {
-      PrepareResult(encoded, hash, hashVersion)
+      PrepareResult(encoded, hash, hashingSchemeVersion)
     }
 
   /** Decodes a prepared transaction, verify its signature and convert it to CommandExecutionResult

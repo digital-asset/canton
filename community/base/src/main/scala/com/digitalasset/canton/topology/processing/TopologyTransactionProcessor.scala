@@ -190,8 +190,11 @@ class TopologyTransactionProcessor(
       // let our client know about the latest known information right now, but schedule the updating
       // of the approximate time subsequently
       val maxEffective = clientInitTimes.map { case (effective, _) => effective }.max1
-      val minApproximate = clientInitTimes.map { case (_, approximate) => approximate }.min1
-      listenersUpdateHeadWithoutTopologyChanges(sequencedTs, maxEffective, minApproximate)
+      listenersUpdateHeadWithoutTopologyChanges(
+        sequencedTs,
+        maxEffective,
+        sequencedTs.toApproximate,
+      )
 
       val directExecutionContext = DirectExecutionContext(noTracingLogger)
       clientInitTimes.foreach { case (effective, _approximate) =>

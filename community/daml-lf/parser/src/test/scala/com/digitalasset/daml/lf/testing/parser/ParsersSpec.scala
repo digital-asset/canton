@@ -503,7 +503,7 @@ class ParsersSpec extends AnyWordSpec with ScalaCheckPropertyChecks with Matcher
         "uembed_expr @tau e" ->
           UpdateEmbedExpr(t"tau", e"e"),
         "try @tau body catch err -> handler err" ->
-          UpdateTryCatch(t"tau", e"body", n"err", e"handler err"),
+          UpdateTryCatchV1(t"tau", e"body", n"err", e"handler err"),
       )
 
       forEvery(testCases)((stringToParse, expectedUpdate) =>

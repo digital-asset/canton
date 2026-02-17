@@ -613,7 +613,7 @@ class ParticipantSimulator(
       syncCrypto: SyncCryptoApi,
   )(implicit traceContext: TraceContext): Unit =
     event.envelopes
-      .flatMap(_.openEnvelope(crypto.pureCrypto, pv).toOption.toList)
+      .flatMap(_.toOpenEnvelope(crypto.pureCrypto, pv).toOption.toList)
       .foreach(cc =>
         cc.protocolMessage match {
           case message: UnsignedProtocolMessage => logger.debug(s"UNSIGNED MESSAGE $message")

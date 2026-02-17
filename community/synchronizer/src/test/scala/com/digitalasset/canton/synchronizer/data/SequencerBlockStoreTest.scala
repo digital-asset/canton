@@ -375,6 +375,7 @@ trait SequencerBlockStoreTest
           ),
           None,
           None,
+          None,
         )
         for {
           _ <- allMembers.parTraverse(member =>

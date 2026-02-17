@@ -11,7 +11,13 @@ import cats.syntax.foldable.*
 import cats.syntax.traverse.*
 import com.digitalasset.base.error.BaseAlarm
 import com.digitalasset.canton.config.BatchingConfig
-import com.digitalasset.canton.crypto.{HashPurpose, SyncCryptoApi, SynchronizerCryptoClient}
+import com.digitalasset.canton.crypto.SignatureCheckError.GeneralError
+import com.digitalasset.canton.crypto.{
+  HashPurpose,
+  SignatureCheckError,
+  SyncCryptoApi,
+  SynchronizerCryptoClient,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonBaseError
@@ -114,7 +120,7 @@ private[update] final class SubmissionRequestValidator(
     )
   }
 
-  // Below are a 3 functions, each a for-comprehension of EitherT.
+  // Below are 3 functions, each a for-comprehension of EitherT.
   // In each Lefts are used to stop processing the submission request and immediately produce the sequenced events
   // They are split into 3 functions to make it possible to re-use intermediate results (specifically
   // BlockUpdateEphemeralState containing updated traffic states), even if further processing fails.
@@ -125,7 +131,8 @@ private[update] final class SubmissionRequestValidator(
   def performIndependentValidations(
       sequencingTimestamp: CantonTimestamp,
       signedSubmissionRequest: SignedContent[SubmissionRequest],
-      topologyOrSequencingSnapshot: SyncCryptoApi,
+      snapshotToValidateSubmissionRequest: SyncCryptoApi,
+      topologySnapshotFromRequestO: Option[SyncCryptoApi],
       topologyTimestampError: Option[SequencerDeliverError],
   )(implicit
       traceContext: TraceContext,
@@ -157,7 +164,7 @@ private[update] final class SubmissionRequestValidator(
       // Warn if we use an approximate snapshot but only after we've read at least one
       _ <- checkSignatureOnSubmissionRequest(
         signedSubmissionRequest,
-        topologyOrSequencingSnapshot,
+        snapshotToValidateSubmissionRequest,
       ).mapK(validationFUSK)
       // At this point we know the sender has indeed properly signed the submission request
       // so we'll want to run the traffic control logic
@@ -208,6 +215,9 @@ private[update] final class SubmissionRequestValidator(
       )
       // TODO(i17584): revisit the consequences of no longer enforcing that
       //  aggregated submissions with signed envelopes define a topology snapshot
+      topologyOrSequencingSnapshot = topologySnapshotFromRequestO.getOrElse(
+        snapshotToValidateSubmissionRequest
+      )
       _ <- validateMaxSequencingTimeForAggregationRule(
         submissionRequest,
         topologyOrSequencingSnapshot,
@@ -395,10 +405,19 @@ private[update] final class SubmissionRequestValidator(
     MonadUtil
       .parTraverseWithLimit_(batchingConfig.parallelism)(submissionRequest.batch.envelopes) {
         closedEnvelope =>
-          closedEnvelope.verifySignatures(
-            topologyOrSequencingSnapshot,
-            submissionRequest.sender,
-          )
+          EitherT
+            .fromEither[FutureUnlessShutdown](
+              closedEnvelope.toClosedUncompressedEnvelopeResult
+                .leftMap[SignatureCheckError] { deserializationError =>
+                  GeneralError(new IllegalArgumentException(deserializationError.message))
+                }
+            )
+            .flatMap { closedUncompressedEnvelope =>
+              closedUncompressedEnvelope.verifySignatures(
+                topologyOrSequencingSnapshot,
+                submissionRequest.sender,
+              )
+            }
       }
       .leftMap { error =>
         SequencerError.InvalidEnvelopeSignature
@@ -573,6 +592,13 @@ private[update] final class SubmissionRequestValidator(
               (aggregationId, inFlightAggregationUpdate, inFlightAggregation)
             )
           }
+
+      uncompressedBatch <- EitherT.fromEither[FutureUnlessShutdown](
+        submissionRequest.batch.toClosedUncompressedBatchResult.leftMap[SubmissionOutcome](_ =>
+          SubmissionOutcome.Discard
+        )
+      )
+
       aggregatedBatch = aggregationOutcome.fold(submissionRequest.batch) {
         case (aggregationId, inFlightAggregationUpdate, inFlightAggregation) =>
           val updatedInFlightAggregation = InFlightAggregation.tryApplyUpdate(
@@ -581,10 +607,11 @@ private[update] final class SubmissionRequestValidator(
             inFlightAggregationUpdate,
             ignoreInFlightAggregationErrors = false,
           )
-          submissionRequest.batch
+          uncompressedBatch
             .focus(_.envelopes)
             .modify(_.lazyZip(updatedInFlightAggregation.aggregatedSignatures).map {
-              (envelope, signatures) => envelope.updateSignatures(signatures = signatures)
+              (envelope, signatures) =>
+                envelope.updateSignatures(signatures = signatures)
             })
       }
 
@@ -676,11 +703,17 @@ private[update] final class SubmissionRequestValidator(
       }
       (inFlightAggregation, inFlightAggregationUpdate) = inFlightAggregationAndUpdate
 
+      uncompressedBatch <- EitherT.fromEither[FutureUnlessShutdown](
+        submissionRequest.batch.toClosedUncompressedBatchResult.leftMap[SubmissionOutcome](_ =>
+          SubmissionOutcome.Discard
+        )
+      )
+
       aggregatedSender = AggregatedSender(
         submissionRequest.sender,
         AggregationBySender(
           sequencingTimestamp,
-          submissionRequest.batch.envelopes.map(_.signatures),
+          uncompressedBatch.envelopes.map(_.signatures),
         ),
       )
 

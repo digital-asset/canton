@@ -739,7 +739,7 @@ class DecodeV2Spec
       }
     }
 
-    s"translate UpdateTryCatch" in {
+    s"translate UpdateTryCatchV1" in {
       val tryCatchProto =
         DamlLf2.Update.TryCatch
           .newBuilder()
@@ -751,7 +751,7 @@ class DecodeV2Spec
       val tryCatchUpdateProto = DamlLf2.Update.newBuilder().setTryCatch(tryCatchProto).build()
       val tryCatchExprProto = DamlLf2.Expr.newBuilder().setUpdate(tryCatchUpdateProto).build()
       val tryCatchExprScala = Ast.EUpdate(
-        Ast.UpdateTryCatch(
+        Ast.UpdateTryCatchV1(
           typ = TUnit,
           body = EUnit,
           binder = Ref.Name.assertFromString("a"),

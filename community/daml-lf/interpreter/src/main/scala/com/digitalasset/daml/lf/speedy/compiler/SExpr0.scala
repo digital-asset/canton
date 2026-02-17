@@ -30,7 +30,7 @@ package compiler
   * Summary of which constructors are contained by: SExp0, SExpr1 and SExpr:
   *
   * - In SExpr{0,1,} (everywhere): SEApp(General), SEBuiltin, SELabelClosure,
-  *   SELocation, SEScopeExercise, SETryCatch, SEVal, SEValue,
+  *   SELocation, SEScopeExercise, SETryCatchV1, SEVal, SEValue,
   *
   * - In SExpr0: SEAbs, SEVar
   *
@@ -105,7 +105,7 @@ private[speedy] object SExpr0 {
   final case class SELabelClosure(label: Profile.Label, expr: SExpr) extends SExpr
 
   /** Exception handler */
-  final case class SETryCatch(body: SExpr, handler: SExpr) extends SExpr
+  final case class SETryCatchV1WithHandler(body: SExpr, handler: SExpr) extends SExpr
 
   /** Exercise scope (begin..end) */
   final case class SEScopeExercise(body: SExpr) extends SExpr

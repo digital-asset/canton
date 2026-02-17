@@ -5,11 +5,7 @@ package com.digitalasset.canton.integration.tests.manual.topology
 
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.{
-  InstanceReference,
-  LocalInstanceReference,
-  LocalSequencerReference,
-}
+import com.digitalasset.canton.console.{InstanceReference, LocalInstanceReference}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.integration.tests.manual.topology.LsuChaos.{
@@ -219,12 +215,6 @@ private[topology] class LsuChaos(
 
     logOperationStep(lsuId)("Migrate synchronizer nodes")
 
-    /*
-    The order is important:
-    - start the sequencer
-    - set the lower bound
-    - start the mediator; download of the correct topology state from the mediator depends on the lower bound.
-     */
     Seq[InstanceReference](newSequencer, newMediator).foreach { newNode =>
       logger.info(s"[$lsuId]: Migrate node $newNode")
       migrateNode(
@@ -236,14 +226,6 @@ private[topology] class LsuChaos(
         newNodeToOldNodeName =
           Map(newSequencer.name -> currentSequencer.name, newMediator.name -> currentMediator.name),
       )
-
-      newNode match {
-        case localSeq: LocalSequencerReference =>
-          localSeq.underlying.value.sequencer
-            .setSequencingTimeLowerBoundExclusive(Some(upgradeTime))
-
-        case _ => ()
-      }
     }
 
     logOperationStep(lsuId)(s"Announcing sequencer successor of $currentSequencer")

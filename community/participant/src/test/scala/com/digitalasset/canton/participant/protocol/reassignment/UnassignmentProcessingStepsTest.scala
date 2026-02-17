@@ -8,11 +8,7 @@ import cats.data.EitherT
 import cats.implicits.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.{
-  DefaultProcessingTimeouts,
-  SessionEncryptionKeyCacheConfig,
-  TopologyConfig,
-}
+import com.digitalasset.canton.config.{DefaultProcessingTimeouts, SessionEncryptionKeyCacheConfig}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{
   Signature,
@@ -28,7 +24,6 @@ import com.digitalasset.canton.data.ViewType.UnassignmentViewType
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.lifecycle.{DefaultPromiseUnlessShutdownFactory, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.participant.ParticipantNodeParameters
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.{LedgerApiIndexer, LedgerApiStore}
@@ -72,6 +67,7 @@ import com.digitalasset.canton.participant.store.{
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.protocol.Phase37Processor.PublishUpdateViaRecordOrderPublisher
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
@@ -188,16 +184,9 @@ final class UnassignmentProcessingStepsTest
       loggerFactory,
     )
   private lazy val physicalSyncPersistentState = new InMemoryPhysicalSyncPersistentState(
-    submittingParticipant,
-    clock,
     SynchronizerCrypto(crypto, defaultStaticSynchronizerParameters),
     IndexedPhysicalSynchronizer.tryCreate(sourceSynchronizer.unwrap, 1),
     defaultStaticSynchronizerParameters,
-    parameters = ParticipantNodeParameters.forTestingOnly(testedProtocolVersion),
-    topologyConfig = TopologyConfig.forTesting,
-    packageMetadataView = mock[PackageMetadataView],
-    Eval.now(mock[LedgerApiStore]),
-    logicalPersistentState,
     loggerFactory,
     timeouts,
     futureSupervisor,
@@ -954,6 +943,7 @@ final class UnassignmentProcessingStepsTest
             loggerFactory,
           ),
           DummyTickRequest,
+          PublishUpdateViaRecordOrderPublisher.noop,
         )
         .value
         .onShutdown(fail("unexpected shutdown during a test"))
@@ -1098,6 +1088,7 @@ final class UnassignmentProcessingStepsTest
       abortEngine = _ => (),
       engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
       DummyTickRequest,
+      PublishUpdateViaRecordOrderPublisher.noop,
     )
 
     "succeed without errors" in {

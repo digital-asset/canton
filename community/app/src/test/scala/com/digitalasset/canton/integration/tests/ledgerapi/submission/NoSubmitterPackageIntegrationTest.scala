@@ -45,6 +45,7 @@ class NoSubmitterPackageIntegrationTest
             .commands()
             .loneElement
         ),
+        hashingSchemeVersion = testedApiHashingSchemeVersion,
       )
 
     "fail if the executing participant does not have the package loaded" in {

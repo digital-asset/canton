@@ -36,10 +36,6 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
 
   private lazy val clock: SimClock = new SimClock(loggerFactory = loggerFactory)
 
-  private val alertAfter: JDuration = JDuration.ofSeconds(10)
-
-  private val alertEvery: JDuration = JDuration.ofSeconds(2)
-
   private def mkTaskScheduler(
       initSc: SequencerCounter = SequencerCounter(0),
       initTs: CantonTimestamp = CantonTimestamp.Epoch,
@@ -503,6 +499,10 @@ class TaskSchedulerTest extends AsyncWordSpec with BaseTest {
 }
 
 object TaskSchedulerTest {
+
+  private val alertAfter: JDuration = JDuration.ofSeconds(10)
+
+  private val alertEvery: JDuration = JDuration.ofSeconds(2)
 
   class MockTaskSchedulerMetrics extends TaskSchedulerMetrics {
     val prefix: MetricName = MetricName("test")
