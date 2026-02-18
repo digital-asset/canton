@@ -243,9 +243,6 @@ run_tests:
     do_checkout:
       default: true
       type: boolean
-    test_scala3_migration:
-      default: false
-      type: boolean
     collect_postgres_query_stats:
       default: false
       type: boolean
@@ -286,17 +283,6 @@ run_tests:
         # Capture GC logs for test runs. The file will be uploaded as an artifact in the step
         # `store_track_cpu_and_memory` as part of the `cleanup_test_job` as it lives in the `track` folder.
         extra_parameters: "-J-Xlog:gc=info,safepoint=info:file=track/GC.log:time"
-    - when:
-        condition: << parameters.test_scala3_migration >>
-        steps:
-          - execute_sbt_command:
-              cmd: "\"++3.3;wartremover-extension/test\""
-              timeout: 5m
-              execution_context_size: << parameters.execution_context_size >>
-              succeed_on_error: << parameters.succeed_on_error >>
-              fail_on_error_in_output: << parameters.fail_on_error_in_output >>
-              override_java_version_for_tests: << parameters.override_java_version_for_tests >>
-              log_immediate_flush: "false"
     - when:
         condition: << parameters.collect_postgres_query_stats >>
         name: Analyze Postgres query plans
@@ -343,9 +329,6 @@ run_ordinary_tests:
     num_parallel_tasks:
       type: string
       default: "4"
-    test_scala3_migration:
-      default: false
-      type: boolean
     collect_postgres_query_stats:
       default: false
       type: boolean
@@ -382,7 +365,6 @@ run_ordinary_tests:
         succeed_on_error: << parameters.succeed_on_error >>
         override_java_version_for_tests: << parameters.override_java_version_for_tests >>
         num_parallel_tasks: << parameters.num_parallel_tasks >>
-        test_scala3_migration: << parameters.test_scala3_migration >>
         collect_postgres_query_stats: << parameters.collect_postgres_query_stats >>
 
 run_test_coverage_test:

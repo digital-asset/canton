@@ -7,7 +7,7 @@ import com.daml.grpc.sampleservice.HelloServiceResponding
 import com.daml.platform.hello.HelloServiceGrpc.HelloService
 import com.daml.platform.hello.{HelloRequest, HelloResponse, HelloServiceGrpc}
 import io.grpc.stub.StreamObserver
-import io.grpc.{BindableService, ServerServiceDefinition, Status}
+import io.grpc.{BindableService, ServerServiceDefinition, Status, StatusRuntimeException}
 
 import scala.concurrent.ExecutionContext
 
@@ -26,16 +26,22 @@ class HelloServiceReferenceImplementation
   override def serverStreaming(
       request: HelloRequest,
       responseObserver: StreamObserver[HelloResponse],
-  ): Unit = {
-    validateRequest(request)
-    for (i <- 1.to(request.reqInt)) responseObserver.onNext(HelloResponse(i))
-    responseObserver.onCompleted()
-  }
+  ): Unit =
+    validateRequest(request) match {
+      case Left(err) =>
+        responseObserver.onError(err)
+      case Right(_) =>
+        for (i <- 1.to(request.reqInt)) responseObserver.onNext(HelloResponse(i))
+        responseObserver.onCompleted()
+    }
 
-  private def validateRequest(request: HelloRequest): Unit =
-    if (request.reqInt < 0)
-      throw Status.INVALID_ARGUMENT
+  private def validateRequest(request: HelloRequest): Either[StatusRuntimeException, Unit] =
+    Either.cond(
+      request.reqInt >= 0,
+      (),
+      Status.INVALID_ARGUMENT
         .withDescription("request cannot be negative")
-        .asRuntimeException()
+        .asRuntimeException(),
+    )
 
 }

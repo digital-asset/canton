@@ -96,27 +96,16 @@ publish_canton_open_source_code_drop:
                 fi
     - checkout: # to get canton private repo code
         method: blobless
-    - restore_sbt_cache
     - track_cpu_and_memory
-    - limit_parallel_test_execution
     - run:
         name: Pull request of unit-tested canton-community code drop
         no_output_timeout: 30m
         command: |
           export NIX_SSL_CERT_FILE="$(ls -1  /nix/store/*-nss-cacert-*/etc/ssl/certs/ca-bundle.crt)"
-          .ci/nix-exec release/propose-open-source-code-drop.sh \
-                         -t "$GITHUB_TOKEN" \
-                         -c "$EXECUTOR_NUM_CPUS" \
-                         -m "$EXECUTOR_JVM_HEAP_SIZE" \
-                         -s "$EXECUTOR_JVM_METASPACE_SIZE"
+          .ci/nix-exec release/propose-open-source-code-drop.sh
     - slack/notify:
         message: 'Open-source PR to be merged at https://github.com/digital-asset/canton/pulls/canton-machine'
         webhook: $SLACK_WEBHOOK_TEAM_CANTON_INTERNAL
-    - store_artifacts:
-        name: Store test logs as artifacts
-        path: public-log/
-        when: always
-        destination: log/
     - slack_red_main_with_volunteer
 
 run_propose_script:

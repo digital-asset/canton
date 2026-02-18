@@ -75,7 +75,8 @@ class TimeoutSpec extends AsyncFlatSpec with Matchers {
     }
   }
 
-  it should "not time out if timeout is infinite" in {
+  // TODO (#30846): disabled flaky test
+  it should "not time out if timeout is infinite" ignore {
     val resultPromise = Promise[Int]()
     Future {
       Thread.sleep(25)

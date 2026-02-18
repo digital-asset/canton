@@ -10,7 +10,7 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.{KeepAliveClientConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.SynchronizerCrypto
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.{AtomicHealthElement, CompositeHealthElement, HealthListener}
@@ -58,6 +58,7 @@ class GrpcInternalSequencerConnectionX private[sequencing] (
     override val config: ConnectionXConfig,
     clientProtocolVersions: NonEmpty[Seq[ProtocolVersion]],
     minimumProtocolVersion: Option[ProtocolVersion],
+    keepAliveClientConfigO: Option[KeepAliveClientConfig],
     stubFactory: SequencerConnectionXStubFactory,
     metrics: SequencerConnectionPoolMetrics,
     metricsContext: MetricsContext,
@@ -72,7 +73,7 @@ class GrpcInternalSequencerConnectionX private[sequencing] (
 
   private val lock = Mutex()
   private val connection: GrpcConnectionX =
-    GrpcConnectionX(config, metrics, timeouts, loggerFactory)
+    GrpcConnectionX(config, keepAliveClientConfigO, metrics, timeouts, loggerFactory)
   private val connectionMetricsContext: MetricsContext = metricsContext.withExtraLabels(
     "connection" -> connection.config.name
   )
@@ -504,6 +505,7 @@ object GrpcInternalSequencerConnectionX {
 class GrpcInternalSequencerConnectionXFactory(
     clientProtocolVersions: NonEmpty[Seq[ProtocolVersion]],
     minimumProtocolVersion: Option[ProtocolVersion],
+    keepAliveClientConfigO: Option[KeepAliveClientConfig],
     metrics: SequencerConnectionPoolMetrics,
     metricsContext: MetricsContext,
     futureSupervisor: FutureSupervisor,
@@ -519,6 +521,7 @@ class GrpcInternalSequencerConnectionXFactory(
       config,
       clientProtocolVersions,
       minimumProtocolVersion,
+      keepAliveClientConfigO,
       stubFactory = new SequencerConnectionXStubFactoryImpl(loggerFactory),
       metrics,
       metricsContext,

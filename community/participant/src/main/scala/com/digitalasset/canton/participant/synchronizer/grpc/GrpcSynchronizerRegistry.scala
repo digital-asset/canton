@@ -157,6 +157,7 @@ class GrpcSynchronizerRegistry(
         ProtocolVersionCompatibility.supportedProtocols(participantNodeParameters),
       minimumProtocolVersion = participantNodeParameters.protocolConfig.minimumProtocolVersion,
       authConfig = participantNodeParameters.sequencerClient.authToken,
+      keepAliveClientConfigO = participantNodeParameters.sequencerClient.keepAliveClient,
       member = participantId,
       clock = clock,
       crypto = cryptoApiProvider.crypto,

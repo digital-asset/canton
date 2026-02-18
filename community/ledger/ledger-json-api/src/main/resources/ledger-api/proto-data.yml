@@ -495,7 +495,9 @@ fileComments:
     messages:
       AllocateExternalPartyRequest:
         message:
-          comments: 'Required authorization: ``HasRight(ParticipantAdmin) OR IsAuthenticatedIdentityProviderAdmin(identity_provider_id)``'
+          comments: |-
+            Required authorization:
+              ``HasRight(ParticipantAdmin) OR IsAuthenticatedIdentityProviderAdmin(identity_provider_id) OR IsAuthenticatedUser(user_id)``
           fieldComments:
             onboarding_transactions: |-
               TopologyTransactions to onboard the external party
@@ -513,6 +515,10 @@ fileComments:
               TODO(#27670) support synchronizer aliases
               Synchronizer ID on which to onboard the party
               Required
+            user_id: |-
+              The user who will get the act_as rights to the newly allocated party.
+              If set to an empty string (the default), no user will get rights to the party.
+              Optional
             wait_for_allocation: |-
               When true, this RPC will attempt to wait for the party to be allocated on the synchronizer before returning.
               When false, the allocation will happen asynchronously.
@@ -534,7 +540,9 @@ fileComments:
             party_id: ''
       AllocatePartyRequest:
         message:
-          comments: 'Required authorization: ``HasRight(ParticipantAdmin) OR IsAuthenticatedIdentityProviderAdmin(identity_provider_id)``'
+          comments: |-
+            Required authorization:
+              ``HasRight(ParticipantAdmin) OR IsAuthenticatedIdentityProviderAdmin(identity_provider_id) OR IsAuthenticatedUser(user_id)``
           fieldComments:
             synchronizer_id: |-
               The synchronizer, on which the party should be allocated.

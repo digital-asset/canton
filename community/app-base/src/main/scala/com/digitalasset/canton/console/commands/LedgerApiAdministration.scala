@@ -2022,6 +2022,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           transactions: Seq[(GenericTopologyTransaction, Seq[Signature])],
           multiSignatures: Seq[Signature],
           synchronize: Boolean = true,
+          identityProviderId: String = "",
+          userId: String = "",
       ): AllocateExternalPartyResponse =
         check(FeatureFlag.Preview)(consoleEnvironment.run {
           ledgerApiCommand(
@@ -2030,6 +2032,8 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               transactions = transactions,
               multiHashSignatures = multiSignatures,
               synchronize = synchronize,
+              identityProviderId = identityProviderId,
+              userId = userId,
             )
           )
         })

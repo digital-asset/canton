@@ -47,6 +47,7 @@ parameters:
       test-ping,
       test-protocol-version-35,
       test-protocol-version-dev,
+      test-scala3,
       toxiproxy-chaos-test,
       toxiproxy-slow-test,
       unstable-test,

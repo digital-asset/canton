@@ -8,7 +8,6 @@ import com.daml.ledger.api.v2.admin.identity_provider_config_service.{
   IdentityProviderConfig,
   UpdateIdentityProviderConfigRequest,
 }
-import com.daml.ledger.api.v2.admin.user_management_service as proto
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.digitalasset.canton.integration.tests.ledgerapi.SuppressionRules.{
   AuthInterceptorSuppressionRule,
@@ -61,7 +60,7 @@ trait AdminOrIDPAdminServiceCallAuthTests
             idpConfig <- createConfig(canBeAnAdmin, audience = Some(UUID.randomUUID().toString))
             (_, _) <- createUserByAdmin(
               userId = userId,
-              rights = idpAdminRights.map(proto.Right(_)),
+              rights = idpAdminRights,
               identityProviderId = idpConfig.identityProviderId,
             )
             token = audienceBasedToken(
@@ -89,7 +88,7 @@ trait AdminOrIDPAdminServiceCallAuthTests
               idpConfig <- createConfig(canBeAnAdmin, audience = Some(UUID.randomUUID().toString))
               (_, _) <- createUserByAdmin(
                 userId = userId,
-                rights = idpAdminRights.map(proto.Right(_)),
+                rights = idpAdminRights,
                 identityProviderId = idpConfig.identityProviderId,
               )
               token = audienceBasedToken(
@@ -137,7 +136,7 @@ trait AdminOrIDPAdminServiceCallAuthTests
                 userId = UUID.randomUUID().toString,
                 identityProviderId = idpConfig.identityProviderId,
                 tokenIssuer = Some(idpConfig.issuer),
-                rights = idpAdminRights.map(proto.Right(_)),
+                rights = idpAdminRights,
               )
               _ <- idpStub(context).updateIdentityProviderConfig(
                 UpdateIdentityProviderConfigRequest(
@@ -185,7 +184,7 @@ trait AdminOrIDPAdminServiceCallAuthTests
                 userId = UUID.randomUUID().toString,
                 identityProviderId = idpConfig1.identityProviderId,
                 tokenIssuer = Some(idpConfig1.issuer),
-                rights = idpAdminRights.map(proto.Right(_)),
+                rights = idpAdminRights,
                 primaryParty = "some-party-1",
                 privateKey = key1.privateKey,
                 keyId = key1.id,
@@ -263,9 +262,5 @@ trait AdminOrIDPAdminServiceCallAuthTests
         enforceFormat = Some(StandardJWTTokenFormat.Audience),
       )
     )
-
-  protected def idpAdminRights: Vector[proto.Right.Kind] = Vector(
-    proto.Right.Kind.IdentityProviderAdmin(proto.Right.IdentityProviderAdmin())
-  )
 
 }

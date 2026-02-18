@@ -111,7 +111,6 @@ jobs:
       filters:
         tags:
           only: /^v.*/
-      test_scala3_migration: true
       requires:
         - compile # optional dependency, introduced to save credits in case of compile errors
   - test:

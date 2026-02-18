@@ -204,25 +204,6 @@ cleanup_test_job:
             name: Store Postgres query stats as artifacts (if any)
             path: postgres-query-stats.sql.gz
             destination: postgres/postgres-query-stats.sql.gz
-run_todo_script:
-  steps:
-    - authorize_git
-    - run:
-        name: Run the todo script
-        command: |
-          # .ci/nix-exec intentionally not used because non-pure nix environment is required for running ammonite (amm)
-          nix-shell -I nixpkgs=./nix/nixpkgs.nix --run "amm .circleci/todo-script/src/checkTodos.sc"
-          # save number of open todos so we can push it to datadog
-          if [ -e todo-out/count ]; then
-            open_todos=$(cat todo-out/count)
-          else
-            open_todos=0
-          fi
-          echo "export open_todos=\"$open_todos\"" >> $BASH_ENV
-    - store_artifacts:
-        name: Store todos as artifacts
-        path: todo-out/todos
-        destination: todos
 
 # On a branch will check for controlled files and fail if detected
 # On a PR will check for controlled files and add missing labels automatically

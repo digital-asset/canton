@@ -148,6 +148,9 @@ object Dependencies {
 
   lazy val google_findbugs = resolveDependency("com.google.code.findbugs", "jsr305")
   lazy val reactivestreams = resolveDependency("org.reactivestreams", "reactive-streams")
+  lazy val reactivestreams_tck = resolveDependency("org.reactivestreams", "reactive-streams-tck")
+  lazy val reactivestreams_examples =
+    resolveDependency("org.reactivestreams", "reactive-streams-examples")
   lazy val spray_json = resolveDependency("io.spray", "spray-json")
 
   lazy val grpc_protobuf = "io.grpc" % "grpc-protobuf" % grpc_version
@@ -200,6 +203,8 @@ object Dependencies {
     "org.scalatestplus" %% "scalacheck-1-18" % (scalatest_version + ".0")
   lazy val mockito_scala = "org.mockito" %% "mockito-scala" % mockito_scala_version
   lazy val scalatestMockito = "org.scalatestplus" %% "mockito-3-4" % ("3.2.10.0")
+  lazy val scalatestTestNG =
+    "org.scalatestplus" %% "testng-7-5" % "3.2.11.0"
 
   lazy val scalatest_compatible = resolveDependency("org.scalatest", "scalatest-compatible")
   lazy val scalatest_wordspec = resolveDependency("org.scalatest", "scalatest-wordspec")

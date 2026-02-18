@@ -5,8 +5,8 @@ package com.daml.ledger.api.testtool.suites.v2_1
 
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.{assertEquals, *}
-import com.daml.ledger.api.testtool.infrastructure.Party
 import com.daml.ledger.api.testtool.infrastructure.participant.ParticipantTestContext
+import com.daml.ledger.api.testtool.infrastructure.{ExternalPartyAllocationHelper, Party}
 import com.daml.ledger.api.v2.admin.object_meta.ObjectMeta
 import com.daml.ledger.api.v2.admin.user_management_service as proto
 import com.daml.ledger.api.v2.admin.user_management_service.{
@@ -1334,6 +1334,42 @@ final class UserManagementServiceIT extends UserManagementServiceITBase {
       rightsAfter <- ledger.userManagement.listUserRights(ListUserRightsRequest(userId1, ""))
     } yield {
       assertUserNotFound(res1)
+      assert(rightsBefore.rights.isEmpty, "rights should be empty")
+      assertSameElements(
+        rightsAfter.rights.toSet,
+        Set(actAsPermission(allocated.underlying)),
+      )
+    }
+  }
+
+  userManagementTest(
+    "TestExternalAllocationTimeGrantUserRights",
+    "Exercise AllocateExternalParty rpc",
+  ) { implicit ec => implicit ledger => _ =>
+    val userId1 = ledger.nextUserId()
+    val user1 = User(
+      id = userId1,
+      primaryParty = "party1",
+      identityProviderId = "",
+      isDeactivated = false,
+      metadata = None,
+    )
+    val partyHint = ledger.nextPartyId()
+    val allocationHelper = ExternalPartyAllocationHelper(ledger)
+    for {
+      syncIds <- ledger.getConnectedSynchronizers(None, None)
+      syncId = syncIds.headOption.getOrElse(throw new Exception("No synchronizer connected"))
+      generationResponse <- allocationHelper.generateTopology(syncId, partyHint)
+      signature = allocationHelper.signTopology(generationResponse)
+      failedResponse <- allocationHelper
+        .submitTopology(syncId, generationResponse, signature, user1.id)
+        .mustFail("granting right to a non-existent user")
+      _ <- ledger.createUser(CreateUserRequest(Some(user1), Nil))
+      rightsBefore <- ledger.userManagement.listUserRights(ListUserRightsRequest(userId1, ""))
+      allocated <- allocationHelper.submitTopology(syncId, generationResponse, signature, user1.id)
+      rightsAfter <- ledger.userManagement.listUserRights(ListUserRightsRequest(userId1, ""))
+    } yield {
+      assertUserNotFound(failedResponse)
       assert(rightsBefore.rights.isEmpty, "rights should be empty")
       assertSameElements(
         rightsAfter.rights.toSet,

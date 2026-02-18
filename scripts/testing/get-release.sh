@@ -5,6 +5,7 @@
 
 set -e -o pipefail
 
+ARTIFACTORY_PASSWORD="${ARTIFACTORY_PASSWORD:-${ARTIFACTORY_TOKEN}}"
 RELEASE=$1
 TARGET_DIR="tmp/canton-enterprise-$RELEASE"
 TGZ_FILE="$TARGET_DIR.tar.gz"

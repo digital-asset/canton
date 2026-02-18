@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration debug="false">
+    <!-- Disable all actual logging and rely on output appender to snag log lines for test assertions -->
+    <appender name="NOP" class="ch.qos.logback.core.helpers.NOPAppender"/>
+
+    <root level="INFO">
+        <appender-ref ref="NOP" />
+    </root>
+</configuration>

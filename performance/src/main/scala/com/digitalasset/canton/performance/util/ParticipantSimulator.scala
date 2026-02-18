@@ -487,6 +487,7 @@ class ParticipantSimulator(
       clientProtocolVersions = NonEmpty(Seq, pv),
       minimumProtocolVersion = Some(pv),
       authConfig = nodeParameters.sequencerClient.authToken,
+      keepAliveClientConfigO = nodeParameters.sequencerClient.keepAliveClient,
       member = pid,
       clock = environment.clock,
       crypto = crypto,

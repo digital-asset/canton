@@ -11,16 +11,30 @@ import com.daml.ledger.api.v2.admin.identity_provider_config_service.{
   IdentityProviderConfig,
   IdentityProviderConfigServiceGrpc,
 }
+import com.daml.ledger.api.v2.admin.object_meta.ObjectMeta
 import com.daml.ledger.api.v2.admin.party_management_service.{
+  AllocateExternalPartyRequest,
+  AllocatePartyResponse,
+  GenerateExternalPartyTopologyRequest,
+  GenerateExternalPartyTopologyResponse,
   PartyManagementServiceGrpc,
   UpdatePartyIdentityProviderIdRequest,
 }
 import com.daml.ledger.api.v2.admin.user_management_service.{
   UpdateUserIdentityProviderIdRequest,
+  User,
   UserManagementServiceGrpc,
 }
+import com.daml.ledger.api.v2.admin.{
+  party_management_service as pproto,
+  user_management_service as uproto,
+}
+import com.daml.ledger.api.v2.crypto as lapicrypto
+import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.UseJWKSServer
+import com.google.protobuf.ByteString
 
+import java.security.{KeyPairGenerator, Signature}
 import java.util.UUID
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -132,5 +146,140 @@ trait IdentityProviderConfigAuth extends KeyPairs {
       )
       .void
   }
+
+  protected def createIDPBundle(context: ServiceCallContext, suffix: String)(implicit
+      ec: ExecutionContext
+  ): Future[(User, ServiceCallContext, IdentityProviderConfig)] =
+    for {
+      idpConfig <- createConfig(context)
+      (user, idpAdminContext) <- createUserByAdminRSA(
+        userId = "idp-admin-" + suffix,
+        identityProviderId = idpConfig.identityProviderId,
+        tokenIssuer = Some(idpConfig.issuer),
+        rights = idpAdminRights,
+        privateKey = key1.privateKey,
+        keyId = key1.id,
+      )
+    } yield (user, idpAdminContext, idpConfig)
+
+  protected def createUser(
+      userId: String,
+      serviceCallContext: ServiceCallContext,
+      rights: Vector[uproto.Right] = Vector.empty,
+  ): Future[uproto.CreateUserResponse] = {
+    val user = uproto.User(
+      id = userId,
+      primaryParty = "",
+      isDeactivated = false,
+      metadata = Some(ObjectMeta.defaultInstance),
+      identityProviderId = serviceCallContext.identityProviderId,
+    )
+    val req = uproto.CreateUserRequest(Some(user), rights)
+    stub(uproto.UserManagementServiceGrpc.stub(channel), serviceCallContext.token)
+      .createUser(req)
+  }
+
+  protected def allocateParty(
+      serviceCallContext: ServiceCallContext,
+      party: String,
+      userId: String = "",
+      identityProviderIdOverride: Option[String] = None,
+  )(implicit
+      env: TestConsoleEnvironment
+  ): Future[String] =
+    allocatePartyWithDetails(serviceCallContext, party, userId, identityProviderIdOverride)
+      .map(_.partyDetails.value.party)(env.executionContext)
+
+  protected def allocatePartyWithDetails(
+      serviceCallContext: ServiceCallContext,
+      party: String,
+      userId: String = "",
+      identityProviderIdOverride: Option[String] = None,
+  ): Future[AllocatePartyResponse] =
+    stub(pproto.PartyManagementServiceGrpc.stub(channel), serviceCallContext.token)
+      .allocateParty(
+        pproto.AllocatePartyRequest(
+          partyIdHint = party,
+          localMetadata = None,
+          identityProviderId =
+            identityProviderIdOverride.getOrElse(serviceCallContext.identityProviderId),
+          synchronizerId = "",
+          userId = userId,
+        )
+      )
+
+  protected def allocateExternalParty(
+      serviceCallContext: ServiceCallContext,
+      partyHint: String,
+      userId: String = "",
+      identityProviderIdOverride: Option[String] = None,
+  )(implicit env: TestConsoleEnvironment): Future[String] = {
+    val keyGen = KeyPairGenerator.getInstance("Ed25519")
+    val keyPair = keyGen.generateKeyPair()
+    val pb = keyPair.getPublic
+    val ledger = stub(pproto.PartyManagementServiceGrpc.stub(channel), serviceCallContext.token)
+    val identityProviderId =
+      identityProviderIdOverride.getOrElse(serviceCallContext.identityProviderId)
+    val synchronizerId = env.synchronizer1Id.logical.toProtoPrimitive
+    implicit val ec: ExecutionContext = env.executionContext
+
+    def signTopology(response: GenerateExternalPartyTopologyResponse): ByteString = {
+      val signing = Signature.getInstance("Ed25519")
+      signing.initSign(keyPair.getPrivate)
+      signing.update(response.multiHash.toByteArray)
+      ByteString.copyFrom(signing.sign())
+    }
+
+    for {
+      generated <- ledger.generateExternalPartyTopology(
+        GenerateExternalPartyTopologyRequest(
+          synchronizer = synchronizerId,
+          partyHint = partyHint,
+          publicKey = Some(
+            lapicrypto.SigningPublicKey(
+              format =
+                lapicrypto.CryptoKeyFormat.CRYPTO_KEY_FORMAT_DER_X509_SUBJECT_PUBLIC_KEY_INFO,
+              keyData = ByteString.copyFrom(pb.getEncoded),
+              keySpec = lapicrypto.SigningKeySpec.SIGNING_KEY_SPEC_EC_CURVE25519,
+            )
+          ),
+          localParticipantObservationOnly = false,
+          otherConfirmingParticipantUids = Seq(),
+          confirmationThreshold = 1,
+          observingParticipantUids = Seq(),
+        )
+      )
+      signature = signTopology(generated)
+      resp <- ledger
+        .allocateExternalParty(
+          AllocateExternalPartyRequest(
+            synchronizer = synchronizerId,
+            onboardingTransactions = generated.topologyTransactions.map(x =>
+              AllocateExternalPartyRequest
+                .SignedTransaction(transaction = x, signatures = Seq.empty)
+            ),
+            multiHashSignatures = Seq(
+              lapicrypto.Signature(
+                format = lapicrypto.SignatureFormat.SIGNATURE_FORMAT_RAW,
+                signature = signature,
+                signedBy = generated.publicKeyFingerprint,
+                signingAlgorithmSpec =
+                  lapicrypto.SigningAlgorithmSpec.SIGNING_ALGORITHM_SPEC_ED25519,
+              )
+            ),
+            waitForAllocation = Some(true),
+            identityProviderId = identityProviderId,
+            userId = userId,
+          )
+        )
+        .map(_.partyId)
+    } yield resp
+  }
+
+  protected def idpAdminRights: Vector[uproto.Right] = Vector(
+    uproto.Right(
+      uproto.Right.Kind.IdentityProviderAdmin(uproto.Right.IdentityProviderAdmin())
+    )
+  )
 
 }

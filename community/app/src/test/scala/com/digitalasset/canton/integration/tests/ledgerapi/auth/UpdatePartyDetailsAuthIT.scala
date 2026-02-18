@@ -17,18 +17,6 @@ final class UpdatePartyDetailsAuthIT extends AdminOrIDPAdminServiceCallAuthTests
 
   override def serviceCallName: String = "PartyManagementService#UpdatePartyDetails"
 
-  private def allocateParty(token: Option[String], partyId: String, identityProviderId: String) =
-    stub(PartyManagementServiceGrpc.stub(channel), token)
-      .allocateParty(
-        AllocatePartyRequest(
-          partyIdHint = s"some-party-$partyId",
-          localMetadata = None,
-          identityProviderId = identityProviderId,
-          synchronizerId = "",
-          userId = "",
-        )
-      )
-
   private def updatePartyDetailsRequest(partyDetails: PartyDetails) =
     UpdatePartyDetailsRequest(
       partyDetails = Some(partyDetails),
@@ -46,7 +34,7 @@ final class UpdatePartyDetailsAuthIT extends AdminOrIDPAdminServiceCallAuthTests
     import context.*
     val partyId = UUID.randomUUID().toString
     for {
-      response <- allocateParty(token, partyId, identityProviderId)
+      response <- allocatePartyWithDetails(context, partyId, "", Some(identityProviderId))
       _ <- updatePartyDetails(
         token,
         response.partyDetails.getOrElse(

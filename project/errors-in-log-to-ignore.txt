@@ -32,4 +32,7 @@ WARN  .*Operation com.digitalasset.canton.resource.DbStorage.createDatabase fail
 # Ignore warnings from ledger-api-test-tool
 WARN .*SingleParticipantTestContext - Failed to prune
 
+# Ignore expected SEVERE exceptions in HelloService
+ERROR .*Exception while executing runnable io.grpc.internal.ServerImpl\$JumpToApplicationThreadServerStreamListener\$1HalfClosed.*\n.*\n.*\n.*at com.daml.*HelloServiceReferenceImplementation.*
+
 # Make sure to have a trailing newline
