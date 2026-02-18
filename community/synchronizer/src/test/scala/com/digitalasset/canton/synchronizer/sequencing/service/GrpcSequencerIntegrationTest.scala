@@ -309,6 +309,7 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
     clientProtocolVersions = NonEmpty(Seq, BaseTest.testedProtocolVersion),
     minimumProtocolVersion = None,
     authConfig = authConfig,
+    keepAliveClientConfigO = None,
     member = participant,
     clock = clock,
     crypto = cryptoApi.crypto.crypto,

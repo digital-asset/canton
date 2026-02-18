@@ -67,7 +67,10 @@ object DAMLe {
         profileDir = profileDir,
         snapshotDir = snapshotDir,
         forbidLocalContractIds = true,
-        contractStateMode = ContractStateMachine.Mode.LegacyNUCK,
+        contractStateMode =
+          // TODO(#30398) revisit how we enable contract key
+          if (enableLfDev) ContractStateMachine.Mode.LegacyNUCK
+          else ContractStateMachine.Mode.NoContractKey,
         iterationsBetweenInterruptions = iterationsBetweenInterruptions,
         paranoid = paranoidMode,
       )

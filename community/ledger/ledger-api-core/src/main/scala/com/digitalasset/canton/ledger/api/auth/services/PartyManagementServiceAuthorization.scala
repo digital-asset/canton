@@ -73,9 +73,7 @@ final class PartyManagementServiceAuthorization(
       request: AllocateExternalPartyRequest
   ): Future[AllocateExternalPartyResponse] =
     authorizer.rpc(service.allocateExternalParty)(
-      RequiredClaims.idpAdminClaimsAndMatchingRequestIdpId(
-        Lens.unit[AllocateExternalPartyRequest].identityProviderId
-      )*
+      allocateExternalPartyClaims*
     )(request)
 }
 
@@ -106,5 +104,15 @@ object PartyManagementServiceAuthorization {
         Lens.unit[AllocatePartyRequest].userId
       ),
       RequiredClaim.MatchIdentityProviderId(Lens.unit[AllocatePartyRequest].identityProviderId),
+    )
+
+  def allocateExternalPartyClaims: List[RequiredClaim[AllocateExternalPartyRequest]] =
+    RequiredClaims(
+      RequiredClaim.AdminOrIdpAdminOrSelfAdmin[AllocateExternalPartyRequest](
+        Lens.unit[AllocateExternalPartyRequest].userId
+      ),
+      RequiredClaim.MatchIdentityProviderId(
+        Lens.unit[AllocateExternalPartyRequest].identityProviderId
+      ),
     )
 }

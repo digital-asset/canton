@@ -106,4 +106,12 @@ java\.lang\.RuntimeException: ProcessBuilder.start\(\) debug
 # TODO(#30481) Ignore warnings from ZIO CodecCommonSpec test until it's rewritten to ScalaTest
 .*Warning.*A check / checkAll / checkN generator did not produce any test cases, which may result in the test hanging.*
 
+# Ignore expected test cancellations in rs-grpc-bridge tests
+^\[info\] Test Canceled - ServerSubscriberBlackboxTest.*(202|204|206|207|208|211|212|213|301|308|310|311|314|315|316).*
+^\[info\] Test Canceled - ServerSubscriberWhiteboxTest.*(202|204|206|207|211|212|213|301|310|311|314|315|316).*
+^\[info\] Test Canceled - ClientPublisherTest.*(106|107|108|109|110|304|305).*
+
+# Ignore expected exceptions in HelloService
+ERROR i.g.i.SerializingExecutor - Exception while executing runnable io.grpc.internal.ServerImpl\$JumpToApplicationThreadServerStreamListener\$1HalfClosed.*\n.*\n.*\n.*at com.daml.*HelloServiceReferenceImplementation.*
+
 # Make sure to have a trailing newline

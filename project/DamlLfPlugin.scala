@@ -19,12 +19,15 @@ object DamlLfPlugin extends AutoPlugin {
   object LfVersions {
     private val v2_1 = "2.1"
     private val v2_2 = "2.2"
-    private val v2_3 = "2.3-rc1"
+    private val v2_3_1 = "2.3-rc1"
+    // keep v2_3 pointed to latest revision
+    private val v2_3 = v2_3_1
     private val v2_dev = "2.dev"
 
     val explicitVersions: Map[String, String] = Map(
       "v2_1" -> v2_1,
       "v2_2" -> v2_2,
+      "v2_3_1" -> v2_3_1,
       "v2_3" -> v2_3,
       "v2_dev" -> v2_dev,
     )
@@ -47,12 +50,15 @@ object DamlLfPlugin extends AutoPlugin {
     val versionLists = Map(
       "allLfVersions" -> allLfVersions,
       "stableLfVersions" -> stableLfVersions,
-      // DEPRECATED langauge lists
+      "compilerInputLfVersions" -> compilerLfVersions,
+      "compilerOutputLfVersions" -> compilerLfVersions,
+
+      // DEPRECATED, use compiler(Input/Output)Versions instead
       "compilerLfVersions" -> compilerLfVersions,
     )
 
     case class LfVersionReport(
-        explicitVersions: Map[String, String],
+        explicitVersions: Seq[String],
         namedVersions: Map[String, String],
         versionLists: Map[String, List[String]],
     )
@@ -77,7 +83,7 @@ object DamlLfPlugin extends AutoPlugin {
   def generateJsonLogic = Def.task {
     // 1. Gather data
     val report = LfVersions.LfVersionReport(
-      explicitVersions = LfVersions.explicitVersions,
+      explicitVersions = LfVersions.explicitVersions.values.toList,
       namedVersions = LfVersions.namedVersions,
       versionLists = LfVersions.versionLists,
     )

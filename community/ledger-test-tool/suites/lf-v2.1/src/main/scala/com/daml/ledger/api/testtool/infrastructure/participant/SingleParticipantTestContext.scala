@@ -356,6 +356,7 @@ final class SingleParticipantTestContext private[participant] (
         ),
         identityProviderId = "",
         waitForAllocation = Some(true),
+        userId = "",
       )
     }
   }

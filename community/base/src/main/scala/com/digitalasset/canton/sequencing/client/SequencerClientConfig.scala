@@ -85,5 +85,5 @@ final case class SequencerClientConfig(
     maximumInFlightEventBatches: PositiveInt = PositiveInt.tryCreate(20),
     useNewConnectionPool: Boolean = true,
     timeReadingsRetention: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(5),
-    enableAmplificationImprovements: Boolean = false,
+    enableAmplificationImprovements: Boolean = true,
 )

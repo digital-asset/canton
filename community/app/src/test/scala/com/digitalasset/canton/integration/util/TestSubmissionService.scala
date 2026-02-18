@@ -422,6 +422,10 @@ object TestSubmissionService {
           else
             LanguageVersion.stableLfVersionsRange,
         checkAuthorization = checkAuthorization,
+        // TODO(#30398) revisit how we enable contract key
+        contractStateMode =
+          if (enableLfDev) ContractStateMachine.Mode.LegacyNUCK
+          else ContractStateMachine.Mode.NoContractKey,
       )
     )
 

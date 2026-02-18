@@ -2366,7 +2366,9 @@ components:
   schemas:
     AllocateExternalPartyRequest:
       title: AllocateExternalPartyRequest
-      description: 'Required authorization: ``HasRight(ParticipantAdmin) OR IsAuthenticatedIdentityProviderAdmin(identity_provider_id)``'
+      description: |-
+        Required authorization:
+          ``HasRight(ParticipantAdmin) OR IsAuthenticatedIdentityProviderAdmin(identity_provider_id) OR IsAuthenticatedUser(user_id)``
       type: object
       required:
       - synchronizer
@@ -2416,6 +2418,12 @@ components:
             Defaults to true.
             Optional
           type: boolean
+        userId:
+          description: |-
+            The user who will get the act_as rights to the newly allocated party.
+            If set to an empty string (the default), no user will get rights to the party.
+            Optional
+          type: string
     AllocateExternalPartyResponse:
       title: AllocateExternalPartyResponse
       type: object
@@ -2425,7 +2433,9 @@ components:
           type: string
     AllocatePartyRequest:
       title: AllocatePartyRequest
-      description: 'Required authorization: ``HasRight(ParticipantAdmin) OR IsAuthenticatedIdentityProviderAdmin(identity_provider_id)``'
+      description: |-
+        Required authorization:
+          ``HasRight(ParticipantAdmin) OR IsAuthenticatedIdentityProviderAdmin(identity_provider_id) OR IsAuthenticatedUser(user_id)``
       type: object
       properties:
         partyIdHint:

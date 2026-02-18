@@ -27,6 +27,7 @@ trait LanguageVersionGenerated {
 
   lazy val v2_1: LanguageVersion = explicitVersions("v2_1")
   lazy val v2_2: LanguageVersion = explicitVersions("v2_2")
+  lazy val v2_3_1: LanguageVersion = explicitVersions("v2_3_1")
   lazy val v2_3: LanguageVersion = explicitVersions("v2_3")
   lazy val v2_dev: LanguageVersion = explicitVersions("v2_dev")
 
@@ -36,7 +37,6 @@ trait LanguageVersionGenerated {
   lazy val defaultLfVersion = namedVersions("defaultLfVersion")
   lazy val devLfVersion = namedVersions("devLfVersion")
   lazy val latestStableLfVersion = namedVersions("latestStableLfVersion")
-
 
   lazy val versionLists: MapView[String, Seq[LanguageVersion]] = BuildInfo.versionLists
     .view.mapValues(_.map(LanguageVersion.assertFromStringUnchecked))

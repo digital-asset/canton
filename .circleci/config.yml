@@ -646,9 +646,6 @@ commands:
             succeed_on_error:
                 default: false
                 type: boolean
-            test_scala3_migration:
-                default: false
-                type: boolean
         steps:
             - run_tests:
                 collect_postgres_query_stats: << parameters.collect_postgres_query_stats >>
@@ -659,7 +656,6 @@ commands:
                 num_test_buckets: << parameters.num_test_buckets >>
                 override_java_version_for_tests: << parameters.override_java_version_for_tests >>
                 succeed_on_error: << parameters.succeed_on_error >>
-                test_scala3_migration: << parameters.test_scala3_migration >>
     run_sbt_command_on_machine:
         parameters:
             additional_docker_args:
@@ -780,9 +776,6 @@ commands:
             succeed_on_error:
                 default: false
                 type: boolean
-            test_scala3_migration:
-                default: false
-                type: boolean
             test_sub_command:
                 default: testOnly
                 type: string
@@ -824,17 +817,6 @@ commands:
                 succeed_on_error: << parameters.succeed_on_error >>
                 timeout: << parameters.timeout >>
             - when:
-                condition: << parameters.test_scala3_migration >>
-                steps:
-                    - execute_sbt_command:
-                        cmd: '"++3.3;wartremover-extension/test"'
-                        execution_context_size: << parameters.execution_context_size >>
-                        fail_on_error_in_output: << parameters.fail_on_error_in_output >>
-                        log_immediate_flush: "false"
-                        override_java_version_for_tests: << parameters.override_java_version_for_tests >>
-                        succeed_on_error: << parameters.succeed_on_error >>
-                        timeout: 5m
-            - when:
                 condition: << parameters.collect_postgres_query_stats >>
                 name: Analyze Postgres query plans
                 steps:
@@ -858,25 +840,6 @@ commands:
                 condition: << parameters.succeed_on_error >>
                 steps:
                     - slack_red_main_with_volunteer
-    run_todo_script:
-        steps:
-            - authorize_git
-            - run:
-                command: |
-                    # .ci/nix-exec intentionally not used because non-pure nix environment is required for running ammonite (amm)
-                    nix-shell -I nixpkgs=./nix/nixpkgs.nix --run "amm .circleci/todo-script/src/checkTodos.sc"
-                    # save number of open todos so we can push it to datadog
-                    if [ -e todo-out/count ]; then
-                      open_todos=$(cat todo-out/count)
-                    else
-                      open_todos=0
-                    fi
-                    echo "export open_todos=\"$open_todos\"" >> $BASH_ENV
-                name: Run the todo script
-            - store_artifacts:
-                destination: todos
-                name: Store todos as artifacts
-                path: todo-out/todos
     run_variations_tests:
         parameters:
             exclude_unstable_tests:
@@ -2138,27 +2101,16 @@ jobs:
                         name: Ensure we only sync on Tuesday (as this will become the public weekly snapshot release)
             - checkout:
                 method: blobless
-            - restore_sbt_cache
             - track_cpu_and_memory
-            - limit_parallel_test_execution
             - run:
                 command: |
                     export NIX_SSL_CERT_FILE="$(ls -1  /nix/store/*-nss-cacert-*/etc/ssl/certs/ca-bundle.crt)"
-                    .ci/nix-exec release/propose-open-source-code-drop.sh \
-                                   -t "$GITHUB_TOKEN" \
-                                   -c "$EXECUTOR_NUM_CPUS" \
-                                   -m "$EXECUTOR_JVM_HEAP_SIZE" \
-                                   -s "$EXECUTOR_JVM_METASPACE_SIZE"
+                    .ci/nix-exec release/propose-open-source-code-drop.sh
                 name: Pull request of unit-tested canton-community code drop
                 no_output_timeout: 30m
             - slack/notify:
                 message: Open-source PR to be merged at https://github.com/digital-asset/canton/pulls/canton-machine
                 webhook: $SLACK_WEBHOOK_TEAM_CANTON_INTERNAL
-            - store_artifacts:
-                destination: log/
-                name: Store test logs as artifacts
-                path: public-log/
-                when: always
             - slack_red_main_with_volunteer
     publish_libraries:
         environment:
@@ -2364,11 +2316,15 @@ jobs:
                     diff shell.nix /tmp/shell.nix || exit 1
                     diff -r nix /tmp/nix || exit 1
                 name: Check that Nix definitions are up to date
-            - run_todo_script
-            - post_to_datadog:
-                data: canton.build.open_todos=$open_todos
-                label: Post canton.build.open_todos to Datadog
-                metric_type: count
+            - run:
+                command: |
+                    # Run the todo checker only on the private repo
+                    # TODO(i30871): Enable again on all projects
+                    if [ "${CIRCLE_PROJECT_USERNAME}" = "DACH-NY" ]; then
+                      # .ci/nix-exec intentionally not used because non-pure nix environment is required for running ammonite (amm)
+                      nix-shell -I nixpkgs=./nix/nixpkgs.nix --run "amm .circleci/todo-script/src/checkTodos.sc"
+                    fi
+                name: Run the todo checker
             - slack_red_main_with_volunteer
     tag_new_releases:
         executor: canton-small-docker
@@ -2390,9 +2346,6 @@ jobs:
             protocol_version:
                 default: ""
                 type: string
-            test_scala3_migration:
-                default: false
-                type: boolean
         steps:
             - set_canton_protocol_version:
                 protocol_version: << parameters.protocol_version >>
@@ -2400,7 +2353,6 @@ jobs:
                 collect_postgres_query_stats: true
                 exclude_unstable_tests: true
                 override_java_version_for_tests: << parameters.override_java_version_for_tests >>
-                test_scala3_migration: << parameters.test_scala3_migration >>
     test_data_continuity_dumps:
         executor: canton-xlarge-docker-with-postgres
         parallelism: 8
@@ -2501,6 +2453,13 @@ jobs:
                 destination: log
                 name: Store test logs as artifacts (if any)
                 path: log
+    test_scala3:
+        executor: canton-large-docker
+        steps:
+            - checkout_and_restore_caches
+            - execute_sbt_command:
+                cmd: '"++3.3;wartremover-extension/test"'
+            - cleanup_build_job
     topology_chaos_test:
         executor: canton-xlarge-docker-with-postgres
         parallelism: << parameters.test_repetitions >>
@@ -2693,6 +2652,7 @@ parameters:
             - test-ping
             - test-protocol-version-35
             - test-protocol-version-dev
+            - test-scala3
             - toxiproxy-chaos-test
             - toxiproxy-slow-test
             - unstable-test
@@ -2816,7 +2776,6 @@ workflows:
                         only: /^v.*/
                 requires:
                     - compile
-                test_scala3_migration: true
             - test:
                 context:
                     - datadog
@@ -3248,13 +3207,6 @@ workflows:
                 - << pipeline.parameters.manual_job >>
     manual_open_source_code_drop:
         jobs:
-            - compile:
-                context:
-                    - datadog
-                    - artifactory
-                    - azure-self-cache
-                    - maven-mirror
-                    - da-images
             - publish_canton_open_source_code_drop:
                 context:
                     - datadog
@@ -3263,8 +3215,6 @@ workflows:
                     - maven-mirror
                     - da-images
                 enforce_date: false
-                requires:
-                    - compile
         when:
             equal:
                 - open-source-code-drop
@@ -3840,6 +3790,27 @@ workflows:
         when:
             equal:
                 - test-protocol-version-dev
+                - << pipeline.parameters.manual_job >>
+    manual_test_scala3:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - test_scala3:
+                context:
+                    - datadog
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+        when:
+            equal:
+                - test-scala3
                 - << pipeline.parameters.manual_job >>
     manual_topology_chaos_test:
         jobs:

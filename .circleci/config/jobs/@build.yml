@@ -56,11 +56,15 @@ static_tests:
           diff shell.nix /tmp/shell.nix || exit 1
           diff -r nix /tmp/nix || exit 1
     # run checker last as it will rebase to main to avoid the race condition
-    - run_todo_script
-    - post_to_datadog:
-        label: "Post canton.build.open_todos to Datadog"
-        data: "canton.build.open_todos=$open_todos"
-        metric_type: count
+    - run:
+        name: Run the todo checker
+        command: |
+          # Run the todo checker only on the private repo
+          # TODO(i30871): Enable again on all projects
+          if [ "${CIRCLE_PROJECT_USERNAME}" = "DACH-NY" ]; then
+            # .ci/nix-exec intentionally not used because non-pure nix environment is required for running ammonite (amm)
+            nix-shell -I nixpkgs=./nix/nixpkgs.nix --run "amm .circleci/todo-script/src/checkTodos.sc"
+          fi
     - slack_red_main_with_volunteer
 
 scalafix:

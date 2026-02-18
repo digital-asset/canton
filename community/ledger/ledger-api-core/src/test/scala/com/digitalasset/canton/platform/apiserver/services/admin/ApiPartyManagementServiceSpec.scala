@@ -133,20 +133,20 @@ class ApiPartyManagementServiceSpec
   }
 
   lazy val (
-    _mockIndexTransactionsService,
     mockIdentityProviderExists,
     mockIndexPartyManagementService,
+    mockUserManagementStore,
     mockPartyRecordStore,
   ) = mockedServices()
   val partyAllocationTracker = makePartyAllocationTracker(loggerFactory)
 
   lazy val apiService = ApiPartyManagementService.createApiService(
-    mock[IndexPartyManagementService],
-    mock[UserManagementStore],
-    mock[IdentityProviderExists],
+    mockIndexPartyManagementService,
+    mockUserManagementStore,
+    mockIdentityProviderExists,
     partiesPageSize,
     NonNegativeInt.tryCreate(0),
-    mock[PartyRecordStore],
+    mockPartyRecordStore,
     TestPartySyncService(testTelemetrySetup.tracer),
     oneHour,
     createSubmissionId,
@@ -249,54 +249,58 @@ class ApiPartyManagementServiceSpec
             AllocateExternalPartyRequest,
           ] => Mutation[AllocateExternalPartyRequest],
           expectedFailure: PartyId => Option[String],
-      ) = {
-        val (publicKey, keyPair) = createSigningKey
-        val cantonPublicKey = cantonSigningPublicKey(publicKey.value)
-        val partyId = PartyId.tryCreate("alice", cantonPublicKey.fingerprint)
-        for {
-          generatedTransactions <- apiService.generateExternalPartyTopology(
-            GenerateExternalPartyTopologyRequest(
-              synchronizer = DefaultTestIdentities.synchronizerId.toProtoPrimitive,
-              partyHint = "alice",
-              publicKey = publicKey,
-              localParticipantObservationOnly = false,
-              otherConfirmingParticipantUids =
-                Seq(DefaultTestIdentities.participant2.uid.toProtoPrimitive),
-              confirmationThreshold = 1,
-              observingParticipantUids =
-                Seq(DefaultTestIdentities.participant3.uid.toProtoPrimitive),
+      ) =
+        loggerFactory.suppress(
+          ApiPartyManagementServiceSuppressionRule
+        ) {
+          val (publicKey, keyPair) = createSigningKey
+          val cantonPublicKey = cantonSigningPublicKey(publicKey.value)
+          val partyId = PartyId.tryCreate("alice", cantonPublicKey.fingerprint)
+          for {
+            generatedTransactions <- apiService.generateExternalPartyTopology(
+              GenerateExternalPartyTopologyRequest(
+                synchronizer = DefaultTestIdentities.synchronizerId.toProtoPrimitive,
+                partyHint = "alice",
+                publicKey = publicKey,
+                localParticipantObservationOnly = false,
+                otherConfirmingParticipantUids =
+                  Seq(DefaultTestIdentities.participant2.uid.toProtoPrimitive),
+                confirmationThreshold = 1,
+                observingParticipantUids =
+                  Seq(DefaultTestIdentities.participant3.uid.toProtoPrimitive),
+              )
             )
-          )
-          signature = sign(keyPair, generatedTransactions.multiHash, partyId.fingerprint)
-          request = AllocateExternalPartyRequest(
-            synchronizer = DefaultTestIdentities.synchronizerId.toProtoPrimitive,
-            onboardingTransactions = generatedTransactions.topologyTransactions.map(tx =>
-              AllocateExternalPartyRequest.SignedTransaction(tx, Seq.empty)
-            ),
-            multiHashSignatures = Seq(signature),
-            identityProviderId = "",
-            waitForAllocation = Some(true),
-          ).update(requestTransform)
-          result <- apiService
-            .allocateExternalParty(request)
-            .transform {
-              case Failure(e: io.grpc.StatusRuntimeException) =>
-                expectedFailure(partyId) match {
-                  case Some(value) =>
-                    e.getStatus.getCode.value() shouldBe io.grpc.Status.INVALID_ARGUMENT.getCode
-                      .value()
-                    e.getStatus.getDescription should include(value)
-                    Success(succeed)
-                  case None =>
-                    fail(s"Expected success but allocation failed with $e")
-                }
-              case Failure(other) => fail(s"expected a gRPC exception but got $other")
-              case Success(_) if expectedFailure(partyId).isDefined =>
-                fail("Expected a failure but got a success")
-              case Success(_) => Success(succeed)
-            }
-        } yield result
-      }
+            signature = sign(keyPair, generatedTransactions.multiHash, partyId.fingerprint)
+            request = AllocateExternalPartyRequest(
+              synchronizer = DefaultTestIdentities.synchronizerId.toProtoPrimitive,
+              onboardingTransactions = generatedTransactions.topologyTransactions.map(tx =>
+                AllocateExternalPartyRequest.SignedTransaction(tx, Seq.empty)
+              ),
+              multiHashSignatures = Seq(signature),
+              identityProviderId = "",
+              waitForAllocation = Some(true),
+              userId = "",
+            ).update(requestTransform)
+            result <- apiService
+              .allocateExternalParty(request)
+              .transform {
+                case Failure(e: io.grpc.StatusRuntimeException) =>
+                  expectedFailure(partyId) match {
+                    case Some(value) =>
+                      e.getStatus.getCode.value() shouldBe io.grpc.Status.INVALID_ARGUMENT.getCode
+                        .value()
+                      e.getStatus.getDescription should include(value)
+                      Success(succeed)
+                    case None =>
+                      fail(s"Expected success but allocation failed with $e")
+                  }
+                case Failure(other) => fail(s"expected a gRPC exception but got $other")
+                case Success(_) if expectedFailure(partyId).isDefined =>
+                  fail("Expected a failure but got a success")
+                case Success(_) => Success(succeed)
+              }
+          } yield result
+        }
 
       def mkDecentralizedTx(ownerSize: Int): (SignedTransaction, Namespace) = {
         val ownersKeys = Seq.fill(ownerSize)(createSigningKey).map { case (publicKey, keyPair) =>

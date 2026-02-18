@@ -304,12 +304,12 @@ private[apiserver] final class ApiPartyManagementService private (
           )
           _ <- requireEmptyString(
             metadata.resourceVersion,
-            "party_details.local_metadata.resource_version",
+            "local_metadata.resource_version",
           )
           annotations <- verifyMetadataAnnotations(
             metadata.annotations,
             allowEmptyValues = false,
-            "party_details.local_metadata.annotations",
+            "local_metadata.annotations",
           )
           identityProviderId <- optionalIdentityProviderId(
             request.identityProviderId,
@@ -336,6 +336,10 @@ private[apiserver] final class ApiPartyManagementService private (
                   outstandingCalls,
                   authenticatedUserContextF,
                 )
+                _ <- verifyPartyIsNonExistentOrInIdp(
+                  identityProviderId,
+                  partyId.toLf,
+                )
                 allocated <- partyAllocationTracker
                   .track(
                     trackerKey,
@@ -352,10 +356,6 @@ private[apiserver] final class ApiPartyManagementService private (
                     } yield ()
                   }
                   .transform(alreadyExistsError(trackerKey.submissionId, loggingContext))
-                _ <- verifyPartyIsNonExistentOrInIdp(
-                  identityProviderId,
-                  allocated.partyDetails.party,
-                )
                 existingPartyRecord <- partyRecordStore.getPartyRecordO(
                   allocated.partyDetails.party
                 )
@@ -837,6 +837,9 @@ private[apiserver] final class ApiPartyManagementService private (
     implicit val errorLoggingContext: ErrorLoggingContext =
       ErrorLoggingContext(logger, loggingContext.toPropertiesMap, loggingContext.traceContext)
     import com.digitalasset.canton.config.NonNegativeFiniteDuration
+    // Retrieving the authenticated user context from the thread-local context
+    val authenticatedUserContextF: Future[AuthenticatedUserContext] =
+      resolveAuthenticatedUserContext
 
     // The default value (empty) should default to true (pre-existing behavior)
     // So this is only false if explicitly set to false
@@ -871,12 +874,17 @@ private[apiserver] final class ApiPartyManagementService private (
         _ = logger.debug(
           s"External party allocation input transactions:\n ${signedTransactionsNE.map(_._1).mkString("\n")}"
         )
+        identityProviderId <- optionalIdentityProviderId(
+          request.identityProviderId,
+          "identity_provider_id",
+        )
+        userId <- optionalUserId(request.userId, "user_id")
         cantonParticipantId = this.syncService.participantId
         externalPartyDetails <- ExternalPartyOnboardingDetails
           .create(signedTransactionsNE, parsedMultiSignatures, protocolVersion, cantonParticipantId)
           .leftMap(ValidationErrors.invalidArgument(_))
-      } yield (synchronizerId, externalPartyDetails)
-    } { case (synchronizerId, externalPartyOnboardingDetails) =>
+      } yield (synchronizerId, externalPartyDetails, identityProviderId, userId)
+    } { case (synchronizerId, externalPartyOnboardingDetails, identityProviderId, userId) =>
       val hostingParticipantsString = externalPartyOnboardingDetails.hostingParticipants
         .map { case HostingParticipant(participantId, permission, _onboarding) =>
           s"$participantId -> $permission"
@@ -901,36 +909,61 @@ private[apiserver] final class ApiPartyManagementService private (
         )
       withEnrichedLoggingContext(telemetry)(logging.submissionId(trackerKey.submissionId)) {
         implicit loggingContext =>
-          def allocateFn = for {
-            result <- syncService.allocateParty(
-              externalPartyOnboardingDetails.partyId,
-              trackerKey.submissionId,
-              Some(synchronizerId),
-              Some(externalPartyOnboardingDetails),
-            )
-            _ <- checkSubmissionResult(result)
-          } yield ()
+          pendingPartyAllocations.withUser(userId) { outstandingCalls =>
+            def allocateFn = for {
+              result <- syncService.allocateParty(
+                externalPartyOnboardingDetails.partyId,
+                trackerKey.submissionId,
+                Some(synchronizerId),
+                Some(externalPartyOnboardingDetails),
+              )
+              _ <- checkSubmissionResult(result)
+            } yield ()
 
-          // Only track the party if we expect it to be fully authorized (and it hasn't explicitly been disabled in the request)
-          // Otherwise the party won't be fully onboarded here so this would time out
-          val partyIdF =
-            if (externalPartyOnboardingDetails.fullyAllocatesParty && waitForAllocation) {
-              partyAllocationTracker
-                .track(
-                  trackerKey,
-                  NonNegativeFiniteDuration(managementServiceTimeout),
-                )(_ => allocateFn)
-                .map(_.partyDetails.party)
-            } else {
-              allocateFn
-                .map(_ => externalPartyOnboardingDetails.partyId.toProtoPrimitive)
-                .failOnShutdownTo(
-                  CommonErrors.ServiceNotRunning.Reject("PartyManagementService").asGrpcError
-                )
-            }
-          partyIdF
-            .map(AllocateExternalPartyResponse.apply)
-            .transform(alreadyExistsError(trackerKey.submissionId, loggingContext))
+            for {
+              _ <- identityProviderExistsOrError(identityProviderId)
+              userInfo <- getUserIfUserSpecified(userId, identityProviderId)
+              _ <- checkUserLimitsIfUserSpecified(
+                userInfo.map(_.rights),
+                outstandingCalls,
+                authenticatedUserContextF,
+              )
+              _ <- verifyPartyIsNonExistentOrInIdp(
+                identityProviderId,
+                externalPartyOnboardingDetails.partyId.toLf,
+              )
+              // Only track the party if we expect it to be fully authorized (and it hasn't explicitly been disabled in the request)
+              // Otherwise the party won't be fully onboarded here so this would time out
+              allocated <-
+                (if (externalPartyOnboardingDetails.fullyAllocatesParty && waitForAllocation) {
+                   partyAllocationTracker
+                     .track(
+                       trackerKey,
+                       NonNegativeFiniteDuration(managementServiceTimeout),
+                     )(_ => allocateFn)
+                     .map(_.partyDetails.party)
+                 } else {
+                   allocateFn
+                     .map(_ => externalPartyOnboardingDetails.partyId.toLf)
+                     .failOnShutdownTo(
+                       CommonErrors.ServiceNotRunning.Reject("PartyManagementService").asGrpcError
+                     )
+                 }).transform(alreadyExistsError(trackerKey.submissionId, loggingContext))
+              existingPartyRecord <- partyRecordStore.getPartyRecordO(
+                allocated
+              )
+              _ <- updateOrCreatePartyRecord(
+                existingPartyRecord,
+                allocated,
+                identityProviderId,
+                Map.empty,
+              )
+              _ <- updateUserInfoIfUserSpecified(
+                allocated,
+                userInfo.map(_.user),
+              )
+            } yield AllocateExternalPartyResponse(allocated)
+          }
       }
     }
   }

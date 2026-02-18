@@ -5,14 +5,16 @@ package com.daml.ledger.api.testtool.suites.v2_1
 
 import com.daml.ledger.api.testtool.infrastructure.Allocation.*
 import com.daml.ledger.api.testtool.infrastructure.Assertions.*
-import com.daml.ledger.api.testtool.infrastructure.{NamePicker, Party}
+import com.daml.ledger.api.testtool.infrastructure.{
+  ExternalPartyAllocationHelper,
+  NamePicker,
+  Party,
+}
 import com.daml.ledger.api.v2.admin.identity_provider_config_service.DeleteIdentityProviderConfigRequest
 import com.daml.ledger.api.v2.admin.object_meta.ObjectMeta
 import com.daml.ledger.api.v2.admin.party_management_service.{
-  AllocateExternalPartyRequest,
   AllocatePartyRequest,
   AllocatePartyResponse,
-  GenerateExternalPartyTopologyRequest,
   GetPartiesRequest,
   GetPartiesResponse,
   ListKnownPartiesRequest,
@@ -20,15 +22,12 @@ import com.daml.ledger.api.v2.admin.party_management_service.{
   PartyDetails,
   UpdatePartyIdentityProviderIdRequest,
 }
-import com.daml.ledger.api.v2.crypto as lapicrypto
 import com.daml.ledger.javaapi.data.Party as ApiParty
 import com.daml.ledger.test.java.model.test.Dummy
 import com.digitalasset.canton.ledger.error.groups.{AdminServiceErrors, RequestValidationErrors}
 import com.digitalasset.canton.topology.UniqueIdentifier
 import com.digitalasset.daml.lf.data.Ref
-import com.google.protobuf.ByteString
 
-import java.security.{KeyPairGenerator, Signature}
 import java.util.UUID
 import java.util.regex.Pattern
 import scala.concurrent.Future
@@ -1131,56 +1130,14 @@ final class PartyManagementServiceIT extends PartyManagementITBase {
     allocate(NoParties),
   )(implicit ec => { case Participants(Participant(ledger, Seq())) =>
     val partyHint = ledger.nextPartyId()
-    val keyGen = KeyPairGenerator.getInstance("Ed25519")
-    val keyPair = keyGen.generateKeyPair()
-    val pb = keyPair.getPublic
-    val signing = Signature.getInstance("Ed25519")
-    signing.initSign(keyPair.getPrivate)
+    val allocationHelper = ExternalPartyAllocationHelper(ledger)
 
     for {
       syncIds <- ledger.getConnectedSynchronizers(None, None)
       syncId = syncIds.headOption.getOrElse(throw new Exception("No synchronizer connected"))
-      response <- ledger.generateExternalPartyTopology(
-        GenerateExternalPartyTopologyRequest(
-          synchronizer = syncId,
-          partyHint = partyHint,
-          publicKey = Some(
-            lapicrypto.SigningPublicKey(
-              format =
-                lapicrypto.CryptoKeyFormat.CRYPTO_KEY_FORMAT_DER_X509_SUBJECT_PUBLIC_KEY_INFO,
-              keyData = ByteString.copyFrom(pb.getEncoded),
-              keySpec = lapicrypto.SigningKeySpec.SIGNING_KEY_SPEC_EC_CURVE25519,
-            )
-          ),
-          localParticipantObservationOnly = false,
-          otherConfirmingParticipantUids = Seq(),
-          confirmationThreshold = 1,
-          observingParticipantUids = Seq(),
-        )
-      )
-      _ = {
-        signing.update(response.multiHash.toByteArray)
-      }
-      _ <- ledger.allocateExternalParty(
-        AllocateExternalPartyRequest(
-          synchronizer = syncId,
-          onboardingTransactions = response.topologyTransactions.map(x =>
-            AllocateExternalPartyRequest
-              .SignedTransaction(transaction = x, signatures = Seq.empty)
-          ),
-          multiHashSignatures = Seq(
-            lapicrypto.Signature(
-              format = lapicrypto.SignatureFormat.SIGNATURE_FORMAT_RAW,
-              signature = ByteString.copyFrom(signing.sign()),
-              signedBy = response.publicKeyFingerprint,
-              signingAlgorithmSpec = lapicrypto.SigningAlgorithmSpec.SIGNING_ALGORITHM_SPEC_ED25519,
-            )
-          ),
-          identityProviderId = "",
-          waitForAllocation = Some(true),
-        ),
-        minSynchronizers = Some(1),
-      )
+      response <- allocationHelper.generateTopology(syncId, partyHint)
+      signature = allocationHelper.signTopology(response)
+      _ <- allocationHelper.submitTopology(syncId, response, signature)
       parties <- ledger.getParties(
         GetPartiesRequest(
           parties = Seq(response.partyId),

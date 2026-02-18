@@ -14,7 +14,6 @@ import com.digitalasset.canton.crypto.{
 }
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.{EnvironmentDefinition, TestConsoleEnvironment}
-import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.Confirmation
 import com.digitalasset.canton.topology.transaction.{
   HostingParticipant,
@@ -22,9 +21,11 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
   TopologyTransaction,
 }
+import com.digitalasset.canton.topology.{DefaultTestIdentities, PartyId, UniqueIdentifier}
 import com.google.protobuf.ByteString
 
 import java.security.KeyPairGenerator
+import java.util.UUID
 import scala.concurrent.Future
 
 final class AllocateExternalPartyAuthIT
@@ -62,7 +63,9 @@ final class AllocateExternalPartyAuthIT
 
   override def serviceCall(
       context: ServiceCallContext
-  )(implicit env: TestConsoleEnvironment): Future[Any] =
+  )(implicit env: TestConsoleEnvironment): Future[Any] = {
+    val PartyId(uid) = DefaultTestIdentities.party1
+    val newParty = PartyId(UniqueIdentifier.tryCreate(UUID.randomUUID().toString, uid.namespace))
     stub(PartyManagementServiceGrpc.stub(channel), context.token)
       .allocateExternalParty(
         AllocateExternalPartyRequest(
@@ -73,7 +76,7 @@ final class AllocateExternalPartyAuthIT
                 op = TopologyChangeOp.Replace,
                 serial = PositiveInt.one,
                 PartyToParticipant.tryCreate(
-                  DefaultTestIdentities.party1,
+                  newParty,
                   PositiveInt.one,
                   Seq(
                     HostingParticipant(env.participant1.id, Confirmation),
@@ -94,6 +97,8 @@ final class AllocateExternalPartyAuthIT
           multiHashSignatures = Seq.empty,
           identityProviderId = context.identityProviderId,
           waitForAllocation = Some(true),
+          userId = "",
         )
       )
+  }
 }

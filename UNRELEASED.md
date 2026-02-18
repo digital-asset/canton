@@ -107,6 +107,16 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
   well as the corresponding console commands `last_errors` and `last_error_trace`.
 - Changed the `CompressedBatch` structure in the sequencer protocol for protocol version 35 to separately keep recipients and envelopes (from `gzip(Seq((recp1, payload1), (recp2, payload2)))` to `gzip(Seq(recp1, recp2)), Seq(gzip(payload1), gzip(payload2)))`).
 - The configuration parameters `topology.use-new-processor` and `topology.use-new-client` have been deprecated and now default to true. Configuring those parameters to false will be ignored.
+- Functionality for managing internal and external parties has been improved, removing previous asymmetry:
+  - User rights can now be assigned to an external party during allocation.
+  - External parties can be allocated by the user themselves in the self-administration mode.
+  Please note that users in self-administration mode can allocate up to N parties, depending on a setting of the parameter
+  ```
+  canton.participants.<participant-id>.ledger-api.party-management-service.max-self-allocated-parties
+  ```
+  By default the value of this parameter is 0.
+- An IDP administrator can now only allocate parties confined to their own IDP perimeter.
+
 
 ### Preview Features
 - preview feature

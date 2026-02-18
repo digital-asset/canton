@@ -40,6 +40,15 @@ object FieldValidator {
   ): Either[StatusRuntimeException, Ref.Party] =
     Ref.Party.fromString(s).left.map(invalidArgument)
 
+  def requireParty(
+      s: String,
+      fieldName: String,
+  )(implicit
+      errorLoggingContext: ErrorLoggingContext
+  ): Either[StatusRuntimeException, Ref.Party] =
+    if (s.isEmpty) Left(missingField(fieldName))
+    else Ref.Party.fromString(s).left.map(invalidField(fieldName, _))
+
   def requirePartyField(s: String, fieldName: String)(implicit
       errorLoggingContext: ErrorLoggingContext
   ): Either[StatusRuntimeException, Ref.Party] =

@@ -143,7 +143,9 @@ trait AdminServiceCallAuthTests
               _ <- serviceCallWithIDPUser(
                 userId = UUID.randomUUID().toString,
                 rights = Vector(
-                  proto.Right.Kind.IdentityProviderAdmin(proto.Right.IdentityProviderAdmin())
+                  proto.Right(
+                    proto.Right.Kind.IdentityProviderAdmin(proto.Right.IdentityProviderAdmin())
+                  )
                 ),
                 identityProviderId = idpConfig.identityProviderId,
                 tokenIssuer = tokenIssuer,
@@ -159,7 +161,7 @@ trait AdminServiceCallAuthTests
 
   def serviceCallWithIDPUser(
       userId: String,
-      rights: Vector[proto.Right.Kind],
+      rights: Vector[proto.Right],
       identityProviderId: String,
       tokenIssuer: Option[String],
       privateKey: Option[RSAPrivateKey] = None,
@@ -170,7 +172,7 @@ trait AdminServiceCallAuthTests
       userId = userId,
       identityProviderId = identityProviderId,
       tokenIssuer = tokenIssuer,
-      rights = rights.map(proto.Right(_)),
+      rights = rights,
       privateKey = privateKey.getOrElse(privateKeyParticipantAdmin),
       keyId = keyId,
     ).flatMap { case (_, context) =>

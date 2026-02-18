@@ -89,7 +89,7 @@ class SequencerConnectionPoolMetrics(
         summary = "Health of a connection",
         description = """Health of a connection (0: fatal, 1: failed, 2: validated)
             |A failed connection is periodically retried for availability.
-            |A fatal subscription is considered invalid and will never be retried.""".stripMargin,
+            |A fatal connection is considered invalid and will never be retried.""".stripMargin,
         qualification = MetricQualification.Saturation,
       ),
       0,

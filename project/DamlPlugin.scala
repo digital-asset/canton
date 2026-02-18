@@ -2,7 +2,6 @@ import java.io.{File, FileReader, FileWriter, StringReader}
 import java.util.Map as JMap
 import com.esotericsoftware.yamlbeans.{YamlConfig, YamlReader, YamlWriter}
 import sbt.Keys.*
-import sbt.librarymanagement.DependencyResolution
 import sbt.{io as _, *}
 import sbt.nio.FileStamp
 import sbt.util.HashFileInfo
@@ -10,7 +9,6 @@ import sbt.util.HashFileInfo
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 import scala.sys.process.*
-import scala.util.{Failure, Success, Try}
 import scala.util.control.NonFatal
 
 object DamlPlugin extends AutoPlugin {
@@ -40,9 +38,8 @@ object DamlPlugin extends AutoPlugin {
     val useVersionedDarName = settingKey[Boolean](
       "If enabled, the output DAR file name is <project-name>-<project-version>.dar otherwise it is <project-name>.dar"
     )
-
-    val damlFixedDars = settingKey[Seq[String]](
-      "Which DARs do we check in to avoid problems with package id versioning across daml updates"
+    val damlPinnedProjects = settingKey[Seq[File]](
+      "List of relative paths to Daml projects (containing daml.yaml) that are pinned to resources"
     )
     // Java codegen settings and tasks
     val damlJavaCodegenOutput =
@@ -63,9 +60,9 @@ object DamlPlugin extends AutoPlugin {
     // From https://github.com/DACH-NY/the-real-canton-coin/pull/357:
     val damlDependencies = taskKey[Seq[File]]("Paths to DARs that this project depends on")
     val damlBuild = taskKey[Seq[File]]("Build a Daml Archive from Daml source")
+    val damlPinProjects =
+      taskKey[Seq[File]]("Update the checked in DAR with a DAR built with the current Daml version")
     val damlStudio = taskKey[Unit]("Open Daml studio for all projects in scope")
-    val damlUpdateFixedDars =
-      taskKey[Unit]("Update the checked in DAR with a DAR built with the current Daml version")
 
     lazy val baseDamlPluginSettings: Seq[Def.Setting[_]] = Seq(
       sourceGenerators += damlGenerateJava.taskValue,
@@ -88,13 +85,7 @@ object DamlPlugin extends AutoPlugin {
       damlBuild := damlBuildTask.value,
       // Declare dependency so that Daml packages in test scope may depend on packages in compile scope.
       (Test / damlBuild) := (Test / damlBuild).dependsOn(Compile / damlBuild).value,
-      damlUpdateFixedDars := {
-        val sourceDirectory = damlDarOutput.value
-        val destinationDirectory = resourceDirectory.value / "dar"
-        val fixedDars = damlFixedDars.value
-
-        fixedDars.foreach(updateFixedDar(sourceDirectory, destinationDirectory, _))
-      },
+      damlPinProjects := damlPinProjectsTask.value,
     )
   }
 
@@ -198,7 +189,7 @@ object DamlPlugin extends AutoPlugin {
     damlUseCustomVersion := Dependencies.use_custom_daml_version,
     dpmRegistry := Dependencies.dpm_registry,
     damlInstall := installDaml.value,
-    damlFixedDars := Seq(),
+    damlPinnedProjects := Seq(),
   )
 
   override lazy val projectSettings: Seq[Def.Setting[_]] =
@@ -269,27 +260,6 @@ object DamlPlugin extends AutoPlugin {
         )
       }
     }
-  }
-
-  /** We intentionally take the unusual step of checking in certain DARs to ensure stable package
-    * ids across different Daml versions. This task will take the dynamically built DAR and update
-    * the checked in version.
-    */
-  private def updateFixedDar(
-      sourceDirectory: File,
-      destinationDirectory: File,
-      filename: String,
-  ): Unit = {
-    val sourcePath = sourceDirectory / filename
-    val destinationPath = destinationDirectory / filename
-
-    if (!sourcePath.exists) {
-      throw new MessageOnlyException(
-        s"Cannot update fixed DAR as DAR at path not found: [$sourcePath]"
-      )
-    }
-
-    IO.copyFile(sourcePath, destinationPath)
   }
 
   private def damlGenerateJavaTask = Def.task {
@@ -393,6 +363,9 @@ object DamlPlugin extends AutoPlugin {
     val damlVersion = damlCompilerVersion.value
     val buildDependencies = damlBuildOrder.value
     val shouldExtractMainDalf = damlExtractMainDalf.value
+    val relativePinnedProjectFiles = damlPinnedProjects.value
+      .map(p => sourceDirectory.toPath.resolve("daml.yaml").relativize(p.toPath).normalize().toFile)
+      .toSet
 
     if (outputLfVersions.isEmpty) {
       throw new MessageOnlyException(
@@ -432,27 +405,32 @@ object DamlPlugin extends AutoPlugin {
       useVersionedDarFileName,
       damlVersion,
       shouldExtractMainDalf,
+      relativePinnedProjectFiles,
     )
     val cacheStore = streams.cacheStoreFactory.make("damlBuild")
     // implicit resolution fails
     val cacheFormat = basicCache(
-      tuple6Format(
+      tuple7Format(
         immSetFormat[HashFileInfo], // source files and dependencies
         StringJsonFormat, // outputDirectory
         immSetFormat(StringJsonFormat), // output lf version
         BooleanJsonFormat, // useVersionedDarFileName
         StringJsonFormat, // daml compiler version
         BooleanJsonFormat, // shouldExtractMainDalf
+        immSetFormat[File], // list of pinned projects
       ),
       FileStamp.Formats.seqFileJsonFormatter,
     )
 
     val cachedOutputDars =
       Cache.cached(cacheStore) {
-        (_: (Set[HashFileInfo], String, Set[String], Boolean, String, Boolean)) =>
+        (_: (Set[HashFileInfo], String, Set[String], Boolean, String, Boolean, Set[File])) =>
           // build the daml files in a sorted way, using the build order definition
           for {
             projectFile <- damlProjectFiles.sortWith(buildOrder)
+            relativeProjectFile =
+              sourceDirectory.toPath.relativize(projectFile.toPath).normalize().toFile
+            if !relativePinnedProjectFiles.contains(relativeProjectFile)
             outputLfVersion <- outputLfVersions.toSeq
             file <-
               buildDamlProject(
@@ -463,13 +441,51 @@ object DamlPlugin extends AutoPlugin {
                 outputLfVersion,
                 outputLfVersions.size > 1,
                 useVersionedDarFileName,
-                sourceDirectory.toPath.relativize(projectFile.toPath).toFile,
+                relativeProjectFile,
                 damlVersion,
                 shouldExtractMainDalf,
               )
           } yield file
       }(cacheFormat)
     cachedOutputDars(cacheInput)
+  }
+
+  /** We intentionally take the unusual step of checking in certain DARs to ensure stable package
+    * ids across different compilers. This task builts the DAR and updates the checked in version.
+    */
+  private def damlPinProjectsTask = Def.task {
+    damlInstall.value
+    val streams = Keys.streams.value
+    val buildDirectory = damlCompileDirectory.value
+    val outputDirectory = damlDarOutput.value
+    val outputLfVersions = damlDarLfVersions.value.toSet
+    val useVersionedDarFileName = useVersionedDarName.value
+    val damlVersion = damlCompilerVersion.value
+    val pinnedProjects = damlPinnedProjects.value
+    val destinationDirectory = resourceDirectory.value / "dar"
+
+    if (pinnedProjects.nonEmpty) {
+      if (!destinationDirectory.exists()) IO.createDirectory(destinationDirectory)
+      for {
+        projectPath <- pinnedProjects
+        outputLfVersion <- outputLfVersions.toSeq
+        file <- buildDamlProject(
+          streams.log,
+          projectPath,
+          buildDirectory,
+          destinationDirectory,
+          outputLfVersion,
+          outputLfVersions.size > 1,
+          useVersionedDarFileName,
+          new File("daml.yaml"),
+          damlVersion,
+          false,
+        )
+      } yield file
+    } else {
+      streams.log.info("No damlPinnedProjects configured to update.")
+      Seq.empty
+    }
   }
 
   private def buildDamlProject(
