@@ -63,8 +63,8 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
   private val psid = crypto.psid
 
   val processingQueue: ProcessingQueue[RequestId] =
-    if (asynchronousProcessing) new ShardedSequentialProcessingQueue[RequestId]
-    else new SynchronousProcessingQueue[RequestId]
+    if (asynchronousProcessing) new ShardedSequentialProcessingQueue
+    else new SynchronousProcessingQueue
 
   override def observeTimestampWithoutEvent(sequencingTimestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
@@ -128,14 +128,22 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                 rootHashMessages,
                 batchAlsoContainsTopologyTransaction,
               ) =>
-            processRequest(
+            mediatorState.registerTimeoutForRequest(
               event.requestId,
-              counter,
               participantResponseDeadline,
-              decisionTime,
-              requestEnvelope,
-              rootHashMessages,
-              batchAlsoContainsTopologyTransaction,
+            )
+            HandlerResult.asynchronous(
+              processingQueue.enqueueForProcessing(event.requestId)(
+                processRequest(
+                  event.requestId,
+                  counter,
+                  participantResponseDeadline,
+                  decisionTime,
+                  requestEnvelope,
+                  rootHashMessages,
+                  batchAlsoContainsTopologyTransaction,
+                )
+              )
             )
           case MediatorEvent.Response(
                 counter,
@@ -220,7 +228,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
       requestEnvelope: OpenEnvelope[MediatorConfirmationRequest],
       rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
       batchAlsoContainsTopologyTransaction: Boolean,
-  )(implicit traceContext: TraceContext): HandlerResult =
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     withSpan("ConfirmationRequestAndResponseProcessor.processRequest") {
       val request = requestEnvelope.protocolMessage
       implicit traceContext =>
@@ -254,62 +262,51 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                     snapshot.ipsSnapshot,
                     Some(participantResponseDeadlineTick),
                   )
-                  asyncResult <- aggregation.asFinalized(
+                  _ <- aggregation.asFinalized(
                     crypto.staticSynchronizerParameters.protocolVersion
                   ) match {
                     case None =>
                       // in case the aggregation is not finalized, we need to update the mediator state on the synchronous path
                       mediatorState.registerPendingRequest(aggregation)
-                      HandlerResult.done
+                      FutureUnlessShutdown.unit
                     case Some(finalizedResponse) =>
                       // if the request is finalized, we don't update the in-memory state, but instead we can write the result
                       // on the asynchronous path
-                      HandlerResult.asynchronous(
-                        processingQueue.enqueueForProcessing(requestId)(
-                          mediatorState.add(finalizedResponse)
-                        )
-                      )
+                      mediatorState.add(finalizedResponse)
                   }
                 } yield {
-                  asyncResult.map { _ =>
-                    logger.info(
-                      show"Phase 2: Registered request=${requestId.unwrap} from submittingParticipant=${request.submittingParticipant} with ${request.informeesAndConfirmationParamsByViewPosition.size} view(s)."
-                    )
-                    logger.debug(
-                      show"Phase 2: Initial state for request=${requestId.unwrap}: ${aggregation.showMergedState}"
-                    )
-                  }
+                  logger.info(
+                    show"Phase 2: Registered request=${requestId.unwrap} from submittingParticipant=${request.submittingParticipant} with ${request.informeesAndConfirmationParamsByViewPosition.size} view(s)."
+                  )
+                  logger.debug(
+                    show"Phase 2: Initial state for request=${requestId.unwrap}: ${aggregation.showMergedState}"
+                  )
                 }
 
               // Request is finalized, approve / reject immediately
               case Left(Some(rejection)) =>
                 val verdict = rejection.toVerdict(psid.protocolVersion)
                 logger.debug(show"$requestId: finalizing immediately with verdict $verdict...")
-                HandlerResult.asynchronous(
-                  processingQueue.enqueueForProcessing(requestId) {
-                    for {
-                      _ <-
-                        verdictSender.sendReject(
-                          requestId,
-                          Some(request),
-                          rootHashMessages,
-                          verdict,
-                          decisionTime,
-                        )
-                      _ <- mediatorState.add(
-                        FinalizedResponse(requestId, request, requestId.unwrap, verdict)(
-                          traceContext
-                        )
-                      )
-                    } yield ()
-
-                  }
-                )
+                for {
+                  _ <-
+                    verdictSender.sendReject(
+                      requestId,
+                      Some(request),
+                      rootHashMessages,
+                      verdict,
+                      decisionTime,
+                    )
+                  _ <- mediatorState.add(
+                    FinalizedResponse(requestId, request, requestId.unwrap, verdict)(
+                      traceContext
+                    )
+                  )
+                } yield ()
 
               // Discard request
               case Left(None) =>
                 logger.debug(show"$requestId: discarding request...")
-                HandlerResult.done
+                FutureUnlessShutdown.unit
             }
           } yield asyncResult
     }

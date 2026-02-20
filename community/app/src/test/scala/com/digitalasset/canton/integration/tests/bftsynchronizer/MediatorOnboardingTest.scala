@@ -23,7 +23,6 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
   TestConsoleEnvironment,
 }
-import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.{ForceFlag, PartyId, UniqueIdentifier}
 
@@ -156,10 +155,7 @@ trait MediatorOnboardingTest
 
     // initialize the mediator
     // user-manual-entry-begin: DynamicallyOnboardMediator-Initialize
-    mediator2.setup.assign(
-      synchronizer1Id,
-      SequencerConnections.single(sequencer1.sequencerConnection),
-    )
+    mediator2.setup.assign(synchronizer1Id, sequencer1)
     mediator2.health.wait_for_initialized()
     // user-manual-entry-end: DynamicallyOnboardMediator-Initialize
 

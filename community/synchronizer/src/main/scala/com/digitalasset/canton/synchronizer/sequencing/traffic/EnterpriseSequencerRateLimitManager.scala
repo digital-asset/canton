@@ -141,7 +141,7 @@ class EnterpriseSequencerRateLimitManager(
     trafficPurchasedManager
       .getTrafficPurchasedAt(member, timestamp, lastBalanceUpdateTimestamp, warnIfApproximate)
       .leftMap { case TrafficPurchasedManager.TrafficPurchasedAlreadyPruned(member, timestamp) =>
-        logger.warn(
+        logger.debug(
           s"Failed to retrieve traffic purchased entry for $member at $timestamp as it was already pruned"
         )
         SequencerRateLimitError.TrafficNotFound(member)

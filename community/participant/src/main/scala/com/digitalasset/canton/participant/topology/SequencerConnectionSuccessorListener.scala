@@ -16,7 +16,6 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.sync.SyncServiceError
-import com.digitalasset.canton.sequencing.SequencerConnections
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
@@ -25,9 +24,9 @@ import com.digitalasset.canton.topology.processing.{
 }
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
 import com.digitalasset.canton.topology.transaction.TopologyMapping.Code
-import com.digitalasset.canton.topology.{KnownPhysicalSynchronizerId, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.{KnownPhysicalSynchronizerId, LSU, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{FutureUnlessShutdownUtil, FutureUtil}
+import com.digitalasset.canton.util.FutureUnlessShutdownUtil
 import com.digitalasset.canton.{SequencerCounter, SynchronizerAlias}
 import org.slf4j.event.Level
 
@@ -66,14 +65,7 @@ class SequencerConnectionSuccessorListener(
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     Monad[FutureUnlessShutdown].whenA(
       transactions.exists(_.mapping.code == Code.SequencerConnectionSuccessor)
-    ) {
-      FutureUtil.doNotAwait(
-        checkAndCreateSynchronizerConfig(effectiveTimestamp.value.immediateSuccessor)
-          .onShutdown(()),
-        failureMessage = s"error while migrating sequencer connections for $alias",
-      )
-      FutureUnlessShutdown.unit
-    }
+    )(checkAndCreateSynchronizerConfig(effectiveTimestamp.value.immediateSuccessor))
 
   private def checkAndCreateSynchronizerConfig(
       snapshotTs: CantonTimestamp
@@ -93,19 +85,21 @@ class SequencerConnectionSuccessorListener(
       (synchronizerUpgradeOngoing, _) <- OptionT(snapshot.synchronizerUpgradeOngoing())
       SynchronizerSuccessor(successorPSId, upgradeTime) = synchronizerUpgradeOngoing
 
-      _ = logger.debug(
+      logger = LSU.Logger(loggerFactory, getClass, synchronizerUpgradeOngoing)
+
+      _ = logger.info(
         s"Checking whether the participant can migrate $alias from ${activeConfig.configuredPSId} to $successorPSId"
       )
-      _ = logger.debug(s"Configured sequencer connections: $configuredSequencerIds")
+      _ = logger.info(s"Configured sequencer connections: $configuredSequencerIds")
 
       sequencerSuccessors <- OptionT.liftF(snapshot.sequencerConnectionSuccessors())
 
-      _ = logger.debug(s"Successors are currently known for: $sequencerSuccessors")
+      _ = logger.info(s"Successors are currently known for: $sequencerSuccessors")
 
       configuredSequencersWithoutSuccessor = configuredSequencerIds
         .diff(sequencerSuccessors.keySet)
       _ = if (configuredSequencersWithoutSuccessor.nonEmpty)
-        logger.debug(
+        logger.info(
           s"Some sequencer have not yet announced their endpoints on the successor synchronizer: $configuredSequencersWithoutSuccessor"
         )
       _ <- OptionT
@@ -119,18 +113,10 @@ class SequencerConnectionSuccessorListener(
         }.toSeq)
       )
 
-      _ = logger.debug(s"New set of sequencer connections for successors: $successorConnections")
+      _ = logger.info(s"New set of sequencer connections for successors: $successorConnections")
 
       sequencerConnections <- OptionT.fromOption[FutureUnlessShutdown](
-        SequencerConnections
-          .many(
-            connections = successorConnections,
-            activeConfig.config.sequencerConnections.sequencerTrustThreshold,
-            activeConfig.config.sequencerConnections.sequencerLivenessMargin,
-            activeConfig.config.sequencerConnections.submissionRequestAmplification,
-            activeConfig.config.sequencerConnections.sequencerConnectionPoolDelays,
-          )
-          .toOption
+        activeConfig.config.sequencerConnections.modifyConnections(successorConnections).toOption
       )
 
       currentSuccessorConfigO =
@@ -142,15 +128,18 @@ class SequencerConnectionSuccessorListener(
               synchronizerId = Some(successorPSId),
               sequencerConnections = sequencerConnections,
             )
+          // TODO(#28724) Can we have races leading to failures here?
           configStore
             .put(
               config = updated,
-              status = SynchronizerConnectionConfigStore.UpgradingTarget,
+              status = SynchronizerConnectionConfigStore.LsuTarget,
               configuredPSId = KnownPhysicalSynchronizerId(successorPSId),
-              synchronizerPredecessor =
-                Some(SynchronizerPredecessor(topologyClient.psid, upgradeTime)),
+              synchronizerPredecessor = Some(
+                SynchronizerPredecessor(topologyClient.psid, upgradeTime, isLateUpgrade = false)
+              ),
             )
             .toOption
+        // TODO(#28724) Use subsumeMerge to reduce impact of races
         case Some(currentSuccessorConfig) =>
           val updated =
             currentSuccessorConfig.config.copy(sequencerConnections = sequencerConnections)
@@ -158,34 +147,39 @@ class SequencerConnectionSuccessorListener(
       }
 
       _ = if (automaticallyConnectToUpgradedSynchronizer)
-        FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-          synchronizerHandshake
-            .performHandshake(successorPSId)
-            .value
-            .map {
-              case Left(error) =>
-                val isRetryable = error.retryable.isDefined
-
-                // e.g., transient network or pool errors
-                if (isRetryable)
-                  logger.info(s"Unable to perform handshake with $successorPSId: $error")
-                else
-                  logger.error(s"Unable to perform handshake with $successorPSId: $error")
-
-              case Right(_: PhysicalSynchronizerId) =>
-                logger.info(s"Handshake with $successorPSId was successful")
-            },
-          level = Level.INFO,
-          failureMessage = s"Failed to perform the synchronizer handshake with $successorPSId",
-        )
+        performHandshake(successorPSId)
     } yield ()
-    resultOT.value.void
 
+    resultOT.value.void
   }
+
+  private def performHandshake(successorPSId: PhysicalSynchronizerId)(implicit
+      traceContext: TraceContext
+  ): Unit =
+    FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+      synchronizerHandshake
+        .performHandshake(successorPSId)
+        .value
+        .map {
+          case Left(error) =>
+            val isRetryable = error.retryable.isDefined
+
+            // e.g., transient network or pool errors
+            if (isRetryable)
+              logger.info(s"Unable to perform handshake with $successorPSId: $error")
+            else
+              logger.error(s"Unable to perform handshake with $successorPSId: $error")
+
+          case Right(()) =>
+            logger.info(s"Handshake with $successorPSId was successful")
+        },
+      level = Level.INFO,
+      failureMessage = s"Failed to perform the synchronizer handshake with $successorPSId",
+    )
 }
 
 trait HandshakeWithPSId {
   def performHandshake(psid: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SyncServiceError, PhysicalSynchronizerId]
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit]
 }

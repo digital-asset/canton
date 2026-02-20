@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.apply.*
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.SynchronizerPredecessor
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -34,10 +33,12 @@ import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.topology.{
   ConfiguredPhysicalSynchronizerId,
   PhysicalSynchronizerId,
+  SequencerId,
   SynchronizerId,
 }
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ReleaseProtocolVersion
+import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias}
 import slick.jdbc.{GetResult, SetParameter}
 
 import scala.concurrent.ExecutionContext
@@ -95,7 +96,21 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
       config: SynchronizerConnectionConfig,
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, Error, Unit]
+  ): EitherT[FutureUnlessShutdown, MissingConfigForSynchronizer, Unit]
+
+  /** Sets the sequencer IDs for the given sequencers of the given synchronizer.
+    *
+    * Returns an error if the connection does not exist or if a different id already exists for a
+    * sequencer.
+    *
+    * This is better than [[replace]] because [[setSequencerIds]] works well even if there are
+    * concurrent calls. Failure can happen only if inconcistent ids are set.
+    */
+  def setSequencerIds(
+      synchronizerAlias: SynchronizerAlias,
+      configuredPSId: ConfiguredPhysicalSynchronizerId,
+      sequencerIds: Map[SequencerAlias, SequencerId],
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, Error, Unit]
 
   def setPhysicalSynchronizerId(
       alias: SynchronizerAlias,
@@ -162,7 +177,7 @@ trait SynchronizerConnectionConfigStore extends AutoCloseable {
   ): Either[Error, Unit] =
     (configuredPSId.toOption, synchronizerPredecessor)
       .mapN((_, _))
-      .map { case (psid, SynchronizerPredecessor(predecessorPSId, _)) =>
+      .map { case (psid, SynchronizerPredecessor(predecessorPSId, _, _)) =>
         Either.cond(
           psid.logical == predecessorPSId.logical,
           (),
@@ -228,9 +243,21 @@ object SynchronizerConnectionConfigStore {
 
   implicit val setParameterStatus: SetParameter[Status] = (f, pp) => pp >> f.dbType.toString
 
+  val allStatuses: Seq[Status] =
+    Seq(Active, HardMigratingTarget, HardMigratingSource, Inactive, LsuTarget, LsuSource)
+
+  private def checkStatuses(): Unit =
+    allStatuses.groupBy(_.dbType).foreach { case (dbType, statuses) =>
+      if (statuses.sizeIs > 1)
+        throw new IllegalArgumentException(
+          s"Several statuses found for type $dbType but only one allowed: $statuses"
+        )
+    }
+  checkStatuses()
+
   implicit val getResultStatus: GetResult[Status] = GetResult { r =>
     val found = r.nextString()
-    Seq(Active, HardMigratingTarget, HardMigratingSource, Inactive, UpgradingTarget)
+    allStatuses
       .find(x => found.headOption.contains(x.dbType))
       .getOrElse(
         throw new DbDeserializationException(s"Failed to deserialize connection status: $found")
@@ -263,8 +290,21 @@ object SynchronizerConnectionConfigStore {
       prettyOfString(_ => "HardMigratingTarget")
   }
 
-  // For logical synchronizer upgrade
-  case object UpgradingTarget extends Status {
+  // For logical synchronizer upgrades
+  case object LsuSource extends Status {
+    val dbType: Char = 'F' // F as in From. S would be better but it is already taken.
+    val canMigrateTo: Boolean = false
+    val canMigrateFrom: Boolean = true
+
+    // cannot connect to the synchronizer anymore
+    val isActive: Boolean = false
+
+    override protected def pretty: Pretty[LsuSource.type] =
+      prettyOfString(_ => "LSU source")
+  }
+
+  // For logical synchronizer upgrades
+  case object LsuTarget extends Status {
     val dbType: Char = 'U'
     val canMigrateTo: Boolean = true
     val canMigrateFrom: Boolean = false
@@ -272,8 +312,8 @@ object SynchronizerConnectionConfigStore {
     // inactive so that we connect yet connect to the synchronizer
     val isActive: Boolean = false
 
-    override protected def pretty: Pretty[UpgradingTarget.type] =
-      prettyOfString(_ => "UpgradingTarget")
+    override protected def pretty: Pretty[LsuTarget.type] =
+      prettyOfString(_ => "LSU target")
   }
 
   case object Inactive extends Status {
@@ -318,6 +358,16 @@ object SynchronizerConnectionConfigStore {
   ) extends Error {
     val message =
       s"Synchronizer with id $predecessorPSId cannot be the predecessor of $predecessorPSId because their logical IDs are incompatible"
+  }
+
+  final case class InconsistentSequencerIds(
+      synchronizerAlias: SynchronizerAlias,
+      configuredPSId: ConfiguredPhysicalSynchronizerId,
+      sequencerIds: Map[SequencerAlias, SequencerId],
+      details: String,
+  ) extends Error {
+    val message =
+      s"Connection for synchronizer with alias `$synchronizerAlias` and id `$configuredPSId` cannot be updated to set ids $sequencerIds: $details."
   }
 
   final case class MissingConfigForSynchronizer(

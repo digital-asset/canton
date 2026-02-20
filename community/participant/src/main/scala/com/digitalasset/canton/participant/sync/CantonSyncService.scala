@@ -6,8 +6,11 @@ package com.digitalasset.canton.participant.sync
 import cats.Eval
 import cats.data.EitherT
 import cats.implicits.toBifunctorOps
+import cats.syntax.contravariantSemigroupal.*
 import cats.syntax.either.*
+import cats.syntax.foldable.*
 import cats.syntax.functor.*
+import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
@@ -52,7 +55,7 @@ import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
 import com.digitalasset.canton.participant.*
 import com.digitalasset.canton.participant.Pruning.*
 import com.digitalasset.canton.participant.admin.*
-import com.digitalasset.canton.participant.admin.data.UploadDarData
+import com.digitalasset.canton.participant.admin.data.{ManualLSURequest, UploadDarData}
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
 import com.digitalasset.canton.participant.admin.inspection.{
   JournalGarbageCollectorControl,
@@ -76,7 +79,6 @@ import com.digitalasset.canton.participant.protocol.submission.routing.{
 }
 import com.digitalasset.canton.participant.pruning.PruningProcessor
 import com.digitalasset.canton.participant.store.*
-import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.UnknownAlias
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.sync.ConnectedSynchronizer.SubmissionReady
 import com.digitalasset.canton.participant.sync.SyncServiceError.{
@@ -203,6 +205,7 @@ class CantonSyncService(
     parameters,
     connectedSynchronizerFactory,
     metrics,
+    sequencerInfoLoader,
     isActive,
     declarativeChangeTrigger,
     futureSupervisor,
@@ -1033,14 +1036,7 @@ class CantonSyncService(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
-    sequencerInfoLoader // TODO(i27622): use the connection pool to validate the config
-      .validateSequencerConnection(
-        config.synchronizerAlias,
-        config.synchronizerId,
-        config.sequencerConnections,
-        sequencerConnectionValidation,
-      )
-      .leftMap(SyncServiceError.SyncServiceInconsistentConnectivity.Error(_): SyncServiceError)
+    connectionsManager.validateSequencerConnection(config, sequencerConnectionValidation)
 
   /** Modifies the settings of the synchronizer connection
     *
@@ -1075,6 +1071,24 @@ class CantonSyncService(
           SyncServiceError.SyncServiceUnknownSynchronizer
             .Error(config.synchronizerAlias): SyncServiceError
         )
+
+      // Try to retrieve and store missing sequencer ids
+      _ <- connectionIdToUpdate.toOption
+        .traverse_(connectionsManager.retrieveAndStoreMissingSequencerIds)
+        .leftMap(err =>
+          SyncServiceError.SyncServiceInternalError
+            .Failure(
+              config.synchronizerAlias,
+              new RuntimeException(s"Unable to retrieve and store missing sequencer ids: $err"),
+            )
+        )
+
+      // If successor exists, will ensure that connections are updated (e.g., if sequencers are added or removed)
+      _ <- EitherT.liftF(
+        connectionIdToUpdate.toOption
+          .flatMap(connectedSynchronizersLookup.get)
+          .traverse_(_.sequencerConnectionListener.init())
+      )
     } yield ()
 
   /** Migrates contracts from a source synchronizer to target synchronizer by re-associating them in
@@ -1148,13 +1162,61 @@ class CantonSyncService(
   }
 
   @VisibleForTesting
-  def upgradeSynchronizerTo(
+  def performLsu(
       currentPSId: PhysicalSynchronizerId,
       synchronizerSuccessor: SynchronizerSuccessor,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Unit] =
-    connectionsManager.upgradeSynchronizerTo(currentPSId, synchronizerSuccessor)
+    connectionsManager.performLsu(currentPSId, synchronizerSuccessor)
+
+  /** Complete unfinished LSUs.
+    *
+    * An LSU from psid1 to psid2 is unfinished if:
+    *   - psid2 is the successor of psid1
+    *   - Connection to psid1 is marked as LsuSource
+    *   - Connection to psid2 is marked as LsuTarget
+    *
+    * Such unfinished LSUs need to be finished "manually" because the normal flow is triggered by a
+    * connection to the synchronizer. However, `LsuSource` state is marks the connection as
+    * inactive, thus preventing further connections.
+    */
+  def finishLSUs()(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
+    val psidToSuccessor: Map[PhysicalSynchronizerId, SynchronizerSuccessor] =
+      synchronizerConnectionConfigStore
+        .getAll()
+        .mapFilter { connection =>
+          if (connection.status == SynchronizerConnectionConfigStore.LsuTarget) {
+            (connection.predecessor, connection.configuredPSId.toOption).mapN {
+              case (predecessor, psid) =>
+                predecessor.psid -> SynchronizerSuccessor(psid, predecessor.upgradeTime)
+            }
+          } else None
+        }
+        .toMap
+
+    val unfinishedLsus = synchronizerConnectionConfigStore.getAll().mapFilter { connectionConfig =>
+      if (connectionConfig.status == SynchronizerConnectionConfigStore.LsuSource) {
+        connectionConfig.configuredPSId.toOption.flatMap { currentPSId =>
+          psidToSuccessor
+            .get(currentPSId)
+            .map((currentPSId, connectionConfig.config.synchronizerAlias, _))
+        }
+      } else None
+    }
+
+    logger.info(s"Found unfinished LSUs: $unfinishedLsus")
+
+    MonadUtil.sequentialTraverse_(unfinishedLsus) { case (currentPSId, alias, successor) =>
+      connectionsManager.automaticLogicalSynchronizerUpgrade.finishUpgradeWithoutChecks(
+        alias = alias,
+        currentPSId = currentPSId,
+        synchronizerSuccessor = successor,
+      )
+    }
+  }
 
   /* Verify that specified synchronizer has inactive status and prune synchronizer stores.
    */
@@ -1229,38 +1291,33 @@ class CantonSyncService(
   )(implicit
       traceContext: TraceContext
   ): Either[SyncServiceError, StoredSynchronizerConnectionConfig] =
-    synchronizerConnectionConfigStore.getAllFor(synchronizerAlias) match {
-      case Left(_: UnknownAlias) =>
-        SyncServiceError.SyncServiceUnknownSynchronizer.Error(synchronizerAlias).asLeft
-
-      case Right(configs) =>
-        val filteredConfigs = if (onlyActive) {
-          val active = configs.filter(_.status.isActive)
-          NonEmpty
-            .from(active)
-            .toRight(SyncServiceError.SyncServiceSynchronizerIsNotActive.Error(synchronizerAlias))
-        } else configs.asRight
-
-        filteredConfigs.map(_.maxBy1(_.configuredPSId))
-    }
+    connectionsManager.getSynchronizerConnectionConfigForAlias(
+      synchronizerAlias,
+      onlyActive = onlyActive,
+    )
 
   /** Perform a handshake with the given synchronizer.
-    * @param synchronizerId
+    * @param psid
     *   the physical synchronizer id of the synchronizer.
     * @return
     */
   def connectToPSIdWithHandshake(
-      synchronizerId: PhysicalSynchronizerId
+      psid: PhysicalSynchronizerId
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, SyncServiceError, PhysicalSynchronizerId] =
-    connectionsManager.connectToPSIdWithHandshake(synchronizerId)
+  ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
+    connectionsManager.connectToPSIdWithHandshake(psid)
 
   /** Disconnect the given synchronizer from the sync service. */
   def disconnectSynchronizer(
       synchronizerAlias: SynchronizerAlias
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
     connectionsManager.disconnectSynchronizer(synchronizerAlias)
+
+  def manuallyUpgradeSynchronizerTo(
+      request: ManualLSURequest
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
+    connectionsManager.manuallyUpgradeSynchronizerTo(request)
 
   def logout(synchronizerAlias: SynchronizerAlias)(implicit
       traceContext: TraceContext

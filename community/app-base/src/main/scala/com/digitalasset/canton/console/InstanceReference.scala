@@ -14,7 +14,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerStatus,
   StaticSynchronizerParameters as ConsoleStaticSynchronizerParameters,
 }
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
 import com.digitalasset.canton.console.CommandErrors.NodeNotStarted
@@ -63,6 +62,7 @@ import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.store.TimeQuery
 import com.digitalasset.canton.tracing.NoTracing
 import com.digitalasset.canton.util.ErrorUtil
+import com.digitalasset.canton.{SequencerAlias, config}
 import com.google.protobuf.ByteString
 
 import java.util.Base64
@@ -1342,7 +1342,8 @@ class LocalSequencerReference(
     consoleEnvironment.environment.config.sequencersByString(name)
 
   override lazy val sequencerConnection: GrpcSequencerConnection =
-    config.publicApi.clientConfig.asSequencerConnection()
+    config.publicApi.clientConfig
+      .asSequencerConnection(sequencerAlias = SequencerAlias.tryCreate(name), sequencerId = None)
 
   private[console] val nodes: SequencerNodes =
     consoleEnvironment.environment.sequencers
@@ -1373,7 +1374,10 @@ class RemoteSequencerReference(val environment: ConsoleEnvironment, val name: St
     environment.environment.config.remoteSequencersByString(name)
 
   override def sequencerConnection: GrpcSequencerConnection =
-    config.publicApi.asSequencerConnection()
+    config.publicApi.asSequencerConnection(
+      sequencerAlias = SequencerAlias.tryCreate(name),
+      sequencerId = None,
+    )
 
   protected lazy val publicApiClient: SequencerPublicApiClient = new SequencerPublicApiClient(
     name,

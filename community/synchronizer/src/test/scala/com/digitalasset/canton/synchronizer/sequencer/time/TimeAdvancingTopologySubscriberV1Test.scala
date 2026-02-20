@@ -321,8 +321,8 @@ object TimeAdvancingTopologySubscriberV1Test {
   private val aPhysicalSynchronizerId =
     PhysicalSynchronizerId(
       SynchronizerId.tryFromString("id::default"),
-      testedProtocolVersion,
       NonNegativeInt.tryCreate(0),
+      testedProtocolVersion,
     )
 
   private val aSequencerId =

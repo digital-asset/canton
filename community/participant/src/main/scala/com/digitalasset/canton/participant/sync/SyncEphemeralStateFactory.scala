@@ -4,7 +4,6 @@
 package com.digitalasset.canton.participant.sync
 
 import cats.Eval
-import cats.syntax.apply.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{ProcessingTimeout, SessionEncryptionKeyCacheConfig}
@@ -84,6 +83,9 @@ class SyncEphemeralStateFactoryImpl(
       )
       synchronizerIndex <- ledgerApiIndexer.value.ledgerApiStore.value
         .cleanSynchronizerIndex(persistentState.synchronizerIdx.synchronizerId)
+      _ = logger.info(
+        s"Computing starting points for ${persistentState.psid} with $synchronizerIndex"
+      )
       startingPoints <- SyncEphemeralStateFactory.startingPoints(
         persistentState.requestJournalStore,
         persistentState.sequencedEventStore,
@@ -187,38 +189,57 @@ object SyncEphemeralStateFactory {
       ec: ExecutionContext,
       loggingContext: ErrorLoggingContext,
   ): FutureUnlessShutdown[ProcessingStartingPoints] = {
-    implicit val traceContext: TraceContext = loggingContext.traceContext
-    for {
-      isSequencedEventStoreEmpty <- sequencedEventStore.sequencedEvents(Some(1)).map(_.isEmpty)
 
-      isAcrossUpgrade = (synchronizerIndexO, synchronizerPredecessor).tupled.exists {
-        case (synchronizerIndex, synchronizerPredecessor) =>
-          isSequencedEventStoreEmpty && synchronizerIndex.recordTime == synchronizerPredecessor.upgradeTime
-      }
-
-      messageProcessingStartingPoint <-
-        if (isAcrossUpgrade) {
-          FutureUnlessShutdown.pure(MessageProcessingStartingPoint.default)
-        } else {
-          for {
-            tocO <- synchronizerIndexO
-              .flatTraverse(si =>
-                requestJournalStore.lastRequestTimeWithRequestTimestampBeforeOrAt(si.recordTime)
-              )
-            sequencerCounterO <- sequencerCounterFromSynchronizerIndex(
-              sequencedEventStore,
-              synchronizerIndexO,
-            )
-          } yield MessageProcessingStartingPoint(
-            nextRequestCounter = tocO.map(_.rc + 1).getOrElse(RequestCounter.Genesis),
-            nextSequencerCounter = sequencerCounterO
-              .map(_ + 1)
-              .getOrElse(SequencerCounter.Genesis),
-            lastSequencerTimestamp = lastSequencerTimestamp(synchronizerIndexO),
-            currentRecordTime = currentRecordTime(synchronizerIndexO),
-            nextRepairCounter = nextRepairCounter(synchronizerIndexO),
+    val updatedSynchronizerIndexO = synchronizerPredecessor match {
+      case Some(synchronizerPredecessor) =>
+        synchronizerIndexO.flatMap { synchronizerIndex =>
+          // If recordTime <= upgradeTime, it means that processing should start from genesis (as the clean index is before the upgrade time).
+          Option.when(synchronizerIndex.recordTime > synchronizerPredecessor.upgradeTime)(
+            synchronizerIndex
           )
         }
+
+      case None => synchronizerIndexO
+    }
+
+    startingPointsInternal(requestJournalStore, sequencedEventStore, updatedSynchronizerIndexO)
+  }
+
+  /** See scaladoc of [[startingPoints]] above for the generic documentation and invariants.
+    * @param updatedSynchronizerIndexO
+    *   Constructed from a [[SynchronizerIndex]] as follows: changed to None if the
+    *   updatedSynchronizerIndexO' record time is before the upgrade time.
+    */
+  private def startingPointsInternal(
+      requestJournalStore: RequestJournalStore,
+      sequencedEventStore: SequencedEventStore,
+      updatedSynchronizerIndexO: Option[SynchronizerIndex],
+  )(implicit
+      ec: ExecutionContext,
+      loggingContext: ErrorLoggingContext,
+  ): FutureUnlessShutdown[ProcessingStartingPoints] = {
+    implicit val traceContext: TraceContext = loggingContext.traceContext
+
+    for {
+      requestCounterO <- updatedSynchronizerIndexO
+        .flatTraverse(si =>
+          requestJournalStore.lastRequestTimeWithRequestTimestampBeforeOrAt(si.recordTime)
+        )
+
+      sequencerCounterO <- sequencerCounterFromSynchronizerIndex(
+        sequencedEventStore,
+        updatedSynchronizerIndexO,
+      )
+
+      messageProcessingStartingPoint = MessageProcessingStartingPoint(
+        nextRequestCounter = requestCounterO.map(_.rc + 1).getOrElse(RequestCounter.Genesis),
+        nextSequencerCounter = sequencerCounterO
+          .map(_ + 1)
+          .getOrElse(SequencerCounter.Genesis),
+        lastSequencerTimestamp = lastSequencerTimestamp(updatedSynchronizerIndexO),
+        currentRecordTime = currentRecordTime(updatedSynchronizerIndexO),
+        nextRepairCounter = nextRepairCounter(updatedSynchronizerIndexO),
+      )
 
       replayOpt <- requestJournalStore
         .firstRequestWithCommitTimeAfter(

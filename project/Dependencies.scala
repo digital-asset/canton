@@ -56,7 +56,6 @@ object Dependencies {
   lazy val javax_annotations_version = "1.3.2"
   lazy val jackson_databind_nullable_version = "0.2.6"
   lazy val jakarta_annotation_api_version = "1.3.5"
-  lazy val log4j_version = "2.23.1"
   lazy val logback_version = "1.5.3"
   lazy val logstash_version = "6.6"
   lazy val magnolia_version = "1.1.10"
@@ -200,8 +199,8 @@ object Dependencies {
 
   lazy val logback_core = "ch.qos.logback" % "logback-core" % logback_version
 
-  lazy val log4j_core = "org.apache.logging.log4j" % "log4j-core" % log4j_version
-  lazy val log4j_api = "org.apache.logging.log4j" % "log4j-api" % log4j_version
+  lazy val log4j_core = resolveDependency("org.apache.logging.log4j", "log4j-core")
+  lazy val log4j_api = resolveDependency("org.apache.logging.log4j", "log4j-api")
 
   // used for condition evaluation in logback
   lazy val janino = "org.codehaus.janino" % "janino" % janino_version

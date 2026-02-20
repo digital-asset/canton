@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.digitalasset.canton.config
-import com.digitalasset.canton.config.{DbConfig, SynchronizerTimeTrackerConfig}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeProportion
+import com.digitalasset.canton.config.{CommitmentSendDelay, DbConfig}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.integration.*
@@ -17,26 +17,29 @@ import com.digitalasset.canton.integration.plugins.{
   UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils.SynchronizerNodes
-import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
-import com.digitalasset.canton.sequencing.SequencerConnections
+import monocle.macros.syntax.lens.*
 
 import java.time.Duration
+import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
+import scala.jdk.DurationConverters.*
 
 /*
- * This test is used to test the logical synchronizer upgrade.
+ * This test verifies that contracts created before a logical synchronizer upgrade
+ * can be pruned after a logical synchronizer upgrade.
  * It uses 2 participants, 2 sequencers and 2 mediators.
  */
-abstract class LSUEndToEndIntegrationTest extends LSUBase {
+abstract class LsuPruningIntegrationTest extends LsuBase {
 
   override protected def testName: String = "logical-synchronizer-upgrade"
 
   registerPlugin(new UsePostgres(loggerFactory))
 
-  override protected lazy val newOldSequencers: Map[String, String] =
-    Map("sequencer2" -> "sequencer1")
+  override protected lazy val newOldSequencers: Map[String, String] = Map(
+    "sequencer2" -> "sequencer1"
+  )
   override protected lazy val newOldMediators: Map[String, String] = Map("mediator2" -> "mediator1")
+
   override protected lazy val upgradeTime: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(30)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
@@ -45,36 +48,25 @@ abstract class LSUEndToEndIntegrationTest extends LSUBase {
         new NetworkBootstrapper(S1M1)
       }
       .addConfigTransforms(configTransforms*)
+      .updateTestingConfig(
+        _.focus(_.commitmentSendDelay).replace(
+          Some(
+            CommitmentSendDelay(
+              Some(NonNegativeProportion.zero),
+              Some(NonNegativeProportion.zero),
+            )
+          )
+        )
+      )
+      .addConfigTransforms(
+        ConfigTransforms.updateMaxDeduplicationDurations(10.minutes.toJava)
+      )
       .withSetup { implicit env =>
-        import env.*
-
-        val daSequencerConnection =
-          SequencerConnections.single(sequencer1.sequencerConnection.withAlias(daName.toString))
-        participants.all.synchronizers.connect(
-          SynchronizerConnectionConfig(
-            synchronizerAlias = daName,
-            sequencerConnections = daSequencerConnection,
-            timeTracker = SynchronizerTimeTrackerConfig(observationLatency =
-              config.NonNegativeFiniteDuration.Zero
-            ),
-          )
-        )
-
-        participants.all.dars.upload(CantonExamplesPath)
-
-        synchronizerOwners1.foreach(
-          _.topology.synchronizer_parameters.propose_update(
-            daId,
-            _.copy(reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)),
-          )
-        )
-
-        oldSynchronizerNodes = SynchronizerNodes(Seq(sequencer1), Seq(mediator1))
-        newSynchronizerNodes = SynchronizerNodes(Seq(sequencer2), Seq(mediator2))
+        defaultEnvironmentSetup()
       }
 
-  "Logical synchronizer upgrade" should {
-    "work end-to-end" in { implicit env =>
+  "Pruning after a logical synchronizer upgrade" should {
+    "work correctly" in { implicit env =>
       import env.*
 
       val fixture = fixtureWithDefaults()
@@ -83,6 +75,8 @@ abstract class LSUEndToEndIntegrationTest extends LSUBase {
 
       val alice = participant1.parties.enable("Alice")
       val bank = participant2.parties.enable("Bank")
+      val tempIou = IouSyntax.createIou(participant2)(bank, alice)
+      IouSyntax.archive(participant2)(tempIou, bank)
       IouSyntax.createIou(participant2)(bank, alice).discard
 
       performSynchronizerNodesLSU(fixture)
@@ -99,17 +93,6 @@ abstract class LSUEndToEndIntegrationTest extends LSUBase {
 
       waitForTargetTimeOnSequencer(sequencer2, environment.clock.now)
 
-      /*
-      We do several ping, disconnect, reconnect because reconnect comes with crash-recovery
-      and acknowledgements to the sequencers.
-       */
-      (0 to 2).foreach { i =>
-        logger.debug(s"Round $i of ping")
-        participant1.health.ping(participant2)
-        participants.all.synchronizers.disconnect_all()
-        participants.all.synchronizers.reconnect_all()
-      }
-
       val aliceIou =
         participant1.ledger_api.javaapi.state.acs.await(IouSyntax.modelCompanion)(alice)
       val bob = participant1.parties.enable("Bob")
@@ -122,16 +105,28 @@ abstract class LSUEndToEndIntegrationTest extends LSUBase {
       participant2.ledger_api.javaapi.commands
         .submit(Seq(bank), bobIou.id.exerciseArchive().commands().asScala.toSeq)
 
-      // Subsequent call should be successful
-      participant1.underlying.value.sync
-        .upgradeSynchronizerTo(daId, fixture.synchronizerSuccessor)
-        .futureValueUS
-        .value shouldBe ()
+      environment.simClock.value.advance(1.hour.toJava)
+      participants.local.foreach(_.testing.fetch_synchronizer_times())
+      IouSyntax.createIou(participant2)(bank, alice)
+      environment.simClock.value.advance(1.hour.toJava)
+      participants.local.foreach(_.testing.fetch_synchronizer_times())
+
+      eventually() {
+        environment.simClock.value.advance(1.hour.toJava)
+        participants.local.foreach(_.testing.fetch_synchronizer_times())
+        val offset =
+          participant2.pruning.find_safe_offset(beforeOrAt = environment.clock.now.toInstant).value
+        logger.debug(s"safe to prune: $offset")
+        offset should be > 2L
+        logger.debug(s"pcs before pruning: ${participant2.testing.pcs_search(daName)}")
+        participant2.pruning.prune(offset)
+        logger.debug(s"pcs after pruning: ${participant2.testing.pcs_search(daName)}")
+      }
     }
   }
 }
 
-final class LSUEndToEndReferenceIntegrationTest extends LSUEndToEndIntegrationTest {
+final class LsuPruningReferenceIntegrationTest extends LsuPruningIntegrationTest {
   registerPlugin(
     new UseReferenceBlockSequencer[DbConfig.Postgres](
       loggerFactory,
@@ -140,7 +135,7 @@ final class LSUEndToEndReferenceIntegrationTest extends LSUEndToEndIntegrationTe
   )
 }
 
-final class LSUEndToEndBftOrderingIntegrationTest extends LSUEndToEndIntegrationTest {
+final class LsuPruningBftOrderingIntegrationTest extends LsuPruningIntegrationTest {
   registerPlugin(
     new UseBftSequencer(
       loggerFactory,

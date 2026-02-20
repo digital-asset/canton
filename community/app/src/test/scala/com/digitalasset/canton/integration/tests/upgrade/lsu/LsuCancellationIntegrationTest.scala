@@ -5,7 +5,7 @@ package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.admin.api.client.data.DynamicSynchronizerParameters as ConsoleDynamicSynchronizerParameters
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.{DbConfig, SynchronizerTimeTrackerConfig}
+import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.discard.Implicits.*
@@ -20,9 +20,7 @@ import com.digitalasset.canton.integration.plugins.{
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.LogicalUpgradeUtils.SynchronizerNodes
-import com.digitalasset.canton.integration.tests.upgrade.lsu.LSUBase.Fixture
-import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
-import com.digitalasset.canton.sequencing.SequencerConnections
+import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
 import com.digitalasset.canton.topology.{PartyId, TopologyManagerError}
 import com.digitalasset.canton.version.ProtocolVersion
 import monocle.macros.syntax.lens.*
@@ -40,7 +38,7 @@ import scala.annotation.nowarn
   *   - Second LSU is performed
   */
 @nowarn("msg=dead code")
-abstract class LSUCancellationIntegrationTest extends LSUBase {
+abstract class LsuCancellationIntegrationTest extends LsuBase {
 
   override protected def testName: String = "logical-synchronizer-upgrade"
 
@@ -108,21 +106,9 @@ abstract class LSUCancellationIntegrationTest extends LSUBase {
       .addConfigTransforms(configTransforms*)
       .withSetup { implicit env =>
         import env.*
-
-        val daSequencerConnection =
-          SequencerConnections.single(sequencer1.sequencerConnection.withAlias(daName.toString))
-
         participants.local.start()
 
-        participants.all.synchronizers.connect(
-          SynchronizerConnectionConfig(
-            synchronizerAlias = daName,
-            sequencerConnections = daSequencerConnection,
-            timeTracker = SynchronizerTimeTrackerConfig(observationLatency =
-              config.NonNegativeFiniteDuration.Zero
-            ),
-          )
-        )
+        participants.all.synchronizers.connect(defaultSynchronizerConnectionConfig())
 
         participants.all.dars.upload(CantonExamplesPath)
         participant1.health.ping(participant1)
@@ -236,7 +222,7 @@ abstract class LSUCancellationIntegrationTest extends LSUBase {
       // Call should fail if no upgrade is ongoing
       eventually() {
         participant1.underlying.value.sync
-          .upgradeSynchronizerTo(daId, fixture1.synchronizerSuccessor)
+          .performLsu(daId, fixture1.synchronizerSuccessor)
           .value
           .futureValueUS
           .left
@@ -277,7 +263,7 @@ abstract class LSUCancellationIntegrationTest extends LSUBase {
   }
 }
 
-final class LSUCancellationReferenceIntegrationTest extends LSUCancellationIntegrationTest {
+final class LsuCancellationReferenceIntegrationTest extends LsuCancellationIntegrationTest {
   registerPlugin(
     new UseReferenceBlockSequencer[DbConfig.Postgres](
       loggerFactory,
@@ -286,7 +272,7 @@ final class LSUCancellationReferenceIntegrationTest extends LSUCancellationInteg
   )
 }
 
-final class LSUCancellationBftOrderingIntegrationTest extends LSUCancellationIntegrationTest {
+final class LsuCancellationBftOrderingIntegrationTest extends LsuCancellationIntegrationTest {
   registerPlugin(
     new UseBftSequencer(
       loggerFactory,

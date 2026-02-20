@@ -755,6 +755,8 @@ class ParticipantNodeBootstrap(
           () => triggerDeclarativeChange(),
         )
 
+        _ <- sync.finishLSUs()
+
         _ = {
           connectedSynchronizerHealth.set(sync.connectedSynchronizerHealth)
           connectedSynchronizerEphemeralHealth.set(sync.ephemeralHealth)

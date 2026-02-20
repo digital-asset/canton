@@ -433,7 +433,6 @@ class ConfirmationRequestAndResponseProcessorTest
               rootHashMessages,
               batchAlsoContainsTopologyTransaction = false,
             )
-            .flatMap(_.unwrap)
             .failOnShutdown,
           shouldBeViewThresholdBelowMinimumAlarm(
             RequestId(requestTimestamp),
@@ -465,7 +464,6 @@ class ConfirmationRequestAndResponseProcessorTest
               rootHashMessages,
               batchAlsoContainsTopologyTransaction = false,
             )
-            .flatMap(_.unwrap)
             .failOnShutdown,
           _.shouldBeCantonError(
             MediatorError.MalformedMessage,
@@ -504,7 +502,6 @@ class ConfirmationRequestAndResponseProcessorTest
             rootHashMessages,
             batchAlsoContainsTopologyTransaction = false,
           )
-          .flatMap(_.unwrap)
           .failOnShutdown
         response = ConfirmationResponses.tryCreate(
           reqId,
@@ -621,7 +618,6 @@ class ConfirmationRequestAndResponseProcessorTest
               rootHashMessages,
               batchAlsoContainsTopologyTransaction = false,
             )
-            .flatMap(_.unwrap)
             .failOnShutdown
         }
       }.map(_ => succeed)
@@ -788,7 +784,6 @@ class ConfirmationRequestAndResponseProcessorTest
                     rootHashMessages,
                     batchAlsoContainsTopologyTransaction = false,
                   )
-                  .flatMap(_.unwrap)
                   .failOnShutdown,
                 _.shouldBeCantonError(
                   MediatorError.MalformedMessage,
@@ -859,7 +854,6 @@ class ConfirmationRequestAndResponseProcessorTest
               ),
               batchAlsoContainsTopologyTransaction = false,
             )
-            .flatMap(_.unwrap)
             .failOnShutdown,
           _.shouldBeCantonError(
             MediatorError.MalformedMessage,
@@ -898,7 +892,6 @@ class ConfirmationRequestAndResponseProcessorTest
               rootHashMessages,
               batchAlsoContainsTopologyTransaction = false,
             )
-            .flatMap(_.unwrap)
             .failOnShutdown,
           _.shouldBeCantonError(
             MediatorError.MalformedMessage,
@@ -971,7 +964,6 @@ class ConfirmationRequestAndResponseProcessorTest
             ),
             batchAlsoContainsTopologyTransaction = false,
           )
-          .flatMap(_.unwrap)
         // should record the request
         requestState <- sut.mediatorState
           .fetch(requestId)
@@ -1233,7 +1225,6 @@ class ConfirmationRequestAndResponseProcessorTest
             ),
             batchAlsoContainsTopologyTransaction = false,
           )
-          .flatMap(_.unwrap)
           .failOnShutdown
 
         // receiving a confirmation response
@@ -1381,7 +1372,6 @@ class ConfirmationRequestAndResponseProcessorTest
             ),
             batchAlsoContainsTopologyTransaction = false,
           )
-          .flatMap(_.unwrap)
           .failOnShutdown
 
         // receiving a confirmation response
@@ -1514,7 +1504,6 @@ class ConfirmationRequestAndResponseProcessorTest
             ),
             batchAlsoContainsTopologyTransaction = false,
           )
-          .flatMap(_.unwrap)
           .failOnShutdown
 
         // receiving a confirmation response
@@ -1604,7 +1593,6 @@ class ConfirmationRequestAndResponseProcessorTest
             ),
             batchAlsoContainsTopologyTransaction = false,
           )
-          .flatMap(_.unwrap)
           .failOnShutdown
         response <- createConfirmationResponses(
           Some(ViewPosition.root),
@@ -1692,7 +1680,6 @@ class ConfirmationRequestAndResponseProcessorTest
               ),
               batchAlsoContainsTopologyTransaction = true,
             )
-            .flatMap(_.unwrap)
             .failOnShutdown,
           _.shouldBeCantonError(
             MediatorError.MalformedMessage,
@@ -1741,7 +1728,6 @@ class ConfirmationRequestAndResponseProcessorTest
               rootHashMessages,
               batchAlsoContainsTopologyTransaction = false,
             )
-            .flatMap(_.unwrap)
             .failOnShutdown,
           _.shouldBeCantonError(
             MediatorError.InvalidMessage,
@@ -1787,7 +1773,6 @@ class ConfirmationRequestAndResponseProcessorTest
             ),
             batchAlsoContainsTopologyTransaction = false,
           )
-          .flatMap(_.unwrap)
           .failOnShutdown
         _ = sut.verdictSender.sentResults shouldBe empty
 

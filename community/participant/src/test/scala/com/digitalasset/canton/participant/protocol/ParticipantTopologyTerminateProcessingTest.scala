@@ -36,6 +36,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission.*
 import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Replace
 import com.digitalasset.canton.topology.transaction.TopologyTransaction.TxHash
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.{
   BaseTest,
   FailOnShutdown,
@@ -66,11 +67,11 @@ class ParticipantTopologyTerminateProcessingTest
   private lazy val psid1 = DefaultTestIdentities.physicalSynchronizerId
   private lazy val psid2 = PhysicalSynchronizerId(
     psid1.logical,
-    psid1.protocolVersion,
     psid1.serial.increment.toNonNegative,
+    psid1.protocolVersion,
   )
   private def synchronizerPredecessor(upgradeTime: CantonTimestamp) =
-    SynchronizerPredecessor(psid1, upgradeTime)
+    SynchronizerPredecessor(psid1, upgradeTime, isLateUpgrade = false)
 
   private def mk(
       store: TopologyStore[TopologyStoreId.SynchronizerStore] = mkStore,
@@ -103,6 +104,7 @@ class ParticipantTopologyTerminateProcessingTest
       pauseSynchronizerIndexingDuringPartyReplication = false,
       synchronizerPredecessor = synchronizerPredecessor,
       lsuCallback = LogicalSynchronizerUpgradeCallback.NoOp,
+      retrieveAndStoreMissingSequencerIds = _ => EitherTUtil.unitUS,
       loggerFactory,
     )
     (proc, store, eventCaptor, recordOrderPublisher)

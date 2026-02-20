@@ -491,7 +491,7 @@ trait TopologyAdministrationTest extends CommunityIntegrationTest with SharedEnv
 
       loggerFactory.assertThrowsAndLogs[CommandFailure](
         participant1.topology.transactions.genesis_state(),
-        _.errorMessage should include("reason=>FieldNotSet(filter_synchronizer_store)"),
+        _.errorMessage should include("reason=>FieldNotSet(synchronizer_store)"),
       )
     }
   }
