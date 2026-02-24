@@ -8,7 +8,7 @@ import com.daml.ledger.api.v2.admin.party_management_service.{
   AllocatePartyRequest,
   AllocatePartyResponse,
 }
-import com.digitalasset.canton.config.TlsClientConfig
+import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.http.json.v2.JsPartyManagementCodecs.*
 import com.digitalasset.canton.http.{HttpService, Party, UserId}

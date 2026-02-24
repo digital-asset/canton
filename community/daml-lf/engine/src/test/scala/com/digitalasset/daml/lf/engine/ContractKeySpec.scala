@@ -17,7 +17,7 @@ import com.digitalasset.daml.lf.data.Ref.{
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.language.Ast.Package
 import com.digitalasset.daml.lf.language.LanguageVersion
-import com.digitalasset.daml.lf.speedy.InitialSeeding
+import com.digitalasset.daml.lf.speedy.{InitialSeeding, SValue}
 import com.digitalasset.daml.lf.transaction.{
   ContractStateMachine,
   FatContractInstance,
@@ -34,6 +34,8 @@ import com.digitalasset.daml.lf.value.Value.{
   ValueRecord,
 }
 import com.daml.logging.LoggingContext
+import com.digitalasset.daml.lf.crypto.SValueHash
+import com.digitalasset.daml.lf.stablepackages.StablePackagesV2
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 
 import org.scalatest.EitherValues
@@ -43,6 +45,7 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.zip.ZipInputStream
+import scala.collection.immutable.ArraySeq
 import scala.language.implicitConversions
 
 class ContractKeySpecV2 extends ContractKeySpec(LanguageVersion.Major.V2)
@@ -137,15 +140,27 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
         withKeyContractInst,
     )
 
-  val defaultKey = Map(
-    GlobalKey.assertBuild(
-      TypeConId(basicTestsPkgId, withKeyTemplate),
-      ValueRecord(None, ImmArray((None, ValueParty(alice)), (None, ValueInt64(42)))),
-      basicTestsPkg.pkgName,
+  val defaultKey = {
+    val sKey = SValue.SRecord(
+      StablePackagesV2.Tuple2,
+      ImmArray(Ref.Name.assertFromString("_1"), Ref.Name.assertFromString("_2")),
+      ArraySeq(SValue.SParty(alice), SValue.SInt64(42)),
     )
-      ->
-        toContractId("BasicTests:WithKey:1")
-  )
+    Map(
+      GlobalKey.assertBuild(
+        TypeConId(basicTestsPkgId, withKeyTemplate),
+        basicTestsPkg.pkgName,
+        sKey.toNormalizedValue,
+        SValueHash.assertHashContractKey(
+          basicTestsPkg.pkgName,
+          Identifier(basicTestsPkgId, "BasicTests:WithKey").qualifiedName,
+          sKey,
+        ),
+      )
+        ->
+          toContractId("BasicTests:WithKey:1")
+    )
+  }
 
   private[this] val lookupKey: PartialFunction[GlobalKeyWithMaintainers, ContractId] = {
     case GlobalKeyWithMaintainers(
@@ -299,6 +314,7 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
       val let = Time.Timestamp.now()
       val submissionSeed = hash("multikeys")
       val seeding = Engine.initialSeeding(submissionSeed, participant, let)
+      val sKey = SValue.SParty(party)
 
       val cid1 = toContractId("1")
       val cid2 = toContractId("2")
@@ -313,7 +329,12 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
             GlobalKey.assertBuild(
               templateId = TypeConId(multiKeysPkgId, "MultiKeys:Keyed"),
               packageName = multiKeysPkg.pkgName,
-              key = ValueParty(party),
+              key = sKey.toNormalizedValue,
+              SValueHash.assertHashContractKey(
+                multiKeysPkg.pkgName,
+                "MultiKeys:Keyed",
+                sKey,
+              ),
             ),
             Set(party),
           )

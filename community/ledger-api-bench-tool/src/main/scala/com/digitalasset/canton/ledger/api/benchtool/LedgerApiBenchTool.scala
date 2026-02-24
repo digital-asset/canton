@@ -7,8 +7,8 @@ import cats.syntax.either.*
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
 import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
 import com.daml.metrics.api.opentelemetry.OpenTelemetryMetricsFactory
+import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.TlsClientConfig
 import com.digitalasset.canton.ledger.api.benchtool.config.WorkflowConfig.{
   FibonacciSubmissionConfig,
   FooSubmissionConfig,

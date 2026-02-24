@@ -33,15 +33,14 @@ This document walks you through the options for setting up:
 1: Decentralizing Control Over Topology Changes
 -----------------------------------------------
 
-The root of trust in Canton is the private transaction signing key (or keys),
-which generate a signature for a transaction, proving that a given party has authorized that transaction.
+The root of trust in Canton is the private key (or keys) used to sign (thereby authorizing) topology transactions on behalf of the party.
 The transactions that *associate signing keys with parties* are an example of *topology* transactions.
 The transactions that give a Validator node permission to create and store data on behalf of a party
 (confirmation and observation rights) are *also* examples of topology transactions.
 
 So the first level of decentralization in Canton is whether or not to decentralize control over topology transactions for a given party.
 If a single private-public keypair controls this association,
-then a signature from the private key in that keypair can change the signing keys for that party.
+then a signature from the private key in that keypair can change the protocol signing keys for that party.
 
 If the association of keys to a party requires signatures from more than one set of keys,
 then control over the party itself is decentralized.
@@ -103,21 +102,22 @@ For further details, see:
 -------------------------------
 
 Due to the privacy model in Canton,
-every transaction needs to be confirmed by the participants hosting the parties that are stakeholders on the transaction.
+every transaction needs to be confirmed by the participant nodes hosting the parties that are stakeholders on the transaction.
 The ``partyToParticipant`` mapping in the topology state defines which participant(s) host every party in the network.
 
-A party with more than one Validator in the ``partyToParticipant`` mapping is called a *multi-hosted party.*
+A party hosted on more than one participant in the ``partyToParticipant`` mapping is called a *multi-hosted party.*
 When given a threshold higher than 1 for confirmations, the multi-hosted party is referred to as a *decentralized party*.
 
-Every transaction requiring confirmation from this party is sent to all participants listed in its ``partyToParticipant`` mapping,
-and once the number of confirmations from different participants crosses the threshold, the transaction is considered confirmed by the party.
+Every transaction requiring confirmation from this party is sent to all participants listed in its ``partyToParticipant`` mapping.
+Each participant validates the transaction and responds with either an approval or a rejection.
+Once the number of identical confirmations from different participants crosses the threshold, the transaction is considered confirmed by the party.
 
 For details on confirming participant nodes see :ref:`overview_canton_external_parties_cpn`.
 
 3: Decentralizing Control over Command Submission
 -------------------------------------------------
 
-Canton ledger state is changed by submitting commands through a participant, which expands the commands into Daml transactions.
+Canton ledger state is changed by submitting commands through a participant, which transforms the commands into Daml transactions.
 Each command submission is signed by the party (or parties) that authorize and submit this command.
 For a standard (non-decentralized) party in Canton, this is simple: that party is hosted on a participant node, and submits the command via that node.
 For a decentralized party, this becomes more complicated,
@@ -293,7 +293,7 @@ See :ref:`howto_decentralized_parties` for more information on setting up decent
 Key Management
 --------------
 
-Depending on your setup, there are between four sets of keys that might be used in the above.
+Depending on your setup, there are four sets of keys that might be used in the above.
 Any given setup will use either two or three of these sets of keys.
 
 * The participant-internal keys, which the participants use to sign confirmations
@@ -313,10 +313,11 @@ and the corresponding thresholds, can be performed through a process called
 
 Refer to :ref:`party-replication` for more information.
 
-Shutting down a node that hosts a party with (submission, confirmation, observation?) rights
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Shutting down a node that hosts a decentralized party
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-It is safe to completely shut down ("offboard" or "decommission") a Validator node that hosts one or more participating in a decentralized confirmation pool.
+It is safe to shut down ("offboard" or "decommission") a participant node that hosts a decentralized party,
+provided enough confirming participants remain online to meet the party's confirmation threshold.
 
 It is also safe to bring this node onto the network within the sequencer pruning window, which is, for example, 30 days on the Global Synchronizer.
 After the sequencer pruning window, a number of failures could occur which currently have no known resolutions.

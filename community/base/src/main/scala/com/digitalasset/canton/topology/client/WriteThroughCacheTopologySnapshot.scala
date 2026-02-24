@@ -80,6 +80,16 @@ class WriteThroughCacheTopologySnapshot(
       )
     )
 
+  override def wasEverOnboarded(
+      participantId: ParticipantId
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
+    lookup(
+      uids = NonEmpty(Seq, participantId.uid),
+      types = Set(TopologyMapping.Code.SynchronizerTrustCertificate),
+      op = None,
+    )
+      .map(transactionsByUid => transactionsByUid.get(participantId.uid).exists(_.nonEmpty))
+
   protected def findTransactionsInStore(
       types: Seq[TopologyMapping.Code],
       filterUid: Option[NonEmpty[Seq[UniqueIdentifier]]],
@@ -96,10 +106,14 @@ class WriteThroughCacheTopologySnapshot(
         filterNamespace = None,
       )
 
-  private def lookup(uids: NonEmpty[Seq[UniqueIdentifier]], types: Set[TopologyMapping.Code])(
-      implicit traceContext: TraceContext
+  private def lookup(
+      uids: NonEmpty[Seq[UniqueIdentifier]],
+      types: Set[TopologyMapping.Code],
+      op: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
+  )(implicit
+      traceContext: TraceContext
   ): FutureUnlessShutdown[Map[UniqueIdentifier, Seq[GenericStoredTopologyTransaction]]] =
-    stateLookup.lookupForUids(EffectiveTime(timestamp), asOfInclusive = false, uids, types)
+    stateLookup.lookupForUids(EffectiveTime(timestamp), asOfInclusive = false, uids, types, op)
 
   // ===============================================
   // actual implementations specific to the

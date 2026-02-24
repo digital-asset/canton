@@ -5,13 +5,13 @@ package com.digitalasset.canton.integration.tests.crashrecovery
 
 import cats.syntax.option.*
 import com.daml.metrics.api.testing.MetricValues
+import com.daml.tls.BaseServerTlsConfig
 import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.admin.api.client.data.SynchronizerConnectionConfig
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, PositiveInt}
 import com.digitalasset.canton.config.{
   NonNegativeFiniteDuration as NonNegativeFiniteDurationConfig,
   PemFile,
-  TlsBaseServerConfig,
 }
 import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
@@ -83,8 +83,8 @@ abstract class BaseDatabaseSequencerFailoverTest
     // most properties should be set in the underlying config file or updated by config transforms.
     // this will just update values specifically related to sequencer ha that we couldn't put in the examples
     // or where the defaults are suitable.
-    def enableTls(sequencerName: String, commonName: String): Option[TlsBaseServerConfig] =
-      TlsBaseServerConfig(
+    def enableTls(sequencerName: String, commonName: String): Option[BaseServerTlsConfig] =
+      BaseServerTlsConfig(
         certChainFile =
           PemFile(ExistingFile.tryCreate(s"$certsPath/$sequencerName-$commonName.crt")),
         privateKeyFile =

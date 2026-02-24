@@ -259,7 +259,7 @@ class RetransmissionMessageValidatorTest extends AnyWordSpec with BftSequencerBa
 object RetransmissionMessageValidatorTest {
   val epochLength = EpochLength(8L)
   val epochInfo =
-    EpochInfo.mk(
+    EpochInfo.forTesting(
       number = EpochNumber.First,
       startBlockNumber = BlockNumber.First,
       length = epochLength,

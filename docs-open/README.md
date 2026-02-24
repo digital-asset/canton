@@ -304,6 +304,20 @@ them in the RST files. This script runs as a preprocessing step.
 > &#9432;&nbsp; When building the [Canton Documentation locally](#how-can-i-build-the-canton-documentation-locally),
 > `sbt generateRstResolvesSnippets` also invokes above script!
 
+### Snippet "Macros"
+
+The `community/app/src/test/scala/com/digitalasset/canton/integration/tests/docs/macros` folder contains RST files that can be re-used in a "macro" style in any other RST file.
+To include a macro file, use the following syntax (example):
+
+```
+.. snippet(allocateExternalParty):: offline_party_replication
+```
+
+where `allocateExternalParty` is the name of the file in the macro folder to be included, minus the `.rst.macro` suffix. In this case there must be a file called `allocateExternalParty.rst.macro` in the macro folder.
+`offline_party_replication` is the usual "scenario name" attached to snippets to group them together in a logical unit.
+
+The content of the macro file will be run as if it was directly declared in the RST file.
+
 ### How are the scaladoc links built for the generated Canton Console Commands and Error Codes?
 
 Links are created in the Python script `rst-preprocessor.py` when generating the Canton Console Commands and Error

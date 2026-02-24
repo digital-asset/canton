@@ -249,27 +249,31 @@ class ViewMessageDecrypterTest extends BaseTestWordSpec with HasExecutionContext
         .futureValueUS shouldBe Right(true)
       jceCrypto.cryptoPrivateStore.removePrivateKey(fingerprint).futureValueUS.value
 
-      loggerFactory.assertInternalErrorAsyncUS[IllegalArgumentException](
-        decrypter.decryptViews(onlyChildEnvelopes).value,
-        _.getMessage shouldBe s"Can't decrypt the randomness of the view with hash ${encryptedViewMessage(child).viewHash} where I'm allegedly an informee. " +
-          s"PrivateKeyStoreVerificationError(FailedToReadKey(keyId = $fingerprint, reason = matching private key does not exist))",
-      )
+      loggerFactory
+        .assertInternalErrorAsyncUS[IllegalArgumentException](
+          decrypter.decryptViews(onlyChildEnvelopes).value,
+          _.getMessage shouldBe s"Can't decrypt the randomness of the view with hash ${encryptedViewMessage(child).viewHash} where I'm allegedly an informee. " +
+            s"PrivateKeyStoreVerificationError(FailedToReadKey(keyId = $fingerprint, reason = matching private key does not exist))",
+        )
+        .futureValueUS
     }
 
-    // TODO(#30503): check why ´ViewMessageDecrypter#storeRandomness` is only called with the randomness from the envelope
-    //  and not also with the randomness from `parentView.subviewHashesAndKeys`.
-    "fail if the randomness of an EncryptedViewMessage does not match the randomness in the parent tree" ignore {
+    "fail if the randomness of an EncryptedViewMessage does not match the randomness in the parent tree" in {
       // Note: It is desirable to keep the child view and discard the parent view in this case.
 
-      val dummyRandomness = SecureRandomness.fromByteString(4)(ByteString.fromHex("DEADBEEF")).value
+      val dummyRandomness = SecureRandomness
+        .fromByteString(16)(ByteString.fromHex("DEADBEEFDEADBEEFDEADBEEFDEADBEEF"))
+        .value
       val env = new Env(interceptSubviewKeyRandomness = _ => Seq(Seq(dummyRandomness), Seq.empty))
       import env.*
 
-      loggerFactory.assertInternalErrorAsyncUS[IllegalArgumentException](
-        decrypter.decryptViews(allEnvelopes).value,
-        _.getMessage shouldBe s"View ${encryptedViewMessage(child).viewHash} has different encryption keys associated with it. " +
-          s"(Previous: Some(Success(Outcome(${randomness(child)}))), new: $dummyRandomness)",
-      )
+      loggerFactory
+        .assertInternalErrorAsyncUS[IllegalArgumentException](
+          decrypter.decryptViews(allEnvelopes).value,
+          _.getMessage shouldBe s"View ${encryptedViewMessage(child).viewHash} has different encryption keys associated with it. " +
+            s"(Previous: Some(Success(Outcome(${randomness(child)}))), new: $dummyRandomness)",
+        )
+        .futureValueUS
     }
 
     "fail if different encrypted view messages contain the same view with different randomnesses" in {

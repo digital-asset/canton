@@ -470,11 +470,13 @@ private[events] object TransactionLogUpdatesConversions {
       executionContext: ExecutionContext,
   ): Future[apiEvent.CreatedEvent] = {
     val keyOpt = createdEvent.contractKey
+      .zip(createdEvent.createKeyHash)
       .zip(createdEvent.createKeyMaintainers)
-      .map { case (keyVersionedValue, maintainers) =>
+      .map { case ((keyVersionedValue, keyHash), maintainers) =>
         GlobalKeyWithMaintainers.assertBuild(
           templateId = createdEvent.templateId,
           value = keyVersionedValue.unversioned,
+          valueHash = keyHash,
           maintainers = maintainers,
           packageName = createdEvent.packageName,
         )

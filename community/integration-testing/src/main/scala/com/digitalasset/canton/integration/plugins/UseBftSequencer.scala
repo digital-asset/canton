@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.integration.plugins
 
+import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton
 import com.digitalasset.canton.UniquePortGenerator
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.StorageConfig.Memory
-import com.digitalasset.canton.config.{CantonConfig, QueryCostMonitoringConfig, TlsClientConfig}
+import com.digitalasset.canton.config.{CantonConfig, QueryCostMonitoringConfig}
 import com.digitalasset.canton.crypto.provider.jce.JcePrivateCrypto
 import com.digitalasset.canton.crypto.{Fingerprint, SigningKeySpec, SigningKeyUsage}
 import com.digitalasset.canton.integration.EnvironmentSetupPlugin

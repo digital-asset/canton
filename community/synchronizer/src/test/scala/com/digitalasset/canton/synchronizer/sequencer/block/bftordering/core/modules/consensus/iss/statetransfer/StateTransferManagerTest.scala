@@ -7,10 +7,8 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.{
-  EpochStore,
-  Genesis,
-}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Bootstrap.bootstrapEpoch
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer.StateTransferTestHelpers.{
   aBlockMetadata,
   aCommitCert,
@@ -53,6 +51,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Output,
   P2PNetworkOut,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
   BftSequencerBaseTest,
   failingCryptoProvider,
@@ -85,7 +84,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       stateTransferManager.startCatchUp(
         aMembership,
         ProgrammableUnitTestEnv.noSignatureCryptoProvider,
-        latestCompletedEpoch = Genesis.GenesisEpoch,
+        latestCompletedEpoch = aBootstrapEpoch,
         startEpoch,
       )(abort = fail(_))
       context.runPipedMessages()
@@ -107,7 +106,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       stateTransferManager.startCatchUp(
         aMembership,
         failingCryptoProvider,
-        latestCompletedEpoch = Genesis.GenesisEpoch,
+        latestCompletedEpoch = aBootstrapEpoch,
         startEpoch,
       )(abort = fail(_))
       context.extractSelfMessages() shouldBe empty
@@ -156,7 +155,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
         )
 
       // Initiate state transfer so that it's in progress.
-      val latestCompletedEpoch = Genesis.GenesisEpoch
+      val latestCompletedEpoch = aBootstrapEpoch
       val startEpoch = EpochNumber(7L)
       stateTransferManager.startCatchUp(
         aMembership,
@@ -194,7 +193,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
         )
 
       val latestCompletedEpochLocally = EpochStore.Epoch(
-        Genesis.GenesisEpochInfo, // the serving node is still at genesis
+        aBootstrapEpoch.info, // the serving node is still at genesis
         lastBlockCommits = Seq.empty,
       )
 
@@ -254,7 +253,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       context.runPipedMessages() // store ordered block data
 
       val latestCompletedEpochLocally = EpochStore.Epoch(
-        EpochInfo.mk(EpochNumber.First, startBlockNumber = BlockNumber.First, length = 1),
+        EpochInfo.forTesting(EpochNumber.First, startBlockNumber = BlockNumber.First, length = 1),
         lastBlockCommits = Seq.empty,
       )
 
@@ -305,7 +304,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       )
 
     // Initiate state transfer so that it's in progress.
-    val latestCompletedEpochLocally = Genesis.GenesisEpoch
+    val latestCompletedEpochLocally = aBootstrapEpoch
     stateTransferManager.startCatchUp(
       aMembership,
       ProgrammableUnitTestEnv.noSignatureCryptoProvider,
@@ -395,7 +394,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
       )
 
     // Initiate state transfer so that it's in progress.
-    val latestCompletedEpochLocally = Genesis.GenesisEpoch
+    val latestCompletedEpochLocally = aBootstrapEpoch
     stateTransferManager.startCatchUp(
       aMembership,
       ProgrammableUnitTestEnv.noSignatureCryptoProvider,
@@ -443,7 +442,7 @@ class StateTransferManagerTest extends AnyWordSpec with BftSequencerBaseTest {
         fakeModuleExpectingSilence // we don't expect any outbound communication
       )
 
-    val latestCompletedEpochLocally = Genesis.GenesisEpoch
+    val latestCompletedEpochLocally = aBootstrapEpoch
 
     val aBlockTransferResponse =
       StateTransferMessage.BlockTransferResponse.create(commitCertificate = None, from = otherId)
@@ -539,4 +538,5 @@ object StateTransferManagerTest {
     previousCryptoProvider = failingCryptoProvider,
     aMembership.leaders,
   )
+  private val aBootstrapEpoch = bootstrapEpoch(TestBootstrapTopologyActivationTime)
 }

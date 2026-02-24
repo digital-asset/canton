@@ -120,6 +120,7 @@ da_scala_test(
         "//canton:crypto",
         "//canton/community/daml-lf/api-type-signature",
         "//canton/community/daml-lf/data",
+        "//canton/community/daml-lf/interpreter",
         "//canton/community/daml-lf/language",
         "//canton/community/daml-lf/transaction:transaction-test-lib",
         "@maven//:com_google_protobuf_protobuf_java",

@@ -41,7 +41,6 @@ import com.digitalasset.canton.logging.{
   NamedLoggerFactory,
   NamedLogging,
   SuppressingLogger,
-  SuppressionRule,
   TracedLogger,
 }
 import com.digitalasset.canton.metrics.CommonMockMetrics
@@ -55,6 +54,7 @@ import com.digitalasset.canton.protocol.{
   SynchronizerParametersLookup,
   TestSynchronizerParameters,
   v30 as protocolV30,
+  v31 as protocolV31,
 }
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencer.api.v30.SequencerAuthenticationServiceGrpc.SequencerAuthenticationService
@@ -400,6 +400,7 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
           Option.when(!useNewConnectionPool)(expectedSequencers),
           connectionPool = connectionPool,
         )
+        .leftMap(error => error.toString)
     } yield {
       clients.updateAndGet(client +: _)
       client
@@ -523,68 +524,66 @@ class GrpcSequencerIntegrationTest
       result.futureValue
     }
 
-    "retry sequencer client creation if traffic state BFT read is unsuccessful" in { env =>
-      import env.*
-      val sequencerId2 = SequencerId(UniqueIdentifier.tryCreate("sequencer2", namespace))
-      val sequencer2ConnectService = env.makeConnectService(sequencerId2)
-      val port2 = UniquePortGenerator.next
-      val sequencerAlias2 = SequencerAlias.tryCreate("Sequencer2")
-      val trafficStateRpcCalled = new AtomicInteger(0)
-      val service2 =
-        new GrpcSequencerService(
-          sequencer,
-          SequencerTestMetrics,
-          env.loggerFactory,
-          authenticationCheck,
-          new SubscriptionPool[GrpcManagedSubscription[?]](
-            clock,
+    "return retryable error on sequencer client creation if traffic state BFT read is unsuccessful" in {
+      env =>
+        import env.*
+        val sequencerId2 = SequencerId(UniqueIdentifier.tryCreate("sequencer2", namespace))
+        val sequencer2ConnectService = env.makeConnectService(sequencerId2)
+        val port2 = UniquePortGenerator.next
+        val sequencerAlias2 = SequencerAlias.tryCreate("Sequencer2")
+        val trafficStateRpcCalled = new AtomicInteger(0)
+        val service2 =
+          new GrpcSequencerService(
+            sequencer,
             SequencerTestMetrics,
-            PositiveInt.three,
-            env.timeouts,
             env.loggerFactory,
-          ),
-          sequencerSubscriptionFactory,
-          synchronizerParamsLookup,
-          params,
-          topologyStateForInitializationService,
-          BaseTest.testedProtocolVersion,
-        ) {
-          override def getTrafficStateForMember(
-              request: v30.GetTrafficStateForMemberRequest
-          ): Future[v30.GetTrafficStateForMemberResponse] =
-            if (trafficStateRpcCalled.getAndIncrement() == 0) {
-              // Return an empty traffic state instead of a None at the start
-              // We should observe retries of the client factory until both sequencers report the same traffic state
-              Future.successful(
-                v30.GetTrafficStateForMemberResponse(Some(TrafficState.empty.toProtoV30))
-              )
-            } else {
-              Future.successful(
-                v30.GetTrafficStateForMemberResponse(None)
-              )
-            }
-        }
+            authenticationCheck,
+            new SubscriptionPool[GrpcManagedSubscription[?]](
+              clock,
+              SequencerTestMetrics,
+              PositiveInt.three,
+              env.timeouts,
+              env.loggerFactory,
+            ),
+            sequencerSubscriptionFactory,
+            synchronizerParamsLookup,
+            params,
+            topologyStateForInitializationService,
+            BaseTest.testedProtocolVersion,
+          ) {
+            override def getTrafficStateForMember(
+                request: v30.GetTrafficStateForMemberRequest
+            ): Future[v30.GetTrafficStateForMemberResponse] =
+              if (trafficStateRpcCalled.getAndIncrement() == 0) {
+                // Return an empty traffic state instead of a None at the start
+                // We should observe retries of the client factory until both sequencers report the same traffic state
+                Future.successful(
+                  v30.GetTrafficStateForMemberResponse(Some(TrafficState.empty.toProtoV30))
+                )
+              } else {
+                Future.successful(
+                  v30.GetTrafficStateForMemberResponse(None)
+                )
+              }
+          }
 
-      env.spinUpSequencer(service2, sequencer2ConnectService, port2)
+        env.spinUpSequencer(service2, sequencer2ConnectService, port2)
 
-      // We need an event in the event store otherwise the factory will skip the traffic state call
-      val now = clock.now
-      val dummyEvent = SequencedEventWithTraceContext(
-        SignedContent(
-          SequencerTestUtils.mockDeliver(now, synchronizerId = synchronizerId),
-          SymbolicCrypto.emptySignature,
-          None,
-          testedProtocolVersion,
+        // We need an event in the event store otherwise the factory will skip the traffic state call
+        val now = clock.now
+        val dummyEvent = SequencedEventWithTraceContext(
+          SignedContent(
+            SequencerTestUtils.mockDeliver(now, synchronizerId = synchronizerId),
+            SymbolicCrypto.emptySignature,
+            None,
+            testedProtocolVersion,
+          )
+        )(
+          TraceContext.empty
         )
-      )(
-        TraceContext.empty
-      )
-      sequencedEventStore.store(Seq(dummyEvent))(traceContext, closeContext).futureValueUS
+        sequencedEventStore.store(Seq(dummyEvent))(traceContext, closeContext).futureValueUS
 
-      env.loggerFactory.assertLogs(
-        SuppressionRule.Level(Level.INFO) && SuppressionRule.forLogger[SequencerClientFactory]
-      )(
-        makeClient(
+        val result = makeClient(
           SequencerConnections
             .many(
               NonEmpty.mk(Seq, connection, makeConnection(port2, sequencerAlias2)),
@@ -597,17 +596,11 @@ class GrpcSequencerIntegrationTest
           expectedSequencers = NonEmpty
             .mk(Set, SequencerAlias.Default -> sequencerId, sequencerAlias2 -> sequencerId2)
             .toMap,
-        ).futureValueUS,
-        assertions = _.infoMessage should include("Initializing traffic state at timestamp:"),
-        _.infoMessage should include(
-          "Cannot reach threshold for Retrieving traffic state from synchronizer"
-        ),
-        _.infoMessage should include(
-          "The operation 'Traffic State Initialization' was not successful"
-        ),
-        _.infoMessage should include("Now retrying operation 'Traffic State Initialization'"),
-      )
+        ).leftOrFail("Expected client creation to fail due to traffic state mismatch")
 
+        result.futureValueUS should (include("RetryableError") and not(
+          include("NonRetryableError")
+        ))
     }
   }
 
@@ -624,6 +617,9 @@ class GrpcSequencerIntegrationTest
 
     override def toProtoSomeEnvelopeContentV30: protocolV30.EnvelopeContent.SomeEnvelopeContent =
       protocolV30.EnvelopeContent.SomeEnvelopeContent.Empty
+
+    override def toProtoSomeEnvelopeContentV31: protocolV31.EnvelopeContent.SomeEnvelopeContent =
+      protocolV31.EnvelopeContent.SomeEnvelopeContent.Empty
   }
 }
 

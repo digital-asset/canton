@@ -10,7 +10,7 @@ import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.AuthenticatedMessageType
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.IssConsensusModuleMetrics.emitNonCompliance
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Bootstrap
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer.StateTransferMessageValidator.StateTransferValidationResult.{
   DropResult,
   InvalidResult,
@@ -117,7 +117,7 @@ final class StateTransferMessageValidator[E <: Env[E]](
   ): Either[String, Unit] =
     for {
       _ <- Either.cond(
-        request.epoch > Genesis.GenesisEpochNumber,
+        request.epoch > Bootstrap.BootstrapEpochNumber,
         (),
         s"state transfer is supported only after genesis, but start epoch ${request.epoch} received",
       )

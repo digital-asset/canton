@@ -16,7 +16,10 @@ import com.digitalasset.canton.integration.plugins.{
   UseProgrammableSequencer,
   UseReferenceBlockSequencer,
 }
-import com.digitalasset.canton.integration.tests.util.{CommitmentTestUtil, IntervalDuration}
+import com.digitalasset.canton.integration.tests.acs.commitment.util.{
+  CommitmentTestUtil,
+  IntervalDuration,
+}
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,

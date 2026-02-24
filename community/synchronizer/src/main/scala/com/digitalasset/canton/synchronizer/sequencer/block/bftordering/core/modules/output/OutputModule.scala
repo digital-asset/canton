@@ -751,7 +751,7 @@ class OutputModule[E <: Env[E]](
       //  (and successfully processed and applied by the topology processor).
       pipeToSelf(
         orderingTopologyProvider.getOrderingTopologyAt(
-          TopologyActivationTime(epochEndBftTime.immediateSuccessor),
+          Some(TopologyActivationTime(epochEndBftTime.immediateSuccessor)),
           checkPendingChanges = true,
         ),
         metrics.topology.queryLatency,

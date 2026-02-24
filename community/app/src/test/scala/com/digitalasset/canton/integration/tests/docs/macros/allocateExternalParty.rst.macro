@@ -1,0 +1,50 @@
+    .. hidden:: val tmpDir = better.files.File(s"/tmp/canton/docs/external_party").createDirectories()
+    .. hidden:: (tmpDir / "synchronizer_id").createFileIfNotExists().write(synchronizerId.toProtoPrimitive)
+    .. hidden:: (tmpDir / "lapi_port").createFileIfNotExists().write(participant1.config.httpLedgerApi.port.unwrap.toString)
+    .. shell-hidden:: TMP_DIR=$(echo "/tmp/canton/docs/external_party")
+    .. shell-hidden:: SYNCHRONIZER_ID=$(cat $TMP_DIR/synchronizer_id)
+    .. shell-hidden:: PARTICIPANT1=$(echo "localhost:$(cat $TMP_DIR/lapi_port)")
+    .. shell-hidden:: openssl genpkey -algorithm ed25519 -outform DER -out private_key.der
+    .. shell-hidden:: openssl pkey -in private_key.der -pubout -outform DER -out public_key.der 2> /dev/null
+    .. shell-hidden:: PUBLIC_KEY_BASE64=$(base64 -w 0 -i public_key.der)
+    .. shell-hidden:: GENERATE=$(cat << EOF
+    {
+    "synchronizer" : "$SYNCHRONIZER_ID",
+    "partyHint" : "Alice",
+    "publicKey" : {
+    "format" : "CRYPTO_KEY_FORMAT_DER_X509_SUBJECT_PUBLIC_KEY_INFO",
+    "keyData": "$PUBLIC_KEY_BASE64",
+    "keySpec" : "SIGNING_KEY_SPEC_EC_CURVE25519"
+    },
+    "otherConfirmingParticipantUids" : []
+    }
+    EOF
+    )
+    .. shell-hidden:: ONBOARDING_TX=$(curl -f -sS -d "$GENERATE" -H "Content-Type: application/json" \
+        -X POST ${PARTICIPANT1}/v2/parties/external/generate-topology)
+    .. shell-hidden:: PARTY_ID=$(echo $ONBOARDING_TX | jq -r .partyId)
+    .. shell-hidden:: TRANSACTIONS=$(echo $ONBOARDING_TX | jq '.topologyTransactions | map({ transaction : .})')
+    .. shell-hidden:: PUBLIC_KEY_FINGERPRINT=$(echo $ONBOARDING_TX | jq -r .publicKeyFingerprint)
+    .. shell-hidden:: MULTI_HASH=$(echo $ONBOARDING_TX | jq -r .multiHash)
+    .. shell-hidden:: echo $MULTI_HASH | base64 --decode > hash_binary.bin
+    .. shell-hidden:: openssl pkeyutl -sign -inkey private_key.der -rawin -in hash_binary.bin -out signature.bin -keyform DER
+    .. shell-hidden:: SIGNATURE=$(base64 -w 0 < signature.bin)
+    .. shell-hidden:: ALLOCATE=$(cat << EOF
+    {
+    "synchronizer" : "$SYNCHRONIZER_ID",
+    "onboardingTransactions": $TRANSACTIONS,
+    "multiHashSignatures": [
+    {
+    "format" : "SIGNATURE_FORMAT_CONCAT",
+    "signature": "$SIGNATURE",
+    "signedBy" : "$PUBLIC_KEY_FINGERPRINT",
+    "signingAlgorithmSpec" : "SIGNING_ALGORITHM_SPEC_ED25519"
+    }
+    ]
+    }
+    EOF
+    )
+    .. shell-hidden:: curl -f -sS -d "$ALLOCATE" -H "Content-Type: application/json" \
+        -X POST ${PARTICIPANT1}/v2/parties/external/allocate
+    .. shell-hidden:: echo $PARTY_ID > $TMP_DIR/external_party_id
+    .. hidden:: val externalParty = PartyId.tryFromProtoPrimitive((tmpDir / "external_party_id").contentAsString.trim)

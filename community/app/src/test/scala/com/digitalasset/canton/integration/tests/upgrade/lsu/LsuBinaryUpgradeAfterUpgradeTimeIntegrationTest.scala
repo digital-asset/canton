@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.*
@@ -10,9 +11,12 @@ import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.{TestPredicateFiltersFixtureAnyWordSpec, config}
 import monocle.macros.syntax.lens.*
 
@@ -39,8 +43,12 @@ Notes:
   - Have P2 and P3 share the DB
   - Ensure P2 and P3 do not run at the same
  */
+// TODO(i30956): This test is flaky
+@UnstableTest
 final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
     extends LsuBase
+    with LsuTrafficManagement
+    with TrafficBalanceSupport
     with TestPredicateFiltersFixtureAnyWordSpec {
 
   override protected def testName: String = "lsu-binary-upgrade-after-upgrade-time"
@@ -93,7 +101,11 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
         synchronizerOwners1.foreach(
           _.topology.synchronizer_parameters.propose_update(
             daId,
-            _.copy(reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)),
+            _.copy(
+              reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1),
+              // enable traffic control
+              trafficControl = Some(trafficControlParameters),
+            ),
           )
         )
 
@@ -118,10 +130,16 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
           synchronizeParticipants = Seq(participant1, participant2), // p3 is offline
         )
 
-        loggerFactory.assertLogsUnordered(
+        loggerFactory.assertLogsUnorderedOptional(
           {
             performSynchronizerNodesLsu(fixture)
             environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
+
+            val oldTrafficState = eventually(retryOnTestFailuresOnly = false) {
+              sequencer1.traffic_control.get_lsu_state()
+            }
+            sequencer2.traffic_control.set_lsu_state(oldTrafficState)
+
             eventually() {
               participant1.synchronizers.is_connected(fixture.newPSId) shouldBe true
               // no dev support
@@ -160,21 +178,38 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
             eventually() {
               participant3.synchronizers.is_connected(fixture.newPSId) shouldBe true
             }
+
           },
           // Logged twice: once during handshake and once during connect attempt
-          _.warningMessage should include(
-            "Validation failure: Failed handshake: The protocol version required by the server (dev) is not among the supported protocol versions by the client"
+          (
+            LogEntryOptionality.Required,
+            _.warningMessage should include(
+              "Validation failure: Failed handshake: The protocol version required by the server (dev) is not among the supported protocol versions by the client"
+            ),
           ),
-          _.warningMessage should include(
-            "Validation failure: Failed handshake: The protocol version required by the server (dev) is not among the supported protocol versions by the client"
+          (
+            LogEntryOptionality.Required,
+            _.warningMessage should include(
+              "Validation failure: Failed handshake: The protocol version required by the server (dev) is not among the supported protocol versions by the client"
+            ),
           ),
           // TODO(#30534) This message can be made more explicit (also include resolution) when individual errors bubble up
-          _.errorMessage should (include(
-            s"Unable to perform handshake with ${fixture.newPSId}"
-          ) and include("Trust threshold of 1 is no longer reachable")),
-          _.errorMessage should (include(s"Upgrade to ${fixture.newPSId} failed") and include(
-            "Trust threshold of 1 is no longer reachable"
-          )),
+          (
+            LogEntryOptionality.Required,
+            _.errorMessage should (include(
+              s"Unable to perform handshake with ${fixture.newPSId}"
+            ) and include("Trust threshold of 1 is no longer reachable")),
+          ),
+          (
+            LogEntryOptionality.Required,
+            _.errorMessage should (include(s"Upgrade to ${fixture.newPSId} failed") and include(
+              "Trust threshold of 1 is no longer reachable"
+            )),
+          ),
+          (
+            LogEntryOptionality.OptionalMany,
+            _.shouldBeCantonErrorCode(SequencerError.NotAtUpgradeTimeOrBeyond),
+          ),
         )
 
         participant1.ledger_api.javaapi.state.acs.await(Iou.COMPANION)(

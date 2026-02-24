@@ -230,8 +230,8 @@ class SuppressingLogger private[logging] (
     for {
       _ <- assertLogs(
         within.transform {
-          case Success(_) =>
-            fail(s"An exception of type $c was expected, but no exception was thrown.")
+          case Success(x) =>
+            fail(s"An exception of type $c was expected, but instead a value was returned: $x")
           case Failure(c(t)) => Success(UnlessShutdown.Outcome(assertion(t)))
           case Failure(t) => fail(s"Exception has wrong type. Expected type: $c.", t)
         }(directExecutionContext),

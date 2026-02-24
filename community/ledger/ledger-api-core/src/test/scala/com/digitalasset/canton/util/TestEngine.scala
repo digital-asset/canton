@@ -20,6 +20,7 @@ import com.digitalasset.canton.logging.NoLogging.noTracingLogger
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.TestContractHasher.SyncContractHasher
 import com.digitalasset.canton.util.TestEngine.{InMemoryPackageStore, TxAndMeta}
 import com.digitalasset.daml.lf.archive
@@ -70,8 +71,12 @@ class TestEngine(
     validateUpgradingPackageResolutions = validateUpgradingPackageResolutions
   )
 
-  val packageResolver: PackageId => TraceContext => FutureUnlessShutdown[Option[Package]] =
-    packageId => _ => FutureUnlessShutdown.pure(packageStore.getPackage(packageId))
+  val packageResolver: PackageResolver = new PackageResolver {
+    override protected def resolveInternal(packageId: PackageId)(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Option[Package]] =
+      FutureUnlessShutdown.pure(packageStore.getPackage(packageId))
+  }
 
   val packageStore: InMemoryPackageStore = packagePaths.foldLeft(InMemoryPackageStore()) { (s, p) =>
     s.withDarFile(new File(p)).value
@@ -373,7 +378,11 @@ object TestEngine extends FutureHelpers with EitherValues {
       private val ec =
         Threading.singleThreadedExecutor("TestEngine.syncContractHasher", noTracingLogger)
       override def hash(create: LfNodeCreate, hashingMethod: Hash.HashingMethod): LfHash =
-        hasher.hash(create, hashingMethod)(ec, TraceContext.empty).value.futureValueUS.value
+        hasher
+          .hash(create, hashingMethod, PackageResolver.ignoreMissingPackage)(ec, TraceContext.empty)
+          .value
+          .futureValueUS
+          .value
     }
   }
 

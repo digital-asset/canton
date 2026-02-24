@@ -183,7 +183,7 @@ trait TopologyStateLookup extends TopologyStateLookupByNamespace {
       asOfInclusive: Boolean,
       uid: UniqueIdentifier,
       transactionTypes: Set[Code],
-      op: TopologyChangeOp = TopologyChangeOp.Replace,
+      op: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
       warnIfUncached: Boolean = false,
   )(implicit
       traceContext: TraceContext
@@ -211,7 +211,7 @@ trait TopologyStateLookup extends TopologyStateLookupByNamespace {
       asOfInclusive: Boolean,
       uid: NonEmpty[Seq[UniqueIdentifier]],
       transactionTypes: Set[Code],
-      op: TopologyChangeOp = TopologyChangeOp.Replace,
+      op: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
       warnIfUncached: Boolean = false,
   )(implicit
       traceContext: TraceContext,
@@ -870,7 +870,7 @@ class TopologyStateWriteThroughCache(
       asOfInclusive: Boolean,
       uid: UniqueIdentifier,
       transactionTypes: Set[Code],
-      op: TopologyChangeOp,
+      op: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
       warnIfUncached: Boolean = false,
   )(implicit
       traceContext: TraceContext
@@ -912,7 +912,8 @@ class TopologyStateWriteThroughCache(
     transactionTypes.toSeq
       .map(StateKey(_, ns, None))
       .parFlatTraverse(
-        get(_, asOf.value, warnIfUncached).map(_.currentState.filterState(asOf, asOfInclusive, op))
+        get(_, asOf.value, warnIfUncached)
+          .map(_.currentState.filterState(asOf, asOfInclusive, Some(op)))
       )
 
   override def lookupForNamespaces(
@@ -1266,7 +1267,7 @@ object TopologyStateWriteThroughCache {
     def filterState(
         asOf: EffectiveTime,
         asOfInclusive: Boolean,
-        op: TopologyChangeOp,
+        op: Option[TopologyChangeOp],
     )(implicit errorLoggingContext: ErrorLoggingContext): Seq[GenericStoredTopologyTransaction] = {
       ErrorUtil.requireState(
         validUntilInclusive.value <= asOf.value,
@@ -1276,7 +1277,7 @@ object TopologyStateWriteThroughCache {
         tail.iterator.takeWhile(_.validUntil.exists(_.value >= asOf.value))
       headAndTail.filter { tx =>
         tx.isActiveAsOf(asOf = asOf, asOfInclusive = asOfInclusive) &&
-        !tx.transaction.isProposal && op == tx.transaction.operation
+        !tx.transaction.isProposal && op.forall(_ == tx.transaction.operation)
         && tx.rejectionReason.isEmpty
       }.toSeq
     }

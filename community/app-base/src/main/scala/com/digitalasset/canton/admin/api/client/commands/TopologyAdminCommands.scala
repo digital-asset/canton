@@ -658,23 +658,23 @@ object TopologyAdminCommands {
       override def timeoutType: TimeoutType = DefaultUnboundedTimeout
     }
 
-    final case class LogicalUpgradeState(
+    final case class SequencerLsuState(
         store: Option[TopologyStoreId],
-        observer: StreamObserver[LogicalUpgradeStateResponse],
+        observer: StreamObserver[SequencerLsuStateResponse],
     ) extends BaseCommand[
-          v30.LogicalUpgradeStateRequest,
+          v30.SequencerLsuStateRequest,
           CancellableContext,
           CancellableContext,
         ] {
-      override protected def createRequest(): Either[String, v30.LogicalUpgradeStateRequest] =
-        Right(v30.LogicalUpgradeStateRequest(store.map(_.toProtoV30)))
+      override protected def createRequest(): Either[String, v30.SequencerLsuStateRequest] =
+        Right(v30.SequencerLsuStateRequest(store.map(_.toProtoV30)))
 
       override protected def submitRequest(
           service: TopologyManagerReadServiceStub,
-          request: v30.LogicalUpgradeStateRequest,
+          request: v30.SequencerLsuStateRequest,
       ): Future[CancellableContext] = {
         val context = Context.current().withCancellation()
-        context.run(() => service.logicalUpgradeState(request, observer))
+        context.run(() => service.sequencerLsuState(request, observer))
         Future.successful(context)
       }
 

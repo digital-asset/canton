@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.apiserver
 
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.ledger.resources.ResourceOwner
+import com.daml.tls.TlsServerConfig
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.auth.*
 import com.digitalasset.canton.config.*

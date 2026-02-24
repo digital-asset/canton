@@ -19,7 +19,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.{v30, v31}
 import com.digitalasset.canton.sequencing.protocol.{ClosedEnvelope, OpenEnvelope}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -108,6 +108,8 @@ object ProtocolMessage {
 /** Marker trait for [[ProtocolMessage]]s that are not a [[SignedProtocolMessage]] */
 trait UnsignedProtocolMessage extends ProtocolMessage {
   protected[messages] def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent
+
+  protected[messages] def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent
 }
 
 /** There can be any number of signatures. Every signature covers the serialization of the

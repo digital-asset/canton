@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.variations
 
-import com.daml.tls.TlsVersion
+import com.daml.tls.{TlsServerConfig, TlsVersion}
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
 import com.digitalasset.canton.integration.plugins.*

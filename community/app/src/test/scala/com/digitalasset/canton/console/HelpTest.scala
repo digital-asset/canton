@@ -5,6 +5,7 @@ package com.digitalasset.canton.console
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.console.Help.forInstance
+import com.digitalasset.canton.environment.CommunityEnvironmentFixture.captureStdout
 import org.scalatest.funsuite.AnyFunSuite
 
 class HelpTest extends AnyFunSuite with BaseTest {
@@ -174,4 +175,34 @@ class HelpTest extends AnyFunSuite with BaseTest {
     )
   }
 
+  test("Documentation: @Summary should warn on newlines, full stops, or excessive length") {
+    val output = captureStdout {
+      // Direct instantiation triggers the 'if'-validation-blocks in the Summary class body
+      Help.Summary("Has a newline\n")
+      Help.Summary("Ends with a period.")
+      Help.Summary("This summary is way too long. " + "(╯°□°)╯︵ ┻━┻" * 42)
+    }
+
+    output should include(
+      "[DOC WARNING] @Summary: The summary 'Has a newline\n' must be a single line"
+    )
+    output should include(
+      "[DOC WARNING] @Summary: The summary 'Ends with a period.' must not end in a full stop"
+    )
+    output should include("exceeds 120 characters")
+  }
+
+  test("Documentation: @Description should warn on lines exceeding 89 characters") {
+    val output = captureStdout {
+      // Direct instantiation triggers the linesIterator logic
+      Help.Description("""This description line is fine.
+        |
+        |This line is very long. It definitely exceeds the limit of eighty-nine characters that is enforced in the console help generator logic."
+        |Another fine description line.""".stripMargin)
+    }
+
+    output should include("[DOC WARNING] @Description: Line exceeds 89 characters.")
+    output should include("Location: Line 3")
+    output should include("Length:   136")
+  }
 }

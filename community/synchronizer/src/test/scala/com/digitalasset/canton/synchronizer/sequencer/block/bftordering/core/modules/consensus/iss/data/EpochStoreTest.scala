@@ -14,7 +14,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   Epoch,
   EpochInProgress,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis.GenesisEpoch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
@@ -61,7 +60,7 @@ trait EpochStoreTest extends AsyncWordSpec {
         val blockNumber0 = 9L
         val prePrepare0 = prePrepare(EpochNumber.First, blockNumber0)
         val commitMessages0 = commitMessages(EpochNumber.First, blockNumber0)
-        val epochInfo0 = EpochInfo.mk(
+        val epochInfo0 = EpochInfo.forTesting(
           number = EpochNumber.First,
           startBlockNumber = BlockNumber.First,
           length = 10L,
@@ -75,7 +74,7 @@ trait EpochStoreTest extends AsyncWordSpec {
         val prePrepare1 = prePrepare(epochNumber1, 19L)
         val commitMessages1 = commitMessages(epochNumber1, 19L)
 
-        val epochInfo1 = EpochInfo.mk(
+        val epochInfo1 = EpochInfo.forTesting(
           number = epochNumber1,
           startBlockNumber = 10L,
           length = 10L,
@@ -89,12 +88,13 @@ trait EpochStoreTest extends AsyncWordSpec {
           _ <- store.startEpoch(epochInfo0)
           // idempotent writes are supported
           _ <- store.startEpoch(epochInfo0)
-          _ <- store.addOrderedBlockAtomically(prePrepare0, commitMessages0)
-          // idempotent writes are supported
-          _ <- store.addOrderedBlockAtomically(prePrepare0, commitMessages0)
 
           e0 <- store.latestEpoch(includeInProgress = false)
           e1 <- store.latestEpoch(includeInProgress = true)
+
+          _ <- store.addOrderedBlockAtomically(prePrepare0, commitMessages0)
+          // idempotent writes are supported
+          _ <- store.addOrderedBlockAtomically(prePrepare0, commitMessages0)
           e2 <- store.loadEpochInfo(EpochNumber.First)
 
           _ <- store.completeEpoch(epochInfo0.number)
@@ -114,16 +114,17 @@ trait EpochStoreTest extends AsyncWordSpec {
           e10 <- store.loadEpochInfo(epochInfo1.number)
           e11 <- store.loadEpochInfo(EpochNumber(1500L))
         } yield {
-          e0 shouldBe GenesisEpoch
-          e1 shouldBe epoch0
+          e0 shouldBe None
+          // Check that epochs can be loaded even if they don't have `lastBlockCommits`
+          e1 shouldBe Some(epoch0.copy(lastBlockCommits = Seq.empty))
           e2 shouldBe Some(epochInfo0)
-          e3 shouldBe epoch0
-          e4 shouldBe epoch0
-          e5 shouldBe epoch0
-          e6 shouldBe epoch0
+          e3 shouldBe Some(epoch0)
+          e4 shouldBe Some(epoch0)
+          e5 shouldBe Some(epoch0)
+          e6 shouldBe Some(epoch0)
           e7 shouldBe Some(epochInfo0)
-          e8 shouldBe epoch0
-          e9 shouldBe epoch1
+          e8 shouldBe Some(epoch0)
+          e9 shouldBe Some(epoch1)
           e10 shouldBe Some(epochInfo1)
           e11 shouldBe None
         }
@@ -131,14 +132,14 @@ trait EpochStoreTest extends AsyncWordSpec {
     }
 
     "latestEpoch" should {
-      "return the genesisEpoch initially" in {
+      "return None initially" in {
         val store = createStore()
         for {
           e0 <- store.latestEpoch(includeInProgress = false)
           e1 <- store.latestEpoch(includeInProgress = true)
         } yield {
-          e0 shouldBe GenesisEpoch
-          e1 shouldBe GenesisEpoch
+          e0 shouldBe None
+          e1 shouldBe None
         }
       }
     }
@@ -146,8 +147,8 @@ trait EpochStoreTest extends AsyncWordSpec {
     "addOrderedBlock" should {
       "create and retrieve EpochInProgress" in {
         val store = createStore()
-        val activeEpoch0Info = EpochInfo.mk(EpochNumber.First, BlockNumber.First, 10)
-        val activeEpoch1Info = EpochInfo.mk(1L, 10L, 10)
+        val activeEpoch0Info = EpochInfo.forTesting(EpochNumber.First, BlockNumber.First, 10)
+        val activeEpoch1Info = EpochInfo.forTesting(1L, 10L, 10)
 
         def addOrderedBlock(
             epochNumber: Long,
@@ -252,10 +253,10 @@ trait EpochStoreTest extends AsyncWordSpec {
     "loadPrePrepares" should {
       "load pre-prepares" in {
         val store = createStore()
-        val epoch0 = EpochInfo.mk(EpochNumber.First, BlockNumber.First, 1)
-        val epoch1 = EpochInfo.mk(1L, 1L, 1)
-        val epoch2 = EpochInfo.mk(2L, 2L, 2)
-        val epoch3 = EpochInfo.mk(3L, 3L, 3)
+        val epoch0 = EpochInfo.forTesting(EpochNumber.First, BlockNumber.First, 1)
+        val epoch1 = EpochInfo.forTesting(1L, 1L, 1)
+        val epoch2 = EpochInfo.forTesting(2L, 2L, 2)
+        val epoch3 = EpochInfo.forTesting(3L, 3L, 3)
         for {
           _ <- store.startEpoch(epoch0)
           _ <- store.addOrderedBlockAtomically(
@@ -301,7 +302,7 @@ trait EpochStoreTest extends AsyncWordSpec {
     "loadOrderedBlocks" should {
       "load ordered blocks" in {
         val store = createStore()
-        val epoch0 = EpochInfo.mk(EpochNumber.First, BlockNumber.First, length = 2)
+        val epoch0 = EpochInfo.forTesting(EpochNumber.First, BlockNumber.First, length = 2)
 
         val expectedOrderedBlocks =
           Seq(
@@ -329,9 +330,9 @@ trait EpochStoreTest extends AsyncWordSpec {
     "prune" should {
       "delete epochs, messages for completed blocks and messages for in progress block" in {
         val store = createStore()
-        val epoch0 = EpochInfo.mk(EpochNumber.First, BlockNumber.First, length = 2)
-        val epoch1 = EpochInfo.mk(1L, 1L, 1)
-        val epoch2 = EpochInfo.mk(2L, 2L, 2)
+        val epoch0 = EpochInfo.forTesting(EpochNumber.First, BlockNumber.First, length = 2)
+        val epoch1 = EpochInfo.forTesting(1L, 1L, 1)
+        val epoch2 = EpochInfo.forTesting(2L, 2L, 2)
         for {
           numberOfRecords0 <- store.loadNumberOfRecords
           _ = numberOfRecords0 shouldBe (EpochStore.NumberOfRecords.empty)

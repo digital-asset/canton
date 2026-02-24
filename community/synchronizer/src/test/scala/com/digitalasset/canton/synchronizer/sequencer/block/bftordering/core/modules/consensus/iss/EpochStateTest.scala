@@ -53,7 +53,7 @@ class EpochStateTest extends AsyncWordSpec with BftSequencerBaseTest {
     "return the last block's completed commit messages" when {
       "created with the last block already completed" in {
         val epochInfo =
-          EpochInfo.mk(
+          EpochInfo.forTesting(
             number = EpochNumber.First,
             startBlockNumber = BlockNumber.First,
             length = 7,
@@ -89,7 +89,7 @@ class EpochStateTest extends AsyncWordSpec with BftSequencerBaseTest {
 
     "complete epoch once all blocks are stored" in {
       val epochInfo =
-        EpochInfo.mk(
+        EpochInfo.forTesting(
           number = EpochNumber.First,
           startBlockNumber = BlockNumber.First,
           length = 7,

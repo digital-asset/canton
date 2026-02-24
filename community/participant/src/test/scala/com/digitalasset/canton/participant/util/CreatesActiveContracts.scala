@@ -15,6 +15,7 @@ import com.digitalasset.canton.topology.{DefaultTestIdentities, PhysicalSynchron
 import com.digitalasset.canton.util.TestContractHasher
 import com.digitalasset.canton.{BaseTest, NeedsNewLfContractIds, ReassignmentCounter}
 import com.digitalasset.daml.lf
+import com.google.protobuf.ByteString
 
 /** Helper that allows unit tests to create active contracts for testing.
   */
@@ -77,6 +78,7 @@ private[participant] trait CreatesActiveContracts {
           contractId = contractId.coid,
           templateId = Some(ledger.api.v2.value.Identifier(M.Cycle.PACKAGE_ID, "Cycle", "Cycle")),
           contractKey = None,
+          contractKeyHash = ByteString.EMPTY,
           createArguments = None,
           createdEventBlob = serialization,
           interfaceViews = Seq.empty,

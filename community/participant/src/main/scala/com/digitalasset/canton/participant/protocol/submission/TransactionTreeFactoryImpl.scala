@@ -31,6 +31,7 @@ import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractHasher, ErrorUtil, LfTransactionUtil, MonadUtil}
@@ -166,7 +167,7 @@ class TransactionTreeFactoryImpl(
         )
       }
 
-      rootViews <- createRootViews(rootViewDecompositions, state, contractOfId)
+      rootViews <- createRootViews(rootViewDecompositions, state, contractOfId, topologySnapshot)
 
       _ <-
         if (validatePackageVettings) {
@@ -241,6 +242,7 @@ class TransactionTreeFactoryImpl(
       decompositions: Seq[TransactionViewDecomposition.NewView],
       state: State,
       contractOfId: ContractInstanceOfId,
+      topologySnapshot: TopologySnapshot,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, Seq[TransactionView]] = {
@@ -287,7 +289,7 @@ class TransactionTreeFactoryImpl(
         MonadUtil.sequentialTraverse(
           decompositions.zip(MerkleSeq.indicesFromSeq(decompositions.size))
         ) { case (rootView, index) =>
-          createView(rootView, index +: ViewPosition.root, state, fromPreloaded)
+          createView(rootView, index +: ViewPosition.root, state, fromPreloaded, topologySnapshot)
         }
       }
   }
@@ -297,6 +299,7 @@ class TransactionTreeFactoryImpl(
       viewPosition: ViewPosition,
       state: State,
       contractOfId: ContractInstanceOfId,
+      topologySnapshot: TopologySnapshot,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, TransactionView] = {
@@ -335,7 +338,13 @@ class TransactionTreeFactoryImpl(
       _ <- MonadUtil.sequentialTraverse_(view.allNodes) {
         case childView: TransactionViewDecomposition.NewView =>
           // Compute subviews, recursively
-          createView(childView, subviewIndex.next() +: viewPosition, state, contractOfId)
+          createView(
+            childView,
+            subviewIndex.next() +: viewPosition,
+            state,
+            contractOfId,
+            topologySnapshot,
+          )
             .map { v =>
               childViewsBuilder += v
               val createdInSubview = state.createdContractsInView
@@ -361,6 +370,7 @@ class TransactionTreeFactoryImpl(
                   viewPosition,
                   createIndex,
                   state,
+                  topologySnapshot,
                 ).map { suffixedNode =>
                   coreCreatedBuilder += (suffixedNode -> rbScope)
                   createdInView += suffixedNode.coid
@@ -486,6 +496,7 @@ class TransactionTreeFactoryImpl(
       viewPosition: ViewPosition,
       createIndex: Int,
       state: State,
+      topologySnapshot: TopologySnapshot,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TransactionTreeConversionError, LfNodeCreate] = {
@@ -525,7 +536,11 @@ class TransactionTreeFactoryImpl(
         CreationTime.Now
     }
     hasher
-      .hash(createNodeWithSuffixedArg, contractIdSuffixer.contractHashingMethod)
+      .hash(
+        createNodeWithSuffixedArg,
+        contractIdSuffixer.contractHashingMethod,
+        PackageResolver.crashOnMissingPackage(topologySnapshot, participantId, state.ledgerTime),
+      )
       .map { contractHash =>
         val ContractIdSuffixer.RelativeSuffixResult(
           suffixedCreateNode,
@@ -867,7 +882,7 @@ class TransactionTreeFactoryImpl(
     for {
       decompositions <- EitherT.right(decompositionsF)
       decomposition = checked(decompositions.head)
-      view <- createView(decomposition, rootPosition, state, contractOfId)
+      view <- createView(decomposition, rootPosition, state, contractOfId, topologySnapshot)
       suffixedNodes = state.suffixedNodes() transform {
         // Recover the children
         case (nodeId, ne: LfNodeExercises) =>

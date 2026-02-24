@@ -4,7 +4,7 @@
 package com.daml.ledger.api.testtool.suites
 
 import com.daml.ledger.api.testtool.infrastructure.LedgerTestSuite
-import com.digitalasset.canton.config.TlsClientConfig
+import com.daml.tls.TlsClientConfig
 
 package object v2_dev {
   def default(timeoutScaleFactor: Double): Vector[LedgerTestSuite] =

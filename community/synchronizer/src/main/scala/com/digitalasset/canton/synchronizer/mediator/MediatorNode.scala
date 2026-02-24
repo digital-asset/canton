@@ -660,6 +660,7 @@ class MediatorNodeBootstrap(
           info.expectedSequencersO,
           connectionPool,
         )
+        .leftMap(error => s"Failed to create sequencer client: $error")
 
       sequencerClientRef =
         GrpcSequencerConnectionService

@@ -348,6 +348,8 @@ private[lf] object IdeLedgerRunner {
       warningLog = warningLog,
       commitLocation = location,
       limits = interpretation.Limits.Lenient,
+      // TODO(i30398): switch mode depending on some criterion, e.g. LF version
+      contractStateMode = ContractStateMachine.Mode.UCK,
     )
     // TODO (drsk) validate and propagate errors back to submitter
     // https://github.com/digital-asset/daml/issues/14108

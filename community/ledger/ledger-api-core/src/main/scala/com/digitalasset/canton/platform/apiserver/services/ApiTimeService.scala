@@ -26,7 +26,6 @@ import io.grpc.{ServerServiceDefinition, StatusRuntimeException}
 
 import java.time.Instant
 import scala.concurrent.{ExecutionContext, Future}
-import scala.util.{Failure, Success}
 
 private[apiserver] final class ApiTimeService(
     backend: TimeServiceBackend,
@@ -71,7 +70,7 @@ private[apiserver] final class ApiTimeService(
       expectedTime <- requirePresence(request.currentTime, "current_time")
         .map(toInstant)
       requestedTime <- requirePresence(request.newTime, "new_time").map(toInstant)
-      _ <- {
+      _ <-
         if (!requestedTime.isBefore(expectedTime))
           Either.unit
         else
@@ -80,24 +79,17 @@ private[apiserver] final class ApiTimeService(
               s"new_time [$requestedTime] is before current_time [$expectedTime]. Setting time backwards is not allowed."
             )
           )
-      }
     } yield (expectedTime, requestedTime)
-    val result: Future[Either[StatusRuntimeException, Empty]] = validatedInput match {
-      case Left(err) => Future.successful(Left(err))
+
+    val result = validatedInput match {
+      case Left(err) => Future.failed(err)
       case Right((expectedTime, requestedTime)) =>
-        updateTime(expectedTime, requestedTime) map (_.map { _ =>
-          Empty()
-        })
+        updateTime(expectedTime, requestedTime).flatMap(resultET =>
+          Future.fromTry(resultET.map(_ => Empty()).toTry)
+        )
     }
 
-    result
-      .thereafter(logger.logErrorsOnCall)
-      .transform(_.flatMap {
-        case Left(error) =>
-          logger.warn(s"Failed to set time for request $request: ${error.getMessage}")
-          Failure(error)
-        case Right(r) => Success(r)
-      })
+    result.thereafter(logger.logErrorsOnCall)
   }
 
   override def bindService(): ServerServiceDefinition =

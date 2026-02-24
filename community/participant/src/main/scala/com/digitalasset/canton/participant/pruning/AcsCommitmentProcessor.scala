@@ -1684,7 +1684,13 @@ class AcsCommitmentProcessor private (
       message: SignedProtocolMessage[AcsCommitment]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
     for {
-      cryptoSnapshot <- synchronizerCrypto.currentSnapshotApproximation
+      cryptoSnapshot <-
+        if (protocolVersion >= ProtocolVersion.v35)
+          synchronizerCrypto.awaitSnapshot(
+            message.message.period.toInclusive.forgetRefinement
+          )
+        else
+          synchronizerCrypto.currentSnapshotApproximation
       result <- message.verifySignature(cryptoSnapshot, message.typedMessage.content.sender).value
     } yield result
       .tapLeft(err => logger.error(s"Commitment signature verification failed with $err"))
@@ -2114,7 +2120,6 @@ class AcsCommitmentProcessor private (
       msgs: Seq[(ParticipantId, AcsCommitment)],
       intervalMillis: Long,
   )(implicit traceContext: TraceContext): Unit = {
-    val now = clock.now
 
     def contentsOrDefaults(delay: CommitmentSendDelay): (Double, Double) =
       (
@@ -2194,19 +2199,27 @@ class AcsCommitmentProcessor private (
     ): EitherT[FutureUnlessShutdown, CommitmentSendState, Unit] = {
       implicit val metricsContext: MetricsContext = MetricsContext("type" -> "send-commitment")
       val sendCallback = SendCallback.future
-      val approximateTimestampOverride = Some(now)
 
       for {
-        cryptoSnapshot <- EitherT.liftF(synchronizerCrypto.currentSnapshotApproximation)
-        // TODO(#22086): Currently the ACS commitment processor delays the actual sending of the submission
-        // request to avoid load spikes on the sequencer. With an interval length of 30min on CN mainnet,
-        // this means that by the time the ACS commitment reaches the counter-participant, the signature
-        // using session keys will be invalid. This can fixed by choosing the period end as the timestamp.
         signedCmtMsgs <- EitherT.right(
           msgsFiltered.parTraverse { case (participant, commitment) =>
-            SignedProtocolMessage
-              .trySignAndCreate(commitment, cryptoSnapshot, approximateTimestampOverride)
-              .map(_ -> Recipients.cc(participant))
+            for {
+              snapshotForSigning <-
+                if (protocolVersion >= ProtocolVersion.v35)
+                  synchronizerCrypto
+                    .awaitSnapshot(
+                      commitment.period.toInclusive.forgetRefinement
+                    )
+                    .map(snapshot => (snapshot, None))
+                else
+                  synchronizerCrypto.currentSnapshotApproximation.map(snapshot =>
+                    (snapshot, Some(clock.now))
+                  )
+              (cryptoSnapshot, approximateTimestampOverride) = snapshotForSigning
+              signedCommitment <- SignedProtocolMessage
+                .trySignAndCreate(commitment, cryptoSnapshot, approximateTimestampOverride)
+                .map(_ -> Recipients.cc(participant))
+            } yield signedCommitment
           }
         )
 
@@ -2281,15 +2294,11 @@ class AcsCommitmentProcessor private (
     }
 
     if (msgs.nonEmpty) {
+      val at = clock.now.plus(java.time.Duration.ofMillis(randDelayMillis))
       FutureUnlessShutdownUtil
         .logOnFailureUnlessShutdown(
-          clock
-            .scheduleAfter(
-              _ => stubbornSendUnlessClosing(),
-              java.time.Duration.ofMillis(randDelayMillis),
-            ),
-          s"Failed to schedule sending commitment message batch for period $period at time ${now
-              .add(java.time.Duration.ofMillis(randDelayMillis))}",
+          clock.scheduleAt(_ => stubbornSendUnlessClosing(), at),
+          s"Failed to schedule sending commitment message batch for period $period at time $at}",
           logPassiveInstanceAtInfo = true,
         )
         .discard

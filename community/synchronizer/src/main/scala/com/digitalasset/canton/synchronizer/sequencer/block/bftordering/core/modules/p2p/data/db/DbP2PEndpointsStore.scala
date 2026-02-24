@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.p2p.data.db
 
+import com.daml.tls.{TlsClientCertificate, TlsClientConfig}
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.String256M
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, Port}

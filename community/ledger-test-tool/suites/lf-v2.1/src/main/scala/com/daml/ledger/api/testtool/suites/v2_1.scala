@@ -8,7 +8,7 @@ import com.daml.ledger.api.testtool.suites.v2_1.objectmeta.{
   PartyManagementServiceObjectMetaIT,
   UserManagementServiceObjectMetaIT,
 }
-import com.digitalasset.canton.config.TlsClientConfig
+import com.daml.tls.TlsClientConfig
 
 package object v2_1 {
   def default(timeoutScaleFactor: Double): Vector[LedgerTestSuite] =

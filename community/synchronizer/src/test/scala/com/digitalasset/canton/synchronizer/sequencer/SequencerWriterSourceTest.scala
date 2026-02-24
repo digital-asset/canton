@@ -571,7 +571,7 @@ class SequencerWriterSourceTest
                   protocolVersion = testedProtocolVersion,
                 ),
                 sequencingTime = CantonTimestamp.Epoch.immediateSuccessor,
-                deliverToMembers = Set(alice, bob),
+                recipients = Set(MemberRecipient(alice), MemberRecipient(bob)),
                 batch = batch,
                 submissionTraceContext = TraceContext.empty,
                 trafficReceiptO = None,

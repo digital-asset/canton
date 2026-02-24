@@ -16,6 +16,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationToken,
   AuthenticationTokenManagerConfig,
+  AuthenticationTokenProvider,
 }
 import com.digitalasset.canton.sequencing.client.transports.GrpcSequencerClientAuth.TokenFetcher
 import com.digitalasset.canton.time.Clock
@@ -135,8 +136,7 @@ class AuthenticationTokenManager(
               if ex.getStatus.getCode == io.grpc.Status.Code.CANCELLED =>
             logger.info("Token refresh cancelled", ex)
           case ex: io.grpc.StatusRuntimeException
-              if ex.getStatus.getCode == io.grpc.Status.Code.UNAVAILABLE &&
-                ex.getMessage.contains("Channel shutdown invoked") =>
+              if AuthenticationTokenProvider.unavailableDueToChannelShutdown(ex.getStatus) =>
             logger.info("Token refresh aborted due to shutdown", ex)
           case ex: io.grpc.StatusRuntimeException =>
             def collectCause(ex: Throwable): Seq[String] =

@@ -64,7 +64,8 @@ class InteractiveSubmissionEnricher(engine: Engine, packageResolver: PackageReso
       case ResultDone(r) => FutureUnlessShutdown.pure(r)
       case ResultError(e) => FutureUnlessShutdown.failed(new RuntimeException(e.message))
       case ResultNeedPackage(packageId, resume) =>
-        packageResolver(packageId)(traceContext)
+        packageResolver
+          .resolve(packageId, PackageResolver.ignoreMissingPackage)
           .flatMap(pkgO => consumeEnricherResult(resume(pkgO)))
       case result =>
         FutureUnlessShutdown.failed(new RuntimeException(s"Unexpected LfEnricher result: $result"))

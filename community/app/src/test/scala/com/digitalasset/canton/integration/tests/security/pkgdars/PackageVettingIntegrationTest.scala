@@ -4,55 +4,59 @@
 package com.digitalasset.canton.integration.tests.security.pkgdars
 
 import com.daml.ledger.api.v2.commands.Command
+import com.daml.ledger.javaapi.data
 import com.daml.test.evidence.scalatest.AccessTestScenario
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Integrity
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.base.error.ErrorCode
-import com.digitalasset.canton.BigDecimalImplicits.*
+import com.digitalasset.canton.config
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.crypto.{CryptoPureApi, SigningKeyUsage}
 import com.digitalasset.canton.damltests.java.conflicttest.Many
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.TransactionRoutingError.ConfigurationErrors.InvalidPrescribedSynchronizerId
 import com.digitalasset.canton.examples.java as M
+import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseProgrammableSequencer}
+import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.pkgdars.PackageUsableMixin
 import com.digitalasset.canton.integration.tests.security.SecurityTestHelpers
 import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWithMetadata
-import com.digitalasset.canton.integration.{
-  CommunityIntegrationTest,
-  EnvironmentDefinition,
-  HasCycleUtils,
-  SharedEnvironment,
-  TestConsoleEnvironment,
-}
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.NotFound
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor
+import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentDataHelpers
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.UnvettedPackages
 import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects
-import com.digitalasset.canton.protocol.messages.Verdict
+import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects.ModelConformance
+import com.digitalasset.canton.protocol.messages.{LocalApprove, Verdict}
+import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.TopologyManagerError.ParticipantTopologyManagerError
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.transaction.DelegationRestriction.CanSignSpecificMappings
+import com.digitalasset.canton.topology.transaction.ParticipantPermission.Observation
 import com.digitalasset.canton.topology.transaction.{VettedPackage, VettedPackages}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MaliciousParticipantNode
+import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.daml.lf.archive.{DamlLf, DarParser, DarReader}
 import com.digitalasset.daml.lf.data.Ref.PackageId
+import monocle.macros.syntax.lens.*
 import org.scalatest.Assertion
 
 import java.io.File
 import java.util.concurrent.atomic.AtomicReference
 import scala.jdk.CollectionConverters.*
 
-trait PackageVettingIntegrationTest
+sealed trait PackageVettingIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with HasProgrammableSequencer
@@ -68,15 +72,75 @@ trait PackageVettingIntegrationTest
   private lazy val pureCryptoRef: AtomicReference[CryptoPureApi] = new AtomicReference()
   def pureCrypto: CryptoPureApi = pureCryptoRef.get()
 
+  private var steve: PartyId = _
+
+  private var maliciousP2: MaliciousParticipantNode = _
+
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S1M1_S1M1
+    EnvironmentDefinition.P4_S1M1_S1M1
+      .addConfigTransforms(
+        ConfigTransforms.updateAllParticipantConfigs_(
+          // Setting a high value, because otherwise reassignment participants get dropped
+          _.focus(_.parameters.reassignmentsConfig.targetTimestampForwardTolerance)
+            .replace(config.NonNegativeFiniteDuration.ofMinutes(10))
+        )
+      )
       .withSetup { implicit env =>
         import env.*
-        participants.local.synchronizers.connect_local(sequencer1, alias = daName)
-        participant1.synchronizers.connect_local(sequencer2, alias = acmeName)
+        Seq(participant1, participant2, participant3).foreach(
+          _.synchronizers.connect_local(sequencer1, alias = daName)
+        )
+        Seq(participant1, participant2, participant4).foreach(
+          _.synchronizers.connect_local(sequencer2, alias = acmeName)
+        )
+
         participant2.dars.upload(CantonTestsPath, synchronizerId = daId)
+        participant2.dars.upload(CantonTestsPath, synchronizerId = acmeId)
+
+        // Enable steve on participant2 on both synchronizers (da+acme)
+        steve = participant2.parties.enable("steve", synchronizer = Some(daName))
+        participant2.parties.enable(
+          "steve",
+          synchronizer = Some(acmeName),
+          synchronizeParticipants = Seq(participant1, participant4),
+        )
+
+        // Enable steve on participant4 on acme.
+        // No need to do that an da, as participant4 is not connected to da.
+        participant2.topology.party_to_participant_mappings
+          .propose_delta(
+            steve,
+            adds = Seq(participant4.id -> Observation),
+            store = acmeId,
+          ) // requires auth by party
+        participant4.topology.party_to_participant_mappings
+          .propose_delta(
+            steve,
+            adds = Seq(participant4.id -> Observation),
+            mustFullyAuthorize = true,
+            store = acmeId,
+          )
+
+        // Verify that steve has been successfully enabled
+        eventually() {
+          val p2p = participant2.topology.party_to_participant_mappings
+            .list(acmeId, filterParty = steve.filterString)
+            .loneElement
+            .item
+          p2p.participants
+            .map(_.participantId)
+            .toSet shouldBe Set(participant2.id, participant4.id)
+        }
 
         pureCryptoRef.set(participant1.crypto.pureCrypto)
+
+        maliciousP2 = MaliciousParticipantNode(
+          participant2,
+          daId,
+          testedProtocolVersion,
+          timeouts,
+          loggerFactory,
+        )
       }
 
   "auto-vetting of dars works and doesn't block on disconnected synchronizers" taggedAs_ {
@@ -167,12 +231,7 @@ trait PackageVettingIntegrationTest
     assertThrowsAndLogsCommandFailures(
       participant3.ledger_api.javaapi.commands.submit(
         Seq(participant3.id.adminParty),
-        new M.iou.Iou(
-          p3p.toProtoPrimitive,
-          p2p.toProtoPrimitive,
-          new M.iou.Amount(3.toBigDecimal, "CHF"),
-          List().asJava,
-        ).create.commands.overridePackageId(M.iou.Iou.PACKAGE_ID).asScala.toSeq,
+        createIouCmds(p3p, p2p).toList.asJava.overridePackageId(M.iou.Iou.PACKAGE_ID).asScala.toSeq,
       ),
       _.shouldBeCommandFailure(NotFound.Package),
     )
@@ -189,12 +248,7 @@ trait PackageVettingIntegrationTest
     assertThrowsAndLogsCommandFailures(
       participant2.ledger_api.javaapi.commands.submit(
         Seq(participant2.id.adminParty),
-        new M.iou.Iou(
-          p2p.toProtoPrimitive,
-          p3p.toProtoPrimitive,
-          new M.iou.Amount(3.toBigDecimal, "CHF"),
-          List().asJava,
-        ).create.commands.asScala.toSeq,
+        createIouCmds(p2p, p3p),
       ),
       assertSynchronizerDiscardedPackageNotVettedByReason(
         synchronizerId = daId,
@@ -218,12 +272,7 @@ trait PackageVettingIntegrationTest
     assertThrowsAndLogsCommandFailures(
       participant2.ledger_api.javaapi.commands.submit(
         Seq(participant2.id.adminParty),
-        new M.iou.Iou(
-          p2p.toProtoPrimitive,
-          p1p.toProtoPrimitive,
-          new M.iou.Amount(3.toBigDecimal, "CHF"),
-          List(p3p.toProtoPrimitive).asJava,
-        ).create.commands.asScala.toSeq,
+        createIouCmds(p2p, p1p, p3p),
       ),
       assertSynchronizerDiscardedPackageNotVettedByReason(
         synchronizerId = daId,
@@ -245,25 +294,8 @@ trait PackageVettingIntegrationTest
     ) in { implicit env =>
     import env.*
 
-    val maliciousP2 =
-      MaliciousParticipantNode(
-        participant2,
-        daId,
-        testedProtocolVersion,
-        timeouts,
-        loggerFactory,
-      )
-
     val rawCmds =
-      new M.iou.Iou(
-        participant2.adminParty.toProtoPrimitive,
-        participant2.adminParty.toProtoPrimitive,
-        new M.iou.Amount(3.toBigDecimal, "CHF"),
-        List(participant3.adminParty.toProtoPrimitive).asJava,
-      ).create.commands
-        .overridePackageId(M.iou.Iou.PACKAGE_ID)
-        .asScala
-        .toSeq
+      createIouCmds(participant2.adminParty, participant2.adminParty, participant3.adminParty)
         .map(c => Command.fromJavaProto(c.toProtoCommand))
     val cmd = CommandsWithMetadata(rawCmds, Seq(participant2.adminParty))
 
@@ -335,25 +367,8 @@ trait PackageVettingIntegrationTest
         .packages should contain(iouVettedPackage)
     }
 
-    val maliciousP2 =
-      MaliciousParticipantNode(
-        participant2,
-        daId,
-        testedProtocolVersion,
-        timeouts,
-        loggerFactory,
-      )
-
     val rawCmds =
-      new M.iou.Iou(
-        participant2.adminParty.toProtoPrimitive,
-        participant1.adminParty.toProtoPrimitive,
-        new M.iou.Amount(3.toBigDecimal, "CHF"),
-        Nil.asJava,
-      ).create.commands
-        .overridePackageId(M.iou.Iou.PACKAGE_ID)
-        .asScala
-        .toSeq
+      createIouCmds(participant2.adminParty, participant1.adminParty)
         .map(c => Command.fromJavaProto(c.toProtoCommand))
     val cmd = CommandsWithMetadata(
       rawCmds,
@@ -384,6 +399,91 @@ trait PackageVettingIntegrationTest
     )
 
     events.assertNoTransactions()
+  }
+
+  "fail gracefully if the underlying package is not vetted on the target synchronizer" in {
+    // target state: fail gracefully, do not fork the ledger
+    implicit env =>
+      import env.*
+
+      // create an iou contract on da
+      val iouContract =
+        IouSyntax.createIou(participant2, Some(daId))(participant2.adminParty, steve)
+      val iouId = iouContract.id.contractId
+      val iouInstance = participant2.testing
+        .acs_search(daName, exactId = iouId, limit = PositiveInt.one)
+        .loneElement
+
+      // Let participant2 maliciously unassign the contract from da.
+
+      val helpers = ReassignmentDataHelpers(
+        contract = iouInstance,
+        sourceSynchronizer = Source(daId),
+        targetSynchronizer = Target(acmeId),
+        pureCrypto = pureCrypto,
+        targetTimestamp = Target(participant2.testing.fetch_synchronizer_time(acmeId)),
+      )
+
+      val unassignmentTree = helpers
+        .fullUnassignmentTree(
+          participant2.adminParty.toLf,
+          participant2,
+          MediatorGroupRecipient(NonNegativeInt.zero),
+        )()
+
+      logger.info("Unassigning contract from da...")
+
+      val (_, events) =
+        ProtocolProcessor.withApprovalContradictionCheckDisabled(loggerFactory) {
+          // participant2 would reject as participant has not vetted the package on the target synchronizer.
+          // Override that by approve.
+          replacingConfirmationResponses(
+            participant2,
+            sequencer1,
+            daId,
+            withLocalVerdict(
+              LocalApprove(testedProtocolVersion)
+            ),
+          ) {
+            trackingLedgerEvents(Seq(participant2), Seq.empty) {
+              TraceContext.withNewTraceContext("attack")(implicit traceContext =>
+                maliciousP2.submitUnassignmentRequest(unassignmentTree, None).futureValueUS
+              )
+            }
+          }
+        }
+
+      val unassignment = events.unassignments(participant2).futureValue.loneElement
+
+      participant2.testing
+        .acs_search(daName, exactId = iouId, limit = PositiveInt.one) shouldBe empty
+
+      // Let p2 assign the contract to acme.
+
+      logger.info("Assigning contract to acme...")
+
+      loggerFactory.assertLogs(
+        participant2.ledger_api.commands.submit_assign(
+          participant2.adminParty,
+          unassignment.reassignmentId,
+          daId,
+          acmeId,
+          timeout = None,
+        ),
+        // participant4 complains due to missing package
+        _.shouldBeCantonErrorCode(ModelConformance),
+      )
+
+      // Both participants remain responsive.
+      assertPingSucceeds(participant2, participant4)
+
+      // The contract is active for participant2 (as well as any honest participant who has vetted the package), but not for participant4.
+      // Hence, there is a ledger fork!
+      participant2.testing
+        .acs_search(acmeName, exactId = iouId, limit = PositiveInt.one)
+        .loneElement
+      participant4.testing
+        .acs_search(acmeName, exactId = iouId, limit = PositiveInt.one) shouldBe empty
   }
 
   "The topology manager" when {
@@ -878,6 +978,9 @@ trait PackageVettingIntegrationTest
     DarParser
       .readArchiveFromFile(new java.io.File(darPath))
       .getOrElse(fail(s"cannot read DAR: $darPath"))
+
+  private def createIouCmds(payer: PartyId, owner: PartyId, viewers: PartyId*): Seq[data.Command] =
+    IouSyntax.testIou(payer, owner, observers = viewers.toList).create.commands.asScala.toSeq
 }
 
 class PackageVettingIntegrationTestInMemory extends PackageVettingIntegrationTest {

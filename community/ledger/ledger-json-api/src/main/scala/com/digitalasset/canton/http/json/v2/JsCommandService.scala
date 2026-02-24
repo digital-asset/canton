@@ -43,6 +43,7 @@ import com.digitalasset.canton.http.json.v2.JsSchema.{
   JsReassignment,
   JsTransaction,
   JsTransactionTree,
+  OneOfSchemaExtension,
 }
 import com.digitalasset.canton.http.json.v2.LegacyDTOs.toTransactionTree
 import com.digitalasset.canton.http.json.v2.damldefinitionsservice.Schema.Codecs.*
@@ -552,21 +553,24 @@ object JsCommandServiceCodecs {
 
   // Schema mappings are added to align generated tapir docs with a circe mapping of ADTs
   implicit val reassignmentCommandCommandSchema
-      : Schema[reassignment_commands.ReassignmentCommand.Command] = Schema.oneOfWrapped
+      : Schema[reassignment_commands.ReassignmentCommand.Command] =
+    Schema.oneOfWrapped[reassignment_commands.ReassignmentCommand.Command].oneOfExtension()
 
   implicit val deduplicationPeriodSchema: Schema[DeduplicationPeriod] =
-    Schema.oneOfWrapped
+    Schema.oneOfWrapped[DeduplicationPeriod].oneOfExtension()
 
   implicit val completionDeduplicationPeriodSchema
       : Schema[completion.Completion.DeduplicationPeriod] =
-    Schema.oneOfWrapped
+    Schema.oneOfWrapped[completion.Completion.DeduplicationPeriod].oneOfExtension()
 
   @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
   implicit val jsCommandSchema: Schema[JsCommand.Command] =
-    Schema.oneOfWrapped
+    Schema.oneOfWrapped[JsCommand.Command].oneOfExtension()
 
   implicit val completionStreamResponseSchema
       : Schema[command_completion_service.CompletionStreamResponse.CompletionResponse] =
-    Schema.oneOfWrapped
+    Schema
+      .oneOfWrapped[command_completion_service.CompletionStreamResponse.CompletionResponse]
+      .oneOfExtension()
 
 }

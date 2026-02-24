@@ -44,7 +44,7 @@ service TopologyManagerReadService {
 
   // Fetch the topology state
   // The returned bytestring can be used directly to initialize a successor sequencer
-  rpc LogicalUpgradeState(LogicalUpgradeStateRequest) returns (stream LogicalUpgradeStateResponse);
+  rpc SequencerLsuState(SequencerLsuStateRequest) returns (stream SequencerLsuStateResponse);
 }
 
 message BaseQuery {
@@ -327,12 +327,12 @@ message GenesisStateV2Response {
   bytes chunk = 1;
 }
 
-message LogicalUpgradeStateRequest {
+message SequencerLsuStateRequest {
   // Must be specified if the node is configured with more than one active synchronizer.
   optional StoreId synchronizer_store = 1;
 }
 
-message LogicalUpgradeStateResponse {
+message SequencerLsuStateResponse {
   // versioned stored topology transactions
   bytes chunk = 1;
 }

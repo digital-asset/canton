@@ -14,7 +14,10 @@ import com.daml.ledger.javaapi
 import com.daml.ledger.javaapi.data.codegen.ContractCompanion
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.UpdateService.{
+  AssignedWrapper,
+  ReassignmentWrapper,
   TransactionWrapper,
+  UnassignedWrapper,
   UpdateWrapper,
 }
 import com.digitalasset.canton.console.{
@@ -565,7 +568,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
     val trackedParties = extraTrackedParties ++ participants.map(_.id.adminParty)
 
     // Subscribe to transaction trees & completions for all participants
-    val (completionsF, transactionsF) = (for (participant <- participants) yield {
+    val (completionsF, updatesF) = (for (participant <- participants) yield {
       val completionObserver =
         new CollectUntilObserver[Completion](_.commandId == finishCommandId)
       val completionCloseable = participant.ledger_api.completions
@@ -580,6 +583,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
       val transactionObserver =
         new CollectUntilObserver[UpdateWrapper]({
           case TransactionWrapper(tt) => tt.commandId == finishCommandId
+          case rw: ReassignmentWrapper => rw.reassignment.commandId == finishCommandId
           case _ => false
         })
       val updateFormat = getUpdateFormat(
@@ -597,13 +601,10 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
         )
       transactionObserver.result.onComplete(_ => transactionCloseable.close())
       submissionFailedP.future.onComplete(_ => transactionCloseable.close())
-      val transactions = transactionObserver.result.map(_.collect {
-        case TransactionWrapper(transaction) => transaction
-      })
 
       (
         participant -> completionObserver.result,
-        participant -> transactions,
+        participant -> transactionObserver.result,
       )
     }).separate
 
@@ -624,7 +625,7 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
         )
         .futureValue
 
-      (result, new TrackingResult(completionsF.toMap, transactionsF.toMap))
+      (result, new TrackingResult(completionsF.toMap, updatesF.toMap))
     } catch {
       case NonFatal(ex) =>
         submissionFailedP.trySuccess(())
@@ -650,8 +651,17 @@ trait SecurityTestHelpers extends SecurityTestLensUtils {
 
   class TrackingResult(
       completions: Map[ParticipantReference, Future[Seq[Completion]]],
-      transactions: Map[ParticipantReference, Future[Seq[Transaction]]],
-  ) {
+      updates: Map[ParticipantReference, Future[Seq[UpdateWrapper]]],
+  )(implicit executionContext: ExecutionContext) {
+
+    def transactions: Map[ParticipantReference, Future[Seq[Transaction]]] =
+      updates.map { case (p, uf) => p -> uf.map(_.collect { case TransactionWrapper(tt) => tt }) }
+
+    def unassignments: Map[ParticipantReference, Future[Seq[UnassignedWrapper]]] =
+      updates.map { case (p, uf) => p -> uf.map(_.collect { case uw: UnassignedWrapper => uw }) }
+
+    def assignments: Map[ParticipantReference, Future[Seq[AssignedWrapper]]] =
+      updates.map { case (p, uf) => p -> uf.map(_.collect { case aw: AssignedWrapper => aw }) }
 
     def assertStatusOk(participant: ParticipantReference): Assertion =
       assertExactlyOneCompletion(participant).status.value.code shouldBe Code.OK.value()

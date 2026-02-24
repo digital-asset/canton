@@ -33,6 +33,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.command.ApiCommands as LfCommands
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageName}
 import com.digitalasset.daml.lf.data.Time.Timestamp
@@ -129,7 +130,12 @@ class CommandSubmissionServiceImplSpec
               LfError.Interpretation.DamlException(
                 LfInterpretationError.DuplicateContractKey(
                   GlobalKey
-                    .assertBuild(tmplId, Value.ValueUnit, PackageName.assertFromString("pkg-name"))
+                    .assertBuild(
+                      tmplId,
+                      PackageName.assertFromString("pkg-name"),
+                      Value.ValueUnit,
+                      crypto.Hash.hashPrivateKey("dummy-key-hash"),
+                    )
                 )
               ),
               None,

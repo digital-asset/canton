@@ -40,7 +40,7 @@ import com.digitalasset.canton.logging.pretty.{Pretty, PrettyInstances}
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.{CommonMockMetrics, TrafficConsumptionMetrics}
 import com.digitalasset.canton.networking.Endpoint
-import com.digitalasset.canton.networking.grpc.GrpcError
+import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, GrpcError}
 import com.digitalasset.canton.protocol.messages.{DefaultOpenEnvelope, UnsignedProtocolMessage}
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParametersLookup,
@@ -48,6 +48,7 @@ import com.digitalasset.canton.protocol.{
   SynchronizerParametersLookup,
   TestSynchronizerParameters,
   v30,
+  v31,
 }
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.ConnectionX.ConnectionXConfig
@@ -1780,6 +1781,7 @@ final class SequencerClientTest
     override def getTrafficStateForMember(
         request: GetTrafficStateForMemberRequest,
         timeout: Duration,
+        logPolicy: CantonGrpcUtil.GrpcLogPolicy,
     )(implicit
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, String, GetTrafficStateForMemberResponse] = ???
@@ -2088,6 +2090,9 @@ final class SequencerClientTest
 
     override def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent =
       v30.EnvelopeContent.SomeEnvelopeContent.Empty
+
+    override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
+      v31.EnvelopeContent.SomeEnvelopeContent.Empty
 
     override def productElement(n: Int): Any = fail("shouldn't be used")
     override def productArity: Int = fail("shouldn't be used")

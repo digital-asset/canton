@@ -22,8 +22,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.int
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.memory.GenericInMemoryEpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.{
+  Bootstrap,
   EpochStoreReader,
-  Genesis,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.OutputModule.{
   DefaultRequestInspector,
@@ -645,7 +645,7 @@ class OutputModuleTest
             val newCryptoProvider = failingCryptoProvider[ProgrammableUnitTestEnv]
             when(
               topologyProviderMock.getOrderingTopologyAt(
-                topologyActivationTime,
+                Some(topologyActivationTime),
                 checkPendingChanges = true,
               )
             )
@@ -736,7 +736,7 @@ class OutputModuleTest
             )
 
             verify(topologyProviderMock, times(1))
-              .getOrderingTopologyAt(topologyActivationTime, checkPendingChanges = true)
+              .getOrderingTopologyAt(Some(topologyActivationTime), checkPendingChanges = true)
             // Update the last block if needed and set up the new topology
             piped3.foreach(output.receive)
 
@@ -790,12 +790,10 @@ class OutputModuleTest
         )
 
         // the behavior will always be the same across block modes, so the chosen one is irrelevant
-        val aTopologyActivationTime = TopologyActivationTime(CantonTimestamp.MinValue)
         val anOrderingTopology =
           OrderingTopology.forTesting(
             nodes = Set(BftNodeId("node1")),
             SequencingParameters.Default,
-            aTopologyActivationTime,
           )
         val aNewMembership =
           Membership(BftNodeId("node1"), anOrderingTopology, Seq(BftNodeId("node1")))
@@ -1084,7 +1082,7 @@ class OutputModuleTest
         context.runPipedMessages() shouldBe Seq.empty
 
         verify(topologyProviderSpy, never).getOrderingTopologyAt(
-          any[TopologyActivationTime],
+          any[Option[TopologyActivationTime]],
           checkPendingChanges = any[Boolean],
         )(
           any[TraceContext]
@@ -1353,7 +1351,7 @@ class OutputModuleTest
 
   private def createOutputModule[E <: BaseIgnoringUnitTestEnv[E]](
       initialHeight: Long = BlockNumber.First,
-      initialEpochForTopology: Long = Genesis.GenesisEpochNumber,
+      initialEpochForTopology: Long = Bootstrap.BootstrapEpochNumber,
       initialOrderingTopology: OrderingTopology = OrderingTopology.forTesting(nodes = Set.empty),
       availabilityRef: ModuleRef[Availability.Message[E]] = fakeModuleExpectingSilence,
       consensusRef: ModuleRef[Consensus.Message[E]] = fakeModuleExpectingSilence,
@@ -1460,7 +1458,7 @@ object OutputModuleTest {
       extends OrderingTopologyProvider[E] {
 
     override def getOrderingTopologyAt(
-        activationTime: TopologyActivationTime,
+        activationTime: Option[TopologyActivationTime],
         checkPendingChanges: Boolean,
     )(implicit
         traceContext: TraceContext

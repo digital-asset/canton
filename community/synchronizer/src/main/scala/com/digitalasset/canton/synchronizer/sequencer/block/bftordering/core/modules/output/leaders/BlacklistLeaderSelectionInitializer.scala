@@ -9,7 +9,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig.BlacklistLeaderSelectionPolicyConfig
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Bootstrap
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.OutputMetadataStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
@@ -102,7 +102,7 @@ class BlacklistLeaderSelectionInitializer[E <: Env[E]](
   )(implicit
       traceContext: TraceContext
   ): BlacklistLeaderSelectionPolicyState =
-    if (epochNumber == Genesis.GenesisEpochNumber) {
+    if (epochNumber == Bootstrap.BootstrapEpochNumber) {
       val state = BlacklistLeaderSelectionPolicyState.FirstBlacklistLeaderSelectionPolicyState(
         protocolVersion
       )

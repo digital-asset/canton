@@ -35,6 +35,7 @@ import scalapb.{GeneratedEnumCompanion, UnknownFieldSet}
 import sttp.tapir.CodecFormat.TextPlain
 import sttp.tapir.Schema.SName
 import sttp.tapir.SchemaType.{SProduct, SProductField}
+import sttp.tapir.docs.apispec.{DocsExtension, DocsExtensionAttribute}
 import sttp.tapir.generic.Derived
 import sttp.tapir.generic.auto.*
 import sttp.tapir.{DecodeResult, FieldName, Schema, SchemaType, Validator}
@@ -46,6 +47,9 @@ import scala.util.Try
 
 /** JSON wrappers that do not belong to a particular service */
 object JsSchema {
+
+  // Marker for oneOf components in OpenAPI docs (used temporarily during openapi generation)
+  val X_ONE_OF = "x-one-of"
 
   val BYTE_STRING_PARSE_ERROR_TEMPLATE = "The string is not a valid Base64: %s"
 
@@ -82,6 +86,27 @@ object JsSchema {
         v => Some(v.name),
       )
     )
+
+  implicit class OneOfSchemaExtension[T](schema: Schema[T]) {
+    def oneOfExtension(): Schema[T] = {
+      implicit val strTapirCodec: sttp.tapir.Codec.JsonCodec[String] =
+        sttp.tapir.Codec.json[String](s => DecodeResult.Value(s))(identity)
+
+      val existingDocsExtensions =
+        schema.attributes
+          .get(DocsExtensionAttribute.docsExtensionAttributeKey)
+          .getOrElse(Vector.empty)
+
+      val updatedAttributes = schema.attributes.put(
+        DocsExtensionAttribute.docsExtensionAttributeKey,
+        existingDocsExtensions :+ DocsExtension.of(X_ONE_OF, "true"),
+      )
+
+      schema.copy(
+        attributes = updatedAttributes
+      )
+    }
+  }
 
   final case class JsTransaction(
       updateId: String,
@@ -217,7 +242,7 @@ object JsSchema {
 
     implicit val identifierFilterSchema
         : Schema[transaction_filter.CumulativeFilter.IdentifierFilter] =
-      Schema.oneOfWrapped
+      Schema.oneOfWrapped[transaction_filter.CumulativeFilter.IdentifierFilter].oneOfExtension()
 
     implicit val filtersByPartyMapSchema: Schema[Map[String, transaction_filter.Filters]] =
       Schema.schemaForMap[transaction_filter.Filters]
@@ -227,7 +252,7 @@ object JsSchema {
 
     @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
     implicit val jsReassignmentEventSchema: Schema[JsReassignmentEvent.JsReassignmentEvent] =
-      Schema.oneOfWrapped
+      Schema.oneOfWrapped[JsReassignmentEvent.JsReassignmentEvent].oneOfExtension()
 
     implicit val topologyTransactionParticipantAuthorizationAddedSchema
         : Schema[lapi.topology_transaction.ParticipantAuthorizationAdded] =
@@ -241,9 +266,11 @@ object JsSchema {
 
     @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
     implicit val topologyEventEventSchema: Schema[lapi.topology_transaction.TopologyEvent.Event] =
-      Schema.oneOfWrapped.name(
-        SName("TopologyEventEvent")
-      ) // Name selected manually otherwise it is generated as Event1
+      Schema.oneOfWrapped
+        .name(
+          SName("TopologyEventEvent")
+        )
+        .oneOfExtension()
 
   }
 
@@ -256,6 +283,7 @@ object JsSchema {
         contractId: String,
         templateId: Identifier,
         contractKey: Option[Json],
+        contractKeyHash: protobuf.ByteString,
         createArgument: Option[Json],
         createdEventBlob: protobuf.ByteString,
         interfaceViews: Seq[JsInterfaceView],
@@ -585,21 +613,17 @@ object JsSchema {
 
     @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
     implicit val jsEventSchema: Schema[JsEvent.Event] =
-      Schema.oneOfWrapped
+      Schema.oneOfWrapped[JsEvent.Event].oneOfExtension()
 
     @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
     implicit val jsTreeEventSchema: Schema[JsTreeEvent.TreeEvent] =
-      Schema.oneOfWrapped
+      Schema.oneOfWrapped[JsTreeEvent.TreeEvent].oneOfExtension()
 
     implicit val eventsByIdSchema: Schema[Map[Int, JsTreeEvent.TreeEvent]] =
       Schema.schemaForMap[Int, JsTreeEvent.TreeEvent](_.toString)
 
     implicit val jsTransactionTreeSchema: Schema[JsTransactionTree] =
       Schema.derived
-
-    implicit val identifierFilterSchema
-        : Schema[transaction_filter.CumulativeFilter.IdentifierFilter] =
-      Schema.oneOfWrapped
 
     implicit val valueSchema: Schema[com.google.protobuf.struct.Value] = Schema.any
 

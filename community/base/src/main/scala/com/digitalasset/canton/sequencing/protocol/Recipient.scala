@@ -9,30 +9,26 @@ import com.digitalasset.canton.ProtoDeserializationError.{
   ValueConversionError,
 }
 import com.digitalasset.canton.config.CantonRequireTypes.{String3, String300}
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
-import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{Member, UniqueIdentifier}
-import com.digitalasset.canton.tracing.TraceContext
-
-import scala.concurrent.ExecutionContext
 
 sealed trait Recipient extends Product with Serializable with PrettyPrinting {
-
-  /** Determines if this recipient is authorized to send or receive through the sequencer.
-    */
-  def isAuthorized(snapshot: TopologySnapshot)(implicit
-      traceContext: TraceContext,
-      executionContext: ExecutionContext,
-  ): FutureUnlessShutdown[Boolean]
 
   def toProtoPrimitive: String = toLengthLimitedString.unwrap
 
   def toLengthLimitedString: String300
 }
+
+/** Represents the state after resolving recipients, where we resolve:
+  *   - [[MediatorGroupRecipient]]
+  *   - [[SequencersOfSynchronizer]]
+  *
+  * But not [[AllMembersOfSynchronizer]], since it's too costly to resolve it.
+  */
+sealed trait MemberRecipientOrBroadcast extends Recipient
 
 object Recipient {
   def fromProtoPrimitive(
@@ -126,12 +122,7 @@ object TopologyBroadcastAddress {
   val recipient: Recipient = AllMembersOfSynchronizer
 }
 
-final case class MemberRecipient(member: Member) extends Recipient {
-
-  override def isAuthorized(snapshot: TopologySnapshot)(implicit
-      traceContext: TraceContext,
-      executionContext: ExecutionContext,
-  ): FutureUnlessShutdown[Boolean] = snapshot.isMemberKnown(member)
+final case class MemberRecipient(member: Member) extends MemberRecipientOrBroadcast {
 
   override protected def pretty: Pretty[MemberRecipient] =
     prettyOfClass(
@@ -142,14 +133,6 @@ final case class MemberRecipient(member: Member) extends Recipient {
 }
 
 final case object SequencersOfSynchronizer extends GroupRecipient {
-
-  override def isAuthorized(
-      snapshot: TopologySnapshot
-  )(implicit
-      traceContext: TraceContext,
-      executionContext: ExecutionContext,
-  ): FutureUnlessShutdown[Boolean] =
-    FutureUnlessShutdown.pure(true)
 
   override protected def pretty: Pretty[SequencersOfSynchronizer.type] =
     prettyOfObject[SequencersOfSynchronizer.type]
@@ -164,11 +147,6 @@ final case object SequencersOfSynchronizer extends GroupRecipient {
 }
 
 final case class MediatorGroupRecipient(group: MediatorGroupIndex) extends GroupRecipient {
-
-  override def isAuthorized(snapshot: TopologySnapshot)(implicit
-      traceContext: TraceContext,
-      executionContext: ExecutionContext,
-  ): FutureUnlessShutdown[Boolean] = snapshot.isMediatorActive(this)
 
   override protected def pretty: Pretty[MediatorGroupRecipient] =
     prettyOfClass(
@@ -199,12 +177,7 @@ object MediatorGroupRecipient {
 /** All known members of the synchronizer, i.e., the return value of
   * [[com.digitalasset.canton.topology.client.MembersTopologySnapshotClient#allMembers]].
   */
-final case object AllMembersOfSynchronizer extends GroupRecipient {
-
-  override def isAuthorized(snapshot: TopologySnapshot)(implicit
-      traceContext: TraceContext,
-      executionContext: ExecutionContext,
-  ): FutureUnlessShutdown[Boolean] = FutureUnlessShutdown.pure(true)
+final case object AllMembersOfSynchronizer extends GroupRecipient with MemberRecipientOrBroadcast {
 
   override protected def pretty: Pretty[AllMembersOfSynchronizer.type] =
     prettyOfString(_ => suffix)

@@ -275,11 +275,19 @@ final class BlockChunkProcessor(
       _ = logger.debug(
         s"Obtained topology snapshot for topology tick at $tickSequencingTimestamp after processing block $height"
       )
-      recipients <-
-        GroupAddressResolver.resolveGroupsToMembers(
-          Set(groupRecipient.fold(_ => AllMembersOfSynchronizer, _ => SequencersOfSynchronizer)),
-          snapshot.ipsSnapshot,
-        )
+      recipients <- groupRecipient match {
+        case Right(sequencersOfSynchronizer) =>
+          GroupAddressResolver
+            .resolveSequencersOfSynchronizers(
+              Set(sequencersOfSynchronizer),
+              snapshot.ipsSnapshot,
+            )
+            .map(_.map[MemberRecipientOrBroadcast](MemberRecipient.apply))
+        case Left(_) =>
+          FutureUnlessShutdown.pure(
+            Set[MemberRecipientOrBroadcast](AllMembersOfSynchronizer)
+          )
+      }
     } yield {
       val unexpiredInFlightAggregations = expireInFlightAggregations(
         state.inFlightAggregations,
@@ -304,7 +312,7 @@ final class BlockChunkProcessor(
             protocolVersion = protocolVersion,
           ),
           sequencingTime = tickSequencingTimestamp,
-          deliverToMembers = recipients(groupRecipient.merge),
+          recipients = recipients,
           batch = Batch.empty(protocolVersion),
           submissionTraceContext = TraceContext.createNew("emit_tick"),
           trafficReceiptO = None,
@@ -470,14 +478,14 @@ final class BlockChunkProcessor(
                     )(traceContext, executionContext)
                     .value
                     .run
-                    .map { case (trafficConsumption, errorOrResolvedGroups) =>
+                    .map { case (trafficConsumption, recipients) =>
                       SequencedValidatedSubmission(
                         sequencingTimestamp,
                         signedSubmissionRequest,
                         orderingSequencerId,
                         topologyTimestampFromRequestError,
                         trafficConsumption,
-                        errorOrResolvedGroups,
+                        recipients,
                       )(traceContext)
                     }
                 }

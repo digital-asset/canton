@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis.GenesisEpochNumber
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Bootstrap.BootstrapEpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer.StateTransferTestHelpers.{
   aCommit,
   aCommitCert,
@@ -58,7 +58,7 @@ class StateTransferMessageValidatorTest extends AnyWordSpec with BftSequencerBas
       ("request", "expected result"),
       // negative: genesis start epoch
       (
-        BlockTransferRequest.create(GenesisEpochNumber, otherId),
+        BlockTransferRequest.create(BootstrapEpochNumber, otherId),
         Left("state transfer is supported only after genesis, but start epoch -1 received"),
       ),
       // positive
@@ -86,7 +86,7 @@ class StateTransferMessageValidatorTest extends AnyWordSpec with BftSequencerBas
         BlockTransferResponse.create(
           Some(
             aCommitCert().copy(prePrepare =
-              aPrePrepare(BlockMetadata(GenesisEpochNumber, BlockNumber.First))
+              aPrePrepare(BlockMetadata(BootstrapEpochNumber, BlockNumber.First))
             )
           ),
           otherId,
@@ -119,7 +119,7 @@ class StateTransferMessageValidatorTest extends AnyWordSpec with BftSequencerBas
           Some(aCommitCert().copy(commits = Seq(aCommit(), aCommit()))),
           otherId,
         ),
-        GenesisEpochNumber,
+        BootstrapEpochNumber,
         aMembershipWith2Nodes,
         Left(
           "received a block transfer response from 'other' containing a commit certificate with the following issue: commit certificate for block 0 has the following errors: there are more than one commits (2) from the same sender other, expected at least 2 commits, but only got 1, commit from other has non-matching hash"
@@ -131,7 +131,7 @@ class StateTransferMessageValidatorTest extends AnyWordSpec with BftSequencerBas
           Some(aCommitCert().copy(commits = Seq(aCommit()))),
           otherId,
         ),
-        GenesisEpochNumber,
+        BootstrapEpochNumber,
         aMembershipWith2Nodes,
         Left(
           "received a block transfer response from 'other' containing a commit certificate with the following issue: commit certificate for block 0 has the following errors: expected at least 2 commits, but only got 1, commit from other has non-matching hash"
@@ -140,7 +140,7 @@ class StateTransferMessageValidatorTest extends AnyWordSpec with BftSequencerBas
       // positive
       (
         BlockTransferResponse.create(Some(aCommitCert()), otherId),
-        GenesisEpochNumber,
+        BootstrapEpochNumber,
         aMembershipWithOnlyOtherNode,
         Right(()),
       ),

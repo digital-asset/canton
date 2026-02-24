@@ -293,9 +293,14 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
           sequencerAggregatedInfo.expectedSequencersO,
           connectionPool,
         )
-        .leftMap[SynchronizerRegistryError](
-          SynchronizerRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(_)
-        )
+        .leftMap[SynchronizerRegistryError] {
+          case SequencerClientFactory.RetryableError(err) =>
+            SynchronizerRegistryError.ConnectionErrors.FailedToConnectToSequencersTransient.Error(
+              err
+            )
+          case SequencerClientFactory.NonRetryableError(err) =>
+            SynchronizerRegistryError.ConnectionErrors.FailedToConnectToSequencer.Error(err)
+        }
 
       _ <- downloadSynchronizerTopologyStateForInitializationIfNeeded(
         syncPersistentStateManager,

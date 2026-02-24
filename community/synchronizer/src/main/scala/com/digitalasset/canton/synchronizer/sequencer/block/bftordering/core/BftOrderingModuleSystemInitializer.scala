@@ -22,8 +22,9 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.int
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.AvailabilityModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis.GenesisEpoch
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Bootstrap.BootstrapEpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.{
+  Bootstrap,
   EpochStore,
   EpochStoreReader,
 }
@@ -226,7 +227,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
           )
           val p2pNetworkOutModule = new P2PNetworkOutModule(
             bootstrapTopologyInfo.thisNode,
-            isGenesis = initialEpoch == GenesisEpoch.info.number,
+            isGenesis = initialEpoch == Bootstrap.BootstrapEpochNumber,
             p2pNetworkOutModuleStateFactory(bootstrapTopologyInfo.currentMembership),
             stores.p2pEndpointsStore,
             metrics,
@@ -326,8 +327,8 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
 
     val bti @ BootstrapTopologyInfo(
       initialEpochNumber,
-      initialTopologyQueryTimestamp,
-      previousTopologyQueryTimestamp,
+      initialTopologyQueryTimestampO,
+      previousTopologyQueryTimestampO,
       maybeOnboardingTopologyQueryTimestamp,
     ) =
       getInitialAndPreviousTopologyQueryTimestamps(moduleSystem)
@@ -335,7 +336,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
     logger.debug(s"Retrieved bootstrap topologies timestamps: $bti")
 
     val (initialTopology, initialCryptoProvider) =
-      getOrderingTopologyAt(moduleSystem, initialTopologyQueryTimestamp, "initial")
+      getOrderingTopologyAt(moduleSystem, initialTopologyQueryTimestampO, "initial")
 
     val leaderSelectionPolicyState = leaderSelectionPolicyFactory.stateForInitial(
       moduleSystem,
@@ -349,7 +350,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
       )
 
     val (previousTopology, previousCryptoProvider) =
-      getOrderingTopologyAt(moduleSystem, previousTopologyQueryTimestamp, "previous")
+      getOrderingTopologyAt(moduleSystem, previousTopologyQueryTimestampO, "previous")
 
     // the previousLeaders is not really used unless we are doing onboarding, in that case we should use previousTopology
     // to compute the "currentLeaders"
@@ -360,7 +361,7 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
 
     val maybeOnboardingTopologyAndCryptoProvider = maybeOnboardingTopologyQueryTimestamp
       .map(onboardingTopologyQueryTimestamp =>
-        getOrderingTopologyAt(moduleSystem, onboardingTopologyQueryTimestamp, "onboarding")
+        getOrderingTopologyAt(moduleSystem, Some(onboardingTopologyQueryTimestamp), "onboarding")
       )
 
     (
@@ -417,47 +418,53 @@ private[bftordering] class BftOrderingModuleSystemInitializer[
         val onboardingTopologyQueryTimestamp = thisNodeActiveAt.timestamp
         BootstrapTopologyInfo(
           epochNumber,
-          initialTopologyQueryTimestamp,
-          previousTopologyQueryTimestamp,
+          Some(initialTopologyQueryTimestamp),
+          Some(previousTopologyQueryTimestamp),
           Some(onboardingTopologyQueryTimestamp),
         )
 
       case _ =>
-        // Regular (i.e., non-onboarding) start
-        val initialTopologyEpochInfo = {
-          val latestEpoch = fetchLatestEpoch(moduleSystem, includeInProgress = true)
-          latestEpoch.info
-        }
-        val initialTopologyQueryTimestamp = initialTopologyEpochInfo.topologyActivationTime
+        // Regular (i.e., non-onboarding) startup; it can be a crash recovery or a clean slate (either genesis or
+        //  the target physical synchronizer of an LSU).
+        //  If it's a crash recovery, fetching the latest epoch object will return an activation time that is
+        //  different from the default bootstrap topology activation time.
+        val (initialTopologyEpochNumberO, initialTopologyQueryTimestampO) =
+          fetchLatestEpoch(
+            moduleSystem,
+            includeInProgress = true,
+          ).map(epoch => epoch.info.number -> epoch.info.topologyActivationTime).unzip
         // TODO(#24262) if restarted just after completing an epoch, the previous and initial topology might be the same
-        val previousTopologyQueryTimestamp = {
-          val latestCompletedEpoch = fetchLatestEpoch(moduleSystem, includeInProgress = false)
-          latestCompletedEpoch.info.topologyActivationTime
-        }
+        val previousTopologyQueryTimestampO =
+          fetchLatestEpoch(moduleSystem, includeInProgress = false).map(
+            _.info.topologyActivationTime
+          )
         BootstrapTopologyInfo(
-          initialTopologyEpochInfo.number,
-          initialTopologyQueryTimestamp,
-          previousTopologyQueryTimestamp,
+          initialTopologyEpochNumberO.getOrElse(BootstrapEpochNumber),
+          initialTopologyQueryTimestampO,
+          previousTopologyQueryTimestampO,
         )
     }
 
   private def getOrderingTopologyAt(
       moduleSystem: ModuleSystem[E],
-      topologyQueryTimestamp: TopologyActivationTime,
+      topologyQueryTimestampO: Option[TopologyActivationTime],
       topologyDesignation: String,
   )(implicit traceContext: TraceContext): (OrderingTopology, CryptoProvider[E]) =
     awaitFuture(
       moduleSystem,
       orderingTopologyProvider.getOrderingTopologyAt(
-        topologyQueryTimestamp,
+        topologyQueryTimestampO,
         checkPendingChanges = false,
       ),
       s"Fetch $topologyDesignation ordering topology for bootstrap",
     ).getOrElse(failBootstrap(s"Failed to fetch $topologyDesignation ordering topology"))
 
-  private def fetchLatestEpoch(moduleSystem: ModuleSystem[E], includeInProgress: Boolean)(implicit
+  private def fetchLatestEpoch(
+      moduleSystem: ModuleSystem[E],
+      includeInProgress: Boolean,
+  )(implicit
       traceContext: TraceContext
-  ): EpochStore.Epoch =
+  ): Option[EpochStore.Epoch] =
     awaitFuture(
       moduleSystem,
       stores.epochStore.latestEpoch(includeInProgress),
@@ -504,25 +511,26 @@ object BftOrderingModuleSystemInitializer {
     *   A start epoch number.
     * @param initialTopologyQueryTimestamp
     *   A timestamp to get an initial topology (and a crypto provider) for signing and validation.
+    *   `None` if starting from a bootstrap topology.
     * @param previousTopologyQueryTimestamp
     *   A timestamp to get a topology (and a crypto provider) for canonical commit set validation at
-    *   the first epoch boundary.
+    *   the first epoch boundary. `None` if starting from a bootstrap topology.
     * @param onboardingTopologyQueryTimestamp
     *   An optional timestamp to get a topology (and a crypto provider) for signing state transfer
     *   requests for onboarding.
     */
   final case class BootstrapTopologyInfo(
       initialEpochNumber: EpochNumber,
-      initialTopologyQueryTimestamp: TopologyActivationTime,
-      previousTopologyQueryTimestamp: TopologyActivationTime,
+      initialTopologyQueryTimestamp: Option[TopologyActivationTime],
+      previousTopologyQueryTimestamp: Option[TopologyActivationTime],
       onboardingTopologyQueryTimestamp: Option[TopologyActivationTime] = None,
   ) extends PrettyPrinting {
 
     override protected def pretty: Pretty[BootstrapTopologyInfo] =
       prettyOfClass(
         param("initialEpochNumber", _.initialEpochNumber),
-        param("initialTopologyQueryTimestamp", _.initialTopologyQueryTimestamp.value),
-        param("previousTopologyQueryTimestamp", _.previousTopologyQueryTimestamp.value),
+        param("initialTopologyQueryTimestamp", _.initialTopologyQueryTimestamp.map(_.value)),
+        param("previousTopologyQueryTimestamp", _.previousTopologyQueryTimestamp.map(_.value)),
         param("onboardingTopologyQueryTimestamp", _.onboardingTopologyQueryTimestamp.map(_.value)),
       )
   }

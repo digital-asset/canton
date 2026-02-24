@@ -88,6 +88,11 @@ class FixedSyncCryptoApiForSigning(
     ): FutureUnlessShutdown[Map[Member, Seq[SigningPublicKey]]] =
       FutureUnlessShutdown.pure(members.map(_ -> Seq(signingKey)).toMap)
 
+    override def wasEverOnboarded(
+        participantId: ParticipantId
+    )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
+      notImplementedUS
+
     // =============================================
     // NOTHING ELSE IS IMPLEMENTED BEYOND THIS POINT
     // =============================================
@@ -126,10 +131,6 @@ class FixedSyncCryptoApiForSigning(
     override def allMembers()(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Set[Member]] = notImplementedUS
-
-    override def isMemberKnown(member: Member)(implicit
-        traceContext: TraceContext
-    ): FutureUnlessShutdown[Boolean] = notImplementedUS
 
     override def areMembersKnown(members: Set[Member])(implicit
         traceContext: TraceContext

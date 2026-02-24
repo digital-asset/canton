@@ -9,7 +9,7 @@ import com.digitalasset.canton.auth.AuthInterceptor
 import com.digitalasset.canton.http.json.v2.CirceRelaxedCodec.deriveRelaxedCodec
 import com.digitalasset.canton.http.json.v2.Endpoints.{CallerContext, TracedInput}
 import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
-import com.digitalasset.canton.http.json.v2.JsSchema.JsCantonError
+import com.digitalasset.canton.http.json.v2.JsSchema.{JsCantonError, OneOfSchemaExtension}
 import com.digitalasset.canton.ledger.client.services.admin.UserManagementClient
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.InvalidArgument
 import com.digitalasset.canton.logging.audit.ApiRequestLogger
@@ -444,5 +444,6 @@ object JsUserManagementCodecs {
       : Codec[user_management_service.UpdateUserIdentityProviderIdResponse] = deriveRelaxedCodec
 
   // Schema mappings are added to align generated tapir docs with a circe mapping of ADTs
-  implicit val kindSchema: Schema[user_management_service.Right.Kind] = Schema.oneOfWrapped
+  implicit val kindSchema: Schema[user_management_service.Right.Kind] =
+    Schema.oneOfWrapped[user_management_service.Right.Kind].oneOfExtension()
 }

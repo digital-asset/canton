@@ -7,6 +7,7 @@ import com.daml.ledger.api.v2.commands.DisclosedContract
 import com.daml.ledger.api.v2.value.Identifier
 import com.digitalasset.canton.LfValue
 import com.digitalasset.canton.protocol.{ExampleContractFactory, LfSerializationVersion}
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
@@ -57,6 +58,7 @@ object DisclosedContractCreator {
           None -> LfValue.ValueText("some key"),
         ),
       ),
+      crypto.Hash.hashPrivateKey("dummy-key-hash"),
       api.keyMaintainers,
       Ref.PackageName.assertFromString(api.packageName),
     )

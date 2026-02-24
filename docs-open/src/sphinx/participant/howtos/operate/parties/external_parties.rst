@@ -23,7 +23,7 @@ Authorizing hosting of a new pending party
 ------------------------------------------
 
 An essential part of the party hosting process is the participant node's approval to host the party.
-This can be performed through the :externalref:`Ledger API <tutorial_onboard_external_multi_hosted>` with appropriate rights.
+This can be performed through the :externalref:`Ledger API <tutorial_onboard_external_party_lapi_multi_hosted_pn_approves>` with appropriate rights.
 It can also be done through the node's console.
 
 Assuming we're connected to ``participant2``'s console, list the pending parties awaiting hosting authorization from ``participant2``:

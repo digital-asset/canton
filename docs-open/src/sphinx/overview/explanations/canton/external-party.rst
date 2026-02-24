@@ -254,7 +254,6 @@ Trust relationships
 * **EPN**: The user does not trust the EPN, except when:
 
     * Acting on command completions obtained from it
-    * Using the Time To Live (TTL) feature via the :externalref:`max_record_time <com.daml.ledger.api.v2.interactive.PrepareSubmissionRequest.max_record_time>` field.
 
 For example, the EPN can intentionally emit incorrect completion events, leading users to retry a submission thinking it had failed when it had actually succeeded.
 It can also ignore or modify the ``max_record_time`` field in which case it will not be enforced according to the user's intent.

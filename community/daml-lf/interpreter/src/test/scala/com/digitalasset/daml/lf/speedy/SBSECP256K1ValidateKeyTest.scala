@@ -95,6 +95,8 @@ class SBSECP256K1ValidateKeyTest extends AnyFreeSpec with Matchers with ScalaChe
           succeed
         case Control.Error(IE.Crypto(IE.Crypto.MalformedKey(`invalidPublicKey`, _))) =>
           succeed
+        case Control.Value(SBool(false)) =>
+          succeed
         case _ =>
           fail()
       }

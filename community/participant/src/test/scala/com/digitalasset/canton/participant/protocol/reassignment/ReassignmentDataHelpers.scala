@@ -6,13 +6,8 @@ package com.digitalasset.canton.participant.protocol.reassignment
 import cats.data.EitherT
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.*
-import com.digitalasset.canton.crypto.{SynchronizerCryptoClient, SynchronizerCryptoPureApi}
-import com.digitalasset.canton.data.{
-  CantonTimestamp,
-  ContractsReassignmentBatch,
-  ReassignmentSubmitterMetadata,
-  UnassignmentData,
-}
+import com.digitalasset.canton.crypto.{CryptoPureApi, SynchronizerCryptoClient}
+import com.digitalasset.canton.data.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.submission.SeedGenerator
 import com.digitalasset.canton.protocol.*
@@ -31,13 +26,14 @@ final case class ReassignmentDataHelpers(
     contract: ContractInstance,
     sourceSynchronizer: Source[PhysicalSynchronizerId],
     targetSynchronizer: Target[PhysicalSynchronizerId],
-    pureCrypto: SynchronizerCryptoPureApi,
+    pureCrypto: CryptoPureApi,
     // mediatorCryptoClient and sequencerCryptoClient need to be defined for computation of the DeliveredUnassignmentResult
     mediatorCryptoClient: Option[SynchronizerCryptoClient] = None,
     sequencerCryptoClient: Option[SynchronizerCryptoClient] = None,
     targetTimestamp: Target[CantonTimestamp] = Target(CantonTimestamp.Epoch),
     sourceValidationPackageId: Option[LfPackageId] = None,
     targetValidationPackageId: Option[LfPackageId] = None,
+    uuid: UUID = UUID.randomUUID(),
 ) {
 
   private val seedGenerator: SeedGenerator =
@@ -55,6 +51,20 @@ final case class ReassignmentDataHelpers(
       LedgerUserId.assertFromString("tests"),
       workflowId = None,
     )
+
+  def fullUnassignmentTree(
+      submitter: LfPartyId,
+      submittingParticipant: ParticipantId,
+      sourceMediator: MediatorGroupRecipient,
+  )(
+      reassigningParticipants: Set[ParticipantId] = Set(submittingParticipant)
+  ): FullUnassignmentTree =
+    unassignmentRequest(
+      submitter,
+      submittingParticipant,
+      sourceMediator,
+    )(reassigningParticipants)
+      .toFullUnassignmentTree(pureCrypto, pureCrypto, seedGenerator.generateSaltSeed(), uuid)
 
   def unassignmentRequest(
       submitter: LfPartyId,

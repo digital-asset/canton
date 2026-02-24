@@ -196,7 +196,11 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             argument = Value.ValueUnit,
             signatories = Set("signatory1", "signatory2", "signatory3"),
             observers = Set("observer"),
-            key = CreateKey.KeyWithMaintainers(keyValue, Set("signatory2", "signatory3")),
+            key = CreateKey.KeyWithMaintainers(
+              keyValue,
+              crypto.Hash.hashPrivateKey(keyValue.toString),
+              Set("signatory2", "signatory3"),
+            ),
           )
         val createNodeId = builder.add(createNode)
         val transaction = builder.buildCommitted()
@@ -257,7 +261,12 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           internal_contract_id = 42L,
           create_key_hash = Some(
             GlobalKey
-              .assertBuild(contractTemplate, keyValue, createNode.packageName)
+              .assertBuild(
+                contractTemplate,
+                createNode.packageName,
+                keyValue,
+                crypto.Hash.hashPrivateKey(keyValue.toString),
+              )
               .hash
               .bytes
               .toHexString
@@ -404,7 +413,11 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           argument = Value.ValueUnit,
           signatories = Set("signatory1", "signatory2", "signatory3"),
           observers = Set("observer"),
-          key = CreateKey.KeyWithMaintainers(keyValue, Set("signatory2", "signatory3")),
+          key = CreateKey.KeyWithMaintainers(
+            keyValue,
+            crypto.Hash.hashPrivateKey(keyValue.toString),
+            Set("signatory2", "signatory3"),
+          ),
         )
       val createNodeId = builder.add(createNode)
       val transaction = builder.buildCommitted()
@@ -1171,7 +1184,11 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         argument = Value.ValueUnit,
         signatories = List("signatory2"),
         observers = Set.empty,
-        key = CreateKey.KeyWithMaintainers(Value.ValueUnit, Set("signatory2")),
+        key = CreateKey.KeyWithMaintainers(
+          Value.ValueUnit,
+          crypto.Hash.hashPrivateKey("dummy-key-hash"),
+          Set("signatory2"),
+        ),
       )
       val exerciseNodeAId = builder.add(exerciseNodeA)
       val exerciseNodeBId = builder.add(exerciseNodeB, exerciseNodeAId)
@@ -1301,8 +1318,9 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             GlobalKey
               .assertBuild(
                 Ref.Identifier.assertFromString("P:M:T2"),
-                Value.ValueUnit,
                 createNodeC.packageName,
+                Value.ValueUnit,
+                crypto.Hash.hashPrivateKey("dummy-key-hash"),
               )
               .hash
               .bytes
@@ -1643,7 +1661,10 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         argument = Value.ValueUnit,
         signatories = List("signatory"),
         observers = List("observer"),
-        key = CreateKey.SignatoryMaintainerKey(Value.ValueUnit),
+        key = CreateKey.SignatoryMaintainerKey(
+          Value.ValueUnit,
+          crypto.Hash.hashPrivateKey("dummy-key-hash"),
+        ),
       )
       val fetchNode = builder.fetch(
         contract = createNode,

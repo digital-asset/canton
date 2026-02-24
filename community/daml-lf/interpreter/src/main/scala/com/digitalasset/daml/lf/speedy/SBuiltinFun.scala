@@ -2108,7 +2108,7 @@ private[lf] object SBuiltinFun {
           IE.FetchEmptyContractKeyMaintainers(
             cachedKey.templateId,
             cachedKey.lfValue,
-            cachedKey.packageName,
+            cachedKey.globalKey.packageName,
           )
         )
       } else {
@@ -2564,7 +2564,6 @@ private[lf] object SBuiltinFun {
         val keyValue = vals(keyIdx)
         val gkey = Speedy.Machine.assertGlobalKey(pkgName, templateId, keyValue)
         CachedKey(
-          packageName = pkgName,
           globalKeyWithMaintainers = GlobalKeyWithMaintainers(
             gkey,
             extractParties(NameOf.qualifiedNameOfCurrentFunc, vals(maintainerIdx)),

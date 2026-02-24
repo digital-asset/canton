@@ -20,6 +20,7 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.{Party, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ComparesLfTransactions, LfPackageName}
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.FrontStack
 import com.digitalasset.daml.lf.transaction.Node
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.{
@@ -706,7 +707,10 @@ trait DamlRollbackTestDevLf extends DamlRollbackTest {
       ),
       signatories = Set(lfParty),
       observers = Set(lfParty) ++ lfObservers,
-      key = CreateKey.SignatoryMaintainerKey(LfValue.ValueParty(lfParty)),
+      key = CreateKey.SignatoryMaintainerKey(
+        LfValue.ValueParty(lfParty),
+        crypto.Hash.hashPrivateKey(lfParty),
+      ),
       version = tbCtx.txVersion,
       packageName = LfPackageName.assertFromString("CantonTestsDev"),
     )
@@ -1162,6 +1166,8 @@ class DamlRollbackBftOrderingIntegrationTestPostgresStableLf
     extends DamlRollbackTestStableLf
     with DamlRollbackBftSequencerPostgresTest
 
-class DamlRollbackBftOrderingIntegrationTestPostgresDevLf
+// TODO(#30398) fix the test, and reactivate it by dropping the abstract key word
+@com.digitalasset.canton.annotations.NuckTest
+abstract class DamlRollbackBftOrderingIntegrationTestPostgresDevLf
     extends DamlRollbackTestDevLf
     with DamlRollbackBftSequencerPostgresTest

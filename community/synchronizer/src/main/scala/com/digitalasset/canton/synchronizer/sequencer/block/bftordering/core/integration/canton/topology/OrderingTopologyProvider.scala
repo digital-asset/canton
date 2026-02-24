@@ -6,7 +6,6 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.in
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
-import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction
 import com.digitalasset.canton.tracing.TraceContext
 
 trait OrderingTopologyProvider[E <: Env[E]] {
@@ -17,7 +16,8 @@ trait OrderingTopologyProvider[E <: Env[E]] {
     * @param activationTime
     *   The timestamp with which to query the topology client for a topology snapshot. See
     *   [[com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime]]
-    *   for details.
+    *   for details. If `None`, the head snapshot is returned as a bootstrap topology and pending
+    *   topology changes are assumed absent without checking.
     * @param checkPendingChanges
     *   Whether to check if there are pending topology changes that have not yet been activated.
     * @return
@@ -26,17 +26,9 @@ trait OrderingTopologyProvider[E <: Env[E]] {
     *   processor.
     */
   def getOrderingTopologyAt(
-      activationTime: TopologyActivationTime,
+      activationTime: Option[TopologyActivationTime],
       checkPendingChanges: Boolean,
   )(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[Option[(OrderingTopology, CryptoProvider[E])]]
-}
-
-object OrderingTopologyProvider {
-
-  val InitialOrderingTopologyActivationTime: TopologyActivationTime =
-    TopologyActivationTime(
-      SignedTopologyTransaction.InitialTopologySequencingTime.immediateSuccessor
-    )
 }

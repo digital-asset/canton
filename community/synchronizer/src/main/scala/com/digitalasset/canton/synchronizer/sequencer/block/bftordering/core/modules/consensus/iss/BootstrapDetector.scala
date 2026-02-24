@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss
 
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Bootstrap.BootstrapEpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis.GenesisEpoch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochLength
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss.EpochInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.snapshot.SequencerSnapshotAdditionalInfo
@@ -34,7 +34,7 @@ object BootstrapDetector {
   )(abort: String => Nothing): BootstrapKind =
     snapshotAdditionalInfo match {
       case Some(additionalInfo)
-          if latestCompletedEpoch == GenesisEpoch && membership.otherNodes.sizeIs > 0 =>
+          if latestCompletedEpoch.info.number == BootstrapEpochNumber && membership.otherNodes.sizeIs > 0 =>
         val activeAt = additionalInfo.nodeActiveAt
           .getOrElse(
             membership.myId,

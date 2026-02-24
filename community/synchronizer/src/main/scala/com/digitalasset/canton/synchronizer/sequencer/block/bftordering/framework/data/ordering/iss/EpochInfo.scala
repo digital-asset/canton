@@ -4,12 +4,12 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.iss
 
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis.GenesisTopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BlockNumber,
   EpochLength,
   EpochNumber,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
 import com.google.common.annotations.VisibleForTesting
 
 final case class EpochInfo(
@@ -43,11 +43,11 @@ object EpochInfo {
 
   /** A convenience constructor for tests, also so that we don't have to provide timestamps. */
   @VisibleForTesting
-  private[bftordering] def mk(
+  private[bftordering] def forTesting(
       number: Long,
       startBlockNumber: Long,
       length: Long,
-      topologyActivationTime: TopologyActivationTime = GenesisTopologyActivationTime,
+      topologyActivationTime: TopologyActivationTime = TestBootstrapTopologyActivationTime,
   ): EpochInfo =
     apply(
       EpochNumber(number),

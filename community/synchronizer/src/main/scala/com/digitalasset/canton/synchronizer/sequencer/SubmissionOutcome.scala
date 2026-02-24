@@ -10,11 +10,12 @@ import com.digitalasset.canton.sequencing.protocol.{
   AggregationId,
   Batch,
   ClosedEnvelope,
+  MemberRecipient,
+  MemberRecipientOrBroadcast,
   SequencerDeliverError,
   SubmissionRequest,
 }
 import com.digitalasset.canton.sequencing.traffic.TrafficReceipt
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
 import com.google.rpc.status.Status
 
@@ -26,7 +27,7 @@ sealed trait DeliverableSubmissionOutcome extends SubmissionOutcome {
 
   def sequencingTime: CantonTimestamp
 
-  def deliverToMembers: Set[Member]
+  def recipients: Set[MemberRecipientOrBroadcast]
 
   def submissionTraceContext: TraceContext
 
@@ -46,7 +47,7 @@ object SubmissionOutcome {
     *   The original submission request.
     * @param sequencingTime
     *   The time at which the submission was sequenced.
-    * @param deliverToMembers
+    * @param recipients
     *   The members to which the submission should be delivered, only needed before group addressing
     *   in DBS is finished.
     * @param batch
@@ -56,7 +57,7 @@ object SubmissionOutcome {
   final case class Deliver(
       override val submission: SubmissionRequest,
       override val sequencingTime: CantonTimestamp,
-      override val deliverToMembers: Set[Member],
+      override val recipients: Set[MemberRecipientOrBroadcast],
       batch: Batch[ClosedEnvelope],
       override val submissionTraceContext: TraceContext,
       override val trafficReceiptO: Option[TrafficReceipt],
@@ -86,7 +87,8 @@ object SubmissionOutcome {
       override val trafficReceiptO: Option[TrafficReceipt],
       override val inFlightAggregation: Option[(AggregationId, InFlightAggregationUpdate)],
   ) extends DeliverableSubmissionOutcome {
-    override def deliverToMembers: Set[Member] = Set(submission.sender)
+    override def recipients: Set[MemberRecipientOrBroadcast] =
+      Set(MemberRecipient(submission.sender))
 
     override def updateTrafficReceipt(
         trafficReceiptO: Option[TrafficReceipt]
@@ -122,7 +124,8 @@ object SubmissionOutcome {
       override val submissionTraceContext: TraceContext,
       override val trafficReceiptO: Option[TrafficReceipt],
   ) extends DeliverableSubmissionOutcome {
-    override def deliverToMembers: Set[Member] = Set(submission.sender)
+    override def recipients: Set[MemberRecipientOrBroadcast] =
+      Set(MemberRecipient(submission.sender))
 
     override def updateTrafficReceipt(
         trafficReceiptO: Option[TrafficReceipt]

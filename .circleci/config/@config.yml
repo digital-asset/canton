@@ -68,7 +68,7 @@ _postgres_non_standard_environment: &postgres_non_standard_environment
   <<: *postgres_environment
   NON_STANDARD_POSTGRES: yes
 _canton_docker_executor: &canton_docker_executor
-  image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-a21baf972d25
+  image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-07e6bec441f5
   auth:
     username: $DOCKERHUB_USERNAME
     password: $DOCKERHUB_PASSWORD
@@ -111,7 +111,7 @@ _toxiproxy_docker_executor: &toxiproxy_docker_executor
 executors:
   canton-small-docker: # for management tasks - don't use this to compile or test
     working_directory: /home/circleci/project
-    resource_class: digital-asset/azure_cci_small # 1CPU, 2G RAM
+    resource_class: dach_ny/azure_cci_small # 1CPU, 2G RAM
     docker:
       - *canton_docker_executor
     environment:
@@ -120,7 +120,7 @@ executors:
       EXECUTOR_JVM_METASPACE_SIZE: 200M
   canton-medium-docker:
     working_directory: /home/circleci/project
-    resource_class: digital-asset/azure_cci_medium # 2CPU, 4G RAM
+    resource_class: dach_ny/azure_cci_medium # 2CPU, 4G RAM
     docker:
       - *canton_docker_executor
     environment:
@@ -129,7 +129,7 @@ executors:
       EXECUTOR_JVM_METASPACE_SIZE: 400M
   canton-large-docker:
     working_directory: /home/circleci/project
-    resource_class: digital-asset/azure_cci_large # 4CPUs, 8G RAM
+    resource_class: dach_ny/azure_cci_large # 4CPUs, 8G RAM
     docker:
       - *canton_docker_executor
     environment: &large_docker_env
@@ -143,7 +143,7 @@ executors:
       # - Non-JVM processes: 100M
   canton-large-docker-with-postgres:
     working_directory: /home/circleci/project
-    resource_class: digital-asset/azure_cci_large # 4CPUs, 8G RAM
+    resource_class: dach_ny/azure_cci_large # 4CPUs, 8G RAM
     docker:
       - *canton_docker_executor
       - *postgres_docker_executor
@@ -151,7 +151,7 @@ executors:
       <<: [ *large_docker_env, *postgres_environment ]
   canton-xlarge-docker:
     working_directory: /home/circleci/project
-    resource_class: digital-asset/azure_cci_xlarge # 8CPUs, 16G RAM
+    resource_class: dach_ny/azure_cci_xlarge # 8CPUs, 16G RAM
     docker:
       - *canton_docker_executor
     environment: &xlarge_docker_env
@@ -171,7 +171,7 @@ executors:
       # - Other processes: 100M
   canton-2xlarge-docker:
     working_directory: /home/circleci/project
-    resource_class: digital-asset/azure_cci_2xl # 16CPUs, 32G RAM
+    resource_class: dach_ny/azure_cci_2xl # 16CPUs, 32G RAM
     docker:
       - *canton_docker_executor
     environment: &xxlarge_docker_env
@@ -180,7 +180,7 @@ executors:
       EXECUTOR_JVM_METASPACE_SIZE: 3200M
   canton-2xlarge-plus-docker:
     working_directory: /home/circleci/project
-    resource_class: digital-asset/azure_cci_2xl # 20CPUs, 40G RAM
+    resource_class: dach_ny/azure_cci_2xl # 20CPUs, 40G RAM
     docker:
       - *canton_docker_executor
     environment: &xxlarge_plus_docker_env
@@ -189,7 +189,7 @@ executors:
       EXECUTOR_JVM_METASPACE_SIZE: 12000M
   canton-xlarge-docker-with-postgres: &canton-xlarge-docker-with-postgres
     working_directory: /home/circleci/project
-    resource_class: digital-asset/azure_cci_xlarge # 8CPUs, 16G RAM
+    resource_class: dach_ny/azure_cci_xlarge # 8CPUs, 16G RAM
     docker:
       - *canton_docker_executor
       - *postgres_docker_executor
@@ -197,7 +197,7 @@ executors:
       <<: [ *xlarge_docker_env,*postgres_environment ]
   canton-xlarge-plus-docker-with-postgres:
     working_directory: /home/circleci/project
-    resource_class: digital-asset/azure_cci_xlarge_plus # request: 8CPU / limit: 16CPU, 16G RAM
+    resource_class: dach_ny/azure_cci_xlarge_plus # request: 8CPU / limit: 16CPU, 16G RAM
     docker:
       - *canton_docker_executor
       - *postgres_docker_executor
@@ -227,7 +227,7 @@ executors:
       - *postgres16_docker_executor
   canton-2xlarge-plus-docker-with-postgres:
     working_directory: /home/circleci/project
-    resource_class: digital-asset/azure_cci_2xl # 20CPUs, 40G RAM
+    resource_class: dach_ny/azure_cci_2xl # 20CPUs, 40G RAM
     docker:
       - *canton_docker_executor
       - *postgres_docker_executor
@@ -236,7 +236,7 @@ executors:
 
   canton-2xlarge-docker-with-postgres:
     working_directory: /home/circleci/project
-    resource_class: digital-asset/azure_cci_2xl # 16CPUs, 32G RAM
+    resource_class: dach_ny/azure_cci_2xl # 16CPUs, 32G RAM
     docker:
       - *canton_docker_executor
       - *postgres_docker_executor
@@ -245,7 +245,7 @@ executors:
 
   canton-xlarge-docker-with-postgres-toxiproxy:
     working_directory: /home/circleci/project
-    resource_class: digital-asset/azure_cci_xlarge # 8CPUs, 16G RAM
+    resource_class: dach_ny/azure_cci_xlarge # 8CPUs, 16G RAM
     docker:
       - *canton_docker_executor
       - *postgres_docker_executor

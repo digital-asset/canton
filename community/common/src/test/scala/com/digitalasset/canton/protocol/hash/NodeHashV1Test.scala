@@ -9,6 +9,7 @@ import com.digitalasset.canton.protocol.hash.TransactionHash.NodeHashingError
 import com.digitalasset.canton.protocol.hash.TransactionHash.NodeHashingError.IncompleteTransactionTree
 import com.digitalasset.canton.protocol.{LfHash, LfSerializationVersion}
 import com.digitalasset.canton.version.HashingSchemeVersion
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.data.Ref.{ChoiceName, PackageName, Party}
 import com.digitalasset.daml.lf.transaction.*
@@ -22,8 +23,9 @@ class NodeHashV1Test extends BaseTest with AnyWordSpecLike with Matchers with Ha
   private val globalKey = GlobalKeyWithMaintainers(
     GlobalKey.assertBuild(
       defRef("module_key", "name"),
-      VA.text.inj("hello"),
       PackageName.assertFromString("package_name_key"),
+      VA.text.inj("hello"),
+      crypto.Hash.hashPrivateKey("dummy-hello-key-hash"),
     ),
     Set[Party](Ref.Party.assertFromString("david")),
   )
@@ -31,8 +33,9 @@ class NodeHashV1Test extends BaseTest with AnyWordSpecLike with Matchers with Ha
   private val globalKey2 = GlobalKeyWithMaintainers(
     GlobalKey.assertBuild(
       defRef("module_key", "name"),
-      VA.text.inj("bye"),
       PackageName.assertFromString("package_name_key"),
+      VA.text.inj("bye"),
+      crypto.Hash.hashPrivateKey("dummy-bye-key-hash"),
     ),
     Set[Party](Ref.Party.assertFromString("david")),
   )

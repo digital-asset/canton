@@ -2555,6 +2555,8 @@ components:
       title: AssignCommand
       description: Assign a contract
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/AssignCommand1'
@@ -2712,6 +2714,8 @@ components:
       description: 'A completion represents the status of a submitted command on the
         ledger: it can be successful or failed.'
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/Completion1'
@@ -3079,6 +3083,12 @@ components:
             The key of the created contract.
             This will be set if and only if ``template_id`` defines a contract key.
             Optional
+        contractKeyHash:
+          description: |-
+            The hash of contract_key.
+            This will be set if and only if ``template_id`` defines a contract key.
+            Optional
+          type: string
         createArgument:
           description: |-
             The arguments that have been used to create the contract.
@@ -4444,6 +4454,8 @@ components:
       title: InterfaceFilter
       description: This filter matches contracts that implement a specific interface.
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/InterfaceFilter1'
@@ -5657,6 +5669,8 @@ components:
       description: Records that a contract has been unassigned, and it becomes unusable
         on the source synchronizer
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/UnassignedEvent'
@@ -5943,6 +5957,8 @@ components:
         - detect time out of commands.
         - provide an offset which can be used to restart consumption.
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/OffsetCheckpoint1'
@@ -5976,6 +5992,8 @@ components:
         - detect time out of commands.
         - provide an offset which can be used to restart consumption.
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/OffsetCheckpoint1'
@@ -5987,6 +6005,8 @@ components:
         - detect time out of commands.
         - provide an offset which can be used to restart consumption.
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/OffsetCheckpoint1'
@@ -6124,6 +6144,8 @@ components:
     ParticipantAuthorizationAdded:
       title: ParticipantAuthorizationAdded
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/ParticipantAuthorizationAdded1'
@@ -6152,6 +6174,8 @@ components:
     ParticipantAuthorizationChanged:
       title: ParticipantAuthorizationChanged
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/ParticipantAuthorizationChanged1'
@@ -6180,6 +6204,8 @@ components:
     ParticipantAuthorizationRevoked:
       title: ParticipantAuthorizationRevoked
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/ParticipantAuthorizationRevoked1'
@@ -6322,6 +6348,8 @@ components:
       title: Reassignment
       description: Complete view of an on-ledger reassignment.
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/JsReassignment'
@@ -6329,6 +6357,8 @@ components:
       title: Reassignment
       description: Complete view of an on-ledger reassignment.
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/JsReassignment'
@@ -6592,6 +6622,8 @@ components:
       title: TemplateFilter
       description: This filter matches contracts of a specific template.
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/TemplateFilter1'
@@ -6718,6 +6750,8 @@ components:
     TopologyTransaction:
       title: TopologyTransaction
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/JsTopologyTransaction'
@@ -6736,6 +6770,8 @@ components:
       description: Filtered view of an on-ledger transaction's create and archive
         events.
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/JsTransaction'
@@ -6793,6 +6829,8 @@ components:
         Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
         Complete view of an on-ledger transaction.
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/JsTransactionTree'
@@ -6831,6 +6869,8 @@ components:
       title: UnassignCommand
       description: Unassign a contract
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/UnassignCommand1'
@@ -7456,6 +7496,8 @@ components:
       title: WildcardFilter
       description: This filter matches all templates.
       type: object
+      required:
+      - value
       properties:
         value:
           $ref: '#/components/schemas/WildcardFilter1'

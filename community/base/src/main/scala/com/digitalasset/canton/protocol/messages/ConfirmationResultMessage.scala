@@ -75,7 +75,7 @@ case class ConfirmationResultMessage private (
       verdict = Some(verdict.toProtoV30),
     )
 
-  override protected[messages] def toProtoTypedSomeSignedProtocolMessage
+  override protected[messages] def toProtoTypedSomeSignedProtocolMessageV30
       : v30.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage =
     v30.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage.ConfirmationResult(
       getCryptographicEvidence

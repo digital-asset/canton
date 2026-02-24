@@ -204,12 +204,12 @@ class RequiredTopologyMappingChecksTest
             asOfInclusive: Boolean,
             uid: UniqueIdentifier,
             transactionTypes: Set[Code],
-            op: TopologyChangeOp,
+            op: Option[TopologyChangeOp] = Some(TopologyChangeOp.Replace),
             warnIfUncached: Boolean = false,
         )(implicit
             traceContext: TraceContext
         ): FutureUnlessShutdown[Seq[GenericStoredTopologyTransaction]] = op match {
-          case TopologyChangeOp.Replace =>
+          case Some(TopologyChangeOp.Replace) =>
             store
               .findPositiveTransactions(
                 asOf = asOf.value,
@@ -220,7 +220,7 @@ class RequiredTopologyMappingChecksTest
                 filterNamespace = None,
               )
               .map(_.result)
-          case TopologyChangeOp.Remove => ???
+          case Some(TopologyChangeOp.Remove) => ???
         }
 
         override def lookupForNamespace(

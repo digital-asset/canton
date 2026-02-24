@@ -5,8 +5,8 @@ package com.daml.ledger.api.testtool.runner
 
 import com.daml.ledger.api.testtool.infrastructure.*
 import com.daml.ledger.api.testtool.runner.TestRunner.*
+import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.TlsClientConfig
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import io.grpc.Channel
 import io.grpc.netty.shaded.io.grpc.netty.{NegotiationType, NettyChannelBuilder}

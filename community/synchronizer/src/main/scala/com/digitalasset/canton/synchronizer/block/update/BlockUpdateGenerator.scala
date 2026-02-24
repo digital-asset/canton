@@ -13,7 +13,7 @@ import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.{
   AllMembersOfSynchronizer,
-  GroupRecipient,
+  MemberRecipientOrBroadcast,
   SequencerDeliverError,
   SequencersOfSynchronizer,
 }
@@ -320,6 +320,6 @@ object BlockUpdateGeneratorImpl {
       orderingSequencerId: SequencerId,
       topologyTimestampError: Option[SequencerDeliverError],
       consumeTraffic: SubmissionRequestValidator.TrafficConsumption,
-      errorOrResolvedGroups: Either[SubmissionOutcome, Map[GroupRecipient, Set[Member]]],
+      errorOrRecipients: Either[SubmissionOutcome, Set[MemberRecipientOrBroadcast]],
   )(val traceContext: TraceContext)
 }

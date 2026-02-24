@@ -283,9 +283,9 @@ class AuthenticationTokenProvider(
     } yield ()
 }
 
-private object AuthenticationTokenProvider {
+object AuthenticationTokenProvider {
 
-  val exceptionRetryPolicy: ExceptionRetryPolicy =
+  private val exceptionRetryPolicy: ExceptionRetryPolicy =
     new ExceptionRetryPolicy {
       override protected def determineExceptionErrorKind(
           exception: Throwable,
