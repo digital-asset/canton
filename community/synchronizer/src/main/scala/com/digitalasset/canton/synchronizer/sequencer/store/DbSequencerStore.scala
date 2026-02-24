@@ -5,11 +5,13 @@ package com.digitalasset.canton.synchronizer.sequencer.store
 
 import cats.Monad
 import cats.data.EitherT
+import cats.syntax.alternative.*
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
 import cats.syntax.option.*
+import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.catsinstances.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
@@ -65,7 +67,7 @@ import java.util.UUID
 import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.collection.immutable.SortedSet
-import scala.concurrent.{ExecutionContext, TimeoutException}
+import scala.concurrent.{ExecutionContext, Future, TimeoutException}
 import scala.util.{Failure, Success}
 
 /** Database backed sequencer store. Supports many concurrent instances reading and writing to the
@@ -895,15 +897,22 @@ class DbSequencerStore(
       )
       .map(items => SortedSet(items*))
 
+  private def splitPreLoadedAndToBeLoaded(
+      payloadIds: Seq[IdOrPayload]
+  ): (Map[PayloadId, Batch[ClosedEnvelope]], Seq[PayloadId]) = {
+    val preloadedPayloads = payloadIds.collect { case payload: BytesPayload =>
+      payload.id -> payload.decodeBatch(protocolVersion)
+    }.toMap
+
+    val idsToLoad = payloadIds.collect { case id: PayloadId => id }
+    (preloadedPayloads, idsToLoad)
+  }
+
   override def readPayloads(payloadIds: Seq[IdOrPayload], member: Member)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[PayloadId, Batch[ClosedEnvelope]]] = {
 
-    val preloadedPayloads = payloadIds.collect { case payload: BytesPayload =>
-      payload.id -> payload.decodeBatchAndTrim(protocolVersion, member)
-    }.toMap
-
-    val idsToLoad = payloadIds.collect { case id: PayloadId => id }
+    val (preloadedPayloads, idsToLoad) = splitPreLoadedAndToBeLoaded(payloadIds)
 
     logger.debug(
       s"readPayloads: reusing buffered ${preloadedPayloads.size} payloads and requesting ${idsToLoad.size}"
@@ -913,6 +922,38 @@ class DbSequencerStore(
       preloadedPayloads ++ accessedPayloads.view
         .mapValues(_.decodeBatchAndTrim(protocolVersion, member))
     }
+  }
+
+  override def readPayloadsByIdWithoutCacheLoading(
+      payloadIds: Seq[IdOrPayload]
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[PayloadId, Batch[ClosedEnvelope]]] = {
+    val (preloadedPayloads, idsToLoad) = splitPreLoadedAndToBeLoaded(payloadIds)
+
+    logger.debug(
+      s"readPayloadsById: reusing buffered ${preloadedPayloads.size} payloads and requesting ${idsToLoad.size}"
+    )
+
+    for {
+      // Load payloads from the cache with getIfPresent to avoid populating the cache with the value
+      // if it's not already there
+      attemptedLoadingFromCache <- FutureUnlessShutdown(
+        // Use Future.sequence on the Seq[Future[_]] as it is more efficient than cats sequence / traverse
+        Future
+          .sequence(idsToLoad.map { id =>
+            payloadCache.getIfPresent(id) match {
+              case Some(value) => value.unwrap.map(_.map(payload => Right(id -> payload)))
+              case None => Future.successful(UnlessShutdown.Outcome(Left(id)))
+            }
+          })
+          // This sequence converts Seq[UnlessShutdown[_]] to UnlessShutdown[Seq[_]], no async computation there
+          .map(_.sequence)
+      )
+      (needsLoadingFromDB, loadedFromCache) = attemptedLoadingFromCache.separate
+      loadedFromDB <- readPayloadsFromStore(needsLoadingFromDB)
+    } yield preloadedPayloads ++ (loadedFromDB ++ loadedFromCache.toMap).view
+      .mapValues(_.decodeBatch(protocolVersion))
   }
 
   private def readPayloadsFromStore(payloadIds: Seq[PayloadId])(implicit

@@ -135,6 +135,7 @@ class DriverBlockSequencerFactory[C](
       synchronizerLoggerFactory,
       exitOnFatalFailures = nodeParameters.exitOnFatalFailures,
       runtimeReady = runtimeReady,
+      batchingConfig = batchingConfig,
     )
 }
 

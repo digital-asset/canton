@@ -573,10 +573,7 @@ private final case class LedgerServicesJson(
       )
 
     override def allocateParty(request: AllocatePartyRequest): Future[AllocatePartyResponse] =
-      for {
-        jsRequest <- protocolConverters.AllocatePartyRequest.toJson(request)
-        resp <- clientCall(JsPartyManagementService.allocatePartyEndpoint, jsRequest)
-      } yield resp
+      clientCall(JsPartyManagementService.allocatePartyEndpoint, request)
 
     override def updatePartyDetails(
         request: UpdatePartyDetailsRequest
@@ -949,8 +946,8 @@ private final case class LedgerServicesJson(
   def contract: ContractService = new ContractService {
     override def getContract(request: GetContractRequest): Future[GetContractResponse] =
       clientCall(JsContractService.getContractEndpoint, request)
-        .flatMap(_.createdEvent.traverse(protocolConverters.CreatedEvent.fromJson))
-        .map(GetContractResponse(_))
+        .flatMap(resp => protocolConverters.CreatedEvent.fromJson(resp.createdEvent))
+        .map(ce => GetContractResponse(Some(ce)))
   }
 }
 

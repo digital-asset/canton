@@ -50,7 +50,8 @@ object JsSchema {
   val BYTE_STRING_PARSE_ERROR_TEMPLATE = "The string is not a valid Base64: %s"
 
   implicit val config: Configuration = Configuration.default.copy(
-    useDefaults = true
+    useDefaults = true,
+    strictDecoding = false,
   )
 
   def stringEncoderForEnum[T <: scalapb.GeneratedEnum](): Encoder[T] =
@@ -99,7 +100,7 @@ object JsSchema {
       updateId: String,
       commandId: String,
       workflowId: String,
-      effectiveAt: Option[protobuf.timestamp.Timestamp],
+      effectiveAt: protobuf.timestamp.Timestamp,
       offset: Long,
       eventsById: Map[Int, JsTreeEvent.TreeEvent],
       synchronizerId: String,
@@ -352,8 +353,8 @@ object JsSchema {
         retryInfo = decodedCantonError.code.category.retryable.map(_.duration),
         definiteAnswer = decodedCantonError.definiteAnswerO,
       )
-
   }
+
   object DirectScalaPbRwImplicits {
     import sttp.tapir.json.circe.*
     import sttp.tapir.generic.auto.*

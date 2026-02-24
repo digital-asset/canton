@@ -52,6 +52,17 @@ object SequencerAdminCommands {
       proto.SequencerAdministrationServiceGrpc.stub(channel)
   }
 
+  abstract class BaseSequencerInspectionCommand[Req, Rep, Res]
+      extends GrpcAdminCommand[Req, Rep, Res] {
+    override type Svc =
+      proto.SequencerTrafficInspectionServiceGrpc.SequencerTrafficInspectionServiceStub
+
+    override def createService(
+        channel: ManagedChannel
+    ): proto.SequencerTrafficInspectionServiceGrpc.SequencerTrafficInspectionServiceStub =
+      proto.SequencerTrafficInspectionServiceGrpc.stub(channel)
+  }
+
   final case class GenerateAuthenticationToken(
       member: Member,
       expiresIn: Option[NonNegativeFiniteDuration],
@@ -159,6 +170,27 @@ object SequencerAdminCommands {
     override protected def handleResponse(
         response: proto.SetTrafficPurchasedResponse
     ): Either[String, Unit] = Either.unit
+  }
+
+  final case class GetTrafficSummaries(
+      timestamps: Seq[CantonTimestamp]
+  ) extends BaseSequencerInspectionCommand[
+        proto.GetTrafficSummariesRequest,
+        proto.GetTrafficSummariesResponse,
+        Seq[proto.TrafficSummary],
+      ] {
+    override protected def createRequest(): Either[String, proto.GetTrafficSummariesRequest] =
+      Right(
+        proto.GetTrafficSummariesRequest(timestamps.map(_.toProtoTimestamp))
+      )
+    override protected def submitRequest(
+        service: proto.SequencerTrafficInspectionServiceGrpc.SequencerTrafficInspectionServiceStub,
+        request: proto.GetTrafficSummariesRequest,
+    ): Future[proto.GetTrafficSummariesResponse] =
+      service.getTrafficSummaries(request)
+    override protected def handleResponse(
+        response: proto.GetTrafficSummariesResponse
+    ): Either[String, Seq[proto.TrafficSummary]] = Right(response.summary)
   }
 
   final case class InitializeFromOnboardingState(onboardingState: ByteString)

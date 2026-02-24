@@ -200,6 +200,7 @@ class BlockSequencerTest
         loggerFactory = loggerFactory,
         exitOnFatalFailures = true,
         runtimeReady = FutureUnlessShutdown.unit,
+        batchingConfig = BatchingConfig(),
       )
 
     override def close(): Unit = {

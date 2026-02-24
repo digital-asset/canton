@@ -32,6 +32,10 @@ if [ -n "${OVERRIDE_BOOTSTRAP_SCRIPT:-}" ]; then
   echo "$OVERRIDE_BOOTSTRAP_SCRIPT" > /app/bootstrap.sc
 fi
 
+for migration in ${!ADDITIONAL_REPEATABLE_MIGRATION@}; do
+   echo "${!migration}"
+done >> /app/repeatable-migrations/R__repeatable-migration.sql
+
 if [ -f /app/bootstrap.sc ]; then
   # Rename file to avoid namespace confusion with canton console bootstrap object
   cp /app/bootstrap.sc /app/user-bootstrap.sc

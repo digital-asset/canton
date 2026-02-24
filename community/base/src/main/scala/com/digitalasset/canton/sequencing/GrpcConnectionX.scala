@@ -9,7 +9,8 @@ import com.daml.grpc.adapter.client.pekko.ClientAdapter
 import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.GrpcServiceInvocationMethod
-import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.{KeepAliveClientConfig, ProcessingTimeout}
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasRunOnClosing, LifeCycle}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -28,7 +29,7 @@ import com.digitalasset.canton.sequencing.ConnectionX.{
   ConnectionXHealth,
   ConnectionXState,
 }
-import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Mutex
 import io.grpc.Channel
 import io.grpc.Context.CancellableContext
@@ -45,6 +46,7 @@ import scala.concurrent.{ExecutionContextExecutor, Future}
   */
 final case class GrpcConnectionX(
     config: ConnectionXConfig,
+    keepAliveClientConfigO: Option[KeepAliveClientConfig],
     metrics: SequencerConnectionPoolMetrics,
     override val timeouts: ProcessingTimeout,
     protected override val loggerFactory: NamedLoggerFactory,
@@ -71,8 +73,7 @@ final case class GrpcConnectionX(
         case Some(_) => logger.warn("Starting an already-started connection. Ignoring.")
 
         case None =>
-          val clientChannelBuilder = ClientChannelBuilder(loggerFactory)
-          val builder = mkChannelBuilder(clientChannelBuilder, config.tracePropagation)
+          val builder = mkChannelBuilder()
           val channel = GrpcManagedChannel(
             s"GrpcConnectionX-$name",
             builder.build(),
@@ -179,21 +180,25 @@ final case class GrpcConnectionX(
         Left(ConnectionXError.InvalidStateError("Connection is not started"))
     }
 
-  private def mkChannelBuilder(
-      clientChannelBuilder: ClientChannelBuilder,
-      tracePropagation: TracingConfig.Propagation,
-  )(implicit
+  private def mkChannelBuilder()(implicit
       executor: Executor
-  ): ManagedChannelBuilderProxy = ManagedChannelBuilderProxy(
-    clientChannelBuilder
-      .create(
-        NonEmpty.mk(Seq, config.endpoint),
-        config.transportSecurity,
-        executor,
-        config.customTrustCertificates,
-        tracePropagation,
-      )
-  )
+  ): ManagedChannelBuilderProxy = {
+    val clientChannelBuilder = ClientChannelBuilder(loggerFactory)
+
+    ManagedChannelBuilderProxy(
+      clientChannelBuilder
+        .create(
+          endpoints = NonEmpty.mk(Seq, config.endpoint),
+          useTls = config.transportSecurity,
+          executor = executor,
+          trustCertificate = config.customTrustCertificates,
+          traceContextPropagation = config.tracePropagation,
+          // TODO(i30502): Limit to `DynamicSynchronizerParameters.maxRequestSize`
+          maxInboundMessageSize = Some(NonNegativeInt.maxValue),
+          keepAliveClient = keepAliveClientConfigO,
+        )
+    )
+  }
 
   override protected def pretty: Pretty[GrpcConnectionX] =
     prettyOfString(conn => s"Connection ${conn.name.singleQuoted}")

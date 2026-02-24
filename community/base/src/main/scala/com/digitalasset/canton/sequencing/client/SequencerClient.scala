@@ -1284,18 +1284,20 @@ class RichSequencerClientImpl(
   )
   private val handlerIdleLock = new Mutex()
 
-  override def getConnectionPoolHealthStatus: Seq[HealthQuasiComponent] = {
-    val (connectionPoolHealth, connectionsHealth) =
-      (connectionPool.health, connectionPool.getConnectionsHealthStatus)
+  override def getConnectionPoolHealthStatus: Seq[HealthQuasiComponent] =
+    if (!config.useNewConnectionPool) Seq.empty
+    else {
+      val (connectionPoolHealth, connectionsHealth) =
+        (connectionPool.health, connectionPool.getConnectionsHealthStatus)
 
-    sequencerSubscriptionPoolRef.get.fold(connectionPoolHealth +: connectionsHealth) {
-      subscriptionPool =>
-        Seq(
-          connectionPoolHealth,
-          subscriptionPool.health,
-        ) ++ connectionsHealth ++ subscriptionPool.getSubscriptionsHealthStatus
+      sequencerSubscriptionPoolRef.get.fold(connectionPoolHealth +: connectionsHealth) {
+        subscriptionPool =>
+          Seq(
+            connectionPoolHealth,
+            subscriptionPool.health,
+          ) ++ connectionsHealth ++ subscriptionPool.getSubscriptionsHealthStatus
+      }
     }
-  }
 
   override protected def subscribeAfterInternal(
       priorTimestamp: CantonTimestamp,

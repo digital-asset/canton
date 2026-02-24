@@ -8,7 +8,6 @@ import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.parallel.*
 import cats.syntax.semigroup.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
@@ -28,7 +27,6 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.synchronizer.mediator.store.MediatorState
 import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.EitherUtil.RichEither
@@ -342,35 +340,47 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
         },
       )
 
+      submissionTimeTopologySnapshotO <- EitherT.right(
+        getSubmissionTopologySnapshot(requestId, rootHashMessages)
+      )
+
       // Validate signature of submitting participant
-      _ <- snapshot
-        .verifySignature(
+      _ <- checkAndReportMaliciousParticipant(
+        snapshot,
+        submissionTimeTopologySnapshotO,
+      )(
+        _.verifySignature(
           request.rootHash.unwrap,
           request.submittingParticipant,
           request.submittingParticipantSignature,
           SigningKeyUsage.ProtocolOnly,
-        )
-        .leftMap { err =>
-          val reject = MediatorError.MalformedMessage.Reject(
+        ).leftMap(err =>
+          // The error is logged at the appropriate level by checkAndReportMaliciousParticipant
+          MediatorError.MalformedMessage.Reject(
             show"Received a mediator confirmation request with id $requestId from ${request.submittingParticipant} with an invalid signature. Rejecting request.\nDetailed error: $err"
           )
-          reject.log()
-          Option(MediatorVerdict.MediatorReject(reject))
-        }
+        )
+      ).leftMap(Option.apply)
 
       // Validate activeness of informee participants
-      _ <- topologySnapshot
-        .allHaveActiveParticipants(request.allInformees)
-        .leftMap { informeesNoParticipant =>
-          val reject = MediatorError.InvalidMessage.Reject(
-            show"Received a mediator confirmation request with id $requestId with some informees not being hosted by an active participant: $informeesNoParticipant. Rejecting request..."
+      _ <- checkAndReportMaliciousParticipant(snapshot, submissionTimeTopologySnapshotO)(
+        _.ipsSnapshot
+          .allHaveActiveParticipants(request.allInformees)
+          .leftMap(informeesNoParticipant =>
+            // The error is logged at the appropriate level by checkAndReportMaliciousParticipant
+            MediatorError.InvalidMessage.Reject(
+              show"Received a mediator confirmation request with id $requestId with some informees not being hosted by an active participant: $informeesNoParticipant. Rejecting request..."
+            )
           )
-          reject.log()
-          Option(MediatorVerdict.MediatorReject(reject))
-        }
+      ).leftMap(Option.apply)
 
       // Validate declared mediator and the group being active
-      validMediator <- checkDeclaredMediator(requestId, requestEnvelope, topologySnapshot)
+      validMediator <- checkDeclaredMediator(
+        requestId,
+        requestEnvelope,
+        snapshot,
+        submissionTimeTopologySnapshotO,
+      )
 
       // Validate root hash messages
       _ <- checkRootHashMessages(
@@ -378,7 +388,8 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
         requestId,
         request,
         rootHashMessages,
-        topologySnapshot,
+        snapshot,
+        submissionTimeTopologySnapshotO,
       )
         .leftMap(Option.apply)
 
@@ -388,7 +399,12 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
         .leftMap(Option.apply)
 
       // Reject, if the authorized confirming parties cannot attain the threshold
-      _ <- validateAuthorizedConfirmingParties(requestId, request, topologySnapshot)
+      _ <- validateAuthorizedConfirmingParties(
+        requestId,
+        request,
+        snapshot,
+        submissionTimeTopologySnapshotO,
+      )
         .leftMap(Option.apply)
 
       // Reject, if the batch also contains a topology transaction
@@ -410,7 +426,8 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
   private def checkDeclaredMediator(
       requestId: RequestId,
       requestEnvelope: OpenEnvelope[MediatorConfirmationRequest],
-      topologySnapshot: TopologySnapshot,
+      topologySnapshot: SynchronizerSnapshotSyncCryptoApi,
+      submissionTimeTopologySnapshotO: Option[SynchronizerSnapshotSyncCryptoApi],
   )(implicit
       loggingContext: ErrorLoggingContext
   ): EitherT[FutureUnlessShutdown, Option[
@@ -419,31 +436,31 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
 
     val request = requestEnvelope.protocolMessage
 
-    def rejectWrongMediator(hint: => String): Option[MediatorVerdict.MediatorReject] =
-      Some(
-        MediatorVerdict.MediatorReject(
-          MediatorError.MalformedMessage
-            .Reject(
-              show"Rejecting mediator confirmation request with $requestId, mediator ${request.mediator}, topology at ${topologySnapshot.timestamp} due to $hint"
-            )
-            .reported()
+    def rejectWrongMediator(hint: => String): MediatorError.MalformedMessage.Reject =
+      MediatorError.MalformedMessage
+        .Reject(
+          show"Rejecting mediator confirmation request with $requestId, mediator ${request.mediator}, topology at ${topologySnapshot.ipsSnapshot.timestamp} due to $hint"
         )
-      )
 
-    for {
-      mediatorGroupO <- EitherT.right(
-        topologySnapshot.mediatorGroup(request.mediator.group)(loggingContext)
-      )
-      mediatorGroup <- EitherT.fromOption[FutureUnlessShutdown](
-        mediatorGroupO,
-        rejectWrongMediator(show"unknown mediator group"),
-      )
+    def getMediatorGroup(
+        snapshot: SynchronizerSnapshotSyncCryptoApi
+    ): EitherT[FutureUnlessShutdown, MediatorError.MalformedMessage.Reject, MediatorGroup] =
+      for {
+        mediatorGroupO <- EitherT.right(
+          snapshot.ipsSnapshot.mediatorGroup(request.mediator.group)(loggingContext)
+        )
+        mediatorGroup <- EitherT.fromOption[FutureUnlessShutdown](
+          mediatorGroupO,
+          rejectWrongMediator(show"unknown mediator group"),
+        )
+      } yield mediatorGroup
+
+    val submissionTimeIndependentChecks = for {
+      mediatorGroup <- getMediatorGroup(topologySnapshot)
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-        mediatorGroup.isActive,
-        rejectWrongMediator(show"inactive mediator group"),
-      )
-      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-        mediatorGroup.active.contains(mediatorId) || mediatorGroup.passive.contains(mediatorId),
+        mediatorGroup.active.contains(mediatorId) || mediatorGroup.passive.contains(
+          mediatorId
+        ),
         rejectWrongMediator(show"this mediator not being part of the mediator group"),
       )
       expectedRecipients = Recipients.cc(request.mediator)
@@ -453,7 +470,25 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
           show"wrong recipients (expected $expectedRecipients, actual ${requestEnvelope.recipients})"
         ),
       )
+    } yield ()
+
+    for {
+      _ <- submissionTimeIndependentChecks.leftMap { error =>
+        // log the submission-time independent checks explicitly.
+        Option(MediatorVerdict.MediatorReject(error.reported()))
+      }
+      _ <- checkAndReportMaliciousParticipant(topologySnapshot, submissionTimeTopologySnapshotO)(
+        snapshot =>
+          getMediatorGroup(snapshot).flatMap { mediatorGroup =>
+            EitherTUtil.condUnitET[FutureUnlessShutdown](
+              mediatorGroup.isActive,
+              // The error is logged at the appropriate level by checkAndReportMaliciousParticipant
+              rejectWrongMediator(show"inactive mediator group"),
+            )
+          }
+      )(loggingContext.traceContext).leftMap(Option.apply)
     } yield request.mediator
+
   }
 
   private def checkRootHashMessages(
@@ -461,7 +496,8 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
       requestId: RequestId,
       request: MediatorConfirmationRequest,
       rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
-      sequencingTopologySnapshot: TopologySnapshot,
+      sequencingSnapshot: SynchronizerSnapshotSyncCryptoApi,
+      submissionTimeSnapshotO: Option[SynchronizerSnapshotSyncCryptoApi],
   )(implicit
       loggingContext: ErrorLoggingContext
   ): EitherT[FutureUnlessShutdown, MediatorVerdict.MediatorReject, Unit] = {
@@ -473,11 +509,8 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
     )
 
     val rootHashMessagesRecipients = correctRecipients
-      .flatMap(recipients =>
-        recipients.collect { case m @ MemberRecipient(_: ParticipantId) =>
-          m
-        }
-      )
+      .flatMap(recipients => recipients.collect { case m @ MemberRecipient(_: ParticipantId) => m })
+
     def repeatedMembers(recipients: Seq[Recipient]): Seq[Recipient] = {
       val repeatedRecipientsB = Seq.newBuilder[Recipient]
       val seen = new mutable.HashSet[Recipient]()
@@ -487,6 +520,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
       }
       repeatedRecipientsB.result()
     }
+
     def wrongRootHashes(expectedRootHash: RootHash): Seq[RootHash] =
       rootHashMessages.mapFilter { envelope =>
         val rootHash = envelope.protocolMessage.rootHash
@@ -499,185 +533,65 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
     def wrongViewType(expectedViewType: ViewType): Seq[ViewType] =
       rootHashMessages.map(_.protocolMessage.viewType).filterNot(_ == expectedViewType).distinct
 
-    def checkWrongMembers(
-        wrongMembers: RootHashMessageRecipients.WrongMembers
-    )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, RejectionReason, Unit] =
-      NonEmpty.from(wrongMemberErrors(wrongMembers)) match {
-        // The check using the sequencing topology snapshot reported no error
-        case None => EitherT.pure[FutureUnlessShutdown, RejectionReason](())
+    def reportedMediatorReject(reason: String): MediatorVerdict.MediatorReject =
+      MediatorVerdict.MediatorReject(malformedMessage(reason).reported())
 
-        case Some(errorsNE) =>
-          val mayBeDueToTopologyChange = errorsNE.forall(_.mayBeDueToTopologyChange)
-
-          val dueToTopologyChangeF = if (mayBeDueToTopologyChange) {
-            // The check reported only errors that may be due to a topology change.
-            val dueToTopologyChangeOF = for {
-              submissionTopologySnapshot <- OptionT(getSubmissionTopologySnapshot)
-
-              // Perform the check using the topology at submission time.
-              wrongMembersAtSubmission <- OptionT.liftF(
-                RootHashMessageRecipients.wrongMembers(
-                  rootHashMessagesRecipients,
-                  request,
-                  submissionTopologySnapshot,
-                )(ec, loggingContext)
-              )
-              // If there are no errors using the topology at submission time, consider that the errors
-              // are due to a topology change.
-            } yield wrongMemberErrors(wrongMembersAtSubmission).isEmpty
-
-            dueToTopologyChangeOF.getOrElse {
-              // We could not obtain a submission topology snapshot.
-              // Consider that the errors are NOT due to a topology change.
-              false
-            }
-          } else {
-            // At least some of the reported errors are not due to a topology change
-            FutureUnlessShutdown.pure(false)
-          }
-
-          // Use the first error for the rejection
-          val firstError = errorsNE.head1
-          EitherT.left[Unit](dueToTopologyChangeF.map(firstError.toRejectionReason))
-      }
-
-    def wrongMemberErrors(
-        wrongMembers: RootHashMessageRecipients.WrongMembers
-    ): Seq[WrongMemberError] = {
-      val missingInformeeParticipantsO = Option.when(
-        wrongMembers.missingInformeeParticipants.nonEmpty
-      )(
-        WrongMemberError(
-          show"Missing root hash message for informee participants: ${wrongMembers.missingInformeeParticipants}",
-          // This may be due to a topology change, e.g. if a party-to-participant mapping is added for an informee
-          mayBeDueToTopologyChange = true,
-        )
-      )
-
-      val superfluousMembersO = Option.when(wrongMembers.superfluousMembers.nonEmpty)(
-        WrongMemberError(
-          show"Superfluous root hash message for members: ${wrongMembers.superfluousMembers}",
-          // This may be due to a topology change, e.g. if a party-to-participant mapping is removed for an informee
-          mayBeDueToTopologyChange = true,
-        )
-      )
-
-      missingInformeeParticipantsO.toList ++ superfluousMembersO
+    def malformedMessage(reason: String): MediatorError.MalformedMessage.Reject = {
+      val message =
+        s"Received a mediator confirmation request with id $requestId with invalid root hash messages. Rejecting... Reason: $reason"
+      MediatorError.MalformedMessage.Reject(message)
     }
 
-    // Retrieve the topology snapshot at submission time. Return `None` in case of error.
-    def getSubmissionTopologySnapshot(implicit
-        traceContext: TraceContext
-    ): FutureUnlessShutdown[Option[TopologySnapshot]] = {
-      val submissionTopologyTimestamps = rootHashMessages
-        .map(_.protocolMessage.submissionTopologyTimestamp)
-        .distinct
-
-      submissionTopologyTimestamps match {
-        case Seq(submissionTopologyTimestamp) =>
-          val sequencingTimestamp = requestId.unwrap
-          SubmissionTopologyHelper.getSubmissionTopologySnapshot(
-            timeouts,
-            sequencingTimestamp,
-            submissionTopologyTimestamp,
-            crypto,
-          )(loggingContext, ec)
-
-        case Seq() =>
-          // This can only happen if there are no root hash messages.
-          // This will be detected during the wrong members check and logged as a warning, so we can log at info level.
-          logger.info(
-            s"No declared submission topology timestamp found. Inconsistencies will be logged as warnings."
-          )
-          FutureUnlessShutdown.pure(None)
-
-        case _ =>
-          // Log at warning level because this is not detected by another check
-          logger.warn(
-            s"Found ${submissionTopologyTimestamps.size} different declared submission topology timestamps. Inconsistencies will be logged as warnings."
-          )
-          FutureUnlessShutdown.pure(None)
-      }
-    }
-
-    val unitOrRejectionReason = for {
+    for {
       _ <- EitherTUtil
         .condUnitET[FutureUnlessShutdown](
           wrongRecipients.isEmpty,
-          RejectionReason(
-            show"Root hash messages with wrong recipients tree: $wrongRecipients",
-            dueToTopologyChange = false,
+          reportedMediatorReject(
+            show"Root hash messages with wrong recipients tree: $wrongRecipients"
           ),
         )
       repeated = repeatedMembers(rootHashMessagesRecipients)
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
         repeated.isEmpty,
-        RejectionReason(
-          show"Several root hash messages for recipients: $repeated",
-          dueToTopologyChange = false,
+        reportedMediatorReject(
+          show"Several root hash messages for recipients: $repeated"
         ),
       )
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-        distinctPayloads.sizeCompare(1) <= 0,
-        RejectionReason(
-          show"Different payloads in root hash messages. Sizes: ${distinctPayloads.map(_.bytes.size).mkShow()}.",
-          dueToTopologyChange = false,
+        distinctPayloads.sizeIs <= 1,
+        reportedMediatorReject(
+          show"Different payloads in root hash messages. Sizes: ${distinctPayloads.map(_.bytes.size).mkShow()}."
         ),
       )
+
       wrongHashes = wrongRootHashes(request.rootHash)
-      wrongViewTypes = wrongViewType(request.viewType)
-
-      wrongMembersF = RootHashMessageRecipients.wrongMembers(
-        rootHashMessagesRecipients,
-        request,
-        sequencingTopologySnapshot,
-      )(ec, loggingContext)
-      _ <- for {
-        _ <- EitherTUtil
-          .condUnitET[FutureUnlessShutdown](
-            wrongHashes.isEmpty,
-            RejectionReason(show"Wrong root hashes: $wrongHashes", dueToTopologyChange = false),
-          )
-        wrongMembers <- EitherT.right(wrongMembersF)
-        _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-          wrongViewTypes.isEmpty,
-          RejectionReason(
-            show"View types in root hash messages differ from expected view type ${request.viewType}: $wrongViewTypes",
-            dueToTopologyChange = false,
-          ),
+      _ <- EitherTUtil
+        .condUnitET[FutureUnlessShutdown](
+          wrongHashes.isEmpty,
+          reportedMediatorReject(show"Wrong root hashes: $wrongHashes"),
         )
-        _ <- checkWrongMembers(wrongMembers)(loggingContext)
-      } yield ()
+
+      wrongViewTypes = wrongViewType(request.viewType)
+      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+        wrongViewTypes.isEmpty,
+        reportedMediatorReject(
+          show"View types in root hash messages differ from expected view type ${request.viewType}: $wrongViewTypes"
+        ),
+      )
+      _ <- checkAndReportMaliciousParticipant(sequencingSnapshot, submissionTimeSnapshotO)(
+        snapshot =>
+          RootHashMessageRecipients
+            .wrongMembers(
+              rootHashMessagesRecipients,
+              request,
+              snapshot.ipsSnapshot,
+            )(ec, loggingContext)
+            // The error is logged at the appropriate level by checkAndReportMaliciousParticipant
+            .leftMap(malformedMessage)
+      )(loggingContext.traceContext)
+
     } yield ()
-
-    unitOrRejectionReason.leftMap { case RejectionReason(reason, dueToTopologyChange) =>
-      val message =
-        s"Received a mediator confirmation request with id $requestId with invalid root hash messages. Rejecting... Reason: $reason"
-      val rejection = MediatorError.MalformedMessage.Reject(message)
-
-      // If the errors are due to a topology change, we consider the request as non-malicious.
-      // Otherwise, we consider it malicious.
-      if (dueToTopologyChange) logErrorDueToTopologyChange(message)(loggingContext)
-      else rejection.reported()(loggingContext)
-
-      MediatorVerdict.MediatorReject(rejection)
-    }
   }
-
-  private case class WrongMemberError(reason: String, mayBeDueToTopologyChange: Boolean) {
-    def toRejectionReason(dueToTopologyChange: Boolean): RejectionReason =
-      RejectionReason(reason, dueToTopologyChange)
-  }
-
-  private case class RejectionReason(reason: String, dueToTopologyChange: Boolean)
-
-  private def logErrorDueToTopologyChange(
-      error: String
-  )(implicit traceContext: TraceContext): Unit = logger.info(
-    error +
-      """ This error is due to a change of topology state between the declared topology timestamp used
-        | for submission and the sequencing time of the request.""".stripMargin
-  )
 
   private def validateMinimumThreshold(
       requestId: RequestId,
@@ -702,62 +616,66 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
   private def validateAuthorizedConfirmingParties(
       requestId: RequestId,
       request: MediatorConfirmationRequest,
-      snapshot: TopologySnapshot,
+      sequencingTimeSnapshot: SynchronizerSnapshotSyncCryptoApi,
+      submissionTimeTopologyTimestampO: Option[SynchronizerSnapshotSyncCryptoApi],
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, MediatorVerdict.MediatorReject, Unit] =
-    request.informeesAndConfirmationParamsByViewPosition.toList
-      .parTraverse_ { case (viewPosition, viewConfirmationParameters) =>
-        // sorting parties to get deterministic error messages
-        val declaredConfirmingParties =
-          viewConfirmationParameters.confirmers.toSeq.sortBy(pId => pId)
+    checkAndReportMaliciousParticipant(sequencingTimeSnapshot, submissionTimeTopologyTimestampO) {
+      snapshot =>
+        request.informeesAndConfirmationParamsByViewPosition.toList
+          .parTraverse_ { case (viewPosition, viewConfirmationParameters) =>
+            // sorting parties to get deterministic error messages
+            val declaredConfirmingParties =
+              viewConfirmationParameters.confirmers.toSeq.sortBy(pId => pId)
 
-        for {
-          hostedConfirmingParties <- EitherT.right[MediatorVerdict.MediatorReject](
-            snapshot
-              .isHostedByAtLeastOneParticipantF(
-                declaredConfirmingParties.toSet,
-                (_, attr) => attr.canConfirm,
+            for {
+              hostedConfirmingParties <- EitherT.right[MediatorError](
+                snapshot.ipsSnapshot
+                  .isHostedByAtLeastOneParticipantF(
+                    declaredConfirmingParties.toSet,
+                    (_, attr) => attr.canConfirm,
+                  )
               )
-          )
 
-          (authorized, unauthorized) = declaredConfirmingParties.partition(
-            hostedConfirmingParties.contains
-          )
+              (authorized, unauthorized) = declaredConfirmingParties.partition(
+                hostedConfirmingParties.contains
+              )
 
-          confirmed = viewConfirmationParameters.quorums.forall { quorum =>
-            // For the authorized informees that belong to each quorum, verify if their combined weight is enough
-            // to meet the quorum's threshold.
-            quorum.confirmers
-              .filter { case (partyId, _) => authorized.contains(partyId) }
-              .values
-              .map(_.unwrap)
-              .sum >= quorum.threshold.unwrap
+              confirmed = viewConfirmationParameters.quorums.forall { quorum =>
+                // For the authorized informees that belong to each quorum, verify if their combined weight is enough
+                // to meet the quorum's threshold.
+                quorum.confirmers
+                  .filter { case (partyId, _) => authorized.contains(partyId) }
+                  .values
+                  .map(_.unwrap)
+                  .sum >= quorum.threshold.unwrap
+              }
+
+              _ <- EitherTUtil.condUnitET[FutureUnlessShutdown][MediatorError](
+                confirmed, {
+                  val insufficientPermissionHint =
+                    if (unauthorized.nonEmpty)
+                      show"\nParties without participant having permission to confirm: $unauthorized"
+                    else ""
+
+                  val authorizedPartiesHint =
+                    if (authorized.nonEmpty) show"\nAuthorized parties: $authorized" else ""
+
+                  val rejection = MediatorError.MalformedMessage
+                    .Reject(
+                      s"Received a mediator confirmation request with id $requestId with insufficient authorized confirming parties for transaction view at $viewPosition. " +
+                        s"Rejecting request." +
+                        insufficientPermissionHint +
+                        authorizedPartiesHint
+                    )
+                  // The error is logged at the appropriate level by checkAndReportMaliciousParticipant
+                  rejection
+                },
+              )
+            } yield ()
           }
-
-          _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-            confirmed, {
-              val insufficientPermissionHint =
-                if (unauthorized.nonEmpty)
-                  show"\nParties without participant having permission to confirm: $unauthorized"
-                else ""
-
-              val authorizedPartiesHint =
-                if (authorized.nonEmpty) show"\nAuthorized parties: $authorized" else ""
-
-              val rejection = MediatorError.MalformedMessage
-                .Reject(
-                  s"Received a mediator confirmation request with id $requestId with insufficient authorized confirming parties for transaction view at $viewPosition. " +
-                    s"Rejecting request." +
-                    insufficientPermissionHint +
-                    authorizedPartiesHint
-                )
-                .reported()
-              MediatorVerdict.MediatorReject(rejection)
-            },
-          )
-        } yield ()
-      }
+    }
 
   def processResponses(
       ts: CantonTimestamp,
@@ -914,4 +832,91 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
         /* no op */
         FutureUnlessShutdown.unit
     }
+
+  // Retrieve the topology snapshot at submission time. Return `None` in case of error.
+  private def getSubmissionTopologySnapshot(
+      requestId: RequestId,
+      rootHashMessages: Seq[OpenEnvelope[RootHashMessage[SerializedRootHashMessagePayload]]],
+  )(implicit
+      traceContext: TraceContext,
+      errorLoggingContext: ErrorLoggingContext,
+  ): FutureUnlessShutdown[Option[SynchronizerSnapshotSyncCryptoApi]] = {
+    val submissionTopologyTimestamps = rootHashMessages
+      .map(_.protocolMessage.submissionTopologyTimestamp)
+      .distinct
+
+    submissionTopologyTimestamps match {
+      case Seq(submissionTopologyTimestamp) =>
+        val sequencingTimestamp = requestId.unwrap
+        SubmissionTopologyHelper.getSubmissionTopologySnapshot(
+          timeouts,
+          sequencingTimestamp,
+          submissionTopologyTimestamp,
+          crypto,
+        )
+
+      case Seq() =>
+        // This can only happen if there are no root hash messages.
+        // This will be detected during the wrong members check and logged as a warning, so we can log at info level.
+        logger.info(
+          s"No declared submission topology timestamp found. Inconsistencies will be logged as warnings."
+        )
+        FutureUnlessShutdown.pure(None)
+
+      case _ =>
+        // Log at warning level because this is not detected by another check
+        logger.warn(
+          s"Found ${submissionTopologyTimestamps.size} different declared submission topology timestamps. Inconsistencies will be logged as warnings."
+        )
+        FutureUnlessShutdown.pure(None)
+    }
+  }
+
+  /** Performs a validation based on the sequencing snapshot. In case of failure, checks whether the
+    * validation would have succeeded at the submission topology timestamp.
+    *
+    * If yes, log the rejection at INFO, because this was merely a race between the request and a
+    * topology change.
+    *
+    * If not, log the rejection as WARN because the participant is acting maliciously.
+    *
+    * The request will be rejected regardless, but the rejection will be logged at the appropriate
+    * log level.
+    */
+  private def checkAndReportMaliciousParticipant[Result](
+      sequencingSnapshot: SynchronizerSnapshotSyncCryptoApi,
+      submissionTimeSnapshotO: Option[SynchronizerSnapshotSyncCryptoApi],
+  )(
+      check: SynchronizerSnapshotSyncCryptoApi => EitherT[
+        FutureUnlessShutdown,
+        MediatorError,
+        Result,
+      ]
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, MediatorVerdict.MediatorReject, Result] =
+    check(sequencingSnapshot).leftFlatMap { reject =>
+      val errorLoggedAtAdjustedLevel = for {
+        validAtSubmissionTopologyTimestamp <-
+          submissionTimeSnapshotO.existsM(
+            check(_).isRight
+          )
+      } yield {
+        if (validAtSubmissionTopologyTimestamp) {
+          // Log the error at INFO level, since it was just a race between the request and a topology change.
+          logger.info(
+            s"""$reject
+               | This error is due to a change of topology state between the declared topology timestamp used
+               | for submission and the sequencing time of the request.""".stripMargin
+          )
+        } else {
+          // otherwise log the error at the original log level.
+          reject.log()
+        }
+        MediatorVerdict.MediatorReject(reject)
+      }
+
+      EitherT.left(errorLoggedAtAdjustedLevel)
+    }
+
 }

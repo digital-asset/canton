@@ -376,6 +376,7 @@ messages:
           If not set the ledger uses the ledger begin offset instead.
           If specified, it must be a valid absolute offset (positive integer) or zero (ledger begin offset).
           If the ledger has been pruned, this parameter must be specified and greater than the pruning offset.
+          Optional
   CompletionStreamResponse:
     message:
       comments: null
@@ -1182,9 +1183,15 @@ messages:
     message:
       comments: null
       fieldComments:
-        command_id_prefix: optional filter by command id
-        state: optional filter by state
-        limit: optional limit of returned statuses, defaults to 100
+        command_id_prefix: |-
+          filter by command id
+          Optional
+        state: |-
+          filter by state
+          Optional
+        limit: |-
+          limit of returned statuses, defaults to 100
+          Optional
   GetCommandStatusResponse:
     message:
       comments: null
@@ -2244,7 +2251,9 @@ messages:
         offset: |-
           The participant's offset. The details of this field are described in ``community/ledger-api/README.md``.
           Required, must be a valid absolute offset (positive integer).
-        events: The collection of reassignment events. Required.
+        events: |-
+          The collection of reassignment events.
+          Required.
         workflow_id: |-
           The workflow ID used in reassignment command submission. Only set if the ``workflow_id`` for the command was set.
           Must be a valid LedgerString (as described in ``value.proto``).
@@ -2924,7 +2933,7 @@ messages:
           Modifiable
         id: |-
           The user identifier, which must be a non-empty string of at most 128
-          characters that are either alphanumeric ASCII characters or one of the symbols "@^$.!`-#+'~_|:".
+          characters that are either alphanumeric ASCII characters or one of the symbols "@^$.!`-#+'~_|:()".
           Required
         is_deactivated: |-
           When set, then the user is denied all access to the Ledger API.

@@ -358,6 +358,8 @@ object Dependencies {
   // Transcode dependencies
   lazy val upickle = "com.lihaoyi" %% "upickle" % upickle_version
 
+  lazy val semver = "org.semver4j" % "semver4j" % "5.3.0"
+
   // We have to exclude conflicting parser version
   lazy val ujson_circe =
     "com.lihaoyi" %% "ujson-circe" % upickle_version exclude ("io.circe", "circe-parser_2.13")

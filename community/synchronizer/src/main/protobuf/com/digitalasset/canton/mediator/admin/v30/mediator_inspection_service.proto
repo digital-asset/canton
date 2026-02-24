@@ -62,6 +62,9 @@ message TransactionView {
   repeated string informees = 1;
   repeated Quorum confirming_parties = 2;
   repeated int32 sub_views = 3;
+  // Hash of the view. Provided for correlation purposes; e.g., with the traffic
+  // information on envelopes reported by the sequencer.
+  bytes view_hash = 4;
 }
 
 message Quorum {

@@ -12,6 +12,7 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLogging}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
+import com.digitalasset.canton.sequencer.admin.v30.TrafficSummary
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
 import com.digitalasset.canton.sequencing.protocol.*
@@ -165,6 +166,14 @@ trait Sequencer
   def trafficStatus(members: Seq[Member], selector: TimestampSelector)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[SequencerTrafficStatus]
+
+  /** Retrieve traffic summaries for the events at the provided timestamps
+    * @param timestamps
+    *   timestamps for which to get traffic summaries for
+    */
+  def getTrafficSummaries(timestamps: Seq[CantonTimestamp])(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficControlError, Seq[TrafficSummary]]
 
   /** Sets the traffic purchased of a member to the new provided value. This will only become
     * effective if / when properly authorized by enough sequencers according to the synchronizer

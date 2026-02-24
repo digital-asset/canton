@@ -6,6 +6,8 @@ package com.digitalasset.canton.synchronizer.sequencing.service
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.foldable.*
+import com.daml.grpc.adapter.ExecutionSequencerFactory
+import com.daml.grpc.adapter.server.pekko.ServerAdapter
 import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.ProtoDeserializationError
@@ -19,6 +21,7 @@ import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
   PromiseUnlessShutdown,
+  UnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
@@ -48,7 +51,6 @@ import com.digitalasset.canton.synchronizer.sequencing.service.GrpcSequencerServ
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.store.{
-  StoredTopologyTransaction,
   StoredTopologyTransactions,
   TopologyStateForInitializationService,
 }
@@ -59,15 +61,19 @@ import com.digitalasset.canton.tracing.{
   Traced,
 }
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.{EitherTUtil, FutureUtil, RateLimiter}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUtil, RateLimiter}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.github.blemale.scaffeine.{Cache, Scaffeine}
 import com.google.common.annotations.VisibleForTesting
 import io.grpc.Status
 import io.grpc.stub.{ServerCallStreamObserver, StreamObserver}
-import org.apache.pekko.Done
-import org.apache.pekko.stream.scaladsl.{Keep, Sink}
-import org.apache.pekko.stream.{KillSwitches, Materializer, UniqueKillSwitch}
+import org.apache.pekko.stream.scaladsl.{Keep, Source}
+import org.apache.pekko.stream.{
+  Materializer,
+  OverflowStrategy,
+  QueueOfferResult,
+  StreamDetachedException,
+}
 
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.{ExecutionContext, Future}
@@ -138,7 +144,11 @@ object GrpcSequencerService {
       topologyStateForInitializationService: TopologyStateForInitializationService,
       loggerFactory: NamedLoggerFactory,
       acknowledgementsConflateWindow: Option[PositiveFiniteDuration] = None,
-  )(implicit executionContext: ExecutionContext, materializer: Materializer): GrpcSequencerService =
+  )(implicit
+      executionContext: ExecutionContext,
+      esf: ExecutionSequencerFactory,
+      materializer: Materializer,
+  ): GrpcSequencerService =
     new GrpcSequencerService(
       sequencer,
       metrics,
@@ -192,7 +202,7 @@ class GrpcSequencerService(
     protocolVersion: ProtocolVersion,
     maxItemsInTopologyResponse: PositiveInt = PositiveInt.tryCreate(100),
     acknowledgementsConflateWindow: Option[PositiveFiniteDuration] = None,
-)(implicit ec: ExecutionContext, materializer: Materializer)
+)(implicit ec: ExecutionContext, esf: ExecutionSequencerFactory, materializer: Materializer)
     extends v30.SequencerServiceGrpc.SequencerService
     with NamedLogging
     with FlagCloseable {
@@ -458,6 +468,52 @@ class GrpcSequencerService(
   ): Unit = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     withServerCallStreamObserver(responseObserver) { observer =>
+      // The server adapter properly respects the demand and readiness signaled by the client
+      // via manual control flow.
+      val sink = ServerAdapter.toSink(
+        observer,
+        throwable => SequencerErrors.Internal(throwable.getMessage).asGrpcError,
+      )
+      // We use a queue with backpressure to feed new elements to the grpc sink.
+      // `completion` is from the sink and gets completed when the client cancels or an error happens.
+      val (queue, completion) =
+        Source.queue(1, OverflowStrategy.backpressure).toMat(sink)(Keep.both).run()
+
+      // The observer handle wraps the queue and properly backpressures when calling onNext
+      val observerHandle = new GrpcObserverHandle[T] {
+        override def onError(t: Throwable): Unit = queue.fail(t)
+
+        override def onCompleted(): Unit = queue.complete()
+
+        override def onNext(elem: T): FutureUnlessShutdown[Unit] =
+          if (!isClosing)
+            FutureUnlessShutdown
+              .outcomeF(queue.offer(elem))
+              .recover { case ex: StreamDetachedException =>
+                // This happens, if the stream/queue was already fully stopped but the GrpcManagedSubscription still
+                // tries to offer another element.
+                logger.info(
+                  "Internal stream was closed but the managed subscription still tried to send a subscription response to the subscriber.",
+                  ex,
+                )
+                UnlessShutdown.AbortedDueToShutdown
+              }
+              .flatMap {
+                case QueueOfferResult.Enqueued => FutureUnlessShutdown.unit
+                case QueueOfferResult.Failure(ex) =>
+                  FutureUnlessShutdown.failed(ex)
+                case QueueOfferResult.Dropped =>
+                  ErrorUtil.invalidStateAsyncShutdown(
+                    "enqueueing a message was dropped, even though the queue was configured to backpressure"
+                  )
+                case QueueOfferResult.QueueClosed =>
+                  // the closure of the queue should be propagated via the normal normal pekko stream mechanism
+                  FutureUnlessShutdown.unit
+              }
+          else FutureUnlessShutdown.abortedDueToShutdown
+
+        override def isCancelled: Boolean = observer.isCancelled
+      }
       val resultE = for {
         subscriptionRequest <-
           SubscriptionRequest
@@ -476,18 +532,19 @@ class GrpcSequencerService(
         _ <- checkSubscriptionMemberPermission(member)
       } yield (member, timestamp, IdentityContextHelper.getCurrentStoredAuthenticationToken)
 
-      // Note: we cannot assign the "cancel" handler during the async subscription creation,
-      // see the doc for `setOnCancelHandler`.
       val createSubscriptionP =
         PromiseUnlessShutdown.unsupervised[Either[Status, GrpcManagedSubscription[?]]]()
-      observer.setOnCancelHandler { () =>
-        logger.info(s"Subscription cancelled by client ${request.member}.")
-        // Instead upon cancellation, we close the subscription once/if it has been successfully created.
-        createSubscriptionP.future.onComplete {
-          case Success(Outcome(Right(subscription))) =>
-            subscription.close()
-          case _ => ()
-        }
+      completion.onComplete {
+        case Failure(ex) =>
+        // the logging and handling of the subscription error is handled elsewhere
+        case Success(()) =>
+          logger.info(s"Subscription cancelled by client ${request.member}.")
+          // Instead upon cancellation, we close the subscription once/if it has been successfully created.
+          createSubscriptionP.future.onComplete {
+            case Success(Outcome(Right(subscription))) =>
+              subscription.close()
+            case _ => ()
+          }
       }
 
       // Note: we do the first part of the subscription creation above in the same thread,
@@ -502,7 +559,7 @@ class GrpcSequencerService(
                 member,
                 authenticationTokenO.map(_.expireAt),
                 timestamp,
-                observer,
+                observerHandle,
                 toSubscriptionResponse,
               ),
             member,
@@ -513,7 +570,7 @@ class GrpcSequencerService(
       } yield subscription
       createSubscriptionP.completeWith(resultET.mapK(FutureUnlessShutdown.outcomeK).value.unwrap)
       FutureUtil.doNotAwait(
-        resultET.fold(err => responseObserver.onError(err.asException()), _ => ()),
+        resultET.fold(err => observer.onError(err.asException()), _ => ()),
         failureMessage = s"Failed to establish subscription for ${request.member}",
       )
     }
@@ -589,7 +646,7 @@ class GrpcSequencerService(
       member: Member,
       expireAt: Option[CantonTimestamp],
       timestamp: Option[CantonTimestamp],
-      observer: ServerCallStreamObserver[T],
+      grpcObserverHandle: GrpcObserverHandle[T],
       toSubscriptionResponse: SequencedSerializedEvent => T,
   )(implicit
       traceContext: TraceContext
@@ -598,7 +655,7 @@ class GrpcSequencerService(
     logger.info(s"$member subscribes from timestamp=$timestamp")
     val subscription = new GrpcManagedSubscription(
       handler => directSequencerSubscriptionFactory.create(timestamp, member, handler),
-      observer,
+      grpcObserverHandle,
       member,
       expireAt,
       timeouts,
@@ -650,17 +707,6 @@ class GrpcSequencerService(
       authenticationCheck.lookupCurrentMember(),
     )
 
-  private def getDownloadTopologyStateForInit(
-      request: TopologyStateForInitRequest,
-      sendResponse: Seq[StoredTopologyTransaction.GenericStoredTopologyTransaction] => Unit,
-  )(implicit traceContext: TraceContext): (UniqueKillSwitch, Future[Done]) =
-    topologyStateForInitializationService
-      .initialSnapshot(request.member)
-      .grouped(maxItemsInTopologyResponse.value)
-      .viaMat(KillSwitches.single)(Keep.right)
-      .toMat(Sink.foreach(sendResponse))(Keep.both)
-      .run()
-
   override def downloadTopologyStateForInit(
       requestP: v30.DownloadTopologyStateForInitRequest,
       responseObserver: StreamObserver[v30.DownloadTopologyStateForInitResponse],
@@ -669,30 +715,28 @@ class GrpcSequencerService(
 
     withServerCallStreamObserver(responseObserver) { observer =>
       TopologyStateForInitRequest
-        .fromProtoV30(requestP)
-        .traverse { request =>
-          val (killSwitch, future) = getDownloadTopologyStateForInit(
-            request,
-            response =>
-              observer.onNext(
-                TopologyStateForInitResponse(
-                  Traced(StoredTopologyTransactions(response))
-                ).toProtoV30
-              ),
+        .fromProtoV30(requestP) match {
+        case Left(parsingError) =>
+          responseObserver.onError(ProtoDeserializationFailure.Wrap(parsingError).asGrpcError)
+        case Right(request) =>
+          val streamCompletionF = topologyStateForInitializationService
+            .initialSnapshot(request.member)
+            .grouped(maxItemsInTopologyResponse.value)
+            .map(transactions =>
+              TopologyStateForInitResponse(
+                Traced(StoredTopologyTransactions(transactions))
+              ).toProtoV30
+            )
+            .runWith(
+              ServerAdapter
+                .toSink(observer, t => SequencerErrors.Internal(t.getMessage).asGrpcError)
+            )
+
+          FutureUtil.doNotAwait(
+            streamCompletionF,
+            s"Error streaming downloadTopologyStateForInit for ${request.member}",
           )
-          observer.setOnCancelHandler(() => killSwitch.shutdown())
-          future
-        }
-        .onComplete {
-          case Success(Left(parsingError)) =>
-            responseObserver.onError(ProtoDeserializationFailure.Wrap(parsingError).asGrpcError)
-
-          case Success(Right(_)) =>
-            responseObserver.onCompleted()
-
-          case Failure(exception) =>
-            responseObserver.onError(exception)
-        }
+      }
     }
   }
 
@@ -791,4 +835,14 @@ class GrpcSequencerService(
       )
     )
   }
+}
+
+/** Thin wrapper around a [[io.grpc.stub.StreamObserver]] targeted to be backed by a pekko queue
+  * that can backpressure.
+  */
+trait GrpcObserverHandle[T] {
+  def onError(t: Throwable): Unit
+  def onCompleted(): Unit
+  def onNext(elem: T): FutureUnlessShutdown[Unit]
+  def isCancelled: Boolean
 }

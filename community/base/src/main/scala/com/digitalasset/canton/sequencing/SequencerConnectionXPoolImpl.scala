@@ -11,8 +11,8 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton
 import com.digitalasset.canton.concurrent.FutureSupervisor
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.{KeepAliveClientConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.{Crypto, SynchronizerCrypto}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -755,6 +755,7 @@ class GrpcSequencerConnectionXPoolFactory(
     clientProtocolVersions: NonEmpty[Seq[ProtocolVersion]],
     minimumProtocolVersion: Option[ProtocolVersion],
     authConfig: AuthenticationTokenManagerConfig,
+    keepAliveClientConfigO: Option[KeepAliveClientConfig],
     member: Member,
     clock: Clock,
     crypto: Crypto,
@@ -781,6 +782,7 @@ class GrpcSequencerConnectionXPoolFactory(
     val connectionFactory = new GrpcInternalSequencerConnectionXFactory(
       clientProtocolVersions,
       minimumProtocolVersion,
+      keepAliveClientConfigO,
       metrics,
       metricsContext,
       futureSupervisor,

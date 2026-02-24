@@ -145,6 +145,7 @@ class BftSequencerFactory(
       synchronizerLoggerFactory,
       exitOnFatalFailures = nodeParameters.exitOnFatalFailures,
       runtimeReady = runtimeReady,
+      batchingConfig = batchingConfig,
     )
 }
 

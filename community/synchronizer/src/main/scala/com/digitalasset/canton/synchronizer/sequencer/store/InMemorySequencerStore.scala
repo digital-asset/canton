@@ -262,6 +262,25 @@ class InMemorySequencerStore(
       }.toMap
     )
 
+  override def readPayloadsByIdWithoutCacheLoading(
+      payloadIds: Seq[IdOrPayload]
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[PayloadId, Batch[ClosedEnvelope]]] =
+    FutureUnlessShutdown.pure(
+      payloadIds.flatMap {
+        case id: PayloadId =>
+          Option(payloads.get(id.unwrap))
+            .map(storedPayload =>
+              id -> BytesPayload(id, storedPayload.content)
+                .decodeBatch(protocolVersion)
+            )
+            .toList
+        case payload: BytesPayload =>
+          List(payload.id -> payload.decodeBatch(protocolVersion))
+      }.toMap
+    )
+
   private def isMemberRecipient(member: SequencerMemberId)(event: StoreEvent[?]): Boolean =
     event match {
       case deliver: DeliverStoreEvent[?] =>

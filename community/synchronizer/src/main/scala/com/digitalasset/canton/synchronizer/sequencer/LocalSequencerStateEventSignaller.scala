@@ -57,17 +57,6 @@ class LocalSequencerStateEventSignaller(
     )
   }
 
-  private val notificationsHubSourceWithLogging =
-    notificationsHubSource.map { tracedNotification =>
-      tracedNotification.withTraceContext { implicit traceContext => notification =>
-        // TODO(#26818): clean up excessive debug logging
-        logger.debug(
-          s"Broadcasting notification: $notification"
-        )
-      }
-      tracedNotification
-    }
-
   override def notifyOfLocalWrite(
       notification: WriteNotification
   )(implicit traceContext: TraceContext): Future[Unit] =
@@ -81,28 +70,13 @@ class LocalSequencerStateEventSignaller(
   override def readSignalsForMember(
       member: Member,
       memberId: SequencerMemberId,
-  )(implicit traceContext: TraceContext): Source[Traced[ReadSignal], NotUsed] = {
-    logger.info(
-      s"Creating signal source for $member (id: $memberId)"
-    ) // TODO(i28037): remove extra logging
-    notificationsHubSourceWithLogging
+  )(implicit traceContext: TraceContext): Source[Traced[ReadSignal], NotUsed] =
+    notificationsHubSource
       .filter(_.value.isBroadcastOrIncludes(memberId))
-      .map { notification =>
-        // TODO(#26818): clean up excessive debug logging
-        logger.debug(s"Processing read signal for $member due to $notification")(
-          notification.traceContext
-        )
-        notification.map(_ => ReadSignal)
-      }
+      .map(notification => notification.map(_ => ReadSignal))
       // this conflate ensures that a slow consumer doesn't cause backpressure and therefore
       // block the stream of signals for other consumers
       .conflate((_, right) => right)
-      .map { tracedReadSignal =>
-        // TODO(#26818): clean up excessive debug logging
-        logger.debug(s"Emitting read signal for $member")(tracedReadSignal.traceContext)
-        tracedReadSignal
-      }
-  }
 
   private def queueWithLogging(
       name: String,
@@ -117,13 +91,12 @@ class LocalSequencerStateEventSignaller(
     LoggerUtil.logAtLevel(logLevel, s"Pushing item to $name: $item")
     queue
       .offer(Traced(item)(traceContext))
-      .transform { // TODO(i28037): remove extra logging, use map instead of transform
+      .transform {
         case Success(result: QueueCompletionResult) =>
           logger.warn(s"Failed to queue item on $name: $result")
           Success(())
         case Success(QueueOfferResult.Enqueued) =>
-          // TODO(#26818): clean up excessive debug logging
-          logger.debug("Push successful.")
+          logger.trace("Push successful.")
           Success(())
         case Success(QueueOfferResult.Dropped) =>
           logger.warn(s"Dropped item while trying to queue on $name")
