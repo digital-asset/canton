@@ -362,6 +362,29 @@ private[lf] object Speedy {
         )
       )
 
+    final private[speedy] def needExternalCall(
+        extensionId: String,
+        functionId: String,
+        configHash: String,
+        input: String,
+    )(
+        continue: Either[Question.Update.ExternalCallError, String] => Control[Question.Update]
+    ): Control.Question[Question.Update] =
+      Control.Question(
+        Question.Update.NeedExternalCall(
+          extensionId = extensionId,
+          functionId = functionId,
+          configHash = configHash,
+          input = input,
+          callback = result =>
+            safelyContinue(
+              NameOf.qualifiedNameOfCurrentFunc,
+              "NeedExternalCall",
+              continue(result),
+            ),
+        )
+      )
+
     private[speedy] def lookupContract(coid: V.ContractId)(
         f: (FatContractInstance, Hash.HashingMethod, Hash => Boolean) => Control[Question.Update]
     ): Control[Question.Update] =

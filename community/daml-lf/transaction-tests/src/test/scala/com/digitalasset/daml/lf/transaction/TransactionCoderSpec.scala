@@ -787,6 +787,10 @@ class TransactionCoderSpec
         if (exe.version >= SerializationVersion.minContractKeys)
           exe.byKey
         else false,
+      externalCallResults =
+        if (exe.version >= SerializationVersion.minExternalCallResults)
+          exe.externalCallResults
+        else ImmArray.empty,
     )
   }
 

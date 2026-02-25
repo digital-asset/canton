@@ -81,6 +81,11 @@ object SerializationVersion {
     LanguageVersion.featureChoiceAuthority.versionRange.min
   )
 
+  // Minimum version that supports external call results in exercise nodes
+  private[lf] val minExternalCallResults = assign(
+    LanguageVersion.featureExternalCall.versionRange.min
+  )
+
   private[lf] def txVersion(tx: Transaction): SerializationVersion = {
     import scala.Ordering.Implicits._
     tx.nodes.valuesIterator.foldLeft(SerializationVersion.minVersion) {
