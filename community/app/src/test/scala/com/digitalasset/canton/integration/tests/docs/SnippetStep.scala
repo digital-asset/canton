@@ -32,8 +32,13 @@ object SnippetStep extends LazyLogging {
     * @param indent
     *   indentation string
     */
-  final case class Shell(cmd: String, cwd: Option[String], line: Int, indent: String = "")
-      extends SnippetStep {
+  final case class Shell(
+      cmd: String,
+      cwd: Option[String],
+      line: Int,
+      indent: String = "",
+      hidden: Boolean = false,
+  ) extends SnippetStep {
     override def truncateOutput: Option[Int] = None
     override def appendToCmd(string: String): SnippetStep = this.copy(cmd = cmd + string)
   }
@@ -72,15 +77,12 @@ object SnippetStep extends LazyLogging {
       .substring(1, str.length - 1)
       .split(",")
       .map(_.split("=").toList)
-      .map {
+      .flatMap {
         case `parameterKey` :: value :: Nil =>
           value.some
-
-        case x =>
-          throw new IllegalArgumentException(s"Invalid arguments ${x.toString} in $str")
+        case _ => None
       }
       .headOption
-      .flatten
   }
 
   def parse(line: String, idx: Int): Option[SnippetStep] = Seq[Option[SnippetStep]](
@@ -110,15 +112,31 @@ object SnippetStep extends LazyLogging {
       logger.debug(s"Matches hidden: $line")
       Hidden(matched.group(2).trim, idx, matched.group(1))
     },
+    snippetShellHidden.findFirstMatchIn(line).map { matched =>
+      logger.debug(s"Matches shell-hidden: $line")
+      Shell(
+        matched.group(3).trim,
+        extractParameter(matched.group(2), "cwd"),
+        idx,
+        matched.group(1),
+        hidden = true,
+      )
+    },
     snippetShell.findFirstMatchIn(line).map { matched =>
       logger.debug(s"Matches shell: $line")
-      Shell(matched.group(3).trim, extractParameter(matched.group(2), "cwd"), idx, matched.group(1))
+      Shell(
+        matched.group(3).trim,
+        extractParameter(matched.group(2), "cwd"),
+        idx,
+        matched.group(1),
+      )
     },
   ).flatten.headOption
 
-  private[docs] val snippetKey = "^\\s*\\.\\. snippet::(.*)$".r
+  private[docs] val snippetKey = "^\\s*\\.\\. snippet(.*?)::(.*)$".r
   private[docs] val snippetSuccess = "^(\\s+)\\.\\. success(.*?)::(.*)$".r
   private[docs] val snippetShell = "^(\\s+)\\.\\. shell(.*?)::(.*)$".r
+  private[docs] val snippetShellHidden = "^(\\s+)\\.\\. shell-hidden(.*?)::(.*)$".r
   private[docs] val snippetFailure = "^(\\s+)\\.\\. failure(.*?)::(.*)$".r
   private[docs] val snippetAssert = "^(\\s+)\\.\\. assert::(.*)$".r
   private[docs] val snippetHidden = "^(\\s+)\\.\\. hidden::(.*)$".r

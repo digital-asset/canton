@@ -27,20 +27,20 @@ object Help {
     private val maxLength = 120
 
     if (s.contains('\n') || s.contains('\r')) {
-      System.err.println(
-        s"@Summary: The summary '$s' must be a single line (no newline characters)."
+      println(
+        s"[DOC WARNING] @Summary: The summary '$s' must be a single line (no newline characters)."
       )
     }
 
     if (s.trim.endsWith(".")) {
-      System.err.println(
-        s"@Summary: The summary '$s' must not end in a full stop ('.')."
+      println(
+        s"[DOC WARNING] @Summary: The summary '$s' must not end in a full stop ('.')."
       )
     }
 
     if (s.length > maxLength) {
-      System.err.println(
-        s"@Summary: The summary '$s' exceeds $maxLength characters (actual length: ${s.length})."
+      println(
+        s"[DOC WARNING] @Summary: The summary '$s' exceeds $maxLength characters (actual length: ${s.length})."
       )
     }
 
@@ -54,9 +54,9 @@ object Help {
 
     s.linesIterator.zipWithIndex.foreach { case (line, index) =>
       if (line.length > lineMaxLength) {
-        System.err.println(
+        println(
           s"""
-             |@Description: Line exceeds $lineMaxLength characters.
+             |[DOC WARNING] @Description: Line exceeds $lineMaxLength characters.
              |Location: Line ${index + 1}
              |Length:   ${line.length}
              |Content:  "$line"

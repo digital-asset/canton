@@ -4,13 +4,13 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
 
 import com.digitalasset.canton.crypto.Signature
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.crypto.FingerprintKeyId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftKeyId,
   BftNodeId,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
 import com.digitalasset.canton.util.MaxBytesToDecompress
 import com.google.common.annotations.VisibleForTesting
 
@@ -95,7 +95,7 @@ object OrderingTopology {
   private[bftordering] def forTesting(
       nodes: Set[BftNodeId],
       sequencingParameters: SequencingParameters = SequencingParameters.Default,
-      activationTime: TopologyActivationTime = TopologyActivationTime(CantonTimestamp.MinValue),
+      activationTime: TopologyActivationTime = TestBootstrapTopologyActivationTime,
       areTherePendingCantonTopologyChanges: Option[Boolean] = Some(false),
       nodesTopologyInfos: Map[BftNodeId, NodeTopologyInfo] = Map.empty,
   ): OrderingTopology =
@@ -104,7 +104,7 @@ object OrderingTopology {
         node -> nodesTopologyInfos.getOrElse(
           node,
           NodeTopologyInfo(
-            activationTime = TopologyActivationTime(CantonTimestamp.MinValue),
+            activationTime,
             keyIds = Set(FingerprintKeyId.toBftKeyId(Signature.noSignature.authorizingLongTermKey)),
           ),
         )

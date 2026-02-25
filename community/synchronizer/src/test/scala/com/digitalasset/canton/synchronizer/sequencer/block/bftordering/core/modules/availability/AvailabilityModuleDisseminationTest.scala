@@ -7,7 +7,7 @@ import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.AuthenticatedMessageType
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Bootstrap
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.OutputModuleTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.{
   IgnoringUnitTestEnv,
@@ -616,7 +616,7 @@ class AvailabilityModuleDisseminationTest
         cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
         availabilityStore = availabilityStore,
         consensus = fakeIgnoringModule,
-        initialEpochNumber = Genesis.GenesisEpochNumber,
+        initialEpochNumber = Bootstrap.BootstrapEpochNumber,
       )
 
       availability.receive(

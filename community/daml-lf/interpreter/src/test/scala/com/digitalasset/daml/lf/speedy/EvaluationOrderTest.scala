@@ -5,6 +5,7 @@ package com.digitalasset.daml.lf
 package speedy
 
 import com.daml.logging.LoggingContext
+import com.digitalasset.daml.lf.crypto.SValueHash
 import com.digitalasset.daml.lf.data.Ref.{Location, PackageId, PackageName, Party}
 import com.digitalasset.daml.lf.data.{FrontStack, ImmArray, Ref}
 import com.digitalasset.daml.lf.interpretation.{Error => IE}
@@ -350,6 +351,16 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
     case _ => sys.error("unexpect error")
   }
 
+  private[this] val TKey = t"M:TKey" match {
+    case TTyCon(tycon) => tycon
+    case _ => sys.error("unexpect error")
+  }
+
+  private[this] val Nested = t"M:Nested" match {
+    case TTyCon(tycon) => tycon
+    case _ => sys.error("unexpect error")
+  }
+
   private[this] val Human = t"M:Human" match {
     case TTyCon(tycon) => tycon
     case _ => sys.error("unexpect error")
@@ -377,6 +388,16 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
     Value.ContractId.V1(crypto.Hash.hashPrivateKey("Helper"))
 
   private[this] val emptyNestedValue = Value.ValueRecord(None, ImmArray.empty)
+
+  private[this] val keySValue = SRecord(
+    TKey,
+    ImmArray("maintainers", "optCid", "nested").map(Ref.Name.assertFromString),
+    ArraySeq(
+      SList(FrontStack(SParty(alice))),
+      SOptional(None),
+      SRecord(Nested, ImmArray(Ref.Name.assertFromString("f")), ArraySeq(SOptional(None))),
+    ),
+  )
 
   private[this] val keyValue = Value.ValueRecord(
     None,
@@ -417,11 +438,13 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
       observers = List(observer),
       contractKeyWithMaintainers = Option.when(withKey)(
         GlobalKeyWithMaintainers(
-          GlobalKey.assertBuild(
-            templateId = T,
-            packageName = pkg.pkgName,
-            key = normalizedKeyValue,
-          ),
+          GlobalKey
+            .assertBuild(
+              templateId = T,
+              packageName = pkg.pkgName,
+              key = normalizedKeyValue,
+              keyHash = SValueHash.assertHashContractKey(pkg.pkgName, T.qualifiedName, keySValue),
+            ),
           Set(alice),
         )
       )
@@ -463,6 +486,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
           templateId = Human,
           packageName = pkg.pkgName,
           key = normalizedKeyValue,
+          keyHash = SValueHash.assertHashContractKey(pkg.pkgName, Human.qualifiedName, keySValue),
         ),
         Set(alice),
       )
@@ -474,7 +498,13 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
   private[this] val getHelper = Map(helperCId -> helper)
 
   private[this] val getKey = Map(
-    GlobalKeyWithMaintainers.assertBuild(T, keyValue, Set(alice), pkg.pkgName) -> cId
+    GlobalKeyWithMaintainers.assertBuild(
+      T,
+      keyValue,
+      SValueHash.assertHashContractKey(pkg.pkgName, T.qualifiedName, keySValue),
+      Set(alice),
+      pkg.pkgName,
+    ) -> cId
   )
 
   private[this] val dummyContract = TransactionBuilder.fatContractInstanceWithDummyDefaults(

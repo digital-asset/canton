@@ -5,10 +5,12 @@ package com.digitalasset.canton.ledger.api.benchtool
 
 import cats.syntax.either.*
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
+import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.opentelemetry.OpenTelemetryMetricsFactory
+import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.TlsClientConfig
 import com.digitalasset.canton.ledger.api.benchtool.config.WorkflowConfig.{
   FibonacciSubmissionConfig,
   FooSubmissionConfig,
@@ -50,7 +52,11 @@ object LedgerApiBenchTool {
 
   def main(args: Array[String]): Unit = {
     implicit val ec =
-      Threading.newExecutionContext("LedgerApiBenchTool", scalalogging.Logger(logger))
+      Threading.newExecutionContext(
+        "LedgerApiBenchTool",
+        scalalogging.Logger(logger),
+        new ExecutorServiceMetrics(NoOpMetricsFactory),
+      )
     ConfigMaker.make(args) match {
       case Left(error) =>
         logger.error(s"Configuration error: ${error.details}")

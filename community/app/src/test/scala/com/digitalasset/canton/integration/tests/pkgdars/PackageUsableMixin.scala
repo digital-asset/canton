@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.pkgdars
 
 import com.daml.ledger.javaapi.data.Command
+import com.digitalasset.canton.config
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.damltests.java.conflicttest.Many
 import com.digitalasset.canton.integration.BaseIntegrationTest
@@ -25,6 +26,7 @@ trait PackageUsableMixin {
           .asScala
           .toSeq
       },
+      optTimeout: Option[config.NonNegativeDuration] = Some(config.NonNegativeDuration.ofMinutes(1)),
   ): Unit = {
     val submitter = submittingParticipant.id.adminParty
     val observer = observerParticipant.id.adminParty
@@ -34,6 +36,7 @@ trait PackageUsableMixin {
       Seq(submitter),
       cmd,
       Some(synchronizerId),
+      optTimeout = optTimeout,
     )
   }
 

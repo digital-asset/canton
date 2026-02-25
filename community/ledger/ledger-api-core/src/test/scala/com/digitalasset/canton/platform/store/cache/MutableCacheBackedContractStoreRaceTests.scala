@@ -34,6 +34,7 @@ import com.digitalasset.canton.protocol.{
   ExampleContractFactory,
   ExampleTransactionFactory,
 }
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.transaction.GlobalKey
 import com.digitalasset.daml.lf.value.Value
@@ -279,8 +280,9 @@ private object MutableCacheBackedContractStoreRaceTests {
     val keys = (0L until keysCount).map { keyIdx =>
       keyIdx -> Key.assertBuild(
         Identifier.assertFromString("pkgId:module:entity"),
-        ValueInt64(keyIdx),
         Ref.PackageName.assertFromString("pkg-name"),
+        ValueInt64(keyIdx),
+        crypto.Hash.hashPrivateKey(keyIdx.toString),
       )
     }.toMap
 

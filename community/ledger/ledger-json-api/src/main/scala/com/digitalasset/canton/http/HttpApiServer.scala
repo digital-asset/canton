@@ -5,8 +5,9 @@ package com.digitalasset.canton.http
 
 import com.daml.grpc.adapter.PekkoExecutionSequencerPool
 import com.daml.ledger.resources.ResourceOwner
+import com.daml.tls.TlsServerConfig
 import com.digitalasset.canton.auth.AuthInterceptor
-import com.digitalasset.canton.config.{ApiLoggingConfig, TlsServerConfig}
+import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.http.metrics.HttpApiMetrics
 import com.digitalasset.canton.http.util.Logging.instanceUUIDLogCtx
 import com.digitalasset.canton.ledger.participant.state.PackageSyncService

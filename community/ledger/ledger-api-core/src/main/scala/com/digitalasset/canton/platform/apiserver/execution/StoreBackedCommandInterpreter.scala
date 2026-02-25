@@ -359,7 +359,8 @@ final class StoreBackedCommandInterpreter(
             )
 
         case ResultNeedPackage(packageId, resume) =>
-          packageResolver(packageId)(loggingContext.traceContext)
+          packageResolver
+            .resolve(packageId, PackageResolver.ignoreMissingPackage)
             .flatMap { maybePackage =>
               resolveStep(
                 Tracked.value(

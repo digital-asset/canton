@@ -11,14 +11,12 @@ import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.UnitTestContext.DelayCount
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState.Epoch
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Bootstrap.bootstrapEpoch
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.EpochInProgress
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis.GenesisEpoch
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.{
-  EpochStore,
-  Genesis,
-}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.{
   BaseIgnoringUnitTestEnv,
   FailingCryptoProvider,
@@ -58,6 +56,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   ConsensusSegment,
   P2PNetworkOut,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
   BftSequencerBaseTest,
   fakeCellModule,
@@ -113,7 +112,7 @@ class IssSegmentModuleTest
     SecondEpochNumber,
     BlockNumber(10L),
     testEpochLength,
-    Genesis.GenesisTopologyActivationTime,
+    TestBootstrapTopologyActivationTime,
   )
   private val block9Commits1Node = Seq(
     Commit
@@ -1374,7 +1373,7 @@ class IssSegmentModuleTest
           prepareFromPrePrepare(remotePrePrepare.message)(from = from)
         def baseCommit(from: BftNodeId) =
           commitFromPrePrepare(remotePrePrepare.message)(from = from)
-        val epochInfo = EpochInfo.mk(
+        val epochInfo = EpochInfo.forTesting(
           remotePrePrepare.message.blockMetadata.epochNumber,
           remotePrePrepare.message.blockMetadata.blockNumber,
           testEpochLength,
@@ -2104,15 +2103,15 @@ class IssSegmentModuleTest
       cryptoProvider: CryptoProvider[E] = new FailingCryptoProvider[E],
       leader: BftNodeId = myId,
       epochLength: EpochLength = testEpochLength,
-      latestCompletedEpochLastCommits: Seq[SignedMessage[Commit]] = GenesisEpoch.lastBlockCommits,
+      latestCompletedEpochLastCommits: Seq[SignedMessage[Commit]] = Seq.empty,
       otherNodes: Set[BftNodeId] = Set.empty,
       storeMessages: Boolean = false,
       epochStore: EpochStore[E] = new InMemoryUnitTestEpochStore[E](),
       epochInProgress: EpochStore.EpochInProgress = EpochStore.EpochInProgress(),
   )(
-      epochInfo: EpochInfo = GenesisEpoch.info.next(
+      epochInfo: EpochInfo = bootstrapEpoch(TestBootstrapTopologyActivationTime).info.next(
         epochLength,
-        Genesis.GenesisTopologyActivationTime,
+        TopologyActivationTime(CantonTimestamp.MinValue.immediateSuccessor),
       )
   ): IssSegmentModule[E] = {
     implicit val metricsContext: MetricsContext = MetricsContext.Empty

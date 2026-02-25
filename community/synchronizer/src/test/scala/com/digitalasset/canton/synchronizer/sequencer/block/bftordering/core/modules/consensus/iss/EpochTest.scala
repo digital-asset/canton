@@ -31,7 +31,7 @@ class EpochTest extends AsyncWordSpec with BftSequencerBaseTest {
       val membership = Membership.forTesting(myId)
       val epoch =
         Epoch(
-          EpochInfo.mk(
+          EpochInfo.forTesting(
             number = EpochNumber.First,
             startBlockNumber = BlockNumber.First,
             length = 4,
@@ -47,7 +47,7 @@ class EpochTest extends AsyncWordSpec with BftSequencerBaseTest {
 
     "support an uneven distribution with multiple leaders" in {
       val epoch = Epoch(
-        EpochInfo.mk(
+        EpochInfo.forTesting(
           number = EpochNumber.First,
           startBlockNumber = BlockNumber.First,
           length = 11,
@@ -71,7 +71,7 @@ class EpochTest extends AsyncWordSpec with BftSequencerBaseTest {
       val leaderWithoutSegment = sortedLeaders(3)
       val membership = Membership.forTesting(leaderWithoutSegment, sortedLeaders.init.toSet)
       val epoch = Epoch(
-        EpochInfo.mk(
+        EpochInfo.forTesting(
           number = EpochNumber.First,
           startBlockNumber = BlockNumber.First,
           length = 3L, // epoch length can accommodate all but the last leader

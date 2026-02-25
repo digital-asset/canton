@@ -8,7 +8,6 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.SignedProtocolMessageContent.SignedMessageContentCast
 import com.digitalasset.canton.protocol.v30
-import com.digitalasset.canton.protocol.v30.TypedSignedProtocolMessageContent
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.serialization.{ProtoConverter, ProtocolVersionedMemoizedEvidence}
 import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
@@ -48,8 +47,8 @@ final case class SetTrafficPurchasedMessage private (
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 
-  override protected[messages] def toProtoTypedSomeSignedProtocolMessage
-      : TypedSignedProtocolMessageContent.SomeSignedProtocolMessage =
+  override protected[messages] def toProtoTypedSomeSignedProtocolMessageV30
+      : v30.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage =
     v30.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage.SetTrafficPurchased(
       getCryptographicEvidence
     )

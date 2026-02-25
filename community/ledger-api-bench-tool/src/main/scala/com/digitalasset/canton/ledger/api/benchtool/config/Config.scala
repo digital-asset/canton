@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.ledger.api.benchtool.config
 
-import com.digitalasset.canton.config.TlsClientConfig
+import com.daml.tls.TlsClientConfig
 
 import java.io.File
 import scala.concurrent.duration.*

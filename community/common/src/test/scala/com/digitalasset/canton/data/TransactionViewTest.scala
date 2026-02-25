@@ -11,6 +11,7 @@ import com.digitalasset.canton.protocol.v30.ActionDescription.FetchActionDescrip
 import com.digitalasset.canton.util.LfTransactionBuilder
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPackageId, LfVersioned}
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.value.Value
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -36,8 +37,9 @@ class TransactionViewTest extends AnyWordSpec with BaseTest with HasExecutionCon
     LfGlobalKey
       .build(
         LfTransactionBuilder.defaultTemplateId,
-        Value.ValueInt64(100L),
         LfTransactionBuilder.defaultPackageName,
+        Value.ValueInt64(100L),
+        crypto.Hash.hashPrivateKey("dummy-key-hash"),
       )
       .value
 

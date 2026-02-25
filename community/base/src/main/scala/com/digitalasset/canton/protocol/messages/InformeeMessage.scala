@@ -12,7 +12,7 @@ import com.digitalasset.canton.data.{
 }
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.{RootHash, v30}
+import com.digitalasset.canton.protocol.{RootHash, v30, v31}
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
@@ -78,6 +78,9 @@ case class InformeeMessage(
 
   override def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent =
     v30.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV30)
+
+  override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
+    v31.EnvelopeContent.SomeEnvelopeContent.InformeeMessage(toProtoV30)
 
   override def rootHash: RootHash = fullInformeeTree.updateId.toRootHash
 

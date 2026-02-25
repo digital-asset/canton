@@ -4,7 +4,6 @@
 package com.daml.grpc.adapter.client.rs
 
 import com.daml.grpc.adapter.TestExecutionSequencerFactory
-import com.daml.grpc.adapter.server.rs.MockClientCallStreamObserver
 import io.grpc.stub.{ClientResponseObserver, StreamObserver}
 import org.reactivestreams.Publisher
 import org.reactivestreams.tck.PublisherVerification

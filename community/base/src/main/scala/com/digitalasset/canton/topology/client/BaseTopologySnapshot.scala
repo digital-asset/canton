@@ -126,6 +126,10 @@ abstract class BaseTopologySnapshot(
       }
       .getOrElse(FutureUnlessShutdown.pure(Map.empty))
 
+  override def wasEverOnboarded(
+      participantId: ParticipantId
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean]
+
   override private[client] def findUnvettedPackagesOrDependencies(
       participant: ParticipantId,
       packages: Set[PackageId],
@@ -610,11 +614,6 @@ abstract class BaseTopologySnapshot(
       )
       .getOrElse(FutureUnlessShutdown.pure(Map.empty))
 
-  override def isMemberKnown(member: Member)(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Boolean] =
-    areMembersKnown(Set(member)).map(_.nonEmpty)
-
   override def areMembersKnown(
       members: Set[Member]
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Set[Member]] = {
@@ -622,6 +621,7 @@ abstract class BaseTopologySnapshot(
     val mediators = members.collect { case MediatorId(uid) => uid }
     val sequencers = members.collect { case SequencerId(uid) => uid }
 
+    // a participant is considered known if an SynchronizerTrustCertificate transaction for it exists
     val knownParticipantsF = NonEmpty
       .from(participants)
       .map { participantsNE =>
@@ -638,6 +638,7 @@ abstract class BaseTopologySnapshot(
       }
       .getOrElse(FutureUnlessShutdown.pure(Set.empty[Member]))
 
+    // a mediator is considered known if an MediatorSynchronizerState transaction for it exists
     val knownMediatorsF = if (mediators.nonEmpty) {
       findTransactionsByUids(
         types = Seq(MediatorSynchronizerState.code),

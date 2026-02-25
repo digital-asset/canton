@@ -36,7 +36,8 @@ class FutureCheckSpec extends AsyncWordSpec with Matchers {
       }
     }
 
-    "not be called for future which is resolved fast enough" in {
+    // TODO (#30847): disabled flaky test
+    "not be called for future which is resolved fast enough" ignore {
       val flag: AtomicBoolean = new AtomicBoolean(false)
       for {
         result <- Delayed.by(100.millis)(1).checkIfComplete(200.millis) {

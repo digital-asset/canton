@@ -529,11 +529,11 @@ class DatabaseSequencer(
       "Traffic control is not supported by the database sequencer"
     )
 
-  override private[sequencer] def updateSynchronizerSuccessor(
+  override private[sequencer] def updateLsuSuccessor(
       successorO: Option[SynchronizerSuccessor],
       announcementEffectiveTime: EffectiveTime,
   )(implicit traceContext: TraceContext): Unit =
-    reader.updateSynchronizerSuccessor(successorO, announcementEffectiveTime)
+    reader.updateLsuSuccessor(successorO, announcementEffectiveTime)
 
   // TODO(#27919): provide a proper implementation
   override def sequencingTime(implicit

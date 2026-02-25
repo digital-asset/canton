@@ -200,7 +200,7 @@ trait Sequencer
 
   /** To be called by the topology processing to set/update/remove a synchronizer upgrade
     */
-  private[sequencer] def updateSynchronizerSuccessor(
+  private[sequencer] def updateLsuSuccessor(
       successorO: Option[SynchronizerSuccessor],
       announcementEffectiveTime: EffectiveTime,
   )(implicit traceContext: TraceContext): Unit

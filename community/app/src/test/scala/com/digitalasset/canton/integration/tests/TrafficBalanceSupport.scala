@@ -5,7 +5,11 @@ package com.digitalasset.canton.integration.tests
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt, PositiveLong}
-import com.digitalasset.canton.console.{LocalInstanceReference, LocalSequencerReference}
+import com.digitalasset.canton.console.{
+  InstanceReference,
+  LocalInstanceReference,
+  SequencerReference,
+}
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.sequencing.protocol.TrafficState
 import com.digitalasset.canton.topology.Member
@@ -20,7 +24,7 @@ trait TrafficBalanceSupport extends BaseTest {
 
   protected def getTrafficForMember(
       member: Member,
-      sequencer: LocalSequencerReference,
+      sequencer: SequencerReference,
   ): Option[TrafficState] =
     sequencer.traffic_control
       .traffic_state_of_members_approximate(Seq(member))
@@ -40,10 +44,10 @@ trait TrafficBalanceSupport extends BaseTest {
     )
 
   protected def updateBalanceForMember(
-      instance: LocalInstanceReference,
+      instance: InstanceReference,
       newBalance: PositiveLong,
       beforeCheck: () => Unit,
-      sequencer: LocalSequencerReference,
+      sequencer: SequencerReference,
   ): Assertion = {
     val member = instance.id.member
 
@@ -70,7 +74,7 @@ trait TrafficBalanceSupport extends BaseTest {
   protected def sendTopUp(
       member: Member,
       newBalance: NonNegativeLong,
-      sequencer: LocalSequencerReference,
+      sequencer: SequencerReference,
       serialO: Option[PositiveInt],
   ): PositiveInt = {
 

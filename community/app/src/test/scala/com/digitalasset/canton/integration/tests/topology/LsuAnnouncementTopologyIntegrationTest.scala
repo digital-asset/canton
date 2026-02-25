@@ -118,7 +118,7 @@ final class LsuAnnouncementTopologyIntegrationTest
     loggerFactory.assertThrowsAndLogs[CommandFailure](
       owner1.topology.namespace_delegations
         .propose_delegation(owner1.namespace, targetKey, CanSignAllMappings, daId),
-      _.shouldBeCantonErrorCode(TopologyManagerError.OngoingSynchronizerUpgrade),
+      _.shouldBeCantonErrorCode(TopologyManagerError.AnnouncedLsuTopologyFreeze),
     )
   }
 

@@ -4,8 +4,10 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils
 
 import cats.data.OptionT
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.tracing.TraceContext
 import org.slf4j.event.Level
 
@@ -13,6 +15,9 @@ import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 
 private[bftordering] object Miscellaneous {
+
+  val TestBootstrapTopologyActivationTime: TopologyActivationTime =
+    TopologyActivationTime(CantonTimestamp.MinValue)
 
   def abort(logger: TracedLogger, message: String)(implicit traceContext: TraceContext): Nothing = {
     logger.error(s"FATAL: $message", new RuntimeException(message))

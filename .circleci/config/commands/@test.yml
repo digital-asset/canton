@@ -244,6 +244,7 @@ run_tests:
       default: true
       type: boolean
     collect_postgres_query_stats:
+      # Collect and analyze postgres query statistics
       default: false
       type: boolean
   steps:
@@ -273,7 +274,7 @@ run_tests:
         command: |
           echo "export CANTON_CRASH_ON_PRETTY_PRINTING_ERRORS=true" >> $BASH_ENV
     - execute_sbt_command:
-        cmd: << parameters.command >>
+        cmd: "<< parameters.command >><<# parameters.collect_postgres_query_stats >> \"community-common / testOnly / com.digitalasset.canton.integration.tests.manual.PostgresStatsAnalysisTest\" <</ parameters.collect_postgres_query_stats >>"
         timeout: << parameters.timeout >>
         execution_context_size: << parameters.execution_context_size >>
         succeed_on_error: << parameters.succeed_on_error >>
@@ -283,18 +284,6 @@ run_tests:
         # Capture GC logs for test runs. The file will be uploaded as an artifact in the step
         # `store_track_cpu_and_memory` as part of the `cleanup_test_job` as it lives in the `track` folder.
         extra_parameters: "-J-Xlog:gc=info,safepoint=info:file=track/GC.log:time"
-    - when:
-        condition: << parameters.collect_postgres_query_stats >>
-        name: Analyze Postgres query plans
-        steps:
-          - execute_sbt_command:
-              cmd: "\"community-common / testOnly / com.digitalasset.canton.integration.tests.manual.PostgresStatsAnalysisTest\""
-              timeout: 5m
-              execution_context_size: << parameters.execution_context_size >>
-              succeed_on_error: << parameters.succeed_on_error >>
-              fail_on_error_in_output: << parameters.fail_on_error_in_output >>
-              override_java_version_for_tests: << parameters.override_java_version_for_tests >>
-              log_immediate_flush: "false"
     - persist_failure_status
     - persist_jvm_crash_files
     - unless:
@@ -495,6 +484,18 @@ run_variations_tests:
         execution_context_size: << parameters.execution_context_size >>
         succeed_on_error: << parameters.succeed_on_error >>
         override_java_version_for_tests: << parameters.override_java_version_for_tests >>
+
+# TODO(#30913): Remove this command once the NUCK feature development is complete
+run_temp_nuck_tests:
+  steps:
+    - run_tests:
+        # Disable transcode tests as they use the ZioTest framework and do not respect the NuckTest annotation for ScalaTest
+        command: "dumpClassPath \"set \\`transcode-schema\\` / Test / testOnly := {};set \\`transcode-daml-lf\\` / Test / testOnly := {};set \\`transcode-codec-json\\` / Test / testOnly := {};set \\`transcode-codec-proto-java\\` / Test / testOnly := {};set \\`transcode-codec-proto-scala\\` / Test / testOnly := {};set \\`transcode-daml-examples\\` / Test / testOnly := {};set \\`transcode-test-conformance\\` / Test / testOnly := {};set \\`transcode-test-utils\\` / Test / testOnly := {};testOnly * -- -n com.digitalasset.canton.annotations.NuckTest\""
+        filter: "cat" # cat acts as identity filter
+        num_test_buckets: ""
+        num_parallel_tasks: "1"
+        succeed_on_error: false
+        fail_on_error_in_output: true
 
 set_canton_protocol_version:
   parameters:

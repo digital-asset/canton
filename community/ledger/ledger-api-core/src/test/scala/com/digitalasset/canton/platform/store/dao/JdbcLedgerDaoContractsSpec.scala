@@ -12,6 +12,7 @@ import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReade
   KeyUnassigned,
 }
 import com.digitalasset.canton.util.FutureInstances.*
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.transaction.{GlobalKey, GlobalKeyWithMaintainers}
 import com.digitalasset.daml.lf.value.Value.{ContractId, ValueText}
 import org.scalatest.flatspec.AsyncFlatSpec
@@ -93,6 +94,7 @@ private[dao] trait JdbcLedgerDaoContractsSpec extends LoneElement with Inside wi
     val key = GlobalKeyWithMaintainers.assertBuild(
       someTemplateId,
       aTextValue,
+      crypto.Hash.hashPrivateKey("dummy-key-hash"),
       Set(alice, bob),
       somePackageName,
     )
@@ -134,6 +136,7 @@ private[dao] trait JdbcLedgerDaoContractsSpec extends LoneElement with Inside wi
       val key = GlobalKeyWithMaintainers.assertBuild(
         someTemplateId,
         aTextValue,
+        crypto.Hash.hashPrivateKey(string),
         Set(alice),
         somePackageName,
       )

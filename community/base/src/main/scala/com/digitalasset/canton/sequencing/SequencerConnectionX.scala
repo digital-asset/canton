@@ -7,6 +7,7 @@ import cats.data.EitherT
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.NamedLogging
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.sequencing.ConnectionX.ConnectionXConfig
 import com.digitalasset.canton.sequencing.InternalSequencerConnectionX.{
   ConnectionAttributes,
@@ -63,7 +64,11 @@ trait SequencerConnectionX extends FlagCloseable with NamedLogging {
       implicit traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, Boolean]
 
-  def getTrafficStateForMember(request: GetTrafficStateForMemberRequest, timeout: Duration)(implicit
+  def getTrafficStateForMember(
+      request: GetTrafficStateForMemberRequest,
+      timeout: Duration,
+      logPolicy: CantonGrpcUtil.GrpcLogPolicy = CantonGrpcUtil.DefaultGrpcLogPolicy,
+  )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, GetTrafficStateForMemberResponse]
 

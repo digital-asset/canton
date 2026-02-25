@@ -21,6 +21,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.SimulationModuleSystem.SimulationEnv
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.future.SimulationFuture
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.util.Success
@@ -32,11 +33,12 @@ class SimulationOrderingTopologyProvider(
 ) extends OrderingTopologyProvider[SimulationEnv] {
 
   override def getOrderingTopologyAt(
-      activationTime: TopologyActivationTime,
+      activationTimeO: Option[TopologyActivationTime],
       checkPendingChanges: Boolean,
   )(implicit
       traceContext: TraceContext
-  ): SimulationFuture[Option[(OrderingTopology, CryptoProvider[SimulationEnv])]] =
+  ): SimulationFuture[Option[(OrderingTopology, CryptoProvider[SimulationEnv])]] = {
+    val activationTime = activationTimeO.getOrElse(TestBootstrapTopologyActivationTime)
     SimulationFuture(s"getOrderingTopologyAt($activationTime)") { () =>
       val activeSequencerTopologyData =
         getEndpointsToTopologyData().view
@@ -79,4 +81,5 @@ class SimulationOrderingTopologyProvider(
         )
       )
     }
+  }
 }

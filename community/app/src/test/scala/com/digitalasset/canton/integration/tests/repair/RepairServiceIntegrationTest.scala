@@ -35,6 +35,7 @@ import com.digitalasset.canton.{
   SynchronizerAlias,
   config,
 }
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.CreationTime
 import com.digitalasset.daml.lf.value.Value
@@ -826,7 +827,14 @@ sealed trait RepairServiceIntegrationTestDevLf extends RepairServiceIntegrationT
               )
             val lfPackageName = Ref.PackageName.assertFromString("CantonTestsDev")
             val keyWithMaintainers = ExampleTransactionFactory.globalKeyWithMaintainers(
-              LfGlobalKey.build(lfNoMaintainerTemplateId, Value.ValueUnit, lfPackageName).value,
+              LfGlobalKey
+                .build(
+                  lfNoMaintainerTemplateId,
+                  lfPackageName,
+                  Value.ValueUnit,
+                  crypto.Hash.hashPrivateKey("dummy-key-hash"),
+                )
+                .value,
               Set.empty,
             )
 

@@ -51,10 +51,16 @@ final case class MissingBatchStatus(
 }
 
 final class MainOutputFetchProtocolState {
+  // tracks retrieval of a single batch, including across retry attempts
   val localOutputMissingBatches: mutable.SortedMap[BatchId, MissingBatchStatus] =
     mutable.SortedMap.empty
   val incomingBatchRequests: mutable.Map[BatchId, Set[BftNodeId]] = mutable.SortedMap.empty
+  // tracks all batches from one specific block that the output module has requested
   val pendingBatchesRequests: mutable.ArrayDeque[BatchesRequest] = mutable.ArrayDeque.empty
+  // tracks remote batches that have been received but not completed database storage,
+  // in order to avoid re-requesting it when batch is needed
+  val pendingRemoteBatchIdsToStore: mutable.SortedSet[BatchId] =
+    mutable.SortedSet[BatchId]()
 
   def findProofOfAvailabilityForMissingBatchId(
       missingBatchId: BatchId

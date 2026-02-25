@@ -3,9 +3,10 @@
 
 package com.digitalasset.canton.integration.tests
 
+import com.daml.tls.BaseServerTlsConfig
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
-import com.digitalasset.canton.config.{IdentityConfig, PemFile, TlsBaseServerConfig}
+import com.digitalasset.canton.config.{IdentityConfig, PemFile}
 import com.digitalasset.canton.integration.plugins.UseBftSequencer
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.{
@@ -36,7 +37,7 @@ trait GrpcConnectionErrorsIntegrationTest extends CommunityIntegrationTest with 
         ConfigTransforms.updateSequencerConfig("sequencer2")(
           _.focus(_.publicApi.tls).replace(
             Some(
-              TlsBaseServerConfig(
+              BaseServerTlsConfig(
                 certChainFile = PemFile(ExistingFile.tryCreate(certificatesPath)),
                 privateKeyFile = PemFile(
                   ExistingFile.tryCreate("./community/app/src/test/resources/tls/public-api.pem")

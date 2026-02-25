@@ -7,6 +7,7 @@ import cats.Monad
 import cats.data.StateT
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.{LfInterfaceId, LfPackageId}
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.Ref.QualifiedName
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.language.LanguageVersion
@@ -34,8 +35,9 @@ object LfTransactionBuilder {
 
   val defaultGlobalKey: LfGlobalKey = LfGlobalKey.assertBuild(
     defaultTemplateId,
-    Value.ValueUnit,
     defaultPackageName,
+    Value.ValueUnit,
+    crypto.Hash.hashPrivateKey("default-global-key"),
   )
 
   def allocateNodeId[M[_]](implicit monadInstance: Monad[M]): StateT[M, NodeIdState, LfNodeId] =

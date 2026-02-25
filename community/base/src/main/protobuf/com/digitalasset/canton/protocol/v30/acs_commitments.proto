@@ -5,6 +5,7 @@ syntax = "proto3";
 
 package com.digitalasset.canton.protocol.v30;
 
+import "com/digitalasset/canton/crypto/v30/crypto.proto";
 import "scalapb/scalapb.proto";
 
 // A commitment to the active contract set (ACS) that is shared between two participants on a given synchronizer at a given time.
@@ -21,4 +22,12 @@ message AcsCommitment {
   int64 from_exclusive = 4; // in microseconds of UTC time since Unix epoch
   int64 to_inclusive = 5; // in microseconds of UTC time since Unix epoch
   bytes commitment = 6;
+}
+
+// Represents a protocol message containing an ACS commitment along with its associated signatures.
+message AcsCommitmentProtocolMessage {
+  option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
+
+  bytes acs_commitment = 1;
+  repeated com.digitalasset.canton.crypto.v30.Signature signatures = 2;
 }

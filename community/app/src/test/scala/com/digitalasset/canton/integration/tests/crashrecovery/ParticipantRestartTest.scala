@@ -23,6 +23,8 @@ import com.daml.ledger.api.v2.transaction_filter.{
 import com.daml.ledger.api.v2.value.Value
 import com.daml.ledger.javaapi as javab
 import com.daml.ledger.javaapi.data.{Command, Transaction}
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nonempty.NonEmpty
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Reliability.{
@@ -392,6 +394,7 @@ abstract class ParticipantRestartTest
             BatchingConfig(),
             loggerFactory,
             NoReportingTracerProvider,
+            new ExecutorServiceMetrics(NoOpMetricsFactory),
           )
           .valueOrFailShutdown("create pure crypto")
       )

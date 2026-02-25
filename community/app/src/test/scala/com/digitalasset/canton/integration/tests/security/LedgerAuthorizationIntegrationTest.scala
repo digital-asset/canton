@@ -1497,7 +1497,7 @@ trait LedgerAuthorizationIntegrationTest
       def checkMessage(msg: String): Assertion =
         msg should include regex
           raw"""Received a request with id \S+ with a view that is not correctly authorized\. Rejecting request\.\.\.
-                 |Missing authorization for participant2\S+ through the submitting parties\.""".stripMargin
+               |Missing authorization for participant2\S+ through the submitting parties\.""".stripMargin
 
       val (_, events) = loggerFactory.assertLoggedWarningsAndErrorsSeq(
         checkingConfirmationResponses(Seq(participant1, participant2), sequencer1) {
@@ -1544,7 +1544,7 @@ trait LedgerAuthorizationIntegrationTest
       def checkMessage(msg: String): Assertion =
         msg should include regex
           raw"""Received a request with id \S+ with a view that is not correctly authorized\. Rejecting request\.\.\.
-                 |The submitting participant PAR::participant1\S+\. is not authorized to submit on behalf of the submitting parties participant2\S+\.""".stripMargin
+               |The submitting participant PAR::participant1\S+\. is not authorized to submit on behalf of the submitting parties participant2\S+\.""".stripMargin
 
       val (_, events) = loggerFactory.assertLoggedWarningsAndErrorsSeq(
         checkingConfirmationResponses(participants.all, sequencer1) {
@@ -1629,7 +1629,7 @@ trait LedgerAuthorizationIntegrationTest
       def checkMessage(msg: String): Assertion =
         msg should include regex
           raw"""Received a request with id \S+ with a view that is not correctly authorized\. Rejecting request\.\.\.
-                 |The submitting participant PAR::participant1\S+\. is not authorized to submit on behalf of the submitting parties decentralized-acs-party\S+\.""".stripMargin
+               |The submitting participant PAR::participant1\S+\. is not authorized to submit on behalf of the submitting parties decentralized-acs-party\S+\.""".stripMargin
 
       val (_, events) = loggerFactory.assertLoggedWarningsAndErrorsSeq(
         checkingConfirmationResponses(participants.all, sequencer1) {
@@ -1719,7 +1719,7 @@ trait LedgerAuthorizationIntegrationTest
       def assertAuthenticationErrorMessage(msg: String): Assertion =
         msg should include regex
           raw"""Received a request with id \S+ with a view that is not correctly authenticated\. Rejecting request\.\.\.
-                 |View ViewPosition\(\S+\) is missing a signature\.""".stripMargin
+               |View ViewPosition\(\S+\) is missing a signature\.""".stripMargin
 
       testRequestSignature(
         None,
@@ -1748,7 +1748,7 @@ trait LedgerAuthorizationIntegrationTest
       def assertAuthenticationErrorMessage(msg: String): Assertion =
         msg should include regex
           raw"""Received a request with id \S+ with a view that is not correctly authenticated\. Rejecting request\.\.\.
-                 |View ViewPosition\(\S+\) has an invalid signature: InvalidSignature(\S+)""".stripMargin
+               |View ViewPosition\(\S+\) has an invalid signature: InvalidSignature(\S+)""".stripMargin
 
       val cryptoSnapshot = adHocSnapshot
       val hash = cryptoSnapshot.pureCrypto
@@ -1813,7 +1813,7 @@ trait LedgerAuthorizationIntegrationTest
 
         def assertAuthorizationError(msg: String): Assertion = msg should include regex
           raw"""Received a request with id \S+ with a view that is not correctly authorized\. Rejecting request\.\.\.
-                 |Missing authorization for participant2\S+, ViewPosition\(Seq\("", ""\)\)\.""".stripMargin
+               |Missing authorization for participant2\S+, ViewPosition\(Seq\("", ""\)\)\.""".stripMargin
 
         val (_, maliciousCaseEvents) =
           loggerFactory.assertLoggedWarningsAndErrorsSeq(

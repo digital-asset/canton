@@ -58,8 +58,6 @@ object Dependencies {
   lazy val javax_annotations_version = "1.3.2"
   lazy val jackson_databind_nullable_version = "0.2.6"
   lazy val jakarta_annotation_api_version = "1.3.5"
-  lazy val log4j_version = "2.23.1"
-  lazy val logback_version = "1.5.3"
   lazy val magnolia_version = "1.1.10"
   lazy val magnolifyScalacheck_version = "0.6.2"
   lazy val magnolifyShared_version = "0.6.2"
@@ -206,13 +204,12 @@ object Dependencies {
   lazy val scalatestTestNG =
     "org.scalatestplus" %% "testng-7-5" % "3.2.11.0"
 
-  lazy val scalatest_compatible = resolveDependency("org.scalatest", "scalatest-compatible")
-  lazy val scalatest_wordspec = resolveDependency("org.scalatest", "scalatest-wordspec")
-  lazy val scalatest_flatspec = resolveDependency("org.scalatest", "scalatest-flatspec")
-  lazy val scalatest_shouldmatchers =
-    resolveDependency("org.scalatest", "scalatest-shouldmatchers")
+  lazy val scalatest_compatible = "org.scalatest" % "scalatest-compatible" % "3.2.11"
+  lazy val scalatest_wordspec = "org.scalatest" %% "scalatest-wordspec" % "3.2.11"
+  lazy val scalatest_flatspec = "org.scalatest" %% "scalatest-flatspec" % "3.2.11"
+  lazy val scalatest_shouldmatchers = "org.scalatest" %% "scalatest-shouldmatchers" % "3.2.11"
 
-  lazy val scalactic = resolveDependency("org.scalactic", "scalactic")
+  lazy val scalactic = "org.scalactic" %% "scalactic" % "3.2.11"
 
   // As an alternative to `mockito-scala`, available on Scala 3
   lazy val smockito = "com.bdmendes" %% "smockito" % "2.2.1"
@@ -229,12 +226,12 @@ object Dependencies {
   lazy val slf4j_api = "org.slf4j" % "slf4j-api" % slf4j_version
   lazy val slf4j_nop = "org.slf4j" % "slf4j-nop" % slf4j_version
   lazy val jul_to_slf4j = "org.slf4j" % "jul-to-slf4j" % slf4j_version
-  lazy val logback_classic = "ch.qos.logback" % "logback-classic" % logback_version
+  lazy val logback_classic = resolveDependency("ch.qos.logback", "logback-classic")
 
-  lazy val logback_core = "ch.qos.logback" % "logback-core" % logback_version
+  lazy val logback_core = resolveDependency("ch.qos.logback", "logback-core")
 
-  lazy val log4j_core = "org.apache.logging.log4j" % "log4j-core" % log4j_version
-  lazy val log4j_api = "org.apache.logging.log4j" % "log4j-api" % log4j_version
+  lazy val log4j_core = resolveDependency("org.apache.logging.log4j", "log4j-core")
+  lazy val log4j_api = resolveDependency("org.apache.logging.log4j", "log4j-api")
 
   // used for condition evaluation in logback
   lazy val janino = "org.codehaus.janino" % "janino" % janino_version
@@ -448,6 +445,7 @@ object Dependencies {
         .getOrElse(
           throw new RuntimeException(s"Unknown dependency: $organization, $artifact")
         )
+
   }
 
   lazy val jline = resolveDependency("org.jline", "jline")
@@ -456,7 +454,7 @@ object Dependencies {
   lazy val google_protobuf_java = resolveDependency("com.google.protobuf", "protobuf-java")
   lazy val protobuf_version = google_protobuf_java.revision
   lazy val google_protobuf_java_util =
-    "com.google.protobuf" % "protobuf-java-util" % protobuf_version
+    resolveDependency("com.google.protobuf", "protobuf-java-util")
 
   // Version depends actually on scalapb.
   lazy val google_common_protos =
@@ -464,6 +462,7 @@ object Dependencies {
 
   lazy val commons_io = resolveDependency("commons-io", "commons-io")
   lazy val commons_compress = resolveDependency("org.apache.commons", "commons-compress")
+  lazy val commons_lang = resolveDependency("org.apache.commons", "commons-lang3")
   lazy val auth0_java = resolveDependency("com.auth0", "java-jwt")
   lazy val auth0_jwks = resolveDependency("com.auth0", "jwks-rsa")
   lazy val guava = resolveDependency("com.google.guava", "guava")

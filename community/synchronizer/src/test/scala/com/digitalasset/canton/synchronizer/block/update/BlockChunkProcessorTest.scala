@@ -9,6 +9,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{CloseContext, FlagCloseable}
 import com.digitalasset.canton.sequencing.protocol.{
   AllMembersOfSynchronizer,
+  MemberRecipient,
   MessageId,
   SequencersOfSynchronizer,
   SubmissionRequest,
@@ -18,11 +19,7 @@ import com.digitalasset.canton.synchronizer.sequencer.SubmissionOutcome
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockSequencerFactory.OrderingTimeFixMode
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerMemberValidator
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerRateLimitManager
-import com.digitalasset.canton.topology.DefaultTestIdentities.{
-  mediatorId,
-  physicalSynchronizerId,
-  sequencerId,
-}
+import com.digitalasset.canton.topology.DefaultTestIdentities.{physicalSynchronizerId, sequencerId}
 import com.digitalasset.canton.topology.TestingIdentityFactory
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -90,8 +87,12 @@ class BlockChunkProcessorTest extends AsyncWordSpec with BaseTest {
         } yield {
           Table(
             ("state", "update", "expected tick recipients"),
-            (state1, update1, Set(sequencerId)),
-            (state2, update2, Set(sequencerId, mediatorId)),
+            (state1, update1, Set(MemberRecipient(sequencerId))),
+            (
+              state2,
+              update2,
+              Set(AllMembersOfSynchronizer),
+            ),
           ).forEvery { case (state, update, expectedTickRecipients) =>
             state.lastChunkTs shouldBe tickSequencingTimestamp
             state.latestSequencerEventTimestamp shouldBe Some(tickSequencingTimestamp)
@@ -108,14 +109,14 @@ class BlockChunkProcessorTest extends AsyncWordSpec with BaseTest {
                         None,
                       ),
                       `tickSequencingTimestamp`,
-                      deliverToMembers,
+                      recipients,
                       batch,
                       _,
                       _,
                       None,
                     )
                   )
-                  if deliverToMembers == expectedTickRecipients &&
+                  if recipients == expectedTickRecipients &&
                     batch.envelopes.isEmpty =>
             }
           }

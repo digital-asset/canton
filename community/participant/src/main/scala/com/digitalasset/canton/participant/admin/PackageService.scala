@@ -51,6 +51,7 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.transaction.VettedPackage
 import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
 import com.digitalasset.canton.{LedgerSubmissionId, LfPackageId, ProtoDeserializationError}
 import com.digitalasset.daml.lf.archive
@@ -108,6 +109,13 @@ class PackageService(
 
   private val packageLoader = new DeduplicatingPackageLoader()
   private val packageDarStore = packageUploader.packageMetadataView.packageStore
+
+  def packageResolver: PackageResolver = new PackageResolver {
+    override protected def resolveInternal(packageId: PackageId)(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Option[Package]] =
+      getPackage(packageId)
+  }
 
   def getPackageMetadataView: PackageMetadataView = packageUploader.packageMetadataView
 

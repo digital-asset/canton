@@ -7,7 +7,8 @@ import better.files.File
 import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.metrics.api.{HistogramInventory, MetricsInfoFilter}
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.{HistogramInventory, MetricsContext, MetricsInfoFilter}
 import com.digitalasset.canton.concurrent.*
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.console.{
@@ -142,6 +143,11 @@ class Environment(
     loggerFactory,
   )
 
+  lazy val executorServiceMetrics: ExecutorServiceMetrics =
+    new ExecutorServiceMetrics(
+      metricsRegistry.generateMetricsFactory(MetricsContext.Empty)
+    )
+
   def createConsole(
       consoleOutput: ConsoleOutput = StandardConsoleOutput
   ): ConsoleEnvironment = {
@@ -197,11 +203,12 @@ class Environment(
 
   private val numThreads = config.parameters.threading.parallelism
     .getOrElse(Threading.detectNumberOfThreads(noTracingLogger))
-  implicit val executionContext: ExecutionContextIdlenessExecutorService =
+  implicit lazy val executionContext: ExecutionContextIdlenessExecutorService =
     Threading.newExecutionContext(
       loggerFactory.threadName + "-env-ec",
       noTracingLogger,
       parallelism = numThreads,
+      executorServiceMetrics = executorServiceMetrics,
       maxExtraThreads = config.parameters.threading.maxExtraThreads,
       keepAliveMillis = config.parameters.threading.keepAliveMillis,
       corePoolSize = config.parameters.threading.corePoolSize,
@@ -219,7 +226,7 @@ class Environment(
       new FutureSupervisor.Impl(timeouts.slowFutureWarn, loggerFactory)
     else FutureSupervisor.Noop
 
-  private val monitorO = if (deadlockConfig.enabled) {
+  private lazy val monitorO = if (deadlockConfig.enabled) {
     val mon = new ExecutionContextMonitor(
       loggerFactory,
       deadlockConfig.interval.toInternal,
@@ -501,6 +508,7 @@ class Environment(
           config.sequencerNodeParametersByString(name),
           createClock(Some(SequencerNodeBootstrap.LoggerFactoryKeyName -> name)),
           metricsRegistry.forSequencer(name),
+          executorServiceMetrics,
           testingConfig,
           futureSupervisor,
           loggerFactory.append(SequencerNodeBootstrap.LoggerFactoryKeyName, name),
@@ -524,6 +532,7 @@ class Environment(
         config.mediatorNodeParametersByString(name),
         createClock(Some(MediatorNodeBootstrap.LoggerFactoryKeyName -> name)),
         metricsRegistry.forMediator(name),
+        executorServiceMetrics,
         testingConfig,
         futureSupervisor,
         loggerFactory.append(MediatorNodeBootstrap.LoggerFactoryKeyName, name),
@@ -549,6 +558,7 @@ class Environment(
           config.participantNodeParametersByString(name),
           createClock(Some(ParticipantNodeBootstrap.LoggerFactoryKeyName -> name)),
           metricsRegistry.forParticipant(name),
+          executorServiceMetrics,
           testingConfig,
           futureSupervisor,
           loggerFactory.append(ParticipantNodeBootstrap.LoggerFactoryKeyName, name),

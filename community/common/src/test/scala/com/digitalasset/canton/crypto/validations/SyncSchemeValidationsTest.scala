@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.crypto.validations
 
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{
@@ -51,6 +53,7 @@ class SyncSchemeValidationsTest extends AnyWordSpec with BaseTest with HasExecut
       BatchingConfig(),
       loggerFactory,
       NoReportingTracerProvider,
+      new ExecutorServiceMetrics(NoOpMetricsFactory),
     )
     .valueOrFailShutdown("Failed to create crypto object")
     .futureValue

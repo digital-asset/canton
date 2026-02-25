@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.crypto.provider.kms
 
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.{
   BatchingConfig,
@@ -90,6 +92,7 @@ trait KmsCryptoTest
         BatchingConfig(),
         loggerFactory,
         NoReportingTracerProvider,
+        new ExecutorServiceMetrics(NoOpMetricsFactory),
       )
 
   lazy val kmsCryptoF: FutureUnlessShutdown[Crypto] =

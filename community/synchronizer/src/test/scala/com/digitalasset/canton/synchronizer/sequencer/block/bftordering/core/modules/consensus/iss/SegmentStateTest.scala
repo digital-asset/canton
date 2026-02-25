@@ -1681,7 +1681,11 @@ object SegmentStateTest {
   val slotNumbers: NonEmpty[Seq[BlockNumber]] =
     NonEmpty.mk(Seq, BlockNumber.First, 4L, 8L).map(BlockNumber(_))
   val epochInfo: EpochInfo =
-    EpochInfo.mk(number = EpochNumber.First, startBlockNumber = BlockNumber.First, length = 12)
+    EpochInfo.forTesting(
+      number = EpochNumber.First,
+      startBlockNumber = BlockNumber.First,
+      length = 12,
+    )
   val blockMetaData: BlockMetadata = BlockMetadata.mk(epochInfo.number, BlockNumber.First)
 
   def createBottomPrePrepare(

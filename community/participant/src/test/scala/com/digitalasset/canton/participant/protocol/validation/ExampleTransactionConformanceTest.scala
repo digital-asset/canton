@@ -41,7 +41,7 @@ import com.digitalasset.canton.{
 }
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName}
 import com.digitalasset.daml.lf.language.Ast.{DeclaredImports, Expr, GenPackage, PackageMetadata}
-import com.digitalasset.daml.lf.language.LanguageVersion
+import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.time.Duration
@@ -69,7 +69,12 @@ class ExampleTransactionConformanceTest
       imports = DeclaredImports(Set.empty),
       isUtilityPackage = true,
     )
-  val packageResolver: PackageResolver = _ => _ => FutureUnlessShutdown.pure(Some(genPackage))
+  val packageResolver: PackageResolver = new PackageResolver {
+    override protected def resolveInternal(packageId: PackageId)(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Option[Ast.Package]] =
+      FutureUnlessShutdown.pure(Some(genPackage))
+  }
 
   val pureCrypto = new SymbolicPureCrypto()
 
@@ -90,6 +95,7 @@ class ExampleTransactionConformanceTest
           contractAuthenticator: ContractAuthenticatorFn,
           submitters: Set[LfPartyId],
           command: LfCommand,
+          topologySnapshot: TopologySnapshot,
           ledgerTime: CantonTimestamp,
           preparationTime: CantonTimestamp,
           rootSeed: Option[LfHash],
@@ -162,6 +168,7 @@ class ExampleTransactionConformanceTest
           commonData.ledgerTime,
           commonData.preparationTime,
           getEngineAbortStatus = () => EngineAbortStatus.notAborted,
+          topologySnapshot = mock[TopologySnapshot],
         )
         .failOnShutdown
 

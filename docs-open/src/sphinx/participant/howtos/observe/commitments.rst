@@ -73,12 +73,12 @@ All metrics below are described in detail in the :ref:`Metrics reference section
   the distinguished group on synchronizer ``synchronizer2Id``, and removes counter-participant ``participant2`` from the
   distinguished group on synchronizer ``synchronizer1Id``:
 
-  .. literalinclude:: ../../../../../../community/app/src/test/scala/com/digitalasset/canton/integration/tests/AcsCommitmentMetricsIntegrationTest.scala
+  .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/acs/commitment/AcsCommitmentMetricsIntegrationTest.scala
    :start-after: user-manual-entry-begin: DistinguishedParticipantAddMetric
    :end-before: user-manual-entry-end: DistinguishedParticipantAddMetric
    :dedent:
 
-  .. literalinclude:: ../../../../../../community/app/src/test/scala/com/digitalasset/canton/integration/tests/AcsCommitmentMetricsIntegrationTest.scala
+  .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/acs/commitment/AcsCommitmentMetricsIntegrationTest.scala
    :start-after: user-manual-entry-begin: DistinguishedParticipantRemoveMetric
    :end-before: user-manual-entry-end: DistinguishedParticipantRemoveMetric
    :dedent:
@@ -97,12 +97,12 @@ All metrics below are described in detail in the :ref:`Metrics reference section
   The following examples show how the operator of ``participant1``  adds/removes counter-participant ``participant3`` to
   be *Individually monitored* on the synchronizer ``synchronizerId``:
 
-  .. literalinclude:: ../../../../../../community/app/src/test/scala/com/digitalasset/canton/integration/tests/AcsCommitmentMetricsIntegrationTest.scala
+  .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/acs/commitment/AcsCommitmentMetricsIntegrationTest.scala
    :start-after: user-manual-entry-begin: IndividualMonitoringAdd
    :end-before: user-manual-entry-end: IndividualMonitoringAdd
    :dedent:
 
-  .. literalinclude:: ../../../../../../community/app/src/test/scala/com/digitalasset/canton/integration/tests/AcsCommitmentMetricsIntegrationTest.scala
+  .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/acs/commitment/AcsCommitmentMetricsIntegrationTest.scala
    :start-after: user-manual-entry-begin: IndividualMonitoringRemove
    :end-before: user-manual-entry-end: IndividualMonitoringRemove
    :dedent:
@@ -112,7 +112,7 @@ for the *Default* and *Distinguished* groups, as well as for the *Individually m
 shows how the operator of ``participant1`` can apply a monitoring configuration to synchronizers ``synchronizer1Id`` and
 ``synchronizer2Id``.
 
-.. literalinclude:: ../../../../../../community/app/src/test/scala/com/digitalasset/canton/integration/tests/AcsCommitmentMetricsIntegrationTest.scala
+.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/acs/commitment/AcsCommitmentMetricsIntegrationTest.scala
    :start-after: user-manual-entry-begin: SetMonitoringConfig
    :end-before: user-manual-entry-end: SetMonitoringConfig
    :dedent:

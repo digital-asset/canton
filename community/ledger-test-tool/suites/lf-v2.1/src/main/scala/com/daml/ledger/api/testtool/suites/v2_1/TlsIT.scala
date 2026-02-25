@@ -9,9 +9,8 @@ import com.daml.ledger.api.testtool.infrastructure.{Endpoint, LedgerTestSuite}
 import com.daml.ledger.api.v2.version_service.VersionServiceGrpc.VersionServiceBlockingStub
 import com.daml.ledger.api.v2.version_service.{GetLedgerApiVersionRequest, VersionServiceGrpc}
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
-import com.daml.tls.TlsVersion
 import com.daml.tls.TlsVersion.TlsVersion
-import com.digitalasset.canton.config.TlsClientConfig
+import com.daml.tls.{TlsClientConfig, TlsVersion}
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import io.grpc.StatusRuntimeException
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder

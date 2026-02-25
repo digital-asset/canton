@@ -4,6 +4,8 @@
 package com.digitalasset.canton.integration.plugins
 
 import cats.syntax.parallel.*
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.Threading
@@ -56,6 +58,7 @@ class UseReferenceBlockSequencer[StorageConfigT <: StorageConfig](
     Threading.newExecutionContext(
       loggerFactory.threadName + s"-$driverSingleWordName-sequencer-plugin-execution-context",
       noTracingLogger,
+      new ExecutorServiceMetrics(NoOpMetricsFactory),
     )
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))

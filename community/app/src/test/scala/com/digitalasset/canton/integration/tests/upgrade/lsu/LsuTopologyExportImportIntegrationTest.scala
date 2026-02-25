@@ -60,10 +60,10 @@ final class LsuTopologyExportImportIntegrationTest extends LsuBase {
   "Logical synchronizer upgrade" should {
     "logical upgrade state cannot be queried if no upgrade is ongoing" in { implicit env =>
       assertThrowsAndLogsCommandFailures(
-        env.sequencer1.topology.transactions.logical_upgrade_state(),
+        env.sequencer1.topology.transactions.sequencer_lsu_state(),
         _.shouldBeCommandFailure(
-          TopologyManagerError.NoOngoingSynchronizerUpgrade,
-          "The operation cannot be performed because no upgrade is ongoing",
+          TopologyManagerError.NoLsuScheduled,
+          "The operation cannot be performed because no LSU is scheduled",
         ),
       )
     }
@@ -147,7 +147,7 @@ final class LsuTopologyExportImportIntegrationTest extends LsuBase {
 
       // fetch the upgrade state from the predecessor sequencer
       val upgradeStateFromPredecessorSequencer =
-        sequencer1.topology.transactions.logical_upgrade_state()
+        sequencer1.topology.transactions.sequencer_lsu_state()
 
       // fetch the participant's topology export for a later comparison
       def topologyStateThatShouldShouldSurviveTheUpgrade(psid: PhysicalSynchronizerId) =
@@ -163,7 +163,7 @@ final class LsuTopologyExportImportIntegrationTest extends LsuBase {
 
       val firstUpgradeState = topologyStateThatShouldShouldSurviveTheUpgrade(fixture.currentPSId)
       val firstUpgradeStateLsuEndpoint =
-        participant1.topology.transactions.logical_upgrade_state(synchronizer1Id)
+        participant1.topology.transactions.sequencer_lsu_state(synchronizer1Id)
 
       // advance the time past the upgrade time, so that the participant connects to the new physical synchronizer
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)

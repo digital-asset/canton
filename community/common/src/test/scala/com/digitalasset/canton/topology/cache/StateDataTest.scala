@@ -85,7 +85,7 @@ class StateDataTest extends BaseTestWordSpec with HasExecutionContext {
       val s2 = s.addNewTransaction(m)
 
       // we can find it now
-      s2.filterState(ts(0), asOfInclusive = true, op = TopologyChangeOp.Replace) shouldBe Seq(
+      s2.filterState(ts(0), asOfInclusive = true, op = Some(TopologyChangeOp.Replace)) shouldBe Seq(
         ns1k1_k1_0_N
       )
 
@@ -96,20 +96,20 @@ class StateDataTest extends BaseTestWordSpec with HasExecutionContext {
 
       // we find both
       validate(
-        s3.filterState(ts(0), asOfInclusive = true, op = TopologyChangeOp.Replace),
+        s3.filterState(ts(0), asOfInclusive = true, op = Some(TopologyChangeOp.Replace)),
         Seq(
           ns1k1_k1_0_N
         ),
       )
       validate(
-        s3.filterState(ts(1), asOfInclusive = true, op = TopologyChangeOp.Replace),
+        s3.filterState(ts(1), asOfInclusive = true, op = Some(TopologyChangeOp.Replace)),
         Seq(
           ns1k2_k1_1_3p,
           ns1k1_k1_0_N,
         ),
       )
       validate(
-        s3.filterState(ts(1), asOfInclusive = false, op = TopologyChangeOp.Replace),
+        s3.filterState(ts(1), asOfInclusive = false, op = Some(TopologyChangeOp.Replace)),
         Seq(
           ns1k1_k1_0_N
         ),
@@ -121,20 +121,20 @@ class StateDataTest extends BaseTestWordSpec with HasExecutionContext {
 
       // s3 should see consistent results despite m2 being archived
       validate(
-        s3.filterState(ts(1), asOfInclusive = true, op = TopologyChangeOp.Replace),
+        s3.filterState(ts(1), asOfInclusive = true, op = Some(TopologyChangeOp.Replace)),
         Seq(
           ns1k1_k1_0_N,
           ns1k2_k1_1_3,
         ),
       )
       validate(
-        s3.filterState(ts(3), asOfInclusive = true, op = TopologyChangeOp.Replace),
+        s3.filterState(ts(3), asOfInclusive = true, op = Some(TopologyChangeOp.Replace)),
         Seq(
           ns1k1_k1_0_N
         ),
       )
       validate(
-        s3.filterState(ts(3), asOfInclusive = false, op = TopologyChangeOp.Replace),
+        s3.filterState(ts(3), asOfInclusive = false, op = Some(TopologyChangeOp.Replace)),
         Seq(
           ns1k1_k1_0_N,
           ns1k2_k1_1_3,
@@ -144,14 +144,14 @@ class StateDataTest extends BaseTestWordSpec with HasExecutionContext {
       val s4 = s3.addNewTransaction(m3)
 
       validate(
-        s3.filterState(ts(1), asOfInclusive = true, op = TopologyChangeOp.Replace),
+        s3.filterState(ts(1), asOfInclusive = true, op = Some(TopologyChangeOp.Replace)),
         Seq(
           ns1k2_k1_1_3,
           ns1k1_k1_0_N,
         ),
       )
       validate(
-        s4.filterState(ts(1), asOfInclusive = true, op = TopologyChangeOp.Replace),
+        s4.filterState(ts(1), asOfInclusive = true, op = Some(TopologyChangeOp.Replace)),
         Seq(
           ns1k1_k1_0_N,
           ns1k2_k1_1_3,
@@ -161,34 +161,34 @@ class StateDataTest extends BaseTestWordSpec with HasExecutionContext {
       val s5 = s4.transferArchivedToTail(true)
       Seq(s4, s5).foreach { ss =>
         validate(
-          ss.filterState(ts(3), asOfInclusive = true, op = TopologyChangeOp.Remove),
+          ss.filterState(ts(3), asOfInclusive = true, op = Some(TopologyChangeOp.Remove)),
           Seq(
             ns1k2_k1_1_3rm // remove is the new state as this is the last known tx so the next one needs to be validated against this one being inStore
           ),
         )
         // find correct txs
         validate(
-          ss.filterState(ts(3), asOfInclusive = true, op = TopologyChangeOp.Replace),
+          ss.filterState(ts(3), asOfInclusive = true, op = Some(TopologyChangeOp.Replace)),
           Seq(
             ns1k1_k1_0_N
           ),
         )
         validate(
-          ss.filterState(ts(3), asOfInclusive = false, op = TopologyChangeOp.Replace),
+          ss.filterState(ts(3), asOfInclusive = false, op = Some(TopologyChangeOp.Replace)),
           Seq(
             ns1k1_k1_0_N,
             ns1k2_k1_1_3,
           ),
         )
         validate(
-          ss.filterState(ts(1), asOfInclusive = true, op = TopologyChangeOp.Replace),
+          ss.filterState(ts(1), asOfInclusive = true, op = Some(TopologyChangeOp.Replace)),
           Seq(
             ns1k1_k1_0_N,
             ns1k2_k1_1_3,
           ),
         )
         validate(
-          ss.filterState(ts(1), asOfInclusive = false, op = TopologyChangeOp.Replace),
+          ss.filterState(ts(1), asOfInclusive = false, op = Some(TopologyChangeOp.Replace)),
           Seq(
             ns1k1_k1_0_N
           ),
@@ -240,25 +240,25 @@ class StateDataTest extends BaseTestWordSpec with HasExecutionContext {
         )
 
       validate(
-        sh.filterState(ts(2), asOfInclusive = true, op = TopologyChangeOp.Replace),
+        sh.filterState(ts(2), asOfInclusive = true, op = Some(TopologyChangeOp.Replace)),
         Seq(ns1k1_k1_0_N, ns1k2_k1_1_3),
       )
       validate(
-        sh.filterState(ts(0), asOfInclusive = true, op = TopologyChangeOp.Replace),
+        sh.filterState(ts(0), asOfInclusive = true, op = Some(TopologyChangeOp.Replace)),
         Seq(ns1k1_k1_0_N),
       )
       validate(
-        sh.filterState(ts(3), asOfInclusive = true, op = TopologyChangeOp.Replace),
+        sh.filterState(ts(3), asOfInclusive = true, op = Some(TopologyChangeOp.Replace)),
         Seq(ns1k1_k1_0_N),
       )
       validate(
-        sh.filterState(ts(3), asOfInclusive = false, op = TopologyChangeOp.Replace),
+        sh.filterState(ts(3), asOfInclusive = false, op = Some(TopologyChangeOp.Replace)),
         Seq(ns1k1_k1_0_N, ns1k2_k1_1_3),
       )
 
       // throws if we access out of bounds
       loggerFactory.assertThrowsAndLogs[IllegalStateException](
-        s.filterState(ts(2), asOfInclusive = true, op = TopologyChangeOp.Replace),
+        s.filterState(ts(2), asOfInclusive = true, op = Some(TopologyChangeOp.Replace)),
         _.errorMessage should include("An internal error has occurred"),
       )
 

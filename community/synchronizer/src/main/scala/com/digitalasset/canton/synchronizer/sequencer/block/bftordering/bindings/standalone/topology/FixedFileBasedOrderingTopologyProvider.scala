@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.binding
 
 import better.files.File as BFile
 import com.digitalasset.canton.crypto.{CryptoPureApi, SigningPrivateKey, SigningPublicKey, v30}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.DynamicSynchronizerParameters
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.pekko.PekkoModuleSystem.{
@@ -18,7 +19,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.int
   OrderingTopologyProvider,
   TopologyActivationTime,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftKeyId,
   BftNodeId,
@@ -39,6 +39,8 @@ class FixedFileBasedOrderingTopologyProvider(
     metrics: BftOrderingMetrics,
 )(implicit executionContext: ExecutionContext)
     extends OrderingTopologyProvider[PekkoEnv] {
+
+  import FixedFileBasedOrderingTopologyProvider.*
 
   private val pubKey = readSigningPublicKey(standaloneConfig.signingPublicKeyProtoFile)
 
@@ -61,13 +63,13 @@ class FixedFileBasedOrderingTopologyProvider(
       Map(
         BftNodeId(standaloneConfig.thisSequencerId) ->
           OrderingTopology.NodeTopologyInfo(
-            Genesis.GenesisTopologyActivationTime,
+            ConventionalBootstrapTopologyActivationTime,
             Set(BftKeyId(pubKey.fingerprint.toProtoPrimitive)),
           )
       ) ++ standaloneConfig.peers.map { peerConfig =>
         BftNodeId(peerConfig.sequencerId) ->
           OrderingTopology.NodeTopologyInfo(
-            Genesis.GenesisTopologyActivationTime,
+            ConventionalBootstrapTopologyActivationTime,
             Set(
               BftKeyId(
                 peerSigningPublicKeys(
@@ -79,12 +81,12 @@ class FixedFileBasedOrderingTopologyProvider(
       },
       SequencingParameters.Default,
       MaxBytesToDecompress(DynamicSynchronizerParameters.defaultMaxRequestSize.value),
-      Genesis.GenesisTopologyActivationTime,
+      ConventionalBootstrapTopologyActivationTime,
       areTherePendingCantonTopologyChanges = Some(false),
     )
 
   override def getOrderingTopologyAt(
-      activationTime: TopologyActivationTime,
+      activationTime: Option[TopologyActivationTime],
       checkPendingChanges: Boolean,
   )(implicit
       traceContext: TraceContext
@@ -108,4 +110,10 @@ class FixedFileBasedOrderingTopologyProvider(
       .getOrElse(
         throw new IllegalArgumentException("Failed to parse signing public key")
       )
+}
+
+object FixedFileBasedOrderingTopologyProvider {
+
+  private val ConventionalBootstrapTopologyActivationTime =
+    TopologyActivationTime(CantonTimestamp.MinValue)
 }

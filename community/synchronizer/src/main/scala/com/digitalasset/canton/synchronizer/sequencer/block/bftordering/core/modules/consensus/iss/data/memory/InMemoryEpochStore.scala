@@ -18,7 +18,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.{
   EpochStore,
   EpochStoreReader,
-  Genesis,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
@@ -132,21 +131,22 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
 
   override def latestEpoch(includeInProgress: Boolean)(implicit
       traceContext: TraceContext
-  ): E#FutureUnlessShutdownT[EpochStore.Epoch] =
+  ): E#FutureUnlessShutdownT[Option[EpochStore.Epoch]] =
     createFuture(latestEpochActionName) { () =>
       Try {
-        val epochInfo = epochs
-          .filter { case (_, EpochStatus(_, isInProgress)) =>
-            includeInProgress || (!includeInProgress && !isInProgress)
-          }
-          .maxByOption { case (epochNumber, _) => epochNumber }
-          .map { case (_, EpochStatus(epochInfo, _)) => epochInfo }
-          .getOrElse(Genesis.GenesisEpochInfo)
-        val commits =
-          blocks
-            .get(epochInfo.lastBlockNumber)
-            .fold[Seq[SignedMessage[Commit]]](Seq.empty)(_.commits)
-        Epoch(epochInfo, commits)
+        for {
+          epochInfo <-
+            epochs
+              .filter { case (_, EpochStatus(_, isInProgress)) =>
+                includeInProgress || (!includeInProgress && !isInProgress)
+              }
+              .maxByOption { case (epochNumber, _) => epochNumber }
+              .map { case (_, EpochStatus(epochInfo, _)) => epochInfo }
+          commits =
+            blocks
+              .get(epochInfo.lastBlockNumber)
+              .fold(Seq.empty[SignedMessage[Commit]])(_.commits)
+        } yield Epoch(epochInfo, commits)
       }
     }
 

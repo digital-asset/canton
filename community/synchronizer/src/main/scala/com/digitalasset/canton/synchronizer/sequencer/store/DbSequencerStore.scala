@@ -1422,7 +1422,6 @@ class DbSequencerStore(
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[CantonTimestamp]] = {
-
     val query = for {
       safeWatermarkO <- safeWaterMarkDBIO
       safeWatermark = safeWatermarkO.getOrElse(CantonTimestamp.MaxValue)

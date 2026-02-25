@@ -11,6 +11,7 @@ import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import com.digitalasset.canton.{HasExecutionContext, TestEssentials}
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.value.Value.ValueInt64
@@ -117,11 +118,13 @@ class ContractStateCachesSpec
       val cId = contractId(contractIdx.incrementAndGet())
       val templateId = Identifier.assertFromString(s"some:template:name")
       val packageName = Ref.PackageName.assertFromString("pkg-name")
+      val keyValue = keyIdx.incrementAndGet()
       val key = Option.when(withKey)(
         Key.assertBuild(
           templateId,
-          ValueInt64(keyIdx.incrementAndGet()),
           packageName,
+          ValueInt64(keyValue),
+          crypto.Hash.hashPrivateKey(keyValue.toString),
         )
       )
       ContractStateEvent.Created(cId, key)

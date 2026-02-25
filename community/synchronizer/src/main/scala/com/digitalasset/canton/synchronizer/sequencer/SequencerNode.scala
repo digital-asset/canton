@@ -247,6 +247,7 @@ class SequencerNodeBootstrap(
         clock,
         scheduler,
         arguments.metrics,
+        arguments.executorServiceMetrics,
         storage,
         sequencerId,
         arguments.parameterConfig,

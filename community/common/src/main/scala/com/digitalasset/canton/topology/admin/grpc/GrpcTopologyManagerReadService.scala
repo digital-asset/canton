@@ -906,13 +906,13 @@ class GrpcTopologyManagerReadService(
     mapErrNewEUS(sourceEUS)
   }
 
-  override def logicalUpgradeState(
-      request: LogicalUpgradeStateRequest,
-      responseObserver: StreamObserver[LogicalUpgradeStateResponse],
+  override def sequencerLsuState(
+      request: SequencerLsuStateRequest,
+      responseObserver: StreamObserver[SequencerLsuStateResponse],
   ): Unit = GrpcStreamingUtils.streamToClient(
     (out: OutputStream) => getLogicalUpgradeState(request.synchronizerStore, out),
     responseObserver,
-    byteString => LogicalUpgradeStateResponse(byteString),
+    byteString => SequencerLsuStateResponse(byteString),
     processingTimeout.unbounded.duration,
   )
 
@@ -959,7 +959,7 @@ class GrpcTopologyManagerReadService(
       topologySnapshot <- EitherT.liftF(topologyClient.currentSnapshotApproximation)
       _ <- EitherT.fromOptionF(
         fopt = topologySnapshot.synchronizerUpgradeOngoing(),
-        ifNone = TopologyManagerError.NoOngoingSynchronizerUpgrade.Failure(): RpcError,
+        ifNone = TopologyManagerError.NoLsuScheduled.Failure(): RpcError,
       )
     } yield {
       // The specific filter here must be kept in sync with the filters for the local copy in

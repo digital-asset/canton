@@ -4,6 +4,7 @@
 package com.digitalasset.canton.environment
 
 import cats.syntax.either.*
+import com.daml.metrics.ExecutorServiceMetrics
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.{LocalNodeConfig, TestingConfigInternal}
@@ -27,6 +28,7 @@ final case class NodeFactoryArguments[
     parameters: ParameterConfig,
     clock: Clock,
     metrics: Metrics,
+    executorServiceMetrics: ExecutorServiceMetrics,
     testingConfig: TestingConfigInternal,
     futureSupervisor: FutureSupervisor,
     loggerFactory: NamedLoggerFactory,
@@ -50,6 +52,7 @@ final case class NodeFactoryArguments[
           testingConfig,
           clock,
           metrics,
+          executorServiceMetrics,
           storageFactory,
           replicaManager,
           futureSupervisor,

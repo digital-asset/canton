@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.crypto.provider.jce
 
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CryptoProvider.Jce
 import com.digitalasset.canton.config.{
@@ -64,6 +66,7 @@ class JceCryptoTest
           BatchingConfig(),
           loggerFactory,
           NoReportingTracerProvider,
+          new ExecutorServiceMetrics(NoOpMetricsFactory),
         )
         .valueOrFail("failed to create crypto")
 

@@ -75,6 +75,7 @@ trait TestEnvironment
       BatchingConfig(),
       loggerFactory,
       NoReportingTracerProvider,
+      environment.executorServiceMetrics,
     )(executionContext, TraceContext.empty)
 
   private lazy val crypto: Crypto =

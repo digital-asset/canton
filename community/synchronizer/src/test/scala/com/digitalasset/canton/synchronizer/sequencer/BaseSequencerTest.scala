@@ -214,7 +214,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, SequencerError, CantonTimestamp] = ???
 
-    override private[sequencer] def updateSynchronizerSuccessor(
+    override private[sequencer] def updateLsuSuccessor(
         successorO: Option[SynchronizerSuccessor],
         announcementEffectiveTime: EffectiveTime,
     )(implicit traceContext: TraceContext): Unit = ???

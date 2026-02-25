@@ -5,7 +5,7 @@ package com.daml.ledger.api.testtool.runner
 
 import com.daml.ledger.api.testtool.infrastructure.PartyAllocationConfiguration
 import com.daml.ledger.api.testtool.runner
-import com.digitalasset.canton.config.TlsClientConfig
+import com.daml.tls.TlsClientConfig
 
 import scala.concurrent.duration.FiniteDuration
 import scala.util.matching.Regex

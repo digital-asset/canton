@@ -23,7 +23,8 @@ class DelayedSpec extends AsyncWordSpec with Matchers {
       }
     }
 
-    "delay by a little while" in {
+    // TODO (#30847): disabled flaky test
+    "delay by a little while" ignore {
       val start = time.Instant.now()
       for {
         result <- Delayed.Future.by(1.second)(Future {

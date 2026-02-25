@@ -150,6 +150,25 @@ jobs:
           only: /^v.*/
       requires:
         - test_protocol_version_35
+  # TODO(#30913): Remove this job once the NUCK feature development is completed
+  - temp_nuck_tests_pv_dev:
+      name: temp_nuck_tests_pv_dev
+      context:
+        - datadog
+        - artifactory
+        - azure-self-cache
+        - maven-mirror
+        - da-images
+        - aws_kms_testing
+        - gcp_kms_testing
+      requires:
+        - compile
+      filters:
+        branches:
+          # The NUCK tests are run as part of PV dev tests, so fine to ignore them on non-dev branches to save credits
+          ignore:
+            - main
+            - /^release-line.*/
   - unstable_test:
       context:
         - datadog

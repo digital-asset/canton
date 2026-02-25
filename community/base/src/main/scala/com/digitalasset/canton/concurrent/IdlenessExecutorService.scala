@@ -62,10 +62,10 @@ abstract class ExecutionContextIdlenessExecutorService(
 
 class ForkJoinIdlenessExecutorService(
     pool: ForkJoinPool,
-    delegate: ExecutorService,
+    monitoredPool: ExecutorService,
     reporter: Throwable => Unit,
     name: String,
-) extends ExecutionContextIdlenessExecutorService(delegate, name, reporter) {
+) extends ExecutionContextIdlenessExecutorService(monitoredPool, name, reporter) {
 
   override protected[concurrent] def awaitIdlenessOnce(timeout: FiniteDuration): Boolean =
     pool.awaitQuiescence(timeout.toMillis, TimeUnit.MILLISECONDS)
@@ -77,9 +77,10 @@ class ForkJoinIdlenessExecutorService(
 
 class ThreadPoolIdlenessExecutorService(
     pool: ThreadPoolExecutor,
+    monitoredPool: ExecutorService,
     reporter: Throwable => Unit,
     name: String,
-) extends ExecutionContextIdlenessExecutorService(pool, name, reporter) {
+) extends ExecutionContextIdlenessExecutorService(monitoredPool, name, reporter) {
 
   override protected[concurrent] def awaitIdlenessOnce(timeout: FiniteDuration): Boolean = {
     val deadline = timeout.fromNow

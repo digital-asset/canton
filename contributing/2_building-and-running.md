@@ -37,6 +37,33 @@ Documentations:
 
 Further commands can be found in `build.sbt` and files referenced therein (such as `BuildCommon`).
 
+
+# Local environment setup
+
+For developer-specific environment configuration, the `.envrc.private` file should be used.
+This file is not tracked by Git and is automatically loaded when running `direnv allow`
+(possibly overriding the env settings in `.envrc`).
+
+## Custom pre-commit hook
+One practical use case of the `.envrc.private` file is configuring personal [Git pre-commit hooks](https://git-scm.com/docs/githooks#_pre_commit).
+
+For example, a developer can unset the repository-level `.hooks` configuration and fall back to the default `.git/hooks`
+directory by adding into their own `.envrc.private` the following line:
+```sh
+git config --unset core.hooksPath
+```
+To enable a local pre-commit hook, a `pre-commit` executable file must be created inside the `.git/hooks` directory.
+This file can contain custom commands such as:
+>
+> `sbt format`
+>
+> `sbt scalafmtCheck`
+>
+> `sbt scalafixAll`
+
+Since `.git/hooks` is not tracked by Git, this allows individual customization without requiring team-wide agreement
+or changes to shared repository hooks.
+
 # Running Canton
 
 ## From sbt

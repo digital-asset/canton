@@ -101,7 +101,7 @@ object FreePort {
   }
 
   private def macosDynamicPortRange(): Try[(Int, Int)] = Try {
-    val sysctl = "usr/sbin/sysctl"
+    val sysctl = "/usr/sbin/sysctl"
     val out = Process(sysctl, Seq("net.inet.ip.portrange.first", "net.inet.ip.portrange.last")).!!
     var min: Option[Int] = None
     var max: Option[Int] = None

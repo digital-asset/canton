@@ -150,7 +150,7 @@ abstract sealed case class AcsCommitment private (
   override protected[this] def toByteStringUnmemoized: ByteString =
     super[HasProtocolVersionedWrapper].toByteString
 
-  override protected[messages] def toProtoTypedSomeSignedProtocolMessage
+  override protected[messages] def toProtoTypedSomeSignedProtocolMessageV30
       : v30.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage =
     v30.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage.AcsCommitment(
       getCryptographicEvidence

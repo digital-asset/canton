@@ -9,6 +9,7 @@ import com.digitalasset.canton.util.LfTransactionBuilder
 import com.digitalasset.canton.util.LfTransactionBuilder.{defaultPackageId, defaultTemplateId}
 import com.digitalasset.canton.version.RepresentativeProtocolVersion
 import com.digitalasset.canton.{BaseTest, LfPackageName, LfPartyId, LfVersioned}
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.value.Value
 import org.scalatest.wordspec.AnyWordSpec
@@ -21,8 +22,9 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
     LfGlobalKey
       .build(
         LfTransactionBuilder.defaultTemplateId,
-        Value.ValueInt64(10L),
         LfPackageName.assertFromString("package-name"),
+        Value.ValueInt64(10L),
+        crypto.Hash.hashPrivateKey("dummy-key-hash"),
       )
       .value
   private val choiceName: LfChoiceName = LfChoiceName.assertFromString("choice")
@@ -94,8 +96,9 @@ class ActionDescriptionTest extends AnyWordSpec with BaseTest {
             LfGlobalKey
               .build(
                 LfTransactionBuilder.defaultTemplateId,
-                ExampleTransactionFactory.veryDeepValue,
                 ExampleTransactionFactory.packageName,
+                ExampleTransactionFactory.veryDeepValue,
+                crypto.Hash.hashPrivateKey(ExampleTransactionFactory.veryDeepValue.toString),
               )
               .value,
           ),

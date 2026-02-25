@@ -370,7 +370,7 @@ class SequencerRuntime(
       // Replace op takes precedence over Remove op
       replaceO
         .orElse(removeO)
-        .foreach(sequencer.updateSynchronizerSuccessor(_, effectiveTimestamp))
+        .foreach(sequencer.updateLsuSuccessor(_, effectiveTimestamp))
       FutureUnlessShutdown.unit
     }
   })
@@ -458,7 +458,7 @@ class SequencerRuntime(
       )
     } yield {
       synchronizerUpgradeO.foreach { case (successor, effectiveTime) =>
-        sequencer.updateSynchronizerSuccessor(Some(successor), effectiveTime)
+        sequencer.updateLsuSuccessor(Some(successor), effectiveTime)
       }
       logger.info("Sequencer runtime initialized")
       runtimeReadyPromise.outcome_(())

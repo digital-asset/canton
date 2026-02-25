@@ -448,11 +448,11 @@ class ProgrammableSequencer(
   ): EitherT[FutureUnlessShutdown, SequencerError, CantonTimestamp] =
     baseSequencer.awaitContainingBlockLastTimestamp(timestamp)
 
-  override private[sequencer] def updateSynchronizerSuccessor(
+  override private[sequencer] def updateLsuSuccessor(
       successorO: Option[SynchronizerSuccessor],
       announcementEffectiveTime: EffectiveTime,
   )(implicit traceContext: TraceContext): Unit =
-    baseSequencer.updateSynchronizerSuccessor(successorO, announcementEffectiveTime)
+    baseSequencer.updateLsuSuccessor(successorO, announcementEffectiveTime)
 
   override private[canton] def orderer: Option[BlockOrderer] = baseSequencer.orderer
 

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.config
 
 import com.daml.jwt.JwtTimestampLeeway
+import com.daml.tls.{BaseServerTlsConfig, TlsClientConfigOnlyTrustFile}
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port, PositiveInt}
@@ -44,7 +45,7 @@ import scala.concurrent.duration.Duration
 final case class PublicServerConfig(
     override val address: String = "127.0.0.1",
     override val internalPort: Option[Port] = None,
-    tls: Option[TlsBaseServerConfig] = None,
+    tls: Option[BaseServerTlsConfig] = None,
     override val keepAliveServer: Option[BasicKeepAliveServerConfig] = Some(
       BasicKeepAliveServerConfig()
     ),

@@ -64,7 +64,7 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyTransaction,
 }
 import com.digitalasset.canton.topology.{DefaultTestIdentities, ExternalParty, Namespace, PartyId}
-import com.digitalasset.canton.version.HashingSchemeVersion
+import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.google.protobuf.ByteString
 import io.grpc.Status
 import monocle.Optional
@@ -1155,6 +1155,24 @@ class InteractiveSubmissionIntegrationTest extends InteractiveSubmissionIntegrat
 
         prepared.hashingSchemeVersion shouldBe expected
       }
+
+    }
+
+    "fail if unsupported hashing scheme version is used" onlyRunWith ProtocolVersion.v34 in {
+      implicit env =>
+        val command = createCycleCommand(aliceE, "c1")
+
+        assertThrowsAndLogsCommandFailures(
+          epn.ledger_api.interactive_submission
+            .prepare(
+              Seq(aliceE),
+              Seq(command),
+              hashingSchemeVersion = ApiHashingSchemeVersion.HASHING_SCHEME_VERSION_V3,
+            ),
+          le => {
+            le.errorMessage should include regex "INVALID_ARGUMENT/FAILED_TO_PREPARE_TRANSACTION.*Hashing scheme version V3 is not supported on protocol version 34"
+          },
+        )
 
     }
 

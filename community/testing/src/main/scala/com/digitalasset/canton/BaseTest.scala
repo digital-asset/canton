@@ -461,8 +461,6 @@ trait BaseTest
   lazy val CantonTestsPath: String = BaseTest.CantonTestsPath
   lazy val CantonTestsDevPath: String = BaseTest.CantonTestsDevPath
   lazy val PerformanceTestPath: String = BaseTest.PerformanceTestPath
-  lazy val DamlTestFilesPath: String = BaseTest.DamlTestFilesPath
-  lazy val DamlTestLfDevFilesPath: String = BaseTest.DamlTestLfDevFilesPath
   // TODO(#25385): Consider deduplicating the upgrade test DARs below
   lazy val FooV1Path: String = BaseTest.FooV1Path
   lazy val FooV2Path: String = BaseTest.FooV2Path
@@ -637,9 +635,6 @@ object BaseTest {
   lazy val CantonLfDev: String = getResourcePath("CantonLfDev-1.0.0.dar")
   lazy val CantonLfV21: String = getResourcePath("CantonLfV21-1.0.0.dar")
   lazy val PerformanceTestPath: String = getResourcePath("PerformanceTest.dar")
-  lazy val DamlScript3TestFilesPath: String = getResourcePath("DamlScript3TestFiles-1.0.0.dar")
-  lazy val DamlTestFilesPath: String = getResourcePath("DamlTestFiles-1.0.0.dar")
-  lazy val DamlTestLfDevFilesPath: String = getResourcePath("DamlTestLfDevFiles-1.0.0.dar")
   // TODO(#25385): Deduplicate these upgrading test DARs
   lazy val FooV1Path: String = getResourcePath("foo-0.0.1.dar")
   lazy val FooV2Path: String = getResourcePath("foo-0.0.2.dar")

@@ -4,10 +4,11 @@
 package com.digitalasset.canton.networking.grpc
 
 import com.daml.nonempty.NonEmpty
+import com.daml.tls.TlsClientConfig
+import com.daml.tls.TlsServerConfig.logTlsProtocolsAndCipherSuites
 import com.daml.tls.TlsVersion.TlsVersion
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.config.TlsServerConfig.logTlsProtocolsAndCipherSuites
-import com.digitalasset.canton.config.{ClientConfig, KeepAliveClientConfig, TlsClientConfig}
+import com.digitalasset.canton.config.{ClientConfig, KeepAliveClientConfig}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.Endpoint

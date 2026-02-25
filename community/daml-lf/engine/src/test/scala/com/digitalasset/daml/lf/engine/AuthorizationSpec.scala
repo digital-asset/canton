@@ -4,18 +4,15 @@
 package com.digitalasset.daml.lf
 package engine
 
+import com.digitalasset.daml.lf.crypto.SValueHash
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.data.Ref.Party
 import com.digitalasset.daml.lf.ledger.Authorize
 import com.digitalasset.daml.lf.ledger.FailedAuthorization._
-import com.digitalasset.daml.lf.speedy.DefaultAuthorizationChecker
+import com.digitalasset.daml.lf.speedy.{DefaultAuthorizationChecker, SValue}
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.CreateKey
 import com.digitalasset.daml.lf.transaction.{GlobalKeyWithMaintainers, Node}
-import com.digitalasset.daml.lf.transaction.test.{
-  TestIdFactory,
-  TestNodeBuilder,
-  TransactionBuilder,
-}
+import com.digitalasset.daml.lf.transaction.test.{TestIdFactory, TestNodeBuilder, TransactionBuilder}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ValueRecord
 import org.scalatest.freespec.AnyFreeSpec
@@ -36,7 +33,7 @@ class AuthorizationSpec extends AnyFreeSpec with Matchers with Inside with TestI
       maintainers: Set[Party] = Seq("Alice"),
   ): Node.Create = {
 
-    val templateId = "M:T"
+    val templateId: Ref.TypeConId = "M:T"
     val pkgName = Ref.PackageName.assertFromString("auth-pkg-name")
     val init = builder
       .create(
@@ -51,7 +48,13 @@ class AuthorizationSpec extends AnyFreeSpec with Matchers with Inside with TestI
     init.copy(
       // By default maintainers are added to signatories so do this to allow error case testing
       keyOpt = Some(
-        GlobalKeyWithMaintainers.assertBuild(templateId, Value.ValueUnit, maintainers, pkgName)
+        GlobalKeyWithMaintainers.assertBuild(
+          templateId,
+          Value.ValueUnit,
+          SValueHash.assertHashContractKey(pkgName, templateId.qualifiedName, SValue.SUnit),
+          maintainers,
+          pkgName,
+        )
       )
     )
   }

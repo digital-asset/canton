@@ -9,8 +9,9 @@ import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.daml.nonempty.NonEmpty
+import com.daml.tls.TlsClientConfig
+import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
-import com.digitalasset.canton.config.{ProcessingTimeout, TlsClientConfig}
 import com.digitalasset.canton.console.{ConsoleMacros, ParticipantReference}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.client.configuration.CommandClientConfiguration

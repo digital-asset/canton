@@ -362,9 +362,11 @@ class TestSubmissionService(
 
       case ResultNeedPackage(packageId, resume) =>
         for {
-          pckgO <- packageResolver(packageId)(traceContext).failOnShutdownToAbortException(
-            "TestSubmissionService"
-          )
+          pckgO <- packageResolver
+            .resolve(packageId, PackageResolver.ignoreMissingPackage)
+            .failOnShutdownToAbortException(
+              "TestSubmissionService"
+            )
           r <- resolve(resume(pckgO))
         } yield r
 
@@ -439,8 +441,7 @@ object TestSubmissionService {
 
     val keyResolver = customKeyResolver.getOrElse(ActiveKeyResolver(participant))
 
-    val packageResolver: PackageResolver = id =>
-      tc => participantNode.sync.packageService.getPackage(id)(tc)
+    val packageResolver: PackageResolver = participantNode.sync.packageService.packageResolver
 
     val loggerFactory = participantNode.loggerFactory
 
