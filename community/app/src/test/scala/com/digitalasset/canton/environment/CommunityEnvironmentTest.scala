@@ -165,6 +165,7 @@ class CommunityEnvironmentTest extends AnyWordSpec with BaseTest with HasExecuti
         )(implicit
             executionContext: ExecutionContextIdlenessExecutorService,
             scheduler: ScheduledExecutorService,
+            executionSequencerFactory: ExecutionSequencerFactory,
             actorSystem: ActorSystem,
         ): Either[String, SequencerNodeBootstrap] =
           Right(createSequencerMock(arguments.name, arguments.config))

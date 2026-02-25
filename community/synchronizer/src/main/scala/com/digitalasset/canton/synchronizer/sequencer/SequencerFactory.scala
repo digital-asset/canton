@@ -61,7 +61,7 @@ abstract class DatabaseSequencerFactory(
     config: DatabaseSequencerConfig,
     storage: Storage,
     cachingConfigs: CachingConfigs,
-    batchingConfig: BatchingConfig,
+    protected val batchingConfig: BatchingConfig,
     override val timeouts: ProcessingTimeout,
     protocolVersion: ProtocolVersion,
     sequencerId: SequencerId,

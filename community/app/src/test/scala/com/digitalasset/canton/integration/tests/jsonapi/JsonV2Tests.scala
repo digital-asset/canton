@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.jsonapi
 
 import com.daml.ledger.api.v2.admin.object_meta.ObjectMeta
 import com.daml.ledger.api.v2.admin.party_management_service.{
+  AllocatePartyRequest,
   AllocatePartyResponse,
   GetPartiesResponse,
   ListKnownPartiesResponse,
@@ -57,7 +58,6 @@ import com.digitalasset.canton.http.json.v2.JsStateServiceCodecs.*
 import com.digitalasset.canton.http.json.v2.JsUpdateServiceCodecs.*
 import com.digitalasset.canton.http.json.v2.JsUserManagementCodecs.*
 import com.digitalasset.canton.http.json.v2.JsVersionServiceCodecs.*
-import com.digitalasset.canton.http.json.v2.js.AllocatePartyRequest
 import com.digitalasset.canton.http.json.v2.{
   IdentifierConverter,
   JsCommand,
@@ -172,6 +172,7 @@ class JsonV2Tests
   }
 
   import org.scalatest.matchers.{Matcher, MatchResult}
+
   def anyMatch[T](matcher: Matcher[T]) = Matcher { (items: Iterable[T]) =>
     MatchResult(
       items.exists(matcher(_).matches),
@@ -184,9 +185,10 @@ class JsonV2Tests
     "allocate, update and get party" in httpTestFixture { fixture =>
       val partyId = uniqueId()
       fixture.getUniquePartyAndAuthHeaders("Alice").flatMap { case (_, headers) =>
-        val jsAllocate = JsonParser(
-          AllocatePartyRequest(partyIdHint = s"Carol:-_ $partyId").asJson
-            .toString()
+        val jsAllocate = toSprayJson(
+          Json.obj(
+            "partyIdHint" -> Json.fromString(s"Carol:-_ $partyId")
+          )
         )
 
         for {
@@ -273,12 +275,14 @@ class JsonV2Tests
     "allocate a party on a specific synchronizers" in httpTestFixture { fixture =>
       val partyId = uniqueId()
       fixture.getUniquePartyAndAuthHeaders("Alice").flatMap { case (_, headers) =>
-        val jsAllocate = JsonParser(
+        val jsAllocate = toSprayJson(
           AllocatePartyRequest(
             partyIdHint = s"Carol:-_ $partyId",
             synchronizerId = validSynchronizerId.toProtoPrimitive,
+            localMetadata = None,
+            identityProviderId = "",
+            userId = "",
           ).asJson
-            .toString()
         )
 
         for {
@@ -963,14 +967,11 @@ class JsonV2Tests
                           "cumulative" : [{
                             "identifierFilter" :  {
                                  "WildcardFilter" : {
-                                      "value" : {
-                                           "includeCreatedEventBlob" : false
-                                      }
+                                      "value" : {}
                                  }
                               }
                           }]
-                     },
-                     "verbose": false
+                     }
                 }
               }""")
                 .toEither

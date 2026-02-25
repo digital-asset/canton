@@ -80,7 +80,6 @@ class FetchLatestEventsFlowTest
               initialState,
               (lookupEvents _).andThen(FutureUnlessShutdown.outcomeF),
               (_, events) => events.isEmpty,
-              loggerFactory,
             )
           )
           .toMat(sink)(Keep.both),

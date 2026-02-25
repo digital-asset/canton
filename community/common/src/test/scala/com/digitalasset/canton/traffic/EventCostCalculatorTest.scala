@@ -121,15 +121,16 @@ class EventCostCalculatorTest
       recipients = recipients.allRecipients.toSeq,
     )
     val baseCost = NonNegativeLong.tryCreate(350)
+    val envelope = ClosedEnvelope.create(
+      ByteString.copyFrom(Array.fill(5)(1.toByte)),
+      recipients,
+      Seq.empty,
+      testedProtocolVersion,
+    )
     new EventCostCalculator(loggerFactory).computeEventCost(
       Batch.fromClosed(
         testedProtocolVersion,
-        ClosedEnvelope.create(
-          ByteString.copyFrom(Array.fill(5)(1.toByte)),
-          recipients,
-          Seq.empty,
-          testedProtocolVersion,
-        ),
+        envelope,
       ),
       PositiveInt.tryCreate(5000),
       Map.empty,
@@ -138,7 +139,7 @@ class EventCostCalculatorTest
     ) shouldBe EventCostDetails(
       costMultiplier = PositiveInt.tryCreate(5000),
       groupToMembersSize = Map.empty,
-      envelopes = List(expectedEnvelopeCost),
+      envelopes = Map(envelope -> expectedEnvelopeCost),
       eventCost = NonNegativeLong.tryCreate(expectedEnvelopeCost.finalCost + baseCost.value),
     )
   }

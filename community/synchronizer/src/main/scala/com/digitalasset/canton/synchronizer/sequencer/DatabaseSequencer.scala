@@ -18,9 +18,11 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.metrics.MetricsHelper
 import com.digitalasset.canton.resource.{DbExceptionRetryPolicy, Storage}
 import com.digitalasset.canton.scheduler.PruningScheduler
+import com.digitalasset.canton.sequencer.admin.v30.TrafficSummary
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
+import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.RegisterError
 import com.digitalasset.canton.synchronizer.sequencer.SequencerWriter.ResetWatermark
@@ -36,6 +38,7 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore.SequencerPruningResult
 import com.digitalasset.canton.synchronizer.sequencer.store.{
+  PayloadId,
   SequencerMemberId,
   SequencerMemberValidator,
   SequencerStore,
@@ -251,7 +254,7 @@ class DatabaseSequencer(
     )
   }
 
-  private val reader =
+  protected val reader =
     new SequencerReader(
       config.reader,
       sequencerStore,
@@ -335,6 +338,26 @@ class DatabaseSequencer(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CreateSubscriptionError, Sequencer.SequencedEventSource] =
     reader.read(member, timestamp)
+
+  override protected def readPayloadsFromTimestampsInternal(timestamps: Seq[CantonTimestamp])(
+      implicit traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[PayloadId, Batch[ClosedEnvelope]]] =
+    FutureUnlessShutdown.failed(
+      new UnsupportedOperationException(
+        "readPayloadsFromTimestampsInternal is not supported by the database sequencer"
+      )
+    )
+
+  override def getTrafficSummaries(timestamps: Seq[CantonTimestamp])(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficControlError, Seq[TrafficSummary]] =
+    EitherT.liftF(
+      FutureUnlessShutdown.failed(
+        io.grpc.Status.UNIMPLEMENTED
+          .withDescription("Traffic summaries are not implemented on the database sequencer")
+          .asRuntimeException()
+      )
+    )
 
   /** Internal method to be used in the sequencer integration.
     */

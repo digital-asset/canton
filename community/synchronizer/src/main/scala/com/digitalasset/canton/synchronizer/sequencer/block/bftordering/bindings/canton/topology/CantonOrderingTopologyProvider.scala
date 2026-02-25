@@ -124,7 +124,7 @@ private[canton] final class CantonOrderingTopologyProvider(
 
       maxRequestSize <- getMaxRequestSize(snapshot)
       _ = logger.debug(
-        "Max request time obtained from dynamic synchronizer parameters " +
+        "Max request size obtained from dynamic synchronizer parameters " +
           s"queried successfully on snapshot at $snapshotTimestamp: $maxRequestSize"
       )
 

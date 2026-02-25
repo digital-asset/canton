@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencing.service
 
 import cats.data.EitherT
 import cats.syntax.option.*
+import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble, PositiveInt}
@@ -30,6 +31,7 @@ import com.digitalasset.canton.synchronizer.sequencer.Sequencer
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerParameters
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.service.{
+  ManualFlowControlServerCallStreamObserver,
   RecordStreamObserverItems,
   StreamComplete,
   StreamError,
@@ -49,7 +51,7 @@ import com.digitalasset.canton.topology.store.{
   TopologyStateForInitializationService,
 }
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
+import com.digitalasset.canton.util.{EitherTUtil, MonadUtil, PekkoUtil}
 import com.digitalasset.canton.version.{ProtocolVersion, VersionedMessage}
 import com.digitalasset.canton.{
   BaseTest,
@@ -88,6 +90,9 @@ class GrpcSequencerServiceTest
   import GrpcSequencerServiceTest.*
 
   private lazy val participant = DefaultTestIdentities.participant1
+
+  implicit val executionSequencerFactory: ExecutionSequencerFactory =
+    PekkoUtil.createExecutionSequencerFactory(loggerFactory.threadName, noTracingLogger)
 
   class Environment(member: Member) extends Matchers {
     val sequencer: Sequencer = mock[Sequencer]
@@ -581,7 +586,7 @@ class GrpcSequencerServiceTest
     }
   }
 
-  "versionedSubscribe" should {
+  "subscribe" should {
     "return error if called with observer not capable of observing server calls" in { env =>
       val observer = new MockStreamObserver[v30.SubscriptionResponse]()
       loggerFactory.suppressWarningsAndErrors {
@@ -602,7 +607,7 @@ class GrpcSequencerServiceTest
     }
 
     "return error if request cannot be deserialized" in { env =>
-      val observer = new MockServerStreamObserver[v30.SubscriptionResponse]()
+      val observer = new ManualFlowControlServerCallStreamObserver[v30.SubscriptionResponse](0)
       env.service.subscribe(
         v30.SubscriptionRequest(
           member = "",
@@ -620,7 +625,7 @@ class GrpcSequencerServiceTest
     }
 
     "return error if pool registration fails" in { env =>
-      val observer = new MockServerStreamObserver[v30.SubscriptionResponse]()
+      val observer = new ManualFlowControlServerCallStreamObserver[v30.SubscriptionResponse](0)
       val requestP =
         SubscriptionRequest(
           participant,
@@ -648,7 +653,7 @@ class GrpcSequencerServiceTest
     }
 
     "return error if sending request with member that is not authenticated" in { env =>
-      val observer = new MockServerStreamObserver[v30.SubscriptionResponse]()
+      val observer = new ManualFlowControlServerCallStreamObserver[v30.SubscriptionResponse](0)
       val requestP =
         SubscriptionRequest(
           ParticipantId("Wrong participant"),
@@ -670,13 +675,14 @@ class GrpcSequencerServiceTest
     "close subscription if canceled before fully created" in { env =>
       val observer = mock[MockServerStreamObserver[v30.SubscriptionResponse]]
       val cancelHandler = new AtomicReference[Option[Runnable]](None)
+      val grpcObserverHandle = mock[GrpcObserverHandle[v30.SubscriptionResponse]]
       val subscriptionClosed = new AtomicBoolean(false)
 
       // Subscription augmented to let us know when it is closed.
       val subscription =
         new GrpcManagedSubscription(
           _ => ???,
-          observer,
+          grpcObserverHandle,
           participant,
           None,
           timeouts,
@@ -792,7 +798,11 @@ class GrpcSequencerServiceTest
 
   "downloadTopologyStateForInit" should {
     "stream batches of topology transactions" in { env =>
-      val observer = new MockServerStreamObserver[v30.DownloadTopologyStateForInitResponse]()
+      val observer =
+        new ManualFlowControlServerCallStreamObserver[v30.DownloadTopologyStateForInitResponse](
+          3 + // responses
+            1 // stream complete
+        )
       env.service.downloadTopologyStateForInit(
         TopologyStateForInitRequest(participant, testedProtocolVersion).toProtoV30,
         observer,

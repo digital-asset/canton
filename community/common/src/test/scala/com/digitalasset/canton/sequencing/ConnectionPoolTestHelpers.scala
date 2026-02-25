@@ -137,10 +137,11 @@ trait ConnectionPoolTestHelpers {
     val config = mkDummyConnectionConfig(0)
 
     val connection = GrpcConnectionX(
-      config,
-      CommonMockMetrics.sequencerClient.connectionPool,
-      timeouts,
-      loggerFactory,
+      config = config,
+      keepAliveClientConfigO = None,
+      metrics = CommonMockMetrics.sequencerClient.connectionPool,
+      timeouts = timeouts,
+      loggerFactory = loggerFactory,
     )
 
     val listener = new TestHealthListener(connection.health)
@@ -159,15 +160,16 @@ trait ConnectionPoolTestHelpers {
     val config = mkDummyConnectionConfig(0, expectedSequencerIdO = expectedSequencerIdO)
 
     val connection = new GrpcInternalSequencerConnectionX(
-      config,
-      clientProtocolVersions,
-      minimumProtocolVersion,
-      stubFactory,
-      CommonMockMetrics.sequencerClient.connectionPool,
-      MetricsContext.Empty,
-      futureSupervisor,
-      timeouts,
-      loggerFactory.append("connection", config.name),
+      config = config,
+      clientProtocolVersions = clientProtocolVersions,
+      minimumProtocolVersion = minimumProtocolVersion,
+      keepAliveClientConfigO = None,
+      stubFactory = stubFactory,
+      metrics = CommonMockMetrics.sequencerClient.connectionPool,
+      metricsContext = MetricsContext.Empty,
+      futureSupervisor = futureSupervisor,
+      timeouts = timeouts,
+      loggerFactory = loggerFactory.append("connection", config.name),
     )
 
     val listener = new TestHealthListener(connection.health)
@@ -534,15 +536,16 @@ protected object ConnectionPoolTestHelpers {
       val stubFactory = new TestSequencerConnectionXStubFactory(responses, loggerFactory)
 
       val connection = new GrpcInternalSequencerConnectionX(
-        config,
-        clientProtocolVersions,
-        minimumProtocolVersion,
-        stubFactory,
-        CommonMockMetrics.sequencerClient.connectionPool,
-        MetricsContext.Empty,
-        futureSupervisor,
-        timeouts,
-        loggerFactory.append("connection", config.name),
+        config = config,
+        clientProtocolVersions = clientProtocolVersions,
+        minimumProtocolVersion = minimumProtocolVersion,
+        keepAliveClientConfigO = None,
+        stubFactory = stubFactory,
+        metrics = CommonMockMetrics.sequencerClient.connectionPool,
+        metricsContext = MetricsContext.Empty,
+        futureSupervisor = futureSupervisor,
+        timeouts = timeouts,
+        loggerFactory = loggerFactory.append("connection", config.name),
       )
 
       createdConnections.add(index, connection)

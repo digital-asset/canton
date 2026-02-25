@@ -142,6 +142,15 @@ object ScaffeineCache {
     )
 
     /** @see
+      *   com.github.blemale.scaffeine.AsyncLoadingCache.getIfPresent
+      */
+    def getIfPresent(key: K): Option[F[V]] = (
+      // The Caffeine cache's get method wraps exceptions from the loader in a `CompletionException`.
+      // We should strip it here.
+      underlying.getIfPresent(key).map(f => tunnel.exit(FutureUtil.unwrapCompletionException(f)))
+    )
+
+    /** @see
       *   com.github.blemale.scaffeine.AsyncLoadingCache.getAll
       */
     def getAll(keys: Iterable[K]): F[Map[K, V]] =
@@ -219,6 +228,12 @@ object ScaffeineCache {
       F.map(underlying.getAll(keys.map(Traced(_))))(_.map { case (tracedKey, value) =>
         tracedKey.unwrap -> value
       })
+
+    /** @see
+      *   com.github.blemale.scaffeine.AsyncLoadingCache.getIfPresent
+      */
+    def getIfPresent(key: K)(implicit traceContext: TraceContext): Option[F[V]] =
+      underlying.getIfPresent(Traced(key))
 
     /** @see
       *   com.github.blemale.scaffeine.AsyncLoadingCache.put

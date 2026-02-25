@@ -15,6 +15,7 @@ import com.digitalasset.canton.tracing.TraceContextGrpc
 import com.digitalasset.canton.tracing.TracingConfig.Propagation
 import com.digitalasset.canton.util.ResourceUtil.withResource
 import com.google.protobuf.ByteString
+import io.grpc.ManagedChannelBuilder
 import io.grpc.netty.shaded.io.grpc.netty.{GrpcSslContexts, NettyChannelBuilder}
 import io.grpc.netty.shaded.io.netty.handler.ssl.{SslContext, SslContextBuilder}
 
@@ -136,16 +137,19 @@ object ClientChannelBuilder {
       .protocols(enabledProtocols.map(_.version).asJava)
       .build()
 
-  def configureKeepAlive(
+  def configureKeepAlive[T <: ManagedChannelBuilder[T]](
       keepAlive: Option[KeepAliveClientConfig],
-      builder: NettyChannelBuilder,
-  ): NettyChannelBuilder =
+      builder: ManagedChannelBuilder[T],
+  ): ManagedChannelBuilder[T] =
     keepAlive.fold(builder) { opt =>
       val time = opt.time.unwrap
       val timeout = opt.timeout.unwrap
+      val idleTimeout = opt.idleTimeout.unwrap
       builder
         .keepAliveTime(time.toMillis, TimeUnit.MILLISECONDS)
         .keepAliveTimeout(timeout.toMillis, TimeUnit.MILLISECONDS)
+        .keepAliveWithoutCalls(opt.keepAliveWithoutCalls)
+        .idleTimeout(idleTimeout.toMillis, TimeUnit.MILLISECONDS)
     }
 
   /** Simple channel construction for test and console clients. `maxInboundMessageSize` is 2GB; so

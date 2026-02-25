@@ -14,6 +14,7 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.sequencer.admin.v30.TrafficSummary
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   SequencerTrafficStatus,
   TimestampSelector,
@@ -139,6 +140,22 @@ class TrafficControlSequencerAdministrationGroup(
     consoleEnvironment.run(
       runner.adminCommand(
         SequencerAdminCommands.SetTrafficPurchased(member, serial, newBalance)
+      )
+    )
+
+  @Help.Summary("Obtain traffic summaries for sequenced events")
+  @Help.Description(
+    """Use this command to retrieve the traffic summaries of sequenced events from their timestamps.
+      | timestamps: list of timestamps for which to retrieve traffic summaries
+      |
+      | returns: traffic summaries of sequenced events available on the sequencer matching the input timestamps.
+      | The response may contain less events than input timestamps.
+      """
+  )
+  def traffic_summaries(timestamps: Seq[CantonTimestamp]): Seq[TrafficSummary] =
+    consoleEnvironment.run(
+      runner.adminCommand(
+        SequencerAdminCommands.GetTrafficSummaries(timestamps)
       )
     )
 

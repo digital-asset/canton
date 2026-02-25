@@ -273,10 +273,19 @@ final case class LedgerApiKeepAliveServerConfig(
   * [[https://man7.org/linux/man-pages/man7/tcp.7.html]]). 15s gives a larger margin to detect a
   * faulty connection earlier and retry a submission on another sequencer via amplification, thereby
   * avoiding a request failure.
+  * @param keepAliveWithoutCalls
+  *   Enables sending of keep alive even when there are no RPCs on the channel (default to false).
+  *   This increases network resource consumption for idle connections and requires the server to
+  *   enable permitKeepAliveWithoutCalls. Prefer using [[idleTimeout]].
+  * @param idleTimeout
+  *   If there are no RPCs during this duration, the channel will close all connections and switch
+  *   to Idle state (default is 30 min)
   */
 final case class KeepAliveClientConfig(
     time: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(40),
     timeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofSeconds(15),
+    keepAliveWithoutCalls: Boolean = false,
+    idleTimeout: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMinutes(30),
 ) extends UniformCantonConfigValidation
 
 object KeepAliveClientConfig {

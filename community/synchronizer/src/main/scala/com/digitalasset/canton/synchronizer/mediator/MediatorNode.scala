@@ -575,6 +575,7 @@ class MediatorNodeBootstrap(
       clientProtocolVersions = ProtocolVersionCompatibility.supportedProtocols(parameters),
       minimumProtocolVersion = Some(ProtocolVersion.minimum),
       authConfig = parameters.sequencerClient.authToken,
+      keepAliveClientConfigO = parameters.sequencerClient.keepAliveClient,
       member = mediatorId,
       clock = clock,
       crypto = crypto.crypto,

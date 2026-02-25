@@ -1262,18 +1262,17 @@ class ProtocolConverters(
         traceContext: TraceContext
     ): Future[lapi.interactive.interactive_submission_service.ExecuteSubmissionRequest] =
       Future {
-        val preparedTransaction = obj.preparedTransaction.map { proto =>
+        val preparedTransaction =
           ProtoConverter
             .protoParser(
               lapi.interactive.interactive_submission_service.PreparedTransaction.parseFrom
-            )(proto)
+            )(obj.preparedTransaction)
             .getOrElse(jsFail("Cannot parse prepared_transaction"))
-        }
+
         obj
           .into[lapi.interactive.interactive_submission_service.ExecuteSubmissionRequest]
-          .withFieldConst(_.preparedTransaction, preparedTransaction)
+          .withFieldConst(_.preparedTransaction, Some(preparedTransaction))
           .transform
-
       }
 
     override def toJson(
@@ -1281,7 +1280,16 @@ class ProtocolConverters(
     )(implicit traceContext: TraceContext): Future[JsExecuteSubmissionRequest] = Future.successful(
       lapi
         .into[JsExecuteSubmissionRequest]
-        .withFieldConst(_.preparedTransaction, lapi.preparedTransaction.map(_.toByteString))
+        .withFieldConst(
+          _.preparedTransaction,
+          lapi.preparedTransaction
+            .map(_.toByteString)
+            .getOrElse(jsFail("preparedTransaction is required")),
+        )
+        .withFieldConst(
+          _.partySignatures,
+          lapi.partySignatures.getOrElse(jsFail("partySignatures are required")),
+        )
         .transform
     )
   }
@@ -1375,27 +1383,6 @@ class ProtocolConverters(
           .fromJson(jsResponse.transaction)
       } yield lapi.interactive.interactive_submission_service
         .ExecuteSubmissionAndWaitForTransactionResponse(Some(transaction))
-  }
-
-  object AllocatePartyRequest
-      extends ProtocolConverter[
-        lapi.admin.party_management_service.AllocatePartyRequest,
-        js.AllocatePartyRequest,
-      ] {
-    def fromJson(
-        obj: js.AllocatePartyRequest
-    )(implicit
-        traceContext: TraceContext
-    ): Future[lapi.admin.party_management_service.AllocatePartyRequest] =
-      Future.successful(
-        obj.into[lapi.admin.party_management_service.AllocatePartyRequest].transform
-      )
-
-    def toJson(
-        obj: lapi.admin.party_management_service.AllocatePartyRequest
-    )(implicit traceContext: TraceContext): Future[js.AllocatePartyRequest] = Future.successful(
-      obj.into[js.AllocatePartyRequest].transform
-    )
   }
 
   object PrefetchContractKey

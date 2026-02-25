@@ -226,7 +226,7 @@ class EnterpriseSequencerRateLimitManagerTest
     val eventCostDetails = EventCostDetails(
       trafficConfig.readVsWriteScalingFactor,
       groupToMembersSize = Map.empty, // Unused in this test
-      envelopes = List.empty, // Unused in this test
+      envelopes = Map.empty, // Unused in this test
       correctCost,
     )
     when(
@@ -299,7 +299,7 @@ class EnterpriseSequencerRateLimitManagerTest
     val eventCostDetails = EventCostDetails(
       trafficConfig.readVsWriteScalingFactor,
       groupToMembersSize = Map.empty, // Unused in this test
-      envelopes = List.empty, // Unused in this test
+      envelopes = Map.empty, // Unused in this test
       cost,
     )
     when(
@@ -319,7 +319,7 @@ class EnterpriseSequencerRateLimitManagerTest
     val eventCostDetails = EventCostDetails(
       trafficConfig.readVsWriteScalingFactor,
       groupToMembersSize = Map.empty, // Unused in this test
-      envelopes = List.empty, // Unused in this test
+      envelopes = Map.empty, // Unused in this test
       eventCostNonNegative,
     )
     when(
@@ -450,7 +450,7 @@ class EnterpriseSequencerRateLimitManagerTest
               EventCostDetails(
                 trafficConfig.readVsWriteScalingFactor,
                 Map.empty,
-                List.empty,
+                Map.empty,
                 eventCostNonNegative,
               ),
             )
@@ -503,7 +503,7 @@ class EnterpriseSequencerRateLimitManagerTest
               correctCostDetails = EventCostDetails(
                 trafficConfig.readVsWriteScalingFactor,
                 Map.empty,
-                List.empty,
+                Map.empty,
                 eventCostNonNegative,
               ),
             )
@@ -530,7 +530,7 @@ class EnterpriseSequencerRateLimitManagerTest
               EventCostDetails(
                 trafficConfig.readVsWriteScalingFactor,
                 Map.empty,
-                List.empty,
+                Map.empty,
                 eventCostNonNegative,
               ),
             )
@@ -805,7 +805,7 @@ class EnterpriseSequencerRateLimitManagerTest
               EventCostDetails(
                 trafficConfig.readVsWriteScalingFactor,
                 Map.empty,
-                List.empty,
+                Map.empty,
                 eventCostNonNegative,
               ),
             )
@@ -871,7 +871,7 @@ class EnterpriseSequencerRateLimitManagerTest
               EventCostDetails(
                 trafficConfig.readVsWriteScalingFactor,
                 Map.empty,
-                List.empty,
+                Map.empty,
                 eventCostNonNegative,
               ),
             )
@@ -948,7 +948,7 @@ class EnterpriseSequencerRateLimitManagerTest
     val eventCostDetails = EventCostDetails(
       trafficConfig.readVsWriteScalingFactor,
       groupToMembersSize = Map.empty, // Unused in this test
-      envelopes = List.empty, // Unused in this test
+      envelopes = Map.empty, // Unused in this test
       eventCostNonNegative,
     )
     when(

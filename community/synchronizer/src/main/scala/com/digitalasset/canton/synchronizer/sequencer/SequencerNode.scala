@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.data.EitherT
+import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.admin.sequencer.v30.SequencerStatusServiceGrpc
 import com.digitalasset.canton.auth.CantonAdminTokenDispenser
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
@@ -129,6 +130,7 @@ class SequencerNodeBootstrap(
     mkSequencerFactory: MkSequencerFactory,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
+    executionSequencerFactory: ExecutionSequencerFactory,
     scheduler: ScheduledExecutorService,
     actorSystem: ActorSystem,
 ) extends CantonNodeBootstrapImpl[

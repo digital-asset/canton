@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.http.json.v2
 
-import com.digitalasset.canton.http.json.v2.ProtoInfo.{camelToSnake, normalizeName}
+import com.digitalasset.canton.http.json.v2.ProtoInfo.{camelToSnake, fixedName, normalizeName}
 import io.circe
 import io.circe.yaml.Printer
 
@@ -312,6 +312,27 @@ final case class MessageInfo(message: FieldData) {
     message.fieldComments
       .get(name)
       .orElse(message.fieldComments.get(camelToSnake(name)))
+      .orElse(message.fieldComments.get(fixedName(name)))
+
+  def isFieldRequired(fieldName: String): Boolean =
+    getFieldComment(fieldName) match {
+      case Some(comment) =>
+        val lines = comment.split("\n")
+        lines.exists(line => ProtoInfo.requiredPattern.findFirstIn(line).isDefined)
+      case None => false
+    }
+
+  def isFieldOptional(fieldName: String): Boolean =
+    getFieldComment(fieldName) match {
+      case Some(comment) =>
+        val lines = comment.split("\n")
+        lines.exists(line =>
+          ProtoInfo.optionalPattern
+            .findFirstIn(line)
+            .isDefined || ProtoInfo.optionalWhenRequiredUnlessPattern.findFirstIn(line).isDefined
+        )
+      case None => false
+    }
 
   override def toString: String = getComments().getOrElse("")
 }
@@ -331,12 +352,21 @@ final case class ExtractedProtoComments(
 }
 
 object ProtoInfo {
+  val optionalPattern = raw"^\s*\bOptional\b".r
+  val requiredPattern = raw"^\s*\bRequired\b(?!\s+unless\b)".r
+  val optionalWhenRequiredUnlessPattern = raw"^\s*\bRequired\b(?:\s+unless\b)".r
   val LedgerApiDescriptionResourceLocation = "ledger-api/proto-data.yml"
   def camelToSnake(name: String): String =
     name
       .replaceAll("([a-z0-9])([A-Z])", "$1_$2")
       .replaceAll("([A-Z]+)([A-Z][a-z])", "$1_$2")
       .toLowerCase
+
+  // Special cases for names that (due to mistake) do not follow the usual convention
+  def fixedName(name: String): String = name match {
+    case "createArgument" => "create_arguments"
+    case other => other
+  }
 
   /** We drop initial `Js` prefix and single digits suffixes.
     */

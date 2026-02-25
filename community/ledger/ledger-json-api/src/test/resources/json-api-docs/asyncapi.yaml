@@ -2,6 +2,11 @@ asyncapi: 2.6.0
 info:
   title: JSON Ledger API WebSocket endpoints
   version: 3.4.12-SNAPSHOT
+  description: |-
+    This specification version fixes the API inconsistencies where certain fields marked as required in the spec are in fact optional.
+    If you use code generation tool based on this file, you might need to adjust the existing application code to handle those fields as optional.
+    If you do not want to change your client code, continue using the OpenAPI specification from the previous Canton 3.4 patch release.
+    MINIMUM_CANTON_VERSION=3.4.12
 channels:
   /v2/commands/completions:
     description: Get completions stream
@@ -134,8 +139,7 @@ components:
       title: CompletionStreamRequest
       type: object
       required:
-      - userId
-      - beginExclusive
+      - parties
       properties:
         userId:
           description: |-
@@ -159,6 +163,7 @@ components:
             If not set the ledger uses the ledger begin offset instead.
             If specified, it must be a valid absolute offset (positive integer) or zero (ledger begin offset).
             If the ledger has been pruned, this parameter must be specified and greater than the pruning offset.
+            Optional
           type: integer
           format: int64
     Either_JsCantonError_CompletionStreamResponse:
@@ -174,8 +179,6 @@ components:
     CompletionStreamResponse:
       title: CompletionStreamResponse
       type: object
-      required:
-      - completionResponse
       properties:
         completionResponse:
           $ref: '#/components/schemas/CompletionResponse'
@@ -205,8 +208,6 @@ components:
       description: 'A completion represents the status of a submitted command on the
         ledger: it can be successful or failed.'
       type: object
-      required:
-      - value
       properties:
         value:
           $ref: '#/components/schemas/Completion1'
@@ -217,11 +218,8 @@ components:
       type: object
       required:
       - commandId
-      - updateId
-      - userId
-      - submissionId
-      - deduplicationPeriod
       - offset
+      - synchronizerTime
       properties:
         commandId:
           description: |-
@@ -436,6 +434,7 @@ components:
       type: object
       required:
       - synchronizerId
+      - recordTime
       properties:
         synchronizerId:
           description: |-
@@ -458,8 +457,6 @@ components:
         - detect time out of commands.
         - provide an offset which can be used to restart consumption.
       type: object
-      required:
-      - value
       properties:
         value:
           $ref: '#/components/schemas/OffsetCheckpoint1'
@@ -494,7 +491,6 @@ components:
         migration is not concerned with incomplete (un)assignments.
       type: object
       required:
-      - verbose
       - activeAtOffset
       properties:
         filter:
@@ -535,8 +531,6 @@ components:
         Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
         Used both for filtering create and archive events as well as for filtering transaction trees.
       type: object
-      required:
-      - filtersByParty
       properties:
         filtersByParty:
           $ref: '#/components/schemas/Map_Filters'
@@ -587,8 +581,6 @@ components:
         A filter that matches all contracts that are either an instance of one of
         the ``template_filters`` or that match one of the ``interface_filters``.
       type: object
-      required:
-      - identifierFilter
       properties:
         identifierFilter:
           $ref: '#/components/schemas/IdentifierFilter'
@@ -626,8 +618,6 @@ components:
       title: InterfaceFilter
       description: This filter matches contracts that implement a specific interface.
       type: object
-      required:
-      - value
       properties:
         value:
           $ref: '#/components/schemas/InterfaceFilter1'
@@ -636,8 +626,7 @@ components:
       description: This filter matches contracts that implement a specific interface.
       type: object
       required:
-      - includeInterfaceView
-      - includeCreatedEventBlob
+      - interfaceId
       properties:
         interfaceId:
           description: |-
@@ -666,8 +655,6 @@ components:
       title: TemplateFilter
       description: This filter matches contracts of a specific template.
       type: object
-      required:
-      - value
       properties:
         value:
           $ref: '#/components/schemas/TemplateFilter1'
@@ -676,7 +663,7 @@ components:
       description: This filter matches contracts of a specific template.
       type: object
       required:
-      - includeCreatedEventBlob
+      - templateId
       properties:
         templateId:
           description: |-
@@ -699,8 +686,6 @@ components:
       title: WildcardFilter
       description: This filter matches all templates.
       type: object
-      required:
-      - value
       properties:
         value:
           $ref: '#/components/schemas/WildcardFilter1'
@@ -708,8 +693,6 @@ components:
       title: WildcardFilter
       description: This filter matches all templates.
       type: object
-      required:
-      - includeCreatedEventBlob
       properties:
         includeCreatedEventBlob:
           description: |-
@@ -727,9 +710,6 @@ components:
         Note that some of the filtering behavior depends on the `TransactionShape`,
         which is expected to be specified alongside usages of `EventFormat`.
       type: object
-      required:
-      - filtersByParty
-      - verbose
       properties:
         filtersByParty:
           $ref: '#/components/schemas/Map_Filters'
@@ -763,9 +743,6 @@ components:
     JsGetActiveContractsResponse:
       title: JsGetActiveContractsResponse
       type: object
-      required:
-      - workflowId
-      - contractEntry
       properties:
         workflowId:
           description: |-
@@ -845,11 +822,14 @@ components:
       - nodeId
       - contractId
       - templateId
-      - createdEventBlob
       - createdAt
       - packageName
       - representativePackageId
       - acsDelta
+      - createArgument
+      - witnessParties
+      - signatories
+      - observers
       properties:
         offset:
           description: |-
@@ -886,7 +866,11 @@ components:
             The key of the created contract.
             This will be set if and only if ``template_id`` defines a contract key.
             Optional
-        createArgument: {}
+        createArgument:
+          description: |-
+            The arguments that have been used to create the contract.
+
+            Required
         createdEventBlob:
           description: |-
             Opaque representation of contract create event payload intended for forwarding
@@ -1029,7 +1013,6 @@ components:
       - source
       - target
       - reassignmentId
-      - submitter
       - reassignmentCounter
       - createdEvent
       properties:
@@ -1103,11 +1086,12 @@ components:
       - contractId
       - source
       - target
-      - submitter
       - reassignmentCounter
       - packageName
       - offset
       - nodeId
+      - templateId
+      - witnessParties
       properties:
         reassignmentId:
           description: |-
@@ -1193,9 +1177,6 @@ components:
     GetUpdatesRequest:
       title: GetUpdatesRequest
       type: object
-      required:
-      - beginExclusive
-      - verbose
       properties:
         beginExclusive:
           description: |-
@@ -1271,6 +1252,7 @@ components:
       type: object
       required:
       - transactionShape
+      - eventFormat
       properties:
         eventFormat:
           $ref: '#/components/schemas/EventFormat'
@@ -1316,8 +1298,6 @@ components:
     JsGetUpdatesResponse:
       title: JsGetUpdatesResponse
       type: object
-      required:
-      - update
       properties:
         update:
           $ref: '#/components/schemas/Update'
@@ -1356,8 +1336,6 @@ components:
         - detect time out of commands.
         - provide an offset which can be used to restart consumption.
       type: object
-      required:
-      - value
       properties:
         value:
           $ref: '#/components/schemas/OffsetCheckpoint1'
@@ -1365,8 +1343,6 @@ components:
       title: Reassignment
       description: Complete view of an on-ledger reassignment.
       type: object
-      required:
-      - value
       properties:
         value:
           $ref: '#/components/schemas/JsReassignment'
@@ -1376,11 +1352,10 @@ components:
       type: object
       required:
       - updateId
-      - commandId
-      - workflowId
       - offset
       - recordTime
       - synchronizerId
+      - events
       properties:
         updateId:
           description: |-
@@ -1407,7 +1382,9 @@ components:
           type: integer
           format: int64
         events:
-          description: The collection of reassignment events. Required.
+          description: |-
+            The collection of reassignment events.
+            Required.
           type: array
           items:
             $ref: '#/components/schemas/JsReassignmentEvent'
@@ -1479,16 +1456,12 @@ components:
       description: Records that a contract has been unassigned, and it becomes unusable
         on the source synchronizer
       type: object
-      required:
-      - value
       properties:
         value:
           $ref: '#/components/schemas/UnassignedEvent'
     TopologyTransaction:
       title: TopologyTransaction
       type: object
-      required:
-      - value
       properties:
         value:
           $ref: '#/components/schemas/JsTopologyTransaction'
@@ -1499,6 +1472,8 @@ components:
       - updateId
       - offset
       - synchronizerId
+      - recordTime
+      - events
       properties:
         updateId:
           description: |-
@@ -1547,8 +1522,6 @@ components:
     TopologyEvent:
       title: TopologyEvent
       type: object
-      required:
-      - event
       properties:
         event:
           $ref: '#/components/schemas/TopologyEventEvent'
@@ -1585,8 +1558,6 @@ components:
     ParticipantAuthorizationAdded:
       title: ParticipantAuthorizationAdded
       type: object
-      required:
-      - value
       properties:
         value:
           $ref: '#/components/schemas/ParticipantAuthorizationAdded1'
@@ -1615,8 +1586,6 @@ components:
     ParticipantAuthorizationChanged:
       title: ParticipantAuthorizationChanged
       type: object
-      required:
-      - value
       properties:
         value:
           $ref: '#/components/schemas/ParticipantAuthorizationChanged1'
@@ -1645,8 +1614,6 @@ components:
     ParticipantAuthorizationRevoked:
       title: ParticipantAuthorizationRevoked
       type: object
-      required:
-      - value
       properties:
         value:
           $ref: '#/components/schemas/ParticipantAuthorizationRevoked1'
@@ -1668,8 +1635,6 @@ components:
       description: Filtered view of an on-ledger transaction's create and archive
         events.
       type: object
-      required:
-      - value
       properties:
         value:
           $ref: '#/components/schemas/JsTransaction'
@@ -1680,12 +1645,11 @@ components:
       type: object
       required:
       - updateId
-      - commandId
-      - workflowId
       - effectiveAt
       - offset
       - synchronizerId
       - recordTime
+      - events
       properties:
         updateId:
           description: |-
@@ -1801,6 +1765,7 @@ components:
       - contractId
       - templateId
       - packageName
+      - witnessParties
       properties:
         offset:
           description: |-
@@ -1880,6 +1845,8 @@ components:
       - exerciseResult
       - packageName
       - acsDelta
+      - actingParties
+      - witnessParties
       properties:
         offset:
           description: |-
@@ -2011,8 +1978,6 @@ components:
       description: Provided for backwards compatibility, it will be removed in the
         Canton version 3.5.0.
       type: object
-      required:
-      - update
       properties:
         update:
           $ref: '#/components/schemas/Update1'
@@ -2045,8 +2010,6 @@ components:
         - detect time out of commands.
         - provide an offset which can be used to restart consumption.
       type: object
-      required:
-      - value
       properties:
         value:
           $ref: '#/components/schemas/OffsetCheckpoint1'
@@ -2054,8 +2017,6 @@ components:
       title: Reassignment
       description: Complete view of an on-ledger reassignment.
       type: object
-      required:
-      - value
       properties:
         value:
           $ref: '#/components/schemas/JsReassignment'
@@ -2065,8 +2026,6 @@ components:
         Provided for backwards compatibility, it will be removed in the Canton version 3.5.0.
         Complete view of an on-ledger transaction.
       type: object
-      required:
-      - value
       properties:
         value:
           $ref: '#/components/schemas/JsTransactionTree'
@@ -2078,8 +2037,7 @@ components:
       type: object
       required:
       - updateId
-      - commandId
-      - workflowId
+      - effectiveAt
       - offset
       - eventsById
       - synchronizerId

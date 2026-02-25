@@ -1,0 +1,48 @@
+// Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package com.digitalasset.canton.sequencer.admin.v30;
+
+import "google/protobuf/timestamp.proto";
+
+// Service for inspecting traffic information of sequenced messages
+service SequencerTrafficInspectionService {
+  // Retrieve summaries of the traffic cost of sequenced events.
+  rpc GetTrafficSummaries(GetTrafficSummariesRequest) returns (GetTrafficSummariesResponse);
+}
+
+message GetTrafficSummariesRequest {
+  // List of sequencing times for which to query traffic data
+  // The RPC will fail if a traffic summary cannot be provided for any of the timestamps requested
+  repeated google.protobuf.Timestamp sequencing_timestamps = 1;
+}
+
+message GetTrafficSummariesResponse {
+  // Traffic summaries for the requested timestamps
+  // May contain FEWER summaries than the provided timestamps:
+  // Only timestamps with a corresponding sequenced event will produce a summary
+  repeated TrafficSummary summary = 1;
+}
+
+// Summarizes the data of a sequenced event
+message TrafficSummary {
+  // Time as of which the message was sequenced
+  google.protobuf.Timestamp sequencing_time = 1;
+
+  // Total traffic cost of the message which was paid by the sender.
+  int64 total_traffic_cost = 2;
+
+  // Summaries for the envelopes contained in the event
+  repeated EnvelopeTrafficSummary envelopes = 3;
+}
+
+// Summary of an envelope contained in a sequenced message.
+message EnvelopeTrafficSummary {
+  // Traffic cost of the envelope
+  int64 envelope_traffic_cost = 1;
+
+  // View hashes declared on the envelope
+  repeated bytes view_hashes = 2;
+}

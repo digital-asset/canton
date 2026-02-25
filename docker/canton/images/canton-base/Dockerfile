@@ -19,7 +19,7 @@ RUN apt-get update \
 COPY --from=grpcurl /bin/grpcurl /bin/grpcurl
 
 # create and switch to a working directory
-RUN mkdir /app
+RUN mkdir -p /app/repeatable-migrations
 WORKDIR /app
 
 COPY target/canton .

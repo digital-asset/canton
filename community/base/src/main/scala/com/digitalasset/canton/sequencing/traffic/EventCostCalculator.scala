@@ -58,7 +58,7 @@ object EventCostCalculator {
   final case class EventCostDetails(
       costMultiplier: PositiveInt,
       groupToMembersSize: Map[GroupRecipient, Int],
-      envelopes: List[EnvelopeCostDetails],
+      envelopes: Map[ClosedEnvelope, EnvelopeCostDetails],
       eventCost: NonNegativeLong,
   ) extends PrettyPrinting {
 
@@ -66,7 +66,7 @@ object EventCostCalculator {
       param("event cost", _.eventCost),
       param("cost multiplier", _.costMultiplier),
       param("group to members size", _.groupToMembersSize),
-      param("envelopes cost details", _.envelopes),
+      param("envelopes cost details", _.envelopes.values.toSeq),
     )
   }
 }
@@ -84,9 +84,11 @@ class EventCostCalculator(override val loggerFactory: NamedLoggerFactory) extend
     // If changing the cost computation, make sure to tie it to a protocol version
     // For now there's only one version of cost computation
     if (protocolVersion >= ProtocolVersion.v34) {
-      val envelopeCosts = event.envelopes.map(computeEnvelopeCost(costMultiplier, groupToMembers))
+      val envelopeCosts = event.envelopes
+        .map(envelope => envelope -> computeEnvelopeCost(costMultiplier, groupToMembers)(envelope))
+        .toMap
       val eventCost =
-        NonNegativeLong.tryCreate(envelopeCosts.map(_.finalCost).sum) + baseEventCost
+        NonNegativeLong.tryCreate(envelopeCosts.values.map(_.finalCost).sum) + baseEventCost
       EventCostDetails(
         costMultiplier,
         groupToMembers.view.mapValues(_.size).toMap,

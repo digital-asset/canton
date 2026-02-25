@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.http.json.v2
 
-import cats.implicits.toTraverseOps
 import com.daml.ledger.api.v2.contract_service
 import com.digitalasset.canton.auth.AuthInterceptor
 import com.digitalasset.canton.http.json.v2.CirceRelaxedCodec.deriveRelaxedCodec
@@ -52,8 +51,8 @@ class JsContractService(
     contractServiceClient(caller.token())(req.traceContext)
       .getContract(req.in)
       .flatMap((r: contract_service.GetContractResponse) =>
-        r.createdEvent
-          .traverse(protocolConverters.CreatedEvent.toJson)
+        protocolConverters.CreatedEvent
+          .toJson(r.getCreatedEvent)
           .map(JsContractService.GetContractResponse(_))
       )
       .resultToRight
@@ -80,7 +79,7 @@ object JsContractService extends DocumentationEndpoints {
     getContractEndpoint
   )
 
-  final case class GetContractResponse(createdEvent: Option[JsEvent.CreatedEvent])
+  final case class GetContractResponse(createdEvent: JsEvent.CreatedEvent)
 }
 
 object JsContractServiceCodecs {

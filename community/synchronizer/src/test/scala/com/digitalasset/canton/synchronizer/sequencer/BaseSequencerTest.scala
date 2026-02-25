@@ -13,9 +13,11 @@ import com.digitalasset.canton.health.HealthListener
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
+import com.digitalasset.canton.sequencer.admin.v30.TrafficSummary
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
+import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
 import com.digitalasset.canton.serialization.ProtocolVersionedMemoizedEvidence
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.RegisterError
 import com.digitalasset.canton.synchronizer.sequencer.admin.data.{
@@ -27,6 +29,7 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.{
   CreateSubscriptionError,
   SequencerError,
 }
+import com.digitalasset.canton.synchronizer.sequencer.store.PayloadId
 import com.digitalasset.canton.synchronizer.sequencer.traffic.TimestampSelector.TimestampSelector
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   SequencerRateLimitError,
@@ -211,6 +214,14 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
     ): FutureUnlessShutdown[Option[CantonTimestamp]] = ???
 
     override private[canton] def orderer: Option[BlockOrderer] = ???
+
+    override protected def readPayloadsFromTimestampsInternal(timestamps: Seq[CantonTimestamp])(
+        implicit traceContext: TraceContext
+    ): FutureUnlessShutdown[Map[PayloadId, Batch[ClosedEnvelope]]] = ???
+
+    override def getTrafficSummaries(timestamps: Seq[CantonTimestamp])(implicit
+        traceContext: TraceContext
+    ): EitherT[FutureUnlessShutdown, TrafficControlError, Seq[TrafficSummary]] = ???
   }
 
   "sendAsyncSigned" should {

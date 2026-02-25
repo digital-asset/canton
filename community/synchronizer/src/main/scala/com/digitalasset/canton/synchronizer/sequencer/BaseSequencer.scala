@@ -12,6 +12,8 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors.SubmissionRequestRefused
 import com.digitalasset.canton.sequencing.protocol.{
   AcknowledgeRequest,
+  Batch,
+  ClosedEnvelope,
   SequencerDeliverError,
   SignedContent,
   SubmissionRequest,
@@ -21,6 +23,7 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.{
   CreateSubscriptionError,
   SequencerAdministrationError,
 }
+import com.digitalasset.canton.synchronizer.sequencer.store.PayloadId
 import com.digitalasset.canton.time.{Clock, PeriodicAction}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
@@ -143,6 +146,10 @@ abstract class BaseSequencer(
   protected def readInternal(member: Member, timestamp: Option[CantonTimestamp])(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CreateSubscriptionError, Sequencer.SequencedEventSource]
+
+  protected def readPayloadsFromTimestampsInternal(timestamps: Seq[CantonTimestamp])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[PayloadId, Batch[ClosedEnvelope]]]
 
   override def onClosed(): Unit =
     periodicHealthCheck.foreach(LifeCycle.close(_)(logger))

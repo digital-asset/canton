@@ -11,6 +11,8 @@ import com.digitalasset.base.error.{
   Explanation,
   Resolution,
 }
+import com.digitalasset.canton.ProtoDeserializationError
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.CantonErrorGroups.TrafficControlErrorGroup
 import com.digitalasset.canton.error.{CantonError, ContextualizedCantonError}
 import com.digitalasset.canton.logging.ErrorLoggingContext
@@ -35,6 +37,65 @@ object TrafficControlErrors extends TrafficControlErrorGroup {
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
           cause = "Traffic state not found"
+        )
+        with TrafficControlError
+  }
+
+  @Explanation(
+    """This error indicates that the requested timestamp has not been reached by this sequencer yet."""
+  )
+  @Resolution(
+    """Retry once the sequencer has reached the timestamp."""
+  )
+  object RequestedTimestampInTheFuture
+      extends ErrorCode(
+        id = "REQUESTED_TIMESTAMP_IN_THE_FUTURE",
+        ErrorCategory.InvalidGivenCurrentSystemStateSeekAfterEnd,
+      ) {
+    final case class Error(timestamp: CantonTimestamp)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = s"Timestamp in the future: $timestamp"
+        )
+        with TrafficControlError
+  }
+
+  @Explanation(
+    """This error indicates that some of the requested timestamps have no corresponding events.
+      |This may be because the events have already been pruned, because there was never
+      |any event sequenced at these timestamps."""
+  )
+  @Resolution(
+    """Request summaries at timestamps at which events have been sequenced."""
+  )
+  object NoEventAtTimestamps
+      extends ErrorCode(
+        id = "NO_EVENT_AT_TIMESTAMPS",
+        ErrorCategory.InvalidIndependentOfSystemState,
+      ) {
+    final case class Error(timestamps: Set[CantonTimestamp])(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = s"No events at timestamps: $timestamps"
+        )
+        with TrafficControlError
+  }
+
+  @Explanation(
+    """This error indicates an error in generating the traffic summary for an envelope."""
+  )
+  @Resolution(
+    """Inspect the details of the error for more details and resolution actions."""
+  )
+  object EnvelopeTrafficSummaryError
+      extends ErrorCode(
+        id = "ENVELOPE_TRAFFIC_SUMMARY_ERROR",
+        ErrorCategory.InvalidIndependentOfSystemState,
+      ) {
+    final case class Error(error: ProtoDeserializationError)(implicit
+        val loggingContext: ErrorLoggingContext
+    ) extends CantonError.Impl(
+          cause = s"Could not generate traffic summary for envelope: ${error.message}"
         )
         with TrafficControlError
   }

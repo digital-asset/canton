@@ -30,9 +30,11 @@ import com.digitalasset.canton.protocol.messages.{
 }
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
+import com.digitalasset.canton.sequencer.admin.v30.TrafficSummary
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
+import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.RegisterError
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.External
 import com.digitalasset.canton.synchronizer.sequencer.admin.data.SequencerAdminStatus
@@ -450,6 +452,11 @@ class ProgrammableSequencer(
     baseSequencer.updateSynchronizerSuccessor(successorO, announcementEffectiveTime)
 
   override private[canton] def orderer: Option[BlockOrderer] = baseSequencer.orderer
+
+  override def getTrafficSummaries(timestamps: Seq[CantonTimestamp])(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficControlError, Seq[TrafficSummary]] =
+    baseSequencer.getTrafficSummaries(timestamps)
 }
 
 /** Utilities for using the [[ProgrammableSequencer]] from tests */

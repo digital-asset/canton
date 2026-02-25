@@ -4,11 +4,13 @@
 package com.digitalasset.canton.integration.tests.jsonapi
 
 import com.daml.jwt.Jwt
-import com.daml.ledger.api.v2.admin.party_management_service.AllocatePartyResponse
+import com.daml.ledger.api.v2.admin.party_management_service.{
+  AllocatePartyRequest,
+  AllocatePartyResponse,
+}
 import com.digitalasset.canton.config.TlsClientConfig
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.http.json.v2.JsPartyManagementCodecs.*
-import com.digitalasset.canton.http.json.v2.js.AllocatePartyRequest as JsAllocatePartyRequest
 import com.digitalasset.canton.http.{HttpService, Party, UserId}
 import com.digitalasset.canton.integration.tests.jsonapi.HttpServiceTestFixture.*
 import com.digitalasset.canton.ledger.client.LedgerClient as DamlLedgerClient
@@ -34,6 +36,7 @@ import scala.util.{Failure, Success}
 
 @SuppressWarnings(Array("org.wartremover.warts.NonUnitStatements"))
 trait HttpTestFuns extends HttpJsonApiTestBase with HttpServiceUserFixture {
+
   import AbstractHttpServiceIntegrationTestFuns.*
   import HttpTestFuns.*
 
@@ -191,6 +194,7 @@ trait HttpTestFuns extends HttpJsonApiTestBase with HttpServiceUserFixture {
       f: HttpServiceTestFixtureData => Future[A]
   ): FixtureParam => A =
     withHttpService(None, participantSelector)(f)(_)
+
   implicit protected final class `AHS Funs Uri functions`(private val self: UriFixture) {
 
     import self.uri
@@ -246,7 +250,13 @@ trait HttpTestFuns extends HttpJsonApiTestBase with HttpServiceUserFixture {
     ): Future[(Party, Jwt, UserId, List[HttpHeader])] = {
       val party = getUniqueParty(name)
       val jsAllocate = JsonParser(
-        JsAllocatePartyRequest(partyIdHint = party.toString).asJson
+        AllocatePartyRequest(
+          partyIdHint = party.toString,
+          localMetadata = None,
+          identityProviderId = "",
+          synchronizerId = "",
+          userId = "",
+        ).asJson
           .toString()
       )
       for {
