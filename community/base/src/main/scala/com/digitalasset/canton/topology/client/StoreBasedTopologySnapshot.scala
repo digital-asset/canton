@@ -51,6 +51,21 @@ class StoreBasedTopologySnapshot(
         None,
       )
 
+  override def wasEverOnboarded(
+      participantId: ParticipantId
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
+    store
+      .findAllTransactions(
+        asOf = this.timestamp,
+        asOfInclusive = true,
+        isProposal = false,
+        types = Seq(TopologyMapping.Code.SynchronizerTrustCertificate),
+        filterUid = NonEmpty.from(Seq(participantId.uid)),
+        filterNamespace = None,
+        pagination = None,
+      )
+      .map(_.signedTransactions.nonEmpty)
+
   private def findTransactionsByType(
       types: Seq[TopologyMapping.Code]
   )(implicit

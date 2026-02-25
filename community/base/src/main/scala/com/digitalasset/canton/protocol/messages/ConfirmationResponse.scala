@@ -219,7 +219,7 @@ final case class ConfirmationResponses private (
       responses = responses.map(_.toProtoV30),
     )
 
-  override protected[messages] def toProtoTypedSomeSignedProtocolMessage
+  override protected[messages] def toProtoTypedSomeSignedProtocolMessageV30
       : v30.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage =
     v30.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage.ConfirmationResponses(
       getCryptographicEvidence

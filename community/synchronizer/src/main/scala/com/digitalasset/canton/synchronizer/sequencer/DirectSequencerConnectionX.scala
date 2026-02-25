@@ -10,6 +10,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
+import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.sequencing.ConnectionX.ConnectionXConfig
 import com.digitalasset.canton.sequencing.InternalSequencerConnectionX.{
@@ -89,6 +90,7 @@ class DirectSequencerConnectionX(
   override def getTrafficStateForMember(
       request: GetTrafficStateForMemberRequest,
       timeout: Duration,
+      logPolicy: CantonGrpcUtil.GrpcLogPolicy,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, String, GetTrafficStateForMemberResponse] =

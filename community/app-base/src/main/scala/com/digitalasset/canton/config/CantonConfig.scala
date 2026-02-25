@@ -16,6 +16,14 @@ import com.daml.metrics.api.MetricQualification
 import com.daml.metrics.{HistogramDefinition, MetricsFilterConfig}
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
+import com.daml.tls.{
+  BaseServerTlsConfig,
+  ServerAuthRequirementConfig,
+  TlsClientCertificate,
+  TlsClientConfig,
+  TlsClientConfigOnlyTrustFile,
+  TlsServerConfig,
+}
 import com.digitalasset.canton.auth.{AccessLevel, AuthorizedUser}
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.*
@@ -905,8 +913,8 @@ object CantonConfig {
 
     lazy implicit final val adminServerReader: ConfigReader[AdminServerConfig] =
       deriveReader[AdminServerConfig]
-    lazy implicit final val tlsBaseServerConfigReader: ConfigReader[TlsBaseServerConfig] =
-      deriveReader[TlsBaseServerConfig]
+    lazy implicit final val tlsBaseServerConfigReader: ConfigReader[BaseServerTlsConfig] =
+      deriveReader[BaseServerTlsConfig]
 
     lazy implicit final val clockConfigReader: ConfigReader[ClockConfig] = {
       implicit val clockConfigRemoteClockReader: ConfigReader[ClockConfig.RemoteClock] =
@@ -1645,8 +1653,8 @@ object CantonConfig {
 
     lazy implicit final val adminServerConfigWriter: ConfigWriter[AdminServerConfig] =
       deriveWriter[AdminServerConfig]
-    lazy implicit final val tlsBaseServerConfigWriter: ConfigWriter[TlsBaseServerConfig] =
-      deriveWriter[TlsBaseServerConfig]
+    lazy implicit final val tlsBaseServerConfigWriter: ConfigWriter[BaseServerTlsConfig] =
+      deriveWriter[BaseServerTlsConfig]
 
     lazy implicit final val clockConfigWriter: ConfigWriter[ClockConfig] = {
       implicit val clockConfigRemoteClockWriter: ConfigWriter[ClockConfig.RemoteClock] =

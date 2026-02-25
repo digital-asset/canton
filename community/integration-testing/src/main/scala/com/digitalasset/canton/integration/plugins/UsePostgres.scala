@@ -4,6 +4,8 @@
 package com.digitalasset.canton.integration.plugins
 
 import cats.syntax.parallel.*
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
@@ -87,6 +89,7 @@ class UsePostgres(
     Threading.newExecutionContext(
       loggerFactory.threadName + "-db-execution-context",
       noTracingLogger,
+      new ExecutorServiceMetrics(NoOpMetricsFactory),
     )
 
   private[plugins] def dbSetupExecutionContext: ExecutionContext = dbSetupExecutorService

@@ -6,6 +6,7 @@ package com.digitalasset.canton.crypto.kms.driver.v1
 import cats.data.EitherT
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
+import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, FutureSupervisor, Threading}
@@ -464,11 +465,16 @@ object DriverKms {
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
       executionContext: ExecutionContext,
+      executorServiceMetrics: ExecutorServiceMetrics,
   ): Either[KmsError, DriverKms] = {
 
     val driverLogger = loggerFactory.append("kms-driver", config.name).getLogger(classOf[DriverKms])
     val driverExecutionContext =
-      Threading.newExecutionContext(s"kms-driver-${config.name}", driverLogger)
+      Threading.newExecutionContext(
+        s"kms-driver-${config.name}",
+        driverLogger,
+        executorServiceMetrics,
+      )
 
     for {
       driver <- DriverLoader

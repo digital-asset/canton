@@ -207,13 +207,19 @@ class ModelConformanceChecker(
   }
 
   private def buildPackageNameMap(
-      packageIds: Set[PackageId]
+      packageIds: Set[PackageId],
+      topologySnapshot: TopologySnapshot,
+      ledgerTime: CantonTimestamp,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, Map[PackageName, PackageId]] =
     EitherT(for {
       resolvedE <- packageIds.toSeq.parTraverse(pId =>
-        packageResolver(pId)(traceContext)
+        packageResolver
+          .resolve(
+            pId,
+            PackageResolver.crashOnMissingPackage(topologySnapshot, participantId, ledgerTime),
+          )
           .map {
             case None => Left(pId)
             case Some(ast) => Right((pId, ast.metadata.name))
@@ -239,6 +245,7 @@ class ModelConformanceChecker(
       ledgerTime: CantonTimestamp,
       preparationTime: CantonTimestamp,
       getEngineAbortStatus: GetEngineAbortStatus,
+      topologySnapshot: TopologySnapshot,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, ConformanceReInterpretationResult] = {
@@ -255,7 +262,7 @@ class ModelConformanceChecker(
 
     for {
 
-      packagePreference <- buildPackageNameMap(packageIdPreference)
+      packagePreference <- buildPackageNameMap(packageIdPreference, topologySnapshot, ledgerTime)
 
       lfTxAndMetadata <- reinterpreter
         .reinterpret(
@@ -263,6 +270,7 @@ class ModelConformanceChecker(
           contractValidator.authenticateHash,
           authorizers,
           cmd,
+          topologySnapshot,
           ledgerTime,
           preparationTime,
           seed,
@@ -313,6 +321,7 @@ class ModelConformanceChecker(
             ledgerTime,
             preparationTime,
             getEngineAbortStatus,
+            topologySnapshot,
           )
         )
 

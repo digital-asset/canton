@@ -73,6 +73,7 @@ if (runningInCI) {
   // if we are not on main, rebase to main to avoid race condition with todos already closed on main
   if (branch != "main") {
     println("rebasing to main to avoid flagging already closed issues")
+    nixify("git config user.name canton").!!.strip()
     nixify("git config user.email canton@digitalasset.com").!!.strip()
     nixify("git fetch origin main").!!.strip()
     nixify("git merge -X theirs origin/main -m Merged --commit").!!.strip()

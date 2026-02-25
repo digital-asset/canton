@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.crypto.sync
 
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.KmsConfig.Driver
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -137,6 +139,7 @@ trait SyncCryptoTest
       BatchingConfig(),
       loggerFactory,
       NoReportingTracerProvider,
+      new ExecutorServiceMetrics(NoOpMetricsFactory),
     )
     .valueOrFailShutdown("Failed to create crypto object")
     .futureValue

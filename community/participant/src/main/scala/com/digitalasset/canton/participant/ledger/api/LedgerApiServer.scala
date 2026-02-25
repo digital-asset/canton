@@ -93,10 +93,11 @@ import com.digitalasset.canton.time.{Clock, RemoteClock, SimClock}
 import com.digitalasset.canton.tracing.{TraceContext, TracerProvider}
 import com.digitalasset.canton.util.ContractValidator
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
-import com.digitalasset.canton.{LedgerParticipantId, LfPackageId, LfPartyId, config}
+import com.digitalasset.canton.{LedgerParticipantId, LfPartyId, config}
 import com.digitalasset.daml.lf.data.Ref
-import com.digitalasset.daml.lf.data.Ref.Party
+import com.digitalasset.daml.lf.data.Ref.{PackageId, Party}
 import com.digitalasset.daml.lf.engine.Engine
+import com.digitalasset.daml.lf.language.Ast
 import io.grpc.inprocess.InProcessChannelBuilder
 import io.grpc.{BindableService, ServerInterceptor, ServerServiceDefinition}
 import io.opentelemetry.api.trace.Tracer
@@ -329,8 +330,10 @@ class LedgerApiServer(
       )
 
       packageLoader = new DeduplicatingPackageLoader()
-      packageResolver: PackageResolver = (packageId: LfPackageId) =>
-        (traceContext: TraceContext) =>
+      packageResolver: PackageResolver = new PackageResolver {
+        override protected def resolveInternal(packageId: PackageId)(implicit
+            traceContext: TraceContext
+        ): FutureUnlessShutdown[Option[Ast.Package]] =
           FutureUnlessShutdown.outcomeF(
             packageLoader.loadPackage(
               packageId = packageId,
@@ -338,6 +341,7 @@ class LedgerApiServer(
               metric = grpcApiMetrics.index.db.translation.getLfPackage,
             )
           )
+      }
 
       contractValidator = ContractValidator(syncService.pureCryptoApi, engine, packageResolver)
 

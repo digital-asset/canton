@@ -294,6 +294,9 @@ final class AvailabilityModule[E <: Env[E]](
         signLocalBatchesAndContinue(batches)
 
       case Availability.LocalDissemination.RemoteBatchStored(batchId, epochNumber, from) =>
+        outputFetchProtocolState.pendingRemoteBatchIdsToStore.remove(batchId).discard
+        outputFetchProtocolState.localOutputMissingBatches.remove(batchId).discard
+        updateOutputFetchStatus(batchId)
         logger.debug(s"$messageType: local store persisted $batchId from $from, signing")
         disseminationProtocolState.disseminationQuotas.addBatch(from, batchId, epochNumber)
         signRemoteBatchAndContinue(batchId, epochNumber, from)
@@ -303,7 +306,6 @@ final class AvailabilityModule[E <: Env[E]](
 
       case LocalDissemination.RemoteBatchStoredSigned(batchId, from, signature) =>
         logger.debug(s"$messageType: signed $batchId from $from, sending ACK")
-        updateOutputFetchStatus(batchId)
         send(
           Availability.RemoteDissemination.RemoteBatchAcknowledged
             .create(
@@ -889,6 +891,7 @@ final class AvailabilityModule[E <: Env[E]](
           error => logger.warn(error),
           batch => {
             emitBatchValidationLatency(validationStart)
+            outputFetchProtocolState.pendingRemoteBatchIdsToStore.add(batchId).discard
             pipeToSelf(availabilityStore.addBatch(batchId, batch)) {
               case Failure(exception) =>
                 abort(s"Failed to add batch $batchId", exception)
@@ -969,28 +972,37 @@ final class AvailabilityModule[E <: Env[E]](
         result match {
           case AvailabilityStore.MissingBatches(missingBatchIds) =>
             request.missingBatches.filterInPlace(missingBatchIds.contains)
-            request.missingBatches.foreach { missingBatchId =>
-              // we are missing batches, so for each batch we are missing we will request
-              // it from another node until we get all of them again.
-              outputFetchProtocolState
-                .findProofOfAvailabilityForMissingBatchId(missingBatchId)
-                .fold {
-                  logger.warn(
-                    s"we are missing proof of availability for $missingBatchId, so we don't know nodes to ask."
-                  )
-                } { proofOfAvailability =>
-                  fetchBatchDataFromNodes(
-                    messageType,
-                    proofOfAvailability,
-                    request.blockForOutput.mode,
-                  )
-                }
-            }
             if (request.missingBatches.isEmpty) {
               // this case can happen if:
               // * we stored a missing batch after the fetch request
               // * but the response of the stored occur before the fetch
               fetchBatchesForOutputRequest(request)
+            } else {
+              request.missingBatches.foreach { missingBatchId =>
+                if (
+                  !outputFetchProtocolState.pendingRemoteBatchIdsToStore.contains(missingBatchId)
+                ) {
+                  // we are missing batches, so for each batch we are missing we will request
+                  // it from another node until we get all of them again.
+                  outputFetchProtocolState
+                    .findProofOfAvailabilityForMissingBatchId(missingBatchId)
+                    .fold {
+                      logger.warn(
+                        s"we are missing proof of availability for $missingBatchId, so we don't know nodes to ask."
+                      )
+                    } { proofOfAvailability =>
+                      fetchBatchDataFromNodes(
+                        messageType,
+                        proofOfAvailability,
+                        request.blockForOutput.mode,
+                      )
+                    }
+                } else {
+                  logger.debug(
+                    s"Missing batch $missingBatchId is actually in the process of being stored"
+                  )
+                }
+              }
             }
           case AvailabilityStore.AllBatches(batches) =>
             // We received all the batches that the output module requested
@@ -1029,6 +1041,7 @@ final class AvailabilityModule[E <: Env[E]](
         outputFetchProtocolState.incomingBatchRequests.remove(batchId).discard
 
       case Availability.LocalOutputFetch.FetchedBatchStored(batchId) =>
+        outputFetchProtocolState.pendingRemoteBatchIdsToStore.remove(batchId).discard
         outputFetchProtocolState.localOutputMissingBatches.get(batchId) match {
           case Some(_) =>
             logger.debug(s"$messageType: $batchId was missing and is now persisted")
@@ -1039,6 +1052,10 @@ final class AvailabilityModule[E <: Env[E]](
         }
 
       case Availability.LocalOutputFetch.FetchRemoteBatchDataTimeout(batchId) =>
+        if (outputFetchProtocolState.pendingRemoteBatchIdsToStore.contains(batchId)) {
+          logger.info(s"Won't retry fetching remote batch $batchId, because it is being stored")
+          return
+        }
         val status = outputFetchProtocolState.localOutputMissingBatches.get(batchId) match {
           case Some(value) => value
           case None =>
@@ -1072,7 +1089,9 @@ final class AvailabilityModule[E <: Env[E]](
                 extractNodes(Some(status.originalProof.acks))
 
             case Some(node) =>
-              logger.debug(s"$messageType: got fetch timeout for $batchId, trying fetch from $node")
+              logger.debug(
+                s"$messageType: got fetch timeout for $batchId, trying fetch from $node"
+              )
               (node, status.remainingNodesToTry.drop(1))
           }
         val missingBatchStatus =
@@ -1160,6 +1179,7 @@ final class AvailabilityModule[E <: Env[E]](
           error => logger.warn(error),
           _ => {
             logger.debug(s"$messageType: received $batchId, persisting it")
+            outputFetchProtocolState.pendingRemoteBatchIdsToStore.add(batchId).discard
             pipeToSelf(availabilityStore.addBatch(batchId, batch)) {
               case Failure(exception) =>
                 abort(s"Failed to add batch $batchId", exception)

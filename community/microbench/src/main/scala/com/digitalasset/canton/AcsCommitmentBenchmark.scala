@@ -6,6 +6,7 @@ package com.digitalasset.canton.participant.pruning
 import cats.data.EitherT
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
+import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName, MetricsContext}
 import com.digitalasset.canton.BaseTest.*
@@ -114,6 +115,7 @@ class AcsCommitmentBenchmark
   implicit val ec: scala.concurrent.ExecutionContext = Threading.newExecutionContext(
     loggerFactory.threadName + "-env-ec",
     noTracingLogger,
+    new ExecutorServiceMetrics(NoOpMetricsFactory),
   )
 
   // these are the parameters that can be changed during a run to benchmark different scenarios.

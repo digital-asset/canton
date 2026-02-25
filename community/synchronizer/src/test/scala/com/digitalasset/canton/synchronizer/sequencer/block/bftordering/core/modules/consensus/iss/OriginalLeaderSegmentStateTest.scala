@@ -16,7 +16,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   Segment,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore.Block
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis.GenesisEpoch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
@@ -248,7 +247,7 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
 
       val orderedBlock = leaderSegmentState.assignToSlot(
         OrderingBlock.empty,
-        latestCompletedEpochLastCommits = GenesisEpoch.lastBlockCommits,
+        latestCompletedEpochLastCommits = Seq.empty,
       )
 
       orderedBlock.canonicalCommitSet shouldBe CanonicalCommitSet.empty
@@ -257,7 +256,7 @@ class OriginalLeaderSegmentStateTest extends AsyncWordSpec with BftSequencerBase
     "tell when this node is blocking progress" in {
       val membership = Membership.forTesting(myId, otherIds)
       val epoch = Epoch(
-        EpochInfo.mk(
+        EpochInfo.forTesting(
           number = EpochNumber.First,
           startBlockNumber = BlockNumber.First,
           length = 12,
@@ -365,7 +364,7 @@ object OriginalLeaderSegmentStateTest {
   private val currentMembership = Membership.forTesting(myId, otherIds)
   private val epoch =
     Epoch(
-      EpochInfo.mk(EpochNumber.First, startBlockNumber = BlockNumber.First, 7),
+      EpochInfo.forTesting(EpochNumber.First, startBlockNumber = BlockNumber.First, 7),
       currentMembership,
       previousMembership = currentMembership, // not relevant
     )

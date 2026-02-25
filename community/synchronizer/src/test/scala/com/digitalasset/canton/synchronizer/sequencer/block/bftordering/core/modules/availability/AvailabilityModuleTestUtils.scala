@@ -5,12 +5,10 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.crypto.{Fingerprint, Hash, Signature, SignatureFormat}
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.block.BlockFormat
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.AvailabilityModule.quorum
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.memory.GenericInMemoryAvailabilityStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.{
@@ -49,6 +47,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Availability.RemoteDissemination
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.LocalAvailability.ProposalCreated
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.dependencies.AvailabilityModuleDependencies
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
   BftSequencerBaseTest,
   failingCryptoProvider,
@@ -372,7 +371,7 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
           myId,
           otherNodes,
           nodesTopologyInfos = otherNodesCustomKeys.map { case (nodeId, keyId) =>
-            nodeId -> NodeTopologyInfo(TopologyActivationTime(CantonTimestamp.MinValue), Set(keyId))
+            nodeId -> NodeTopologyInfo(TestBootstrapTopologyActivationTime, Set(keyId))
           },
         )
       )

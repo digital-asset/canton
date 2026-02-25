@@ -348,7 +348,7 @@ class SendEventGenerator(
           )
       )
 
-    def validateRecipient(
+    def validateMember(
         member: Member,
         registeredMember: Option[RegisteredMember],
     ): Validated[Member, SequencerMemberId] = {
@@ -357,16 +357,24 @@ class SendEventGenerator(
     }
 
     def validateRecipients(
-        recipients: Set[Member]
-    ): FutureUnlessShutdown[Validated[NonEmpty[Seq[Member]], Set[SequencerMemberId]]] =
+        recipients: Set[MemberRecipientOrBroadcast]
+    ): FutureUnlessShutdown[Validated[NonEmpty[Seq[Member]], Set[SequencerMemberId]]] = {
+      val members = recipients.collect { case MemberRecipient(member) =>
+        member
+      }
+
+      val broadCastOpt =
+        Option.when(recipients.contains(AllMembersOfSynchronizer))(SequencerMemberId.Broadcast)
+
       for {
         // TODO(#12363) Support group addresses in the DB Sequencer
-        registeredMembers <- store.lookupMembers(recipients.toSeq)
-        validatedSeq = registeredMembers.map { case (member, registeredMember) =>
-          validateRecipient(member, registeredMember)
+        registeredMembers <- store.lookupMembers(members.toSeq)
+        validatedMembers = registeredMembers.map { case (member, registeredMember) =>
+          validateMember(member, registeredMember)
         }.toSeq
-        validated = validatedSeq.traverse(_.leftMap(NonEmpty(Seq, _)))
-      } yield validated.map(_.toSet)
+        validated = validatedMembers.traverse(_.leftMap(NonEmpty(Seq, _)))
+      } yield validated.map(_.toSet ++ broadCastOpt)
+    }
 
     def validateAndGenerateEvent(
         senderId: SequencerMemberId,
@@ -388,12 +396,11 @@ class SendEventGenerator(
         )
       }
 
-      def deliver(recipientIds: Set[SequencerMemberId]): StoreEvent[BytesPayload] = {
-        val finalRecipientIds = if (submission.batch.isBroadcast) {
+      def deliver(sequencerMemberIds: Set[SequencerMemberId]): StoreEvent[BytesPayload] = {
+        val finalRecipientIds: Set[SequencerMemberId] = if (submission.batch.isBroadcast) {
           Set(SequencerMemberId.Broadcast)
-        } else {
-          recipientIds
-        }
+        } else sequencerMemberIds
+
         val payload =
           BytesPayload(
             submissionOrOutcome.fold(
@@ -413,10 +420,11 @@ class SendEventGenerator(
         )
       }
 
-      val recipients = submissionOrOutcome.fold(
-        _.batch.allMembers,
-        _.deliverToMembers,
+      val recipients: Set[MemberRecipientOrBroadcast] = submissionOrOutcome.fold(
+        _.batch.allMembers.map(MemberRecipient.apply),
+        _.recipients,
       )
+
       for {
         validatedRecipients <- validateRecipients(recipients)
       } yield validatedRecipients.fold(unknownRecipientsDeliverError, deliver)

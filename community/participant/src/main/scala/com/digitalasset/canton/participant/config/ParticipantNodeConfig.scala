@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.config
 
 import cats.syntax.option.*
 import com.daml.jwt.JwtTimestampLeeway
+import com.daml.tls.TlsServerConfig
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.DeprecatedConfigUtils.DeprecatedFieldsFor
 import com.digitalasset.canton.config.RequireTypes.*

@@ -78,8 +78,9 @@ class FatContractInstanceSpec extends AnyFreeSpec with Matchers with TableDriven
       .build(
         templateId = Ref.Identifier.assertFromString("-dummyPkg-:NotTemplateModule:dummyName"),
         value = Value.ValueText("key1"),
-        packageName = node.packageName,
+        crypto.Hash.hashPrivateKey("dummy-key-hash"),
         maintainers = node.signatories,
+        packageName = node.packageName,
       )
       .toOption
 

@@ -139,6 +139,7 @@ class ThreadPoolIdlenessExecutorServiceTest
         new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue[Runnable]())
       new ThreadPoolIdlenessExecutorService(
         pool,
+        pool,
         throwable => logger.error(s"Error: $throwable"),
         loggerFactory.threadName + "-thread-pool-executor",
       )

@@ -80,6 +80,7 @@ import com.google.common.collect.{BiMap, HashBiMap}
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
+import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
@@ -174,6 +175,12 @@ private[sync] class SynchronizerConnectionsManager(
           alias.value,
           keepRetrying = true,
           connectSynchronizer = ConnectSynchronizer.Connect,
+          /*
+          After LSU, the likelihood of a failure of the first connection attempt is higher than
+          with normal connects. Sequencers might not be ready yet and/or be hammered with request.
+          Hence, we decrease the level from WARN to INFO.
+           */
+          logLevelFailureInitialAttempt = Level.INFO,
         )(alias.traceContext),
       disconnectSynchronizer = (alias: Traced[SynchronizerAlias]) =>
         disconnectSynchronizer(alias.value)(alias.traceContext),
@@ -488,6 +495,7 @@ private[sync] class SynchronizerConnectionsManager(
       synchronizerAlias: SynchronizerAlias,
       keepRetrying: Boolean,
       connectSynchronizer: ConnectSynchronizer,
+      logLevelFailureInitialAttempt: Level = Level.WARN,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Option[PhysicalSynchronizerId]] = {
@@ -512,11 +520,13 @@ private[sync] class SynchronizerConnectionsManager(
             )
             .isEmpty
         } else true
+
         attemptSynchronizerConnection(
           synchronizerAlias,
           keepRetrying = keepRetrying,
           initial = initial,
           connectSynchronizer = connectSynchronizer,
+          logLevelFailureInitialAttempt = logLevelFailureInitialAttempt,
         )
       }
   }
@@ -532,6 +542,7 @@ private[sync] class SynchronizerConnectionsManager(
       keepRetrying: Boolean,
       initial: Boolean,
       connectSynchronizer: ConnectSynchronizer,
+      logLevelFailureInitialAttempt: Level = Level.WARN,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Option[PhysicalSynchronizerId]] =
@@ -545,13 +556,14 @@ private[sync] class SynchronizerConnectionsManager(
         ).transform {
           case Left(SyncServiceError.SyncServiceFailedSynchronizerConnection(_, err))
               if keepRetrying && err.retryable.nonEmpty =>
-            if (initial)
-              logger.warn(s"Initial connection attempt to $synchronizerAlias failed with ${err.code
-                  .toMsg(err.cause, traceContext.traceId, limit = None)}. Will keep on trying.")
-            else
-              logger.info(
-                s"Initial connection attempt to $synchronizerAlias failed. Will keep on trying."
-              )
+            val level = if (initial) logLevelFailureInitialAttempt else Level.INFO
+
+            LoggerUtil.logAtLevel(
+              level,
+              s"Initial connection attempt to $synchronizerAlias failed with ${err.code
+                  .toMsg(err.cause, traceContext.traceId, limit = None)}. Will keep on trying.",
+            )
+
             scheduleReconnectAttempt(
               clock.now.plus(parameters.sequencerClient.startupConnectionRetryDelay.asJava),
               ConnectSynchronizer.Connect,

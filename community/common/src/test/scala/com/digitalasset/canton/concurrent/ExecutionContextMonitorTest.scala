@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.concurrent
 
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.logging.{LogEntry, SuppressingLogger}
@@ -25,7 +27,11 @@ class ExecutionContextMonitorTest extends AnyWordSpec with BaseTest {
       )
 
     val ecName = loggerFactory.threadName + "test-my-ec"
-    implicit val ec = Threading.newExecutionContext(ecName, noTracingLogger)
+    implicit val ec = Threading.newExecutionContext(
+      ecName,
+      noTracingLogger,
+      new ExecutorServiceMetrics(NoOpMetricsFactory),
+    )
     val monitor =
       new ExecutionContextMonitor(
         loggerFactory,

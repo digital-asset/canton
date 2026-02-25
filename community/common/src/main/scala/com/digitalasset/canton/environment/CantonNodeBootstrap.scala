@@ -9,10 +9,10 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
 import cats.syntax.traverse.*
-import com.daml.metrics.HealthMetrics
 import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
 import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
 import com.daml.metrics.api.MetricName
+import com.daml.metrics.{ExecutorServiceMetrics, HealthMetrics}
 import com.daml.nonempty.NonEmpty
 import com.daml.tracing.DefaultOpenTelemetry
 import com.digitalasset.canton.admin.health.v30.StatusServiceGrpc
@@ -197,6 +197,7 @@ final case class CantonNodeBootstrapCommonArguments[
     testingConfig: TestingConfigInternal,
     clock: Clock,
     metrics: M,
+    executorServiceMetrics: ExecutorServiceMetrics,
     storageFactory: StorageFactory,
     replicaManager: Option[ReplicaManager],
     futureSupervisor: FutureSupervisor,
@@ -255,6 +256,7 @@ abstract class CantonNodeBootstrapImpl[
 
   protected val cryptoConfig: CryptoConfig = config.crypto
   protected val tracerProvider: TracerProvider = arguments.tracerProvider
+  protected val executorServiceMetrics: ExecutorServiceMetrics = arguments.executorServiceMetrics
   protected implicit val tracer: Tracer = tracerProvider.tracer
   protected val initQueue: SimpleExecutionQueue = new SimpleExecutionQueue(
     s"init-queue-${arguments.name}",
@@ -490,6 +492,7 @@ abstract class CantonNodeBootstrapImpl[
             arguments.config.parameters.batching,
             bootstrapStageCallback.loggerFactory,
             tracerProvider,
+            executorServiceMetrics,
           )
           .map { crypto =>
             addCloseable(crypto)

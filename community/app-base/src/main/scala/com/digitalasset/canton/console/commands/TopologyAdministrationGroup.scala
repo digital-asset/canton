@@ -48,7 +48,7 @@ import com.digitalasset.canton.topology.admin.v30.{
   ExportTopologySnapshotV2Response,
   GenesisStateResponse,
   GenesisStateV2Response,
-  LogicalUpgradeStateResponse,
+  SequencerLsuStateResponse,
 }
 import com.digitalasset.canton.topology.store.{
   StoredTopologyTransaction,
@@ -786,16 +786,16 @@ class TopologyAdministrationGroup(
         |                 topology store must be set explicitly.
         """
     )
-    def logical_upgrade_state(
+    def sequencer_lsu_state(
         topologyStore: Option[TopologyStoreId.Synchronizer] = None,
         timeout: NonNegativeDuration = timeouts.unbounded,
     ): ByteString =
       consoleEnvironment.run {
-        val responseObserver = new ByteStringStreamObserver[LogicalUpgradeStateResponse](_.chunk)
+        val responseObserver = new ByteStringStreamObserver[SequencerLsuStateResponse](_.chunk)
 
         def call: ConsoleCommandResult[Context.CancellableContext] =
           adminCommand(
-            TopologyAdminCommands.Read.LogicalUpgradeState(topologyStore, responseObserver)
+            TopologyAdminCommands.Read.SequencerLsuState(topologyStore, responseObserver)
           )
 
         processResult(

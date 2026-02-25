@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton
 
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   ExecutionContextMonitor,
@@ -61,6 +63,7 @@ trait HasExecutorServiceGeneric extends NamedLogging {
       executionContextName,
       noTracingLogger,
       threads,
+      new ExecutorServiceMetrics(NoOpMetricsFactory),
       exitOnFatal = exitOnFatal,
     )
     val monitor =

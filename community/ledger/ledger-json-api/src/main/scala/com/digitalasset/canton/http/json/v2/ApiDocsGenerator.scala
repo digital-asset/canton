@@ -4,6 +4,7 @@
 package com.digitalasset.canton.http.json.v2
 
 import com.digitalasset.canton.http.json.JsHealthService
+import com.digitalasset.canton.http.json.v2.JsSchema.X_ONE_OF
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.apiserver.services.VersionFile
 import com.softwaremill.quicklens.*
@@ -148,10 +149,44 @@ class ApiDocsGenerator(override protected val loggerFactory: NamedLoggerFactory)
       component: openapi.Components,
       proto: ProtoInfo,
   ): openapi.Components = {
+    val schemasInOneOfWithExtension = findSchemasInOneOfWithExtension(component.schemas)
+
     val updatedSchemas: ListMap[String, SchemaLike] =
-      component.schemas.map(s => importSchemaLike(s, proto, findUniqueParent(s, component.schemas)))
-    component.copy(schemas = updatedSchemas)
+      component.schemas.map(s =>
+        importSchemaLike(
+          component = s,
+          proto = proto,
+          parentComponent = findUniqueParent(s, component.schemas),
+          schemasInOneOfWithExtension = schemasInOneOfWithExtension,
+        )
+      )
+
+    val schemasWithoutXOneOf: ListMap[String, SchemaLike] = updatedSchemas.map {
+      case (name, schema: Schema) => (name, removeXOneOfExtension(schema))
+      case other => other
+    }
+
+    component.copy(schemas = schemasWithoutXOneOf)
   }
+
+  private def findSchemasInOneOfWithExtension(schemas: ListMap[String, SchemaLike]): Set[String] =
+    schemas
+      .collect {
+        case (_, parent: Schema) if parent.oneOf.nonEmpty && parent.extensions.exists {
+              case (key, value) =>
+                key == X_ONE_OF && value.toString.contains("true")
+            } =>
+          parent.oneOf.flatMap {
+            case variantSchema: Schema =>
+              variantSchema.properties.values.collect {
+                case propSchema: Schema if propSchema.$ref.isDefined =>
+                  propSchema.$ref.fold("")(_.split("/").lastOption.getOrElse(""))
+              }
+            case _ => Nil
+          }
+      }
+      .flatten
+      .toSet
 
   private def findUniqueParent(
       component: (String, SchemaLike),
@@ -179,18 +214,27 @@ class ApiDocsGenerator(override protected val loggerFactory: NamedLoggerFactory)
       component: asyncapi.Components,
       proto: ProtoInfo,
   ): asyncapi.Components = {
+    val schemasInOneOfWithExtension = findSchemasInOneOfWithExtension(component.schemas)
+
     val updatedSchemas: ListMap[String, Schema] =
-      component.schemas.map(s => importSchema(s._1, s._2, proto))
-    component.copy(schemas = updatedSchemas)
+      component.schemas.map(s => importSchema(s._1, s._2, proto, None, schemasInOneOfWithExtension))
+
+    val schemasWithoutXOneOf: ListMap[String, Schema] = updatedSchemas.map { case (name, schema) =>
+      (name, removeXOneOfExtension(schema))
+    }
+
+    component.copy(schemas = schemasWithoutXOneOf)
   }
 
   private def importSchemaLike(
       component: (String, SchemaLike),
       proto: ProtoInfo,
       parentComponent: Option[String],
+      schemasInOneOfWithExtension: Set[String],
   ): (String, SchemaLike) =
     component._2 match {
-      case schema: Schema => importSchema(component._1, schema, proto, parentComponent)
+      case schema: Schema =>
+        importSchema(component._1, schema, proto, parentComponent, schemasInOneOfWithExtension)
       case _ => component
     }
 
@@ -198,7 +242,8 @@ class ApiDocsGenerator(override protected val loggerFactory: NamedLoggerFactory)
       componentName: String,
       componentSchema: Schema,
       proto: ProtoInfo,
-      parentComponent: Option[String] = None,
+      parentComponent: Option[String],
+      schemasInOneOfWithExtension: Set[String],
   ): (String, Schema) =
     proto
       .findMessageInfo(componentName, parentComponent)
@@ -221,26 +266,76 @@ class ApiDocsGenerator(override protected val loggerFactory: NamedLoggerFactory)
               (
                 propertyName,
                 propertySchema match {
-                  case pSchema: Schema =>
-                    pSchema.copy(description = Some(comments))
+                  case pSchema: Schema => pSchema.copy(description = Some(comments))
                   case _ => propertySchema
                 },
               )
             }
-            .getOrElse(
-              (propertyName, propertySchema)
-            )
+            .getOrElse((propertyName, propertySchema))
         }
+
+        val finalRequired =
+          if (
+            shouldMakeValueRequired(
+              componentSchema,
+              message,
+              allRequired,
+              componentName,
+              schemasInOneOfWithExtension,
+            )
+          ) {
+            (allRequired :+ "value").distinct
+          } else {
+            allRequired
+          }
+
         (
           componentName,
           componentSchema.copy(
             description = message.getComments(),
             properties = properties,
-            required = allRequired,
+            required = finalRequired,
           ),
         )
       }
       .getOrElse((componentName, componentSchema))
+
+  private def shouldMakeValueRequired(
+      schema: Schema,
+      message: MessageInfo,
+      currentRequired: List[String],
+      componentName: String,
+      schemasInOneOfWithExtension: Set[String],
+  ): Boolean = {
+    val isInOneOfWithExtension = schemasInOneOfWithExtension.contains(componentName)
+    val hasSingleValueProperty =
+      schema.properties.sizeIs == 1 && schema.properties.contains("value")
+    val valueNotAlreadyRequired = !currentRequired.contains("value")
+    val protoDoesntSpecifyValue =
+      !message.isFieldRequired("value") && !message.isFieldOptional("value")
+
+    isInOneOfWithExtension && hasSingleValueProperty && valueNotAlreadyRequired && protoDoesntSpecifyValue
+  }
+
+  private def removeXOneOfExtension(schema: Schema): Schema = {
+    val cleanedExtensions = schema.extensions.filterNot { case (key, _) => key == X_ONE_OF }
+
+    val cleanedProperties = schema.properties.map {
+      case (propName, propSchema: Schema) => (propName, removeXOneOfExtension(propSchema))
+      case other => other
+    }
+
+    val cleanedOneOf = schema.oneOf.map {
+      case variantSchema: Schema => removeXOneOfExtension(variantSchema)
+      case other => other
+    }
+
+    schema.copy(
+      extensions = cleanedExtensions,
+      properties = cleanedProperties,
+      oneOf = cleanedOneOf,
+    )
+  }
 
   def loadProtoData(): ProtoInfo =
     ProtoInfo

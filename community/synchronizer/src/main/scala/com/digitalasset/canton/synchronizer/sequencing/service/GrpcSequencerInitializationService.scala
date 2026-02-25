@@ -25,12 +25,12 @@ import com.digitalasset.canton.sequencer.admin.v30.{
   InitializeSequencerFromGenesisStateResponse,
   InitializeSequencerFromGenesisStateV2Request,
   InitializeSequencerFromGenesisStateV2Response,
+  InitializeSequencerFromLsuPredecessorRequest,
+  InitializeSequencerFromLsuPredecessorResponse,
   InitializeSequencerFromOnboardingStateRequest,
   InitializeSequencerFromOnboardingStateResponse,
   InitializeSequencerFromOnboardingStateV2Request,
   InitializeSequencerFromOnboardingStateV2Response,
-  InitializeSequencerFromPredecessorRequest,
-  InitializeSequencerFromPredecessorResponse,
 }
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.synchronizer.Synchronizer.FailedToInitialiseSynchronizerNode
@@ -94,9 +94,9 @@ class GrpcSequencerInitializationService(
     )
   }
 
-  override def initializeSequencerFromPredecessor(
-      responseObserver: StreamObserver[InitializeSequencerFromPredecessorResponse]
-  ): StreamObserver[InitializeSequencerFromPredecessorRequest] = {
+  override def initializeSequencerFromLsuPredecessor(
+      responseObserver: StreamObserver[InitializeSequencerFromLsuPredecessorResponse]
+  ): StreamObserver[InitializeSequencerFromLsuPredecessorRequest] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     GrpcStreamingUtils.streamFromClient(
       _.topologySnapshot,
@@ -109,7 +109,7 @@ class GrpcSequencerInitializationService(
           topologySnapshot,
           synchronizerParams,
           doResetTimes = false,
-        ).map(_ => InitializeSequencerFromPredecessorResponse()),
+        ).map(_ => InitializeSequencerFromLsuPredecessorResponse()),
       responseObserver,
     )
   }

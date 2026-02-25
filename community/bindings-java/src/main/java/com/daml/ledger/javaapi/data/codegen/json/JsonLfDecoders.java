@@ -28,6 +28,7 @@ public class JsonLfDecoders {
       JsonLfDecoder.create(
           (r, policy) -> {
             r.readStartObject();
+            r.readEndObject();
             return Unit.getInstance();
           });
 

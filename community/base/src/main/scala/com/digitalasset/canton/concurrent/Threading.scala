@@ -4,6 +4,7 @@
 package com.digitalasset.canton.concurrent
 
 import cats.syntax.either.*
+import com.daml.metrics.ExecutorServiceMetrics
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.lifecycle.ClosingException
@@ -45,10 +46,13 @@ object Threading {
     *   used for created threads. Prefer dash separated names.
     * @param logger
     *   where uncaught exceptions are logged
+    * @param executorServiceMetrics
+    *   ExecutorServiceMetrics to monitor the executor service
     */
   def singleThreadedExecutor(
       name: String,
       logger: Logger,
+      executorServiceMetrics: ExecutorServiceMetrics,
   ): ExecutionContextIdlenessExecutorService = {
     val executor = new ThreadPoolExecutor(
       1,
@@ -58,8 +62,12 @@ object Threading {
       new LinkedBlockingQueue[Runnable](),
       threadFactory(name, logger, exitOnFatal = true),
     )
+
+    val monitoredExecutor = executorServiceMetrics.monitorExecutorService(name, executor)
+
     new ThreadPoolIdlenessExecutorService(
       executor,
+      monitoredExecutor,
       createReporter(name, logger, exitOnFatal = true)(_),
       name,
     )
@@ -126,16 +134,20 @@ object Threading {
   def newExecutionContext(
       name: String,
       logger: Logger,
+      executorServiceMetrics: ExecutorServiceMetrics,
   ): ExecutionContextIdlenessExecutorService =
     newExecutionContext(
       name,
       logger,
       detectNumberOfThreads(logger),
+      executorServiceMetrics,
     )
 
   /** Yields an `ExecutionContext` like `scala.concurrent.ExecutionContext.global`, except that it
     * has its own thread pool.
     *
+    * @param executorServiceMetrics
+    *   ExecutorServiceMetrics to monitor the executor service
     * @param exitOnFatal
     *   terminate the JVM on fatal errors. Enable this in production to prevent data corruption by
     *   termination of specific threads.
@@ -145,6 +157,7 @@ object Threading {
       name: String,
       logger: Logger,
       parallelism: PositiveInt,
+      executorServiceMetrics: ExecutorServiceMetrics,
       maxExtraThreads: PositiveInt = PositiveInt.tryCreate(256),
       keepAliveMillis: PositiveInt = PositiveInt.tryCreate(60000),
       corePoolSize: Option[PositiveInt] = None,
@@ -180,7 +193,9 @@ object Threading {
         minRunnable,
       )
 
-    new ForkJoinIdlenessExecutorService(forkJoinPool, forkJoinPool, reporter, name)
+    val monitoredPool = executorServiceMetrics.monitorExecutorService(name, forkJoinPool)
+
+    new ForkJoinIdlenessExecutorService(forkJoinPool, monitoredPool, reporter, name)
   }
 
   /** Minimum parallelism of ForkJoinPool. Currently greater than one to work around a bug that

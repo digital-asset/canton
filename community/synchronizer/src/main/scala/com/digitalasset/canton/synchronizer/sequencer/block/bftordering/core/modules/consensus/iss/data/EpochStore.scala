@@ -50,7 +50,7 @@ trait EpochStore[E <: Env[E]] extends AutoCloseable {
 
   def latestEpoch(includeInProgress: Boolean)(implicit
       traceContext: TraceContext
-  ): E#FutureUnlessShutdownT[Epoch]
+  ): E#FutureUnlessShutdownT[Option[Epoch]]
   protected def latestEpochActionName: String = "fetch latest epoch"
 
   def addPrePrepare(prePrepare: SignedMessage[PrePrepare])(implicit
@@ -136,6 +136,7 @@ trait EpochStore[E <: Env[E]] extends AutoCloseable {
 }
 
 object EpochStore {
+
   // Can we remove these classes and merge with Epoch/Blocks from Data?
   final case class Epoch(
       info: EpochInfo,

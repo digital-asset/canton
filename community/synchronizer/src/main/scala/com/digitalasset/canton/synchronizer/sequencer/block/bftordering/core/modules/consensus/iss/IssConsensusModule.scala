@@ -19,11 +19,8 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   emitConsensusLatencyStats,
   emitNonCompliance,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Bootstrap.BootstrapEpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis.{
-  GenesisEpoch,
-  GenesisEpochInfo,
-}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.retransmissions.RetransmissionsManager
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.statetransfer.StateTransferBehavior.StateTransferType
@@ -596,7 +593,7 @@ final class IssConsensusModule[E <: Env[E]](
       traceContext: TraceContext,
   ): Unit = {
     val epochInfo = epochState.epoch.info
-    if (epochInfo == GenesisEpoch.info) {
+    if (epochInfo.number == BootstrapEpochNumber) {
       logger.debug("Started at genesis, self-sending its topology to start epoch 0")
       context.self.asyncSend(
         NewEpochTopology(
@@ -669,7 +666,7 @@ final class IssConsensusModule[E <: Env[E]](
       // It can happen after storing the first epoch after state transfer.
       logger.debug(s"New epoch state for epoch ${newEpochInfo.number} already set")
     } else if (
-      newEpochInfo.number == currentEpochInfo.number + 1 || currentEpochInfo == GenesisEpochInfo
+      newEpochInfo.number == currentEpochInfo.number + 1 || currentEpochInfo.number == BootstrapEpochNumber
     ) {
       maybeNewMembershipAndCryptoProvider.foreach { case (newMembership, newCryptoProvider) =>
         activeTopologyInfo = activeTopologyInfo.updateMembership(newMembership, newCryptoProvider)

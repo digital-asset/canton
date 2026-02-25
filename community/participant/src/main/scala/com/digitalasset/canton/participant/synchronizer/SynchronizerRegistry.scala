@@ -95,6 +95,26 @@ object SynchronizerRegistryError extends SynchronizerRegistryErrorGroup {
     }
 
     @Explanation(
+      """This error indicates that the participant failed to connect to the sequencers.
+        |The error is transient, so the participant will retry to connect to the sequencers after this error."""
+    )
+    @Resolution(
+      "Inspect the provided reason. Usually this error resolves itself."
+    )
+    object FailedToConnectToSequencersTransient
+        extends ErrorCode(
+          id = "FAILED_TO_CONNECT_TO_SEQUENCERS_TRANSIENT",
+          ErrorCategory.TransientServerFailure,
+        ) {
+      final case class Error(reason: String)(implicit
+          val loggingContext: ErrorLoggingContext
+      ) extends CantonError.Impl(
+            cause = s"The participant temporarily failed to connect to the sequencers: $reason"
+          )
+          with SynchronizerRegistryError
+    }
+
+    @Explanation(
       "This error results if the GRPC connection to the synchronizer service fails with GRPC status UNAVAILABLE."
     )
     @Resolution(

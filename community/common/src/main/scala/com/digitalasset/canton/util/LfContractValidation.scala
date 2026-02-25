@@ -63,7 +63,8 @@ object LfContractValidation {
           contractIdSubstitution,
           hashingMethod,
           idValidator = idValidator,
-        )
+        ),
+        PackageResolver.ignoreMissingPackage,
       ).subflatMap(e => e.left.map(_.toString))
 
   }

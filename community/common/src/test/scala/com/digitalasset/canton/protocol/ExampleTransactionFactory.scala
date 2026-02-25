@@ -180,7 +180,12 @@ object ExampleTransactionFactory {
   ): Versioned[LfGlobalKey] =
     LfVersioned(
       serializationVersion,
-      LfGlobalKey.assertBuild(templateId, value, packageName),
+      LfGlobalKey.assertBuild(
+        templateId,
+        packageName,
+        value,
+        com.digitalasset.daml.lf.crypto.Hash.hashPrivateKey(value.toString),
+      ),
     )
 
   def globalKeyWithMaintainers(

@@ -4,6 +4,8 @@
 package com.digitalasset.canton.store
 
 import cats.instances.future.catsStdInstancesForFuture
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.concurrent.{ExecutorServiceExtensions, Threading}
 import com.digitalasset.canton.config.DefaultProcessingTimeouts
 import com.digitalasset.canton.data.CantonTimestamp
@@ -66,6 +68,7 @@ trait PrunableByTimeTest {
       val parallelEc = Threading.newExecutionContext(
         "pruning-parallel-ec",
         noTracingLogger,
+        new ExecutorServiceMetrics(NoOpMetricsFactory),
       )
       val prunable = mkPrunable(parallelEc)
       val iterations = 100

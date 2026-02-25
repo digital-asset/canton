@@ -3,15 +3,10 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi
 
+import com.daml.tls.{TlsClientCertificate, TlsClientConfig, TlsServerConfig}
 import com.digitalasset.canton.config.AuthServiceConfig.Wildcard
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, Port}
-import com.digitalasset.canton.config.{
-  CantonConfig,
-  PemFile,
-  TlsClientCertificate,
-  TlsClientConfig,
-  TlsServerConfig,
-}
+import com.digitalasset.canton.config.{CantonConfig, PemFile}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixture
 import com.digitalasset.canton.integration.{

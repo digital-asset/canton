@@ -6,6 +6,7 @@ package com.digitalasset.canton.protocol
 import com.digitalasset.canton.protocol.ExampleTransactionFactory.*
 import com.digitalasset.canton.protocol.WellFormedTransaction.{Stage, WithSuffixes, WithoutSuffixes}
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, LfPackageName, LfPartyId}
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.{NodeId, SerializationVersion}
 import com.digitalasset.daml.lf.value.Value
@@ -219,6 +220,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
                 .assertBuild(
                   templateId,
                   contractInst.unversioned.arg,
+                  crypto.Hash.hashPrivateKey(contractInst.unversioned.arg.toString),
                   Set.empty,
                   LfPackageName.assertFromString("package-name"),
                 )
@@ -232,6 +234,7 @@ class WellFormedTransactionTest extends AnyWordSpec with BaseTest with HasExecut
               LfGlobalKeyWithMaintainers.assertBuild(
                 templateId,
                 contractInst.unversioned.arg,
+                crypto.Hash.hashPrivateKey(contractInst.unversioned.arg.toString),
                 Set.empty,
                 packageName,
               )

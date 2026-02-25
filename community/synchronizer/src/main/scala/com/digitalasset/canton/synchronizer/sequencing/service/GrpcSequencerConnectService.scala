@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 import com.digitalasset.canton.ProtoDeserializationError.ProtoDeserializationFailure
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -34,7 +35,12 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransaction.GenericSignedTopologyTransaction
-import com.digitalasset.canton.topology.transaction.{SignedTopologyTransaction, TopologyMapping}
+import com.digitalasset.canton.topology.transaction.TopologyChangeOp.Remove
+import com.digitalasset.canton.topology.transaction.{
+  OwnerToKeyMapping,
+  SignedTopologyTransaction,
+  TopologyMapping,
+}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.EitherTUtil
 import com.digitalasset.canton.version.{ProtocolVersion, ProtocolVersionValidation}
@@ -90,6 +96,7 @@ class GrpcSequencerConnectService(
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
     val resultF = for {
       participant <- EitherT.fromEither[FutureUnlessShutdown](getParticipantFromGrpcContext())
+      // for status reads use the currentSnapshotApproximation
       topologySnapshot <- EitherT.liftF(
         cryptoApi.ips.currentSnapshotApproximation
       )
@@ -133,16 +140,28 @@ class GrpcSequencerConnectService(
       request: SequencerConnect.RegisterOnboardingTopologyTransactionsRequest
   ): Future[SequencerConnect.RegisterOnboardingTopologyTransactionsResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+
     val resultET = for {
 
+      // check that the header has a member ID
       member <- EitherT.fromEither[Future](
         IdentityContextHelper.getCurrentStoredMember.toRight(
           invalidRequest("Unable to find member id in gRPC context")
         )
       )
 
+      // refuse requests from non-participants
+      participantId <- member match {
+        case p: ParticipantId => EitherT.rightT[Future, StatusRuntimeException](p)
+        case other =>
+          EitherT.leftT[Future, ParticipantId](
+            failedPrecondition(s"This endpoint is only for participants. Refused: ${other.code}")
+          )
+      }
+
       now = clock.now
 
+      // Time check
       /*
       This checks allows for a better UX. Without it, the sequencer will fail to dispatch the onboarding
       topology transactions, which causes
@@ -160,26 +179,21 @@ class GrpcSequencerConnectService(
         case _ => EitherTUtil.unit[StatusRuntimeException]
       }
 
-      isKnown <- CantonGrpcUtil.mapErrNewETUS(
-        EitherT.right(
-          cryptoApi.ips.headSnapshot.isMemberKnown(member)
-        )
-      )
+      // grab the head snapshot to use in all subsequent checks
+      // use head snapshot here to make sure we see the results of all sequenced transactions
+      topologySnapshot = cryptoApi.ips.headSnapshot
+
+      // get the synchronizer parameters from the snapshot
+      params <- EitherT(
+        topologySnapshot.findDynamicSynchronizerParameters().asGrpcFuture
+      ).leftMap(err => failedPrecondition(s"Could not fetch synchronizer parameters: $err"))
+
+      // Reject request if the synchronizer is locked
       _ <- EitherTUtil.condUnitET[Future](
-        !isKnown,
-        failedPrecondition(s"Member $member is already known on the synchronizer"),
+        !params.parameters.onboardingRestriction.isLocked,
+        failedPrecondition("Synchronizer is locked for onboarding."),
       )
-      // check that the onboarding member is not attempting to re-onboard
-      // TODO(#14045) Topology Pruning: Make sure that we retain evidence that a member was offboarded
-      firstKnownAtO <- CantonGrpcUtil.mapErrNewETUS(
-        EitherT.right(cryptoApi.ips.headSnapshot.memberFirstKnownAt(member))
-      )
-      _ <- EitherTUtil.condUnitET[Future](
-        firstKnownAtO.isEmpty,
-        failedPrecondition(
-          s"Member $member has previously been off-boarded and cannot onboard again."
-        ),
-      )
+
       transactions <- CantonGrpcUtil.mapErrNew(
         request.topologyTransactions
           .traverse(
@@ -187,12 +201,35 @@ class GrpcSequencerConnectService(
               .fromProtoV30(ProtocolVersionValidation(serverProtocolVersion), _)
           )
           .leftMap(ProtoDeserializationFailure.Wrap(_))
+          .map(_.distinctBy(_.mapping.uniqueKey))
       )
 
-      _ <- checkForOnlyOnboardingTransactions(member, transactions)
+      // Perform validations on the transactions
+      // Pass a limit of 7 for total number of transactions
+      // We enforce exactly 1 OTK and STC. An allowance of 5 NSDs
+      // should more than suffice during onboarding. Assuming even one NSD for each of
+      // the other mappings (STC, OTK), one to manage them, plus one root mapping
+      // requires 4 NSDs in total. More mappings can be added after onboarding
+      _ <- validateOnboardingTransactions(participantId, transactions, PositiveInt.tryCreate(7))
+
+      // query whether the participant has ever onboarded before (regardless of whether it is presently active)
+      wasEverOnboarded <- EitherT.liftF(
+        topologySnapshot.wasEverOnboarded(participantId).asGrpcFuture
+      )
+
+      _ <- EitherTUtil.condUnitET[Future](
+        !wasEverOnboarded,
+        failedPrecondition(
+          s"Participant $participantId is either active on the synchronizer or has previously been offboarded."
+        ),
+      )
+
       _ <- CantonGrpcUtil.mapErrNewETUS(
         synchronizerTopologyManager
-          .add(transactions, ForceFlags.all, expectFullAuthorization = false)
+          // TopologyStateProcessor.validateAndApply sets expectFullAuthorization = expectFullAuthorization || !tx.isProposal,
+          // so in the usual case (isProposal=false, also checked above that this holds), the authorization checks are active
+          // even with expectFullAuthorization = false. But to be safe, set it to be true.
+          .add(transactions, ForceFlags.all, expectFullAuthorization = true)
       )
     } yield RegisterOnboardingTopologyTransactionsResponse.defaultInstance
 
@@ -200,46 +237,108 @@ class GrpcSequencerConnectService(
       .toFuture(resultET)
   }
 
-  private def checkForOnlyOnboardingTransactions(
-      member: Member,
+  private[service] def validateOnboardingTransactions(
+      participantId: ParticipantId,
       transactions: Seq[GenericSignedTopologyTransaction],
+      maxMappings: PositiveInt,
   ): EitherT[Future, StatusRuntimeException, Unit] = {
-    val unexpectedUids = transactions.filter(_.mapping.maybeUid.exists(_ != member.uid))
-    val unexpectedNamespaces = transactions.filter(_.mapping.namespace != member.namespace)
 
-    val expectedMappings =
-      if (member.code == ParticipantId.Code) TopologyStore.initialParticipantDispatchingSet.forgetNE
-      else Set(TopologyMapping.Code.NamespaceDelegation, TopologyMapping.Code.OwnerToKeyMapping)
-    val submittedMappings = transactions.map(_.mapping.code).toSet
-    val unexpectedMappings = submittedMappings -- expectedMappings
-    val missingMappings = expectedMappings -- submittedMappings
-
-    val unexpectedProposals = transactions.filter(_.isProposal)
+    val expectedMappings = TopologyStore.initialParticipantDispatchingSet.forgetNE
 
     val resultET = for {
-      _ <- EitherTUtil.condUnitET[Future](
-        unexpectedMappings.isEmpty,
-        s"Unexpected topology mappings for onboarding $member: $unexpectedMappings",
-      )
-      _ <- EitherTUtil.condUnitET[Future](
-        unexpectedUids.isEmpty,
-        s"Mappings for unexpected UIDs for onboarding $member: $unexpectedUids",
-      )
-      _ <- EitherTUtil.condUnitET[Future](
-        unexpectedNamespaces.isEmpty,
-        s"Mappings for unexpected namespaces for onboarding $member: $unexpectedNamespaces",
-      )
-      _ <- EitherTUtil.condUnitET[Future](
-        missingMappings.isEmpty,
-        s"Missing mappings for onboarding $member: $missingMappings",
-      )
-      _ <- EitherTUtil.condUnitET[Future](
-        unexpectedProposals.isEmpty,
-        s"Unexpected proposals for onboarding $member: $unexpectedMappings",
-      )
-    } yield ()
+      _ <- {
+        // 0. Reject the transactions if the number exceeds the limit
+        val totalCount = transactions.size
+        EitherTUtil.condUnitET[Future](
+          totalCount <= maxMappings.value,
+          s"Too many topology transactions. Limit: ${maxMappings.value}, Found: $totalCount",
+        )
+      }
 
-    resultET.leftMap(invalidRequest)
+      stcCount = transactions.count(
+        _.mapping.code == TopologyMapping.Code.SynchronizerTrustCertificate
+      )
+      otks = transactions.flatMap(_.mapping.select[OwnerToKeyMapping])
+
+      // 1. Participants must have exactly 1 STC
+      _ <- EitherTUtil.condUnitET[Future](
+        stcCount == 1,
+        s"Exactly one SynchronizerTrustCertificate is required for Participants. Found: $stcCount",
+      )
+
+      // 2. All members must send exactly 1 OTK at a time
+      singleOtk <- otks.toList match {
+        case single :: Nil => EitherT.rightT[Future, String](single)
+        case Nil =>
+          EitherT.leftT[Future, OwnerToKeyMapping](
+            "Exactly one OwnerToKeyMapping is required. Found: 0"
+          )
+        case more =>
+          EitherT.leftT[Future, OwnerToKeyMapping](
+            s"Exactly one OwnerToKeyMapping is required. Found: ${more.size}"
+          )
+      }
+
+      // 3. check for unexpected mappings
+      _ <- {
+        val firstUnexpectedMapping =
+          transactions.find(t => !expectedMappings.contains(t.mapping.code))
+        EitherTUtil.condUnitET[Future](
+          firstUnexpectedMapping.isEmpty,
+          s"Unexpected topology mapping found. Allowed: $expectedMappings. Found: ${firstUnexpectedMapping.map(_.mapping.code).toString}",
+        )
+      }
+
+      // 4. check for missing mappings
+      // at present this is just a check that there is at least one Namespace delegation
+      // But we use this slightly complexer check for future robustness in case expectedMappings is extended
+      _ <- {
+        val submittedMappings = transactions.map(_.mapping.code).toSet
+        val missingMappings = expectedMappings -- submittedMappings
+        EitherTUtil.condUnitET[Future](
+          missingMappings.isEmpty,
+          s"Missing mappings for onboarding $participantId. Missing: $missingMappings",
+        )
+      }
+
+      // 5. check for proposals. if any is found, reject the request
+      _ <- {
+        val firstProposal = transactions.find(_.isProposal)
+        EitherTUtil.condUnitET[Future](
+          firstProposal.isEmpty,
+          s"Unexpected proposals for onboarding $participantId. Found: ${firstProposal.toString}",
+        )
+      }
+
+      // 6. check for removals. if any is found, reject the request
+      _ <- {
+        val firstRemoval = transactions.find(_.operation.equals(Remove))
+        EitherTUtil.condUnitET[Future](
+          firstRemoval.isEmpty,
+          s"Unexpected removals for onboarding $participantId. Found: ${firstRemoval.toString}",
+        )
+      }
+
+      // 7. check for unexpected UIDs
+      _ <- {
+        val firstBadUidTx = transactions.find(_.mapping.maybeUid.exists(_ != participantId.uid))
+        EitherTUtil.condUnitET[Future](
+          firstBadUidTx.isEmpty,
+          s"Mappings for unexpected UIDs for onboarding $participantId: ${firstBadUidTx.toString}",
+        )
+      }
+
+      // 8. check for unexpected namespaces
+      _ <- {
+        val firstUnexpectedNamespace =
+          transactions.find(_.mapping.namespace != participantId.namespace)
+        EitherTUtil.condUnitET[Future](
+          firstUnexpectedNamespace.isEmpty,
+          s"Mappings for unexpected namespaces for onboarding $participantId: ${firstUnexpectedNamespace.toString}",
+        )
+      }
+    } yield ()
+    resultET.leftMap(msg => invalidRequest(msg))
   }
 
   private def invalidRequest(message: String): StatusRuntimeException =

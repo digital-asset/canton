@@ -13,6 +13,7 @@ import com.digitalasset.canton.{
   LfValue,
   LfVersioned,
 }
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
 import com.digitalasset.daml.lf.transaction.{CreationTime, FatContractInstance, Node}
 import com.digitalasset.daml.lf.value.Value
@@ -45,8 +46,9 @@ class SerializableContractTest extends AnyWordSpec with BaseTest {
               LfGlobalKey
                 .build(
                   templateId,
-                  Value.ValueUnit,
                   LfPackageName.assertFromString("package-name"),
+                  Value.ValueUnit,
+                  crypto.Hash.hashPrivateKey("dummy-key-hash"),
                 )
                 .value,
               Set(alice),

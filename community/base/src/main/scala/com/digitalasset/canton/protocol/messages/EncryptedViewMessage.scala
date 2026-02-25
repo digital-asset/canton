@@ -18,7 +18,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessageError.SyncCryptoDecryptError
 import com.digitalasset.canton.protocol.messages.ProtocolMessage.ProtocolMessageContentCast
-import com.digitalasset.canton.protocol.{v30, *}
+import com.digitalasset.canton.protocol.{v30, v31, *}
 import com.digitalasset.canton.serialization.DeserializationError
 import com.digitalasset.canton.serialization.ProtoConverter.{ParsingResult, parseRequiredNonEmpty}
 import com.digitalasset.canton.store.ConfirmationRequestSessionKeyStore
@@ -222,6 +222,9 @@ final case class EncryptedViewMessage[+VT <: ViewType](
 
   override def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent =
     v30.EnvelopeContent.SomeEnvelopeContent.EncryptedViewMessage(toProtoV30)
+
+  override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
+    v31.EnvelopeContent.SomeEnvelopeContent.EncryptedViewMessage(toProtoV30)
 
   protected def updateView[VT2 <: ViewType](
       newView: EncryptedView[VT2]

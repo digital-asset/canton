@@ -61,15 +61,20 @@ class TransactionNodeStatisticsSpec
   "TransactionNodeStatistics" should {
 
     def create(b: TxBuilder, withKey: Boolean = false) = {
-      val parties = Set(b.newParty)
       b.create(
         id = b.newCid,
         packageName = b.newPackageName,
         templateId = b.newIdentifier,
         argument = Value.ValueUnit,
-        signatories = parties,
+        signatories = Set(b.newParty),
         observers = Set.empty,
-        key = if (withKey) CreateKey.SignatoryMaintainerKey(Value.ValueUnit) else NoKey,
+        key =
+          if (withKey)
+            CreateKey.SignatoryMaintainerKey(
+              Value.ValueUnit,
+              crypto.Hash.hashPrivateKey("dummy-key-hash"),
+            )
+          else NoKey,
       )
     }
 

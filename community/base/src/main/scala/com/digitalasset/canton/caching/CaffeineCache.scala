@@ -7,6 +7,7 @@ import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.metrics.CacheMetrics
 import com.github.benmanes.caffeine.cache as caffeine
 
+import scala.collection.concurrent
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.{RichOptional, RichOptionalLong}
 
@@ -37,8 +38,13 @@ object CaffeineCache {
     override def getOrAcquire(key: Key, acquire: Key => Value): Value =
       cache.get(key, key => acquire(key))
 
+    override def invalidateAll(items: Iterable[Key]): Unit = cache.invalidateAll(items.asJava)
+
     override def invalidateAll(): Unit = cache.invalidateAll()
 
+    override def updateViaMap(updater: concurrent.Map[Key, Value] => Unit): Unit = updater(
+      cache.asMap().asScala
+    )
   }
 
   private final class InstrumentedCaffeineCache[Key <: AnyRef, Value <: AnyRef](
@@ -62,7 +68,12 @@ object CaffeineCache {
     override def getOrAcquire(key: Key, acquire: Key => Value): Value =
       delegate.getOrAcquire(key, acquire)
 
+    override def invalidateAll(items: Iterable[Key]): Unit = delegate.invalidateAll(items)
+
     override def invalidateAll(): Unit = delegate.invalidateAll()
+
+    override def updateViaMap(updater: concurrent.Map[Key, Value] => Unit): Unit =
+      delegate.updateViaMap(updater)
   }
 
   private[caching] def installMetrics(

@@ -288,12 +288,12 @@ object SequencerAdminCommands {
     override def timeoutType: TimeoutType = DefaultUnboundedTimeout
   }
 
-  final case class InitializeFromSynchronizerPredecessor(
+  final case class InitializeFromLsuPredecessor(
       topologySnapshot: ByteString,
       synchronizerParameters: com.digitalasset.canton.protocol.StaticSynchronizerParameters,
   ) extends GrpcAdminCommand[
-        proto.InitializeSequencerFromPredecessorRequest,
-        proto.InitializeSequencerFromPredecessorResponse,
+        proto.InitializeSequencerFromLsuPredecessorRequest,
+        proto.InitializeSequencerFromLsuPredecessorResponse,
         Unit,
       ] {
     override type Svc =
@@ -306,12 +306,12 @@ object SequencerAdminCommands {
 
     override protected def submitRequest(
         service: proto.SequencerInitializationServiceGrpc.SequencerInitializationServiceStub,
-        request: proto.InitializeSequencerFromPredecessorRequest,
-    ): Future[proto.InitializeSequencerFromPredecessorResponse] =
+        request: proto.InitializeSequencerFromLsuPredecessorRequest,
+    ): Future[proto.InitializeSequencerFromLsuPredecessorResponse] =
       GrpcStreamingUtils.streamToServer(
-        service.initializeSequencerFromPredecessor,
+        service.initializeSequencerFromLsuPredecessor,
         (topologySnapshot: Array[Byte]) =>
-          proto.InitializeSequencerFromPredecessorRequest(
+          proto.InitializeSequencerFromLsuPredecessorRequest(
             topologySnapshot = ByteString.copyFrom(topologySnapshot),
             synchronizerParameters = Some(synchronizerParameters.toProtoV30),
           ),
@@ -319,16 +319,16 @@ object SequencerAdminCommands {
       )
 
     override protected def createRequest()
-        : Either[String, proto.InitializeSequencerFromPredecessorRequest] =
+        : Either[String, proto.InitializeSequencerFromLsuPredecessorRequest] =
       Right(
-        proto.InitializeSequencerFromPredecessorRequest(
+        proto.InitializeSequencerFromLsuPredecessorRequest(
           topologySnapshot = topologySnapshot,
           synchronizerParameters = Some(synchronizerParameters.toProtoV30),
         )
       )
 
     override protected def handleResponse(
-        response: proto.InitializeSequencerFromPredecessorResponse
+        response: proto.InitializeSequencerFromLsuPredecessorResponse
     ): Either[String, Unit] =
       Right(())
 

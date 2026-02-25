@@ -32,11 +32,11 @@ import com.digitalasset.canton.platform.{
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{FullIdentifier, Identifier}
-import com.digitalasset.daml.lf.engine as LfEngine
 import com.digitalasset.daml.lf.engine.Engine
 import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.VersionedValue
+import com.digitalasset.daml.lf.{crypto, engine as LfEngine}
 import com.google.protobuf.ByteString
 import com.google.rpc.Status
 import com.google.rpc.status.Status as ProtoStatus
@@ -300,7 +300,7 @@ final class LfValueTranslation(
       loggingContext: LoggingContextWithTrace,
   ): Future[CreatedEvent] = {
     val createArgument = fatContractInstance.createArg
-    val createKey = fatContractInstance.contractKeyWithMaintainers.map(_.globalKey.key)
+    val createKey = fatContractInstance.contractKeyWithMaintainers.map(_.globalKey)
 
     val representativeTemplateId =
       fatContractInstance.templateId
@@ -323,7 +323,8 @@ final class LfValueTranslation(
       templateId = Some(
         LfEngineToApi.toApiIdentifier(fatContractInstance.templateId)
       ),
-      contractKey = apiContractData.contractKey,
+      contractKey = apiContractData.contractKey.map(_._1),
+      contractKeyHash = apiContractData.contractKey.fold(ByteString.EMPTY)(_._2.bytes.toByteString),
       createArguments = Some(apiContractData.createArguments),
       createdEventBlob = apiContractData.createdEventBlob.getOrElse(ByteString.EMPTY),
       interfaceViews = apiContractData.interfaceViews,
@@ -342,7 +343,7 @@ final class LfValueTranslation(
 
   private def toApiContractData(
       value: Value,
-      keyO: Option[Value],
+      keyO: Option[GlobalKey],
       representativeTemplateId: FullIdentifier,
       witnesses: Set[String],
       eventProjectionProperties: EventProjectionProperties,
@@ -363,14 +364,14 @@ final class LfValueTranslation(
         .map(toContractArgumentApi(verbose))
     def asyncContractKey = keyO match {
       case None => Future.successful(None)
-      case Some(key) =>
+      case Some(gkey) =>
         enrichAsync(
           verbose = verbose,
-          value = key,
+          value = gkey.key,
           enrich = enricher.enrichContractKey(representativeTemplateId.toIdentifier, _),
         )
           .map(toContractKeyApi(verbose))
-          .map(Some(_))
+          .map(value => Some((value, gkey.hash)))
     }
 
     def asyncInterfaceViews =
@@ -564,7 +565,7 @@ object LfValueTranslation {
   final case class ApiContractData(
       createArguments: ApiRecord,
       createdEventBlob: Option[ByteString],
-      contractKey: Option[ApiValue],
+      contractKey: Option[(ApiValue, crypto.Hash)],
       interfaceViews: Seq[InterfaceView],
   )
 }

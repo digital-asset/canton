@@ -7,9 +7,9 @@ import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
 import com.digitalasset.canton.crypto.{SigningKeyPair, SigningKeyUsage}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.bftordering.TopologySettings
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.topology.NodeSimulationTopologyData.SigningKeyPairWithLifetime
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.jdk.DurationConverters.ScalaDurationOps
@@ -87,7 +87,7 @@ final case class NodeSimulationTopologyDataFactory(
     val onboardingTime = maybeOnboardingDelay match {
       case Some(onboardingDelay) =>
         TopologyActivationTime(stageStart.add(onboardingDelay.toJava))
-      case None => Genesis.GenesisTopologyActivationTime
+      case None => TestBootstrapTopologyActivationTime
     }
     val offboardingTime = maybeOffboardingDelay.map(offboardingDelay =>
       onboardingTime.value.add(offboardingDelay.toJava)

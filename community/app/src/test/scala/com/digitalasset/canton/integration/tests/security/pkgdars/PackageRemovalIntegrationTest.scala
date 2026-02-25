@@ -29,6 +29,7 @@ import com.digitalasset.canton.integration.{
   SharedEnvironment,
   TestConsoleEnvironment,
 }
+import com.digitalasset.canton.logging.SuppressionRule.LevelAndAbove
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.PackageRemovalErrorCode.{
   CannotRemoveAdminWorkflowPackage,
   CannotRemoveOnlyDarForPackage,
@@ -42,11 +43,14 @@ import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.participant.store.DamlPackageStore
 import com.digitalasset.canton.participant.util.JavaCodegenUtil.*
 import com.digitalasset.canton.performance.model.java.dvp.asset.Asset
+import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.daml.lf.archive.DarParser
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.value.Value.ContractId
 import org.scalatest.*
+import org.slf4j.event.Level
 
 import java.io.File
 import scala.jdk.CollectionConverters.*
@@ -64,8 +68,6 @@ trait PackageRemovalIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1_S1M1
-
-  val inMemory: Boolean
 
   private val pkg = PackageId.assertFromString(Many.PACKAGE_ID)
   private val adminWorkflowPkg = PackageId.assertFromString(Ping.PACKAGE_ID)
@@ -162,7 +164,7 @@ trait PackageRemovalIntegrationTest
 
         val (darHex, darDescriptor) = setUp(participant1, sequencer1, daName, daId)
 
-        val cid = activeContractForPackage(participant1, daName, pkg)
+        val cid = activeContractsForPackage(participant1, daName, pkg).loneElement
 
         assertThrowsAndLogsCommandFailures(
           participant1.dars.remove(darHex),
@@ -274,7 +276,7 @@ trait PackageRemovalIntegrationTest
 
       setUp(participant1, sequencer1, daName, daId)
 
-      val cid = activeContractForPackage(participant1, daName, pkg)
+      val cid = activeContractsForPackage(participant1, daName, pkg).loneElement
 
       logger.info(s"Cannot remove package that is used and vetted")
       packageRemovalFails(participant1, pkg, new PackageInUse(pkg, cid, daId).cause)
@@ -291,32 +293,27 @@ trait PackageRemovalIntegrationTest
       participant1.stop()
       participant1.start()
 
-      if (inMemory) {
-        participant1.packages.list().map(_.packageId) should not(contain(pkg))
-      } else {
+      logger.info(
+        s"Cannot remove package that is used and vetted, after a restart, when disconnected"
+      )
+      packageRemovalFails(participant1, pkg, new PackageInUse(pkg, cid, daId).cause)
 
-        logger.info(
-          s"Cannot remove package that is used and vetted, after a restart, when disconnected"
-        )
-        packageRemovalFails(participant1, pkg, new PackageInUse(pkg, cid, daId).cause)
+      participant1.synchronizers.connect_local(sequencer1, alias = daName)
 
-        participant1.synchronizers.connect_local(sequencer1, alias = daName)
+      logger.info(
+        s"Cannot remove package that is used and vetted, after a restart, when reconnected"
+      )
+      packageRemovalFails(participant1, pkg, new PackageInUse(pkg, cid, daId).cause)
 
-        logger.info(
-          s"Cannot remove package that is used and vetted, after a restart, when reconnected"
-        )
-        packageRemovalFails(participant1, pkg, new PackageInUse(pkg, cid, daId).cause)
+      archiveContract(participant1, cid)()
 
-        archiveContract(participant1, cid)()
+      logger.info(s"Cannot remove package that is vetted")
+      packageRemovalFails(participant1, pkg, new PackageVetted(pkg).cause)
 
-        logger.info(s"Cannot remove package that is vetted")
-        packageRemovalFails(participant1, pkg, new PackageVetted(pkg).cause)
+      removeVetting(participant1, daId, darPath)
 
-        removeVetting(participant1, daId, darPath)
-
-        logger.info(s"Can remove package that is unused and unvetted")
-        participant1.packages.remove(pkg)
-      }
+      logger.info(s"Can remove package that is unused and unvetted")
+      participant1.packages.remove(pkg)
     }
 
     "remove packages only once unvetted on disconnected synchronizers" taggedAs ledgerIntegrity
@@ -347,27 +344,22 @@ trait PackageRemovalIntegrationTest
       participant1.stop()
       participant1.start()
 
-      if (inMemory) {
-        participant1.packages.list().map(_.packageId) should not(contain(pkg))
-      } else {
+      logger.info(
+        s"Cannot remove package that is vetted, after a restart, when disconnected"
+      )
+      packageRemovalFails(participant1, pkg, new PackageVetted(pkg).cause)
 
-        logger.info(
-          s"Cannot remove package that is vetted, after a restart, when disconnected"
-        )
-        packageRemovalFails(participant1, pkg, new PackageVetted(pkg).cause)
+      participant1.synchronizers.connect_local(sequencer1, alias = daName)
 
-        participant1.synchronizers.connect_local(sequencer1, alias = daName)
+      logger.info(
+        s"Cannot remove package that is vetted, after a restart, when reconnected"
+      )
+      packageRemovalFails(participant1, pkg, new PackageVetted(pkg).cause)
 
-        logger.info(
-          s"Cannot remove package that is vetted, after a restart, when reconnected"
-        )
-        packageRemovalFails(participant1, pkg, new PackageVetted(pkg).cause)
+      removeVetting(participant1, daId, darPath)
 
-        removeVetting(participant1, daId, darPath)
-
-        logger.info(s"Can remove package that is unused and unvetted")
-        participant1.packages.remove(pkg)
-      }
+      logger.info(s"Can remove package that is unused and unvetted")
+      participant1.packages.remove(pkg)
     }
 
     "remove a package immediately with the force flag" taggedAs_ {
@@ -379,16 +371,66 @@ trait PackageRemovalIntegrationTest
 
       participant1.packages.list().map(_.packageId) should contain(pkg)
 
-      val cid = activeContractForPackage(participant1, daName, pkg)
+      val cid = activeContractsForPackage(participant1, daName, pkg).loneElement
       packageRemovalFails(participant1, pkg, new PackageInUse(pkg, cid, daId).cause)
 
       participant1.packages.remove(pkg, force = true)
 
       participant1.packages.list().map(_.packageId) should not contain (pkg)
+    }
 
-      // Clean up for the next test
-      archiveContract(participant1, cid)()
+    "crash if a vetted package has been removed with force" in { implicit env =>
+      import env.*
 
+      setUp(participant1, sequencer1, daName, daId)
+      setUp(participant2, sequencer1, daName, daId)
+
+      assertPackageUsable(participant1, participant2, daId)
+
+      participant2.packages.remove(pkg, force = true)
+
+      // Restart participant2 to also remove the package from in-memory caches
+      participant2.stop()
+      participant2.start()
+      participant2.synchronizers.reconnect_all()
+
+      // This should crash p2
+      loggerFactory.assertLogsSeq(LevelAndAbove(Level.WARN))(
+        {
+          submitCommand(participant1, participant2, daId, optTimeout = None)
+          eventually() {
+            participant2.synchronizers
+              .list_connected()
+              .map(_.physicalSynchronizerId) should not contain daId
+          }
+        },
+        inside(_) { case head :: tail =>
+          val exceptionMessage =
+            s"""Unable to load package $pkg even though the package has been vetted: VettedPackage(packageId = ${pkg.show}, unbounded). Crashing...
+                 |To recover from this error upload the package with id $pkg to the participant and then reconnect the participant to the synchronizer.""".stripMargin
+
+          head.throwable.value.getMessage shouldBe exceptionMessage
+          head.errorMessage shouldBe "An internal error has occurred."
+
+          forEvery(tail) { entry =>
+            if (entry.throwable.map(_.getMessage).contains(exceptionMessage)) {
+              succeed
+            } else if (entry.errorMessage.contains(exceptionMessage)) {
+              succeed
+            } else {
+              fail(s"Unexpected log entry: $entry")
+            }
+          }
+        },
+      )
+    }
+
+    "recover by uploading the removed package again" in { implicit env =>
+      import env.*
+
+      participant2.dars.upload(CantonTestsPath, vetAllPackages = false)
+      participant2.synchronizers.reconnect_all()
+      assertPackageUsable(participant1, participant2, daId)
     }
 
     "remove packages that do not exist" taggedAs_ {
@@ -398,10 +440,6 @@ trait PackageRemovalIntegrationTest
       setUp(participant1, sequencer1, daName, daId)
 
       participant1.packages.remove("this-is-not-a-real-package-id")
-
-      // Clean up
-      val cid = activeContractForPackage(participant1, daName, pkg)
-      archiveContract(participant1, cid)()
     }
 
     "disable a package twice" taggedAs_ {
@@ -431,10 +469,6 @@ trait PackageRemovalIntegrationTest
         participant1.packages.remove("invalid-package-id-\uD83C\uDF3C\uD83C\uDF38❀✿\uD83C\uDF37"),
         entry => entry.commandFailureMessage should include("INVALID_ARGUMENT"),
       )
-
-      // Clean up
-      val cid = activeContractForPackage(participant1, daName, pkg)
-      archiveContract(participant1, cid)()
     }
 
     "remove only specific packages" taggedAs_ {
@@ -498,8 +532,8 @@ trait PackageRemovalIntegrationTest
 
       logger.info(s"Cannot remove package that is used and vetted")
 
-      val cidDa = activeContractForPackage(participant1, daName, pkg)
-      val cidAcme = activeContractForPackage(participant1, acmeName, pkg)
+      val cidDa = activeContractsForPackage(participant1, daName, pkg).loneElement
+      val cidAcme = activeContractsForPackage(participant1, acmeName, pkg).loneElement
 
       packageRemovalFails(participant1, pkg, new PackageInUse(pkg, cidDa, daId).cause)
 
@@ -630,7 +664,7 @@ trait PackageRemovalIntegrationTest
   )(implicit env: TestConsoleEnvironment): Unit = {
     logger.info(s"Cannot remove package that is used and vetted")
 
-    val cid = activeContractForPackage(participant, env.daName, pkg)
+    val cid = activeContractsForPackage(participant, env.daName, pkg).loneElement
 
     packageRemovalFails(participant, pkg, new PackageInUse(pkg, cid, env.daId).cause)
 
@@ -665,22 +699,17 @@ trait PackageRemovalIntegrationTest
     participant1.packages.synchronize_vetting()
   }
 
-  private def activeContractForPackage(
+  private def activeContractsForPackage(
       participant: LocalParticipantReference,
       synchronizerAlias: SynchronizerAlias,
       pkg: String,
-  ) = {
-    val activeContractsForPkg = participant.testing.acs_search(
-      synchronizerAlias,
-      filterPackage = pkg,
-      exactId = "",
-      filterTemplate = "",
-    )
-
-    val cid = activeContractsForPkg.headOption.value.contractId
-
-    cid
-  }
+  ): Seq[LfContractId] =
+    participant.testing
+      .acs_search(
+        synchronizerAlias,
+        filterPackage = pkg,
+      )
+      .map(_.contractId)
 
   private def archiveContract(
       participant1: => LocalParticipantReference,
@@ -723,6 +752,11 @@ trait PackageRemovalIntegrationTest
     val darHex =
       uploadDarAndVerifyVettingOnSynchronizer(participant, CantonTestsPath, pkg, synchronizerId)
 
+    // Archive contracts left over from previous test cases.
+    for (cid <- activeContractsForPackage(participant, synchronizerAlias, pkg)) {
+      archiveContract(participant, cid)()
+    }
+
     assertPackageUsable(participant, participant, synchronizerId)
     val darDescriptor = descriptorForHexHash(participant, darHex)
     darHex -> darDescriptor
@@ -749,7 +783,7 @@ trait PackageRemovalIntegrationTest
             .loneElement
             .item
             .packages
-            .map(_.packageId) contains pkg
+            .map(_.packageId) should contain(pkg)
         }
         darHex
       }
@@ -772,6 +806,7 @@ trait PackageRemovalIntegrationTest
 
 }
 
+// Do not run this test with in-memory storage, as it restarts participant nodes.
 class PackageRemovalIntegrationTestPostgres extends PackageRemovalIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(
@@ -780,5 +815,4 @@ class PackageRemovalIntegrationTestPostgres extends PackageRemovalIntegrationTes
       sequencerGroups = MultiSynchronizer.tryCreate(Set("sequencer1"), Set("sequencer2")),
     )
   )
-  override val inMemory: Boolean = false
 }

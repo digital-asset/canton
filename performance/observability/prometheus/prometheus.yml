@@ -26,6 +26,14 @@ scrape_configs:
           namespace: canton-testing-2
           pod: canton
           container: canton
+  - job_name: canton-testing-2-benchmark-and-replay
+    static_configs:
+      - targets:
+          - canton-testing-2.da-int.net:19091
+        labels:
+          namespace: canton-testing-2
+          pod: canton
+          container: canton
   - job_name: canton-testing-3
     static_configs:
       - targets:
@@ -34,10 +42,26 @@ scrape_configs:
           namespace: canton-testing-3
           pod: canton
           container: canton
+  - job_name: canton-testing-3-benchmark-and-replay
+    static_configs:
+      - targets:
+          - canton-testing-3.da-int.net:19091
+        labels:
+          namespace: canton-testing-3
+          pod: canton
+          container: canton
   - job_name: canton-network-testing-1
     static_configs:
       - targets:
           - canton-network-testing-1.da-int.net:9464
+        labels:
+          namespace: canton-network-testing-1
+          pod: canton
+          container: canton
+  - job_name: canton-network-testing-1-benchmark-and-replay
+    static_configs:
+      - targets:
+          - canton-network-testing-1.da-int.net:19091
         labels:
           namespace: canton-network-testing-1
           pod: canton

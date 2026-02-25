@@ -24,6 +24,7 @@ import com.digitalasset.canton.platform.store.{LedgerApiContractStore, LedgerApi
 import com.digitalasset.canton.protocol.ExampleContractFactory
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{HasExecutionContext, TestEssentials}
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.{Ref, Time}
 import com.digitalasset.daml.lf.transaction.CreationTime
@@ -392,7 +393,8 @@ object MutableCacheBackedContractStoreSpec {
   private def globalKey(desc: String): Key =
     Key.assertBuild(
       Identifier.assertFromString("some:template:name"),
-      ValueText(desc),
       Ref.PackageName.assertFromString("pkg-name"),
+      ValueText(desc),
+      crypto.Hash.hashPrivateKey(desc),
     )
 }

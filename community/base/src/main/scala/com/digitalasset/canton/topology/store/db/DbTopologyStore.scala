@@ -618,6 +618,28 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
       pagination,
     ).map(_.collectOfType[TopologyChangeOp.Remove])
 
+  override def findAllTransactions(
+      asOf: CantonTimestamp,
+      asOfInclusive: Boolean,
+      isProposal: Boolean,
+      types: Seq[TopologyMapping.Code],
+      filterUid: Option[NonEmpty[Seq[UniqueIdentifier]]],
+      filterNamespace: Option[NonEmpty[Seq[Namespace]]],
+      pagination: Option[(Option[UniqueIdentifier], Int)] = None,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[StoredTopologyTransactions[TopologyChangeOp, TopologyMapping]] =
+    findTransactionsBatchingUidFilter(
+      asOf,
+      asOfInclusive,
+      isProposal,
+      types.toSet,
+      filterUid,
+      filterNamespace,
+      None,
+      pagination,
+    )
+
   override def findFirstSequencerStateForSequencer(sequencerId: SequencerId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[

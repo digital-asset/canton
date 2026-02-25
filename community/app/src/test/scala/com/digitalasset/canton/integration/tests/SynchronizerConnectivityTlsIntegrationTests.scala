@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests
 
+import com.daml.tls.BaseServerTlsConfig
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
 import com.digitalasset.canton.integration.*
@@ -27,7 +28,7 @@ trait SynchronizerConnectivityTlsIntegrationTests
         ConfigTransforms.updateAllSequencerConfigs_(
           _.focus(_.publicApi.tls).replace(
             Some(
-              TlsBaseServerConfig(
+              BaseServerTlsConfig(
                 certChainFile = certChainFile,
                 privateKeyFile = privateKeyFile,
               )

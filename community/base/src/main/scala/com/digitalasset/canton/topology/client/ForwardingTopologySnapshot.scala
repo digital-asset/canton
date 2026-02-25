@@ -51,6 +51,11 @@ class ForwardingTopologySnapshot(
   ): FutureUnlessShutdown[Map[ParticipantId, ParticipantAttributes]] =
     parent.loadParticipantStates(participants)
 
+  override def wasEverOnboarded(
+      participantId: ParticipantId
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
+    parent.wasEverOnboarded(participantId)
+
   override private[client] def loadActiveParticipantsOf(
       party: PartyId,
       participantStates: Seq[ParticipantId] => FutureUnlessShutdown[
@@ -109,11 +114,6 @@ class ForwardingTopologySnapshot(
       traceContext: TraceContext
   ): FutureUnlessShutdown[Set[Member]] =
     parent.allMembers()
-
-  override def isMemberKnown(member: Member)(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Boolean] =
-    parent.isMemberKnown(member)
 
   override def areMembersKnown(members: Set[Member])(implicit
       traceContext: TraceContext
@@ -247,7 +247,8 @@ class CachingTopologySnapshot(
   private val memberCache: TracedAsyncLoadingCache[FutureUnlessShutdown, Member, Boolean] =
     ScaffeineCache.buildTracedAsync[FutureUnlessShutdown, Member, Boolean](
       cache = cachingConfigs.memberCache.buildScaffeine(loggerFactory),
-      loader = implicit traceContext => member => parent.isMemberKnown(member),
+      loader = implicit traceContext =>
+        member => parent.areMembersKnown(Set(member)).map(_.contains(member)),
       allLoader = Some(implicit traceContext =>
         members =>
           parent
@@ -255,6 +256,15 @@ class CachingTopologySnapshot(
             .map(knownMembers => members.map(m => m -> knownMembers.contains(m)).toMap)
       ),
     )(logger, "memberCache")
+
+  private val wasEverOnboardedCache
+      : TracedAsyncLoadingCache[FutureUnlessShutdown, ParticipantId, Boolean] =
+    ScaffeineCache.buildTracedAsync[FutureUnlessShutdown, ParticipantId, Boolean](
+      cache = cachingConfigs.memberCache.buildScaffeine(
+        loggerFactory
+      ), // reuse the config from memberCache
+      loader = implicit traceContext => participantId => parent.wasEverOnboarded(participantId),
+    )(logger, "wasEverOnboardedCache")
 
   private val synchronizerParametersCache =
     new AtomicReference[
@@ -379,15 +389,15 @@ class CachingTopologySnapshot(
   ): FutureUnlessShutdown[Set[Member]] =
     getAndCache(allMembersCache, parent.allMembers())
 
-  override def isMemberKnown(member: Member)(implicit
-      traceContext: TraceContext
-  ): FutureUnlessShutdown[Boolean] =
-    memberCache.get(member)
-
   override def areMembersKnown(members: Set[Member])(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Set[Member]] =
     memberCache.getAll(members).map(_.collect { case (member, _isKnown @ true) => member }.toSet)
+
+  override def wasEverOnboarded(
+      participantId: ParticipantId
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Boolean] =
+    wasEverOnboardedCache.get(participantId)
 
   override def memberFirstKnownAt(
       member: Member

@@ -5,7 +5,6 @@ package com.digitalasset.canton.config
 
 import cats.Monoid
 import cats.syntax.either.*
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.RequireTypes.NonNegativeNumeric.SubtractionResult
 import pureconfig.error.{CannotConvert, FailureReason}
 import pureconfig.{ConfigReader, ConfigWriter}
@@ -264,7 +263,6 @@ object RequireTypes {
   object PositiveInt {
     def create(n: Int): Either[InvariantViolation, PositiveInt] = PositiveNumeric.create(n)
     def tryCreate(n: Int): PositiveInt = PositiveNumeric.tryCreate(n)
-    def size[T](collection: NonEmpty[Iterable[T]]): PositiveInt = tryCreate(collection.size)
 
     lazy val one: PositiveInt = PositiveInt.tryCreate(1)
     lazy val two: PositiveInt = PositiveInt.tryCreate(2)
@@ -278,7 +276,6 @@ object RequireTypes {
   object PositiveLong {
     def create(n: Long): Either[InvariantViolation, PositiveLong] = PositiveNumeric.create(n)
     def tryCreate(n: Long): PositiveLong = PositiveNumeric.tryCreate(n)
-    def size[T](collection: NonEmpty[Iterable[T]]): PositiveLong = tryCreate(collection.size.toLong)
 
     lazy val one: PositiveLong = PositiveLong.tryCreate(1)
     lazy val MaxValue: PositiveLong = PositiveLong.tryCreate(Long.MaxValue)

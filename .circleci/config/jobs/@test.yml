@@ -51,6 +51,21 @@ variations_test:
         exclude_unstable_tests: true
         override_java_version_for_tests: << parameters.override_java_version_for_tests >>
 
+# Job used to run the NUCK tests in PV DEV, which are currently excluded from the regular test runs on dev branches.
+# This allows us to run them more frequently and get faster feedback during development of the NUCK feature.
+# TODO(#30913): Remove this job once the NUCK feature development is complete
+temp_nuck_tests_pv_dev:
+  parameters:
+    override_java_version_for_tests:
+      type: string
+      default: ""
+  executor: canton-xlarge-docker-with-postgres
+  parallelism: 1
+  steps:
+    - set_canton_protocol_version:
+        protocol_version: "DEV"
+    - run_temp_nuck_tests
+
 postgres_conformance_test:
   parameters:
     postgres_version:

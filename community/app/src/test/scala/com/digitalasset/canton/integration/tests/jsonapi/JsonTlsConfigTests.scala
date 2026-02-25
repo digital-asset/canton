@@ -3,14 +3,10 @@
 
 package com.digitalasset.canton.integration.tests.jsonapi
 
+import com.daml.tls.ServerAuthRequirementConfig.Require
+import com.daml.tls.{TlsClientCertificate, TlsClientConfig, TlsServerConfig}
+import com.digitalasset.canton.config.PemFile
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
-import com.digitalasset.canton.config.ServerAuthRequirementConfig.Require
-import com.digitalasset.canton.config.{
-  PemFile,
-  TlsClientCertificate,
-  TlsClientConfig,
-  TlsServerConfig,
-}
 import com.digitalasset.canton.http.HttpService
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.jsonapi.HttpServiceTestFixture.{

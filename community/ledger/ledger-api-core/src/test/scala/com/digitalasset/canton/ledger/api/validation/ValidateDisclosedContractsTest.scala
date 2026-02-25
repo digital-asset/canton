@@ -20,6 +20,7 @@ import com.digitalasset.canton.ledger.api.validation.ValidateDisclosedContractsT
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.{DefaultDamlValues, LfValue}
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.transaction.*
 import com.digitalasset.daml.lf.value.Value as Lf
@@ -335,6 +336,7 @@ object ValidateDisclosedContractsTest {
           None -> LfValue.ValueText("some key"),
         ),
       ),
+      crypto.Hash.hashPrivateKey("dummy-key-hash"),
       api.keyMaintainers,
       api.packageName,
     )

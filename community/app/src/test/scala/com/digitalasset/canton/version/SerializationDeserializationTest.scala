@@ -96,6 +96,9 @@ final class SerializationDeserializationTest
         test(DynamicSequencingParameters, version)
 
         test(AcsCommitment, version)
+        if (version >= ProtocolVersion.v35) {
+          testContext(AcsCommitmentProtocolMessage, version, version)
+        }
         test(Verdict, version)
         test(ConfirmationResponses, version)
         testContext(

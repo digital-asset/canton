@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.docs
 
+import better.files.File
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.typesafe.scalalogging.LazyLogging
@@ -34,7 +35,7 @@ final case class SnippetStepResult(step: SnippetStep, output: Seq[String]) exten
       case SnippetStep.Failure(cmd, _, _, _) => cmd
       case SnippetStep.Assert(_, _, _) => ""
       case SnippetStep.Hidden(_, _, _) => ""
-      case SnippetStep.Shell(cmd, _, _, _) => cmd
+      case SnippetStep.Shell(cmd, _, _, _, hidden) => if (hidden) "" else cmd
     }
     val tmp = output.flatMap(_.split('\n').toList)
 
@@ -52,6 +53,10 @@ final case class SnippetStepResult(step: SnippetStep, output: Seq[String]) exten
 }
 
 object SnippetScenario extends LazyLogging {
+
+  // Location of snippet macros
+  private val macroFolder =
+    File.currentWorkingDirectory / "community/app/src/test/scala/com/digitalasset/canton/integration/tests/docs/macros"
 
   def parse(lines: Seq[String]): Seq[SnippetScenario] = {
 
@@ -74,9 +79,14 @@ object SnippetScenario extends LazyLogging {
 
     /** @param name
       *   Name of the environment
+      * @param macroName
+      *   Optional name of the file in the macro folder to use as source for the snippet steps
       */
-    final case class InSnippet(name: String, pending: Map[String, Seq[Seq[SnippetStep]]])
-        extends Result {
+    final case class InSnippet(
+        name: String,
+        pending: Map[String, Seq[Seq[SnippetStep]]],
+        macroName: Option[String],
+    ) extends Result {
       def update(line: String, idx: Int): Result =
         if (line.isBlank) {
           // reset snippet context
@@ -85,7 +95,7 @@ object SnippetScenario extends LazyLogging {
           snippetKey.findFirstMatchIn(line).foreach { matched =>
             logger.debug(s"Matches snippet $line")
             throw new IllegalArgumentException(
-              s"Found snippet ${matched.group(1).trim()} but already in snippet $name"
+              s"Found snippet ${matched.group(2).trim()} but already in snippet $name"
             )
           }
 
@@ -174,19 +184,33 @@ object SnippetScenario extends LazyLogging {
               this
             } { matched =>
               logger.debug(s"Matches snippet $line")
-              enterSnippet(matched.group(1).trim())
+              val macroNameMatch = matched.group(1).trim()
+              val macroName = Option.when(macroNameMatch.nonEmpty)(
+                // substring because we remove the wrapping parenthesis
+                macroNameMatch.substring(1, macroNameMatch.length - 1)
+              )
+              enterSnippet(matched.group(2).trim(), macroName)
             }
         }
 
-      def enterSnippet(name: String): InSnippet = {
+      def enterSnippet(name: String, macroName: Option[String]): InSnippet = {
         val prepNextSnippet = pending.updated(name, pending.getOrElse(name, Seq()) :+ Seq())
-        InSnippet(name, prepNextSnippet)
+        InSnippet(name, prepNextSnippet, macroName)
       }
     }
 
     lines.zipWithIndex
-      .foldLeft[Result](OutsideSnippet(Map())) { case (acc, (line, idx)) =>
-        acc.update(line, idx)
+      .foldLeft[Result](OutsideSnippet(Map())) {
+        case (acc @ InSnippet(_, _, Some(macroName)), (_, idx)) =>
+          // If it's a macro, read the steps from the corresponding file and feed them to the current
+          // result
+          (macroFolder / s"$macroName.rst.macro").lines.toSeq.zipWithIndex
+            .foldLeft(acc: Result) { case (macroAcc, (line, idx)) =>
+              macroAcc.update(line, idx)
+            } // Add a blank line at the end to signal the exit of the snippet
+            .update("", idx)
+        case (acc, (line, idx)) =>
+          acc.update(line, idx)
       }
       .result
   }

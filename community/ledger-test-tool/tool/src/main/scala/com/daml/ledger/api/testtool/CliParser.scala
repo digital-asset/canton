@@ -5,9 +5,10 @@ package com.daml.ledger.api.testtool
 
 import com.daml.ledger.api.testtool.infrastructure.PartyAllocationConfiguration
 import com.daml.ledger.api.testtool.runner.Config
+import com.daml.tls.TlsClientCertificate
 import com.digitalasset.canton.buildinfo.BuildInfo
+import com.digitalasset.canton.config.PemFile
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
-import com.digitalasset.canton.config.{PemFile, TlsClientCertificate}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import scopt.{OptionParser, Read}
 

@@ -63,7 +63,7 @@ private[update] final class SequencedSubmissionsValidator(
       orderingSequencerId,
       _,
       trafficConsumption,
-      errorOrResolvedGroups,
+      errorOrRecipients,
     ) = sequencedValidatedSubmissionRequest
 
     implicit val traceContext: TraceContext = sequencedValidatedSubmissionRequest.traceContext
@@ -81,7 +81,7 @@ private[update] final class SequencedSubmissionsValidator(
           signedSubmissionRequest,
           orderingSequencerId,
           trafficConsumption,
-          errorOrResolvedGroups,
+          errorOrRecipients,
           latestSequencerEventTimestamp,
         )
       SubmissionRequestValidationResult(inFlightAggregations, outcome, sequencerEventTimestamp) =

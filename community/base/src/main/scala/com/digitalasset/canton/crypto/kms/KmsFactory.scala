@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.crypto.kms
 
+import com.daml.metrics.ExecutorServiceMetrics
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{KmsConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.kms.aws.AwsKms
@@ -24,6 +25,7 @@ object KmsFactory {
       clock: Clock,
       loggerFactory: NamedLoggerFactory,
       executionContext: ExecutionContext,
+      executorServiceMetrics: ExecutorServiceMetrics,
   ): Either[KmsError, Kms] =
     config match {
       case awsKmsConfig: KmsConfig.Aws =>
@@ -38,6 +40,7 @@ object KmsFactory {
           timeouts,
           loggerFactory,
           executionContext,
+          executorServiceMetrics,
         )
     }
 

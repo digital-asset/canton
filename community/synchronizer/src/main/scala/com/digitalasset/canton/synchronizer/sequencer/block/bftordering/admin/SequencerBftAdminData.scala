@@ -4,8 +4,9 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.admin
 
 import cats.implicits.*
+import com.daml.tls.{TlsClientCertificate, TlsClientConfig}
 import com.digitalasset.canton.config.RequireTypes.{ExistingFile, Port}
-import com.digitalasset.canton.config.{PemFile, PemString, TlsClientCertificate, TlsClientConfig}
+import com.digitalasset.canton.config.{PemFile, PemString}
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyNameOnlyCase, PrettyPrinting}
 import com.digitalasset.canton.sequencer.admin.v30.PeerEndpoint.Security
 import com.digitalasset.canton.sequencer.admin.v30.PeerEndpoint.Security.Empty

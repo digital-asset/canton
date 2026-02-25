@@ -120,7 +120,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
           synchronizerParameters.participantResponseDeadlineForF(requestTimestamp)
         )
         decisionTime <- synchronizerParameters.decisionTimeForF(requestTimestamp)
-        asyncProcessing <- (event match {
+        asyncProcessing <- event match {
           case MediatorEvent.Request(
                 counter,
                 _,
@@ -165,8 +165,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                 )
               )
             )
-        })
-
+        }
       } yield asyncProcessing
       synchronousResult
     }
@@ -725,6 +724,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
           hostedConfirmingParties.contains
         )
 
+        // TODO(#30923): Remove unnecessary confirmer weight and quorum threshold parameters and simplify/correct check
         confirmed = viewConfirmationParameters.quorums.forall { quorum =>
           // For the authorized informees that belong to each quorum, verify if their combined weight is enough
           // to meet the quorum's threshold.
@@ -841,7 +841,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
           _ <- {
             if (
               // Check that this message was sent to all mediators in the group.
-              // Ignore other recipients of the response so that this check does not rely any recipients restrictions
+              // Ignore other recipients of the response so that this check does not rely on any recipients restrictions
               // that are enforced in the sequencer.
               recipients.allRecipients.contains(responseAggregation.request.mediator)
             ) {
@@ -859,7 +859,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
             responseAggregation
               .validateAndProgress(ts, responses, snapshot.ipsSnapshot, batchingConfig)
           )
-          _unit <- OptionT(
+          _ <- OptionT(
             mediatorState
               .replace(responseAggregation, nextResponseAggregation)
               .map(Option.when(_)(()))

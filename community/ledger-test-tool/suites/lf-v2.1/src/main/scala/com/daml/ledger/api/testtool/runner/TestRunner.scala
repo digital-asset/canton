@@ -5,8 +5,10 @@ package com.daml.ledger.api.testtool.runner
 
 import com.daml.ledger.api.testtool.infrastructure.*
 import com.daml.ledger.api.testtool.runner.TestRunner.*
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
+import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton.concurrent.Threading
-import com.digitalasset.canton.config.TlsClientConfig
 import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
 import io.grpc.Channel
 import io.grpc.netty.shaded.io.grpc.netty.{NegotiationType, NettyChannelBuilder}
@@ -166,7 +168,11 @@ final class TestRunner(availableTests: AvailableTests, config: Config, lfVersion
     val testsF = runner.asFuture
       .flatMap(
         _.runTests(
-          Threading.newExecutionContext("TestRunner", com.typesafe.scalalogging.Logger(logger))
+          Threading.newExecutionContext(
+            "TestRunner",
+            com.typesafe.scalalogging.Logger(logger),
+            new ExecutorServiceMetrics(NoOpMetricsFactory),
+          )
         )
           .transformWith {
             case scala.util.Success(summaries) => runner.release().map(_ => summaries)

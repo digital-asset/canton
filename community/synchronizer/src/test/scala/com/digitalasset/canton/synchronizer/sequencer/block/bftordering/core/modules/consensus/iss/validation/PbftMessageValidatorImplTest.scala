@@ -15,12 +15,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultEpochLength,
   DefaultMaxBatchesPerProposal,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.EpochState.{
   Epoch,
   Segment,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Genesis.GenesisTopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
@@ -45,6 +43,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Commit,
   PrePrepare,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
 import com.digitalasset.canton.version.ProtocolVersion
 import com.google.protobuf.ByteString
 import org.scalatest.wordspec.AnyWordSpec
@@ -532,7 +531,7 @@ object PbftMessageValidatorImplTest {
       myId,
       nodesTopologyInfos = Map(
         myId -> NodeTopologyInfo(
-          activationTime = TopologyActivationTime(CantonTimestamp.MinValue),
+          activationTime = TestBootstrapTopologyActivationTime,
           keyIds = Set.empty,
         )
       ),
@@ -583,7 +582,7 @@ object PbftMessageValidatorImplTest {
         epochNumber,
         startBlockNumber,
         DefaultEpochLength, // ignored
-        GenesisTopologyActivationTime, // ignored
+        TestBootstrapTopologyActivationTime, // ignored
       ),
       currentMembership,
       previousMembership,

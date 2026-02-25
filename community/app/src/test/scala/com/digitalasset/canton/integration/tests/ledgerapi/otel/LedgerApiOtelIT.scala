@@ -26,10 +26,11 @@ import com.daml.ledger.api.v2.transaction_filter.{
 }
 import com.daml.ledger.api.v2.update_service.*
 import com.daml.ledger.api.v2.value.{Record, RecordField, Value}
+import com.daml.tls.TlsServerConfig
 import com.digitalasset.canton.UniquePortGenerator
 import com.digitalasset.canton.config.AuthServiceConfig.Wildcard
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
-import com.digitalasset.canton.config.{CantonConfig, PemFile, TlsServerConfig}
+import com.digitalasset.canton.config.{CantonConfig, PemFile}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UseOtlp}
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.ValueConversions.*
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.{CantonFixture, CreatesParties}

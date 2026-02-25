@@ -10,6 +10,7 @@ import com.digitalasset.canton.protocol.{LfHash, LfNodeCreate}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.crypto.Hash.HashingMethod
+import com.digitalasset.daml.lf.data.Ref.PackageId
 
 import scala.concurrent.ExecutionContext
 
@@ -20,7 +21,11 @@ object TestContractHasher {
   }
 
   object Async extends ContractHasher {
-    override def hash(create: LfNodeCreate, hashingMethod: HashingMethod)(implicit
+    override def hash(
+        create: LfNodeCreate,
+        hashingMethod: HashingMethod,
+        onMissingPackage: PackageId => FutureUnlessShutdown[Unit],
+    )(implicit
         ec: ExecutionContext,
         traceContext: TraceContext,
     ): EitherT[FutureUnlessShutdown, String, LfHash] =

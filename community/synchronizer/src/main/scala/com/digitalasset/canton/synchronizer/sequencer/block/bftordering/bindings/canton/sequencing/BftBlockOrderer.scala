@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.binding
 
 import cats.data.EitherT
 import cats.syntax.either.*
+import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.MetricsContext
 import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.concurrent.Threading
@@ -137,6 +138,7 @@ final class BftBlockOrderer(
     sequencerSnapshotInfo: Option[SequencerSnapshot.ImplementationSpecificInfo],
     exitOnFatalFailures: Boolean,
     metrics: BftOrderingMetrics,
+    executorServiceMetrics: ExecutorServiceMetrics,
     override val loggerFactory: NamedLoggerFactory,
     queryCostMonitoring: Option[QueryCostMonitoringConfig],
     executionContext: ExecutionContextExecutor,
@@ -156,6 +158,7 @@ final class BftBlockOrderer(
         PositiveInt.tryCreate(
           Threading.detectNumberOfThreads(noTracingLogger).value / divisor
         ),
+        executorServiceMetrics,
       )
     }
 
@@ -213,6 +216,7 @@ final class BftBlockOrderer(
     Threading.newExecutionContext(
       loggerFactory.threadName + "-dp2p-server-grpc-executor-context",
       noTracingLogger,
+      executorServiceMetrics = executorServiceMetrics,
     )
 
   // Standalone mode doesn't support authentication

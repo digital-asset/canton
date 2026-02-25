@@ -376,27 +376,41 @@ private[platform] object InMemoryStateUpdater {
         // no state updates for participant divulged events and transient events as these events
         // cannot lead to successful contract lookup and usage in interpretation anyway
         if createdEvent.flatEventWitnesses.nonEmpty =>
+      if (createdEvent.contractKey.isDefined != createdEvent.createKeyHash.isDefined) {
+        throw new IllegalStateException(
+          s"Invalid TransactionLogUpdate.CreatedEvent: contractKey and createKeyHash must be both defined or both empty, but was: $createdEvent"
+        )
+      }
       ContractStateEvent.Created(
         contractId = createdEvent.contractId,
-        globalKey = createdEvent.contractKey.map(k =>
+        globalKey = createdEvent.contractKey.zip(createdEvent.createKeyHash).map { case (k, kh) =>
           Key.assertBuild(
             createdEvent.templateId,
-            k.unversioned,
             createdEvent.packageName,
+            k.unversioned,
+            kh,
           )
-        ),
+        },
       )
     case exercisedEvent: TransactionLogUpdate.ExercisedEvent
         // no state updates for participant divulged events and transient events as these events
         // cannot lead to successful contract lookup and usage in interpretation anyway
         if exercisedEvent.consuming && exercisedEvent.flatEventWitnesses.nonEmpty =>
+      if (exercisedEvent.contractKey.isDefined != exercisedEvent.contractKeyHash.isDefined) {
+        throw new IllegalStateException(
+          s"Invalid TransactionLogUpdate.ExercisedEvent: contractKey and contractKeyHash must be both defined or both empty, but was: $exercisedEvent"
+        )
+      }
       ContractStateEvent.Archived(
         contractId = exercisedEvent.contractId,
-        globalKey = exercisedEvent.contractKey.map(k =>
-          Key.assertBuild(
-            exercisedEvent.templateId,
-            k.unversioned,
-            exercisedEvent.packageName,
+        globalKey = exercisedEvent.contractKey.flatMap(k =>
+          exercisedEvent.contractKeyHash.map(hash =>
+            Key.assertBuild(
+              exercisedEvent.templateId,
+              exercisedEvent.packageName,
+              k.unversioned,
+              hash,
+            )
           )
         ),
       )
@@ -479,6 +493,7 @@ private[platform] object InMemoryStateUpdater {
           contractKey = exercise.keyOpt.map(k =>
             com.digitalasset.daml.lf.transaction.Versioned(exercise.version, k.value)
           ),
+          contractKeyHash = exercise.keyOpt.map(_.globalKey.hash),
           treeEventWitnesses = blinding.disclosure.getOrElse(nodeId, Set.empty),
           flatEventWitnesses =
             if (exercise.consuming && txAccepted.isAcsDelta(exercise.targetCoid))

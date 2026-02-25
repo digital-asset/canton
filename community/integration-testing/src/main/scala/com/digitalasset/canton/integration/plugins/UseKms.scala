@@ -6,6 +6,8 @@ package com.digitalasset.canton.integration.plugins
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.parallel.*
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   ExecutorServiceExtensions,
@@ -43,6 +45,8 @@ abstract class UseKms extends EnvironmentSetupPlugin with AutoCloseable with NoT
 
   private val clock = new WallClock(timeouts, loggerFactory)
 
+  private val kmsExecutorServiceMetrics = new ExecutorServiceMetrics(NoOpMetricsFactory)
+
   protected def withKmsClient[V](
       f: Kms => EitherT[Future, KmsError, V]
   )(implicit ec: ExecutionContext): EitherT[Future, KmsError, V] =
@@ -56,6 +60,7 @@ abstract class UseKms extends EnvironmentSetupPlugin with AutoCloseable with NoT
           clock,
           loggerFactory,
           ec,
+          kmsExecutorServiceMetrics,
         )
         .toEitherT[Future]
       res <- ResourceUtil.withResourceM(kmsClient)(f)
@@ -65,6 +70,7 @@ abstract class UseKms extends EnvironmentSetupPlugin with AutoCloseable with NoT
     Threading.newExecutionContext(
       loggerFactory.threadName + "-kms-key-deletion-execution-context",
       noTracingLogger,
+      kmsExecutorServiceMetrics,
     )
 
   private def encryptedPrivateStoreConfig(reverted: Boolean) =
@@ -204,6 +210,7 @@ object UseKms {
           new WallClock(timeouts, loggerFactory),
           loggerFactory,
           ec,
+          new ExecutorServiceMetrics(NoOpMetricsFactory),
         )
         .toEitherT[Future]
       res <- ResourceUtil.withResourceM(kmsClient)(f)

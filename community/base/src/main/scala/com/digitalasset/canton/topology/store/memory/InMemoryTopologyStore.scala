@@ -428,6 +428,27 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
       _.collectOfType[TopologyChangeOp.Remove]
     )
 
+  override def findAllTransactions(
+      asOf: CantonTimestamp,
+      asOfInclusive: Boolean,
+      isProposal: Boolean,
+      types: Seq[TopologyMapping.Code],
+      filterUid: Option[NonEmpty[Seq[UniqueIdentifier]]],
+      filterNamespace: Option[NonEmpty[Seq[Namespace]]],
+      pagination: Option[(Option[UniqueIdentifier], Int)] = None,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[StoredTopologyTransactions[TopologyChangeOp, TopologyMapping]] =
+    findTransactionsInStore(
+      asOf,
+      asOfInclusive,
+      isProposal,
+      types,
+      filterUid,
+      filterNamespace,
+      pagination,
+    )
+
   private def findTransactionsInStore(
       asOf: CantonTimestamp,
       asOfInclusive: Boolean,

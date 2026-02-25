@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.p2p.grpc
 
+import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton.config.RequireTypes.Port
-import com.digitalasset.canton.config.TlsClientConfig
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}

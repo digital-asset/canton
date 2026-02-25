@@ -40,6 +40,16 @@ public class JsonLfDecodersTest {
   }
 
   @Test
+  public void testUnitWithUnknownField() throws JsonLfDecoder.Error {
+    checkReadAll(JsonLfDecoders.unit, errors("{\"x\": 1}", "Expected } but was x"));
+  }
+
+  @Test
+  public void testUnitArrayInputIsRejected() throws JsonLfDecoder.Error {
+    checkReadAll(JsonLfDecoders.unit, errors("[]", "Expected { but was ["));
+  }
+
+  @Test
   public void testBool() throws JsonLfDecoder.Error {
     checkReadAll(JsonLfDecoders.bool, eq("false", false), eq("true", true));
   }

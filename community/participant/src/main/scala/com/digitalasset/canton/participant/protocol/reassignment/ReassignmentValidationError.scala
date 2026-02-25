@@ -120,7 +120,7 @@ object ReassignmentValidationError {
       declared: Set[ParticipantId],
   ) extends ReassignmentValidationError {
     override def message: String =
-      s"For `$reassignmentRef`: reassigning participants mismatch"
+      s"For `$reassignmentRef`: reassigning participants mismatch (expected: $expected, declared: $declared)"
   }
 
   final case class AbortedDueToShutdownOut(contractId: LfContractId)

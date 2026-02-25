@@ -4,7 +4,14 @@
 package com.digitalasset.canton.config
 
 import com.daml.tls.TlsVersion.TlsVersion
-import com.daml.tls.{OcspProperties, TlsInfo, TlsVersion}
+import com.daml.tls.{
+  OcspProperties,
+  ServerAuthRequirementConfig,
+  TlsClientCertificate,
+  TlsInfo,
+  TlsServerConfig,
+  TlsVersion,
+}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder

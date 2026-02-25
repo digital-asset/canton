@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.integration.tests.sequencer.bftordering
 
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.MockedNodeParameters
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
@@ -72,6 +74,7 @@ class BftSequencerApiTest extends SequencerApiTest with RateLimitManagerTesting 
         sequencerId,
         params,
         SequencerTestMetrics,
+        new ExecutorServiceMetrics(NoOpMetricsFactory),
         loggerFactory,
         None,
       )

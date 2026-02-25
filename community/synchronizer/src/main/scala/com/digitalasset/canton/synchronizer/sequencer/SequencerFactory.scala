@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.data.EitherT
+import com.daml.metrics.ExecutorServiceMetrics
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
@@ -63,6 +64,7 @@ object SequencerMetaFactory {
       clock: Clock,
       scheduler: ScheduledExecutorService,
       metrics: SequencerMetrics,
+      executorServiceMetrics: ExecutorServiceMetrics,
       storage: Storage,
       sequencerId: SequencerId,
       nodeParameters: SequencerNodeParameters,
@@ -158,6 +160,7 @@ object SequencerMetaFactory {
           sequencerId,
           nodeParameters,
           metrics,
+          executorServiceMetrics,
           loggerFactory,
           blockSequencerConfig.testingInterceptor,
         )
