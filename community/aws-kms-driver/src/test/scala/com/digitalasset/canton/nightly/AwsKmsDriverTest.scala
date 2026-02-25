@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.nightly
 
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.KmsConfig
 import com.digitalasset.canton.crypto.kms.aws.AwsKms
@@ -46,6 +48,7 @@ class AwsKmsDriverInternalTest
         timeouts,
         loggerFactory,
         parallelExecutionContext,
+        new ExecutorServiceMetrics(NoOpMetricsFactory),
       )
       .valueOrFail("Failed to create Driver KMS")
 

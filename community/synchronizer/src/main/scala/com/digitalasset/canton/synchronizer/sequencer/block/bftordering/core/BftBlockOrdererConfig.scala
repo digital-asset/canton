@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core
 
 import com.daml.jwt.JwtTimestampLeeway
+import com.daml.tls.{TlsClientConfig, TlsServerConfig}
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
 import com.digitalasset.canton.config.{
@@ -18,8 +19,6 @@ import com.digitalasset.canton.config.{
   PemFileOrString,
   ServerConfig,
   StorageConfig,
-  TlsClientConfig,
-  TlsServerConfig,
 }
 import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.sequencing.authentication.AuthenticationTokenManagerConfig

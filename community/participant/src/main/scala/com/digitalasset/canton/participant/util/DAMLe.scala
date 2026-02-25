@@ -15,6 +15,8 @@ import com.digitalasset.canton.participant.store.ContractAndKeyLookup
 import com.digitalasset.canton.participant.util.DAMLe.*
 import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
@@ -26,8 +28,8 @@ import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
 import com.digitalasset.daml.lf.engine.{Enricher as _, *}
 import com.digitalasset.daml.lf.interpretation.Error as LfInterpretationError
-import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.language.LanguageVersion.v2_dev
+import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.transaction.{ContractStateMachine, FatContractInstance}
 import com.digitalasset.daml.lf.value.ContractIdVersion
 
@@ -118,6 +120,7 @@ object DAMLe {
         contractAuthenticator: ContractAuthenticatorFn,
         submitters: Set[LfPartyId],
         command: LfCommand,
+        topologySnapshot: TopologySnapshot,
         ledgerTime: CantonTimestamp,
         preparationTime: CantonTimestamp,
         rootSeed: Option[LfHash],
@@ -143,6 +146,7 @@ object DAMLe {
   *   The execution context where Daml interpretation and validation are execution
   */
 class DAMLe(
+    participantId: ParticipantId,
     resolvePackage: PackageResolver,
     engine: Engine,
     engineLoggingConfig: EngineLoggingConfig,
@@ -162,15 +166,18 @@ class DAMLe(
   )
   private lazy val interactiveSubmissionEnricher = new InteractiveSubmissionEnricher(
     engineForEnrichment,
-    packageId =>
-      implicit traceContext => {
-        resolvePackage(packageId)(traceContext)
+    new PackageResolver {
+      override protected def resolveInternal(
+          packageId: PackageId
+      )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[Ast.Package]] =
+        resolvePackage
+          .resolve(packageId, PackageResolver.ignoreMissingPackage)
           .thereafter {
             case Failure(ex) =>
               logger.error(s"Package resolution failed for [$packageId]", ex)
             case _ => ()
           }
-      },
+    },
   )
 
   /** Enrich transaction values by re-hydrating record labels and identifiers
@@ -197,6 +204,7 @@ class DAMLe(
       contractAuthenticator: ContractAuthenticatorFn,
       submitters: Set[LfPartyId],
       command: LfCommand,
+      topologySnapshot: TopologySnapshot,
       ledgerTime: CantonTimestamp,
       preparationTime: CantonTimestamp,
       rootSeed: Option[LfHash],
@@ -268,7 +276,14 @@ class DAMLe(
 
     for {
       txWithMetadata <- EitherT(
-        handleResult(contracts, contractAuthenticator, result, getEngineAbortStatus)
+        handleResult(
+          topologySnapshot,
+          ledgerTime,
+          contracts,
+          contractAuthenticator,
+          result,
+          getEngineAbortStatus,
+        )
       )
       (tx, metadata) = txWithMetadata
       peeledTxE = peelAwayRootLevelRollbackNode(tx).leftMap(EngineError.apply)
@@ -287,6 +302,8 @@ class DAMLe(
   def replayCreate(
       submitters: Set[LfPartyId],
       command: LfCreateCommand,
+      topologySnapshot: TopologySnapshot,
+      ledgerTime: CantonTimestamp,
       getEngineAbortStatus: GetEngineAbortStatus,
   )(implicit
       traceContext: TraceContext
@@ -305,6 +322,8 @@ class DAMLe(
       for {
         txWithMetadata <- EitherT(
           handleResult(
+            topologySnapshot,
+            ledgerTime,
             ContractAndKeyLookup.noContracts(loggerFactory),
             (_, _) => Left("Unexpected contract authenticator when replaying a create command"),
             result,
@@ -324,6 +343,8 @@ class DAMLe(
     }
 
   private[this] def handleResult[A](
+      topologySnapshot: TopologySnapshot,
+      ledgerTime: CantonTimestamp,
       contracts: ContractAndKeyLookup,
       contractAuthenticator: ContractAuthenticatorFn,
       result: Result[A],
@@ -352,13 +373,18 @@ class DAMLe(
 
       result match {
         case ResultNeedPackage(packageId, resume) =>
-          resolvePackage(packageId)(traceContext).transformWithHandledAborted {
-            case Success(pkg) =>
-              handleResultInternal(contracts, resume(pkg))
-            case Failure(ex) =>
-              logger.error(s"Package resolution failed for [$packageId]", ex)
-              FutureUnlessShutdown.failed(ex)
-          }
+          resolvePackage
+            .resolve(
+              packageId,
+              PackageResolver.crashOnMissingPackage(topologySnapshot, participantId, ledgerTime),
+            )
+            .transformWithHandledAborted {
+              case Success(pkg) =>
+                handleResultInternal(contracts, resume(pkg))
+              case Failure(ex) =>
+                logger.error(s"Package resolution failed for [$packageId]", ex)
+                FutureUnlessShutdown.failed(ex)
+            }
         case ResultDone(completedResult) => FutureUnlessShutdown.pure(Right(completedResult))
         case ResultNeedKey(key, resume) =>
           val gk = key.globalKey

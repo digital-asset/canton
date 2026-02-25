@@ -6,9 +6,9 @@ package com.digitalasset.canton.console.commands
 import com.digitalasset.canton.admin.api.client.commands.SequencerAdminCommands.{
   InitializeFromGenesisState,
   InitializeFromGenesisStateV2,
+  InitializeFromLsuPredecessor,
   InitializeFromOnboardingState,
   InitializeFromOnboardingStateV2,
-  InitializeFromSynchronizerPredecessor,
 }
 import com.digitalasset.canton.admin.api.client.commands.{GrpcAdminCommand, SequencerAdminCommands}
 import com.digitalasset.canton.admin.api.client.data.{
@@ -174,7 +174,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
   @Help.Summary(
     "Initialize a sequencer for the logical upgrade from the state of its predecessor"
   )
-  def initialize_from_synchronizer_predecessor(
+  def initialize_from_lsu_predecessor(
       predecessorState: ByteString,
       synchronizerParameters: StaticSynchronizerParameters,
       waitForReady: Boolean = true,
@@ -183,7 +183,7 @@ class SequencerAdministration(node: SequencerReference) extends ConsoleCommandGr
 
     consoleEnvironment.run {
       runner.adminCommand(
-        InitializeFromSynchronizerPredecessor(
+        InitializeFromLsuPredecessor(
           predecessorState,
           synchronizerParameters.toInternal,
         )

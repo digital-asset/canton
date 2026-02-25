@@ -12,6 +12,7 @@ import com.digitalasset.canton.protocol.ExampleTransactionFactory.{
 import com.digitalasset.canton.protocol.{ExampleContractFactory, LfGlobalKey, LfTemplateId}
 import com.digitalasset.canton.util.LfTransactionBuilder.defaultPackageName
 import com.digitalasset.canton.{BaseTest, LfPackageId}
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.transaction.test.TestIdFactory
 import com.digitalasset.daml.lf.transaction.test.TreeTransactionBuilder.{
   NodeOps,
@@ -34,8 +35,9 @@ class InputContractPackagesTest extends AnyWordSpec with BaseTest with TestIdFac
 
       val globalKey = LfGlobalKey.assertBuild(
         t(p2),
-        Value.ValueUnit,
         defaultPackageName,
+        Value.ValueUnit,
+        crypto.Hash.hashPrivateKey("dummy-key-hash"),
       )
 
       val example = toVersionedTransaction(

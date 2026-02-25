@@ -5,9 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.crypto.Signature.noSignature
-import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftKeyId,
   BftNodeId,
@@ -20,6 +18,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   OrderingTopology,
   SequencingParameters,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -136,9 +135,7 @@ class DisseminationProtocolStateTest
 
 object DisseminationProtocolStateTest {
 
-  private val AnActivationTime: TopologyActivationTime = TopologyActivationTime(
-    CantonTimestamp.MinValue
-  )
+  private val AnActivationTime = TestBootstrapTopologyActivationTime
 
   private val SomeStats = OrderingRequestBatchStats(0, 0)
   private val AnEpochNumber = EpochNumber.First

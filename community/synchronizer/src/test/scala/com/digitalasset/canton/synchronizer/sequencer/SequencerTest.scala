@@ -16,7 +16,7 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.protocol.messages.{EnvelopeContent, UnsignedProtocolMessage}
-import com.digitalasset.canton.protocol.v30
+import com.digitalasset.canton.protocol.{v30, v31}
 import com.digitalasset.canton.resource.MemoryStorage
 import com.digitalasset.canton.sequencing.SequencedSerializedEvent
 import com.digitalasset.canton.sequencing.client.RequestSigner
@@ -202,6 +202,9 @@ class SequencerTest
 
     override def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent =
       v30.EnvelopeContent.SomeEnvelopeContent.Empty
+
+    override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
+      v31.EnvelopeContent.SomeEnvelopeContent.Empty
 
     override def productElement(n: Int): Any = fail("shouldn't be used")
     override def productArity: Int = fail("shouldn't be used")

@@ -395,7 +395,6 @@ object ConfigTransforms {
         .replace(config.NonNegativeFiniteDuration.ofDays(10000))
     )
 
-    // TODO(#30068): Enable session keys after sim clock advances are synced
     val disableSessionKeys =
       ConfigTransforms.setSessionSigningKeys(SessionSigningKeysConfig.disabled)
 

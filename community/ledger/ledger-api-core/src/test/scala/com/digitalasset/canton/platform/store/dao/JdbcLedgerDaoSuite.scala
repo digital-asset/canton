@@ -12,6 +12,7 @@ import com.digitalasset.canton.protocol.{ExampleContractFactory, TestUpdateId}
 import com.digitalasset.canton.testing.utils.TestModels
 import com.digitalasset.canton.util.JarResourceUtils
 import com.digitalasset.daml.lf.archive.{DamlLf, DarParser, Decode}
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.{
   Identifier,
@@ -369,7 +370,13 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
       maintainers: Set[Party]
   ): GlobalKeyWithMaintainers = {
     val aTextValue = ValueText(scala.util.Random.nextString(10))
-    GlobalKeyWithMaintainers.assertBuild(someTemplateId, aTextValue, maintainers, somePackageName)
+    GlobalKeyWithMaintainers.assertBuild(
+      someTemplateId,
+      aTextValue,
+      crypto.Hash.hashPrivateKey(aTextValue.toString),
+      maintainers,
+      somePackageName,
+    )
   }
 
   protected final def createAndStoreContract(
@@ -683,7 +690,13 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
         stakeholders = Set(party),
         key = Some(
           GlobalKeyWithMaintainers
-            .assertBuild(someTemplateId, someContractKey(party, key), Set(party), somePackageName)
+            .assertBuild(
+              someTemplateId,
+              someContractKey(party, key),
+              crypto.Hash.hashPrivateKey(key),
+              Set(party),
+              somePackageName,
+            )
         ),
       )
     )
@@ -725,10 +738,17 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
         choiceAuthorizers = None,
         children = ImmArray.Empty,
         exerciseResult = Some(LfValue.ValueUnit),
-        keyOpt = maybeKey.map(k =>
+        keyOpt = maybeKey.map { k =>
+          val keyValue = someContractKey(party, k)
           GlobalKeyWithMaintainers
-            .assertBuild(someTemplateId, someContractKey(party, k), Set(party), somePackageName)
-        ),
+            .assertBuild(
+              someTemplateId,
+              keyValue,
+              crypto.Hash.hashPrivateKey(keyValue.toString),
+              Set(party),
+              somePackageName,
+            )
+        },
         byKey = false,
         version = txVersion,
       )
@@ -754,12 +774,19 @@ private[dao] trait JdbcLedgerDaoSuite extends JdbcLedgerDaoBackend with OptionVa
       result: Option[ContractId],
   ): (Offset, LedgerEntry.Transaction) = {
     val txBuilder = newBuilder()
+    val keyValue = someContractKey(party, key)
     val lookupByKeyNodeId = txBuilder.add(
       Node.LookupByKey(
         templateId = someTemplateId,
         packageName = somePackageName,
         key = GlobalKeyWithMaintainers
-          .assertBuild(someTemplateId, someContractKey(party, key), Set(party), somePackageName),
+          .assertBuild(
+            someTemplateId,
+            keyValue,
+            crypto.Hash.hashPrivateKey(keyValue.toString),
+            Set(party),
+            somePackageName,
+          ),
         result = result,
         version = txVersion,
       )

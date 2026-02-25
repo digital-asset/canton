@@ -71,7 +71,7 @@ trait GzipCompressionTests extends AnyWordSpec with BaseTest {
       (
         "bad prefix",
         "1f8a08000000000000004b4ca41a0000a0ec9d324b000000",
-        "Input is not in the .gz format.",
+        "Input is not in the .gz format",
       ),
       (
         "bad compression method",
@@ -81,12 +81,12 @@ trait GzipCompressionTests extends AnyWordSpec with BaseTest {
       (
         "bad flags",
         "1f8a08080000000000004b4ca41a0000a0ec9d324b000000",
-        "Input is not in the .gz format.",
+        "Input is not in the .gz format",
       ),
       (
         "bad block length",
         "1f8b080000000000000002000000000000000000",
-        "Gzip-compressed data is corrupt.",
+        "Gzip-compressed data is corrupt",
       ),
       (
         "truncated",

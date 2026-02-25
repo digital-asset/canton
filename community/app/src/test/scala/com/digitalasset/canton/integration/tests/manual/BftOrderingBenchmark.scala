@@ -126,6 +126,16 @@ class BftOrderingBenchmark
     )
       .map(_.toInt)
 
+  private val pruningRetentionPeriod: FiniteDuration =
+    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.pruning-retention-period"))
+      .map(Duration(_).asInstanceOf[FiniteDuration])
+      .getOrElse(5.minutes)
+
+  private val pruningMinBlocksToKeepHistory: Int =
+    Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.pruning-min-blocks-of-history"))
+      .map(_.toInt)
+      .getOrElse(500)
+
   private val useInMemoryStorageForBftOrderer: Boolean =
     Option(System.getProperty(s"$BFTOrderingBenchmarkPrefix.use-in-memory-storage"))
       .exists(_.toBoolean)
@@ -321,6 +331,15 @@ class BftOrderingBenchmark
       _.runningToxiproxy.controllingToxiproxyClient.getProxies.forEach(addToxics)
     )
     mediators.local.foreach(_.stop())
+    sequencers.local.foreach {
+      _.bft.pruning
+        .set_bft_schedule(
+          cron = "0 * * * * ?",
+          maxDuration = 15.seconds,
+          retention = pruningRetentionPeriod,
+          minBlocksToKeep = pruningMinBlocksToKeepHistory,
+        )
+    }
 
     // Use a high timeout to allow many nodes in performance testing environments
 

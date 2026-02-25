@@ -529,11 +529,26 @@ abstract class UpgradeTest extends AnyFreeSpec with Matchers with TableDrivenPro
       ValueInt64(100),
     )
 
+  val commonKeyValue = ValueParty(alice)
+  val commonKeyHash = crypto.Hash.hashPrivateKey(alice)
+
   val v1_key =
-    GlobalKeyWithMaintainers.assertBuild(i"'-pkg1-':M:T", ValueParty(alice), Set(alice), pkgName)
+    GlobalKeyWithMaintainers.assertBuild(
+      i"'-pkg1-':M:T",
+      commonKeyValue,
+      commonKeyHash,
+      Set(alice),
+      pkgName,
+    )
 
   val v2_key =
-    GlobalKeyWithMaintainers.assertBuild(i"'-pkg2-':M:T", ValueParty(alice), Set(alice), pkgName)
+    GlobalKeyWithMaintainers.assertBuild(
+      i"'-pkg2-':M:T",
+      commonKeyValue,
+      commonKeyHash,
+      Set(alice),
+      pkgName,
+    )
 
   "upgrade attempted" - {
 
@@ -548,6 +563,7 @@ abstract class UpgradeTest extends AnyFreeSpec with Matchers with TableDrivenPro
       val v_missingFieldKey = GlobalKeyWithMaintainers.assertBuild(
         i"'-pkg2-':M:T",
         ValueParty(alice),
+        crypto.Hash.hashPrivateKey(alice),
         Set(alice),
         pkgName,
       )
@@ -607,6 +623,7 @@ abstract class UpgradeTest extends AnyFreeSpec with Matchers with TableDrivenPro
       val v_missingFieldKey = GlobalKeyWithMaintainers.assertBuild(
         i"'-pkg1-':M:T",
         ValueParty(alice),
+        crypto.Hash.hashPrivateKey(alice),
         Set(alice),
         pkgName,
       )
@@ -665,6 +682,7 @@ abstract class UpgradeTest extends AnyFreeSpec with Matchers with TableDrivenPro
       def key(templateId: Ref.TypeConId) = GlobalKeyWithMaintainers.assertBuild(
         templateId,
         ValueParty(alice),
+        crypto.Hash.hashPrivateKey(alice),
         Set(alice),
         pkgName,
       )
@@ -879,6 +897,7 @@ abstract class UpgradeTest extends AnyFreeSpec with Matchers with TableDrivenPro
       val v1_extraTextKey = GlobalKeyWithMaintainers.assertBuild(
         i"'-pkg1-':M:T",
         ValueParty(alice),
+        crypto.Hash.hashPrivateKey(alice),
         Set(alice),
         pkgName,
       )
@@ -940,6 +959,7 @@ abstract class UpgradeTest extends AnyFreeSpec with Matchers with TableDrivenPro
       val v1_extraSomeKey = GlobalKeyWithMaintainers.assertBuild(
         i"'-pkg3-':M:T",
         ValueParty(alice),
+        crypto.Hash.hashPrivateKey(alice),
         Set(alice),
         pkgName,
       )
@@ -1013,6 +1033,7 @@ abstract class UpgradeTest extends AnyFreeSpec with Matchers with TableDrivenPro
       val v1_extraNoneKey = GlobalKeyWithMaintainers.assertBuild(
         i"'-pkg3-':M:T",
         ValueParty(alice),
+        crypto.Hash.hashPrivateKey(alice),
         Set(alice),
         pkgName,
       )
@@ -1066,6 +1087,7 @@ abstract class UpgradeTest extends AnyFreeSpec with Matchers with TableDrivenPro
       val v1_extraNoneKey = GlobalKeyWithMaintainers.assertBuild(
         i"'-pkg3-':M:T",
         ValueParty(alice),
+        crypto.Hash.hashPrivateKey(alice),
         Set(alice),
         pkgName,
       )

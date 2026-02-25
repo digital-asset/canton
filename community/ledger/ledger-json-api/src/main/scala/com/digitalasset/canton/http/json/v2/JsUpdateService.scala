@@ -31,6 +31,7 @@ import com.digitalasset.canton.http.json.v2.JsSchema.{
   JsReassignment,
   JsTransaction,
   JsTransactionTree,
+  OneOfSchemaExtension,
 }
 import com.digitalasset.canton.http.json.v2.JsUpdateServiceConverters.toUpdateFormat
 import com.digitalasset.canton.http.json.v2.LegacyDTOs.toTransactionTree
@@ -683,10 +684,12 @@ object JsUpdateServiceCodecs {
     Schema.derived.name(Some(SName("JsTopologyTransaction")))
 
   @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
-  implicit val jsUpdateSchema: Schema[JsUpdate.Update] = Schema.oneOfWrapped
+  implicit val jsUpdateSchema: Schema[JsUpdate.Update] =
+    Schema.oneOfWrapped[JsUpdate.Update].oneOfExtension()
 
   @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
-  implicit val jsUpdateTreeSchema: Schema[JsUpdateTree.Update] = Schema.oneOfWrapped
+  implicit val jsUpdateTreeSchema: Schema[JsUpdateTree.Update] =
+    Schema.oneOfWrapped[JsUpdateTree.Update].oneOfExtension()
 
 }
 

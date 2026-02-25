@@ -99,7 +99,8 @@ class ModelConformanceCheckerTest
     "ModelConformanceExamples-1.0.0.dar"
   )
   private val testEngine = new TestEngine(Seq(CantonExamplesPath, modelConformanceExamplesPath))
-  private val contractHasher = ContractHasher(testEngine.engine, testEngine.packageResolver)
+  private val contractHasher =
+    ContractHasher(testEngine.engine, testEngine.packageResolver)
   private val transactionTreeFactory: TransactionTreeFactory =
     TransactionConfirmationRequestFactory(
       participantId,
@@ -169,6 +170,7 @@ class ModelConformanceCheckerTest
       engine = testEngine.engine,
       engineLoggingConfig = EngineLoggingConfig(),
       loggerFactory = loggerFactory,
+      participantId = participantId,
     )
 
     ModelConformanceChecker(
@@ -819,6 +821,7 @@ class ModelConformanceCheckerTest
                 preparationTime = fullTransactionViewTree.preparationTime,
                 resolverFromView = keyResolver,
                 getEngineAbortStatus = getEngineAbortStatus,
+                topologySnapshot = topologySnapshot,
               )
           }
         )

@@ -10,7 +10,10 @@ import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.HasDelayedInit
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStore
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.{
+  Bootstrap,
+  EpochStore,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.retransmissions.RetransmissionsManager
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   EpochLength,
@@ -139,8 +142,15 @@ final class PreIssConsensusModule[E <: Env[E]](
         epochStore.latestEpoch(includeInProgress = true),
       )
     ) {
-      case scala.util.Success(latestCompletedEpoch -> latestEpoch) =>
-        Some(Consensus.Init.LatestEpochsLoaded(latestCompletedEpoch, latestEpoch))
+      case scala.util.Success(latestCompletedEpochO -> latestEpochO) =>
+        val bootstrapTopologyActivationTime = bootstrapTopologyInfo.currentTopology.activationTime
+        val bootstrapEpoch = Bootstrap.bootstrapEpoch(bootstrapTopologyActivationTime)
+        Some(
+          Consensus.Init.LatestEpochsLoaded(
+            latestCompletedEpochO.getOrElse(bootstrapEpoch),
+            latestEpochO.getOrElse(bootstrapEpoch),
+          )
+        )
       case scala.util.Failure(exception) =>
         abort(s"Failed to load latest epochs from store: ${exception.getMessage}")
     }

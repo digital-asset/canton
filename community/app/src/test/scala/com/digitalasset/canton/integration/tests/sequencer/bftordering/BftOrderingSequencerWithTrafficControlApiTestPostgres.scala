@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.integration.tests.sequencer.bftordering
 
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.integration.tests.sequencer.reference.ReferenceSequencerWithTrafficControlApiTestBase
@@ -70,6 +72,7 @@ class BftOrderingSequencerWithTrafficControlApiTestPostgres
       sequencerId,
       params,
       sequencerMetrics,
+      new ExecutorServiceMetrics(NoOpMetricsFactory),
       loggerFactory,
       None,
     ) {

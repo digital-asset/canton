@@ -16,6 +16,9 @@ import com.digitalasset.canton.participant.protocol.EngineController.{
 import com.digitalasset.canton.participant.store.{ContractAndKeyLookup, ExtendedContractLookup}
 import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
 import com.digitalasset.canton.protocol.*
+import com.digitalasset.canton.topology.DefaultTestIdentities
+import com.digitalasset.canton.topology.client.TopologySnapshot
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.TestEngine
@@ -27,8 +30,9 @@ import com.digitalasset.canton.{
   LfCommand,
   LfPartyId,
 }
-import com.digitalasset.daml.lf.data.Ref.Party
+import com.digitalasset.daml.lf.data.Ref.{PackageId, Party}
 import com.digitalasset.daml.lf.engine
+import com.digitalasset.daml.lf.language.Ast
 import org.scalatest.wordspec.AsyncWordSpec
 
 class DAMLeTest
@@ -46,10 +50,15 @@ class DAMLeTest
     val testEngine =
       new TestEngine(packagePaths = Seq(CantonExamplesPath), iterationsBetweenInterruptions = 10)
 
-    val packageResolver: PackageResolver =
-      packageId => _ => FutureUnlessShutdown.pure(testEngine.packageStore.getPackage(packageId))
+    val packageResolver: PackageResolver = new PackageResolver {
+      override protected def resolveInternal(packageId: PackageId)(implicit
+          traceContext: TraceContext
+      ): FutureUnlessShutdown[Option[Ast.Package]] =
+        FutureUnlessShutdown.pure(testEngine.packageStore.getPackage(packageId))
+    }
 
     val damlE = new DAMLe(
+      DefaultTestIdentities.participant1,
       packageResolver,
       DAMLe.newEngine(
         enableLfDev = false,
@@ -78,6 +87,7 @@ class DAMLeTest
           contractAuthenticator = contractAuthenticator,
           submitters = submitters,
           command = command,
+          topologySnapshot = mock[TopologySnapshot],
           ledgerTime = CantonTimestamp.now(),
           preparationTime = CantonTimestamp.now(),
           rootSeed = Some(rootSeed),

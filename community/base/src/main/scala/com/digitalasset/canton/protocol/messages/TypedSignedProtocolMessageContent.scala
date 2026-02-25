@@ -36,7 +36,7 @@ case class TypedSignedProtocolMessageContent[+M <: SignedProtocolMessageContent]
 
   private def toProtoV30: v30.TypedSignedProtocolMessageContent =
     v30.TypedSignedProtocolMessageContent(
-      someSignedProtocolMessage = content.toProtoTypedSomeSignedProtocolMessage
+      someSignedProtocolMessage = content.toProtoTypedSomeSignedProtocolMessageV30
     )
 
   @VisibleForTesting

@@ -8,15 +8,15 @@ import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.logging.LoggingContextOf
 import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
 import com.daml.ports.{Port, PortFiles}
-import com.daml.tls.TlsVersion
-import com.digitalasset.canton.auth.AuthInterceptor
-import com.digitalasset.canton.config.{
-  ApiLoggingConfig,
+import com.daml.tls.{
   ServerAuthRequirementConfig,
   TlsClientCertificate,
   TlsClientConfig,
   TlsServerConfig,
+  TlsVersion,
 }
+import com.digitalasset.canton.auth.AuthInterceptor
+import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.http.HttpService.HttpServiceHandle
 import com.digitalasset.canton.http.json.v2.V2Routes
 import com.digitalasset.canton.http.metrics.{HttpApiMetrics, HttpMetricsInterceptor}

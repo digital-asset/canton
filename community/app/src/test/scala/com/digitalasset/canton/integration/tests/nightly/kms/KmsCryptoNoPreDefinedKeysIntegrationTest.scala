@@ -5,6 +5,8 @@ package com.digitalasset.canton.integration.tests.nightly.kms
 
 import cats.data.EitherT
 import cats.syntax.parallel.*
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.concurrent.{ExecutionContextIdlenessExecutorService, Threading}
 import com.digitalasset.canton.config.DefaultProcessingTimeouts.shutdownProcessing
 import com.digitalasset.canton.config.KmsConfig
@@ -35,6 +37,7 @@ trait KmsCryptoNoPreDefinedKeysIntegrationTest extends KmsCryptoIntegrationTestB
     Threading.newExecutionContext(
       loggerFactory.threadName + "-kms-init-keys-deletion-execution-context",
       noTracingLogger,
+      new ExecutorServiceMetrics(NoOpMetricsFactory),
     )
 
   private def deleteKeys(

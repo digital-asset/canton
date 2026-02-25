@@ -25,12 +25,7 @@ class TrafficControlSequencerAdministrationGroup(
     runner: AdminCommandRunner,
     override val consoleEnvironment: ConsoleEnvironment,
     override val loggerFactory: NamedLoggerFactory,
-) extends TrafficControlAdministrationGroup(
-      runner,
-      consoleEnvironment,
-      loggerFactory,
-    )
-    with Helpful
+) extends Helpful
     with FeatureFlagFilter {
 
   @Help.Summary("Return the traffic state of the given members")

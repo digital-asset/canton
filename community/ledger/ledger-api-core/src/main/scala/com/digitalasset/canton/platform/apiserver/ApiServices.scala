@@ -42,7 +42,9 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.daml.lf.data.Ref
+import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.engine.*
+import com.digitalasset.daml.lf.language.Ast
 import io.grpc.BindableService
 import io.grpc.protobuf.services.ProtoReflectionServiceV1
 import io.opentelemetry.api.trace.Tracer
@@ -262,15 +264,18 @@ object ApiServices {
 
       val packageLoader = new DeduplicatingPackageLoader()
 
-      val packageResolver: PackageResolver = (packageId: Ref.PackageId) =>
-        (tc: TraceContext) =>
+      val packageResolver: PackageResolver = new PackageResolver {
+        override protected def resolveInternal(
+            packageId: PackageId
+        )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[Ast.Package]] =
           FutureUnlessShutdown.outcomeF(
             packageLoader.loadPackage(
               packageId,
-              syncService.getLfArchive(_)(tc),
+              syncService.getLfArchive(_),
               metrics.execution.getLfPackage,
             )
           )
+      }
 
       val commandInterpreter =
         new StoreBackedCommandInterpreter(

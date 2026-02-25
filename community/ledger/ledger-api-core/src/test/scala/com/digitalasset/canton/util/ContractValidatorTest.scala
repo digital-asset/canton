@@ -16,6 +16,7 @@ import com.digitalasset.canton.{
   LfPackageName,
   LfPartyId,
 }
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.CreationTime.CreatedAt
 import com.digitalasset.daml.lf.transaction.{CreationTime, FatContractInstance, Versioned}
@@ -256,8 +257,9 @@ class ContractValidatorTest
             val changeKey = keyWithMaintainers.copy(globalKey =
               LfGlobalKey.assertBuild(
                 contractInstanceWithKey.templateId,
-                ValueText("changed"),
                 contractInstanceWithKey.inst.packageName,
+                ValueText("changed"),
+                crypto.Hash.hashPrivateKey("dummy-key-hash"),
               )
             )
             val invalid: FatContractInstance = ExampleContractFactory

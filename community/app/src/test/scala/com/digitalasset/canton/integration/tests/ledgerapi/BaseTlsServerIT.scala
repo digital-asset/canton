@@ -4,17 +4,11 @@
 package com.digitalasset.canton.integration.tests.ledgerapi
 
 import com.daml.ledger.api.v2.state_service.GetLedgerEndResponse
-import com.daml.tls.TlsVersion
 import com.daml.tls.TlsVersion.TlsVersion
+import com.daml.tls.{TlsClientCertificate, TlsClientConfig, TlsServerConfig, TlsVersion}
 import com.digitalasset.canton.config.AuthServiceConfig.Wildcard
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
-import com.digitalasset.canton.config.{
-  CantonConfig,
-  PemFile,
-  TlsClientCertificate,
-  TlsClientConfig,
-  TlsServerConfig,
-}
+import com.digitalasset.canton.config.{CantonConfig, PemFile}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.fixture.CantonFixture
 import com.digitalasset.canton.integration.{

@@ -8,11 +8,12 @@ import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
-import com.digitalasset.canton.checkedToByteString
 import com.digitalasset.canton.crypto.{HashOps, Signature, SignatureCheckError, SyncCryptoApi}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.Pretty
 import com.digitalasset.canton.protocol.messages.{
+  AcsCommitment,
+  AcsCommitmentProtocolMessage,
   DefaultOpenEnvelope,
   EnvelopeContent,
   ProtocolMessage,
@@ -36,6 +37,7 @@ import com.digitalasset.canton.version.{
   VersionedProtoCodec,
   VersioningCompanion,
 }
+import com.digitalasset.canton.{ProtoDeserializationError, checkedToByteString}
 import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
 
@@ -52,7 +54,7 @@ import scala.concurrent.ExecutionContext
 final case class ClosedUncompressedEnvelope private[protocol] (
     override val bytes: ByteString,
     override val recipients: Recipients,
-    val signatures: Seq[Signature],
+    signatures: Seq[Signature],
 )(
     override val representativeProtocolVersion: RepresentativeProtocolVersion[
       ClosedUncompressedEnvelope.type
@@ -68,12 +70,6 @@ final case class ClosedUncompressedEnvelope private[protocol] (
       protocolVersion: ProtocolVersion,
   ): ParsingResult[DefaultOpenEnvelope] =
     NonEmpty.from(signatures) match {
-      case None =>
-        EnvelopeContent
-          .fromByteString(hashOps, protocolVersion)(bytes)
-          .map { envelopeContent =>
-            OpenEnvelope(envelopeContent.message, recipients)(protocolVersion)
-          }
       case Some(signaturesNE) =>
         TypedSignedProtocolMessageContent
           .fromByteStringPVV(ProtocolVersionValidation.PV(protocolVersion), bytes)
@@ -82,6 +78,39 @@ final case class ClosedUncompressedEnvelope private[protocol] (
               SignedProtocolMessage(typedMessage, signaturesNE),
               recipients,
             )(protocolVersion)
+          }
+      case None =>
+        EnvelopeContent
+          .fromByteString(hashOps, protocolVersion)(bytes)
+          .flatMap { envelopeContent =>
+            envelopeContent.message match {
+              case AcsCommitmentProtocolMessage(acsCommitment, signatures)
+                  if protocolVersion >= ProtocolVersion.v35 =>
+                Right(
+                  OpenEnvelope(
+                    SignedProtocolMessage(
+                      TypedSignedProtocolMessageContent(acsCommitment),
+                      signatures,
+                    ),
+                    recipients,
+                  )(protocolVersion)
+                )
+              case internal: AcsCommitmentProtocolMessage
+                  if protocolVersion < ProtocolVersion.v35 =>
+                Left(
+                  ProtoDeserializationError.OtherError(
+                    s"Unexpected type inside envelope: ${internal.showType}. This type should only be used with " +
+                      s"protocol version ${ProtocolVersion.v35} or higher."
+                  )
+                )
+              case _ =>
+                Right(
+                  OpenEnvelope(
+                    envelopeContent.message,
+                    recipients,
+                  )(protocolVersion)
+                )
+            }
           }
     }
 
@@ -176,18 +205,15 @@ object ClosedUncompressedEnvelope extends VersioningCompanion[ClosedUncompressed
     } yield closedEnvelope
   }
 
-  def fromProtocolMessage(
+  def tryFromProtocolMessage(
       protocolMessage: ProtocolMessage,
       recipients: Recipients,
       protocolVersion: ProtocolVersion,
   ): ClosedUncompressedEnvelope =
     protocolMessage match {
-      case SignedProtocolMessage(typedMessageContent, signatures) =>
-        ClosedUncompressedEnvelope.create(
-          typedMessageContent.toByteString,
-          recipients,
-          signatures,
-          protocolVersion,
+      case internal: AcsCommitmentProtocolMessage =>
+        throw new IllegalStateException(
+          s"You cannot have envelopes containing internal types such as ${internal.showType}."
         )
       case unsignedProtocolMessage: UnsignedProtocolMessage =>
         ClosedUncompressedEnvelope.create(
@@ -196,6 +222,26 @@ object ClosedUncompressedEnvelope extends VersioningCompanion[ClosedUncompressed
           Seq.empty,
           protocolVersion,
         )
+      case SignedProtocolMessage(typedMessage, signatures) =>
+        typedMessage.content match {
+          case acsCommitment: AcsCommitment if protocolVersion >= ProtocolVersion.v35 =>
+            ClosedUncompressedEnvelope.create(
+              EnvelopeContent(
+                AcsCommitmentProtocolMessage(acsCommitment, signatures),
+                protocolVersion,
+              ).toByteString,
+              recipients,
+              Seq.empty,
+              protocolVersion,
+            )
+          case _ =>
+            ClosedUncompressedEnvelope.create(
+              typedMessage.toByteString,
+              recipients,
+              signatures,
+              protocolVersion,
+            )
+        }
     }
 
   def create(

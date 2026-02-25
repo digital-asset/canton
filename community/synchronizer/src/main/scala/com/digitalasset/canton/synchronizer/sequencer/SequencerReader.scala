@@ -31,10 +31,7 @@ import com.digitalasset.canton.sequencing.{GroupAddressResolver, SequencedSerial
 import com.digitalasset.canton.store.SequencedEventStore.SequencedEventWithTraceContext
 import com.digitalasset.canton.store.db.DbDeserializationException
 import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
-import com.digitalasset.canton.synchronizer.sequencer.SequencerReader.{
-  OngoingSynchronizerUpgrade,
-  ReadState,
-}
+import com.digitalasset.canton.synchronizer.sequencer.SequencerReader.{AnnouncedLsu, ReadState}
 import com.digitalasset.canton.synchronizer.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.synchronizer.sequencer.store.*
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -124,23 +121,22 @@ class SequencerReader(
   private val psid = syncCryptoApi.psid
   private val protocolVersion: ProtocolVersion = psid.protocolVersion
 
-  private val ongoingSynchronizerUpgrade: AtomicReference[Option[OngoingSynchronizerUpgrade]] =
+  private val announcedLsu: AtomicReference[Option[AnnouncedLsu]] =
     new AtomicReference(None)
 
-  def updateSynchronizerSuccessor(
+  def updateLsuSuccessor(
       successorO: Option[SynchronizerSuccessor],
       announcementEffectiveTime: EffectiveTime,
   )(implicit traceContext: TraceContext): Unit = {
     logger.info(
-      s"Updating synchronizer upgrade information, setting new successor from ${ongoingSynchronizerUpgrade
-          .get()} to $successorO"
+      s"Updating LSU information, setting new successor from ${announcedLsu.get()} to $successorO"
     )
     successorO match {
       case Some(successor) =>
-        ongoingSynchronizerUpgrade.set(
-          Some(OngoingSynchronizerUpgrade(successor, announcementEffectiveTime, loggerFactory))
+        announcedLsu.set(
+          Some(AnnouncedLsu(successor, announcementEffectiveTime, loggerFactory))
         )
-      case None => ongoingSynchronizerUpgrade.set(None)
+      case None => announcedLsu.set(None)
     }
   }
 
@@ -386,7 +382,7 @@ class SequencerReader(
       }
     }
 
-    def latestTopologyClientTimestampAfter(
+    private def latestTopologyClientTimestampAfter(
         topologyClientTimestampBefore: Option[CantonTimestamp],
         event: Sequenced[?],
     ): Option[CantonTimestamp] = {
@@ -792,7 +788,7 @@ class SequencerReader(
           val groupRecipients = batch.allRecipients.collect { case x: GroupRecipient =>
             x
           }
-          val synchronizerUpgradeO = ongoingSynchronizerUpgrade.get()
+          val synchronizerUpgradeO = announcedLsu.get()
           for {
             topologySnapshot <- topologySnapshotO.fold(
               SyncCryptoClient
@@ -813,7 +809,7 @@ class SequencerReader(
               val otherGroupsToMembers =
                 // An optimization to resolve others only when necessary
                 if (groupRecipients.exists(_ != AllMembersOfSynchronizer)) {
-                  GroupAddressResolver.resolveMediatorGroupsAndSequencerToMembers(
+                  GroupAddressResolver.resolveMediatorAndSequencerGroupRecipients(
                     groupRecipients,
                     topologySnapshot,
                   )
@@ -981,7 +977,7 @@ object SequencerReader {
       eventTraceContext: TraceContext,
   )
 
-  private[sequencer] final case class OngoingSynchronizerUpgrade(
+  private[sequencer] final case class AnnouncedLsu(
       successor: SynchronizerSuccessor,
       announcementEffectiveTime: EffectiveTime,
       override val loggerFactory: NamedLoggerFactory,

@@ -53,27 +53,6 @@ For external parties, changes to the party's topology must be explicitly authori
 a signature of the external party's namespace key.
 Whenever in the how-to authorization from the party is required, the distinction will be
 made between *local* and *external* parties.
-The procedure for external parties will refer to an abstract function authorizing updates
-to the party's party-to-participant mapping:
-
-.. code-block:: Python
-
-    class HostingParticipant:
-        participant_uid: str
-        permission: Enums.ParticipantPermission
-
-    def update_external_party_hosting(
-        party_id: str,
-        synchronizer_id: str,
-        confirming_threshold: int,
-        hosting_participants_add_or_update: [HostingParticipant]
-    )
-
-An example implementation of this function is given in the
-:externalref:`external party onboarding documentation <external_party_offline_replication>`.
-The implementation additionally takes the private key of the party's namespace and a gRPC
-channel connected to the admin API of one of the party's confirming nodes.
-Those have been omitted in the function declared above for conciseness.
 
 When the ``source`` participant is used in this how-to for actions other than authorizing
 topology changes, one of the existing confirming participants of the external party must be used.
@@ -159,7 +138,7 @@ The following demonstrates these steps using two participants:
     namespace, but it is not a requirement.
 
     Alternatively, you can create the party in its own dedicated
-    :externalref:`namespace<topology-namespaces>`, or create an :externalref:`external party <tutorial_onboard_external_party>`.
+    :externalref:`namespace<topology-namespaces>`, or create an :externalref:`external party <tutorial_onboard_external_party_lapi>`.
 
 
 2. Vet packages
@@ -205,14 +184,11 @@ Authorize hosting update on the source participant
 
     .. group-tab:: External Party
 
-        The :externalref:`onboarding process <external_party_onboarding_transactions>`
-        for external parties demonstrates how to declare the hosting relationship of the
-        party during the creation of the party, including hosting on multiple nodes
-        (multi-hosted external party). Unlike local parties who are always first hosted on
+        Unlike local parties who are always first hosted on
         a single node, and therefore always need to amend their party-to-participant
         mapping after the fact to be multi-hosted, external parties can do this in one
         step during the onboarding process.
-        See :externalref:`onboarding process <external_party_multi_hosting>` for more details.
+        See :externalref:`onboarding process <tutorial_onboard_external_multi_hosted>` for more details.
 
 
 Authorize hosting update on the target participant
@@ -362,6 +338,12 @@ These are the steps, which you must perform in **the exact order** they are list
     This documentation provides a guide. Your environment may require
     adjustments. Test thoroughly in a test environment before production use.
 
+External parties
+^^^^^^^^^^^^^^^^
+
+For demonstration purposes, we will authorize topology transactions on behalf of external parties using a private ED25519
+key in the DER format available on disk called ``private_key.der``.
+This is NOT a secure way to store private keys. Real world deployment must secure private keys (using a KMS for example).
 
 Scenario description
 ^^^^^^^^^^^^^^^^^^^^
@@ -393,6 +375,7 @@ The ``source`` can be any participant already hosting the party.
     .. success:: val target = participant2
     .. hidden:: participants.all.synchronizers.connect_local(sequencer1, "mysynchronizer")
     .. success:: val alice = source.parties.enable("Alice", synchronizer = Some("mysynchronizer")) // This command creates a local party. For external parties see the external party onboarding documentation (link found above in this page)
+    .. hidden:: val localAlice = alice
     .. hidden:: source.ledger_api.javaapi.commands.submit(
          Seq(alice),
          new Ping(
@@ -405,6 +388,12 @@ The ``source`` can be any participant already hosting the party.
     .. hidden:: source.pruning.set_schedule("0 0 20 * * ?", 2.hours, 30.days)
     .. hidden:: source.dars.upload("dars/CantonExamples.dar")
 
+..
+    Note: The following is a "macro" snippet that gets replaced with the content of allocateExternalParty.rst.macro
+           It allocates an external party and makes its PartyId available in a "externalParty" value in the console.
+           The whole allocation is "hidden" as in does not show up in the final RST file.
+
+.. snippet(allocateExternalParty):: offline_party_replication
 
 1. Vet packages
 ^^^^^^^^^^^^^^^
@@ -476,9 +465,16 @@ participant permission (*observation* in this example).
     Please ensure the onboarding flag is set with ``requiresPartyToBeOnboarded = true``.
 
 .. snippet:: offline_party_replication
-    .. success:: target.topology.party_to_participant_mappings
+    .. success:: val proposal = target.topology.party_to_participant_mappings
         .propose_delta(
           party = alice,
+          adds = Seq((target.id, ParticipantPermission.Observation)),
+          store = synchronizerId,
+          requiresPartyToBeOnboarded = true
+        )
+    .. hidden:: val proposal = target.topology.party_to_participant_mappings
+        .propose_delta(
+          party = externalParty,
           adds = Seq((target.id, ParticipantPermission.Observation)),
           store = synchronizerId,
           requiresPartyToBeOnboarded = true
@@ -540,16 +536,45 @@ have party Alice agree to be hosted on it.
 
     .. group-tab:: External Party
 
-        .. code-block:: Python
+        ..
+            Note: We play a trick in this section by re-allocating "alice" to "externalAlice" in the console
+                   (hidden) at the beginning and re-allocating her to "localAlice" at the end. From the final documentation
+                   perspective it makes it look like we're acting on the same alice while actually running the commands
+                   on "externalAlice".
 
-            update_external_party_hosting(
-                party_id = alice,
-                synchronizer_id = synchronizerId,
-                confirming_threshold = None, # Keep current threshold
-                hosting_participants_add_or_update: [
-                    HostingParticipant(participant_uid = target.id, ParticipantPermission.Observation, onboarding = HostingParticipant.Onboarding())
-                ]
-            )
+        For external parties, we need to authorize the new hosting proposal by signing the transaction hash with Alice's external key.
+
+        First write the hash to a file:
+
+        .. snippet:: offline_party_replication
+            .. hidden:: val alice = externalParty
+            .. success:: val tmpDir = better.files.File(s"/tmp/canton/offline_party_replication").createDirectories()
+            .. success:: (tmpDir / "target_obs_topology_tx.hash").createFileIfNotExists().outputStream.apply(proposal.hash.hash.getCryptographicEvidence.writeTo(_))
+
+        Then sign the hash. As mentioned before, we use a local private key and the ``openssl`` command line tool to sign the hash here for demonstration purposes. In real deployments, use a secure storage / signing solution.
+
+        .. snippet:: offline_party_replication
+            .. shell:: TMP_DIR=$(echo "/tmp/canton/offline_party_replication")
+            .. shell:: openssl pkeyutl -sign -inkey private_key.der -rawin -in $TMP_DIR/target_obs_topology_tx.hash -out $TMP_DIR/target_obs_topology_tx.sig -keyform DER
+
+        Finally load the transaction with Alice's signature:
+
+        .. snippet:: offline_party_replication
+            .. success:: val aliceSignature = Signature.fromExternalSigning(
+                format = SignatureFormat.Concat,
+                signature = (tmpDir / "target_obs_topology_tx.sig").inputStream()(com.google.protobuf.ByteString.readFrom),
+                signedBy = alice.fingerprint,
+                signingAlgorithmSpec = SigningAlgorithmSpec.Ed25519,
+              )
+            .. success:: val proposalSignedByAlice = proposal.addSingleSignature(aliceSignature)
+            .. success::
+                source.topology.transactions.load(
+                    transactions = Seq(proposalSignedByAlice),
+                    store = synchronizerId,
+                )
+
+        .. snippet:: offline_party_replication
+            .. hidden:: val alice = localAlice
 
 
 .. _party-replication-export-acs:
@@ -573,6 +598,14 @@ it in the export file named ``party_replication.alice.acs.gz``.
           targetParticipantId = target.id,
           beginOffsetExclusive = beforeActivationOffset,
           exportFilePath = "party_replication.alice.acs.gz",
+        )
+    .. hidden:: source.parties
+        .export_party_acs(
+          party = externalParty,
+          synchronizerId = synchronizerId,
+          targetParticipantId = target.id,
+          beginOffsetExclusive = beforeActivationOffset,
+          exportFilePath = "party_replication.alice_external.acs.gz",
         )
 
 
@@ -602,6 +635,7 @@ Import Alice's ACS in the ``target`` participant:
 
 .. snippet:: offline_party_replication
     .. success:: target.parties.import_party_acs("party_replication.alice.acs.gz")
+    .. hidden:: target.parties.import_party_acs("party_replication.alice_external.acs.gz")
 
 
 11. Reconnect target participant to synchronizer
@@ -624,6 +658,14 @@ Now, reconnect that ``target`` participant to the synchronizer.
          hostingParticipants.forall(_.topology.party_to_participant_mappings.is_known(
            synchronizerId,
            alice,
+           Seq(target.id),
+           Some(ParticipantPermission.Observation)
+         )
+       ))
+    .. hidden:: utils.retry_until_true(
+         hostingParticipants.forall(_.topology.party_to_participant_mappings.is_known(
+           synchronizerId,
+           externalParty,
            Seq(target.id),
            Some(ParticipantPermission.Observation)
          )
@@ -659,6 +701,9 @@ that has activated ``alice`` on the ``target`` participant.
     .. success:: val flagStatus = target.parties
         .clear_party_onboarding_flag(alice, synchronizerId, targetLedgerEnd)
     .. assert:: flagStatus.isInstanceOf[FlagSet]
+    .. hidden:: val flagStatusExternal = target.parties
+        .clear_party_onboarding_flag(externalParty, synchronizerId, targetLedgerEnd)
+    .. assert:: flagStatusExternal.isInstanceOf[FlagSet]
 
 The command returns the onboarding flag clearance status:
 
@@ -683,6 +728,10 @@ The following snippet demonstrates how this command can be polled.
            case FlagNotSet => true
           }
         }
+
+..
+    Note: We don't wait here again for the onboarding flag to be cleared on the external party to save
+        on time in the generation of the snippets
 
 .. note::
 

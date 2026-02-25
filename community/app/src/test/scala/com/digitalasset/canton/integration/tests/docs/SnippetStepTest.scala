@@ -12,7 +12,7 @@ class SnippetStepTest extends BaseTestWordSpec {
   "snippet regex" should {
     "correctly match on snippet" in {
       val m = snippetKey.findAllIn(".. snippet:: test")
-      m.group(1).trim shouldBe "test"
+      m.group(2).trim shouldBe "test"
     }
     "ignore non matching" in {
       val m = snippetKey.findAllIn("blah .. snippet:: test")
@@ -88,6 +88,20 @@ class SnippetStepTest extends BaseTestWordSpec {
     }
   }
 
+  "shell-hidden regex" when {
+    "not match at the beginning of the line" in {
+      val m = snippetShellHidden.findAllIn(".. shell-hidden:: nope")
+      m.isEmpty shouldBe true
+    }
+    "match correctly" in {
+      val m = snippetShellHidden.findAllIn("  .. shell-hidden(cwd=/run/in/this/dir):: command")
+      m.groupCount shouldBe 3
+      m.group(1) shouldBe "  "
+      m.group(2) shouldBe "(cwd=/run/in/this/dir)"
+      m.group(3).trim shouldBe "command"
+    }
+  }
+
   "scenario parser" should {
     "parse correctly" in {
       SnippetScenario.parse("""
@@ -109,6 +123,10 @@ Some more text, followed by a multi-line step
       "b"
     .. success:: "c"
 
+.. snippet:: alpha
+    .. shell:: "echo"
+    .. shell-hidden:: "echo-hidden"
+
 Then another scenario
 .. snippet:: beta
   .. success:: berta
@@ -126,9 +144,13 @@ Then another scenario
               SnippetStep.Success("\"a\" +\n      \"b\"", None, 15, "    "),
               SnippetStep.Success("\"c\"", None, 17, "    "),
             ),
+            Seq(
+              SnippetStep.Shell("\"echo\"", None, 20, "    ", hidden = false),
+              SnippetStep.Shell("\"echo-hidden\"", None, 21, "    ", hidden = true),
+            ),
           ),
         ),
-        SnippetScenario("beta", Seq(Seq(SnippetStep.Success("berta", None, 21, "  ")))),
+        SnippetScenario("beta", Seq(Seq(SnippetStep.Success("berta", None, 25, "  ")))),
       )
     }
 

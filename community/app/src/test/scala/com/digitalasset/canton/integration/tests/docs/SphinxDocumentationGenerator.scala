@@ -67,6 +67,8 @@ import scala.util.{Failure, Success, Using}
   *     .. assert:: RES.nonEmpty
   *     .. failure:: participant1.parties.enable("Bob")
   *     .. hidden:: val synchronizerId = sequencer1.synchronizer_id
+  *     .. shell:: echo "hello"
+  *     .. shell-hidden:: echo "hello-hidden"
   * }}}
   *
   * The `success` command will run the command and capture the output (optionally truncated to the
@@ -88,6 +90,14 @@ import scala.util.{Failure, Success, Using}
   * }}}
   * to make the documentation snippets work. This import will not appear in the documentation, and
   * when users copy-paste the documented snippet into the console, they face a compilation error.
+  *
+  * The `shell` command runs the command in a shell environment (as opposed to within the canton
+  * console) This can be useful to document direct interactions with the API (using grpcurl for
+  * instance) or to document flows that require steps outside of the node's control (e.g. external
+  * party allocation / signing)
+  *
+  * The `shell-hidden` command is similar to `shell` but doesn't show its output in the doc (similar
+  * to `hidden` for canton console commands)
   *
   * In each RST file, you can have several snippets. They are mapped to "IsolatedEnvironments".
   *
@@ -151,6 +161,11 @@ abstract class SphinxDocumentationGenerator(
     storeResults()
   }
 
+  // This is 4 spaces and assumed to be the size of one unit of indentation in RST files.
+  // It would be best to not rely on this assumption and only use regex-captured indentation but leaving this
+  // for further improvements
+  private val indentUnit = "    "
+
   private def storeResults(): Unit = {
     val dir = target.parent
     if (!dir.exists)
@@ -161,11 +176,17 @@ abstract class SphinxDocumentationGenerator(
       val atSign = if (stepResult.prependAtSign) "@ " else ""
       val language = stepResult.language
       val sb = new mutable.StringBuilder
+      // If a snippet has more than one step and is indented, the code-block line should also be indented
+      // The first one (one acc is empty) does not need special handling here because the python script
+      // that replaces snippets drops their replacement exactly where the snippet is in the rst file (therfore preserving indentation)
+      // But subsequent steps in the snippet should be indented as well. The "indent" variable contains the indent whitespaces for the
+      // command, which is itself is one more indentation level compared to the ".. code-block" line. So we dedent it by one indentation unit.
+      val codeBlockIndent = if (acc.isEmpty) "" else indent.indent(-indentUnit.length).stripLineEnd
       if (cmd.nonEmpty) {
-        sb.append(s".. code-block:: $language\n\n$indent$atSign$cmd\n")
+        sb.append(s"$codeBlockIndent.. code-block:: $language\n\n$indent$atSign$cmd\n")
       }
       val stepOutputLines = if (out.isEmpty) Array.empty[String] else out.split("\n")
-      stepOutputLines.foreach(line => sb.append(s"$indent    $line\n"))
+      stepOutputLines.foreach(line => sb.append(s"$indent$indentUnit$line\n"))
       if (stepOutputLines.isEmpty) sb.append("\n")
       acc + sb.toString()
     }
@@ -808,18 +829,23 @@ class PartyReplicationDocumentationIntegrationTest
 
   registerPlugin(new UsePostgres(loggerFactory))
 
-  private val partyReplicationAcsFilename = "party_replication.alice.acs.gz"
+  private val partyReplicationAcsFilenames =
+    Set("party_replication.alice.acs.gz", "party_replication.alice_external.acs.gz")
 
   override protected def beforeAll(): Unit = {
     super.beforeAll()
     createDarsSimlink()
-    val file = File(partyReplicationAcsFilename)
-    file.delete(swallowIOExceptions = true)
-    file.deleteOnExit(swallowIOExceptions = true)
+    partyReplicationAcsFilenames.foreach { partyReplicationAcsFilename =>
+      val file = File(partyReplicationAcsFilename)
+      file.delete(swallowIOExceptions = true)
+      file.deleteOnExit(swallowIOExceptions = true)
+    }
   }
 
   override protected def afterAll(): Unit = {
-    File(partyReplicationAcsFilename).delete(swallowIOExceptions = true)
+    partyReplicationAcsFilenames.foreach { partyReplicationAcsFilename =>
+      File(partyReplicationAcsFilename).delete(swallowIOExceptions = true)
+    }
     cleanUpDarsSimlink()
     super.afterAll()
   }

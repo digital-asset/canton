@@ -6,6 +6,8 @@ package com.digitalasset.canton.util
 import cats.implicits.toTraverseOps
 import com.daml.ledger.api.v2.commands.Commands.DeduplicationPeriod.Empty
 import com.daml.logging.LoggingContext
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.digitalasset.canton.FutureHelpers
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
@@ -20,6 +22,7 @@ import com.digitalasset.canton.logging.NoLogging.noTracingLogger
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NoLogging}
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.TestContractHasher.SyncContractHasher
 import com.digitalasset.canton.util.TestEngine.{InMemoryPackageStore, TxAndMeta}
 import com.digitalasset.daml.lf.archive
@@ -70,8 +73,12 @@ class TestEngine(
     validateUpgradingPackageResolutions = validateUpgradingPackageResolutions
   )
 
-  val packageResolver: PackageId => TraceContext => FutureUnlessShutdown[Option[Package]] =
-    packageId => _ => FutureUnlessShutdown.pure(packageStore.getPackage(packageId))
+  val packageResolver: PackageResolver = new PackageResolver {
+    override protected def resolveInternal(packageId: PackageId)(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Option[Package]] =
+      FutureUnlessShutdown.pure(packageStore.getPackage(packageId))
+  }
 
   val packageStore: InMemoryPackageStore = packagePaths.foldLeft(InMemoryPackageStore()) { (s, p) =>
     s.withDarFile(new File(p)).value
@@ -371,9 +378,17 @@ object TestEngine extends FutureHelpers with EitherValues {
     val hasher = ContractHasher(testEngine.engine, testEngine.packageResolver)
     new TestContractHasher.SyncContractHasher {
       private val ec =
-        Threading.singleThreadedExecutor("TestEngine.syncContractHasher", noTracingLogger)
+        Threading.singleThreadedExecutor(
+          "TestEngine.syncContractHasher",
+          noTracingLogger,
+          new ExecutorServiceMetrics(NoOpMetricsFactory),
+        )
       override def hash(create: LfNodeCreate, hashingMethod: Hash.HashingMethod): LfHash =
-        hasher.hash(create, hashingMethod)(ec, TraceContext.empty).value.futureValueUS.value
+        hasher
+          .hash(create, hashingMethod, PackageResolver.ignoreMissingPackage)(ec, TraceContext.empty)
+          .value
+          .futureValueUS
+          .value
     }
   }
 

@@ -10,6 +10,9 @@ import ch.qos.logback.classic.{Level, LoggerContext}
 import ch.qos.logback.core.OutputStreamAppender
 import ch.qos.logback.core.encoder.Encoder
 import com.daml.logging.LoggingContext.{newLoggingContext, withEnrichedLoggingContext}
+import io.circe.Decoder
+import io.circe.generic.extras.Configuration
+import net.logstash.logback.encoder.LogstashEncoder
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.slf4j.{Logger, LoggerFactory}
@@ -25,6 +28,13 @@ private final case class Entry(
     b: Option[String],
     c: Option[String],
 )
+private object Entry {
+  import io.circe.generic.extras.semiauto.*
+
+  implicit val config: Configuration = Configuration.default
+
+  implicit def decodeEntry: Decoder[Entry] = deriveConfiguredDecoder
+}
 
 final class ContextualizedLoggerIT extends AnyFlatSpec with Matchers {
 
@@ -50,25 +60,23 @@ final class ContextualizedLoggerIT extends AnyFlatSpec with Matchers {
       logger.info("1")
     }
 
-// TODO: (#30144): enable this test
-//  it should "write the expected JSON file" in {
-//
-//    import io.circe.generic.auto._
-//    import io.circe.parser._
-//
-//    val log = ContextualizedLoggerIT.run(new LogstashEncoder)(testCase)
-//
-//    log map decode[Entry] should contain theSameElementsAs Seq(
-//      Right(Entry("1", "ERROR", None, None, None)),
-//      Right(Entry("2", "ERROR", Some("1"), None, None)),
-//      Right(Entry("3", "ERROR", Some("1"), Some("2"), None)),
-//      Right(Entry("4", "ERROR", Some("1"), Some("2"), Some("3"))),
-//      Right(Entry("3", "INFO", Some("1"), Some("2"), None)),
-//      Right(Entry("2", "INFO", Some("1"), None, None)),
-//      Right(Entry("1", "INFO", None, None, None)),
-//    )
-//
-//  }
+  it should "write the expected JSON file" in {
+
+    import io.circe.generic.auto.*
+    import io.circe.parser.*
+
+    val log = ContextualizedLoggerIT.run(new LogstashEncoder)(testCase)
+
+    log map decode[Entry] should contain theSameElementsAs Seq(
+      Right(Entry("1", "ERROR", None, None, None)),
+      Right(Entry("2", "ERROR", Some("1"), None, None)),
+      Right(Entry("3", "ERROR", Some("1"), Some("2"), None)),
+      Right(Entry("4", "ERROR", Some("1"), Some("2"), Some("3"))),
+      Right(Entry("3", "INFO", Some("1"), Some("2"), None)),
+      Right(Entry("2", "INFO", Some("1"), None, None)),
+      Right(Entry("1", "INFO", None, None, None)),
+    )
+  }
 
   it should "write the expected lines when using a non-structured encoder" in {
 

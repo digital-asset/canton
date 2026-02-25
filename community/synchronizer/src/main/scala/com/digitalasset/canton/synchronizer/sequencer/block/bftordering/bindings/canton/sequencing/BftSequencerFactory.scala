@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.sequencing
 
+import com.daml.metrics.ExecutorServiceMetrics
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.CantonTimestamp
@@ -48,6 +49,7 @@ class BftSequencerFactory(
     sequencerId: SequencerId,
     nodeParameters: SequencerNodeParameters,
     metrics: SequencerMetrics,
+    executorServiceMetrics: ExecutorServiceMetrics,
     override val loggerFactory: NamedLoggerFactory,
     testingInterceptor: Option[TestingInterceptor],
 )(implicit ec: ExecutionContextExecutor)
@@ -96,6 +98,7 @@ class BftSequencerFactory(
       sequencerSnapshot.flatMap(_.additional),
       nodeParameters.exitOnFatalFailures,
       metrics.bftOrdering,
+      executorServiceMetrics,
       synchronizerLoggerFactory,
       nodeParameters.loggingConfig.queryCost,
       ec,

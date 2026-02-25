@@ -26,11 +26,11 @@ import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext, L
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.Identifier
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
-import com.digitalasset.daml.lf.engine
 import com.digitalasset.daml.lf.engine.*
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
 import com.digitalasset.daml.lf.transaction.{CreationTime, FatContractInstance, Node as LfNode}
 import com.digitalasset.daml.lf.value.Value
+import com.digitalasset.daml.lf.{crypto, engine}
 import com.google.protobuf.ByteString
 import monocle.Monocle.toAppliedFocusOps
 import org.mockito.{ArgumentMatchersSugar, MockitoSugar}
@@ -95,6 +95,7 @@ class StoreBackedCommandInterpreterSpec
         KeyWithMaintainers.assertBuild(
           templateId = identifier,
           LfValue.ValueTrue,
+          crypto.Hash.hashPrivateKey("dummy-key-hash"),
           Set(Ref.Party.assertFromString("unexpectedSig")),
           packageName,
         )

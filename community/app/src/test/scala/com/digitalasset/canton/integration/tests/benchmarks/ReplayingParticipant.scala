@@ -5,7 +5,9 @@ package com.digitalasset.canton.integration.tests.benchmarks
 
 import cats.data.EitherT
 import com.daml.grpc.adapter.ExecutionSequencerFactory
+import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.MetricsContext
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BaseTest.{
   RichSynchronizerIdO,
@@ -270,6 +272,7 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
         BatchingConfig(),
         loggerFactory,
         NoReportingTracerProvider,
+        new ExecutorServiceMetrics(NoOpMetricsFactory),
       )
   }
 

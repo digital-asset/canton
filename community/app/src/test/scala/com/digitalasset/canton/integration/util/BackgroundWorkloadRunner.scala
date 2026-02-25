@@ -3,6 +3,8 @@
 
 package com.digitalasset.canton.integration.util
 
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.concurrent.{
@@ -34,6 +36,7 @@ trait BackgroundWorkloadRunner {
     val scheduler = Threading.singleThreadedExecutor(
       "test-workload-runner",
       noTracingLogger,
+      new ExecutorServiceMetrics(NoOpMetricsFactory),
     )
     try {
       scheduler.submit(new WorkloadRunner(scheduler, stop, participants))

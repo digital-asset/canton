@@ -20,6 +20,11 @@ Template for a bigger topic
 
 #### Protocol Version 35
 
+##### Time to Live (TTL) and Hashing Algorithm Update
+
+- A new hashing scheme version `HASHING_SCHEME_VERSION_V3` has been introduced that includes the TTL in the hash computation.
+- See the [hashing algorithm documentation](https://docs.digitalasset-staging.com/build/3.5/explanations/external-signing/external_signing_hashing_algorithm) for the updated version.
+- The `TTL` is now enforced at confirmation time by all confirming participants.
 
 #### Dev Protocol
 
@@ -116,7 +121,10 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
   ```
   By default the value of this parameter is 0.
 - An IDP administrator can now only allocate parties confined to their own IDP perimeter.
-
+- The Ledger API and Ledger JSON API prepare `InteractiveSubmissionService` has been modified to support a such that
+- `PrepareSubmissionRequest.hashing_scheme_version` can now be populated with the desired hashing version to be
+   used for the transaction. The default hashing scheme is `HASHING_SCHEME_VERSION_V2` but integrators are encouraged to move to `HASHING_SCHEME_VERSION_V3` for
+  synchronizers using protocol version 35.
 
 ### Preview Features
 - preview feature

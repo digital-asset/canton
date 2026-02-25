@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream
+import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.Identifier
 import com.digitalasset.daml.lf.transaction.GlobalKey
@@ -25,13 +26,15 @@ private[backend] trait StorageBackendTestsContracts
   it should "correctly find key states" in {
     val key1 = GlobalKey.assertBuild(
       Identifier.assertFromString("A:B:C"),
-      ValueUnit,
       someTemplateId.pkg.name,
+      ValueUnit,
+      crypto.Hash.hashPrivateKey("dummy-key-hash-1"),
     )
     val key2 = GlobalKey.assertBuild(
       Identifier.assertFromString("A:B:C"),
-      ValueText("value"),
       someTemplateId.pkg.name,
+      ValueText("value"),
+      crypto.Hash.hashPrivateKey("dummy-key-hash-2"),
     )
     val internalContractId = 123L
     val internalContractId2 = 223L

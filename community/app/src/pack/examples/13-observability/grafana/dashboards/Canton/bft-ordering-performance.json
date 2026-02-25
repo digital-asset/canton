@@ -1897,7 +1897,7 @@
           },
           "gridPos": {
             "h": 6,
-            "w": 11,
+            "w": 12,
             "x": 12,
             "y": 35
           },
@@ -2573,6 +2573,164 @@
             }
           ],
           "title": "Batch validation",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$DS"
+          },
+          "description": "Summary of cache hits, misses, and evictions for the Availability store's batch data cache",
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 10,
+                "gradientMode": "none",
+                "hideFrom": {
+                  "legend": false,
+                  "tooltip": false,
+                  "viz": false
+                },
+                "lineInterpolation": "linear",
+                "lineWidth": 1,
+                "pointSize": 5,
+                "scaleDistribution": {
+                  "type": "linear"
+                },
+                "showPoints": "auto",
+                "spanNulls": false,
+                "stacking": {
+                  "group": "A",
+                  "mode": "none"
+                },
+                "thresholdsStyle": {
+                  "mode": "off"
+                }
+              },
+              "decimals": 0,
+              "links": [],
+              "mappings": [],
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  }
+                ]
+              },
+              "unit": "none"
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Height for last 3 hours"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "fixedColor": "#447ebc",
+                      "mode": "fixed"
+                    }
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Total Transactions for last 3 hours"
+                },
+                "properties": [
+                  {
+                    "id": "color",
+                    "value": {
+                      "fixedColor": "#ef843c",
+                      "mode": "fixed"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 6,
+            "w": 12,
+            "x": 12,
+            "y": 65
+          },
+          "hideTimeOverride": false,
+          "id": 110,
+          "options": {
+            "legend": {
+              "calcs": [
+                "mean",
+                "max"
+              ],
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": false
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "none"
+            }
+          },
+          "pluginVersion": "10.1.5",
+          "targets": [
+            {
+              "datasource": {
+                "uid": "$DS"
+              },
+              "editorMode": "builder",
+              "expr": "sum(irate(daml_cache_hits{cache=\"batch-cache\"}[$__rate_interval]))",
+              "format": "time_series",
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 1,
+              "legendFormat": "Cache Hits",
+              "refId": "A"
+            },
+            {
+              "datasource": {
+                "uid": "$DS"
+              },
+              "editorMode": "builder",
+              "expr": "sum(irate(daml_cache_misses{cache=\"batch-cache\"}[$__rate_interval]))",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 1,
+              "legendFormat": "Cache Misses",
+              "refId": "B"
+            },
+            {
+              "datasource": {
+                "uid": "$DS"
+              },
+              "editorMode": "builder",
+              "expr": "sum(irate(daml_cache_evictions{cache=\"batch-cache\"}[$__rate_interval]))",
+              "format": "time_series",
+              "hide": false,
+              "instant": false,
+              "interval": "",
+              "intervalFactor": 1,
+              "legendFormat": "Cache Evictions",
+              "refId": "C"
+            }
+          ],
+          "title": "Availability Store Cache Statistics",
           "type": "timeseries"
         }
       ],
@@ -7792,8 +7950,8 @@
       {
         "current": {
           "selected": false,
-          "text": "SEQ::sequencer1::12201e092c1890e837b24f3d2656885c43e96ffe432ed8a4c85ea1c02e3f52c7b353",
-          "value": "SEQ::sequencer1::12201e092c1890e837b24f3d2656885c43e96ffe432ed8a4c85ea1c02e3f52c7b353"
+          "text": "None",
+          "value": ""
         },
         "datasource": {
           "type": "prometheus",
@@ -7819,8 +7977,8 @@
       {
         "current": {
           "selected": true,
-          "text": ".999",
-          "value": ".999"
+          "text": ".95",
+          "value": ".95"
         },
         "hide": 0,
         "includeAll": false,
@@ -7859,7 +8017,7 @@
             "value": ".9"
           },
           {
-            "selected": false,
+            "selected": true,
             "text": ".95",
             "value": ".95"
           },
@@ -7869,7 +8027,7 @@
             "value": ".99"
           },
           {
-            "selected": true,
+            "selected": false,
             "text": ".999",
             "value": ".999"
           }

@@ -48,7 +48,7 @@ get_pull_files_changed () {
 get_merge_base_files_changed () {
   BASE=$(detect_base)
   echo "Using git diff to detect changes vs the base merge branch '$BASE'..."
-  git diff --merge-base --name-only "$BASE" HEAD | grep -v -x -f .circleci/compliance-files-exceptions.txt > .files_changed
+  git diff --merge-base --name-only "$BASE" HEAD | (grep -v -x -f .circleci/compliance-files-exceptions.txt || true) > .files_changed
 }
 
 has_changed_path_prefix () {

@@ -75,7 +75,7 @@ The following examples show how the operator of ``participant1`` inspects the re
 for specific time periods on synchronizer ``synchronizerId``, filtered by buffered commitments, which means
 that the participant received but has not computed the commitments for that period yet:
 
-.. literalinclude:: ../../../../../../community/app/src/test/scala/com/digitalasset/canton/integration/tests/AcsCommitmentToolingIntegrationTest.scala
+.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/acs/commitment/AcsCommitmentToolingIntegrationTest.scala
   :start-after: user-manual-entry-begin: InspectReceivedCommitments
   :end-before: user-manual-entry-end: InspectReceivedCommitments
   :dedent:
@@ -113,7 +113,7 @@ with, e.g., potential repair commands on the participant, or even uncover misbeh
 The following examples show how the operator of ``participant1`` inspects the commitments sent to all counter-participants,
 for specific time periods on synchronizer ``synchronizerId``, filtered by mismatches commitments:
 
-.. literalinclude:: ../../../../../../community/app/src/test/scala/com/digitalasset/canton/integration/tests/AcsCommitmentToolingIntegrationTest.scala
+.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/acs/commitment/AcsCommitmentToolingIntegrationTest.scala
   :start-after: user-manual-entry-begin: InspectSentCommitments
   :end-before: user-manual-entry-end: InspectSentCommitments
   :dedent:
@@ -150,7 +150,7 @@ The following shows how the operator of ``participant1`` can mark as no-wait cou
 on synchronizer ``synchronizerId1``. This command, as well as the commands in this section, also accept multiple counter-participants
 and synchronizers.
 
-.. literalinclude:: ../../../../../../community/app/src/test/scala/com/digitalasset/canton/integration/tests/AcsCommitmentNoWaitCounterParticipantIntegrationTest.scala
+.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/acs/commitment/AcsCommitmentNoWaitCounterParticipantIntegrationTest.scala
   :start-after: user-manual-entry-begin: SetNoWaitCommitment
   :end-before: user-manual-entry-end: SetNoWaitCommitment
   :dedent:
@@ -158,7 +158,7 @@ and synchronizers.
 The operator can also reset the no-wait configuration, i.e., wait for commitments, for counter-participant ``participant2``
 on synchronizer ``synchronizerId1`` using a similar command:
 
-.. literalinclude:: ../../../../../../community/app/src/test/scala/com/digitalasset/canton/integration/tests/AcsCommitmentNoWaitCounterParticipantIntegrationTest.scala
+.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/acs/commitment/AcsCommitmentNoWaitCounterParticipantIntegrationTest.scala
   :start-after: user-manual-entry-begin: ResetNoWaitCommitment
   :end-before: user-manual-entry-end: ResetNoWaitCommitment
   :dedent:
@@ -168,7 +168,7 @@ To retrieve the current no-wait configuration for synchronizer ``synchronizerId1
 the operator can use the command below.
 The command allows for filtering by specific counter-participants and/or synchronizers.
 
-.. literalinclude:: ../../../../../../community/app/src/test/scala/com/digitalasset/canton/integration/tests/AcsCommitmentNoWaitCounterParticipantIntegrationTest.scala
+.. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/acs/commitment/AcsCommitmentNoWaitCounterParticipantIntegrationTest.scala
   :start-after: user-manual-entry-begin: GetNoWaitCommitment
   :end-before: user-manual-entry-end: GetNoWaitCommitment
   :dedent:
@@ -261,7 +261,7 @@ We troubleshoot the mismatch as follows:
    the commitment using the command ``commitments.open_commitment`` in the :ref:`admin console <canton_console_reference>`
    (or via gRPC) as follows:
 
-   .. literalinclude:: ../../../../../../community/app/src/test/scala/com/digitalasset/canton/integration/tests/AcsCommitmentMismatchInspectionRunbookIntegrationTest.scala
+   .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/acs/commitment/AcsCommitmentMismatchInspectionRunbookIntegrationTest.scala
      :start-after: user-manual-entry-begin: OpenCommitment
      :end-before: user-manual-entry-end: OpenCommitment
      :dedent:
@@ -293,7 +293,7 @@ We troubleshoot the mismatch as follows:
    ``participant2`` to run ``commitments.open_commitment``, which the counter-participant operator probably intends to
    do anyway, as it also observes a mismatch warning in its logs.
 
-   .. literalinclude:: ../../../../../../community/app/src/test/scala/com/digitalasset/canton/integration/tests/AcsCommitmentMismatchInspectionRunbookIntegrationTest.scala
+   .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/acs/commitment/AcsCommitmentMismatchInspectionRunbookIntegrationTest.scala
      :start-after: user-manual-entry-begin: OpenCommitmentCounter
      :end-before: user-manual-entry-end: OpenCommitmentCounter
      :dedent:
@@ -318,7 +318,7 @@ We troubleshoot the mismatch as follows:
    The operator of ``participant1`` can validate that the contract metadata received from ``participant2`` matches the
    commitment received from ``participant2``:
 
-   .. literalinclude:: ../../../../../../community/app/src/test/scala/com/digitalasset/canton/integration/tests/AcsCommitmentMismatchInspectionRunbookIntegrationTest.scala
+   .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/acs/commitment/AcsCommitmentMismatchInspectionRunbookIntegrationTest.scala
      :start-after: user-manual-entry-begin: ValidateContractMetadata
      :end-before: user-manual-entry-end: ValidateContractMetadata
      :dedent:
@@ -335,7 +335,7 @@ We troubleshoot the mismatch as follows:
    in the ``openCmtLocalFilename`` file from step 1 against the counter-participant's opened commitment output in the
    ``openCmtRemoteFilename`` file received in step 2.
 
-   .. literalinclude:: ../../../../../../community/app/src/test/scala/com/digitalasset/canton/integration/tests/AcsCommitmentMismatchInspectionRunbookIntegrationTest.scala
+   .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/acs/commitment/AcsCommitmentMismatchInspectionRunbookIntegrationTest.scala
      :start-after: user-manual-entry-begin: MismatchingContracts
      :end-before: user-manual-entry-end: MismatchingContracts
      :dedent:
@@ -363,7 +363,7 @@ We troubleshoot the mismatch as follows:
    in this case ``inspectContractsFilename``, which it can exchange with the operator of ``participant2`` if needed
    for repairing the ACS state.
 
-   .. literalinclude:: ../../../../../../community/app/src/test/scala/com/digitalasset/canton/integration/tests/AcsCommitmentMismatchInspectionRunbookIntegrationTest.scala
+   .. literalinclude:: CANTON/community/app/src/test/scala/com/digitalasset/canton/integration/tests/acs/commitment/AcsCommitmentMismatchInspectionRunbookIntegrationTest.scala
      :start-after: user-manual-entry-begin: InspectMismatchCause
      :end-before: user-manual-entry-end: InspectMismatchCause
      :dedent:

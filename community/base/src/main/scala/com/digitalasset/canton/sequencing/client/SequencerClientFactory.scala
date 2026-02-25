@@ -18,7 +18,7 @@ import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, NamedLoggingContext}
 import com.digitalasset.canton.metrics.SequencerClientMetrics
 import com.digitalasset.canton.networking.Endpoint
-import com.digitalasset.canton.networking.grpc.ClientChannelBuilder
+import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, ClientChannelBuilder}
 import com.digitalasset.canton.protocol.{StaticSynchronizerParameters, SynchronizerParametersLookup}
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.ReplayAction.{SequencerEvents, SequencerSends}
@@ -37,13 +37,10 @@ import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
-import com.digitalasset.canton.util.retry
-import com.digitalasset.canton.util.retry.AllExceptionRetryPolicy
 import com.digitalasset.canton.version.ProtocolVersion
 import io.grpc.{CallOptions, ManagedChannel}
 import io.opentelemetry.api.trace.Tracer
 import org.apache.pekko.stream.Materializer
-import org.slf4j.event.Level
 
 import scala.concurrent.*
 
@@ -64,11 +61,16 @@ trait SequencerClientFactory {
       tracer: Tracer,
       traceContext: TraceContext,
       closeContext: CloseContext,
-  ): EitherT[FutureUnlessShutdown, String, RichSequencerClient]
+  ): EitherT[FutureUnlessShutdown, SequencerClientFactory.CreateError, RichSequencerClient]
 
 }
 
 object SequencerClientFactory {
+  // Left holds a traffic state error, which can be retried. Right d
+  sealed trait CreateError
+  final case class RetryableError(message: String) extends CreateError
+  final case class NonRetryableError(message: String) extends CreateError
+
   def apply(
       psid: PhysicalSynchronizerId,
       syncCryptoApi: SyncCryptoClient[SyncCryptoApi],
@@ -108,7 +110,7 @@ object SequencerClientFactory {
           tracer: Tracer,
           traceContext: TraceContext,
           closeContext: CloseContext,
-      ): EitherT[FutureUnlessShutdown, String, RichSequencerClient] = {
+      ): EitherT[FutureUnlessShutdown, CreateError, RichSequencerClient] = {
         // initialize recorder if it's been configured for the member (should only be used for testing)
         val recorderO = recordingConfigForMember(member).map { recordingConfig =>
           new SequencerClientRecorder(
@@ -134,7 +136,7 @@ object SequencerClientFactory {
 
         def getTrafficStateWithTransports(
             ts: CantonTimestamp
-        ): EitherT[FutureUnlessShutdown, String, Option[TrafficState]] =
+        ): EitherT[FutureUnlessShutdown, CreateError, Option[TrafficState]] =
           for {
             sequencerTransportsMap <- EitherT.liftF(
               sequencerTransportsMapF.getOrElse(
@@ -164,20 +166,24 @@ object SequencerClientFactory {
                   )
                 ).map(_.trafficState)
               )(identity)
-              .leftMap { err =>
-                s"Failed to retrieve traffic state from synchronizer for $member: $err"
+              .leftMap[CreateError] { err =>
+                RetryableError(
+                  s"Failed to retrieve traffic state from synchronizer for $member: $err"
+                )
               }
           } yield request
 
         def getTrafficStateWithConnectionPool(
             ts: CantonTimestamp
-        ): EitherT[FutureUnlessShutdown, String, Option[TrafficState]] =
+        ): EitherT[FutureUnlessShutdown, CreateError, Option[TrafficState]] =
           for {
             connections <- EitherT.fromEither[FutureUnlessShutdown](
               NonEmpty
                 .from(connectionPool.getOneConnectionPerSequencer("get-traffic-state"))
                 .toRight(
-                  s"No connection available to retrieve traffic state from synchronizer for $member"
+                  NonRetryableError(
+                    s"No connection available to retrieve traffic state from synchronizer for $member"
+                  )
                 )
             )
             result <- BftSender
@@ -200,26 +206,32 @@ object SequencerClientFactory {
                     synchronizerParameters.protocolVersion,
                   ),
                   timeout = processingTimeout.network.duration,
+                  // On LSU these calls may fail and be noisy. We rather let the caller decide what to do with the error.
+                  logPolicy = CantonGrpcUtil.SilentLogPolicy,
                 ).map(_.trafficState)
               )(identity)
-              .leftMap { err =>
-                s"Failed to retrieve traffic state from synchronizer for $member: $err"
+              .leftMap[CreateError] { err =>
+                RetryableError(
+                  s"Failed to retrieve traffic state from synchronizer for $member: $err"
+                )
               }
 
           } yield result
 
         for {
           sequencerTransportsMapO <- EitherT.liftF(sequencerTransportsMapF.traverse(identity))
-          sequencerTransports <- EitherT.fromEither[FutureUnlessShutdown](
-            SequencerTransports.from(
-              sequencerTransportsMapO,
-              expectedSequencersO,
-              sequencerConnections.sequencerTrustThreshold,
-              sequencerConnections.sequencerLivenessMargin,
-              sequencerConnections.submissionRequestAmplification,
-              sequencerConnections.sequencerConnectionPoolDelays,
+          sequencerTransports <- EitherT
+            .fromEither[FutureUnlessShutdown](
+              SequencerTransports.from(
+                sequencerTransportsMapO,
+                expectedSequencersO,
+                sequencerConnections.sequencerTrustThreshold,
+                sequencerConnections.sequencerLivenessMargin,
+                sequencerConnections.submissionRequestAmplification,
+                sequencerConnections.sequencerConnectionPoolDelays,
+              )
             )
-          )
+            .leftMap(NonRetryableError.apply)
           // Reinitialize the sequencer counter allocator to ensure that passive->active replica transitions
           // correctly track the counters produced by other replicas
           _ <- EitherT.right(
@@ -239,26 +251,6 @@ object SequencerClientFactory {
             if (config.useNewConnectionPool) getTrafficStateWithConnectionPool _
             else getTrafficStateWithTransports _
 
-          getTrafficStateFromSynchronizerWithRetryFn = { (ts: CantonTimestamp) =>
-            EitherT(
-              retry
-                .Backoff(
-                  logger,
-                  closeContext.context,
-                  retry.Forever,
-                  config.startupConnectionRetryDelay.asFiniteApproximation,
-                  config.maxConnectionRetryDelay.asFiniteApproximation,
-                  "Traffic State Initialization",
-                  s"Initialize traffic state from a BFT read with threshold ${sequencerConnections.sequencerTrustThreshold} from ${sequencerConnections.connections.length} total connections",
-                  retryLogLevel = Some(Level.INFO),
-                )
-                .unlessShutdown(
-                  getTrafficStateFromSynchronizerFn(ts).value,
-                  AllExceptionRetryPolicy,
-                )
-            )
-          }
-
           // Make a BFT call to all the transports to retrieve the current traffic state from the synchronizer
           // and initialize the trafficStateController with it
           trafficInitTimestampO = latestSequencedTimestampO.orElse(
@@ -270,7 +262,7 @@ object SequencerClientFactory {
             s"Initializing traffic state at timestamp: $trafficInitTimestampO"
           )
           trafficStateO <- trafficInitTimestampO
-            .traverse(getTrafficStateFromSynchronizerWithRetryFn)
+            .traverse(getTrafficStateFromSynchronizerFn)
             .map(_.flatten)
 
           // fetch the initial set of pending sends to initialize the client with.

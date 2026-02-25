@@ -21,7 +21,7 @@ trait SignedProtocolMessageContent
     * [[com.digitalasset.canton.protocol.v30.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage]]
     * constructor.
     */
-  protected[messages] def toProtoTypedSomeSignedProtocolMessage
+  protected[messages] def toProtoTypedSomeSignedProtocolMessageV30
       : v30.TypedSignedProtocolMessageContent.SomeSignedProtocolMessage
 
   /** The timestamp of the [[com.digitalasset.canton.crypto.SyncCryptoApi]] used for signing this

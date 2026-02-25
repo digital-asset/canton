@@ -42,57 +42,9 @@ class CantonOrderingTopologyProviderTest
 
   "Getting the ordering topology" should {
     "return the correct ordering topology" in {
-      val crypto = SymbolicCrypto.create(testedReleaseProtocolVersion, timeouts, loggerFactory)
-      val pk = getSigningPublicKey(crypto, BftOrderingSigningKeyUsage, EcSecp256k1).futureValueUS
-      val topologySnapshotMock = mock[TopologySnapshot]
-      when(topologySnapshotMock.timestamp).thenReturn(aTimestamp)
-      when(topologySnapshotMock.sequencerGroup())
-        .thenReturn(
-          FutureUnlessShutdown.pure(
-            Some(SequencerGroup(someSequencerIds, Seq.empty, PositiveInt.one))
-          )
-        )
-      when(topologySnapshotMock.findDynamicSynchronizerParameters())
-        .thenReturn(
-          FutureUnlessShutdown.pure(
-            Right(
-              DynamicSynchronizerParametersWithValidity(
-                DynamicSynchronizerParameters
-                  .defaultValues(
-                    testedProtocolVersion
-                  ),
-                validFrom = aTimestamp,
-                validUntil = None,
-              )
-            ).withLeft[String]
-          )
-        )
-      when(topologySnapshotMock.memberFirstKnownAt(any[SequencerId])(any[TraceContext]))
-        .thenReturn(
-          FutureUnlessShutdown.pure(Some((SequencedTime(aTimestamp), EffectiveTime(aTimestamp))))
-        )
-      when(topologySnapshotMock.findDynamicSequencingParameters()(any[TraceContext]))
-        .thenReturn(FutureUnlessShutdown.pure(Right(someDynamicSequencingParameters)))
-      when(
-        topologySnapshotMock.signingKeys(eqTo(someSequencerIds), eqTo(BftOrderingSigningKeyUsage))(
-          any[TraceContext]
-        )
-      )
-        .thenReturn(
-          FutureUnlessShutdown.pure(
-            someSequencerIds.map(sequencerId => sequencerId -> Seq(pk)).toMap
-          )
-        )
-      val synchronizerSnapshotSyncCryptoApiMock = mock[SynchronizerSnapshotSyncCryptoApi]
-      when(synchronizerSnapshotSyncCryptoApiMock.ipsSnapshot).thenReturn(topologySnapshotMock)
-      val cryptoApiMock = mock[SynchronizerCryptoClient]
-      when(cryptoApiMock.awaitSnapshot(any[CantonTimestamp])(any[TraceContext]))
-        .thenReturn(FutureUnlessShutdown.pure(synchronizerSnapshotSyncCryptoApiMock))
-
       Table(
         (
-          "activationTimestamp",
-          "maxEffectiveTimestamp",
+          "optional activationTimestamp and maxEffectiveTimestamp",
           "expected pending topology changes",
         ),
         // Case 1: the topology snapshot query timestamp is the immediate successor of the maximum effective timestamp,
@@ -100,35 +52,115 @@ class CantonOrderingTopologyProviderTest
         //  a valid topology transaction is the last sequenced event and topology change delay is 0, then
         //  no topology changes are pending because the last topology change is already active at the topology
         //  snapshot query time.
-        (aTimestamp.immediateSuccessor, aTimestamp, Some(false)),
+        (Some(aTimestamp.immediateSuccessor -> aTimestamp), Some(false)),
         // Case 2: the topology snapshot query timestamp equals the maximum effective timestamp,
         //  i.e., the maximum activation timestamp is 1 microsecond later than the topology snapshot query timestamp;
         //  e.g., a valid topology transaction is the last sequenced event and topology change delay is 1 microsecond,
         //  then the corresponding topology change is pending because it is not already active at the topology
         //  snapshot query time.
-        (aTimestamp, aTimestamp, Some(true)),
+        (Some(aTimestamp -> aTimestamp), Some(true)),
+        // Case 3: bootstrap (genesis or LSU), invocation without an activation timestamp,
+        //  then no max effective timestamp is available either, and pending topology changes are
+        //  assumed absent without checking.
+        (None, Some(false)),
       ).forEvery {
-        case (activationTimestamp, maxEffectiveTimestamp, expectedPendingTopologyChangesFlag) =>
+        case (activationTimestampAndMaxEffectiveTimestampO, expectedPendingTopologyChangesFlag) =>
+          val crypto = SymbolicCrypto.create(testedReleaseProtocolVersion, timeouts, loggerFactory)
+          val pk =
+            getSigningPublicKey(crypto, BftOrderingSigningKeyUsage, EcSecp256k1).futureValueUS
+          val topologySnapshotMock = mock[TopologySnapshot]
+          when(topologySnapshotMock.timestamp).thenReturn(aTimestamp)
+          when(topologySnapshotMock.sequencerGroup())
+            .thenReturn(
+              FutureUnlessShutdown.pure(
+                Some(SequencerGroup(someSequencerIds, Seq.empty, PositiveInt.one))
+              )
+            )
+          when(topologySnapshotMock.findDynamicSynchronizerParameters())
+            .thenReturn(
+              FutureUnlessShutdown.pure(
+                Right(
+                  DynamicSynchronizerParametersWithValidity(
+                    DynamicSynchronizerParameters
+                      .defaultValues(
+                        testedProtocolVersion
+                      ),
+                    validFrom = aTimestamp,
+                    validUntil = None,
+                  )
+                ).withLeft[String]
+              )
+            )
+          when(topologySnapshotMock.memberFirstKnownAt(any[SequencerId])(any[TraceContext]))
+            .thenReturn(
+              FutureUnlessShutdown.pure(
+                Some((SequencedTime(aTimestamp), EffectiveTime(aTimestamp)))
+              )
+            )
+          when(topologySnapshotMock.findDynamicSequencingParameters()(any[TraceContext]))
+            .thenReturn(FutureUnlessShutdown.pure(Right(someDynamicSequencingParameters)))
           when(
-            cryptoApiMock.awaitMaxTimestamp(SequencedTime(activationTimestamp.immediatePredecessor))
+            topologySnapshotMock.signingKeys(
+              eqTo(someSequencerIds),
+              eqTo(BftOrderingSigningKeyUsage),
+            )(
+              any[TraceContext]
+            )
           )
             .thenReturn(
               FutureUnlessShutdown.pure(
-                Some((SequencedTime(aTimestamp), EffectiveTime(maxEffectiveTimestamp)))
+                someSequencerIds.map(sequencerId => sequencerId -> Seq(pk)).toMap
               )
             )
+          val synchronizerSnapshotSyncCryptoApiMock = mock[SynchronizerSnapshotSyncCryptoApi]
+          when(synchronizerSnapshotSyncCryptoApiMock.ipsSnapshot).thenReturn(topologySnapshotMock)
+          val cryptoApiMock = mock[SynchronizerCryptoClient]
+          when(cryptoApiMock.awaitSnapshot(any[CantonTimestamp])(any[TraceContext]))
+            .thenReturn(FutureUnlessShutdown.pure(synchronizerSnapshotSyncCryptoApiMock))
+          when(cryptoApiMock.headSnapshot(any[TraceContext]))
+            .thenReturn(synchronizerSnapshotSyncCryptoApiMock)
+
+          activationTimestampAndMaxEffectiveTimestampO.foreach {
+            case (activationTimestamp, maxEffectiveTimestamp) =>
+              when(
+                cryptoApiMock.awaitMaxTimestamp(
+                  SequencedTime(activationTimestamp.immediatePredecessor)
+                )
+              )
+                .thenReturn(
+                  FutureUnlessShutdown.pure(
+                    Some((SequencedTime(aTimestamp), EffectiveTime(maxEffectiveTimestamp)))
+                  )
+                )
+          }
           new CantonOrderingTopologyProvider(
             cryptoApiMock,
             loggerFactory,
             SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
           )
             .getOrderingTopologyAt(
-              TopologyActivationTime(activationTimestamp),
+              activationTimestampAndMaxEffectiveTimestampO.map { case (activationTimestamp, _) =>
+                TopologyActivationTime(activationTimestamp)
+              },
               checkPendingChanges = true,
             )
             .futureUnlessShutdown()
             .futureValueUS
             .fold(fail("Ordering topology not returned")) { case (orderingTopology, _) =>
+              verify(cryptoApiMock, times(1)).member
+              activationTimestampAndMaxEffectiveTimestampO.fold {
+                // No activation timestamp tp query nor max effective time available -> bootstrap (genesis or LSU)
+                verify(cryptoApiMock, times(1)).headSnapshot(any[TraceContext])
+                verifyNoMoreInteractions(cryptoApiMock)
+              } { case (activationTimestamp, maxEffectiveTimestamp) =>
+                verify(cryptoApiMock, times(1)).awaitSnapshot(eqTo(activationTimestamp))(
+                  any[TraceContext]
+                )
+                verify(cryptoApiMock, times(1)).awaitMaxTimestamp(
+                  eqTo(SequencedTime(activationTimestamp.immediatePredecessor))
+                )(any[TraceContext])
+                verifyNoMoreInteractions(cryptoApiMock)
+              }
               orderingTopology.areTherePendingCantonTopologyChanges shouldBe expectedPendingTopologyChangesFlag
               orderingTopology.nodesTopologyInfo should contain theSameElementsAs someSequencerIds
                 .map(sequencerId =>

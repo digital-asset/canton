@@ -671,8 +671,7 @@ class AvailabilityModuleOutputFetchTest
             forAll(
               Table[Msg](
                 "message",
-                Availability.LocalDissemination
-                  .RemoteBatchStoredSigned(ABatchId, Node0, Signature.noSignature),
+                Availability.LocalDissemination.RemoteBatchStored(ABatchId, anEpochNumber, Node0),
                 Availability.LocalOutputFetch.FetchedBatchStored(ABatchId),
               )
             ) { message =>
@@ -722,8 +721,7 @@ class AvailabilityModuleOutputFetchTest
             forAll(
               Table[Msg](
                 "message",
-                Availability.LocalDissemination
-                  .RemoteBatchStoredSigned(ABatchId, Node0, Signature.noSignature),
+                Availability.LocalDissemination.RemoteBatchStored(ABatchId, anEpochNumber, Node0),
                 Availability.LocalOutputFetch.FetchedBatchStored(ABatchId),
               )
             ) { message =>
@@ -873,6 +871,42 @@ class AvailabilityModuleOutputFetchTest
             )
           )
         }
+      }
+    }
+
+    "it receives OutputFetch.FetchedBlockDataFromStorage and there are missing batches that are pending storage" should {
+      "not ask other nodes for missing batches" in {
+        implicit val context
+            : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
+          new ProgrammableUnitTestContext
+        val outputFetchProtocolState = new MainOutputFetchProtocolState()
+        val expectedMessageCell = new AtomicReference[Option[P2PNetworkOut.Message]](None)
+        val cellNetwork = fakeCellModule(expectedMessageCell)
+        val availability = createAvailability[ProgrammableUnitTestEnv](
+          outputFetchProtocolState = outputFetchProtocolState,
+          p2pNetworkOut = cellNetwork,
+        )
+        outputFetchProtocolState.pendingRemoteBatchIdsToStore.add(ABatchId)
+        val singleBatchMissingRequest = new BatchesRequest(
+          AnOrderedBlockForOutput,
+          missingBatches = mutable.SortedSet(ABatchId),
+        )
+        assertLogs(
+          availability.receive(
+            Availability.LocalOutputFetch.FetchedBlockDataFromStorage(
+              singleBatchMissingRequest,
+              AvailabilityStore.MissingBatches(Set(ABatchId)),
+            )
+          ),
+          log => {
+            log.level shouldBe Level.DEBUG
+            log.message should include(
+              s"Missing batch $ABatchId is actually in the process of being stored"
+            )
+          },
+        )
+        context.runPipedMessagesAndReceiveOnModule(availability)
+        expectedMessageCell.get() shouldBe None
       }
     }
 

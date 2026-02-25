@@ -377,12 +377,12 @@ class CantonSyncService(
     loggerFactory = loggerFactory,
   )(ec)
 
-  private val packageResolver: PackageResolver = packageId =>
-    traceContext => packageService.getPackage(packageId)(traceContext)
+  private val packageResolver: PackageResolver = packageService.packageResolver
 
-  val contractValidator = ContractValidator(syncCrypto.pureCrypto, engine, packageResolver)
+  val contractValidator: ContractValidator =
+    ContractValidator(syncCrypto.pureCrypto, engine, packageResolver)
 
-  val contractHasher = ContractHasher(engine, packageResolver)
+  val contractHasher: ContractHasher = ContractHasher(engine, packageResolver)
 
   val repairService: RepairService = new RepairService(
     participantId,

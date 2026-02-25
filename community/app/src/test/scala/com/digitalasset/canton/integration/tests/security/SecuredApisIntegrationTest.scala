@@ -8,6 +8,13 @@ import com.daml.test.evidence.scalatest.AccessTestScenario
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.*
+import com.daml.tls.{
+  BaseServerTlsConfig,
+  ServerAuthRequirementConfig,
+  TlsClientCertificate,
+  TlsClientConfig,
+  TlsServerConfig,
+}
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.{InstanceName, NonEmptyString}
@@ -102,7 +109,7 @@ trait SecuredApisIntegrationTest
           .focus(_.publicApi.tls)
           .replace(
             Some(
-              TlsBaseServerConfig(
+              BaseServerTlsConfig(
                 certChainFile = base.certChainFile,
                 privateKeyFile = base.privateKeyFile,
               )

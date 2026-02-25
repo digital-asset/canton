@@ -106,7 +106,7 @@ trait LogicalUpgradeUtils extends FutureHelpers {
     }
 
     def writeSequencerGenesisState(sequencer: SequencerReference): Unit = {
-      val genesisState = sequencer.topology.transactions.logical_upgrade_state()
+      val genesisState = sequencer.topology.transactions.sequencer_lsu_state()
       BinaryFileUtil.writeByteStringToFile(
         s"${exportDirectory / sequencer.name}-genesis-state",
         genesisState,
@@ -247,7 +247,7 @@ trait LogicalUpgradeUtils extends FutureHelpers {
       staticSynchronizerParameters: StaticSynchronizerParameters,
   ): Unit = {
     migrated.health.wait_for_ready_for_initialization()
-    migrated.setup.initialize_from_synchronizer_predecessor(
+    migrated.setup.initialize_from_lsu_predecessor(
       genesisState,
       staticSynchronizerParameters,
     )

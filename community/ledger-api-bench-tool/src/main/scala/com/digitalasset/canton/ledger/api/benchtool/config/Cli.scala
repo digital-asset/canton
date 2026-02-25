@@ -4,8 +4,9 @@
 package com.digitalasset.canton.ledger.api.benchtool.config
 
 import cats.syntax.either.*
+import com.daml.tls.{TlsClientCertificate, TlsClientConfig}
+import com.digitalasset.canton.config.PemFile
 import com.digitalasset.canton.config.RequireTypes.ExistingFile
-import com.digitalasset.canton.config.{PemFile, TlsClientCertificate, TlsClientConfig}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import scopt.{OptionParser, Read}
 

@@ -20,6 +20,7 @@ import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
 import com.digitalasset.canton.http.json.v2.JsSchema.{
   JsCantonError,
   JsTransaction,
+  OneOfSchemaExtension,
   stringDecoderForEnum,
   stringEncoderForEnum,
   stringSchemaForEnum,
@@ -462,11 +463,13 @@ object JsInteractiveSubmissionServiceCodecs {
     stringSchemaForEnum()
 
   implicit val timeSchema: Schema[interactive_submission_service.MinLedgerTime.Time] =
-    Schema.oneOfWrapped
+    Schema.oneOfWrapped[interactive_submission_service.MinLedgerTime.Time].oneOfExtension()
 
   implicit val esrDeduplicationPeriodSchema
       : Schema[interactive_submission_service.ExecuteSubmissionRequest.DeduplicationPeriod] =
-    Schema.oneOfWrapped
+    Schema
+      .oneOfWrapped[interactive_submission_service.ExecuteSubmissionRequest.DeduplicationPeriod]
+      .oneOfExtension()
 
   implicit val hashingSchemeVersionSchema
       : Schema[interactive_submission_service.HashingSchemeVersion] =

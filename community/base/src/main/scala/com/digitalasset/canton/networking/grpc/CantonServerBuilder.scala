@@ -3,11 +3,12 @@
 
 package com.digitalasset.canton.networking.grpc
 
+import com.daml.tls.TlsServerConfig.logTlsProtocolsAndCipherSuites
+import com.daml.tls.{BaseServerTlsConfig, TlsConfig, TlsServerConfig}
 import com.daml.tracing.Telemetry
 import com.digitalasset.canton.auth.CantonAdminTokenDispenser
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.config.TlsServerConfig.logTlsProtocolsAndCipherSuites
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
@@ -195,7 +196,7 @@ object CantonServerBuilder {
     )
   }
 
-  private def baseSslBuilder(config: BaseTlsArguments): SslContextBuilder = {
+  private def baseSslBuilder(config: TlsConfig): SslContextBuilder = {
     import scala.jdk.CollectionConverters.*
     val s1 =
       GrpcSslContexts.forServer(config.certChainFile.pemStream, config.privateKeyFile.pemStream)
@@ -203,7 +204,7 @@ object CantonServerBuilder {
     config.ciphers.fold(s2)(ciphers => s2.ciphers(ciphers.asJava))
   }
 
-  def baseSslContext(config: TlsBaseServerConfig): SslContext = baseSslBuilder(config).build()
+  def baseSslContext(config: BaseServerTlsConfig): SslContext = baseSslBuilder(config).build()
 
   def sslContext(
       config: TlsServerConfig,

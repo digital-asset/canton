@@ -6,6 +6,7 @@ package com.digitalasset.canton.crypto
 import cats.data.EitherT
 import cats.syntax.either.*
 import cats.syntax.show.*
+import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.{
@@ -372,6 +373,7 @@ object Crypto {
       batchingConfig: BatchingConfig,
       loggerFactory: NamedLoggerFactory,
       tracerProvider: TracerProvider,
+      executorServiceMetrics: ExecutorServiceMetrics,
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
@@ -391,6 +393,7 @@ object Crypto {
             clock,
             loggerFactory,
             executionContext,
+            executorServiceMetrics,
           )
           .leftMap(err => s"Failed to create the KMS client: $err")
           .toEitherT[FutureUnlessShutdown]

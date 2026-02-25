@@ -262,12 +262,14 @@ object EnvironmentDefinition extends LazyLogging {
     )
   }
 
-  private def S2M1(implicit env: TestConsoleEnvironment): NetworkTopologyDescription = {
+  def S2M1(
+      synchronizerOwnersOverride: Option[Seq[InstanceReference]] = None
+  )(implicit env: TestConsoleEnvironment): NetworkTopologyDescription = {
     import env.*
 
     NetworkTopologyDescription(
       daName,
-      synchronizerOwners = Seq(sequencer1, sequencer2),
+      synchronizerOwners = synchronizerOwnersOverride.getOrElse(Seq(sequencer1, sequencer2)),
       synchronizerThreshold = PositiveInt.one,
       sequencers = Seq(sequencer1, sequencer2),
       mediators = Seq(mediator1),
@@ -429,7 +431,7 @@ object EnvironmentDefinition extends LazyLogging {
     numMediators = 1,
   )
     .withNetworkBootstrap { implicit env =>
-      new NetworkBootstrapper(S2M1)
+      new NetworkBootstrapper(S2M1())
     }
 
   lazy val P0S2M2_Config: EnvironmentDefinition =
@@ -568,6 +570,7 @@ object EnvironmentDefinition extends LazyLogging {
       numSequencers = 4,
       numMediators = 1,
     )
+
   lazy val P2S4M2_Config: EnvironmentDefinition =
     buildBaseEnvironmentDefinition(
       numParticipants = 2,
@@ -905,7 +908,7 @@ object EnvironmentDefinition extends LazyLogging {
     numMediators = 1,
   )
     .withNetworkBootstrap { implicit env =>
-      NetworkBootstrapper(Seq(S2M1))
+      NetworkBootstrapper(Seq(S2M1()))
     }
 
   /**   - 2 participants '''not''' connected to any synchronizer

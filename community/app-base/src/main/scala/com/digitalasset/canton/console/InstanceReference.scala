@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.console
 
+import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton.admin.api.client.commands.*
 import com.digitalasset.canton.admin.api.client.commands.SequencerAdminCommands.FindPruningTimestampCommand
 import com.digitalasset.canton.admin.api.client.data.topology.ListParticipantSynchronizerPermissionResult
@@ -132,17 +133,6 @@ trait InstanceReference
   def parties: PartiesAdministrationGroup
 
   def topology: TopologyAdministrationGroup
-
-  private lazy val trafficControl_ =
-    new TrafficControlAdministrationGroup(
-      this,
-      consoleEnvironment,
-      loggerFactory,
-    )
-  @Help.Summary("Traffic control related commands")
-  @Help.Group("Traffic")
-  def traffic_control: TrafficControlAdministrationGroup = trafficControl_
-
 }
 
 object InstanceReference {
@@ -587,6 +577,16 @@ abstract class ParticipantReference(
   @Help.Group("Repair")
   def repair: ParticipantRepairAdministration = repair_
 
+  private lazy val trafficControl_ =
+    new ParticipantTrafficControlAdministrationGroup(
+      this,
+      consoleEnvironment,
+      loggerFactory,
+    )
+  @Help.Summary("Traffic control related commands")
+  @Help.Group("Traffic")
+  def traffic_control: ParticipantTrafficControlAdministrationGroup = trafficControl_
+
   /** Waits until for every participant p (drawn from consoleEnvironment.participants.all) that is
     * running and initialized and for each synchronizer to which both this participant and p are
     * connected the vetted_package transactions in the authorized store are the same as in the
@@ -871,7 +871,7 @@ abstract class SequencerReference(
 
   @Help.Summary("Admin traffic control related commands")
   @Help.Group("Traffic")
-  override def traffic_control: TrafficControlSequencerAdministrationGroup =
+  def traffic_control: TrafficControlSequencerAdministrationGroup =
     sequencerTrafficControl
 
   @Help.Summary("Returns the logical synchronizer id of the synchronizer")

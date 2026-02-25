@@ -205,6 +205,8 @@ trait PublicKey extends CryptoKeyPairKey {
 
   def isSigning: Boolean = purpose == KeyPurpose.Signing
 
+  def isEncryption: Boolean = purpose == KeyPurpose.Encryption
+
   def asSigningKey: Option[SigningPublicKey] = this match {
     case k: SigningPublicKey => Some(k)
     case _ => None

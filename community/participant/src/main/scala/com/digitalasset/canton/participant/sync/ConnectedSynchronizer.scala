@@ -112,16 +112,9 @@ import com.digitalasset.canton.topology.{
   TopologyManagerError,
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.util.{
-  ContractHasher,
-  ContractValidator,
-  EitherTUtil,
-  ErrorUtil,
-  FutureUnlessShutdownUtil,
-  MonadUtil,
-}
 import com.digitalasset.canton.version.ParticipantProtocolFeatureFlags
 import com.digitalasset.daml.lf.engine.Engine
 import io.grpc.Status
@@ -201,10 +194,9 @@ class ConnectedSynchronizer(
   private val seedGenerator =
     new SeedGenerator(synchronizerCrypto.crypto.pureCrypto)
 
-  private val packageResolver: PackageResolver = pkgId =>
-    traceContext => packageService.getPackage(pkgId)(traceContext)
+  private val packageResolver: PackageResolver = packageService.packageResolver
 
-  private val contractHasher = ContractHasher(engine, packageResolver)
+  private val contractHasher: ContractHasher = ContractHasher(engine, packageResolver)
 
   private[canton] val requestGenerator =
     TransactionConfirmationRequestFactory(
@@ -262,6 +254,7 @@ class ConnectedSynchronizer(
 
   private val damle =
     new DAMLe(
+      participantId,
       packageResolver,
       engine,
       parameters.engine.validationPhaseLogging,
@@ -1283,7 +1276,7 @@ object ConnectedSynchronizer {
         val contractValidator = ContractValidator(
           synchronizerCrypto.pureCrypto,
           engine,
-          packageId => traceContext => packageService.getPackage(packageId)(traceContext),
+          packageService.packageResolver,
         )
         new ConnectedSynchronizer(
           synchronizerHandle,

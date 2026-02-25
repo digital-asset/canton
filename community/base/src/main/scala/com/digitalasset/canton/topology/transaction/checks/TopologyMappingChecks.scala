@@ -326,7 +326,7 @@ class RequiredTopologyMappingChecks(
       _ <- checkFirstIsNotRemove
       _ <- checkReplaceIsNotMaxSerial
       _ <- checkRemoveDoesNotChangeMapping
-      _ <- checkNoOngoingSynchronizerUpgrade(effective, toValidate)
+      _ <- checkNoAnnouncedLsu(effective, toValidate)
       _ <- checkOpt.getOrElse(EitherTUtil.unitUS)
     } yield ()
 
@@ -338,7 +338,7 @@ class RequiredTopologyMappingChecks(
   /** Check that the topology state is not frozen if this store is a synchronizer store. All other
     * stores are not subject to freezing the topology state.
     */
-  private def checkNoOngoingSynchronizerUpgrade(
+  private def checkNoAnnouncedLsu(
       effective: EffectiveTime,
       toValidate: GenericSignedTopologyTransaction,
   )(implicit
@@ -362,7 +362,7 @@ class RequiredTopologyMappingChecks(
           case Some(announcement) =>
             EitherTUtil.condUnitET[FutureUnlessShutdown](
               mappingsAllowedDuringSynchronizerUpgrade.contains(toValidate.mapping.code),
-              RequiredMappingRejection.OngoingSynchronizerUpgrade(
+              RequiredMappingRejection.AnnouncedLsuTopologyFreeze(
                 announcement.head1.mapping.successorSynchronizerId.logical
               ): TopologyTransactionRejection,
             )

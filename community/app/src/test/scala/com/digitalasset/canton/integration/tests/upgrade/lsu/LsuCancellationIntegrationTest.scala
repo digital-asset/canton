@@ -181,7 +181,7 @@ final class LsuCancellationIntegrationTest extends LsuBase {
       // Fails because the upgrade is ongoing
       loggerFactory.assertThrowsAndLogs[CommandFailure](
         participant1.parties.enable("Bob"),
-        _.shouldBeCantonErrorCode(TopologyManagerError.OngoingSynchronizerUpgrade),
+        _.shouldBeCantonErrorCode(TopologyManagerError.AnnouncedLsuTopologyFreeze),
       )
 
       clock.advanceTo(upgradeTime1.minusSeconds(5))

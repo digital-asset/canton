@@ -23,6 +23,11 @@ import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.sequencing.protocol.{HandshakeRequest, HandshakeResponse}
 import com.digitalasset.canton.synchronizer.config.SynchronizerParametersConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
+import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
+import com.digitalasset.canton.topology.transaction.{
+  ParticipantPermission,
+  SynchronizerTrustCertificate,
+}
 import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{SequencerAlias, SynchronizerAlias, config}
@@ -55,7 +60,7 @@ trait SequencerConnectServiceIntegrationTest
   ): Option[LocalSequencerReference]
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P1_S1M1
+    EnvironmentDefinition.P2_S1M1
 
   lazy val alias: SynchronizerAlias = SynchronizerAlias.tryCreate("sequencer1")
 
@@ -166,7 +171,7 @@ trait SequencerConnectServiceIntegrationTest
         .value shouldBe daId
     }
 
-    "respond to is active requests" in { implicit env =>
+    "respond to isActive requests" in { implicit env =>
       import env.*
 
       val grpcSequencerConnectClient = getSequencerConnectClient()
@@ -249,6 +254,183 @@ trait GrpcSequencerConnectServiceIntegrationTest extends SequencerConnectService
           .leftMap(_.message)
           .futureValueUS
         errorFromLeft.left.value should include regex "Request failed for .*. Is the server running?"
+    }
+
+    "reject onboarding when the synchronizer is locked" in { implicit env =>
+      import env.*
+      import com.digitalasset.canton.admin.api.client.data.OnboardingRestriction
+
+      val grpcSequencerConnectClient = getSequencerConnectClient()
+      val syncId = sequencer1.synchronizer_id
+
+      // Lock the synchronizer
+      sequencer1.topology.synchronizer_parameters.propose_update(
+        syncId,
+        _.update(onboardingRestriction =
+          OnboardingRestriction.RestrictedLocked: OnboardingRestriction
+        ),
+      )
+
+      //  Wait for the topology transaction to be sequenced
+      sequencer1.topology.synchronisation.await_idle()
+
+      //  Attempt registration
+      val identityTxs = participant1.topology.transactions.identity_transactions()
+
+      // Wait for the result value
+      val result = grpcSequencerConnectClient
+        .registerOnboardingTopologyTransactions(participant1.id, identityTxs)
+        .value
+        .futureValueUS
+
+      // Check that it is a Left containing the gRPC error string
+      inside(result) { case Left(error) =>
+        error.toString should include("FAILED_PRECONDITION")
+        error.toString should include("Synchronizer is locked for onboarding")
+      }
+
+      sequencer1.topology.synchronizer_parameters.propose_update(
+        syncId,
+        _.update(onboardingRestriction =
+          OnboardingRestriction.UnrestrictedOpen: OnboardingRestriction
+        ),
+      )
+    }
+
+    "reject onboarding for mediators" in { implicit env =>
+      import env.*
+
+      val grpcSequencerConnectClient = getSequencerConnectClient()
+
+      //  Attempt registration
+      val identityTxs = mediator1.topology.transactions.identity_transactions()
+
+      // Wait for the result value
+      val result = grpcSequencerConnectClient
+        .registerOnboardingTopologyTransactions(mediator1.id, identityTxs)
+        .value
+        .futureValueUS
+
+      // Check that it is a Left containing the gRPC error string
+      inside(result) { case Left(error) =>
+        error.toString should include("FAILED_PRECONDITION")
+        error.toString should include("This endpoint is only for participants")
+      }
+    }
+
+    "reject onboarding for offboarded or active participants" in { implicit env =>
+      import env.*
+      import com.digitalasset.canton.topology.transaction.TopologyChangeOp
+
+      val syncId = sequencer1.synchronizer_id
+      val client = getSequencerConnectClient()
+      val p1Id = participant1.id
+
+      val existingStc = participant1.topology.transactions
+        .list(
+          store = TopologyStoreId.Authorized,
+          filterMappings =
+            Seq(com.digitalasset.canton.topology.transaction.SynchronizerTrustCertificate.code),
+        )
+        .result
+        .find(_.mapping.select[SynchronizerTrustCertificate].exists(_.synchronizerId == syncId))
+        .map(_.transaction)
+        .getOrElse(fail("Participant 1 should already have an STC"))
+
+      participant1.topology.synchronizer_trust_certificates.propose(
+        participantId = p1Id,
+        synchronizerId = syncId,
+        change = TopologyChangeOp.Remove,
+        store = Some(TopologyStoreId.Authorized),
+        synchronize = None,
+      )
+
+      sequencer1.topology.synchronisation.await_idle()
+
+      val identityTxs = participant1.topology.transactions.identity_transactions()
+      val allTxs = identityTxs :+ existingStc
+
+      val result = client
+        .registerOnboardingTopologyTransactions(p1Id, allTxs)
+        .value
+        .futureValueUS
+
+      inside(result) { case Left(error) =>
+        val errorStr = error.toString
+        errorStr should include("FAILED_PRECONDITION")
+        errorStr should include(
+          s"Participant ${participant1.id} is either active on the synchronizer or has previously been offboarded"
+        )
+      }
+    }
+
+    "allow onboarding for authorized participants when restricted" in { implicit env =>
+      import env.*
+      import com.digitalasset.canton.admin.api.client.data.OnboardingRestriction
+
+      val syncId = sequencer1.synchronizer_id
+      val client = getSequencerConnectClient()
+
+      // Set to RestrictedOpen
+      sequencer1.topology.synchronizer_parameters.propose_update(
+        syncId,
+        _.update(onboardingRestriction =
+          OnboardingRestriction.RestrictedOpen: OnboardingRestriction
+        ),
+      )
+      // if no permission for participant2 exists, add one
+      if (
+        sequencer1.topology.participant_synchronizer_permissions
+          .find(syncId, participant2.id)
+          .isEmpty
+      ) {
+        sequencer1.topology.participant_synchronizer_permissions.propose(
+          synchronizerId = syncId,
+          participantId = participant2.id,
+          permission = ParticipantPermission.Submission,
+        )
+      }
+      sequencer1.topology.synchronisation.await_idle()
+
+      val identityTxs = participant2.topology.transactions.identity_transactions()
+
+      // Check if p2 already has an STC for this synchronizer. If not, add one
+      val existingStc = participant2.topology.transactions
+        .list(
+          store = TopologyStoreId.Authorized,
+          filterMappings = Seq(SynchronizerTrustCertificate.code),
+          filterNamespace = participant2.namespace.filterString,
+        )
+        .result
+        .map(_.transaction)
+        .find(tx =>
+          tx.mapping
+            .select[SynchronizerTrustCertificate]
+            .exists(_.synchronizerId == syncId)
+        )
+      val trustCert = existingStc.getOrElse {
+        participant2.topology.synchronizer_trust_certificates.propose(
+          participantId = participant2.id,
+          synchronizerId = syncId,
+          store = Some(TopologyStoreId.Authorized),
+          synchronize = None,
+        )
+      }
+
+      // Attempt registration
+      val result = client
+        .registerOnboardingTopologyTransactions(participant2.id, identityTxs :+ trustCert)
+        .value
+        .futureValueUS
+      result shouldBe Right(())
+
+      eventually() {
+        val isActiveResult = client
+          .isActive(participant2.id, waitForActive = false) // calls the gRPC endpoint
+          .value
+          .futureValueUS
+        isActiveResult shouldBe Right(true)
+      }
     }
   }
 }

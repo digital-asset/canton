@@ -57,6 +57,9 @@ final case class AssignmentMediatorMessage(
   override def toProtoSomeEnvelopeContentV30: v30.EnvelopeContent.SomeEnvelopeContent =
     v30.EnvelopeContent.SomeEnvelopeContent.AssignmentMediatorMessage(toProtoV30)
 
+  override def toProtoSomeEnvelopeContentV31: v31.EnvelopeContent.SomeEnvelopeContent =
+    v31.EnvelopeContent.SomeEnvelopeContent.AssignmentMediatorMessage(toProtoV30)
+
   def toProtoV30: v30.AssignmentMediatorMessage =
     v30.AssignmentMediatorMessage(
       tree = Some(tree.toProtoV30),

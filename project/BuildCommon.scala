@@ -419,15 +419,10 @@ object BuildCommon {
         "ledger-api-value",
       )
 
-      val sampleServiceProto: Seq[(File, String)] = packProtobufSourceFiles(
-        "base" / "sample-service",
-        "sample-service",
-      )
-
       val apiFiles =
         ledgerApiProto ++ communityBaseProto ++ communityParticipantProto ++ communityAdminProto ++ communitySynchronizerProto ++
-          scalapbProto ++ googleRpcProtos ++ damlLfLedgerApiValueProto ++ communityJsonApiOpenapi ++ sampleServiceProto ++
-          damlLfSnapshotProto ++ damlLfArchiveProto ++ damlLfTransactionProto
+          scalapbProto ++ googleRpcProtos ++ damlLfLedgerApiValueProto ++ communityJsonApiOpenapi ++ damlLfSnapshotProto ++
+          damlLfArchiveProto ++ damlLfTransactionProto
 
       log.info("Invoking bundle generator")
       // add license to package
@@ -498,6 +493,8 @@ object BuildCommon {
     Compile / scalacOptions ++= Seq("--release", "17"),
     Compile / javacOptions ++= Seq("--release", "17"),
     Compile / compile / javacOptions += "-proc:full",
+    // Make sure that shared dependencies with Daml repo force their version
+    dependencyOverrides ++= Dependencies.resolveDependency.sharedDependencyMap.values.toSeq,
     publish / skip := true,
   )
 
@@ -690,9 +687,7 @@ object BuildCommon {
     lazy val `util-external` = project
       .in(file("base/util-external"))
       .dependsOn(
-        `base-errors`,
-        `wartremover-annotations`,
-        DamlProjects.`nonempty-cats`,
+        `wartremover-annotations`
       )
       .settings(
         sharedCantonSettingsExternal,
@@ -700,6 +695,7 @@ object BuildCommon {
         organization := "com.daml",
         publish / skip := false,
         libraryDependencies ++= Seq(
+          better_files,
           cats,
           jul_to_slf4j % Test,
           mockito_scala % Test,
@@ -780,6 +776,12 @@ object BuildCommon {
       .enablePlugins(DamlPlugin)
       .settings(
         sharedAppSettings,
+        // Some tests in community-app depend on a newer protobuf-java to use
+        // opentelemetry_proto, which community-integration-testing depends on
+        dependencyOverrides ++= Seq(
+          "com.google.protobuf" % "protobuf-java" % "4.31.0" % Test,
+          "com.google.protobuf" % "protobuf-java-util" % "4.31.0" % Test,
+        ),
         libraryDependencies ++= Seq(
           scala_logging,
           janino, // not used at compile time, but required for conditionals in logback configuration
@@ -1315,7 +1317,6 @@ object BuildCommon {
         `ledger-api-core`,
       )
 
-    // Keep as separate sub-project due to possible dependency problems with daml_script_runner protobuf dependencies
     // TODO(#30144) fix the test broken as part of #29333
     lazy val `daml-script-tests` = project
       .in(file("community/daml-script-tests"))
@@ -1327,7 +1328,11 @@ object BuildCommon {
         libraryDependencies ++= Seq(
         ),
         excludeTranscodeConflictingDependencies,
-        addProtobufFilesToHeaderCheck(Compile),
+        Test / testOptions += Tests.Argument(
+          TestFrameworks.ScalaTest,
+          s"-DdamlVersion=${Dependencies.daml_libraries_version}",
+          s"-DdpmRegistry=${Dependencies.dpm_registry}",
+        ),
       )
 
     lazy val `performance-driver` = project
@@ -1621,7 +1626,7 @@ object BuildCommon {
     lazy val `daml-tls` = project
       .in(file("base/daml-tls"))
       .dependsOn(
-        `util-external` % Test,
+        `util-external`,
         `wartremover-annotations`,
       )
       .settings(
@@ -1897,7 +1902,7 @@ object BuildCommon {
         DamlProjects.`observability-metrics` % Test,
         DamlProjects.`observability-tracing` % "test->compile;test->test",
         DamlProjects.ports,
-        DamlProjects.`rs-grpc-testing-utils` % Test,
+        DamlProjects.`rs-grpc-bridge` % "test->test",
         DamlProjects.`test-evidence-generator` % "test->test",
         DamlProjects.`timer-utils`,
         `base-errors` % "test->test",
@@ -2209,6 +2214,7 @@ object BuildCommon {
           assembly / mainClass := Some("com.daml.ledger.api.testtool.Main"),
           assembly / assemblyJarName := s"ledger-api-test-tool-$lfVersion-${version.value}.jar",
           assembly / assemblyMergeStrategy := {
+            case PathList("logback.xml") => MergeStrategy.last
             case PathList("org", "hamcrest", _ @_*) => MergeStrategy.last
             // complains about okio.kotlin_module clash
             case PathList("META-INF", "okio.kotlin_module") => MergeStrategy.last
@@ -2464,7 +2470,6 @@ object BuildCommon {
       nameof,
       `testing-utils`,
       `grpc-test-utils`,
-      `rs-grpc-testing-utils`,
       `test-evidence-generator`,
       `test-evidence-scalatest`,
       `test-evidence-tag`,
@@ -2473,7 +2478,6 @@ object BuildCommon {
       `observability-metrics`,
       `observability-tracing`,
       `executors`,
-      `sample-service`,
       `daml-lf-data`,
       `daml-lf-data-scalacheck`,
       `daml-lf-data-tests`,
@@ -2528,9 +2532,6 @@ object BuildCommon {
 
     lazy val `rs-grpc-bridge` = project
       .in(file("base/rs-grpc-bridge"))
-      .dependsOn(
-        `rs-grpc-testing-utils`
-      )
       .settings(
         libsScalaSettings,
         Compile / javacOptions ++= Seq("--release", "17"),
@@ -2578,7 +2579,7 @@ object BuildCommon {
       .dependsOn(
         `rs-grpc-bridge` % "test->test;test->compile",
         `rs-grpc-pekko`,
-        `sample-service` % "test->test;test->compile",
+        `testing-utils` % "test->test;test->compile",
       )
       .settings(
         libsScalaSettings,
@@ -2615,6 +2616,10 @@ object BuildCommon {
       .settings(
         libsScalaSettings,
         libraryDependencies ++= Seq(
+          circe_core % Test,
+          circe_generic % Test,
+          circe_generic_extras % Test,
+          circe_parser % Test,
           fasterjackson_core,
           logback_classic % Test,
           logstash,
@@ -2622,6 +2627,7 @@ object BuildCommon {
           pekko_actor,
           pekko_stream,
           scalatest % Test,
+          shapeless % Test,
           slf4j_api,
         ),
         publish / skip := false,
@@ -2761,20 +2767,32 @@ object BuildCommon {
         `resources-pekko`,
         `rs-grpc-bridge`,
         `rs-grpc-pekko`,
+        CommunityProjects.`base-errors`,
+        CommunityProjects.`util-external`,
       )
       .settings(
-        libsScalaSettings,
+        sharedCommunitySettings,
         scalacOptions += "-Wconf:msg=unused:silent",
         libraryDependencies ++= Seq(
           grpc_api,
           grpc_inprocess,
           grpc_netty_shaded,
           guava,
+          scalapb_runtime,
           scalatest,
           slf4j_api,
           typesafe_config,
         ),
         publish / skip := false,
+        Compile / bufLintCheck := {},
+        Compile / PB.targets := Seq(
+          scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
+        ),
+        Compile / packageBin / packageOptions +=
+          Package.ManifestAttributes(
+            "ScalaPB-Options-Proto" -> "com/daml/platform/hello/package.proto"
+          ),
+        addProtobufFilesToHeaderCheck(Compile),
       )
 
     lazy val `grpc-test-utils` = project
@@ -2795,18 +2813,6 @@ object BuildCommon {
           grpc_services,
           grpc_stub,
           scalatest,
-        ),
-        publish / skip := false,
-      )
-
-    lazy val `rs-grpc-testing-utils` = project
-      .in(file("base/rs-grpc-testing-utils"))
-      .disablePlugins(WartRemover)
-      .settings(
-        libsScalaSettings,
-        scalacOptions += "-Wconf:msg=unused:silent",
-        libraryDependencies ++= Seq(
-          grpc_stub
         ),
         publish / skip := false,
       )
@@ -2871,30 +2877,6 @@ object BuildCommon {
         publish / skip := false,
       )
 
-    lazy val `sample-service` = project
-      .in(file("base/sample-service"))
-      .disablePlugins(WartRemover)
-      .dependsOn(
-        DamlProjects.`testing-utils`,
-        CommunityProjects.`util-external`,
-      )
-      .settings(
-        sharedCommunitySettings,
-        publish / skip := false,
-        Compile / bufLintCheck := {},
-        libraryDependencies ++= Seq(
-          scalapb_runtime
-        ),
-        Compile / PB.targets := Seq(
-          scalapb.gen(flatPackage = true) -> (Compile / sourceManaged).value / "protobuf"
-        ),
-        Compile / packageBin / packageOptions +=
-          Package.ManifestAttributes(
-            "ScalaPB-Options-Proto" -> "com/daml/platform/hello/package.proto"
-          ),
-        addProtobufFilesToHeaderCheck(Compile),
-      )
-
     lazy val `ports` = project
       .in(file("base/ports"))
       .disablePlugins(WartRemover)
@@ -2929,12 +2911,15 @@ object BuildCommon {
     lazy val `observability-metrics` = project
       .in(file("base/observability/metrics"))
       .dependsOn(
-        `scala-utils`
+        `grpc-test-utils` % "test->test",
+        `ledger-resources-test-lib` % "test->test",
+        `rs-grpc-pekko-test` % "test->test",
+        `testing-utils` % Test,
+        `scala-utils`,
       )
       .disablePlugins(WartRemover)
       .settings(
         libsScalaSettings,
-        Test / scalaSource := baseDirectory.value / "src" / "test" / "lib",
         Test / scalacOptions ++= Seq("--release", "17"),
         libraryDependencies ++= Seq(
           google_findbugs,
@@ -2945,6 +2930,7 @@ object BuildCommon {
           opentelemetry_sdk_metrics,
           pekko_stream,
           scalapb_runtime_grpc,
+          scalatest % Test,
           slf4j_api,
         ),
         publish / skip := false,
@@ -2952,10 +2938,12 @@ object BuildCommon {
 
     lazy val `observability-tracing` = project
       .in(file("base/observability/tracing"))
+      .dependsOn(
+        `testing-utils`
+      )
       .disablePlugins(WartRemover)
       .settings(
         libsScalaSettings,
-        Test / scalaSource := baseDirectory.value / "src" / "test" / "lib",
         libraryDependencies ++= Seq(
           opentelemetry_api,
           opentelemetry_context,
@@ -3187,6 +3175,13 @@ object BuildCommon {
         `logging-entries`,
       )
       .settings()
+
+    lazy val `daml-lf-data-bench` = project
+      .in(file("community/daml-lf/data-bench"))
+      .disablePlugins(WartRemover)
+      .enablePlugins(JmhPlugin)
+      .dependsOn(`daml-lf-data`)
+      .settings(sharedCommunitySettings)
 
     lazy val `daml-lf-data-scalacheck` = project
       .in(file("community/daml-lf/data-scalacheck"))

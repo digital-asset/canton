@@ -78,6 +78,13 @@ final class GeneratorsMessages(
     )
   )
 
+  implicit val acsCommitmentProtocolMessageArb: Arbitrary[AcsCommitmentProtocolMessage] = Arbitrary(
+    for {
+      acsCommitment <- Arbitrary.arbitrary[AcsCommitment]
+      signatures <- nonEmptyListGen(implicitly[Arbitrary[Signature]])
+    } yield AcsCommitmentProtocolMessage(acsCommitment, signatures)
+  )
+
   implicit val confirmationResultMessageArb: Arbitrary[ConfirmationResultMessage] = Arbitrary(
     for {
       psid <- Arbitrary.arbitrary[PhysicalSynchronizerId]
@@ -268,6 +275,13 @@ final class GeneratorsMessages(
       GeneratorForClass(
         topologyTransactionsBroadcast.arbitrary,
         classOf[TopologyTransactionsBroadcast],
+      ),
+      GeneratorForClass(
+        // Serializing an ACS commitment using protocol version v30 is not supported.
+        // In that case, do not generate anything.
+        if (protocolVersion < ProtocolVersion.v35) Gen.fail
+        else acsCommitmentProtocolMessageArb.arbitrary,
+        classOf[AcsCommitmentProtocolMessage],
       ),
     )
 

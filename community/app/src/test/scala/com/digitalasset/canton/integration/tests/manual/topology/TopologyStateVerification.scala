@@ -5,6 +5,8 @@ package com.digitalasset.canton.integration.tests.manual.topology
 
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
+import com.daml.metrics.ExecutorServiceMetrics
+import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nonempty.NonEmptyReturningOps.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.*
@@ -276,6 +278,7 @@ class TopologyStateVerification(
             BatchingConfig(),
             replayLoggerFactory,
             NoReportingTracerProvider,
+            new ExecutorServiceMetrics(NoOpMetricsFactory),
           )
           .map(SynchronizerCrypto(_, staticSynchronizerParameters))
           .valueOrF(err =>

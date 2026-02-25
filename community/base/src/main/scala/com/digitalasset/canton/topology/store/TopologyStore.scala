@@ -336,6 +336,18 @@ abstract class TopologyStore[+StoreID <: TopologyStoreId](implicit
       pagination: Option[(Option[UniqueIdentifier], Int)] = None,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[NegativeStoredTopologyTransactions]
 
+  def findAllTransactions(
+      asOf: CantonTimestamp,
+      asOfInclusive: Boolean,
+      isProposal: Boolean,
+      types: Seq[TopologyMapping.Code],
+      filterUid: Option[NonEmpty[Seq[UniqueIdentifier]]],
+      filterNamespace: Option[NonEmpty[Seq[Namespace]]],
+      pagination: Option[(Option[UniqueIdentifier], Int)] = None,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[StoredTopologyTransactions[TopologyChangeOp, TopologyMapping]]
+
   /** Fetch all items for the given state keys in descending order
     *
     * This function is used by the batch loader. As such, we assume that the request is already

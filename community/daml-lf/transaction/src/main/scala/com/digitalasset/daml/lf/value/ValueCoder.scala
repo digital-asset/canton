@@ -9,6 +9,7 @@ import com.digitalasset.daml.SafeProto
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.transaction.{
+  GlobalKey,
   SerializationVersion,
   Versioned,
   ensuresNoUnknownFields,
@@ -458,5 +459,39 @@ class ValueCoder(allowNullCharacters: Boolean) {
       }
     }
 
+    // TODO(i30398): storing both the hash and the value in the key field is a temporary hack. We will eventually
+    //  introduce a new transaction version which will store the hash and the value in separate fields.
+    def encodeKey(version: SerializationVersion, key: GlobalKey): Either[EncodeError, ByteString] =
+      encodeValue(valueVersion = version, v0 = key.key)
+        .map(bs => key.hash.bytes.toByteString.concat(bs))
+
+    // TODO(i30398): storing both the hash and the value in the key field is a temporary hack. We will eventually
+    //  introduce a new transaction version which will store the hash and the value in separate fields.
+    def decodeKey(
+        templateId: Ref.TypeConId,
+        packageName: Ref.PackageName,
+        version: SerializationVersion,
+        bytes: ByteString,
+    ): Either[DecodeError, GlobalKey] = {
+      val hashBytesLength = crypto.Hash.underlyingHashLength
+      if (bytes.size < hashBytesLength) {
+        Left(
+          DecodeError(
+            s"ByteString too short to contain a GlobalKey hash. Expected at least $hashBytesLength bytes, got ${bytes.size}"
+          )
+        )
+      } else {
+        val hashBs = bytes.substring(0, hashBytesLength)
+        val valueBs = bytes.substring(hashBytesLength)
+        for {
+          hash <- crypto.Hash.fromBytes(Bytes.fromByteString(hashBs)).left.map(DecodeError(_))
+          value <- decodeValue(version, valueBs)
+          gkey <- GlobalKey
+            .build(templateId, packageName, value, hash)
+            .left
+            .map(hashErr => DecodeError(hashErr.msg))
+        } yield gkey
+      }
+    }
   }
 }
