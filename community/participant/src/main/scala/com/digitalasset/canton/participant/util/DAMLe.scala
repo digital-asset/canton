@@ -8,12 +8,13 @@ import cats.syntax.either.*
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries}
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{LoggingContextUtil, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.EngineController.GetEngineAbortStatus
 import com.digitalasset.canton.participant.store.ContractAndKeyLookup
 import com.digitalasset.canton.participant.util.DAMLe.*
+import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
+import com.digitalasset.canton.platform.apiserver.execution.ExternalCallHandler
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -21,10 +22,11 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.{LfCommand, LfKeyResolver, LfPackageId, LfPartyId}
+import com.digitalasset.canton.{LfCommand, LfCreateCommand, LfKeyResolver, LfPackageId, LfPartyId}
 import com.digitalasset.daml.lf.VersionRange
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName}
-import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
 import com.digitalasset.daml.lf.engine.{Enricher as _, *}
 import com.digitalasset.daml.lf.interpretation.Error as LfInterpretationError
@@ -60,9 +62,7 @@ object DAMLe {
       iterationsBetweenInterruptions: Long =
         10000, // 10000 is the default value in the engine configuration,
       paranoidMode: Boolean,
-      submissionPhaseLogging: EngineLoggingConfig,
-      validationPhaseLogging: EngineLoggingConfig,
-      loggerFactory: NamedLoggerFactory,
+      contractStateMode: Option[ContractStateMachine.Mode] = None,
   ): Engine =
     new Engine(
       EngineConfig(
@@ -76,12 +76,13 @@ object DAMLe {
         profileDir = profileDir,
         snapshotDir = snapshotDir,
         forbidLocalContractIds = true,
+        contractStateMode = contractStateMode.getOrElse(
+          if (enableLfDev) ContractStateMachine.Mode.devDefault
+          else ContractStateMachine.Mode.default
+        ),
         iterationsBetweenInterruptions = iterationsBetweenInterruptions,
         paranoid = paranoidMode,
-        submissionPhaseLogging = submissionPhaseLogging,
-        validationPhaseLogging = validationPhaseLogging,
-      ),
-      loggerFactory,
+      )
     )
 
   private def maxVersion(enableLfDev: Boolean, enableLfBeta: Boolean) =
@@ -117,6 +118,23 @@ object DAMLe {
     override protected def pretty: Pretty[EnrichmentError] = adHocPrettyInstance
   }
 
+  private val zeroSeed: LfHash =
+    LfHash.assertFromByteArray(new Array[Byte](LfHash.underlyingHashLength))
+
+  /** Stored external call results for replay during validation.
+    * Key is (extensionId, functionId, callIndex), value is (configHash, inputHex, outputHex)
+    */
+  type StoredExternalCallResults = Map[(String, String, Int), (String, String, String)]
+
+  object StoredExternalCallResults {
+    val empty: StoredExternalCallResults = Map.empty
+
+    def fromResults(results: ImmArray[ExternalCallResult]): StoredExternalCallResults =
+      results.toSeq.map { r =>
+        (r.extensionId, r.functionId, r.callIndex) -> (r.configHash, r.inputHex, r.outputHex)
+      }.toMap
+  }
+
   trait HasReinterpret {
     def reinterpret(
         contracts: ContractAndKeyLookup,
@@ -130,6 +148,8 @@ object DAMLe {
         packageResolution: Map[Ref.PackageName, Ref.PackageId],
         expectFailure: Boolean,
         getEngineAbortStatus: GetEngineAbortStatus,
+        storedExternalCallResults: StoredExternalCallResults = StoredExternalCallResults.empty,
+        isConfirmer: Boolean = false,
     )(implicit traceContext: TraceContext): EitherT[
       FutureUnlessShutdown,
       ReinterpretationError,
@@ -152,8 +172,9 @@ class DAMLe(
     participantId: ParticipantId,
     resolvePackage: PackageResolver,
     engine: Engine,
-    contractStateMode: ContractStateMachine.Mode,
+    engineLoggingConfig: EngineLoggingConfig,
     protected val loggerFactory: NamedLoggerFactory,
+    externalCallHandler: Option[ExternalCallHandler] = None,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
     with HasReinterpret {
@@ -165,8 +186,7 @@ class DAMLe(
   // TODO(i21582) Because we do not hash suffixed CIDs, we need to disable validation of suffixed CIDs otherwise enrichment
   // will fail. Remove this when we hash and sign suffixed CIDs
   private lazy val engineForEnrichment = new Engine(
-    engine.config.copy(forbidLocalContractIds = false),
-    loggerFactory,
+    engine.config.copy(forbidLocalContractIds = false)
   )
   private lazy val interactiveSubmissionEnricher = new InteractiveSubmissionEnricher(
     engineForEnrichment,
@@ -215,6 +235,8 @@ class DAMLe(
       packageResolution: Map[PackageName, PackageId],
       expectFailure: Boolean,
       getEngineAbortStatus: GetEngineAbortStatus,
+      storedExternalCallResults: StoredExternalCallResults = StoredExternalCallResults.empty,
+      isConfirmer: Boolean = false,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
     ReinterpretationError,
@@ -264,16 +286,19 @@ class DAMLe(
         }
       }
 
-    val result = engine.reinterpret(
-      submitters = submitters,
-      command = command,
-      nodeSeed = rootSeed,
-      preparationTime = preparationTime.toLf,
-      ledgerEffectiveTime = ledgerTime.toLf,
-      packageResolution = packageResolution,
-      contractIdVersion = ContractIdVersion.V1,
-      contractStateMode = contractStateMode,
-    )
+    val result = LoggingContextUtil.createLoggingContext(loggerFactory) { implicit loggingContext =>
+      engine.reinterpret(
+        submitters = submitters,
+        command = command,
+        nodeSeed = rootSeed,
+        preparationTime = preparationTime.toLf,
+        ledgerEffectiveTime = ledgerTime.toLf,
+        packageResolution = packageResolution,
+        engineLogger =
+          engineLoggingConfig.toEngineLogger(loggerFactory.append("phase", "validation")),
+        contractIdVersion = ContractIdVersion.V1,
+      )
+    }
 
     for {
       txWithMetadata <- EitherT(
@@ -284,6 +309,8 @@ class DAMLe(
           contractAuthenticator,
           result,
           getEngineAbortStatus,
+          storedExternalCallResults,
+          isConfirmer,
         )
       )
       (tx, metadata) = txWithMetadata
@@ -300,6 +327,49 @@ class DAMLe(
     )
   }
 
+  def replayCreate(
+      submitters: Set[LfPartyId],
+      command: LfCreateCommand,
+      topologySnapshot: TopologySnapshot,
+      ledgerTime: CantonTimestamp,
+      getEngineAbortStatus: GetEngineAbortStatus,
+  )(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, ReinterpretationError, LfNodeCreate] =
+    LoggingContextUtil.createLoggingContext(loggerFactory) { implicit loggingContext =>
+      val result = engine.reinterpret(
+        submitters = submitters,
+        command = command,
+        nodeSeed = Some(DAMLe.zeroSeed),
+        preparationTime = Time.Timestamp.Epoch, // Only used to compute contract ids
+        // Only used in Updates, but a create command does not go through Updates.
+        ledgerEffectiveTime = Time.Timestamp.Epoch,
+        packageResolution = Map.empty,
+        contractIdVersion = ContractIdVersion.V1,
+      )
+      for {
+        txWithMetadata <- EitherT(
+          handleResult(
+            topologySnapshot,
+            ledgerTime,
+            ContractAndKeyLookup.noContracts(loggerFactory),
+            (_, _) => Left("Unexpected contract authenticator when replaying a create command"),
+            result,
+            getEngineAbortStatus,
+          )
+        )
+        (tx, _) = txWithMetadata
+        singleCreate = tx.nodes.values.toList match {
+          case (create: LfNodeCreate) :: Nil => create
+          case _ =>
+            throw new RuntimeException(
+              s"DAMLe failed to replay a create $command submitted by $submitters"
+            )
+        }
+        create <- EitherT.pure[FutureUnlessShutdown, ReinterpretationError](singleCreate)
+      } yield create
+    }
+
   private[this] def handleResult[A](
       topologySnapshot: TopologySnapshot,
       ledgerTime: CantonTimestamp,
@@ -307,6 +377,8 @@ class DAMLe(
       contractAuthenticator: ContractAuthenticatorFn,
       result: Result[A],
       getEngineAbortStatus: GetEngineAbortStatus,
+      storedExternalCallResults: StoredExternalCallResults = StoredExternalCallResults.empty,
+      isConfirmer: Boolean = false,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
@@ -344,8 +416,7 @@ class DAMLe(
                 FutureUnlessShutdown.failed(ex)
             }
         case ResultDone(completedResult) => FutureUnlessShutdown.pure(Right(completedResult))
-        case ResultNeedKey(key, _, _, resume) =>
-          // TODO(#30398) review this code once engine really supports NUCK
+        case ResultNeedKey(key, resume) =>
           val gk = key.globalKey
           contracts
             .lookupKey(gk)
@@ -355,7 +426,7 @@ class DAMLe(
                   Error.Interpretation.DamlException(LfInterpretationError.ContractKeyNotFound(gk)),
                   None,
                 )
-              ): ReinterpretationError
+              )
             )
             .flatMap {
               case Some(cid) =>
@@ -379,6 +450,9 @@ class DAMLe(
                 )
             }
             .value
+        case ResultNeedNKey(_, _, _, _) =>
+          // TODO(#30398): add support
+          throw new UnsupportedOperationException("Not supported yet")
         case ResultNeedContract(acoid, resume) =>
           (CantonContractIdVersion.extractCantonContractIdVersion(acoid) match {
             case Right(version) =>
@@ -411,6 +485,135 @@ class DAMLe(
         case ResultPrefetch(_, _, resume) =>
           // we do not need to prefetch here as Canton includes the keys as a static map in Phase 3
           handleResultInternal(contracts, resume())
+        case ResultNeedExternalCall(
+              extensionId,
+              functionId,
+              configHash,
+              input,
+              storedResult,
+              resume,
+            ) =>
+          // For confirmers (signatories), we re-execute external calls to independently verify.
+          // For observers, we replay stored external call results.
+          (isConfirmer, externalCallHandler) match {
+            case (true, Some(handler)) =>
+              // Confirming participant: execute the external call
+              logger.debug(
+                s"Confirmer re-executing external call for extension=$extensionId, function=$functionId"
+              )
+              handler
+                .handleExternalCall(extensionId, functionId, configHash, input, "validation")
+              .flatMap {
+                case Right(output) =>
+                  // Verify result matches stored result if available
+                  val storedOutput = storedResult.orElse {
+                    storedExternalCallResults
+                      .collectFirst {
+                        case ((extId, funcId, _), (_, storedInput, storedOutputValue))
+                            if extId == extensionId &&
+                              funcId == functionId &&
+                              storedInput == input =>
+                          storedOutputValue
+                      }
+                  }
+                  storedOutput match {
+                    case Some(expected) if expected != output =>
+                      logger.warn(
+                        s"External call result mismatch for extension=$extensionId, function=$functionId: " +
+                          s"confirmer got '$output' but submitter recorded '$expected'"
+                      )
+                      // Return error - results don't match, transaction should be rejected
+                      FutureUnlessShutdown.pure(
+                        Left(
+                          EngineError(
+                            Error.Interpretation(
+                              Error.Interpretation.Internal(
+                                "reinterpretation",
+                                s"External call result mismatch: confirmer computed '$output' but submitter recorded '$expected'. " +
+                                  "The transaction is rejected because validators disagree on the external call result.",
+                                None,
+                              ),
+                              None,
+                            )
+                          )
+                        )
+                      )
+                    case _ =>
+                      // Results match or no stored result to compare - continue
+                      handleResultInternal(contracts, resume(Right(output)))
+                  }
+                case Left(error) =>
+                  FutureUnlessShutdown.pure(
+                    Left(
+                      EngineError(
+                        Error.Interpretation(
+                          Error.Interpretation.Internal(
+                            "reinterpretation",
+                            s"External call failed during confirmation: ${error.message}",
+                            None,
+                          ),
+                          None,
+                        )
+                      )
+                    )
+                  )
+              }
+            case _ =>
+              // Observer or no handler: replay stored external call results
+            // The storedResult may be passed directly from the interpreter, or we look it up
+            // from our stored results map.
+
+            // First try the directly provided stored result
+            val resultToReplay: Option[String] = storedResult.orElse {
+              // Look up from our stored results map using (extensionId, functionId, callIndex)
+              // Since the engine doesn't provide callIndex, we track it by matching on
+              // (extensionId, functionId, inputHex) - the same call with same input should
+              // produce the same result
+              storedExternalCallResults
+                .collectFirst {
+                  case ((extId, funcId, _), (storedConfigHash, storedInput, output))
+                      if extId == extensionId &&
+                        funcId == functionId &&
+                        storedInput == input =>
+                    // Optionally verify configHash matches
+                    if (storedConfigHash == configHash) {
+                      output
+                    } else {
+                      logger.warn(
+                        s"Config hash mismatch for external call replay: expected=$storedConfigHash, got=$configHash"
+                      )
+                      output // Still use the stored result but log warning
+                    }
+                }
+            }
+
+            resultToReplay match {
+              case Some(output) =>
+                // Replay the stored result
+                logger.debug(
+                  s"Observer replaying external call result for extension=$extensionId, function=$functionId"
+                )
+                handleResultInternal(contracts, resume(Right(output)))
+
+              case None =>
+                // No stored result found - this is an error during validation
+                FutureUnlessShutdown.pure(
+                  Left(
+                    EngineError(
+                      Error.Interpretation(
+                        Error.Interpretation.Internal(
+                          "reinterpretation",
+                          s"No stored external call result found for replay: extension=$extensionId, function=$functionId, input=$input. " +
+                            "This may indicate transaction tampering or a mismatch between the transaction and its metadata.",
+                          None,
+                        ),
+                        None,
+                      )
+                    )
+                  )
+                )
+            }
+          }
       }
     }
 
