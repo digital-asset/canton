@@ -173,6 +173,7 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
       exerciseResult = exerciseResult,
       keyOpt = key,
       byKey = samBool2,
+      externalCallResults = ImmArray.empty,
       version = version,
     )
 

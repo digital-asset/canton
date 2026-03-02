@@ -74,6 +74,8 @@ message Node {
     repeated string observers = 8;
     // No listed authorizers indicates default authorizers (signatories + actors)
     repeated string authorizers = 1001; // *since version dev*
+    // Results of external calls made during this exercise
+    repeated ExternalCallResult external_call_results = 1002; // *since version dev*
   }
 
   message Rollback {
@@ -115,4 +117,17 @@ message FatContractInstance {
 message KeyWithMaintainers {
   bytes key = 1;
   repeated string maintainers = 2; // the maintainers induced by the key
+}
+
+// Result of an external call made during transaction execution.
+// External calls are deterministic HTTP calls to extension services.
+// Results are stored in the transaction and replayed during validation.
+// *since dev*
+message ExternalCallResult {
+  string extension_id = 1;    // Extension service identifier (e.g., "oracle-price-feed")
+  string function_id = 2;     // Function identifier within the extension
+  string config_hash = 3;     // Hash of the extension configuration for version validation
+  string input_hex = 4;       // Hex-encoded input data sent to the extension
+  string output_hex = 5;      // Hex-encoded output data returned by the extension
+  int32 call_index = 6;       // Index of this call within the exercise node (for ordering)
 }

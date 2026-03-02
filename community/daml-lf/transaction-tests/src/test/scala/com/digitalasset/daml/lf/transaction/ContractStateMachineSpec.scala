@@ -122,6 +122,7 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       exerciseResult = None,
       keyOpt = toOptKeyWithMaintainers(templateId, key),
       byKey = byKey,
+      externalCallResults = ImmArray.empty,
       version = txVersion,
     )
   }

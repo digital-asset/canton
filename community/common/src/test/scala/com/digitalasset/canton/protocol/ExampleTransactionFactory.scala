@@ -270,6 +270,7 @@ object ExampleTransactionFactory {
       exerciseResult = exerciseResult,
       keyOpt = key,
       byKey = byKey,
+      externalCallResults = ImmArray.empty,
       version = serializationVersion,
     )
 
