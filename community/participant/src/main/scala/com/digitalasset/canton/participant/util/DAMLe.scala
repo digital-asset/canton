@@ -14,6 +14,7 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.EngineController.GetEngineAbortStatus
 import com.digitalasset.canton.participant.store.ReplayContractLookup
 import com.digitalasset.canton.participant.util.DAMLe.*
+import com.digitalasset.canton.platform.apiserver.execution.ExternalCallHandler
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -23,10 +24,11 @@ import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.Thereafter.syntax.*
 import com.digitalasset.canton.{LfCommand, LfGlobalKeyMapping, LfPackageId, LfPartyId}
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName}
-import com.digitalasset.daml.lf.data.{ImmArray, Ref}
+import com.digitalasset.daml.lf.data.{Bytes => LfBytes, ImmArray, Ref}
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
 import com.digitalasset.daml.lf.engine.{Enricher as _, *}
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
+import com.digitalasset.daml.lf.transaction.ExternalCallResult
 import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
   NeedKeyProgression,
@@ -124,6 +126,22 @@ object DAMLe {
     override protected def pretty: Pretty[EnrichmentError] = adHocPrettyInstance
   }
 
+  /** Stored external call results for replay during validation.
+    * Key is (extensionId, functionId, index), value is (config, input, output) as data.Bytes.
+    * The index is derived from the position in the externalCallResults list.
+    */
+  type StoredExternalCallResults = Map[(String, String, Int), (LfBytes, LfBytes, LfBytes)]
+
+  object StoredExternalCallResults {
+    val empty: StoredExternalCallResults = Map.empty
+
+    def fromResults(results: ImmArray[ExternalCallResult]): StoredExternalCallResults =
+      results.toSeq.zipWithIndex.map { case (result, index) =>
+        (result.extensionId, result.functionId, index) ->
+          (result.config, result.input, result.output)
+      }.toMap
+  }
+
   trait HasReinterpret {
     def reinterpret(
         contracts: ReplayContractLookup,
@@ -137,6 +155,8 @@ object DAMLe {
         packageResolution: Map[Ref.PackageName, Ref.PackageId],
         expectFailure: Boolean,
         getEngineAbortStatus: GetEngineAbortStatus,
+        storedExternalCallResults: StoredExternalCallResults = StoredExternalCallResults.empty,
+        isConfirmer: Boolean = false,
     )(implicit traceContext: TraceContext): EitherT[
       FutureUnlessShutdown,
       ReinterpretationError,
@@ -164,6 +184,7 @@ class DAMLe(
     engine: Engine,
     contractStateMode: ContractStateMachine.Mode,
     protected val loggerFactory: NamedLoggerFactory,
+    externalCallHandler: Option[ExternalCallHandler] = None,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
     with HasReinterpret {
@@ -225,6 +246,8 @@ class DAMLe(
       packageResolution: Map[PackageName, PackageId],
       expectFailure: Boolean,
       getEngineAbortStatus: GetEngineAbortStatus,
+      storedExternalCallResults: StoredExternalCallResults = StoredExternalCallResults.empty,
+      isConfirmer: Boolean = false,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
     ReinterpretationError,
@@ -295,6 +318,8 @@ class DAMLe(
           contractAuthenticator,
           result,
           getEngineAbortStatus,
+          storedExternalCallResults,
+          isConfirmer,
         )
       )
       (tx, metadata) = txWithMetadata
@@ -328,9 +353,12 @@ class DAMLe(
       contractAuthenticator: ContractAuthenticatorFn,
       result: Result[A],
       getEngineAbortStatus: GetEngineAbortStatus,
+      storedExternalCallResults: StoredExternalCallResults = StoredExternalCallResults.empty,
+      isConfirmer: Boolean = false,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
+    val externalCallCounter = new java.util.concurrent.atomic.AtomicInteger(0)
 
     def handleResultInternal(
         result: Result[A]
@@ -411,22 +439,103 @@ class DAMLe(
         case ResultPrefetch(_, _, resume) =>
           // we do not need to prefetch here as Canton includes the keys as a static map in Phase 3
           handleResultInternal(resume())
-        // TODO(https://github.com/digital-asset/canton/issues/513): Replay or validate recorded external-call results during reinterpretation.
-        case ResultNeedExternalCall(_, _, _, _, _) =>
-          FutureUnlessShutdown.pure(
-            Left(
-              EngineError(
-                Error.Interpretation(
-                  Error.Interpretation.Internal(
-                    "reinterpretation",
-                    "External calls are not supported during reinterpretation",
-                    None,
-                  ),
-                  None,
-                )
+        case ResultNeedExternalCall(extensionId, functionId, configHash, input, resume) =>
+          val currentCallIndex = externalCallCounter.getAndIncrement()
+          (isConfirmer, externalCallHandler) match {
+            case (true, Some(handler)) =>
+              logger.debug(
+                s"Confirmer re-executing external call for extension=$extensionId, function=$functionId, callIndex=$currentCallIndex"
               )
-            )
-          )
+              handler
+                .handleExternalCall(extensionId, functionId, configHash, input, "validation")
+                .flatMap {
+                  case Right(output) =>
+                    val storedOutput = storedExternalCallResults
+                      .get((extensionId, functionId, currentCallIndex))
+                      .map(_._3.toHexString)
+
+                    storedOutput match {
+                      case Some(expected) if expected != output =>
+                        logger.warn(
+                          s"External call result mismatch for extension=$extensionId, function=$functionId, callIndex=$currentCallIndex: " +
+                            s"confirmer got '$output' but submitter recorded '$expected'"
+                        )
+                        FutureUnlessShutdown.pure(
+                          Left(
+                            EngineError(
+                              Error.Interpretation(
+                                Error.Interpretation.Internal(
+                                  "reinterpretation",
+                                  s"LOCAL_VERDICT_EXTERNAL_CALL_RESULT_MISMATCH: " +
+                                    s"confirmer computed '$output' but submitter recorded '$expected' " +
+                                    s"(extensionId=$extensionId, functionId=$functionId, callIndex=$currentCallIndex)",
+                                  None,
+                                ),
+                                None,
+                              )
+                            )
+                          )
+                        )
+                      case _ =>
+                        handleResultInternal(resume(Right(output)))
+                    }
+                  case Left(error) =>
+                    FutureUnlessShutdown.pure(
+                      Left(
+                        EngineError(
+                          Error.Interpretation(
+                            Error.Interpretation.Internal(
+                              "reinterpretation",
+                              s"LOCAL_VERDICT_EXTERNAL_CALL_FAILED: ${error.message} " +
+                                s"(status=${error.statusCode}, extensionId=$extensionId, functionId=$functionId, callIndex=$currentCallIndex" +
+                                error.requestId.map(id => s", requestId=$id").getOrElse("") + ")",
+                              None,
+                            ),
+                            None,
+                          )
+                        )
+                      )
+                    )
+                }
+
+            case _ =>
+              val resultToReplay = storedExternalCallResults
+                .get((extensionId, functionId, currentCallIndex))
+                .map { case (storedConfig, _, output) =>
+                  if (storedConfig.toHexString != configHash) {
+                    logger.warn(
+                      s"Config mismatch for external call replay: expected=${storedConfig.toHexString}, got=$configHash"
+                    )
+                  }
+                  output.toHexString
+                }
+
+              resultToReplay match {
+                case Some(output) =>
+                  logger.debug(
+                    s"Observer replaying external call result for extension=$extensionId, function=$functionId"
+                  )
+                  handleResultInternal(resume(Right(output)))
+
+                case None =>
+                  FutureUnlessShutdown.pure(
+                    Left(
+                      EngineError(
+                        Error.Interpretation(
+                          Error.Interpretation.Internal(
+                            "reinterpretation",
+                            s"LOCAL_VERDICT_EXTERNAL_CALL_REPLAY_MISSING: " +
+                              s"no stored result for extensionId=$extensionId, functionId=$functionId, callIndex=$currentCallIndex. " +
+                              "This may indicate transaction tampering or a mismatch between the transaction and its metadata.",
+                            None,
+                          ),
+                          None,
+                        )
+                      )
+                    )
+                  )
+              }
+          }
       }
     }
 

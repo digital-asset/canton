@@ -270,6 +270,22 @@ object LocalRejectError extends LocalRejectionGroup {
             _resourcesType = Some(ErrorResource.ContractId),
           )
     }
+
+    @Explanation(
+      """This rejection is made by a participant if external calls with the same arguments
+        |returned inconsistent results across the transaction. Each party validates consistency
+        |of all external calls where they are a signatory of the exercised contract."""
+    )
+    @Resolution("This indicates either malicious or faulty behaviour.")
+    object ExternalCallInconsistency
+        extends MalformedErrorCode(
+          id = "LOCAL_VERDICT_EXTERNAL_CALL_INCONSISTENCY"
+        ) {
+      final case class Reject(override val _details: String)
+          extends Malformed(
+            _causePrefix = "Rejected transaction due to inconsistent external call results: "
+          )
+    }
   }
 
   object UnassignmentRejects extends ErrorGroup() {
