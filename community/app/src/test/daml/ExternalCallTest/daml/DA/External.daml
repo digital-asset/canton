@@ -1,0 +1,45 @@
+-- Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+-- | Mock DA.External module for testing.
+-- This provides an echo behavior for testing - returns the input as output.
+-- This is a placeholder until the real BEExternalCall primitive is available.
+module DA.External
+  ( externalCall
+  , BytesHex
+  , isHex
+  , isBytesHex
+  ) where
+
+import DA.Text qualified as Text
+
+-- | Hex-encoded bytes represented as Text.
+-- Must be even length and contain only valid hex characters (0-9, a-f, A-F).
+type BytesHex = Text
+
+-- | Check if a Text contains only valid hex characters.
+isHex : Text -> Bool
+isHex = Text.isPred (\t -> t >= "0" && t <= "9" || t >= "a" && t <= "f" || t >= "A" && t <= "F")
+
+-- | Check if a Text is a valid hex-encoded byte string.
+-- Must be even length and contain only valid hex characters.
+isBytesHex : Text -> Bool
+isBytesHex hex = Text.length hex % 2 == 0 && isHex hex
+
+-- | Make an external call to a configured extension service.
+--
+-- MOCK IMPLEMENTATION: Returns the input as output (echo behavior).
+-- This is a testing stub - the real implementation uses the BEExternalCall primitive.
+--
+-- Parameters:
+--   - extensionId: Identifier of the configured extension (must match canton config)
+--   - functionId: Identifier for the function within the extension
+--   - configHex: Configuration hash as hex string (even length)
+--   - inputHex: Input data as hex string (even length)
+--
+-- Returns: The input data (echo behavior for testing)
+externalCall : Text -> Text -> BytesHex -> BytesHex -> Update BytesHex
+externalCall _extensionId _functionId configHex inputHex
+  | not (isBytesHex configHex) = error ("External call failed: Invalid hex encoding in config: " <> configHex)
+  | not (isBytesHex inputHex) = error ("External call failed: Invalid hex encoding in input: " <> inputHex)
+  | otherwise = pure (Text.asciiToLower inputHex)
