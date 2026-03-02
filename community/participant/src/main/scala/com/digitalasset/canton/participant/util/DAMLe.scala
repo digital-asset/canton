@@ -14,6 +14,7 @@ import com.digitalasset.canton.participant.protocol.EngineController.GetEngineAb
 import com.digitalasset.canton.participant.store.ContractAndKeyLookup
 import com.digitalasset.canton.participant.util.DAMLe.*
 import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
+import com.digitalasset.canton.platform.apiserver.execution.ExternalCallHandler
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
@@ -137,6 +138,7 @@ object DAMLe {
         expectFailure: Boolean,
         getEngineAbortStatus: GetEngineAbortStatus,
         storedExternalCallResults: StoredExternalCallResults = StoredExternalCallResults.empty,
+        isConfirmer: Boolean = false,
     )(implicit traceContext: TraceContext): EitherT[
       FutureUnlessShutdown,
       ReinterpretationError,
@@ -160,6 +162,7 @@ class DAMLe(
     engine: Engine,
     engineLoggingConfig: EngineLoggingConfig,
     protected val loggerFactory: NamedLoggerFactory,
+    externalCallHandler: Option[ExternalCallHandler] = None,
 )(implicit ec: ExecutionContext)
     extends NamedLogging
     with HasReinterpret {
@@ -217,6 +220,7 @@ class DAMLe(
       expectFailure: Boolean,
       getEngineAbortStatus: GetEngineAbortStatus,
       storedExternalCallResults: StoredExternalCallResults = StoredExternalCallResults.empty,
+      isConfirmer: Boolean = false,
   )(implicit traceContext: TraceContext): EitherT[
     FutureUnlessShutdown,
     ReinterpretationError,
@@ -288,6 +292,7 @@ class DAMLe(
           result,
           getEngineAbortStatus,
           storedExternalCallResults,
+          isConfirmer,
         )
       )
       (tx, metadata) = txWithMetadata
@@ -349,6 +354,7 @@ class DAMLe(
       result: Result[A],
       getEngineAbortStatus: GetEngineAbortStatus,
       storedExternalCallResults: StoredExternalCallResults = StoredExternalCallResults.empty,
+      isConfirmer: Boolean = false,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
@@ -435,59 +441,126 @@ class DAMLe(
               storedResult,
               resume,
             ) =>
-          // During validation/reinterpretation, we replay stored external call results.
-          // The storedResult may be passed directly from the interpreter, or we look it up
-          // from our stored results map.
-
-          // First try the directly provided stored result
-          val resultToReplay: Option[String] = storedResult.orElse {
-            // Look up from our stored results map using (extensionId, functionId, callIndex)
-            // Since the engine doesn't provide callIndex, we track it by matching on
-            // (extensionId, functionId, inputHex) - the same call with same input should
-            // produce the same result
-            storedExternalCallResults
-              .collectFirst {
-                case ((extId, funcId, _), (storedConfigHash, storedInput, output))
-                    if extId == extensionId &&
-                      funcId == functionId &&
-                      storedInput == input =>
-                  // Optionally verify configHash matches
-                  if (storedConfigHash == configHash) {
-                    output
-                  } else {
-                    logger.warn(
-                      s"Config hash mismatch for external call replay: expected=$storedConfigHash, got=$configHash"
-                    )
-                    output // Still use the stored result but log warning
-                  }
-              }
-          }
-
-          resultToReplay match {
-            case Some(output) =>
-              // Replay the stored result
+          // For confirmers (signatories), we re-execute external calls to independently verify.
+          // For observers, we replay stored external call results.
+          (isConfirmer, externalCallHandler) match {
+            case (true, Some(handler)) =>
+              // Confirming participant: execute the external call
               logger.debug(
-                s"Replaying external call result for extension=$extensionId, function=$functionId"
+                s"Confirmer re-executing external call for extension=$extensionId, function=$functionId"
               )
-              handleResultInternal(contracts, resume(Right(output)))
+              handler
+                .handleExternalCall(extensionId, functionId, configHash, input, "validation")
+              .flatMap {
+                case Right(output) =>
+                  // Verify result matches stored result if available
+                  val storedOutput = storedResult.orElse {
+                    storedExternalCallResults
+                      .collectFirst {
+                        case ((extId, funcId, _), (_, storedInput, storedOutputValue))
+                            if extId == extensionId &&
+                              funcId == functionId &&
+                              storedInput == input =>
+                          storedOutputValue
+                      }
+                  }
+                  storedOutput match {
+                    case Some(expected) if expected != output =>
+                      logger.warn(
+                        s"External call result mismatch for extension=$extensionId, function=$functionId: " +
+                          s"confirmer got '$output' but submitter recorded '$expected'"
+                      )
+                      // Return error - results don't match, transaction should be rejected
+                      FutureUnlessShutdown.pure(
+                        Left(
+                          EngineError(
+                            Error.Interpretation(
+                              Error.Interpretation.Internal(
+                                "reinterpretation",
+                                s"External call result mismatch: confirmer computed '$output' but submitter recorded '$expected'. " +
+                                  "The transaction is rejected because validators disagree on the external call result.",
+                                None,
+                              ),
+                              None,
+                            )
+                          )
+                        )
+                      )
+                    case _ =>
+                      // Results match or no stored result to compare - continue
+                      handleResultInternal(contracts, resume(Right(output)))
+                  }
+                case Left(error) =>
+                  FutureUnlessShutdown.pure(
+                    Left(
+                      EngineError(
+                        Error.Interpretation(
+                          Error.Interpretation.Internal(
+                            "reinterpretation",
+                            s"External call failed during confirmation: ${error.message}",
+                            None,
+                          ),
+                          None,
+                        )
+                      )
+                    )
+                  )
+              }
+            case _ =>
+              // Observer or no handler: replay stored external call results
+            // The storedResult may be passed directly from the interpreter, or we look it up
+            // from our stored results map.
 
-            case None =>
-              // No stored result found - this is an error during validation
-              FutureUnlessShutdown.pure(
-                Left(
-                  EngineError(
-                    Error.Interpretation(
-                      Error.Interpretation.Internal(
-                        "reinterpretation",
-                        s"No stored external call result found for replay: extension=$extensionId, function=$functionId, input=$input. " +
-                          "This may indicate transaction tampering or a mismatch between the transaction and its metadata.",
+            // First try the directly provided stored result
+            val resultToReplay: Option[String] = storedResult.orElse {
+              // Look up from our stored results map using (extensionId, functionId, callIndex)
+              // Since the engine doesn't provide callIndex, we track it by matching on
+              // (extensionId, functionId, inputHex) - the same call with same input should
+              // produce the same result
+              storedExternalCallResults
+                .collectFirst {
+                  case ((extId, funcId, _), (storedConfigHash, storedInput, output))
+                      if extId == extensionId &&
+                        funcId == functionId &&
+                        storedInput == input =>
+                    // Optionally verify configHash matches
+                    if (storedConfigHash == configHash) {
+                      output
+                    } else {
+                      logger.warn(
+                        s"Config hash mismatch for external call replay: expected=$storedConfigHash, got=$configHash"
+                      )
+                      output // Still use the stored result but log warning
+                    }
+                }
+            }
+
+            resultToReplay match {
+              case Some(output) =>
+                // Replay the stored result
+                logger.debug(
+                  s"Observer replaying external call result for extension=$extensionId, function=$functionId"
+                )
+                handleResultInternal(contracts, resume(Right(output)))
+
+              case None =>
+                // No stored result found - this is an error during validation
+                FutureUnlessShutdown.pure(
+                  Left(
+                    EngineError(
+                      Error.Interpretation(
+                        Error.Interpretation.Internal(
+                          "reinterpretation",
+                          s"No stored external call result found for replay: extension=$extensionId, function=$functionId, input=$input. " +
+                            "This may indicate transaction tampering or a mismatch between the transaction and its metadata.",
+                          None,
+                        ),
                         None,
-                      ),
-                      None,
+                      )
                     )
                   )
                 )
-              )
+            }
           }
       }
     }

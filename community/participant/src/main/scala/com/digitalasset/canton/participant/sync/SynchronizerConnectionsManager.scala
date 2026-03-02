@@ -53,6 +53,7 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
   SyncServiceSynchronizerDisconnect,
   SyncServiceUnknownSynchronizer,
 }
+import com.digitalasset.canton.platform.apiserver.execution.ExternalCallHandler
 import com.digitalasset.canton.participant.sync.SynchronizerConnectionsManager.{
   AttemptReconnect,
   ConnectSynchronizer,
@@ -134,6 +135,7 @@ private[sync] class SynchronizerConnectionsManager(
     testingConfig: TestingConfigInternal,
     ledgerApiIndexer: LifeCycleContainer[LedgerApiIndexer],
     connectedSynchronizersLookupContainer: ConnectedSynchronizersLookupContainer,
+    externalCallHandler: Option[ExternalCallHandler] = None,
 )(implicit ec: ExecutionContextExecutor, mat: Materializer, val tracer: Tracer)
     extends FlagCloseable
     with Spanning
@@ -1051,6 +1053,7 @@ private[sync] class SynchronizerConnectionsManager(
               futureSupervisor,
               synchronizerLoggerFactory,
               testingConfig,
+              externalCallHandler,
             )
           )
 

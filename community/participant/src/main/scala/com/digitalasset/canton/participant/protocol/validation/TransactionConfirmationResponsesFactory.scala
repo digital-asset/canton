@@ -11,6 +11,7 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.ProcessingSteps
 import com.digitalasset.canton.participant.protocol.ProtocolProcessor.MalformedPayload
+import com.digitalasset.canton.participant.protocol.validation.ExternalCallConsistencyChecker.*
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -24,6 +25,7 @@ class TransactionConfirmationResponsesFactory(
     participantId: ParticipantId,
     synchronizerId: PhysicalSynchronizerId,
     protected val loggerFactory: NamedLoggerFactory,
+    externalCallConsistencyChecker: ExternalCallConsistencyChecker = new ExternalCallConsistencyChecker(),
 ) extends NamedLogging {
 
   import com.digitalasset.canton.util.ShowUtil.*
@@ -149,14 +151,37 @@ class TransactionConfirmationResponsesFactory(
             )
           )
 
-        responses <- transactionValidationResult.viewValidationResults.toSeq
-          .parTraverseFilter { case (viewPosition, viewValidationResult) =>
-            for {
-              hostedConfirmingParties <-
-                hostedConfirmingPartiesOfView(viewValidationResult)
+        // Step 1: Compute hosted confirming parties for all views
+        viewsWithHostedParties <- transactionValidationResult.viewValidationResults.toSeq
+          .parTraverse { case (viewPosition, viewValidationResult) =>
+            hostedConfirmingPartiesOfView(viewValidationResult).map { hostedParties =>
+              (viewPosition, viewValidationResult, hostedParties)
+            }
+          }
 
-            } yield {
+        // Step 2: Collect all external calls and check consistency per party
+        allHostedConfirmingParties = viewsWithHostedParties.flatMap(_._3).toSet
+        allExternalCalls = externalCallConsistencyChecker.collectExternalCalls(
+          transactionValidationResult.viewValidationResults
+        )
+        externalCallConsistencyResults = externalCallConsistencyChecker.checkConsistency(
+          allExternalCalls,
+          allHostedConfirmingParties,
+        )
 
+        // Log external call inconsistencies
+        _ = externalCallConsistencyResults.results.foreach {
+          case (party, Inconsistent(key, outputs, viewPositions)) =>
+            logger.warn(
+              show"Request $requestId: Party $party sees inconsistent external call results for ${key.functionId}: outputs=$outputs in views $viewPositions"
+            )
+          case _ => // consistent, no logging needed
+        }
+
+        // Step 3: Generate verdicts for each view, considering per-party external call consistency
+        responses <- viewsWithHostedParties
+          .parTraverse { case (viewPosition, viewValidationResult, hostedConfirmingParties) =>
+            FutureUnlessShutdown.pure {
               // Rejections due to a failed internal consistency check
               val internalConsistencyRejections =
                 transactionValidationResult.internalConsistencyResultE.swap.toOption.map(cause =>
@@ -252,30 +277,27 @@ class TransactionConfirmationResponsesFactory(
                   modelConformanceRejections ++ internalConsistencyRejections ++
                   replayRejections
 
-              val localVerdictAndPartiesO = localVerdicts
-                .collectFirst[(LocalVerdict, Set[LfPartyId])] {
-                  case malformed: LocalReject if malformed.isMalformed => malformed -> Set.empty
-                  case localReject: LocalReject if hostedConfirmingParties.nonEmpty =>
-                    localReject -> hostedConfirmingParties
+              // Determine general verdict (applies to all parties unless overridden by external call inconsistency)
+              val generalVerdictO: Option[(LocalVerdict, Boolean)] = localVerdicts
+                .collectFirst[(LocalVerdict, Boolean)] {
+                  case malformed: LocalReject if malformed.isMalformed => (malformed, true)
+                  case localReject: LocalReject => (localReject, false)
                 }
-                .orElse(
-                  Option.when(hostedConfirmingParties.nonEmpty)(
-                    LocalApprove(protocolVersion) -> hostedConfirmingParties
-                  )
-                )
+                .orElse(Some((LocalApprove(protocolVersion), false)))
 
-              localVerdictAndPartiesO.map { case (localVerdict, parties) =>
-                checked(
-                  ConfirmationResponse
-                    .tryCreate(
-                      Some(viewPosition),
-                      localVerdict,
-                      parties,
-                    )
-                )
-              }
+              // Partition parties based on external call consistency results
+              val responses = partitionByExternalCallConsistency(
+                hostedConfirmingParties,
+                externalCallConsistencyResults,
+                generalVerdictO,
+                viewPosition,
+                requestId,
+              )
+
+              responses
             }
           }
+          .map(_.flatten)
       } yield {
         checked(
           NonEmpty
@@ -292,6 +314,94 @@ class TransactionConfirmationResponsesFactory(
                 )
             )
         )
+      }
+    }
+
+    /** Partitions parties based on their external call consistency results.
+      *
+      * Parties with inconsistent external call results get a malformed rejection,
+      * while parties with consistent results get the general verdict.
+      *
+      * @param hostedConfirmingParties All hosted confirming parties for this view
+      * @param consistencyResults Per-party external call consistency results
+      * @param generalVerdictO The general verdict (and whether it's malformed) to apply to consistent parties
+      * @param viewPosition The position of the view being processed
+      * @param requestId The request ID for logging
+      * @return Confirmation responses partitioned by verdict
+      */
+    def partitionByExternalCallConsistency(
+        hostedConfirmingParties: Set[LfPartyId],
+        consistencyResults: ExternalCallConsistencyResults,
+        generalVerdictO: Option[(LocalVerdict, Boolean)],
+        viewPosition: com.digitalasset.canton.data.ViewPosition,
+        requestId: RequestId,
+    )(implicit traceContext: TraceContext): Seq[ConfirmationResponse] = {
+      if (hostedConfirmingParties.isEmpty) {
+        Seq.empty
+      } else {
+        // Separate parties by their external call consistency result
+        val (inconsistentParties, consistentParties) = hostedConfirmingParties.partition { party =>
+          consistencyResults.results.get(party).exists {
+            case _: Inconsistent => true
+            case Consistent => false
+          }
+        }
+
+        val responses = Seq.newBuilder[ConfirmationResponse]
+
+        // Handle parties with external call inconsistency - they get a malformed rejection
+        if (inconsistentParties.nonEmpty) {
+          // Group by the specific inconsistency to create minimal number of responses
+          val groupedByInconsistency = inconsistentParties
+            .map(p => (p, consistencyResults.results(p)))
+            .groupBy(_._2)
+
+          groupedByInconsistency.foreach {
+            case (Inconsistent(key, outputs, _), _) =>
+              val reject = logged(
+                requestId,
+                LocalRejectError.MalformedRejects.ExternalCallInconsistency.Reject(
+                  s"Function ${key.functionId} returned different outputs: ${outputs.mkString(", ")}"
+                ),
+              ).toLocalReject(protocolVersion)
+              responses += checked(
+                ConfirmationResponse.tryCreate(
+                  Some(viewPosition),
+                  reject,
+                  Set.empty, // Malformed rejections use empty confirming parties
+                )
+              )
+            case _ => // Consistent parties handled below
+          }
+        }
+
+        // Handle consistent parties with the general verdict
+        generalVerdictO match {
+          case Some((generalVerdict, isMalformed)) =>
+            val shouldEmitGeneralVerdict = if (isMalformed) {
+              // For malformed general verdicts, we emit with empty parties but only once
+              // Skip if we already emitted malformed for inconsistent parties
+              consistentParties.nonEmpty || inconsistentParties.isEmpty
+            } else {
+              true
+            }
+
+            if (shouldEmitGeneralVerdict) {
+              val partiesToUse = if (isMalformed) Set.empty[LfPartyId] else consistentParties
+              if (partiesToUse.nonEmpty || isMalformed) {
+                responses += checked(
+                  ConfirmationResponse.tryCreate(
+                    Some(viewPosition),
+                    generalVerdict,
+                    partiesToUse,
+                  )
+                )
+              }
+            }
+          case None => // No general verdict to emit
+        }
+
+        responses.result()
       }
     }
 

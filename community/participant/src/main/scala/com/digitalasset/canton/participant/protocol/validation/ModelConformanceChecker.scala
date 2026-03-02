@@ -240,6 +240,7 @@ class ModelConformanceChecker(
       ledgerTime: CantonTimestamp,
       preparationTime: CantonTimestamp,
       getEngineAbortStatus: GetEngineAbortStatus,
+      topologySnapshot: Option[TopologySnapshot] = None,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, Error, ConformanceReInterpretationResult] = {
@@ -262,9 +263,22 @@ class ModelConformanceChecker(
 
     val contractAndKeyLookup = new ExtendedContractLookup(inputContracts, resolverFromView)
 
+    // Determine if this participant is a confirmer (signatory) for this view
+    // Confirmers must re-execute external calls; observers replay stored results
+    val confirmingParties = view.viewCommonData.tryUnwrap.viewConfirmationParameters.confirmers
+    val isConfirmerF: FutureUnlessShutdown[Boolean] = topologySnapshot match {
+      case Some(snapshot) =>
+        snapshot.canConfirm(participantId, confirmingParties).map(_.nonEmpty)
+      case None =>
+        // No topology snapshot available - assume not a confirmer (conservative)
+        FutureUnlessShutdown.pure(false)
+    }
+
     for {
 
       packagePreference <- buildPackageNameMap(packageIdPreference)
+
+      isConfirmer <- EitherT.right[Error](isConfirmerF)
 
       lfTxAndMetadata <- reinterpreter
         .reinterpret(
@@ -279,6 +293,7 @@ class ModelConformanceChecker(
           failed,
           getEngineAbortStatus,
           storedExternalCallResults,
+          isConfirmer,
         )(traceContext)
         .leftMap(DAMLeError(_, view.viewHash))
         .leftWiden[Error]

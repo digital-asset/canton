@@ -905,6 +905,11 @@ object BuildCommon {
             (Test / damlDarOutput).value / "foo-0.0.3.dar",
             "com.digitalasset.canton.http.json.tests.upgrades.v3",
           ),
+          (
+            (Test / sourceDirectory).value / "daml" / "ExternalCallTest",
+            (Test / damlDarOutput).value / "ExternalCallTest-1.0.0.dar",
+            "com.digitalasset.canton.externalcall",
+          ),
         ),
         Test / damlTsCodegen := Seq(
           (

@@ -89,6 +89,7 @@ import com.digitalasset.canton.participant.sync.SynchronizerConnectionsManager.{
   ConnectSynchronizer,
   ConnectionListener,
 }
+import com.digitalasset.canton.platform.apiserver.execution.ExternalCallHandler
 import com.digitalasset.canton.participant.synchronizer.*
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
@@ -172,6 +173,7 @@ class CantonSyncService(
     testingConfig: TestingConfigInternal,
     val ledgerApiIndexer: LifeCycleContainer[LedgerApiIndexer],
     connectedSynchronizersLookupContainer: ConnectedSynchronizersLookupContainer,
+    externalCallHandler: Option[ExternalCallHandler] = None,
 )(implicit ec: ExecutionContextExecutor, mat: Materializer, val tracer: Tracer)
     extends state.SyncService
     with ParticipantPruningSyncService
@@ -208,6 +210,7 @@ class CantonSyncService(
     testingConfig,
     ledgerApiIndexer,
     connectedSynchronizersLookupContainer,
+    externalCallHandler,
   )
 
   private def connectedSynchronizersLookup: ConnectedSynchronizersLookup =

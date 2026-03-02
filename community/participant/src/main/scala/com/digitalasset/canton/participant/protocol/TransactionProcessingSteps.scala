@@ -751,6 +751,7 @@ class TransactionProcessingSteps(
                   ledgerTime,
                   parsedRequest.preparationTime,
                   () => engineController.abortStatus,
+                  Some(ipsSnapshot),
                 )
             }
           }
