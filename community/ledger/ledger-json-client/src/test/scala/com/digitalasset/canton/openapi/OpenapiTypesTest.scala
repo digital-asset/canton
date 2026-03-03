@@ -4,6 +4,7 @@
 package com.digitalasset.canton.openapi
 
 import com.daml.ledger.api.v2
+import com.daml.ledger.api.v2.version_service.FeaturesDescriptor
 import com.digitalasset.canton.http.json.v2 as json
 import com.digitalasset.canton.http.json.v2.LegacyDTOs
 import com.digitalasset.canton.openapi.json.{JSON, model as openapi}
@@ -71,7 +72,13 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
       } catch {
         case NonFatal(error) =>
           logger.error(
-            s"Parse error detected for class $classTag when attempting to parse the generated json.\n  json-error: $error\n  sample: $sample\n  encoded-json: $initialCirceJson",
+            s"""Parse error detected for class $classTag when attempting to parse the generated json (see hints on the next line).
+               Hints:
+                - If a field is an Option in the Scala server class (${classTag.runtimeClass.getName}) but it is required in the OpenAPI spec, make sure the Arbitrary always generates populated values for the field.
+               json-error: $error
+               sample: $sample
+               encoded-json: $initialCirceJson
+               """.stripMargin,
             error,
           )
           throw new RuntimeException(
@@ -161,6 +168,62 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
     import com.digitalasset.canton.http.json.v2.JsContractServiceCodecs.*
 
     import magnolify.scalacheck.auto.*
+
+    private[Mappings] implicit val offsetCheckpointFeatureArb
+        : Arbitrary[v2.version_service.OffsetCheckpointFeature] =
+      Arbitrary(
+        genArbitrary[com.google.protobuf.duration.Duration].arbitrary.map(duration =>
+          v2.version_service.OffsetCheckpointFeature(Some(duration))
+        )
+      )
+
+    // Explicitly defined arbitrary instance with the Optional fields populated
+    // to match the OpenAPI schema required properties
+    private[Mappings] implicit val featuresDescriptorArb: Arbitrary[FeaturesDescriptor] =
+      Arbitrary(
+        for {
+          ef <- genArbitrary[v2.experimental_features.ExperimentalFeatures].arbitrary
+          umf <- genArbitrary[v2.version_service.UserManagementFeature].arbitrary
+          pmf <- genArbitrary[v2.version_service.PartyManagementFeature].arbitrary
+          ocf <- offsetCheckpointFeatureArb.arbitrary
+          pf <- genArbitrary[v2.version_service.PackageFeature].arbitrary
+        } yield v2.version_service.FeaturesDescriptor(
+          experimental = Some(ef),
+          userManagement = Some(umf),
+          partyManagement = Some(pmf),
+          offsetCheckpoint = Some(ocf),
+          packageFeature = Some(pf),
+        )
+      )
+
+    // Explicitly defined arbitrary instance with the Optional fields populated
+    // to match the OpenAPI schema required properties
+    private[Mappings] implicit val getLedgerApiVersionArb
+        : Arbitrary[v2.version_service.GetLedgerApiVersionResponse] =
+      Arbitrary(
+        featuresDescriptorArb.arbitrary.map(fd =>
+          v2.version_service.GetLedgerApiVersionResponse(
+            version = Arbitrary.arbString.arbitrary.sample.getOrElse("test-version"),
+            features = Some(fd),
+          )
+        )
+      )
+
+    // Explicitly defined arbitrary instance with the Optional fields populated
+    // to match the OpenAPI schema required properties
+    private[Mappings] implicit val updateVettedPackagesResponseArb
+        : Arbitrary[v2.admin.package_management_service.UpdateVettedPackagesResponse] =
+      Arbitrary(
+        for {
+          optionalPastVettedPackages <- Arbitrary
+            .arbOption(genArbitrary[v2.package_reference.VettedPackages])
+            .arbitrary
+          someNewVettedPackages <- genArbitrary[v2.package_reference.VettedPackages].arbitrary
+        } yield v2.admin.package_management_service.UpdateVettedPackagesResponse(
+          pastVettedPackages = optionalPastVettedPackages,
+          newVettedPackages = Some(someNewVettedPackages),
+        )
+      )
 
     // as stated above this split is needed to ensure that mappings initialization do not exceed max 64kB method size
     val allMappings =

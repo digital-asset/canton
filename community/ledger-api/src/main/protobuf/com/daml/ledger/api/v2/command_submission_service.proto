@@ -37,6 +37,7 @@ service CommandSubmissionService {
 // The submitted commands will be processed atomically in a single transaction. Moreover, each ``Command`` in ``commands`` will be executed in the order specified by the request.
 message SubmitRequest {
   // The commands to be submitted in a single transaction.
+  //
   // Required
   Commands commands = 1;
 }
@@ -45,6 +46,7 @@ message SubmitResponse {}
 
 message SubmitReassignmentRequest {
   // The reassignment command to be submitted.
+  //
   // Required
   ReassignmentCommands reassignment_commands = 1;
 }

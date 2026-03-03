@@ -169,7 +169,6 @@ class BlockSequencer(
     materializer,
     loggerFactory,
   )
-
   private val throughputCap =
     new BlockSequencerThroughputCap(
       blockSequencerConfig.throughputCap,
@@ -940,4 +939,15 @@ class BlockSequencer(
     blockOrderer.sequencingTime
 
   override private[canton] def orderer: Some[BlockOrderer] = Some(blockOrderer)
+
+  override def getThroughputCap(
+      requestType: SubmissionRequestType
+  ): Option[BlockSequencerConfig.IndividualThroughputCapConfig] =
+    throughputCap.getCap(requestType)
+
+  override def setThroughputCap(
+      requestType: SubmissionRequestType,
+      config: Option[BlockSequencerConfig.IndividualThroughputCapConfig],
+  )(implicit traceContext: TraceContext): Unit = throughputCap.replaceCap(requestType, config)
+
 }

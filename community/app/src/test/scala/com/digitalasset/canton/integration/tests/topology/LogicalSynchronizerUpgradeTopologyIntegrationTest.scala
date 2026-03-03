@@ -76,7 +76,7 @@ sealed trait LogicalSynchronizerUpgradeTopologyIntegrationTest
 
     val successorPSId = allocateSuccessorPSId()
     synchronizerOwners1.foreach { owner =>
-      owner.topology.synchronizer_upgrade.announcement.propose(
+      owner.topology.lsu.announcement.propose(
         successorPhysicalSynchronizerId = successorPSId,
         upgradeTime = upgradeTime,
       )
@@ -95,7 +95,7 @@ sealed trait LogicalSynchronizerUpgradeTopologyIntegrationTest
   "the topology state can be unfrozen again" in { implicit env =>
     import env.*
     synchronizerOwners1.foreach(
-      _.topology.synchronizer_upgrade.announcement.revoke(
+      _.topology.lsu.announcement.revoke(
         successorPhysicalSynchronizerId = latestSuccessorPSId.get().value,
         upgradeTime = upgradeTime,
       )
@@ -128,14 +128,14 @@ sealed trait LogicalSynchronizerUpgradeTopologyIntegrationTest
     // announce the upgrade to prepare for the sequencer connection announcements
     val successorPSId = allocateSuccessorPSId()
     synchronizerOwners1.foreach(
-      _.topology.synchronizer_upgrade.announcement.propose(
+      _.topology.lsu.announcement.propose(
         successorPhysicalSynchronizerId = successorPSId,
         upgradeTime = upgradeTime,
       )
     )
 
     // sequencer1 announces its connection details for the successor synchronizer
-    sequencer1.topology.synchronizer_upgrade.sequencer_successors.propose_successor(
+    sequencer1.topology.lsu.sequencer_successors.propose_successor(
       sequencer1.id,
       endpoints = NonEmpty(Seq, new URI("https://localhost:5000")),
       daId,
@@ -154,7 +154,7 @@ sealed trait LogicalSynchronizerUpgradeTopologyIntegrationTest
       .toOption shouldBe None
 
     // sequencer2 announces its connection details for the successor synchronizer
-    sequencer2.topology.synchronizer_upgrade.sequencer_successors.propose_successor(
+    sequencer2.topology.lsu.sequencer_successors.propose_successor(
       sequencer2.id,
       endpoints = NonEmpty(Seq, new URI("http://localhost:6000"), new URI("http://localhost:7000")),
       daId,
@@ -170,7 +170,7 @@ sealed trait LogicalSynchronizerUpgradeTopologyIntegrationTest
     )
 
     // sequencer2 changes its connection details for the successor synchronizer
-    sequencer2.topology.synchronizer_upgrade.sequencer_successors.propose_successor(
+    sequencer2.topology.lsu.sequencer_successors.propose_successor(
       sequencer2.id,
       endpoints = NonEmpty(Seq, new URI("http://localhost:6000")),
       daId,
@@ -180,7 +180,7 @@ sealed trait LogicalSynchronizerUpgradeTopologyIntegrationTest
     checkUpgradedSequencerConfig(participant2, sequencer1.id -> 5000, sequencer2.id -> 6000)
 
     // sequencer1 changes its connection details for the successor synchronizer
-    sequencer1.topology.synchronizer_upgrade.sequencer_successors.propose_successor(
+    sequencer1.topology.lsu.sequencer_successors.propose_successor(
       sequencer1.id,
       endpoints = NonEmpty(Seq, new URI("https://localhost:5005")),
       daId,
@@ -226,7 +226,7 @@ sealed trait LogicalSynchronizerUpgradeTopologyIntegrationTest
       // During an actual LSU, this wouldn't be needed, because the participant would perform the handshake with the
       // unfrozen successor synchronizer
       synchronizerOwners1.foreach(
-        _.topology.synchronizer_upgrade.announcement.revoke(
+        _.topology.lsu.announcement.revoke(
           latestSuccessorPSId.get().value,
           upgradeTime = upgradeTime,
         )
@@ -250,15 +250,17 @@ sealed trait LogicalSynchronizerUpgradeTopologyIntegrationTest
         .setPhysicalSynchronizerId(daName, daId)
         .futureValueUS
         .discard
-      // Perform a manual handshake that just downloads the topology state.
-      // During an actual LSU, the participant would make this call after every announcement. Here, we just want to test
-      // whether the call works as expected.
+
+      // Perform a manual handshake
+      // During an actual LSU, the participant would make this call after every sequencer announcement.
+      // Here, we just want to test whether the call works as expected
+      participant3.underlying.value.sync.syncPersistentStateManager.get(daId) shouldBe None
       participant3.underlying.value.sync
-        .connectToPSIdWithHandshake(daId)
+        .performPureHandshake(daId)
         .futureValueUS
 
       eventually() {
-        participant3.topology.sequencers.list(daId) should not be empty
+        participant3.underlying.value.sync.syncPersistentStateManager.get(daId) shouldBe defined
       }
   }
 
@@ -271,14 +273,14 @@ sealed trait LogicalSynchronizerUpgradeTopologyIntegrationTest
 
     Seq(successor1, successor2).foreach { successor =>
       synchronizerOwners1.foreach { owner =>
-        owner.topology.synchronizer_upgrade.announcement.propose(
+        owner.topology.lsu.announcement.propose(
           successorPhysicalSynchronizerId = successor,
           upgradeTime = upgradeTime,
         )
       }
 
       synchronizerOwners1.foreach { owner =>
-        owner.topology.synchronizer_upgrade.announcement.revoke(
+        owner.topology.lsu.announcement.revoke(
           successorPhysicalSynchronizerId = successor,
           upgradeTime = upgradeTime,
         )
@@ -288,7 +290,7 @@ sealed trait LogicalSynchronizerUpgradeTopologyIntegrationTest
     // Re-using successor1 or successor2 should fail
     Seq(successor1, successor2).foreach { successor =>
       loggerFactory.assertThrowsAndLogs[CommandFailure](
-        sequencer1.topology.synchronizer_upgrade.announcement.propose(
+        sequencer1.topology.lsu.announcement.propose(
           successorPhysicalSynchronizerId = successor,
           upgradeTime = upgradeTime,
         ),
@@ -304,7 +306,7 @@ sealed trait LogicalSynchronizerUpgradeTopologyIntegrationTest
     }
 
     // But successor3 should be fine
-    sequencer1.topology.synchronizer_upgrade.announcement.propose(
+    sequencer1.topology.lsu.announcement.propose(
       successorPhysicalSynchronizerId = successor3,
       upgradeTime = upgradeTime,
     )

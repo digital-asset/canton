@@ -9,6 +9,7 @@ import com.digitalasset.canton.store.{
   PendingOperationStore,
   PendingOperationStoreTest,
 }
+import com.digitalasset.canton.topology.SynchronizerId
 import com.google.protobuf.ByteString
 
 import scala.concurrent.Future
@@ -17,17 +18,17 @@ class InMemoryPendingOperationStoreTest
     extends PendingOperationStoreTest[TestPendingOperationMessage] {
 
   override protected def insertCorruptedData(
-      op: PendingOperation[TestPendingOperationMessage],
-      store: Option[PendingOperationStore[TestPendingOperationMessage]],
+      op: PendingOperation[TestPendingOperationMessage, SynchronizerId],
+      store: Option[PendingOperationStore[TestPendingOperationMessage, SynchronizerId]],
       corruptOperationBytes: Option[ByteString] = None,
   ): Future[Unit] = {
     // Cast the store to its concrete type to access its internal state
     val inMemoryStore =
-      store.value.asInstanceOf[InMemoryPendingOperationStore[TestPendingOperationMessage]]
+      store.value
+        .asInstanceOf[InMemoryPendingOperationStore[TestPendingOperationMessage, SynchronizerId]]
 
     val corruptStoredOp = InMemoryPendingOperationStore.StoredPendingOperation(
-      trigger = op.trigger.asString,
-      serializedSynchronizerId = op.synchronizerId.toProtoPrimitive,
+      synchronizer = op.synchronizer,
       key = op.key,
       name = op.name.unwrap,
       serializedOperation = corruptOperationBytes.getOrElse(op.operation.toByteString),

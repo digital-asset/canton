@@ -14,6 +14,7 @@ option java_package = "com.daml.ledger.api.v2";
 
 message GetEventsByContractIdRequest {
   // The contract id being queried.
+  //
   // Required
   string contract_id = 1;
 
@@ -21,6 +22,7 @@ message GetEventsByContractIdRequest {
   reserved "requesting_parties";
 
   // Format of the events in the result, the presentation will be of TRANSACTION_SHAPE_ACS_DELTA.
+  //
   // Required
   EventFormat event_format = 3;
 }
@@ -40,23 +42,27 @@ service EventQueryService {
 message GetEventsByContractIdResponse {
   // The create event for the contract with the ``contract_id`` given in the request
   // provided it exists and has not yet been pruned.
+  //
   // Optional
   Created created = 1;
 
   // The archive event for the contract with the ``contract_id`` given in the request
   // provided such an archive event exists and it has not yet been pruned.
+  //
   // Optional
   Archived archived = 2;
 }
 
 message Created {
-  // Required
   // The event as it appeared in the context of its original update (i.e. daml transaction or
   // reassignment) on this participant node. You can use its offset and node_id to find the
   // corresponding update and the node within it.
+  //
+  // Required
   CreatedEvent created_event = 1;
 
   // The synchronizer which sequenced the creation of the contract
+  //
   // Required
   string synchronizer_id = 2;
 }
@@ -65,7 +71,8 @@ message Archived {
   // Required
   ArchivedEvent archived_event = 1;
 
-  // Required
   // The synchronizer which sequenced the archival of the contract
+  //
+  // Required
   string synchronizer_id = 2;
 }

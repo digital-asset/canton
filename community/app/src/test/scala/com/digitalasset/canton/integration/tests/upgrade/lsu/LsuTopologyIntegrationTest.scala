@@ -16,12 +16,9 @@ import com.digitalasset.canton.integration.plugins.{
   UsePostgres,
   UseReferenceBlockSequencer,
 }
-import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.topology.TopologyManagerError
 import com.digitalasset.canton.topology.store.TimeQuery
-import com.digitalasset.canton.topology.store.db.DbTopologyStore
 import com.digitalasset.canton.topology.transaction.TopologyMapping
-import org.slf4j.event.Level
 
 /*
  * This test is used to test topology related aspects of LSU.
@@ -64,7 +61,7 @@ abstract class LsuTopologyIntegrationTest extends LsuBase {
 
       synchronizerOwners1.foreach(owner =>
         assertThrowsAndLogsCommandFailures(
-          owner.topology.synchronizer_upgrade.announcement
+          owner.topology.lsu.announcement
             .propose(
               daId.copy(serial = NonNegativeInt.one),
               CantonTimestamp.Epoch.minusSeconds(10),
@@ -83,26 +80,7 @@ abstract class LsuTopologyIntegrationTest extends LsuBase {
 
       participant1.health.ping(participant1)
 
-      // perform the synchronizer node upgrade.
-      // this also announces the sequencer successors, which the participants will use
-      // as the oportunity to initialize the successor synchronizer's topology ahead of the ugprade time.
-      // the assertion below verifies that the topology state was indeed copied locally.
-      // unfortunately, the least effort way of doing this is to assert on the log message
-      // emitted by the local copy process.
-      loggerFactory.assertEventuallyLogsSeq(
-        SuppressionRule.forLogger[DbTopologyStore[?]] && SuppressionRule.Level(Level.INFO)
-      )(
-        performSynchronizerNodesLSU(fixture),
-        entries => {
-          // all participants must log that the state was copied locally
-          forAll(participants.all)(participant =>
-            forExactly(1, entries) { msg =>
-              msg.infoMessage should include regex (raw"Transferred \d+ topology transactions from ${fixture.currentPSId} to ${fixture.newPSId}".r)
-              msg.loggerName should include(s"participant=${participant.name}")
-            }
-          )
-        },
-      )
+      performSynchronizerNodesLsu(fixture)
 
       // validate the successor sequencer's topology state
       sequencer2.synchronizer_parameters.static.get() shouldBe newStaticSynchronizerParameters
@@ -142,7 +120,7 @@ abstract class LsuTopologyIntegrationTest extends LsuBase {
       val temporaryUpgradeTime = environment.simClock.value.now.plusSeconds(10)
 
       Seq[InstanceReference](sequencer2, mediator2).foreach(
-        _.topology.synchronizer_upgrade.announcement.propose(
+        _.topology.lsu.announcement.propose(
           temporaryPsid,
           temporaryUpgradeTime,
         )
@@ -163,7 +141,7 @@ abstract class LsuTopologyIntegrationTest extends LsuBase {
 
       // revoke the temporary upgrade announcement
       Seq[InstanceReference](sequencer2, mediator2).foreach(
-        _.topology.synchronizer_upgrade.announcement.revoke(temporaryPsid, temporaryUpgradeTime)
+        _.topology.lsu.announcement.revoke(temporaryPsid, temporaryUpgradeTime)
       )
     }
   }

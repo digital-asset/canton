@@ -87,6 +87,9 @@ class SequencerMetrics(
   val payloadCache: CacheMetrics =
     new CacheMetrics("payload-cache", openTelemetryMetricsFactory)
 
+  val catchupCache: CacheMetrics =
+    new CacheMetrics("catchup-payload-cache", openTelemetryMetricsFactory)
+
   val memberCache: CacheMetrics =
     new CacheMetrics("member-cache", openTelemetryMetricsFactory)
 

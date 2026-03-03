@@ -3402,7 +3402,7 @@ class TopologyAdministrationGroup(
     }
   }
 
-  object synchronizer_upgrade extends Helpful {
+  object lsu extends Helpful {
 
     // TODO(#28972) Remove preview flag once LSU is stable
     @Help.Summary("Inspect synchronizer migration announcements", FeatureFlag.Preview)

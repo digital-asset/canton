@@ -47,17 +47,16 @@ message GetActiveContractsRequest {
   // The offset at which the snapshot of the active contracts will be computed.
   // Must be no greater than the current ledger end offset.
   // Must be greater than or equal to the last pruning offset.
-  // Required, must be a valid absolute offset (positive integer) or ledger begin offset (zero).
+  // Must be a valid absolute offset (positive integer) or ledger begin offset (zero).
   // If zero, the empty set will be returned.
+  //
+  // Required
   int64 active_at_offset = 3;
 
   // Format of the contract_entries in the result. In case of CreatedEvent the presentation will be of
   // TRANSACTION_SHAPE_ACS_DELTA.
-  // Optional for backwards compatibility, defaults to an EventFormat where:
   //
-  // - filters_by_party is the filter.filters_by_party from this request
-  // - filters_for_any_party is the filter.filters_for_any_party from this request
-  // - verbose is the verbose field from this request
+  // Required
   EventFormat event_format = 4;
 }
 
@@ -65,6 +64,7 @@ message GetActiveContractsResponse {
   // The workflow ID used in command submission which corresponds to the contract_entry. Only set if
   // the ``workflow_id`` for the command was set.
   // Must be a valid LedgerString (as described in ``value.proto``).
+  //
   // Optional
   string workflow_id = 1;
 
@@ -73,6 +73,8 @@ message GetActiveContractsResponse {
   // A contract_entry is included in the result, if and only if there is at least one stakeholder party of the contract
   // that is hosted on the synchronizer at the time of the event and the party satisfies the
   // ``TransactionFilter`` in the query.
+  //
+  // Required
   oneof contract_entry {
     // The contract is active on the assigned synchronizer, meaning: there was an activation event on the given synchronizer (
     // created, assigned), which is not followed by a deactivation event (archived, unassigned) on the same
@@ -94,15 +96,17 @@ message GetActiveContractsResponse {
 }
 
 message ActiveContract {
-  // Required
   // The event as it appeared in the context of its last update (i.e. daml transaction or
   // reassignment). In particular, the last offset, node_id pair is preserved.
   // The last update is the most recent update created or assigned this contract on synchronizer_id synchronizer.
   // The offset of the CreatedEvent might point to an already pruned update, therefore it cannot necessarily be used
   // for lookups.
+  //
+  // Required
   CreatedEvent created_event = 1;
 
   // A valid synchronizer id
+  //
   // Required
   string synchronizer_id = 2;
 
@@ -111,18 +115,20 @@ message ActiveContract {
   // equals zero.
   // This field will be the reassignment_counter of the latest observable activation event on this synchronizer, which is
   // before the active_at_offset.
+  //
   // Required
   uint64 reassignment_counter = 3;
 }
 
 message IncompleteUnassigned {
-  // Required
   // The event as it appeared in the context of its last activation update (i.e. daml transaction or
   // reassignment). In particular, the last activation offset, node_id pair is preserved.
   // The last activation update is the most recent update created or assigned this contract on synchronizer_id synchronizer before
   // the unassigned_event.
   // The offset of the CreatedEvent might point to an already pruned update, therefore it cannot necessarily be used
   // for lookups.
+  //
+  // Required
   CreatedEvent created_event = 1;
 
   // Required
@@ -138,35 +144,43 @@ message GetConnectedSynchronizersRequest {
   // The party of interest
   // Must be a valid PartyIdString (as described in ``value.proto``).
   // If empty, all synchronizers this node is connected to will be returned
+  //
   // Optional
   string party = 1;
 
   // The id of a participant whose mapping of a party to connected synchronizers is requested.
   // Must be a valid participant-id retrieved through a prior call to getParticipantId.
   // Defaults to the participant id of the host participant.
+  //
   // Optional
   string participant_id = 2;
 
   // The ID of the identity provider configured by ``Identity Provider Config``
-  // Optional, if not set, assume the user is managed by the default identity provider.
+  // If not set, it's assumed the user is managed by the default identity provider.
+  //
+  // Optional
   string identity_provider_id = 3;
 }
 
 message GetConnectedSynchronizersResponse {
   message ConnectedSynchronizer {
     // The alias of the synchronizer
+    //
     // Required
     string synchronizer_alias = 1;
 
     // The ID of the synchronizer
+    //
     // Required
     string synchronizer_id = 2;
 
     // The permission on the synchronizer
     // Set if a party was used in the request, otherwise unspecified.
+    //
     // Optional
     ParticipantPermission permission = 3;
   }
+  // Optional: can be empty
   repeated ConnectedSynchronizer connected_synchronizers = 1;
 }
 
@@ -190,6 +204,8 @@ message GetLedgerEndResponse {
   // It will always be a non-negative integer.
   // If zero, the participant view of the ledger is empty.
   // If positive, the absolute offset of the ledger as viewed by the participant.
+  //
+  // Optional
   int64 offset = 1;
 }
 
@@ -202,6 +218,8 @@ message GetLatestPrunedOffsetsResponse {
   // If positive, the absolute offset up to which the ledger has been pruned,
   // disregarding the state of all divulged contracts pruning.
   // If zero, the ledger has not been pruned yet.
+  //
+  // Optional
   int64 participant_pruned_up_to_inclusive = 1;
 
   // It will always be a non-negative integer.
@@ -210,5 +228,7 @@ message GetLatestPrunedOffsetsResponse {
   // For more details about all divulged events pruning,
   // see ``PruneRequest.prune_all_divulged_contracts`` in ``participant_pruning_service.proto``.
   // If zero, the divulged events have not been pruned yet.
+  //
+  // Optional
   int64 all_divulged_contracts_pruned_up_to_inclusive = 2;
 }

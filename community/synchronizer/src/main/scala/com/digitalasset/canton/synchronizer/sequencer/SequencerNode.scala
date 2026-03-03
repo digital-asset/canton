@@ -247,6 +247,7 @@ class SequencerNodeBootstrap(
         arguments.metrics.eventBuffer.closeAcquired()
         arguments.metrics.memberCache.closeAcquired()
         arguments.metrics.payloadCache.closeAcquired()
+        arguments.metrics.catchupCache.closeAcquired()
       }
     })
 

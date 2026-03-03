@@ -56,34 +56,41 @@ service IdentityProviderConfigService {
 message IdentityProviderConfig {
   // The identity provider identifier
   // Must be a valid LedgerString (as describe in ``value.proto``).
+  //
   // Required
   string identity_provider_id = 1;
 
   // When set, the callers using JWT tokens issued by this identity provider are denied all access
   // to the Ledger API.
-  // Optional,
   // Modifiable
+  //
+  // Optional
   bool is_deactivated = 2;
 
   // Specifies the issuer of the JWT token.
   // The issuer value is a case sensitive URL using the https scheme that contains scheme, host,
   // and optionally, port number and path components and no query or fragment components.
-  // Required
   // Modifiable
+  //
+  // Can be left empty when used in `UpdateIdentityProviderConfigRequest` if the issuer is not being updated.
+  //
+  // Required
   string issuer = 3;
 
   // The JWKS (JSON Web Key Set) URL.
   // The Ledger API uses JWKs (JSON Web Keys) from the provided URL to verify that the JWT has been
   // signed with the loaded JWK. Only RS256 (RSA Signature with SHA-256) signing algorithm is supported.
-  // Required
   // Modifiable
+  //
+  // Required
   string jwks_url = 4;
 
   // Specifies the audience of the JWT token.
   // When set, the callers using JWT tokens issued by this identity provider are allowed to get an access
   // only if the "aud" claim includes the string specified here
-  // Optional,
   // Modifiable
+  //
+  // Optional
   string audience = 5;
 }
 
@@ -93,6 +100,7 @@ message CreateIdentityProviderConfigRequest {
 }
 
 message CreateIdentityProviderConfigResponse {
+  // Required
   IdentityProviderConfig identity_provider_config = 1;
 }
 
@@ -102,6 +110,7 @@ message GetIdentityProviderConfigRequest {
 }
 
 message GetIdentityProviderConfigResponse {
+  // Required
   IdentityProviderConfig identity_provider_config = 1;
 }
 
@@ -110,13 +119,17 @@ message ListIdentityProviderConfigsRequest {
 }
 
 message ListIdentityProviderConfigsResponse {
+  // The list of identity provider configs
+  //
+  // Required: must be non-empty
   repeated IdentityProviderConfig identity_provider_configs = 1;
 }
 
 message UpdateIdentityProviderConfigRequest {
   // The identity provider config to update.
-  // Required,
   // Modifiable
+  //
+  // Required
   IdentityProviderConfig identity_provider_config = 1;
 
   // An update mask specifies how and which properties of the ``IdentityProviderConfig`` message are to be updated.
@@ -129,17 +142,21 @@ message UpdateIdentityProviderConfigRequest {
   //
   // Fields that can be updated are marked as ``Modifiable``.
   // For additional information see the documentation for standard protobuf3's ``google.protobuf.FieldMask``.
+  //
   // Required
   google.protobuf.FieldMask update_mask = 2;
 }
 
 message UpdateIdentityProviderConfigResponse {
   // Updated identity provider config
+  //
+  // Required
   IdentityProviderConfig identity_provider_config = 1;
 }
 
 message DeleteIdentityProviderConfigRequest {
   // The identity provider config to delete.
+  //
   // Required
   string identity_provider_id = 1;
 }

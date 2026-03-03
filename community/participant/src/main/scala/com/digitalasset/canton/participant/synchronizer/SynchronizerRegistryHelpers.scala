@@ -107,6 +107,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
         persistentState,
         syncPersistentStateManager,
       )
+
       // check and issue the synchronizer trust certificate
       _ <- EitherTUtil.ifThenET(!config.initializeFromTrustedSynchronizer)(
         topologyDispatcher.trustSynchronizer(psid)

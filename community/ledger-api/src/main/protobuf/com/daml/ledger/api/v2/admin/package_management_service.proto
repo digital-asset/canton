@@ -45,19 +45,22 @@ message ListKnownPackagesRequest {}
 
 message ListKnownPackagesResponse {
   // The details of all Daml-LF packages known to backing participant.
-  // Required
+  //
+  // Required: must be non-empty
   repeated PackageDetails package_details = 1;
 }
 
 message PackageDetails {
   // The identity of the Daml-LF package.
   // Must be a valid PackageIdString (as describe in ``value.proto``).
+  //
   // Required
   string package_id = 1;
 
   // Size of the package in bytes.
   // The size of the package is given by the size of the ``daml_lf``
   // ArchivePayload. See further details in ``daml_lf.proto``.
+  //
   // Required
   uint64 package_size = 2;
 
@@ -66,8 +69,13 @@ message PackageDetails {
   google.protobuf.Timestamp known_since = 3;
 
   // Name of the package as defined by the package metadata
+  //
+  // Required
   string name = 4;
+
   // Version of the package as defined by the package metadata
+  //
+  // Required
   string version = 5;
 }
 
@@ -75,11 +83,14 @@ message UploadDarFileRequest {
   // Contains a Daml archive DAR file, which in turn is a jar like zipped
   // container for ``daml_lf`` archives. See further details in
   // ``daml_lf.proto``.
-  // Required
+  //
+  // Required: must be non-empty
   bytes dar_file = 1;
 
   // Unique submission identifier.
-  // Optional, defaults to a random identifier.
+  // If not populated, a random identifier will be generated.
+  //
+  // Optional
   string submission_id = 2;
 
   enum VettingChange {
@@ -93,6 +104,8 @@ message UploadDarFileRequest {
   }
 
   // How to vet packages in the DAR being uploaded
+  //
+  // Optional
   VettingChange vetting_change = 3;
 
   // Only used if VettingChange is set to VETTING_CHANGE_VET_ALL_PACKAGES, in
@@ -117,10 +130,12 @@ message ValidateDarFileRequest {
   // Contains a Daml archive DAR file, which in turn is a jar like zipped
   // container for ``daml_lf`` archives. See further details in
   // ``daml_lf.proto``.
-  // Required
+  //
+  // Required: must be non-empty
   bytes dar_file = 1;
 
   // Unique submission identifier.
+  //
   // Optional, defaults to a random identifier.
   string submission_id = 2;
 
@@ -144,6 +159,8 @@ message VettedPackagesChange {
     //
     // If a reference in this list matches multiple packages, they are all
     // unvetted.
+    //
+    // Required: must be non-empty
     repeated VettedPackagesRef packages = 1;
   }
 
@@ -155,6 +172,8 @@ message VettedPackagesChange {
     // If a reference in this list matches more than one package, the change is
     // considered ambiguous and the entire update request is rejected. In other
     // words, every reference must match exactly one package.
+    //
+    // Required: must be non-empty
     repeated VettedPackagesRef packages = 1;
 
     // The time from which these packages should be vetted, prior lower bounds
@@ -168,6 +187,7 @@ message VettedPackagesChange {
     google.protobuf.Timestamp new_valid_until_exclusive = 3;
   }
 
+  // Required
   oneof operation {
     // Add packages to or update packages in the set of vetted packages.
     Vet vet = 1;
@@ -189,14 +209,17 @@ message VettedPackagesChange {
 // unresolved and the entire update request is rejected.
 message VettedPackagesRef {
   // Package's package id must be the same as this field.
+  //
   // Optional
   string package_id = 1;
 
   // Package's name must be the same as this field.
+  //
   // Optional
   string package_name = 2;
 
   // Package's version must be the same as this field.
+  //
   // Optional
   string package_version = 3;
 }
@@ -205,6 +228,8 @@ message UpdateVettedPackagesRequest {
   // Changes to apply to the current vetting state of the participant on the
   // specified synchronizer. The changes are applied in order.
   // Any package not changed will keep their previous vetting state.
+  //
+  // Required: must be non-empty
   repeated VettedPackagesChange changes = 1;
 
   // If dry_run is true, then the changes are only prepared, but not applied. If
@@ -212,6 +237,9 @@ message UpdateVettedPackagesRequest {
   // it will also trigger an error when dry_run.
   //
   // Use this flag to preview a change before applying it.
+  // Defaults to false.
+  //
+  // Optional
   bool dry_run = 2;
 
   // If set, the requested changes will take place on the specified
@@ -238,7 +266,7 @@ message UpdateVettedPackagesRequest {
 
   // Controls whether potentially unsafe vetting updates are allowed.
   //
-  // Optional, defaults to FORCE_FLAG_UNSPECIFIED.
+  // Optional: can be empty
   repeated UpdateVettedPackagesForceFlag update_vetted_packages_force_flags = 5;
 }
 
@@ -256,7 +284,13 @@ enum UpdateVettedPackagesForceFlag {
 message UpdateVettedPackagesResponse {
   // All vetted packages on this participant and synchronizer, before the
   // specified changes. Empty if no vetting state existed beforehand.
+  //
+  // Not populated if no vetted topology state exists prior to the update.
+  //
+  // Optional
   VettedPackages past_vetted_packages = 1;
   // All vetted packages on this participant and synchronizer, after the specified changes.
+  //
+  // Required
   VettedPackages new_vetted_packages = 2;
 }

@@ -136,7 +136,7 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
       val exportDirectory = loggerFactory.assertEventuallyLogsSeq(LevelAndAbove(event.Level.WARN))(
         clue("Migrate s1") {
           fixture.oldSynchronizerOwners.foreach(
-            _.topology.synchronizer_upgrade.announcement
+            _.topology.lsu.announcement
               .propose(fixture.newPSId, fixture.upgradeTime)
           )
 
@@ -156,7 +156,7 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
             oldNodeName = "sequencer1",
           )
 
-          sequencer1.topology.synchronizer_upgrade.sequencer_successors.propose_successor(
+          sequencer1.topology.lsu.sequencer_successors.propose_successor(
             sequencerId = sequencer1.id,
             endpoints = sequencer3.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
             synchronizerId = fixture.currentPSId,

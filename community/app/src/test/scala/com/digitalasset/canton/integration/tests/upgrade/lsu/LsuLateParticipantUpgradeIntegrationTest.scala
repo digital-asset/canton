@@ -128,7 +128,7 @@ final class LsuLateParticipantUpgradeIntegrationTest extends LsuBase {
         .contractId
         .toLfContractId
 
-      performSynchronizerNodesLSU(fixture)
+      performSynchronizerNodesLsu(fixture)
 
       // P3 performs handshake with the new synchronizer
       eventually() {

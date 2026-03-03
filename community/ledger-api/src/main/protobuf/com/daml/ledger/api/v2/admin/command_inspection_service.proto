@@ -37,42 +37,77 @@ enum CommandState {
 }
 
 message GetCommandStatusRequest {
-  // filter by command id
+  // Filter by command id
+  //
   // Optional
   string command_id_prefix = 1;
-  // filter by state
+  // Filter by state
+  //
   // Optional
   CommandState state = 2;
-  // limit of returned statuses, defaults to 100
+  // Limit the number of returned statuses
+  // Defaults to 100 if not set
+  //
   // Optional
   uint32 limit = 3;
 }
 
 message GetCommandStatusResponse {
+  // Optional: can be empty
   repeated CommandStatus command_status = 1;
 }
 
 message CommandStatus {
+  // Time at which the command was received for interpretation by the participant.
+  //
+  // Required
   google.protobuf.Timestamp started = 1;
+  // Time at which the command was completed.
+  //
+  // Optional
   google.protobuf.Timestamp completed = 2;
+  // The completion associated with the command
+  // Contains only default values if the command is still pending
+  //
+  // Optional
   Completion completion = 3;
+  // The state of the command
+  //
+  // Required
   CommandState state = 4;
+  // The individual submitted commands
+  //
+  // Required: must be non-empty
   repeated Command commands = 5;
+  // Statistics about the command request
+  //
+  // Optional
   RequestStatistics request_statistics = 6;
+  // The ledger updates effected by the command
+  //
+  // Optional
   CommandUpdates updates = 7;
 }
 
 message RequestStatistics {
+  // Optional
   uint32 envelopes = 1;
+  // Optional
   uint32 request_size = 2;
+  // Optional
   uint32 recipients = 3;
 }
 
 message CommandUpdates {
+  // Optional: can be empty
   repeated Contract created = 1;
+  // Optional: can be empty
   repeated Contract archived = 2;
+  // Required
   uint32 exercised = 3;
+  // Required
   uint32 fetched = 4;
+  // Required
   uint32 looked_up_by_key = 5;
 }
 
@@ -87,6 +122,7 @@ message Contract {
   //
   // Required
   string contract_id = 2;
+
   // The contract key, if defined
   //
   // Optional

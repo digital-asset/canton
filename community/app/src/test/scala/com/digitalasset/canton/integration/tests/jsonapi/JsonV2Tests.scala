@@ -53,7 +53,7 @@ import com.digitalasset.canton.http.json.v2.JsPackageCodecs.*
 import com.digitalasset.canton.http.json.v2.JsPartyManagementCodecs.*
 import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
 import com.digitalasset.canton.http.json.v2.JsSchema.JsServicesCommonCodecs.*
-import com.digitalasset.canton.http.json.v2.JsSchema.{JsCantonError, JsEvent}
+import com.digitalasset.canton.http.json.v2.JsSchema.{JsCantonError, JsEvent, JsTreeEvent}
 import com.digitalasset.canton.http.json.v2.JsStateServiceCodecs.*
 import com.digitalasset.canton.http.json.v2.JsUpdateServiceCodecs.*
 import com.digitalasset.canton.http.json.v2.JsUserManagementCodecs.*
@@ -71,6 +71,7 @@ import com.digitalasset.canton.http.json.v2.{
   JsSubmitAndWaitForTransactionResponse,
   JsSubmitAndWaitForTransactionTreeResponse,
   JsUpdate,
+  JsUpdateTree,
   LegacyDTOs,
 }
 import com.digitalasset.canton.http.util.ClientUtil.uniqueId
@@ -1323,8 +1324,17 @@ class JsonV2Tests
       fixture.getUniquePartyAndAuthHeaders("Alice").flatMap { case (alice, headers) =>
         for {
           jwt <- jwtForParties(fixture.uri)(List(alice), List())
-          (_, offset) <- createCommand(fixture, alice, headers)
-          (updateId, _, alternateParty) <- {
+          (contractId, offset) <- createCommand(fixture, alice, headers)
+          _ <- exerciseCommand(
+            fixture = fixture,
+            party = alice,
+            headers = headers,
+            contractId = contractId,
+            choice = "Archive",
+            argument = io.circe.Json.Null,
+          )
+
+          (updateId, alternateParty) <- {
             val webSocketFlow =
               websocket(fixture.uri.withPath(Uri.Path("/v2/updates")), jwt)
             Source
@@ -1346,7 +1356,7 @@ class JsonV2Tests
                   .map(decode[JsGetUpdatesResponse])
                   .collect { case Right(JsGetUpdatesResponse(JsUpdate.Transaction(tx))) =>
                     inside(tx.events.head) { case event: JsEvent.CreatedEvent =>
-                      (tx.updateId, event.nodeId, event.signatories.head)
+                      (tx.updateId, event.signatories.head)
                     }
                   }
                   .head
@@ -1380,6 +1390,24 @@ class JsonV2Tests
 
                 val responses = decode[Seq[JsGetUpdatesResponse]](result.toString()).value
                 responses.size should be >= 1
+                assertAcsDeltaEvents(responses)
+              }
+          }
+          _ <- {
+            fixture
+              .postJsonStringRequest(
+                fixture.uri withPath Uri.Path("/v2/updates") withQuery Query(
+                  ("stream_idle_timeout_ms", "500")
+                ),
+                updatesRequestLegacy.asJson.noSpaces,
+                headers,
+              )
+              .map { case (status, result) =>
+                status should be(StatusCodes.OK)
+
+                val responses = decode[Seq[JsGetUpdatesResponse]](result.toString()).value
+                responses.size should be >= 1
+                assertAcsDeltaEvents(responses)
               }
           }
           _ <- {
@@ -1388,11 +1416,20 @@ class JsonV2Tests
             Source
               .single(
                 TextMessage(
-                  updatesRequestLegacy.asJson.noSpaces
+                  updatesRequestLegacy.copy(beginExclusive = offset - 1).asJson.noSpaces
                 )
               )
               .concatMat(Source.maybe[Message])(Keep.left)
               .via(webSocketFlow)
+              // filter out OffsetCheckpoints that may cause flakes
+              .filter {
+                case m: TextMessage =>
+                  decode[JsGetUpdatesResponse](m.getStrictText) match {
+                    case Right(JsGetUpdatesResponse(JsUpdate.OffsetCheckpoint(_))) => false
+                    case _ => true
+                  }
+                case _ => true
+              }
               .take(2)
               .collect { case m: TextMessage =>
                 m.getStrictText
@@ -1400,14 +1437,13 @@ class JsonV2Tests
               .toMat(Sink.seq)(Keep.right)
               .run()
               .map { updates =>
-                updates
+                val responses = updates
                   .map(decode[JsGetUpdatesResponse])
-                  .collect { case Right(JsGetUpdatesResponse(JsUpdate.Transaction(tx))) =>
-                    inside(tx.events.head) { case event: JsEvent.CreatedEvent =>
-                      (tx.updateId, event.nodeId, event.signatories.head)
-                    }
+                  .collect { case Right(response) =>
+                    response
                   }
-                  .head
+                responses should not be empty
+                assertAcsDeltaEvents(responses)
               }
           }
           _ <- {
@@ -1458,6 +1494,7 @@ class JsonV2Tests
 
                 val responses = decode[Seq[JsGetUpdatesResponse]](result.toString()).value
                 responses.size should be >= 1
+                assertAcsDeltaEvents(responses)
               }
           }
           _ <- {
@@ -1466,21 +1503,33 @@ class JsonV2Tests
             Source
               .single(
                 TextMessage(
-                  updatesRequestLegacy.asJson.noSpaces
+                  updatesRequestLegacy.copy(beginExclusive = offset - 1).asJson.noSpaces
                 )
               )
               .concatMat(Source.maybe[Message])(Keep.left)
               .via(webSocketFlow)
-              .take(1)
+              // filter out OffsetCheckpoints that may cause flakes
+              .filter {
+                case m: TextMessage =>
+                  decode[JsGetUpdateTreesResponse](m.getStrictText) match {
+                    case Right(JsGetUpdateTreesResponse(JsUpdateTree.OffsetCheckpoint(_))) => false
+                    case _ => true
+                  }
+                case _ => true
+              }
+              .take(2)
               .collect { case m: TextMessage =>
                 m.getStrictText
               }
               .toMat(Sink.seq)(Keep.right)
               .run()
               .map { updates =>
-                inside(decode[JsGetUpdateTreesResponse](updates.head)) { case Right(value) =>
-                  value.update should not be null
-                }
+                val responses = updates
+                  .map(decode[JsGetUpdateTreesResponse])
+                  .collect { case Right(response) =>
+                    response
+                  }
+                assertTreeEvents(responses)
               }
           }
           _ <- {
@@ -1530,6 +1579,7 @@ class JsonV2Tests
 
                 val responses = decode[Seq[JsGetUpdateTreesResponse]](result.toString()).value
                 responses.size should be >= 1
+                assertTreeEvents(responses)
               }
           }
           _ <- {
@@ -2011,4 +2061,33 @@ class JsonV2Tests
       includeReassignments = None,
       includeTopologyEvents = None,
     )
+
+  private def assertAcsDeltaEvents(
+      responses: Seq[JsGetUpdatesResponse]
+  ): Unit = {
+    val events = responses
+      .map(_.update)
+      .collect { case JsUpdate.Transaction(tx) =>
+        tx.events
+      }
+      .flatten
+
+    events should not be empty
+    events.collect { case _: JsEvent.CreatedEvent => () } should not be empty
+    events.collect { case _: JsEvent.ArchivedEvent => () } should not be empty
+    events.collect { case _: JsEvent.ExercisedEvent => () } shouldBe empty
+  }
+
+  private def assertTreeEvents(responses: Seq[JsGetUpdateTreesResponse]): Unit = {
+    val events = responses
+      .map(_.update)
+      .collect { case JsUpdateTree.TransactionTree(tx) =>
+        tx.eventsById.values
+      }
+      .flatten
+
+    events should not be empty
+    events.collect { case _: JsTreeEvent.CreatedTreeEvent => () } should not be empty
+    events.collect { case _: JsTreeEvent.ExercisedTreeEvent => () } should not be empty
+  }
 }

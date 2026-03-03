@@ -12,56 +12,58 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.store.PendingOperation.{
-  ConflictingPendingOperationError,
-  PendingOperationTriggerType,
-}
+import com.digitalasset.canton.store.PendingOperation.ConflictingPendingOperationError
 import com.digitalasset.canton.store.{PendingOperation, PendingOperationStore}
-import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.topology.Synchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HasProtocolVersionedWrapper, VersioningCompanion}
 import com.google.protobuf.ByteString
 import slick.jdbc.{GetResult, SetParameter, TransactionIsolation}
 
-import java.sql.Types
 import scala.annotation.unused
 import scala.concurrent.ExecutionContext
 
-class DbPendingOperationsStore[Op <: HasProtocolVersionedWrapper[Op]](
+class DbPendingOperationsStore[Op <: HasProtocolVersionedWrapper[Op], SId <: Synchronizer](
     override protected val storage: DbStorage,
     override protected val timeouts: ProcessingTimeout,
     override protected val loggerFactory: NamedLoggerFactory,
     override protected val opCompanion: VersioningCompanion[Op],
+    sidParser: String => Either[String, SId],
 )(implicit val executionContext: ExecutionContext)
     extends DbStore
-    with PendingOperationStore[Op] {
+    with PendingOperationStore[Op, SId] {
 
   import storage.api.*
   import storage.converters.*
 
-  implicit val tryPendingOperationGetResult: GetResult[PendingOperation[Op]] =
+  private implicit val getResultSId: GetResult[SId] =
+    DbPendingOperationsStore.getResultSId(sidParser)
+  private implicit val setParameterSId: SetParameter[SId] = (v: SId, pp) => pp >> v.toProtoPrimitive
+
+  implicit val tryPendingOperationGetResult: GetResult[PendingOperation[Op, SId]] =
     DbPendingOperationsStore.tryGetPendingOperationResult(opCompanion.fromTrustedByteString)
 
   override def insert(
-      operation: PendingOperation[Op]
+      operation: PendingOperation[Op, SId]
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ConflictingPendingOperationError, Unit] = {
+
     val readAction =
       sql"""
-        select operation_trigger, operation_name, operation_key, operation, synchronizer_id
+        select operation_name, operation_key, operation, synchronizer_id
         from common_pending_operations
-        where synchronizer_id = ${operation.synchronizerId}
+        where synchronizer_id = ${operation.synchronizer}
         and operation_key = ${operation.key}
         and operation_name = ${operation.name.unwrap}
-      """.as[PendingOperation[Op]].headOption
+      """.as[PendingOperation[Op, SId]].headOption
 
     val transaction = readAction.flatMap {
       case Some(existingOperation) if existingOperation != operation =>
         DBIO.successful(
           Left(
             ConflictingPendingOperationError(
-              operation.synchronizerId,
+              operation.synchronizer,
               operation.key,
               operation.name,
             )
@@ -73,20 +75,16 @@ class DbPendingOperationsStore[Op <: HasProtocolVersionedWrapper[Op]](
       case None =>
         @unused
         implicit val setParameter: SetParameter[Op] = (v: Op, pp) => pp >> v.toByteString
-        @unused
-        implicit val setOperationTriggerType: SetParameter[PendingOperationTriggerType] =
-          DbPendingOperationsStore.setOperationTriggerType(storage)
 
         sqlu"""
           insert into common_pending_operations
-            (operation_trigger, operation_name, operation_key, operation, synchronizer_id)
+            (operation_name, operation_key, operation, synchronizer_id)
           values
             (
-              ${operation.trigger},
               ${operation.name.unwrap},
               ${operation.key},
               ${operation.operation},
-              ${operation.synchronizerId}
+              ${operation.synchronizer}
             )
         """.map(_ => Right(()))
     }
@@ -99,15 +97,34 @@ class DbPendingOperationsStore[Op <: HasProtocolVersionedWrapper[Op]](
     )
   }
 
+  override def updateOperation(
+      operation: Op,
+      synchronizer: SId,
+      name: NonEmptyString,
+      key: String,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    @unused
+    implicit val setParameter: SetParameter[Op] = (v: Op, pp) => pp >> v.toByteString
+    val updateAction =
+      sqlu"""
+          update common_pending_operations
+          set operation = $operation
+          where synchronizer_id = $synchronizer and operation_key = $key and operation_name = ${name.unwrap}
+        """
+    storage.update_(updateAction, functionFullName)
+  }
+
   override def delete(
-      synchronizerId: SynchronizerId,
+      synchronizer: SId,
       operationKey: String,
       operationName: NonEmptyString,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
     val deleteAction =
       sqlu"""
         delete from common_pending_operations
-        where synchronizer_id = $synchronizerId
+        where synchronizer_id = $synchronizer
         and operation_key = $operationKey
         and operation_name = ${operationName.unwrap}
       """
@@ -115,53 +132,71 @@ class DbPendingOperationsStore[Op <: HasProtocolVersionedWrapper[Op]](
   }
 
   override def get(
-      synchronizerId: SynchronizerId,
+      synchronizer: SId,
       operationKey: String,
       operationName: NonEmptyString,
-  )(implicit traceContext: TraceContext): OptionT[FutureUnlessShutdown, PendingOperation[Op]] = {
+  )(implicit
+      traceContext: TraceContext
+  ): OptionT[FutureUnlessShutdown, PendingOperation[Op, SId]] = {
     val selectAction =
       sql"""
-        select operation_trigger, operation_name, operation_key, operation, synchronizer_id
+        select operation_name, operation_key, operation, synchronizer_id
         from common_pending_operations
-        where synchronizer_id = $synchronizerId
+        where synchronizer_id = $synchronizer
         and operation_key = $operationKey
         and operation_name = ${operationName.unwrap}
-      """.as[PendingOperation[Op]].headOption
+      """.as[PendingOperation[Op, SId]].headOption
     OptionT.apply(storage.query(selectAction, functionFullName))
   }
 
+  override def getAll(operationName: NonEmptyString)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Set[PendingOperation[Op, SId]]] = {
+    val selectAction =
+      sql"""
+        select operation_name, operation_key, operation, synchronizer_id
+        from common_pending_operations
+        where operation_name = ${operationName.unwrap}
+      """.as[PendingOperation[Op, SId]]
+    storage.query(selectAction, functionFullName).map(_.toSet)
+  }
 }
 
 private object DbPendingOperationsStore {
+
+  private def getResultSId[SId](sidParser: String => Either[String, SId]): GetResult[SId] =
+    GetResult { r =>
+      val rawSynchronizer = r.<<[String]
+      sidParser(rawSynchronizer).valueOr(err =>
+        throw new DbDeserializationException(
+          s"Unable to parse `$rawSynchronizer` as a synchronizer: $err"
+        )
+      )
+    }
 
   /** @throws DbDeserializationException
     *   Slick's transactional boundaries are managed through DBIOAction, which ultimately produces a
     *   Future. A Future signals failure with an exception. Therefore, to make a DBIO transaction
     *   fail and roll back, we must throw an exception from within it.
     */
-  private def tryGetPendingOperationResult[Op <: HasProtocolVersionedWrapper[Op]](
+  private def tryGetPendingOperationResult[
+      Op <: HasProtocolVersionedWrapper[Op],
+      SId <: Synchronizer,
+  ](
       operationDeserializer: ByteString => ParsingResult[Op]
-  )(implicit getByteString: GetResult[ByteString]): GetResult[PendingOperation[Op]] = GetResult {
-    r =>
+  )(implicit
+      getByteString: GetResult[ByteString],
+      getSId: GetResult[SId],
+  ): GetResult[PendingOperation[Op, SId]] =
+    GetResult { r =>
       PendingOperation
         .create(
-          trigger = r.<<[String],
           name = r.<<[String],
           key = r.<<[String],
           operationBytes = r.<<[ByteString],
           operationDeserializer,
-          synchronizerId = r.<<[String],
+          synchronizer = r.<<[SId],
         )
         .valueOr(errorMessage => throw new DbDeserializationException(errorMessage))
-  }
-
-  // For PostgreSQL, `setObject` with `Types.OTHER` is required for handling the custom enum type
-  def setOperationTriggerType(storage: DbStorage): SetParameter[PendingOperationTriggerType] =
-    storage.profile match {
-      case _: DbStorage.Profile.Postgres =>
-        (t, pp) => pp.setObject(t.asString, Types.OTHER)
-      case _: DbStorage.Profile.H2 =>
-        (t, pp) => pp.setString(t.asString)
     }
-
 }

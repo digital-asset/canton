@@ -30,7 +30,6 @@ sealed trait SimplestPingCommunityIntegrationTest
 
     sequencer1.start()
     mediator1.start()
-
     sequencer1.health.status shouldBe NodeStatus.NotInitialized(
       active = true,
       Some(WaitingForInitialization),

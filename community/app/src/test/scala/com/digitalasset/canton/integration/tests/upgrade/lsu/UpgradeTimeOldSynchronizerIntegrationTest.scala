@@ -65,11 +65,11 @@ class UpgradeTimeOldSynchronizerIntegrationTest
       participant1.synchronizers.connect_local(sequencer1, daName)
 
       synchronizerOwners1.foreach(
-        _.topology.synchronizer_upgrade.announcement.propose(successorPSId, upgradeTime)
+        _.topology.lsu.announcement.propose(successorPSId, upgradeTime)
       )
 
       eventually() {
-        participant1.topology.synchronizer_upgrade.announcement
+        participant1.topology.lsu.announcement
           .list(daId)
           .loneElement
           .item

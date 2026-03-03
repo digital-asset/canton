@@ -560,4 +560,5 @@ class DatabaseSequencer(
     FutureUnlessShutdown.pure(None)
 
   override private[canton] def orderer: Option[BlockOrderer] = None
+
 }

@@ -22,7 +22,9 @@ import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
   HasCloseContext,
+  LifeCycle,
   PromiseUnlessShutdown,
+  SyncCloseable,
   UnlessShutdown,
 }
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting, PrettyUtil}
@@ -975,6 +977,10 @@ class TopologyStateWriteThroughCache(
         )
         .map(_.stored)
     }
+
+  override protected def onClosed(): Unit = LifeCycle.close(
+    SyncCloseable("topology cache metrics", metrics.closeAcquired())
+  )(logger)
 }
 
 object TopologyStateWriteThroughCache {

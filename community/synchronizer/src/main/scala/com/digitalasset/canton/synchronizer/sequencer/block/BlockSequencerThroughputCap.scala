@@ -5,7 +5,9 @@ package com.digitalasset.canton.synchronizer.sequencer.block
 
 import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveDouble}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{FlagCloseable, LifeCycle}
@@ -69,7 +71,7 @@ class BlockSequencerThroughputCap(
     with AutoCloseable {
 
   private val lock = new Mutex()
-  private val perMessageTypeCaps =
+  private val perMessageTypeCaps = new AtomicReference(
     Map[SubmissionRequestType, IndividualBlockSequencerThroughputCap](
       SubmissionRequestType.ConfirmationRequest -> makeIndividualCap(
         config.messages.confirmationRequest,
@@ -80,6 +82,7 @@ class BlockSequencerThroughputCap(
         SubmissionRequestType.TopologyTransaction,
       ),
     )
+  )
 
   private def makeIndividualCap(
       individualConfig: IndividualThroughputCapConfig,
@@ -87,6 +90,9 @@ class BlockSequencerThroughputCap(
   ) =
     new IndividualBlockSequencerThroughputCap(
       config.observationPeriodSeconds,
+      config.strict,
+      config.thresholds,
+      config.updateEveryMs,
       individualConfig,
       requestType,
       clock,
@@ -94,6 +100,25 @@ class BlockSequencerThroughputCap(
       timeouts,
       loggerFactory,
     )
+
+  def getCap(requestType: SubmissionRequestType): Option[IndividualThroughputCapConfig] =
+    perMessageTypeCaps.get().get(requestType).map(_.config)
+
+  /** Hot-replace existing cap */
+  def replaceCap(
+      requestType: SubmissionRequestType,
+      individualConfig: Option[IndividualThroughputCapConfig],
+  )(implicit traceContext: TraceContext): Unit = {
+    logger.info(s"Adjusting cap for $requestType to $individualConfig ")
+    perMessageTypeCaps
+      .getAndUpdate(current =>
+        individualConfig
+          .map(newConfig => current.updated(requestType, makeIndividualCap(newConfig, requestType)))
+          .getOrElse(current)
+      )
+      .get(requestType)
+      .foreach(_.close())
+  }
 
   private val enabled: AtomicBoolean = new AtomicBoolean(config.enabled)
   private var cancellable: Option[Cancellable] = None
@@ -106,6 +131,7 @@ class BlockSequencerThroughputCap(
     if (!enabled.get()) Right(())
     else
       perMessageTypeCaps
+        .get()
         .get(requestType)
         .map(_.shouldRejectTransaction(member, requestLevel))
         .getOrElse(Right(()))
@@ -141,6 +167,7 @@ class BlockSequencerThroughputCap(
 
     submissions.foreach { submission =>
       perMessageTypeCaps
+        .get()
         .get(submission.requestType)
         .foreach(
           _.addEvent(
@@ -155,7 +182,7 @@ class BlockSequencerThroughputCap(
   })
 
   private def advanceWindow(): Unit = (lock.exclusive {
-    perMessageTypeCaps.values.foreach(_.advanceWindow())
+    perMessageTypeCaps.get().values.foreach(_.advanceWindow())
     scheduleClockTick()
   })
 
@@ -169,7 +196,8 @@ class BlockSequencerThroughputCap(
       )
     )
 
-  override def close(): Unit = perMessageTypeCaps.foreach(_._2.close())
+  override def close(): Unit = perMessageTypeCaps.getAndSet(Map.empty).foreach(_._2.close())
+
 }
 
 object BlockSequencerThroughputCap {
@@ -210,7 +238,10 @@ object BlockSequencerThroughputCap {
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   class IndividualBlockSequencerThroughputCap(
       observationPeriodSeconds: Int,
-      config: IndividualThroughputCapConfig,
+      strict: Boolean,
+      thresholdsConfig: NonEmpty[Seq[PositiveDouble]],
+      updateEveryMs: NonNegativeInt,
+      val config: IndividualThroughputCapConfig,
       requestType: SubmissionRequestType,
       clock: Clock,
       parentMetrics: SequencerMetrics,
@@ -221,8 +252,7 @@ object BlockSequencerThroughputCap {
 
     private var initialized: Boolean = false
 
-    private val thresholds =
-      config.thresholds.sorted.reverse.zipWithIndex
+    private val thresholds = thresholdsConfig.sorted.reverse.zipWithIndex
     private val maximumGlobalTransactionsPerObservationPeriod =
       config.globalTpsCap.value * observationPeriodSeconds.toDouble
     private val maximumGlobalBytesPerObservationPeriod =
@@ -387,7 +417,7 @@ object BlockSequencerThroughputCap {
         val now = clock.uniqueTime()
         // if we are in non-strict mode or if an update is due, update the thresholds
         if (
-          config.strict || (now.toMicros - advancingWindowLast.get.toMicros) > config.updateEveryMs.value * 1000
+          strict || (now.toMicros - advancingWindowLast.get.toMicros) > updateEveryMs.value * 1000
         ) {
           advancingWindowLast.set(now)
           lock.exclusive {
@@ -433,7 +463,7 @@ object BlockSequencerThroughputCap {
           }
 
           calculateAndSetThresholdLevel()
-          val (mode, newThrottledCountForMember, newThrottledBytesForMember) = if (config.strict) {
+          val (mode, newThrottledCountForMember, newThrottledBytesForMember) = if (strict) {
             // in strict mode, we give every member the same share of the rate
             val vActive = memberUsage.size
             (

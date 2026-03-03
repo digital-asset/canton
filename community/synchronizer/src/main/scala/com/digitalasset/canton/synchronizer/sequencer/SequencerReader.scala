@@ -647,8 +647,10 @@ class SequencerReader(
           // fetch payloads in bulk
           val idOrPayloads =
             snapshotsWithEvent.flatMap(_.value.unvalidatedEvent.event.payloadO.toList)
+          // determine if this is a catch up where we are reading lots of old events or whether we read recent ones
+          val readFromBuffer = snapshotsWithEvent.forall(x => !x.value.unvalidatedEvent.fromStore)
           store
-            .readPayloads(idOrPayloads.toSeq, member)
+            .readPayloads(idOrPayloads.toSeq, member, recentEvents = readFromBuffer)
             .map { loadedPayloads =>
               snapshotsWithEvent.map(snapshotWithEvent =>
                 snapshotWithEvent.map(_.mapEventPayload {

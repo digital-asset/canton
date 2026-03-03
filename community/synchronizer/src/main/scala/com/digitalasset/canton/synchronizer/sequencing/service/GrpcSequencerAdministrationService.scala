@@ -23,14 +23,20 @@ import com.digitalasset.canton.sequencer.admin.v30
 import com.digitalasset.canton.sequencer.admin.v30.{
   GenerateAuthenticationTokenRequest,
   GenerateAuthenticationTokenResponse,
+  GetThroughputCapRequest,
+  GetThroughputCapResponse,
   OnboardingStateResponse,
   OnboardingStateV2Request,
   OnboardingStateV2Response,
+  SetThroughputCapRequest,
+  SetThroughputCapResponse,
   SetTrafficPurchasedRequest,
   SetTrafficPurchasedResponse,
 }
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
+import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
 import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.IndividualThroughputCapConfig
 import com.digitalasset.canton.synchronizer.sequencer.traffic.TimestampSelector
 import com.digitalasset.canton.synchronizer.sequencer.{
   OnboardingStateForSequencer,
@@ -417,5 +423,44 @@ class GrpcSequencerAdministrationService(
     } yield SetTrafficPurchasedResponse()
 
     mapErrNewEUS(result)
+  }
+
+  private def parseRequestType(requestType: String) =
+    SubmissionRequestType
+      .fromStringForCap(requestType)
+      .toRight(
+        ProtoDeserializationError.ValueConversionError(
+          "type",
+          s"Unknown submission type $requestType",
+        )
+      )
+
+  override def setThroughputCap(
+      request: SetThroughputCapRequest
+  ): Future[SetThroughputCapResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val SetThroughputCapRequest(requestType, config) = request
+    val result = for {
+      cfg <- config.traverse(IndividualThroughputCapConfig.fromAdminProto)
+      requestType <- parseRequestType(requestType)
+    } yield {
+      sequencer.setThroughputCap(requestType, cfg)
+      SetThroughputCapResponse()
+    }
+    mapErrNewEUS(wrapErrUS(result))
+  }
+
+  override def getThroughputCap(
+      request: GetThroughputCapRequest
+  ): Future[GetThroughputCapResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val GetThroughputCapRequest(requestType) = request
+    val result = parseRequestType(requestType)
+      .map { cap =>
+        GetThroughputCapResponse(
+          config = sequencer.getThroughputCap(cap).map(_.toAdminProto)
+        )
+      }
+    mapErrNewEUS(wrapErrUS(result))
   }
 }

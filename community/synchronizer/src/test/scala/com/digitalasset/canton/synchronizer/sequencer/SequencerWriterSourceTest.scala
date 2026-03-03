@@ -576,6 +576,7 @@ class SequencerWriterSourceTest
               case Sequenced(
                     _,
                     deliverError @ DeliverErrorStoreEvent(aliceId, _, _, _, _),
+                    _,
                   ) =>
                 deliverError
             }.value

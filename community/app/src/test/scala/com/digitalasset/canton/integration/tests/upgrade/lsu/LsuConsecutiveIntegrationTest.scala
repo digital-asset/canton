@@ -145,7 +145,7 @@ final class LsuConsecutiveIntegrationTest extends LsuBase {
 
         fixture.newSynchronizerNodes.all.start()
 
-        performSynchronizerNodesLSU(fixture)
+        performSynchronizerNodesLsu(fixture)
 
         environment.simClock.value.advanceTo(fixture.upgradeTime.immediateSuccessor)
 

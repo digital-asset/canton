@@ -20,7 +20,7 @@ import scala.jdk.CollectionConverters.*
 
 // SQL MIGRATION AND THEIR DIGEST FILES SHOULD BE CREATED ONLY ONCE AND NEVER CHANGED AGAIN,
 // OTHERWISE MIGRATIONS BREAK ON EXISTING DEPLOYMENTS!
-class FlywayMigrationsSpec extends AnyWordSpec {
+final class FlywayMigrationsSpec extends AnyWordSpec {
 
   "Postgres flyway migration files" should {
     "always have a valid SHA-256 digest file accompanied" in {
@@ -83,14 +83,14 @@ object FlywayMigrationsSpec {
       sourceFile: String,
       digestFile: String,
       resourceScanner: Scanner[?],
-  ) =
+  ): String =
     IOUtils.toString(
       Option(resourceScanner.getResource(digestFile))
         .getOrElse(sys.error(s"""Missing sha-256 file $digestFile!
            |Are you introducing a new Flyway migration step?
            |You need to create a sha-256 digest file by either running:
            | - shasum -a 256 $sourceFile | awk '{print $$1}' > $digestFile (under the db/migration folder)
-           | - or ledger/sandbox/src/main/resources/db/migration/recompute-sha256sums.sh
+           | - or community/common/src/main/resources/db/migration/canton/recompute-sha256sums.sh
            |""".stripMargin))
         .read()
     )

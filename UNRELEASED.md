@@ -4,10 +4,18 @@ Canton CANTON_VERSION has been released on RELEASE_DATE.
 
 INFO: Note that the "## Until YYYY-MM-DD" headers below should all be Wednesdays until 2pm CET to align with the weekly release schedule, i.e. if you add an entry effective at or after the first header, prepend the new date header that corresponds to the Wednesday after your change.
 
-## Until 2026-02-25
+## Until 2026-03-04
+### Minor Improvements
+- *BREAKING* The
+    - `/v2/updates` HTTP POST and websocket GET endpoints
+    - `/v2/updates/flats` HTTP POST and websocket GET endpoints
+
+  were incorrectly retuning LedgerEffects events (i.e., `CreatedEvent` and `ExercisedEvent`). They are now corrected to return
+  AcsDelta (flat) events (i.e., `CreatedEvent` and `ArchivedEvent`).
 
 ### JSON Ledger API OpenAPI/AsyncAPI Specification Updates
-We've corrected the OpenAPI and AsyncAPI specification files to properly reflect field requirements as defined in the Ledger API `.proto` files. Additionally, specification files now include the Canton version in their filenames (e.g., `openapi-3.4.11.yaml`).
+We've corrected the OpenAPI and AsyncAPI specification files to properly reflect field requirements as defined in the Ledger API `.proto` files.
+Additionally, specification files now include the Canton version in their filenames (e.g., `openapi-3.4.11.yaml`).
 
 #### Impact and Migration
 If you regenerate client code from these updated specifications, your code may require changes due to corrected field optionality. You have two options:
@@ -17,6 +25,13 @@ If you regenerate client code from these updated specifications, your code may r
     - **TypeScript**: Handle optional fields using `!` or `??` operators as needed.
 
 The JSON API server remains compatible with specification files from all 3.4.x versions (e.g., 3.4.9).
+
+#### Specification bugfix
+`GetUpdatesRequest.updateFormat` now appears marked as required in the OpenAPI/AsyncAPI specs even though it was previously optional.
+This is a specification fix to align with the actual behavior of the API, which requires this field.
+If your client code was previously omitting this field, you will need to update it to include a valid value.
+
+## Until 2026-02-25
 
 ### Sequencer Inspection Service
 A new service is available on the Admin API of the sequencer.
@@ -63,6 +78,33 @@ canton.sequencers.sequencer.public-api.keep-alive-server.permit-keep-alive-witho
 canton.sequencers.sequencer.public-api.keep-alive-server.permit-keep-alive-time = 5 minutes
 ```
 - Lowered the log level of certain warnings to INFO level, if validation of the confirmation request or confirmation response failed due to a race with a topology change.
+- (Alpha): Sequencer throughput caps can now be modified while the sequencer is running. This is supported
+  using the new Admin API rpc calls ``get_througput_cap`` and ``set_throughput_cap`` or by using the
+  ``declarative`` configuration section of the sequencer node:
+```
+canton {
+  parameters = {
+    // note this is an alpha feature
+    enable-alpha-state-via-config = true
+    state-refresh-interval = 1s
+  }
+  sequencers {
+    sequencer1 {
+      declarative {
+        throughput-cap = {
+          "confirmation request" : {
+            global-tps-cap = 45
+            global-kbps-cap = 1000
+            per-client-tps-cap = 7
+            per-client-kbps-cap = 2500
+          }
+        }
+      }
+```
+Note that you can start your process with multiple config files ``./bin/canton -c static.conf -c dynamic.conf``.
+Canton will reload the config if any of the files changed (but only apply the declarative parts).
+- Sequencer: Separated catchup from event buffer cache such that a catchup of a member does not lead to cache evictions
+  of recent events.
 
 ### Bugfixes
 - Switched the gRPC service `SequencerService.subscribe` and `SequencerService.downloadTopologyStateForInit` to manual
@@ -70,3 +112,4 @@ canton.sequencers.sequencer.public-api.keep-alive-server.permit-keep-alive-time 
 - When the new connection pool is disabled using `sequencer-client.use-new-connection-pool = false`, the health of the
   connection pool is no longer reported as a component in `<node>.health.status` (before the fix, the connection pool
   component would report a "Not initialized" status).
+- Fixed a race condition in mediator that could cause verdicts for invalid requests to not be emitted to ongoing inspection service streams.

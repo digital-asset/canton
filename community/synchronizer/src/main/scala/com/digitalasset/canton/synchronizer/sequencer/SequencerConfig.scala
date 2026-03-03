@@ -18,6 +18,9 @@ import com.digitalasset.canton.config.{
   StorageConfig,
   UniformCantonConfigValidation,
 }
+import com.digitalasset.canton.sequencer.admin.v30 as adminProto
+import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.{
   CircuitBreakerConfig,
   ThroughputCapConfig,
@@ -33,7 +36,8 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.reference.{
   ReferenceSequencerDriverFactory,
 }
 import com.digitalasset.canton.time.Clock
-import pureconfig.ConfigCursor
+import pureconfig.generic.semiauto.{deriveReader, deriveWriter}
+import pureconfig.{ConfigCursor, ConfigReader, ConfigWriter}
 
 import scala.concurrent.ExecutionContext
 
@@ -274,13 +278,28 @@ object BlockSequencerConfig {
     CantonConfigValidatorDerivation[BlockSequencerConfig]
   }
 
+  /** Control throughput caps
+    *
+    * Strict mode means that if we reach the cap, we'll allocate the same bandwidth to everyone. If
+    * false, then we sort by usage descending and compute the usage cap for the highest spenders at
+    * which their spend will fall below the threshold
+    *
+    * @param strict
+    *   how should the per member rate cap be computed
+    * @param updateEveryMs
+    *   how often should the new caps be computed (only used in non-strict mode)
+    */
   final case class ThroughputCapConfig(
       enabled: Boolean = false,
       observationPeriodSeconds: Int = 60,
       clockTickInterval: NonNegativeFiniteDuration = NonNegativeFiniteDuration.ofMillis(100),
       messages: ThroughputCapByMessageTypeConfig = ThroughputCapByMessageTypeConfig(),
+      strict: Boolean = true,
+      thresholds: NonEmpty[Seq[PositiveDouble]] = NonEmpty.mk(Seq, PositiveDouble.tryCreate(0.9)),
+      updateEveryMs: NonNegativeInt = NonNegativeInt.tryCreate(100),
   ) extends UniformCantonConfigValidation
   object ThroughputCapConfig {
+    import CantonConfigValidatorInstances.*
     implicit val throughputCapConfigValidator: CantonConfigValidator[ThroughputCapConfig] =
       CantonConfigValidatorDerivation[ThroughputCapConfig]
   }
@@ -298,32 +317,66 @@ object BlockSequencerConfig {
       CantonConfigValidatorDerivation[ThroughputCapByMessageTypeConfig]
   }
 
-  /** configure an individual cap
-    *
-    * Strict mode means that if we reach the cap, we'll allocate the same bandwidth to everyone. If
-    * false, then we sort by usage descending and compute the usage cap for the highest spenders at
-    * which their spend will fall below the threshold
-    *
-    * @param strict
-    *   how should the per member rate cap be computed
-    * @param updateEveryMs
-    *   how often should the new caps be computed (only used in non-strict mode)
-    */
+  /** configure an individual cap */
   final case class IndividualThroughputCapConfig(
       globalTpsCap: PositiveDouble = PositiveDouble.tryCreate(10.0),
       globalKbpsCap: PositiveDouble = PositiveDouble.tryCreate(2000.0),
       perClientTpsCap: PositiveDouble = PositiveDouble.tryCreate(4.0),
       perClientKbpsCap: PositiveDouble = PositiveDouble.tryCreate(1000.0),
-      strict: Boolean = true,
-      thresholds: NonEmpty[Seq[PositiveDouble]] = NonEmpty.mk(Seq, PositiveDouble.tryCreate(0.9)),
-      updateEveryMs: NonNegativeInt = NonNegativeInt.tryCreate(100),
-  ) extends UniformCantonConfigValidation
+  ) extends UniformCantonConfigValidation {
+
+    def toAdminProto: adminProto.IndividualThroughputCapConfig =
+      adminProto.IndividualThroughputCapConfig(
+        globalTpsCap = globalTpsCap.value,
+        globalKbpsCap = globalKbpsCap.value,
+        perClientTpsCap = perClientTpsCap.value,
+        perClientKbpsCap = perClientKbpsCap.value,
+      )
+
+  }
   object IndividualThroughputCapConfig {
+
+    object ConfigImplicits {
+      final implicit val individualCapConfigReader: ConfigReader[IndividualThroughputCapConfig] =
+        deriveReader[IndividualThroughputCapConfig]
+      final implicit val individualCapConfigWriter: ConfigWriter[IndividualThroughputCapConfig] =
+        deriveWriter[IndividualThroughputCapConfig]
+    }
+
     implicit val throughputCapConfigValidator
         : CantonConfigValidator[IndividualThroughputCapConfig] = {
       import CantonConfigValidatorInstances.*
       CantonConfigValidatorDerivation[IndividualThroughputCapConfig]
     }
+
+    def fromAdminProto(
+        value: adminProto.IndividualThroughputCapConfig
+    ): ParsingResult[IndividualThroughputCapConfig] = {
+      val adminProto.IndividualThroughputCapConfig(
+        globalTpsCapP,
+        globalKbpsCapP,
+        perClientTpsCapP,
+        perClientKbpsCapP,
+      ) = value
+      for {
+        globalTpsCap <- ProtoConverter.parsePositiveDouble("global_tps_cap", globalTpsCapP)
+        globalKbpsCap <- ProtoConverter.parsePositiveDouble("global_kbps_cap", globalKbpsCapP)
+        perClientTpsCap <- ProtoConverter.parsePositiveDouble(
+          "per_client_tps_cap",
+          perClientTpsCapP,
+        )
+        perClientKbpsCap <- ProtoConverter.parsePositiveDouble(
+          "per_client_kbps_cap",
+          perClientKbpsCapP,
+        )
+      } yield IndividualThroughputCapConfig(
+        globalTpsCap = globalTpsCap,
+        globalKbpsCap = globalKbpsCap,
+        perClientTpsCap = perClientTpsCap,
+        perClientKbpsCap = perClientKbpsCap,
+      )
+    }
+
   }
 
   final case class CircuitBreakerConfig(

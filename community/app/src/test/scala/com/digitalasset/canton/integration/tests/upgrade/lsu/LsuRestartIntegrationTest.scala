@@ -98,7 +98,7 @@ final class LsuRestartIntegrationTest extends LsuBase {
         owner = participant1.adminParty,
       )
 
-      performSynchronizerNodesLSU(fixture)
+      performSynchronizerNodesLsu(fixture)
 
       participants.local.stop()
 

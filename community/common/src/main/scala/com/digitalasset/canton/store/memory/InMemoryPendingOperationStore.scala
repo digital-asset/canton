@@ -10,9 +10,8 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.store.PendingOperation.ConflictingPendingOperationError
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.canton.store.memory.InMemoryPendingOperationStore.compositeKey
 import com.digitalasset.canton.store.{PendingOperation, PendingOperationStore}
-import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.topology.Synchronizer
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.{HasProtocolVersionedWrapper, VersioningCompanion}
 import com.google.common.annotations.VisibleForTesting
@@ -22,22 +21,22 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.ExecutionContext
 import scala.util.Try
 
-class InMemoryPendingOperationStore[Op <: HasProtocolVersionedWrapper[Op]](
+class InMemoryPendingOperationStore[Op <: HasProtocolVersionedWrapper[Op], SId <: Synchronizer](
     override protected val opCompanion: VersioningCompanion[Op]
 )(implicit
     val executionContext: ExecutionContext
-) extends PendingOperationStore[Op] {
+) extends PendingOperationStore[Op, SId] {
 
   // Allows tests to bypass validation and insert malformed data into the store
   @VisibleForTesting
   private[memory] val store =
     TrieMap.empty[
-      (SynchronizerId, String, NonEmptyString),
-      InMemoryPendingOperationStore.StoredPendingOperation,
+      (SId, String, NonEmptyString),
+      InMemoryPendingOperationStore.StoredPendingOperation[SId],
     ]
 
   override def insert(
-      operation: PendingOperation[Op]
+      operation: PendingOperation[Op, SId]
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, ConflictingPendingOperationError, Unit] =
@@ -53,7 +52,7 @@ class InMemoryPendingOperationStore[Op <: HasProtocolVersionedWrapper[Op]](
         case Some(existingSerializedOp) if existingSerializedOp != serializedOp =>
           Left(
             ConflictingPendingOperationError(
-              operation.synchronizerId,
+              operation.synchronizer,
               operation.key,
               operation.name,
             )
@@ -64,29 +63,54 @@ class InMemoryPendingOperationStore[Op <: HasProtocolVersionedWrapper[Op]](
             s"Pending operation ${operation.key} was either removed from or never inserted into the in-memory store."
           )
       }
-
     }
 
+  override def updateOperation(
+      operation: Op,
+      synchronizer: SId,
+      name: NonEmptyString,
+      key: String,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    store
+      .updateWith((synchronizer, key, name))(
+        _.map(_.copy(serializedOperation = operation.toByteString))
+      )
+      .discard
+    FutureUnlessShutdown.unit
+  }
+
   override def delete(
-      synchronizerId: SynchronizerId,
+      synchronizer: SId,
       operationKey: String,
       operationName: NonEmptyString,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {
-    store.remove(compositeKey(synchronizerId, operationKey, operationName)).discard
-    FutureUnlessShutdown.pure(())
+    store.remove((synchronizer, operationKey, operationName)).discard
+    FutureUnlessShutdown.unit
   }
 
   override def get(
-      synchronizerId: SynchronizerId,
+      synchronizer: SId,
       operationKey: String,
       operationName: NonEmptyString,
-  )(implicit traceContext: TraceContext): OptionT[FutureUnlessShutdown, PendingOperation[Op]] = {
+  )(implicit
+      traceContext: TraceContext
+  ): OptionT[FutureUnlessShutdown, PendingOperation[Op, SId]] = {
     val resultF = FutureUnlessShutdown.fromTry(Try {
       store
-        .get(compositeKey(synchronizerId, operationKey, operationName))
+        .get((synchronizer, operationKey, operationName))
         .map(_.tryToPendingOperation(opCompanion))
     })
     OptionT(resultF)
+  }
+
+  override def getAll(operationName: NonEmptyString)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Set[PendingOperation[Op, SId]]] = FutureUnlessShutdown.pure {
+    store.iterator.collect { case ((_, _, `operationName`), op) =>
+      op.tryToPendingOperation(opCompanion)
+    }.toSet
   }
 }
 
@@ -98,9 +122,8 @@ object InMemoryPendingOperationStore {
    * the store's behavior when reading corrupt records.
    */
   @VisibleForTesting
-  private[memory] final case class StoredPendingOperation(
-      trigger: String,
-      serializedSynchronizerId: String,
+  private[memory] final case class StoredPendingOperation[SId <: Synchronizer](
+      synchronizer: SId,
       key: String,
       name: String,
       serializedOperation: ByteString,
@@ -112,37 +135,28 @@ object InMemoryPendingOperationStore {
       */
     def tryToPendingOperation[Op <: HasProtocolVersionedWrapper[Op]](
         opCompanion: VersioningCompanion[Op]
-    ): PendingOperation[Op] =
+    ): PendingOperation[Op, SId] =
       PendingOperation
         .create(
-          trigger,
           name,
           key,
           serializedOperation,
           opCompanion.fromTrustedByteString,
-          serializedSynchronizerId,
+          synchronizer,
         )
         .valueOr(errorMessage => throw new DbDeserializationException(errorMessage))
   }
 
   @VisibleForTesting
   private[memory] object StoredPendingOperation {
-    def fromPendingOperation[Op <: HasProtocolVersionedWrapper[Op]](
-        po: PendingOperation[Op]
-    ): StoredPendingOperation =
+    def fromPendingOperation[Op <: HasProtocolVersionedWrapper[Op], SId <: Synchronizer](
+        po: PendingOperation[Op, SId]
+    ): StoredPendingOperation[SId] =
       StoredPendingOperation(
-        po.trigger.asString,
-        po.synchronizerId.toProtoPrimitive,
+        po.synchronizer,
         po.key,
         po.name.unwrap,
         po.operation.toByteString,
       )
   }
-
-  private def compositeKey(
-      synchronizerId: SynchronizerId,
-      operationKey: String,
-      operationName: NonEmptyString,
-  ): (SynchronizerId, String, NonEmptyString) =
-    (synchronizerId, operationKey, operationName)
 }

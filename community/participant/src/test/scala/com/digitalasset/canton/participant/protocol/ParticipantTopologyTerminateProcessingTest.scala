@@ -18,7 +18,8 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.lifecycle.UnlessShutdown.Outcome
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
-import com.digitalasset.canton.participant.sync.LogicalSynchronizerUpgradeCallback
+import com.digitalasset.canton.participant.sync.LsuCallback
+import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
@@ -50,7 +51,7 @@ import org.slf4j.event.Level
 
 import scala.jdk.CollectionConverters.*
 
-class ParticipantTopologyTerminateProcessingTest
+final class ParticipantTopologyTerminateProcessingTest
     extends AsyncWordSpec
     with BaseTest
     with FailOnShutdown
@@ -103,7 +104,8 @@ class ParticipantTopologyTerminateProcessingTest
       DefaultTestIdentities.participant1,
       pauseSynchronizerIndexingDuringPartyReplication = false,
       synchronizerPredecessor = synchronizerPredecessor,
-      lsuCallback = LogicalSynchronizerUpgradeCallback.NoOp,
+      lsuCallback = LsuCallback.NoOp,
+      pendingHandshakesWithSuccessorsStore = mock[PendingHandshakesWithSuccessorsStore],
       retrieveAndStoreMissingSequencerIds = _ => EitherTUtil.unitUS,
       loggerFactory,
     )

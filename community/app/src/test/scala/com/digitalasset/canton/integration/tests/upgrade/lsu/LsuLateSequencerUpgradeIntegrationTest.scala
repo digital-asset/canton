@@ -102,7 +102,7 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
       participants.all.map(p => p.health.ping(p))
 
       fixture.oldSynchronizerOwners.foreach(
-        _.topology.synchronizer_upgrade.announcement
+        _.topology.lsu.announcement
           .propose(fixture.newPSId, fixture.upgradeTime)
       )
 
@@ -130,12 +130,12 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
       )
 
       // both successors are announced
-      sequencer1.topology.synchronizer_upgrade.sequencer_successors.propose_successor(
+      sequencer1.topology.lsu.sequencer_successors.propose_successor(
         sequencerId = sequencer1.id,
         endpoints = sequencer3.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
         synchronizerId = fixture.currentPSId,
       )
-      sequencer2.topology.synchronizer_upgrade.sequencer_successors.propose_successor(
+      sequencer2.topology.lsu.sequencer_successors.propose_successor(
         sequencerId = sequencer2.id,
         endpoints = sequencer4.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
         synchronizerId = fixture.currentPSId,

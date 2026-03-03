@@ -162,5 +162,5 @@ sealed trait AcsImportNoSynchronizerConnectionIntegrationTest
   }
 }
 
-class AcsImportNoSynchronizerConnectionIntegrationTestPostgres
+final class AcsImportNoSynchronizerConnectionIntegrationTestPostgres
     extends AcsImportNoSynchronizerConnectionIntegrationTest

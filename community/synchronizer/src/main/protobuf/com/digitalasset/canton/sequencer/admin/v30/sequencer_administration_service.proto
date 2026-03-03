@@ -28,6 +28,11 @@ service SequencerAdministrationService {
   // The new balance will only become valid once authorized by a quorum of sequencers of the synchronizer
   rpc SetTrafficPurchased(SetTrafficPurchasedRequest) returns (SetTrafficPurchasedResponse);
 
+  // Update the throughput caps enforced on the sequencer
+  rpc SetThroughputCap(SetThroughputCapRequest) returns (SetThroughputCapResponse);
+  // Get the throughput caps configured on the sequencer
+  rpc GetThroughputCap(GetThroughputCapRequest) returns (GetThroughputCapResponse);
+
   // fetch a snapshot of the sequencer state based on the given timestamp
   rpc Snapshot(SnapshotRequest) returns (SnapshotResponse);
 
@@ -102,6 +107,30 @@ message SetTrafficPurchasedRequest {
 }
 
 message SetTrafficPurchasedResponse {}
+
+// Limit the throughput per member for the purpose of protecting the system availability
+message IndividualThroughputCapConfig {
+  double global_tps_cap = 1;
+  double global_kbps_cap = 2;
+  double per_client_tps_cap = 3;
+  double per_client_kbps_cap = 4;
+}
+
+/** Set throughput cap for the given type */
+message SetThroughputCapRequest {
+  // Message type for which the cap should apply
+  // "confirmation request", "topology transaction"
+  string type = 1;
+  // Optional: send empty to disable
+  IndividualThroughputCapConfig config = 2;
+}
+message SetThroughputCapResponse {}
+message GetThroughputCapRequest {
+  string type = 1;
+}
+message GetThroughputCapResponse {
+  IndividualThroughputCapConfig config = 1;
+}
 
 message SnapshotRequest {
   google.protobuf.Timestamp timestamp = 1;

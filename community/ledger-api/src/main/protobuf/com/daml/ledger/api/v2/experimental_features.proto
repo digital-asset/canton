@@ -16,21 +16,26 @@ option java_package = "com.daml.ledger.api.v2";
 
 // See the feature message definitions for descriptions.
 message ExperimentalFeatures {
+  // Optional
   ExperimentalStaticTime static_time = 1;
+  // Optional
   ExperimentalCommandInspectionService command_inspection_service = 2;
 }
 
 // Ledger is in the static time mode and exposes a time service.
 message ExperimentalStaticTime {
+  // Required
   bool supported = 1;
 }
 
 // Whether the Ledger API supports command inspection service
 message ExperimentalCommandInspectionService {
+  // Required
   bool supported = 1;
 }
 
 // Whether the Ledger API supports party events
 message ExperimentalPartyTopologyEvents {
+  // Required
   bool supported = 1;
 }

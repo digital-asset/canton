@@ -24,6 +24,7 @@ option java_package = "com.daml.ledger.api.v2";
 // indicates the subset of the requested parties that can see the event
 // in question.
 message Event {
+  // Required
   oneof event {
     // The event as it appeared in the context of its original daml transaction on this participant node.
     // In particular, the offset, node_id pair of the daml transaction are preserved.
@@ -38,18 +39,23 @@ message CreatedEvent {
   // The offset of origin, which has contextual meaning, please see description at messages that include a CreatedEvent.
   // Offsets are managed by the participant nodes.
   // Transactions can thus NOT be assumed to have the same offsets on different participant nodes.
-  // Required, it is a valid absolute offset (positive integer)
+  // It is a valid absolute offset (positive integer)
+  //
+  // Required
   int64 offset = 1;
 
   // The position of this event in the originating transaction or reassignment.
   // The origin has contextual meaning, please see description at messages that include a CreatedEvent.
   // Node IDs are not necessarily equal across participants,
   // as these may see different projections/parts of transactions.
-  // Required, must be valid node ID (non-negative integer)
+  // Must be valid node ID (non-negative integer)
+  //
+  // Required
   int32 node_id = 2;
 
   // The ID of the created contract.
   // Must be a valid LedgerString (as described in ``value.proto``).
+  //
   // Required
   string contract_id = 3;
 
@@ -61,6 +67,7 @@ message CreatedEvent {
 
   // The key of the created contract.
   // This will be set if and only if ``template_id`` defines a contract key.
+  //
   // Optional
   Value contract_key = 5;
 
@@ -72,7 +79,8 @@ message CreatedEvent {
   // Opaque representation of contract create event payload intended for forwarding
   // to an API server as a contract disclosed as part of a command
   // submission.
-  // Optional
+  //
+  // Optional: can be empty
   bytes created_event_blob = 7;
 
   // Interface views specified in the transaction filter.
@@ -82,7 +90,7 @@ message CreatedEvent {
   // - and which is implemented by the template of this event,
   // - and which has ``include_interface_view`` set.
   //
-  // Optional
+  // Optional: can be empty
   repeated InterfaceView interface_views = 8;
 
   // The parties that are notified of this event. When a ``CreatedEvent``
@@ -111,28 +119,34 @@ message CreatedEvent {
   // ``UpdateFormat``.  Using these events, query the ACS as-of an offset where the
   // party is hosted on the participant node, and ignore create events at offsets
   // where the party is not hosted on the participant node.
-  // Required
+  //
+  // Required: must be non-empty
   repeated string witness_parties = 9;
 
   // The signatories for this contract as specified by the template.
-  // Required
+  //
+  // Required: must be non-empty
   repeated string signatories = 10;
 
   // The observers for this contract as specified explicitly by the template or implicitly as choice controllers.
   // This field never contains parties that are signatories.
-  // Required
+  //
+  // Optional: can be empty
   repeated string observers = 11;
 
   // Ledger effective time of the transaction that created the contract.
+  //
   // Required
   google.protobuf.Timestamp created_at = 12;
 
   // The package name of the created contract.
+  //
   // Required
   string package_name = 13;
 
   // Whether this event would be part of respective ACS_DELTA shaped stream,
   // and should therefore considered when tracking contract activeness on the client-side.
+  //
   // Required
   bool acs_delta = 14;
 
@@ -157,12 +171,14 @@ message InterfaceView {
   // Whether the view was successfully computed, and if not,
   // the reason for the error. The error is reported using the same rules
   // for error codes and messages as the errors returned for API requests.
+  //
   // Required
   google.rpc.Status view_status = 2;
 
   // The value of the interface's view method on this event.
   // Set if it was requested in the ``InterfaceFilter`` and it could be
   // successfully computed.
+  //
   // Optional
   Record view_value = 3;
 }
@@ -172,13 +188,17 @@ message ArchivedEvent {
   // The offset of origin.
   // Offsets are managed by the participant nodes.
   // Transactions can thus NOT be assumed to have the same offsets on different participant nodes.
-  // Required, it is a valid absolute offset (positive integer)
+  // It is a valid absolute offset (positive integer)
+  //
+  // Required
   int64 offset = 1;
 
   // The position of this event in the originating transaction or reassignment.
   // Node IDs are not necessarily equal across participants,
   // as these may see different projections/parts of transactions.
-  // Required, must be valid node ID (non-negative integer)
+  // Must be valid node ID (non-negative integer)
+  //
+  // Required
   int32 node_id = 2;
 
   // The ID of the archived contract.
@@ -202,10 +222,12 @@ message ArchivedEvent {
   // the contract.
   // Each one of its elements must be a valid PartyIdString (as described
   // in ``value.proto``).
-  // Required
+  //
+  // Required: must be non-empty
   repeated string witness_parties = 5;
 
   // The package name of the contract.
+  //
   // Required
   string package_name = 6;
 
@@ -215,7 +237,7 @@ message ArchivedEvent {
   //
   // If defined, the identifier uses the package-id reference format.
   //
-  // Optional
+  // Optional: can be empty
   repeated Identifier implemented_interfaces = 7;
 }
 
@@ -224,13 +246,17 @@ message ExercisedEvent {
   // The offset of origin.
   // Offsets are managed by the participant nodes.
   // Transactions can thus NOT be assumed to have the same offsets on different participant nodes.
-  // Required, it is a valid absolute offset (positive integer)
+  // It is a valid absolute offset (positive integer)
+  //
+  // Required
   int64 offset = 1;
 
   // The position of this event in the originating transaction or reassignment.
   // Node IDs are not necessarily equal across participants,
   // as these may see different projections/parts of transactions.
-  // Required, must be valid node ID (non-negative integer)
+  // Must be valid node ID (non-negative integer)
+  //
+  // Required
   int32 node_id = 2;
 
   // The ID of the target contract.
@@ -255,19 +281,23 @@ message ExercisedEvent {
 
   // The choice that was exercised on the target contract.
   // Must be a valid NameString (as described in ``value.proto``).
+  //
   // Required
   string choice = 6;
 
   // The argument of the exercised choice.
+  //
   // Required
   Value choice_argument = 7;
 
   // The parties that exercised the choice.
   // Each element must be a valid PartyIdString (as described in ``value.proto``).
-  // Required
+  //
+  // Required: must be non-empty
   repeated string acting_parties = 8;
 
   // If true, the target contract may no longer be exercised.
+  //
   // Required
   bool consuming = 9;
 
@@ -287,21 +317,25 @@ message ExercisedEvent {
   // ``choice ... controller`` syntax, and said controllers are not
   // explicitly marked as observers.
   // Each element must be a valid PartyIdString (as described in ``value.proto``).
-  // Required
+  //
+  // Required: must be non-empty
   repeated string witness_parties = 10;
 
   // Specifies the upper boundary of the node ids of the events in the same transaction that appeared as a result of
   // this ``ExercisedEvent``. This allows unambiguous identification of all the members of the subtree rooted at this
   // node. A full subtree can be constructed when all descendant nodes are present in the stream. If nodes are heavily
   // filtered, it is only possible to determine if a node is in a consequent subtree or not.
+  //
   // Required
   int32 last_descendant_node_id = 11;
 
   // The result of exercising the choice.
-  // Required
+  //
+  // Optional
   Value exercise_result = 12;
 
   // The package name of the contract.
+  //
   // Required
   string package_name = 13;
 
@@ -311,11 +345,12 @@ message ExercisedEvent {
   //
   // The identifier uses the package-id reference format.
   //
-  // Optional
+  // Optional: can be empty
   repeated Identifier implemented_interfaces = 14;
 
   // Whether this event would be part of respective ACS_DELTA shaped stream,
   // and should therefore considered when tracking contract activeness on the client-side.
+  //
   // Required
   bool acs_delta = 15;
 }

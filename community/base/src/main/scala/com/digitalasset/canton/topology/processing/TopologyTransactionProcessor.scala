@@ -447,7 +447,7 @@ class TopologyTransactionProcessor(
       txs: Seq[GenericSignedTopologyTransaction],
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
     // processing an event with a sequencing time less than what was already in the store
-    // when initializing TopologyTransactionProcessor means that is it is being replayed
+    // when initializing TopologyTransactionProcessor means that it is being replayed
     // after crash recovery (eg reconnecting to a synchronizer or restart after a crash)
     for {
       maxSequencedTimeAtInitialization <- synchronizeWithClosing(
@@ -485,13 +485,17 @@ class TopologyTransactionProcessor(
       validUpgradeAnnouncements = validTransactions
         .mapFilter(_.selectMapping[SynchronizerUpgradeAnnouncement])
 
-      _ = validUpgradeAnnouncements.foreach { announcement =>
-        announcement.operation match {
-          case TopologyChangeOp.Replace =>
-            terminateProcessing.notifyUpgradeAnnouncement(announcement.mapping.successor)
-          case TopologyChangeOp.Remove => terminateProcessing.notifyUpgradeCancellation()
+      _ <- synchronizeWithClosing("process-lsu-upgrade")(
+        MonadUtil.sequentialTraverse(validUpgradeAnnouncements) { announcement =>
+          announcement.operation match {
+            case TopologyChangeOp.Replace =>
+              terminateProcessing.notifyUpgradeAnnouncement(announcement.mapping.successor)
+              FutureUnlessShutdown.unit
+
+            case TopologyChangeOp.Remove => terminateProcessing.notifyUpgradeCancellation()
+          }
         }
-      }
+      )
 
       _ <- synchronizeWithClosing("notify-topology-transaction-observers")(
         MonadUtil.sequentialTraverse(listeners.get()) { listenerGroup =>

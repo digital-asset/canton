@@ -80,12 +80,16 @@ service InteractiveSubmissionService {
 message CostEstimationHints {
   // Disable cost estimation
   // Default (not set) is false
+  //
+  // Optional
   bool disabled = 1;
   // Details on the keys that will be used to sign the transaction (how many and of which type).
   // Signature size impacts the cost of the transaction.
   // If empty, the signature sizes will be approximated with threshold-many signatures (where threshold is defined
   // in the PartyToKeyMapping of the external party), using keys in the order they are registered.
-  // Optional (empty list is equivalent to not providing this field)
+  // Empty list is equivalent to not providing this field
+  //
+  // Optional: can be empty
   repeated SigningAlgorithmSpec expected_signatures = 2;
 }
 
@@ -95,14 +99,22 @@ message CostEstimationHints {
 // The cost of re-assigning contracts to another synchronizer when necessary is not included in the estimation.
 message CostEstimation {
   // Timestamp at which the estimation was made
+  //
+  // Required
   google.protobuf.Timestamp estimation_timestamp = 1;
   // Estimated traffic cost of the confirmation request associated with the transaction
+  //
+  // Required
   uint64 confirmation_request_traffic_cost_estimation = 2;
   // Estimated traffic cost of the confirmation response associated with the transaction
   // This field can also be used as an indication of the cost that other potential confirming nodes
   // of the party will incur to approve or reject the transaction
+  //
+  // Required
   uint64 confirmation_response_traffic_cost_estimation = 3;
   // Sum of the fields above
+  //
+  // Required
   uint64 total_traffic_cost_estimation = 4;
 }
 
@@ -111,6 +123,7 @@ message PrepareSubmissionRequest {
   // Must be a valid UserIdString (as described in ``value.proto``).
   // Required unless authentication is used with a user token.
   // In that case, the token's user-id will be used for the request's user_id.
+  //
   // Optional
   string user_id = 1;
 
@@ -119,13 +132,15 @@ message PrepareSubmissionRequest {
   // where act_as is interpreted as a set of party names.
   // The change ID can be used for matching the intended ledger changes with all their completions.
   // Must be a valid LedgerString (as described in ``value.proto``).
+  //
   // Required
   string command_id = 2;
 
   // Individual elements of this atomic command. Must be non-empty.
   // Limitation: Only single command transaction are currently supported by the API.
   // The field is marked as repeated in preparation for future support of multiple commands.
-  // Required
+  //
+  // Required: must be non-empty
   repeated Command commands = 3;
 
   // Optional
@@ -138,6 +153,7 @@ message PrepareSubmissionRequest {
   // which is useful to know when it can definitely not be accepted
   // anymore and resorting to preparing another transaction for the same
   // intent is safe again.
+  //
   // Optional
   optional google.protobuf.Timestamp max_record_time = 11;
 
@@ -147,7 +163,8 @@ message PrepareSubmissionRequest {
   // and does not execute it. Therefore read authorization is sufficient even for actAs parties.
   // Note: This may change, and more specific authorization scope may be introduced in the future.
   // Each element must be a valid PartyIdString (as described in ``value.proto``).
-  // Required, must be non-empty.
+  //
+  // Required: must be non-empty
   repeated string act_as = 5;
 
   // Set of parties on whose behalf (in addition to all parties listed in ``act_as``) contracts can be retrieved.
@@ -157,33 +174,39 @@ message PrepareSubmissionRequest {
   // rules for fetch operations.
   // If ledger API authorization is enabled, then the authorization metadata must authorize the sender of the request
   // to read contract data on behalf of each of the given parties.
-  // Optional
+  //
+  // Optional: can be empty
   repeated string read_as = 6;
 
   // Additional contracts used to resolve contract & contract key lookups.
-  // Optional
+  //
+  // Optional: can be empty
   repeated DisclosedContract disclosed_contracts = 7;
 
   // Must be a valid synchronizer id
   // If not set, a suitable synchronizer that this node is connected to will be chosen
+  //
   // Optional
   string synchronizer_id = 8;
 
   // The package-id selection preference of the client for resolving
   // package names and interface instances in command submission and interpretation
-  // Optional
+  //
+  // Optional: can be empty
   repeated string package_id_selection_preference = 9;
 
   // When true, the response will contain additional details on how the transaction was encoded and hashed
   // This can be useful for troubleshooting of hash mismatches. Should only be used for debugging.
-  // Optional, default to false
+  // Defaults to false
+  //
+  // Optional
   bool verbose_hashing = 10;
 
   // Fetches the contract keys into the caches to speed up the command processing.
   // Should only contain contract keys that are expected to be resolved during interpretation of the commands.
   // Keys of disclosed contracts do not need prefetching.
   //
-  // Optional
+  // Optional: can be empty
   repeated PrefetchContractKey prefetch_contract_keys = 15;
 
   // Hints to improve the accuracy of traffic cost estimation.
@@ -192,8 +215,10 @@ message PrepareSubmissionRequest {
   // Request amplification is not accounted for in the estimation: each amplified request will
   // result in the cost of the confirmation request to be charged additionally.
   //
-  // Optional - Traffic cost estimation is enabled by default if this field is not set
+  // Traffic cost estimation is enabled by default if this field is not set
   // To turn off cost estimation, set the CostEstimationHints#disabled field to true
+  //
+  // Optional
   optional CostEstimationHints estimate_traffic_cost = 16;
 }
 
@@ -209,21 +234,30 @@ enum HashingSchemeVersion {
 message PrepareSubmissionResponse {
   // The interpreted transaction, it represents the ledger changes necessary to execute the commands specified in the request.
   // Clients MUST display the content of the transaction to the user for them to validate before signing the hash if the preparing participant is not trusted.
+  //
+  // Required
   PreparedTransaction prepared_transaction = 1;
   // Hash of the transaction, this is what needs to be signed by the party to authorize the transaction.
   // Only provided for convenience, clients MUST recompute the hash from the raw transaction if the preparing participant is not trusted.
   // May be removed in future versions
+  //
+  // Required: must be non-empty
   bytes prepared_transaction_hash = 2;
 
   // The hashing scheme version used when building the hash
+  //
+  // Required
   HashingSchemeVersion hashing_scheme_version = 3;
 
   // Optional additional details on how the transaction was encoded and hashed. Only set if verbose_hashing = true in the request
   // Note that there are no guarantees on the stability of the format or content of this field.
   // Its content should NOT be parsed and should only be used for troubleshooting purposes.
+  //
+  // Optional
   optional string hashing_details = 4;
 
   // Traffic cost estimation of the prepared transaction
+  //
   // Optional
   optional CostEstimation cost_estimation = 5;
 }
@@ -231,17 +265,20 @@ message PrepareSubmissionResponse {
 // Signatures provided by a single party
 message SinglePartySignatures {
   // Submitting party
+  //
   // Required
   string party = 1;
   // Signatures
-  // Required
+  //
+  // Required: must be non-empty
   repeated Signature signatures = 2;
 }
 
 // Additional signatures provided by the submitting parties
 message PartySignatures {
   // Additional signatures provided by all individual parties
-  // Required
+  //
+  // Required: must be non-empty
   repeated SinglePartySignatures signatures = 1;
 }
 
@@ -249,6 +286,7 @@ message ExecuteSubmissionRequest {
   // the prepared transaction
   // Typically this is the value of the `prepared_transaction` field in `PrepareSubmissionResponse`
   // obtained from calling `prepareSubmission`.
+  //
   // Required
   PreparedTransaction prepared_transaction = 1;
 
@@ -256,11 +294,13 @@ message ExecuteSubmissionRequest {
   // Each party can provide one or more signatures..
   // and one or more parties can sign.
   // Note that currently, only single party submissions are supported.
+  //
   // Required
   PartySignatures party_signatures = 2;
 
   // Specifies the deduplication period for the change ID (See PrepareSubmissionRequest).
   // If omitted, the participant will assume the configured maximum deduplication time.
+  //
   // Optional
   oneof deduplication_period {
     // Specifies the length of the deduplication period.
@@ -282,15 +322,18 @@ message ExecuteSubmissionRequest {
   string submission_id = 5;
 
   // See [PrepareSubmissionRequest.user_id]
+  //
   // Optional
   string user_id = 6;
 
   // The hashing scheme version used when building the hash
+  //
   // Required
   HashingSchemeVersion hashing_scheme_version = 7;
 
   // If set will influence the chosen ledger effective time but will not result in a submission delay so any override
   // should be scheduled to executed within the window allowed by synchronizer.
+  //
   // Optional
   MinLedgerTime min_ledger_time = 8;
 }
@@ -301,6 +344,7 @@ message ExecuteSubmissionAndWaitRequest {
   // the prepared transaction
   // Typically this is the value of the `prepared_transaction` field in `PrepareSubmissionResponse`
   // obtained from calling `prepareSubmission`.
+  //
   // Required
   PreparedTransaction prepared_transaction = 1;
 
@@ -308,11 +352,13 @@ message ExecuteSubmissionAndWaitRequest {
   // Each party can provide one or more signatures..
   // and one or more parties can sign.
   // Note that currently, only single party submissions are supported.
+  //
   // Required
   PartySignatures party_signatures = 2;
 
   // Specifies the deduplication period for the change ID (See PrepareSubmissionRequest).
   // If omitted, the participant will assume the configured maximum deduplication time.
+  //
   // Optional
   oneof deduplication_period {
     // Specifies the length of the deduplication period.
@@ -334,15 +380,18 @@ message ExecuteSubmissionAndWaitRequest {
   string submission_id = 5;
 
   // See [PrepareSubmissionRequest.user_id]
+  //
   // Optional
   string user_id = 6;
 
   // The hashing scheme version used when building the hash
+  //
   // Required
   HashingSchemeVersion hashing_scheme_version = 7;
 
   // If set will influence the chosen ledger effective time but will not result in a submission delay so any override
   // should be scheduled to executed within the window allowed by synchronizer.
+  //
   // Optional
   MinLedgerTime min_ledger_time = 8;
 }
@@ -350,10 +399,12 @@ message ExecuteSubmissionAndWaitRequest {
 message ExecuteSubmissionAndWaitResponse {
   // The id of the transaction that resulted from the submitted command.
   // Must be a valid LedgerString (as described in ``value.proto``).
+  //
   // Required
   string update_id = 1;
 
   // The details of the offset field are described in ``community/ledger-api/README.md``.
+  //
   // Required
   int64 completion_offset = 2;
 }
@@ -362,6 +413,7 @@ message ExecuteSubmissionAndWaitForTransactionRequest {
   // the prepared transaction
   // Typically this is the value of the `prepared_transaction` field in `PrepareSubmissionResponse`
   // obtained from calling `prepareSubmission`.
+  //
   // Required
   PreparedTransaction prepared_transaction = 1;
 
@@ -369,11 +421,13 @@ message ExecuteSubmissionAndWaitForTransactionRequest {
   // Each party can provide one or more signatures..
   // and one or more parties can sign.
   // Note that currently, only single party submissions are supported.
+  //
   // Required
   PartySignatures party_signatures = 2;
 
   // Specifies the deduplication period for the change ID (See PrepareSubmissionRequest).
   // If omitted, the participant will assume the configured maximum deduplication time.
+  //
   // Optional
   oneof deduplication_period {
     // Specifies the length of the deduplication period.
@@ -395,6 +449,7 @@ message ExecuteSubmissionAndWaitForTransactionRequest {
   string submission_id = 5;
 
   // See [PrepareSubmissionRequest.user_id]
+  //
   // Optional
   string user_id = 6;
 
@@ -404,6 +459,7 @@ message ExecuteSubmissionAndWaitForTransactionRequest {
 
   // If set will influence the chosen ledger effective time but will not result in a submission delay so any override
   // should be scheduled to executed within the window allowed by synchronizer.
+  //
   // Optional
   MinLedgerTime min_ledger_time = 8;
 
@@ -412,6 +468,7 @@ message ExecuteSubmissionAndWaitForTransactionRequest {
   // filter for all original ``act_as`` and ``read_as`` parties and the ``verbose`` flag is set.
   // When the ``transaction_shape`` TRANSACTION_SHAPE_ACS_DELTA shape is used (explicitly or is defaulted to as explained above),
   // events will only be returned if the submitting party is hosted on this node.
+  //
   // Optional
   TransactionFormat transaction_format = 9;
 }
@@ -419,11 +476,13 @@ message ExecuteSubmissionAndWaitForTransactionRequest {
 message ExecuteSubmissionAndWaitForTransactionResponse {
   // The transaction that resulted from the submitted command.
   // The transaction might contain no events (request conditions result in filtering out all of them).
+  //
   // Required
   Transaction transaction = 1;
 }
 
 message MinLedgerTime {
+  // Required
   oneof time {
     // Lower bound for the ledger time assigned to the resulting transaction.
     // The ledger time of a transaction is assigned as part of command interpretation.
@@ -449,8 +508,12 @@ message MinLedgerTime {
  */
 message PreparedTransaction {
   // Daml Transaction representing the ledger effect if executed. See below
+  //
+  // Required
   DamlTransaction transaction = 1;
   // Metadata context necessary to execute the transaction
+  //
+  // Required
   Metadata metadata = 2;
 }
 
@@ -458,22 +521,29 @@ message PreparedTransaction {
 // Refer to the hashing documentation for information on how it should be hashed.
 message Metadata {
   message SubmitterInfo {
+    // Required: must be non-empty
     repeated string act_as = 1;
+    // Required
     string command_id = 2;
   }
 
   message GlobalKeyMappingEntry {
+    // Required
     interactive.GlobalKey key = 1;
+    // Optional
     optional Value value = 2;
   }
 
   message InputContract {
+    // Required
     oneof contract {
       // When new versions will be added, they will show here
       interactive.transaction.v1.Create v1 = 1;
     }
+    // Required
     uint64 created_at = 1000;
     reserved 1001; // Used to contain driver_metadata, now contained in event_blob
+    // Required: must be non-empty
     bytes event_blob = 1002;
   }
 
@@ -484,11 +554,19 @@ message Metadata {
   // this used to contain the ledger effective time
   reserved 1;
 
+  // Required
   SubmitterInfo submitter_info = 2;
+  // Required
   string synchronizer_id = 3;
+  // Required
   uint32 mediator_group = 4;
+  // Required
   string transaction_uuid = 5;
+  // Required
   uint64 preparation_time = 6;
+  // Not populated if the transaction has no input contracts
+  //
+  // Optional: can be empty
   repeated InputContract input_contracts = 7;
 
   /*
@@ -499,7 +577,9 @@ message Metadata {
    * If the ledger effective time is outside of any populated min/max bounds then a different transaction
    * can result, that will cause a confirmation message rejection.
    */
+  // Optional
   optional uint64 min_ledger_effective_time = 9;
+  // Optional
   optional uint64 max_ledger_effective_time = 10;
 
   /* ********************************************************** */
@@ -508,6 +588,8 @@ message Metadata {
 
   // Contextual information needed to process the transaction but not signed, either because it's already indirectly
   // signed by signing the transaction, or because it doesn't impact the ledger state
+  //
+  // Optional: can be empty
   repeated GlobalKeyMappingEntry global_key_mapping = 8;
 
   // Maximum timestamp at which the transaction can be recorded onto the ledger via the synchronizer `synchronizer_id`.
@@ -516,6 +598,8 @@ message Metadata {
   // Unsigned in 3.3 to avoid a breaking protocol change
   // Will be signed in 3.4+
   // Set max_record_time in the PreparedTransactionRequest to get this field set accordingly
+  //
+  // Optional
   optional uint64 max_record_time = 11;
 }
 
@@ -525,7 +609,9 @@ message Metadata {
  */
 message DamlTransaction {
   message NodeSeed {
+    // Required
     int32 node_id = 1;
+    // Required: must be non-empty
     bytes seed = 2;
   }
 
@@ -533,60 +619,78 @@ message DamlTransaction {
   // Each node must be hashed using the hashing algorithm corresponding to its specific version.
   // [docs-entry-start: DamlTransaction.Node]
   message Node {
+    // Required
     string node_id = 1;
 
     // Versioned node
     oneof versioned_node {
       // Start at 1000 so we can add more fields before if necessary
       // When new versions will be added, they will show here
+      //
+      // Required
       interactive.transaction.v1.Node v1 = 1000;
     }
   }
   // [docs-entry-end: DamlTransaction.Node]
 
   // serialization version, will be >= max(nodes version)
+  //
+  // Required
   string version = 1;
   // Root nodes of the transaction
+  //
+  // Required: must be non-empty
   repeated string roots = 2;
   // List of nodes in the transaction
+  //
+  // Required: must be non-empty
   repeated Node nodes = 3;
   // Node seeds are values associated with certain nodes used for generating cryptographic salts
+  //
+  // Required: must be non-empty
   repeated NodeSeed node_seeds = 4;
 }
 
 message GetPreferredPackageVersionRequest {
   // The parties whose participants' vetting state should be considered when resolving the preferred package.
-  // Required
+  //
+  // Required: must be non-empty
   repeated string parties = 1;
   // The package-name for which the preferred package should be resolved.
+  //
   // Required
   string package_name = 2;
 
   // The synchronizer whose vetting state should be used for resolving this query.
   // If not specified, the vetting states of all synchronizers to which the participant is connected are used.
+  //
   // Optional
   string synchronizer_id = 3;
 
   // The timestamp at which the package vetting validity should be computed
   // on the latest topology snapshot as seen by the participant.
   // If not provided, the participant's current clock time is used.
+  //
   // Optional
   google.protobuf.Timestamp vetting_valid_at = 4;
 }
 
 message GetPreferredPackageVersionResponse {
   // Not populated when no preferred package is found
+  //
   // Optional
   PackagePreference package_preference = 1;
 }
 
 message PackagePreference {
   // The package reference of the preferred package.
+  //
   // Required
   PackageReference package_reference = 1;
 
   // The synchronizer for which the preferred package was computed.
   // If the synchronizer_id was specified in the request, then it matches the request synchronizer_id.
+  //
   // Required
   string synchronizer_id = 2;
 }
@@ -594,10 +698,12 @@ message PackagePreference {
 // Defines a package-name for which the commonly vetted package with the highest version must be found.
 message PackageVettingRequirement {
   // The parties whose participants' vetting state should be considered when resolving the preferred package.
-  // Required
+  //
+  // Required: must be non-empty
   repeated string parties = 1;
 
   // The package-name for which the preferred package should be resolved.
+  //
   // Required
   string package_name = 2;
 }
@@ -609,7 +715,7 @@ message GetPreferredPackagesRequest {
   // Additional package-name requirements can be provided when additional Daml transaction informees need to use
   // package dependencies of the command's root packages.
   //
-  // Required
+  // Required: must be non-empty
   repeated PackageVettingRequirement package_vetting_requirements = 1;
 
   // The synchronizer whose vetting state should be used for resolving this query.
@@ -620,6 +726,7 @@ message GetPreferredPackagesRequest {
   // The timestamp at which the package vetting validity should be computed
   // on the latest topology snapshot as seen by the participant.
   // If not provided, the participant's current clock time is used.
+  //
   // Optional
   google.protobuf.Timestamp vetting_valid_at = 3;
 }
@@ -633,11 +740,12 @@ message GetPreferredPackagesResponse {
   // in the ``package_id_selection_preference`` of the command submission to
   // avoid race conditions with concurrent changes of the on-ledger package vetting state.
   //
-  // Required
+  // Required: must be non-empty
   repeated PackageReference package_references = 1;
 
   // The synchronizer for which the package preferences are computed.
   // If the synchronizer_id was specified in the request, then it matches the request synchronizer_id.
+  //
   // Required
   string synchronizer_id = 2;
 }
