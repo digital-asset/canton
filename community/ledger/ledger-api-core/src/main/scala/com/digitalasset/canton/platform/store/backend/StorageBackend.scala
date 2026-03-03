@@ -273,6 +273,31 @@ trait ContractStorageBackend {
 
   /** Returns true if the batch lookup is implemented */
   def supportsBatchKeyStateLookups: Boolean
+
+  def nonUniqueContractKey(keyPageQuery: ContractStorageBackend.KeysPageQuery)(
+      connection: Connection
+  ): ContractStorageBackend.KeysPageResult
+}
+
+object ContractStorageBackend {
+  final case class KeysPageQuery(
+      key: Key,
+      limit: Int,
+      nextPageToken: Option[Long],
+      validAtEventSeqId: Long,
+  )
+
+  /** @param internalContractIds
+    *   in reverse event sequential ID order starting from nextPageToken (exclusive) or
+    *   validAtEventSeqId (inclusive) from the KeysPageQuery
+    * @param nextPageToken
+    *   If available, this is the event sequential ID of the last (earliest) contract If not
+    *   available, this is the last page from the page-sequence
+    */
+  final case class KeysPageResult(
+      internalContractIds: Vector[Long],
+      nextPageToken: Option[Long],
+  )
 }
 
 trait EventStorageBackend {

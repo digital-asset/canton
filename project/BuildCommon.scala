@@ -630,6 +630,7 @@ object BuildCommon {
       `community-admin-api`,
       `community-app`,
       `community-app-base`,
+      `daml-lf-upgrades-matrix-integration`,
       `community-base`,
       `community-common`,
       `community-synchronizer`,
@@ -731,11 +732,9 @@ object BuildCommon {
     lazy val `util-observability` = project
       .in(file("community/util-observability"))
       .dependsOn(
-        `base-errors` % "compile->compile;test->test",
         `daml-grpc-utils`,
-        DamlProjects.`nonempty-cats`,
+        DamlProjects.`nonempty`,
         DamlProjects.`contextualized-logging`,
-        DamlProjects.`daml-lf-data`,
         DamlProjects.`observability-metrics`,
         DamlProjects.`observability-tracing`,
       )
@@ -1017,6 +1016,51 @@ object BuildCommon {
         Test / testOptions -= Tests.Argument("-C", "com.digitalasset.canton.LogReporter"),
       )
 
+    lazy val `daml-lf-upgrades-matrix-integration` = project
+      .in(file("community/daml-lf/upgrades-matrix-integration"))
+      .disablePlugins(
+        WartRemover
+      )
+      .settings(
+        sharedCommunitySettings,
+        organization := "com.daml",
+        coverageEnabled := false,
+        libraryDependencies ++= List(
+          cats,
+          google_protobuf_java,
+          org_apache_commons_commons_text,
+          org_typelevel_paiges_core,
+          scalaz_core,
+          scalactic,
+          scalatest,
+        ),
+        excludeTranscodeConflictingDependencies,
+        // TODO(#30144): replace with @nowarn once the bazel targets are deleted
+        Test / scalacOptions ++= Seq("-Wconf:msg=match may not be exhaustive:s"),
+      )
+      .dependsOn(
+        DamlProjects.`daml-lf-archive`,
+        DamlProjects.`daml-lf-data`,
+        DamlProjects.`daml-lf-interpreter`,
+        DamlProjects.`daml-lf-language`,
+        DamlProjects.`daml-lf-stable-packages`,
+        DamlProjects.`daml-lf-transaction`,
+        DamlProjects.`daml-lf-validation`,
+        DamlProjects.`daml-lf-snapshot-proto`,
+        DamlProjects.`contextualized-logging`,
+        DamlProjects.nameof,
+        DamlProjects.`scala-utils`,
+        DamlProjects.`daml-lf-engine`,
+        DamlProjects.`test-evidence-scalatest`,
+        DamlProjects.`daml-lf-transaction-test-lib`,
+        DamlProjects.`daml-lf-parser`,
+        DamlProjects.`daml-lf-encoder`,
+        DamlProjects.`daml-lf-tests`,
+        DamlProjects.`daml-lf-upgrades-matrix`,
+        DamlProjects.`timer-utils`,
+        `community-app` % "test->test;test->compile",
+      )
+
     lazy val `community-common` = project
       .in(file("community/common"))
       .enablePlugins(DamlPlugin)
@@ -1240,7 +1284,7 @@ object BuildCommon {
       .dependsOn(
         `community-app-base`,
         `community-testing`,
-        DamlProjects.`http-test-utils`,
+        DamlProjects.`testing-utils`,
       )
       .settings(
         sharedCantonCommunitySettings,
@@ -1896,8 +1940,6 @@ object BuildCommon {
         DamlProjects.`daml-jwt`,
         DamlProjects.`daml-lf-parser`,
         DamlProjects.`daml-lf-encoder`,
-        DamlProjects.`grpc-test-utils` % Test,
-        DamlProjects.`http-test-utils` % Test,
         DamlProjects.`ledger-resources`,
         DamlProjects.`observability-metrics` % Test,
         DamlProjects.`observability-tracing` % "test->compile;test->test",
@@ -1905,6 +1947,7 @@ object BuildCommon {
         DamlProjects.`rs-grpc-bridge` % "test->test",
         DamlProjects.`test-evidence-generator` % "test->test",
         DamlProjects.`timer-utils`,
+        DamlProjects.`testing-utils` % Test,
         `base-errors` % "test->test",
         `daml-tls` % "test->test",
         `community-common` % "compile->compile;test->test",
@@ -2158,7 +2201,7 @@ object BuildCommon {
           `ledger-api-core`,
           `ledger-json-api`,
           darsProject,
-          DamlProjects.`grpc-test-utils`,
+          DamlProjects.`testing-utils`,
           DamlProjects.`test-evidence-tag`,
         )
         .settings(
@@ -2464,17 +2507,14 @@ object BuildCommon {
       `resources-pekko`,
       `resources-grpc`,
       `ledger-resources`,
-      `ledger-resources-test-lib`,
       `timer-utils`,
       crypto,
       nameof,
       `testing-utils`,
-      `grpc-test-utils`,
       `test-evidence-generator`,
       `test-evidence-scalatest`,
       `test-evidence-tag`,
       `ports`,
-      `http-test-utils`,
       `observability-metrics`,
       `observability-tracing`,
       `executors`,
@@ -2700,24 +2740,6 @@ object BuildCommon {
         publish / skip := false,
       )
 
-    lazy val `ledger-resources-test-lib` = project
-      .in(file("base/ledger-resources-test-lib"))
-      .dependsOn(
-        `daml-resources`,
-        `resources-grpc`,
-        `resources-pekko`,
-        `ledger-resources`,
-      )
-      .settings(
-        libsScalaSettings,
-        libraryDependencies ++= Seq(
-          grpc_api,
-          grpc_netty_shaded,
-          scalatest,
-        ),
-        publish / skip := false,
-      )
-
     lazy val `timer-utils` = project
       .in(file("base/timer-utils"))
       .disablePlugins(WartRemover)
@@ -2795,28 +2817,6 @@ object BuildCommon {
         addProtobufFilesToHeaderCheck(Compile),
       )
 
-    lazy val `grpc-test-utils` = project
-      .in(file("base/grpc-test-utils"))
-      .disablePlugins(WartRemover)
-      .dependsOn(
-        `timer-utils`,
-        `resources-grpc`,
-        `daml-resources`,
-      )
-      .settings(
-        libsScalaSettings,
-        scalacOptions += "-Wconf:msg=unused:silent",
-        libraryDependencies ++= Seq(
-          google_protobuf_java,
-          grpc_api,
-          grpc_inprocess,
-          grpc_services,
-          grpc_stub,
-          scalatest,
-        ),
-        publish / skip := false,
-      )
-
     lazy val `test-evidence-generator` = project
       .in(file("base/test-evidence/generator"))
       .dependsOn(
@@ -2889,14 +2889,6 @@ object BuildCommon {
         publish / skip := false,
       )
 
-    lazy val `http-test-utils` = project
-      .in(file("base/http-test-utils"))
-      .disablePlugins(WartRemover)
-      .settings(
-        libsScalaSettings,
-        publish / skip := false,
-      )
-
     lazy val `executors` = project
       .in(file("base/executors"))
       .dependsOn(
@@ -2911,8 +2903,6 @@ object BuildCommon {
     lazy val `observability-metrics` = project
       .in(file("base/observability/metrics"))
       .dependsOn(
-        `grpc-test-utils` % "test->test",
-        `ledger-resources-test-lib` % "test->test",
         `rs-grpc-pekko-test` % "test->test",
         `testing-utils` % Test,
         `scala-utils`,

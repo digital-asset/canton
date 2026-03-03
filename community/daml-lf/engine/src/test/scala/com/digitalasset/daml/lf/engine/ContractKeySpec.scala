@@ -303,7 +303,7 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
       val uckEngine = new Engine(
         EngineConfig(
           allowedLanguageVersions = LV.allLfVersionsRange,
-          contractStateMode = ContractStateMachine.Mode.UCK,
+          contractStateMode = ContractStateMachine.Mode.UCKWithRollback,
           forbidLocalContractIds = true,
         )
       )

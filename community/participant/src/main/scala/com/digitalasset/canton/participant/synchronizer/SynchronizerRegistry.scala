@@ -5,7 +5,10 @@ package com.digitalasset.canton.participant.synchronizer
 
 import com.digitalasset.base.error.{ErrorCategory, ErrorCode, ErrorGroup, Explanation, Resolution}
 import com.digitalasset.canton.SynchronizerAlias
-import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader.SequencerInfoLoaderError
+import com.digitalasset.canton.common.sequencer.grpc.SequencerInfoLoader.{
+  SequencerAggregatedInfo,
+  SequencerInfoLoaderError,
+}
 import com.digitalasset.canton.crypto.SynchronizerCryptoClient
 import com.digitalasset.canton.data.SynchronizerPredecessor
 import com.digitalasset.canton.error.*
@@ -43,6 +46,15 @@ trait SynchronizerRegistry extends AutoCloseable {
     Either[SynchronizerRegistryError, (SynchronizerHandle, SynchronizerConnectionConfig)]
   ]
 
+  /** Performs the handshake with the synchronizer.
+    */
+  def pureHandshake(
+      config: SynchronizerConnectionConfig
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[
+    Either[SynchronizerRegistryError, (SequencerAggregatedInfo, SynchronizerConnectionConfig)]
+  ]
 }
 
 sealed trait SynchronizerRegistryError

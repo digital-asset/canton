@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.config.CommitmentSendDelay
 import com.digitalasset.canton.config.RequireTypes.NonNegativeProportion
+import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.integration.*
@@ -17,6 +18,7 @@ import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSeq
 import monocle.macros.syntax.lens.*
 
 import java.time.Duration
+import java.time.temporal.ChronoUnit
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 import scala.jdk.DurationConverters.*
@@ -69,6 +71,18 @@ final class LsuPruningIntegrationTest extends LsuBase {
         defaultEnvironmentSetup()
       }
 
+  private def noOutstandingCommitments(
+      p: LocalParticipantReference,
+      ts: CantonTimestamp,
+  )(implicit env: TestConsoleEnvironment): CantonTimestamp =
+    p.underlying.value.sync.syncPersistentStateManager
+      .get(env.daId)
+      .value
+      .acsCommitmentStore
+      .noOutstandingCommitments(ts)
+      .futureValueUS
+      .value
+
   "Pruning after a logical synchronizer upgrade" should {
     "work correctly" in { implicit env =>
       import env.*
@@ -86,16 +100,24 @@ final class LsuPruningIntegrationTest extends LsuBase {
       performSynchronizerNodesLsu(fixture)
 
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
-
+      transferTraffic()
       eventually() {
+        environment.simClock.value.advance(Duration.ofSeconds(1))
         participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
+      }
+
+      // ACS commitments are exchanged and upgrade time is clean (no outstanding ACS commitments)
+      participant1.health.ping(participant2)
+      eventually() {
+        noOutstandingCommitments(participant1, upgradeTime) shouldBe upgradeTime
+        noOutstandingCommitments(participant1, upgradeTime) shouldBe upgradeTime
       }
 
       oldSynchronizerNodes.all.stop()
 
       environment.simClock.value.advance(Duration.ofSeconds(1))
 
-      waitForTargetTimeOnSequencer(sequencer2, environment.clock.now)
+      waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
 
       val aliceIou =
         participant1.ledger_api.javaapi.state.acs.await(IouSyntax.modelCompanion)(alice)
@@ -125,6 +147,15 @@ final class LsuPruningIntegrationTest extends LsuBase {
         logger.debug(s"pcs before pruning: ${participant2.testing.pcs_search(daName)}")
         participant2.pruning.prune(offset)
         logger.debug(s"pcs after pruning: ${participant2.testing.pcs_search(daName)}")
+      }
+
+      // ACS commitments are exchanged and current time is clean (no outstanding ACS commitments)
+      val now = environment.clock.now.toInstant
+      // reconciliation interval = 1s
+      val rounded = CantonTimestamp.assertFromInstant(now.truncatedTo(ChronoUnit.SECONDS))
+      eventually() {
+        noOutstandingCommitments(participant1, rounded) shouldBe rounded
+        noOutstandingCommitments(participant2, rounded) shouldBe rounded
       }
     }
   }

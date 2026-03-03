@@ -340,5 +340,12 @@
             <testing>true</testing>
         </rewrite>
 
+        <!-- TODO(#31008) remove this rule, once the cache metrics are properly closed again -->
+        <rewrite class="com.digitalasset.canton.logging.Rewrite">
+            <logger>io.opentelemetry.sdk.metrics.internal.state.AsynchronousMetricStorage</logger>
+            <maxLevel>INFO</maxLevel>
+            <testing>true</testing>
+        </rewrite>
+
    </appender>
 </included>

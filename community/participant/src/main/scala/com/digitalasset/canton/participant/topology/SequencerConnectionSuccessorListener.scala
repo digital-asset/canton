@@ -16,6 +16,8 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore
 import com.digitalasset.canton.participant.sync.SyncServiceError
+import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor
+import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
 import com.digitalasset.canton.topology.client.SynchronizerTopologyClient
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
@@ -47,8 +49,9 @@ class SequencerConnectionSuccessorListener(
     alias: SynchronizerAlias,
     topologyClient: SynchronizerTopologyClient,
     configStore: SynchronizerConnectionConfigStore,
-    synchronizerHandshake: HandshakeWithPSId,
+    synchronizerHandshake: HandshakeWithSuccessor,
     automaticallyConnectToUpgradedSynchronizer: Boolean,
+    pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends TopologyTransactionProcessingSubscriber
@@ -88,7 +91,7 @@ class SequencerConnectionSuccessorListener(
       logger = Lsu.Logger(loggerFactory, getClass, synchronizerUpgradeOngoing)
 
       _ = logger.info(
-        s"Checking whether the participant can migrate $alias from ${activeConfig.configuredPSId} to $successorPSId"
+        s"Checking whether the participant can migrate $alias config from ${activeConfig.configuredPSId} to $successorPSId"
       )
       _ = logger.info(s"Configured sequencer connections: $configuredSequencerIds")
 
@@ -156,8 +159,10 @@ class SequencerConnectionSuccessorListener(
         .map(_.config.sequencerConnections)
         .contains(updatedSuccessorConfig.sequencerConnections)
 
-      _ = if (automaticallyConnectToUpgradedSynchronizer && sequencerConnectionsChanged)
+      _ = if (automaticallyConnectToUpgradedSynchronizer && sequencerConnectionsChanged) {
+        logger.info(s"Performing handshake to validate connection to $successorPSId")
         performHandshake(successorPSId)
+      }
     } yield ()
 
     resultOT.value.void
@@ -165,10 +170,28 @@ class SequencerConnectionSuccessorListener(
 
   private def performHandshake(successorPSId: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
-  ): Unit =
-    FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-      synchronizerHandshake
-        .performHandshake(successorPSId)
+  ): Unit = {
+
+    val resF: FutureUnlessShutdown[Unit] = for {
+      _ <- pendingHandshakesWithSuccessorsStore
+        .insert(
+          PendingHandshakeWithLsuSuccessor(successorPSId = successorPSId)(
+            PendingHandshakeWithLsuSuccessor.protocolVersionRepresentativeFor(
+              topologyClient.protocolVersion
+            )
+          ).toPendingOperation(currentPSId = topologyClient.psid)
+        )
+
+        /* Left can happen only on inconsistent successor for a given psid which cannot happen because:
+        - successor psid cannot be changed
+        - the entry is removed upon LSU cancellation
+         */
+        .toOption
+        .value
+        .void
+
+      _ <- synchronizerHandshake
+        .handshakeWithSuccessor(successorPSId)
         .value
         .map {
           case Left(error) =>
@@ -182,14 +205,19 @@ class SequencerConnectionSuccessorListener(
 
           case Right(()) =>
             logger.info(s"Handshake with $successorPSId was successful")
-        },
+        }
+    } yield ()
+
+    FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+      resF,
       level = Level.INFO,
       failureMessage = s"Failed to perform the synchronizer handshake with $successorPSId",
     )
+  }
 }
 
-trait HandshakeWithPSId {
-  def performHandshake(psid: PhysicalSynchronizerId)(implicit
+trait HandshakeWithSuccessor {
+  def handshakeWithSuccessor(successorPSId: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit]
 }

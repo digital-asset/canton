@@ -3,8 +3,7 @@
 
 package com.digitalasset.canton.platform.apiserver.execution
 
-import cats.data.EitherT
-import cats.implicits.{catsSyntaxAlternativeSeparate, toFoldableOps, toTraverseOps}
+import cats.implicits.{catsSyntaxAlternativeSeparate, toFoldableOps}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.error.TransactionRoutingError.ConfigurationErrors.InvalidPrescribedSynchronizerId
@@ -29,12 +28,7 @@ import com.digitalasset.canton.platform.apiserver.execution.TapsCommandExecution
   PackagesForName,
   TapsDescription,
 }
-import com.digitalasset.canton.platform.apiserver.execution.TapsResult.{
-  TapsPassExecutionResult,
-  TapsPassInterpretationFailed,
-}
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
-import com.digitalasset.canton.platform.apiserver.services.ErrorCause.RoutingFailed
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.util.EitherUtil.RichEither
@@ -79,14 +73,14 @@ private[execution] class TapsCommandExecutionFactory(
       packageVersionMap = packageMetadataSnapshot.packageIdVersionMap,
     )
 
-  /** Models a single TAPS pass (see [[TopologyAwareCommandExecutor]] ScalaDoc for more details)
+  /** Execute a single TAPS pass (see [[TopologyAwareCommandExecutor]] ScalaDoc for more details)
     *
     * @param tapsPassDescription
     *   The description of this TAPS pass (used for logging)
-    * @param computeRequiredSubmitters
+    * @param requiredSubmitters
     *   The parties expected to require submission rights on the preparing participant on the
     *   selected synchronizer
-    * @param computePartyPackageRequirements
+    * @param partyPackageRequirements
     *   The package-names required to be vetted by each transaction informee party involved in the
     *   command. Only root-level package-names introduce strict requirements for the transaction's
     *   informees. Other package-names appearing in non-root nodes are only evaluated for debugging
@@ -96,77 +90,91 @@ private[execution] class TapsCommandExecutionFactory(
     *   Computes the package preference set to be used for interpreting the command, given the
     *   per-synchronizer package preference sets and the pass input
     */
-  class TapsPass[PassInput](
-      val tapsPassDescription: String,
-      computeRequiredSubmitters: PassInput => Set[Party],
-      computePartyPackageRequirements: PassInput => Map[LfPartyId, Set[LfPackageName]],
-      computePackagePreferenceSet: (
-          PassInput,
-          NonEmpty[Map[PhysicalSynchronizerId, Set[LfPackageId]]],
-      ) => FutureUnlessShutdown[Set[LfPackageId]],
-  ) extends NamedLogging {
+  def executePass(
+      tapsPassDescription: String,
+      requiredSubmitters: Set[Party],
+      partyPackageRequirements: Map[LfPartyId, Set[LfPackageName]],
+      computePackagePreferenceSet: NonEmpty[
+        Map[PhysicalSynchronizerId, Set[LfPackageId]]
+      ] => FutureUnlessShutdown[Set[LfPackageId]],
+  ): FutureUnlessShutdown[TapsResult] =
+    new TapsPass(tapsPassDescription).execute(
+      requiredSubmitters,
+      partyPackageRequirements,
+      computePackagePreferenceSet,
+    )
 
-    override protected def loggerFactory: NamedLoggerFactory =
-      TapsCommandExecutionFactory.this.loggerFactory
-
-    def execute(passInput: PassInput): FutureUnlessShutdown[TapsResult] = {
-      val requiredSubmitters = computeRequiredSubmitters(passInput)
-      val partyPackageRequirements = computePartyPackageRequirements(passInput)
-
+  private class TapsPass(tapsPassDescription: String) {
+    def execute(
+        requiredSubmitters: Set[Party],
+        partyPackageRequirements: Map[LfPartyId, Set[LfPackageName]],
+        computePackagePreferenceSet: NonEmpty[
+          Map[PhysicalSynchronizerId, Set[LfPackageId]]
+        ] => FutureUnlessShutdown[Set[LfPackageId]],
+    ): FutureUnlessShutdown[TapsResult] = {
       logDebug(s"Attempting $tapsPassDescription of $TapsDescription")
-      val resultEFUS = for {
+      for {
         // Compute package preference set
-        perSynchronizerPreferenceSet <- EitherT.right(
+        perSynchronizerPreferenceSet <-
           computePerSynchronizerPackagePreferenceSet(requiredSubmitters, partyPackageRequirements)
-        )
-        packagePreferenceSet <- EitherT
-          .right(computePackagePreferenceSet(passInput, perSynchronizerPreferenceSet))
+        packagePreferenceSet <- computePackagePreferenceSet(perSynchronizerPreferenceSet)
         _ = logDebug(show"Using package preference set: $packagePreferenceSet")
 
         // Interpret command with the computed package preference set
-        commandInterpretationResult <- EitherT(
-          commandInterpreter
-            .interpret(
-              commands.copy(packagePreferenceSet = packagePreferenceSet),
-              submissionSeed,
-            )
+        commandInterpretationResult <- commandInterpreter.interpret(
+          commands.copy(packagePreferenceSet = packagePreferenceSet),
+          submissionSeed,
         )
-          .leftMap(refinePackageNotFoundError(_, packageMetadataSnapshot.packageNameMap.keySet))
-          .leftMap(TapsPassInterpretationFailed(_))
 
-        // Try to route the interpreted command
-        passResult <- syncService
-          .selectRoutingSynchronizer(
-            submitterInfo = commandInterpretationResult.submitterInfo,
-            transaction = commandInterpretationResult.transaction,
-            transactionMeta = commandInterpretationResult.transactionMeta,
-            disclosedContractIds =
-              commandInterpretationResult.processedDisclosedContracts.map(_.contractId).toList,
-            optSynchronizerId = commandInterpretationResult.optSynchronizerId,
-            transactionUsedForExternalSigning = forExternallySigned,
-            routingSynchronizerState = routingSynchronizerState,
-          )
-          .map[TapsPassExecutionResult] { synchronizerRank =>
-            // Pass succeeded - return the command execution result
-            TapsPassExecutionResult.Succeeded(
-              commandInterpretationResult.toCommandExecutionResult(
-                synchronizerRank,
-                routingSynchronizerState,
-              )
+        passResult <- commandInterpretationResult match {
+          case Left(error) =>
+            val refinedError =
+              refinePackageNotFoundError(error, packageMetadataSnapshot.packageNameMap.keySet)
+            logDebug(
+              s"$TapsDescription failed before synchronizer routing. Aborting submission. Error: $refinedError"
             )
-          }
-          .leftFlatMap[TapsPassExecutionResult, TapsPassInterpretationFailed](err =>
-            // Pass failed at routing stage - return the command interpretation result
-            EitherT.rightT[FutureUnlessShutdown, TapsPassInterpretationFailed](
-              TapsPassExecutionResult.RoutingFailed(
-                commandInterpretationResult,
-                ErrorCause.RoutingFailed(err),
+            FutureUnlessShutdown.pure(TapsResult.InterpretationFailed(refinedError))
+          case Right(commandInterpretationResult) =>
+            // Try to route the interpreted command
+            syncService
+              .selectRoutingSynchronizer(
+                submitterInfo = commandInterpretationResult.submitterInfo,
+                transaction = commandInterpretationResult.transaction,
+                transactionMeta = commandInterpretationResult.transactionMeta,
+                disclosedContractIds =
+                  commandInterpretationResult.processedDisclosedContracts.map(_.contractId).toList,
+                optSynchronizerId = commandInterpretationResult.optSynchronizerId,
+                transactionUsedForExternalSigning = forExternallySigned,
+                routingSynchronizerState = routingSynchronizerState,
               )
-            )
-          )
+              .value
+              .map {
+                case Right(synchronizerRank) =>
+                  // Pass succeeded - return the command execution result
+                  logDebug(
+                    s"$TapsDescription succeeded. Routing transaction for synchronization to ${synchronizerRank.synchronizerId}"
+                  )
+                  TapsResult.Succeeded(
+                    commandInterpretationResult.toCommandExecutionResult(
+                      synchronizerRank,
+                      routingSynchronizerState,
+                    )
+                  )
+                case Left(error) =>
+                  // Pass failed at routing stage - return the command interpretation result
+                  val errorMessage = error.code.toMsg(
+                    cause = error.cause,
+                    correlationId = loggingContextWithTrace.traceContext.traceId,
+                    limit = None,
+                  )
+                  logDebug(s"Failed synchronizer routing: $errorMessage")
+                  TapsResult.RoutingFailed(
+                    commandInterpretationResult,
+                    ErrorCause.RoutingFailed(error),
+                  )
+              }
+        }
       } yield passResult
-
-      resultEFUS.value.map(new TapsResult(_, logDebug(_)))
     }
 
     private def computePerSynchronizerPackagePreferenceSet(
@@ -347,48 +355,6 @@ private[execution] class TapsCommandExecutionFactory(
       .view
       .mapValues(SortedSet.from[PackageReference])
       .toMap
-
-  class TapsResult(
-      val result: Either[TapsPassInterpretationFailed, TapsPassExecutionResult],
-      previousPassLogDebug: String => Unit,
-  ) {
-    final def attemptNewPassOnRoutingFailed(
-        nextPass: TapsPass[CommandInterpretationResult]
-    ): FutureUnlessShutdown[TapsResult] =
-      result.left
-        .map { errCause =>
-          previousPassLogDebug(
-            s"$TapsDescription failed before synchronizer routing. Aborting submission. Error: $errCause"
-          )
-          this
-        }
-        .traverse {
-          case TapsPassExecutionResult.RoutingFailed(interpretationResult, RoutingFailed(err)) =>
-            previousPassLogDebug(
-              s"Failed synchronizer routing: ${err.code.toMsg(cause = err.cause, correlationId = loggingContextWithTrace.traceContext.traceId, limit = None)}"
-            )
-            nextPass.execute(interpretationResult)
-          case TapsPassExecutionResult.Succeeded(commandExecutionResult) =>
-            previousPassLogDebug(
-              s"$TapsDescription succeeded. Routing transaction for synchronization to ${commandExecutionResult.synchronizerRank.synchronizerId}"
-            )
-            FutureUnlessShutdown.pure(
-              new TapsResult(
-                Right(TapsPassExecutionResult.Succeeded(commandExecutionResult)),
-                previousPassLogDebug,
-              )
-            )
-        }
-        .map(_.merge)
-
-    def toSubmissionResult: Either[ErrorCause, CommandExecutionResult] =
-      result.left.map(_.cause).flatMap {
-        case TapsPassExecutionResult.RoutingFailed(_, routingFailed) =>
-          Left(routingFailed)
-        case TapsPassExecutionResult.Succeeded(commandExecutionResult) =>
-          Right(commandExecutionResult)
-      }
-  }
 }
 
 object TapsCommandExecutionFactory {
@@ -397,21 +363,26 @@ object TapsCommandExecutionFactory {
   private[execution] val TapsDescription = "Topology-aware package selection for command submission"
 }
 
+sealed trait TapsResult extends Product with Serializable {
+  def toSubmissionResult: Either[ErrorCause, CommandExecutionResult]
+}
+
 object TapsResult {
   // Command execution failed at the interpretation stage
   // and the submission should be rejected
-  final case class TapsPassInterpretationFailed(cause: ErrorCause)
+  final case class InterpretationFailed(cause: ErrorCause) extends TapsResult {
+    override def toSubmissionResult: Either[ErrorCause, CommandExecutionResult] = Left(cause)
+  }
+  final case class RoutingFailed(
+      interpretation: CommandInterpretationResult,
+      cause: ErrorCause.RoutingFailed,
+  ) extends TapsResult {
+    override def toSubmissionResult: Either[ErrorCause, CommandExecutionResult] = Left(cause)
+  }
 
-  // Models the outcomes of the first pass of the algorithm that can continue towards a successful command execution
-  sealed trait TapsPassExecutionResult extends Product with Serializable
-
-  object TapsPassExecutionResult {
-    final case class RoutingFailed(
-        interpretation: CommandInterpretationResult,
-        cause: ErrorCause.RoutingFailed,
-    ) extends TapsPassExecutionResult
-
-    final case class Succeeded(commandExecutionResult: CommandExecutionResult)
-        extends TapsPassExecutionResult
+  final case class Succeeded(commandExecutionResult: CommandExecutionResult) extends TapsResult {
+    override def toSubmissionResult: Either[ErrorCause, CommandExecutionResult] = Right(
+      commandExecutionResult
+    )
   }
 }

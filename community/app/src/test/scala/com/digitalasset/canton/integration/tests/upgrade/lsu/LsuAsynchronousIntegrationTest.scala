@@ -12,6 +12,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 
+import java.time.Duration
 import java.util.UUID
 import scala.concurrent.Future
 
@@ -61,15 +62,17 @@ final class LsuAsynchronousIntegrationTest extends LsuBase {
       performSynchronizerNodesLsu(fixture)
 
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
+      transferTraffic()
 
       eventually() {
+        environment.simClock.value.advance(Duration.ofSeconds(1))
         participant1.synchronizers.is_connected(fixture.newPSId) shouldBe true
         participant2.synchronizers.is_connected(fixture.newPSId) shouldBe false
 
         participants.all.forall(_.synchronizers.is_connected(fixture.currentPSId)) shouldBe false
       }
 
-      waitForTargetTimeOnSequencer(sequencer2, environment.clock.now)
+      waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
 
       val commandId = UUID.randomUUID().toString
       val transferIouF = Future {

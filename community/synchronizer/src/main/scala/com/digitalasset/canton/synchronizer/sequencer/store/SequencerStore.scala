@@ -125,11 +125,17 @@ final case class BytesPayload(id: PayloadId, content: ByteString) extends Payloa
       protocolVersion: ProtocolVersion,
       member: Member,
   ): Batch[ClosedEnvelope] = {
+    val fullBatch = decodeBatch(protocolVersion)
+    Batch.trimForMember(fullBatch, member)
+  }
+
+  def decodeBatch(
+      protocolVersion: ProtocolVersion
+  ): Batch[ClosedEnvelope] = {
     val noLimitFromStore = MaxBytesToDecompress.MaxValueUnsafe
-    val fullBatch = Batch
+    Batch
       .fromByteString(ProtocolVersionValidation.PV(protocolVersion), noLimitFromStore, content)
       .valueOr(err => throw new DbDeserializationException(err.toString))
-    Batch.trimForMember(fullBatch, member)
   }
 }
 
@@ -687,6 +693,15 @@ trait SequencerStore
   def readPayloads(
       payloadIds: Seq[IdOrPayload],
       member: Member,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[PayloadId, Batch[ClosedEnvelope]]]
+
+  /** Read payloads from their ID. IMPORTANTLY, payloads not in the cache are retrieved from the DB
+    * but are NOT added to the cache.
+    */
+  def readPayloadsByIdWithoutCacheLoading(
+      payloadIds: Seq[IdOrPayload]
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[PayloadId, Batch[ClosedEnvelope]]]

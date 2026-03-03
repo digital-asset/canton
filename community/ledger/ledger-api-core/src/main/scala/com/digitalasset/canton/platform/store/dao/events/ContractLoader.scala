@@ -197,7 +197,9 @@ object ContractLoader {
             val contractIds = batch.map(_._1._1)
             for {
               contractIdToInternalContractId <- contractStore
-                .lookupBatchedInternalIds(contractIds)(usedLoggingContext.traceContext)
+                .lookupBatchedInternalIdsNonReadThrough(contractIds)(
+                  usedLoggingContext.traceContext
+                )
               internalContractIds = contractIds.flatMap(contractIdToInternalContractId.get)
               contractStatuses <- dbDispatcher
                 .executeSql(metrics.index.db.lookupActiveContractsDbMetrics)(
@@ -264,7 +266,7 @@ object ContractLoader {
                   )
                 )(usedLoggingContext)
               internalContractIdToContractId <- contractStore
-                .lookupBatchedContractIds(contractKeys.values)(
+                .lookupBatchedContractIdsNonReadThrough(contractKeys.values)(
                   usedLoggingContext.traceContext
                 )
             } yield batch.view.map { case ((key, eventSeqId), _) =>
@@ -302,7 +304,7 @@ object ContractLoader {
       .flatMap {
         case Some(internalContractId) =>
           contractStore
-            .lookupBatchedContractIds(List(internalContractId))(
+            .lookupBatchedContractIdsNonReadThrough(List(internalContractId))(
               loggingContext.traceContext
             )
             .map(_.get(internalContractId).map(KeyAssigned.apply).getOrElse(KeyUnassigned))

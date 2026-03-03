@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.telemetry
 
-import com.digitalasset.canton.metrics.OnDemandMetricsReader
+import com.daml.metrics.OnDemandMetricsReader
 import io.opentelemetry.sdk.OpenTelemetrySdk
 import io.opentelemetry.sdk.trace.SdkTracerProviderBuilder
 

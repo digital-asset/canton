@@ -121,4 +121,49 @@ class ContractStorageBackendTemplate(
       .getOrElse(Map.empty)
 
   override def supportsBatchKeyStateLookups: Boolean = false
+
+  override def nonUniqueContractKey(
+      keyPageQuery: ContractStorageBackend.KeysPageQuery
+  )(connection: Connection): ContractStorageBackend.KeysPageResult = {
+    import com.digitalasset.canton.platform.store.backend.Conversions.HashToStatement
+    val eventSeqIdUpperBoundInclusive =
+      keyPageQuery.nextPageToken
+        .map(_ - 1) // making the exclusive token the inclusive bound
+        .getOrElse(keyPageQuery.validAtEventSeqId)
+    val (eventSeqIds, internalContractIds) = SQL"""
+      SELECT event_sequential_id, internal_contract_id
+      FROM lapi_events_activate_contract
+      WHERE
+        create_key_hash = ${keyPageQuery.key.hash}
+        AND event_sequential_id <= $eventSeqIdUpperBoundInclusive
+        AND NOT EXISTS (
+          SELECT 1
+          FROM lapi_events_deactivate_contract
+          WHERE
+            deactivated_event_sequential_id = lapi_events_activate_contract.event_sequential_id
+            AND lapi_events_deactivate_contract.event_sequential_id <= ${keyPageQuery.validAtEventSeqId}
+        )
+      ORDER BY event_sequential_id DESC
+      ${QueryStrategy.limitClause(Some(keyPageQuery.limit + 1))}"""
+      .asVectorOf(
+        long("event_sequential_id") ~ long("internal_contract_id") map {
+          case eventSeqId ~ internalContractId => (eventSeqId -> internalContractId)
+        }
+      )(connection)
+      .unzip
+    ContractStorageBackend.KeysPageResult(
+      internalContractIds =
+        // we asked for limit plus 1
+        internalContractIds.take(keyPageQuery.limit),
+      nextPageToken = Option
+        // we asked for one more, so there is only make sense to continue if there is limit+1 results
+        // and then the exclusive token should be one above the identified one
+        // note: subsequent query still can return empty in case validAtEventSeqId increased and this
+        // causes all potential activations in the next page to be inactivated.
+        .when(eventSeqIds.sizeIs == keyPageQuery.limit + 1)(
+          eventSeqIds.lastOption.map(_ + 1)
+        )
+        .flatten,
+    )
+  }
 }

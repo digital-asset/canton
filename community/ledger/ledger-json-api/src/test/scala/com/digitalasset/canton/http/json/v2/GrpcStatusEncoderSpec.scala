@@ -3,50 +3,131 @@
 
 package com.digitalasset.canton.http.json.v2
 
+import com.digitalasset.base.error.*
 import com.google.protobuf.any.Any
-import com.google.rpc.error_details.{ErrorInfo, RetryInfo}
 import com.google.rpc.status.Status
+import io.circe.parser
 import io.circe.syntax.*
-import org.scalatest.OptionValues
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.{EitherValues, OptionValues}
 
-class GrpcStatusEncoderSpec extends AnyFlatSpec with Matchers with OptionValues {
+class GrpcStatusEncoderSpec extends AnyFlatSpec with Matchers with OptionValues with EitherValues {
   import com.digitalasset.canton.http.json.v2.JsSchema.DirectScalaPbRwImplicits.*
 
-  it should "encode Status with ErrorInfo detail" in {
-    val errorInfo = ErrorInfo("reason", "domain", Map("key" -> "value"))
-    val errorInfoProto = Any.pack(errorInfo)
-    val status = Status(3, "error", Seq(errorInfoProto))
+  it should "encode Status with all error details" in {
+    val someLoggingContext =
+      new NoBaseLogging(correlationId = Some("corrId"), properties = Map.empty)
+    case object SampleError
+        extends ErrorCode("SOME_ERROR", ErrorCategory.InvalidGivenCurrentSystemStateSeekAfterEnd)(
+          ErrorClass.root()
+        ) {
 
-    val json = status.asJson
-    val detailsList = json.hcursor.downField("details").values.toList
-    detailsList.size shouldBe 1
-    val details = detailsList.head
-    details.head.hcursor
-      .get[String]("valueDecoded")
-      .toOption
-      .fold(fail("Expected valueDecoded to be present")) { valueDecoded =>
-        valueDecoded should be(errorInfo.toString)
+      final case class Reject(override val cause: String)(implicit
+          loggingContext: BaseErrorLogger
+      ) extends DamlErrorWithDefiniteAnswer(cause = cause, extraContext = Map("ck" -> "cv")) {
+        override def resources: Seq[(ErrorResource, String)] =
+          Seq((ErrorResource.DevErrorType, "some/resource"))
       }
-  }
+    }
 
-  it should "encode Status with RetryInfo detail" in {
-    val retryInfo = RetryInfo()
-    val retryInfoProto = Any.pack(retryInfo)
-    val status = Status(1, "retry", Seq(retryInfoProto))
+    val error = SampleError.Reject("This is a sample error")(someLoggingContext)
+    val jsonError = error.rpcStatus()(someLoggingContext).asJson
 
-    val json = status.asJson
-    val detailsOpt = json.hcursor.downField("details").values
-    detailsOpt should not be empty
-    val details = detailsOpt.value
-    details.head.hcursor.get[String]("valueDecoded").isRight shouldBe true
-    details.head.hcursor
-      .get[String]("valueDecoded")
-      .toOption
-      .fold(fail("Expected valueDecoded to be present")) { valueDecoded =>
-        valueDecoded should be(retryInfo.toString)
-      }
+    jsonError shouldBe parser
+      .parse("""{
+               |  "code" : 11,
+               |  "message" : "SOME_ERROR(12,corrId): This is a sample error",
+               |  "details" : [
+               |    {
+               |      "typeUrl" : "type.googleapis.com/google.rpc.ErrorInfo",
+               |      "value" : "CgpTT01FX0VSUk9SGggKAmNrEgJjdhoYCg9kZWZpbml0ZV9hbnN3ZXISBWZhbHNlGg4KCGNhdGVnb3J5EgIxMg==",
+               |      "valueDecoded" : {
+               |        "reason" : "SOME_ERROR",
+               |        "domain" : "",
+               |        "metadata" : {
+               |          "ck" : "cv",
+               |          "definite_answer" : "false",
+               |          "category" : "12"
+               |        },
+               |        "unknownFields" : {
+               |          "fields" : {
+               |
+               |          }
+               |        }
+               |      },
+               |      "unknownFields" : {
+               |        "fields" : {
+               |
+               |        }
+               |      }
+               |    },
+               |    {
+               |      "typeUrl" : "type.googleapis.com/google.rpc.RetryInfo",
+               |      "value" : "CgIIAQ==",
+               |      "valueDecoded" : {
+               |        "retryDelay" : {
+               |          "seconds" : 1,
+               |          "nanos" : 0,
+               |          "unknownFields" : {
+               |            "fields" : {
+               |
+               |            }
+               |          }
+               |        },
+               |        "unknownFields" : {
+               |          "fields" : {
+               |
+               |          }
+               |        }
+               |      },
+               |      "unknownFields" : {
+               |        "fields" : {
+               |
+               |        }
+               |      }
+               |    },
+               |    {
+               |      "typeUrl" : "type.googleapis.com/google.rpc.RequestInfo",
+               |      "value" : "CgZjb3JySWQ=",
+               |      "valueDecoded" : {
+               |        "requestId" : "corrId",
+               |        "servingData" : "",
+               |        "unknownFields" : {
+               |          "fields" : {
+               |
+               |          }
+               |        }
+               |      },
+               |      "unknownFields" : {
+               |        "fields" : {
+               |
+               |        }
+               |      }
+               |    },
+               |    {
+               |      "typeUrl" : "type.googleapis.com/google.rpc.ResourceInfo",
+               |      "value" : "Cg5ERVZfRVJST1JfVFlQRRINc29tZS9yZXNvdXJjZQ==",
+               |      "valueDecoded" : {
+               |        "resourceType" : "DEV_ERROR_TYPE",
+               |        "resourceName" : "some/resource",
+               |        "owner" : "",
+               |        "description" : "",
+               |        "unknownFields" : {
+               |          "fields" : {
+               |
+               |          }
+               |        }
+               |      },
+               |      "unknownFields" : {
+               |        "fields" : {
+               |
+               |        }
+               |      }
+               |    }
+               |  ]
+               |}""".stripMargin)
+      .value
   }
 
   it should "encode Status with unknown detail type" in {

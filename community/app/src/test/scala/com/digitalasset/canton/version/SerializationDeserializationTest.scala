@@ -14,6 +14,7 @@ import com.digitalasset.canton.participant.protocol.party.{
   PartyReplicationTargetParticipantMessage,
 }
 import com.digitalasset.canton.participant.protocol.submission.SubmissionTrackingData
+import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.protocol.messages.EncryptedViewMessage.computeRandomnessLength
@@ -115,6 +116,7 @@ final class SerializationDeserializationTest
           version,
         )
         test(ConfirmationResultMessage, version)
+        test(PendingHandshakeWithLsuSuccessor, version)
 
         test(AcknowledgeRequest, version)
         test(AggregationRule, version)

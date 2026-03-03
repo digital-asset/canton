@@ -79,7 +79,7 @@ Configure the target audience for JWT authorization
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The default audience (``aud`` field in the audience-based token) for authenticating on the Ledger API using JWT is
-``https://daml.com/participant/jwt/aud/participant/${participantId}``. Other audiences can be configured explicitly
+``https://daml.com/jwt/aud/participant/${participantId}``. Other audiences can be configured explicitly
 using the custom target audience configuration option:
 
 .. literalinclude:: CANTON/community/app/src/test/resources/documentation-snippets/ledger-api-target-audience.conf

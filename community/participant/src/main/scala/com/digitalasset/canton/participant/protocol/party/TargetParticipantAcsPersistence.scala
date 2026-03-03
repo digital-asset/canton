@@ -9,23 +9,21 @@ import cats.implicits.toTraverseOps
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.crypto.{CryptoPureApi, HashPurpose}
-import com.digitalasset.canton.data.{CantonTimestamp, ContractReassignment}
-import com.digitalasset.canton.ledger.participant.state.{Reassignment, ReassignmentInfo, Update}
+import com.digitalasset.canton.data.ContractReassignment
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.participant.admin.data.{ActiveContract, RepairContract}
+import com.digitalasset.canton.participant.admin.party.PartyReplicationIndexingWorkflow.ContractToIndex
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
-import com.digitalasset.canton.participant.event.{AcsChangeSupport, RecordOrderPublisher}
-import com.digitalasset.canton.participant.protocol.conflictdetection.{CommitSet, RequestTracker}
+import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
 import com.digitalasset.canton.participant.protocol.party.TargetParticipantAcsPersistence.PersistsContracts
 import com.digitalasset.canton.participant.store.{
   AcsReplicationProgress,
   ParticipantNodePersistentState,
 }
 import com.digitalasset.canton.participant.util.TimeOfChange
-import com.digitalasset.canton.protocol.{ContractInstance, LfContractId, ReassignmentId, UpdateId}
+import com.digitalasset.canton.protocol.{ContractInstance, LfContractId}
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.tracing.TraceContext
@@ -44,8 +42,6 @@ import scala.concurrent.ExecutionContext
   *   interface to update OnPR progress
   * @param persistsContracts
   *   interface to persist a batch of contracts to the contract store
-  * @param recordOrderPublisher
-  *   record order publisher for publishing indexer events
   * @param requestTracker
   *   request tracker to update the active contract store journal along with in-memory state
   */
@@ -55,9 +51,7 @@ abstract class TargetParticipantAcsPersistence(
     partyOnboardingAt: EffectiveTime,
     replicationProgressState: AcsReplicationProgress,
     persistsContracts: PersistsContracts,
-    recordOrderPublisher: RecordOrderPublisher,
     requestTracker: RequestTracker,
-    pureCrypto: CryptoPureApi,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
 
@@ -71,13 +65,18 @@ abstract class TargetParticipantAcsPersistence(
     * @param contracts
     *   the contracts to import
     * @return
-    *   the updated total count of contracts imported thus far
+    *   the updated total count of contracts imported thus far and the contracts to index after all
+    *   contracts have been imported.
     */
   def importContracts(
       contracts: NonEmpty[Seq[ActiveContract]]
   )(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, String, NonNegativeInt] =
+  ): EitherT[
+    FutureUnlessShutdown,
+    String,
+    (NonNegativeInt, NonEmpty[Seq[ContractToIndex]]),
+  ] =
     for {
       replicationProgress <- EitherT.fromEither[FutureUnlessShutdown](
         replicationProgressState
@@ -109,23 +108,13 @@ abstract class TargetParticipantAcsPersistence(
           internalContractIdsForActiveContracts,
         )
       )
-      _ <- EitherT.right[String](
-        FutureUnlessShutdown.lift(
-          recordOrderPublisher.schedulePublishAddContracts(
-            repairEventFromActiveContracts(
-              repairCounter = repairCounter,
-              activeContracts = validatedActivationsWithInternalContractIds,
-            )
-          )
-        )
-      )
       updatedProcessedContractsCount =
         replicationProgress.processedContractCount + NonNegativeInt.size(contracts)
       _ <- replicationProgressState.updateAcsReplicationProgress(
         requestId,
         newProgress(updatedProcessedContractsCount, repairCounter),
       )
-    } yield updatedProcessedContractsCount
+    } yield (updatedProcessedContractsCount, validatedActivationsWithInternalContractIds)
 
   /** The new progress depends on ephemeral state depending on the derived class.
     */
@@ -141,7 +130,7 @@ abstract class TargetParticipantAcsPersistence(
       internalContractIds: Map[LfContractId, Long],
   )(implicit
       traceContext: TraceContext
-  ): NonEmpty[Seq[(ContractReassignment, Long)]] =
+  ): NonEmpty[Seq[ContractToIndex]] =
     contractReassignments.map { contractReassignment =>
       val contractId = contractReassignment.contract.contractId
       val internalContractId =
@@ -181,93 +170,6 @@ abstract class TargetParticipantAcsPersistence(
           }
         )
     )
-
-  /** Determines the indexer event corresponding to the imported active contracts
-    * @param repairCounter
-    *   the repair counter lexicographically relative to the timestamp
-    * @param activeContracts
-    *   the active contracts to publish
-    * @param timestamp
-    *   the record time to publish the event at
-    * @return
-    *   the event to publish
-    */
-  private def repairEventFromActiveContracts(
-      repairCounter: RepairCounter,
-      activeContracts: NonEmpty[Seq[(ContractReassignment, Long)]],
-  )(
-      timestamp: CantonTimestamp
-  )(implicit traceContext: TraceContext): Update.OnPRReassignmentAccepted = {
-    val uniqueUpdateId = {
-      // Add the repairCounter to the hash to arrive at unique per-OPR updateIds.
-      val hash = activeContracts
-        .foldLeft {
-          pureCrypto
-            .build(HashPurpose.OnlinePartyReplicationId)
-            .addByteString(requestId.unwrap)
-            .addLong(repairCounter.unwrap)
-        } {
-          // TODO(#26468): Use validation packages
-          case (builder, (ContractReassignment(contract, _, _, reassignmentCounter), _)) =>
-            builder
-              .addLong(reassignmentCounter.v)
-              .addString(contract.contractId.coid)
-        }
-        .finish()
-      UpdateId(hash)
-    }
-
-    val contractIdCounters = activeContracts.map {
-      // TODO(#26468): Use validation packages
-      case (ContractReassignment(contract, _, _, reassignmentCounter), _) =>
-        (contract.contractId, reassignmentCounter)
-    }
-
-    val artificialReassignmentInfo = ReassignmentInfo(
-      sourceSynchronizer = ReassignmentTag.Source(psid.logical),
-      targetSynchronizer = ReassignmentTag.Target(psid.logical),
-      submitter = None,
-      reassignmentId = ReassignmentId(
-        ReassignmentTag.Source(psid.logical),
-        ReassignmentTag.Target(psid.logical),
-        timestamp, // artificial unassign has same timestamp as the assign
-        contractIdCounters,
-      ),
-      isReassigningParticipant = false,
-    )
-    val commitSet = CommitSet.createForAssignment(
-      artificialReassignmentInfo.reassignmentId,
-      activeContracts.map(_._1),
-      artificialReassignmentInfo.sourceSynchronizer,
-    )
-    val acsChangeFactory = AcsChangeSupport.fromCommitSet(commitSet)
-    Update.OnPRReassignmentAccepted(
-      workflowId = None,
-      updateId = uniqueUpdateId,
-      reassignmentInfo = artificialReassignmentInfo,
-      reassignment = Reassignment.Batch(
-        activeContracts.zipWithIndex.map {
-          // TODO(#26468): Use validation packages
-          case (
-                (ContractReassignment(contract, _, _, reassignmentCounter), internalContractId),
-                idx,
-              ) =>
-            Reassignment.Assign(
-              ledgerEffectiveTime = contract.inst.createdAt.time,
-              createNode = contract.toLf,
-              contractAuthenticationData = contract.inst.authenticationData,
-              reassignmentCounter = reassignmentCounter.v,
-              nodeId = idx,
-              internalContractId = internalContractId,
-            )
-        }
-      ),
-      repairCounter = repairCounter,
-      recordTime = timestamp,
-      synchronizerId = psid.logical,
-      acsChangeFactory = acsChangeFactory,
-    )
-  }
 }
 
 object TargetParticipantAcsPersistence {

@@ -29,7 +29,7 @@ class AvailabilityModuleUpdateTopologyTest
       val newCryptoProvider = failingCryptoProvider[IgnoringUnitTestEnv]
 
       val availability =
-        createAvailability[IgnoringUnitTestEnv](cryptoProvider = initialCryptoProvider)
+        createAndStartAvailability[IgnoringUnitTestEnv](cryptoProvider = initialCryptoProvider)
 
       // double-check initial values
       availability.getActiveMembership shouldBe initialMembership
@@ -63,7 +63,7 @@ class AvailabilityModuleUpdateTopologyTest
       val newCryptoProvider = failingCryptoProvider[IgnoringUnitTestEnv]
 
       val availability =
-        createAvailability[IgnoringUnitTestEnv](
+        createAndStartAvailability[IgnoringUnitTestEnv](
           cryptoProvider = initialCryptoProvider,
           customMembership = Some(initialMembership),
         )

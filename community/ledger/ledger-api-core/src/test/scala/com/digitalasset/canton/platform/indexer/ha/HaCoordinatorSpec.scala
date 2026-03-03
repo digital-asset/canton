@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.indexer.ha
 
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.NonNegativeLong

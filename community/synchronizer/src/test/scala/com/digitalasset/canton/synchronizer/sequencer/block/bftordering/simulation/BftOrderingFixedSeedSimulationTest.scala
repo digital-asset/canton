@@ -23,6 +23,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulati
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.topology.SimulationTopologyHelpers.generateNodeOnboardingDelay
 import org.scalatest.Assertion
+import org.slf4j.event.Level
 
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.Random
@@ -177,6 +178,15 @@ class BftOrderingSimulationTestWithOnboardingAndKeyRotationsNoFaults
 
   private val random = new Random(4)
   private val durationOfFirstPhaseWithFaults = 1.minute
+
+  override def allowedWarnings: Seq[LogEntry => Assertion] = Seq(
+    // Invalid acks may be received after a key is rotated
+    { logEntry =>
+      logEntry.level should be(Level.WARN)
+      logEntry.message should include("sent invalid ACK for batch")
+      logEntry.loggerName should include("AvailabilityModule")
+    }
+  )
 
   override def generateSettings: SimulationTestSettings = SimulationTestSettings(
     numberOfInitialNodes = 2,

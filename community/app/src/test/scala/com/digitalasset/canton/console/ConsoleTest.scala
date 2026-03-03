@@ -6,6 +6,7 @@ package com.digitalasset.canton.console
 import ammonite.runtime.Storage.InMemory
 import ammonite.util.Colors
 import cats.syntax.either.*
+import com.daml.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
 import com.digitalasset.canton.admin.api.client.commands.{
   GrpcAdminCommand,
   ParticipantAdminCommands,
@@ -20,7 +21,6 @@ import com.digitalasset.canton.console.HeadlessConsole.{
   RuntimeError,
 }
 import com.digitalasset.canton.environment.*
-import com.digitalasset.canton.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
 import com.digitalasset.canton.participant.{ParticipantNode, ParticipantNodeBootstrap}
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.tracing.TracerProvider

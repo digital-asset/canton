@@ -171,7 +171,7 @@ final class ConsoleCommandBackwardsCompatibilityReaderTest
         // load the console command metadata for the latest release version of the given majorMinor
         def metadataForVersion(): Option[(ReleaseVersion, Seq[NamedConsoleCommandSignature])] =
           S3Dump
-            .getDumpBaseDirectoriesForVersion(majorUpgradeTestFrom = Some(majorMinor))
+            .getDumpBaseDirectoriesForVersion(latestFromMajorMinor = Some(majorMinor))
             .maxByOption { case (_, version) => version }
             .map { case (dumpRef, rv) =>
               val file = better.files.File(dumpRef.localDownloadPath, metadataFileName)

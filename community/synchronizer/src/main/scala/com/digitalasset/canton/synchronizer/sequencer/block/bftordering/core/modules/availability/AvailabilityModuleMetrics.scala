@@ -37,32 +37,31 @@ private[availability] object AvailabilityModuleMetrics {
     requested.batches.updateValue(requestedBatches)
 
     val readyForConsensusMc = mc.withExtraLabels(dissemination.labels.ReadyForConsensus -> "true")
+    val disseminationComplete = state.disseminationCompleteView
     locally {
       implicit val mc: MetricsContext = readyForConsensusMc
-      dissemination.bytes.updateValue(state.batchesReadyForOrdering.values.map(_.stats.bytes).sum)
-      dissemination.requests.updateValue(
-        state.batchesReadyForOrdering.values.map(_.stats.requests).sum
-      )
-      dissemination.batches.updateValue(state.batchesReadyForOrdering.size)
+      dissemination.bytes.updateValue(disseminationComplete.map(_._2.stats.bytes).sum)
+      dissemination.requests.updateValue(disseminationComplete.map(_._2.stats.requests).sum)
+      dissemination.batches.updateValue(disseminationComplete.size)
     }
     val inProgressMc = mc.withExtraLabels(dissemination.labels.ReadyForConsensus -> "false")
     locally {
       implicit val mc: MetricsContext = inProgressMc
       dissemination.bytes.updateValue(
-        state.disseminationProgress.values.map(_.batchMetadata.stats.bytes).sum
+        state.disseminationProgress.values.map(_.stats.bytes).sum
       )
       dissemination.requests.updateValue(
-        state.disseminationProgress.values.map(_.batchMetadata.stats.requests).sum
+        state.disseminationProgress.values.map(_.stats.requests).sum
       )
       dissemination.batches.updateValue(state.disseminationProgress.size)
     }
 
     val regressionsToSigning =
-      state.disseminationProgress.values.map(_.batchMetadata.regressionsToSigning).sum +
-        state.batchesReadyForOrdering.values.map(_.regressionsToSigning).sum
+      state.disseminationProgress.values.map(_.regressionsToSigning).sum +
+        disseminationComplete.map(_._2.regressionsToSigning).sum
     val regressedDisseminations =
-      state.disseminationProgress.values.map(_.batchMetadata.disseminationRegressions).sum +
-        state.batchesReadyForOrdering.values.map(_.disseminationRegressions).sum
+      state.disseminationProgress.values.map(_.disseminationRegressions).sum +
+        disseminationComplete.map(_._2.disseminationRegressions).sum
     regression.batch.inc(regressionsToSigning.toLong)(
       mc.withExtraLabels(
         regression.labels.stage.Key -> regression.labels.stage.values.Signing.toString
@@ -74,19 +73,8 @@ private[availability] object AvailabilityModuleMetrics {
       )
     )
     // Reset regressions counts to avoid double counting
-    state.disseminationProgress = state.disseminationProgress.map { case (key, value) =>
-      key -> value.copy(
-        batchMetadata = value.batchMetadata.copy(
-          regressionsToSigning = 0,
-          disseminationRegressions = 0,
-        )
-      )
-    }
-    state.batchesReadyForOrdering = state.batchesReadyForOrdering.map { case (key, value) =>
-      key -> value.copy(
-        regressionsToSigning = 0,
-        disseminationRegressions = 0,
-      )
-    }
+    state.disseminationProgress.addAll(state.disseminationProgress.map { case (key, status) =>
+      key -> status.resetRegressions()
+    })
   }
 }

@@ -12,7 +12,7 @@ import cats.syntax.traverse.*
 import com.daml.metrics.api.MetricHandle.Gauge.CloseableGauge
 import com.daml.metrics.api.MetricHandle.LabeledMetricsFactory
 import com.daml.metrics.api.MetricName
-import com.daml.metrics.{ExecutorServiceMetrics, HealthMetrics}
+import com.daml.metrics.{CacheMetrics, ExecutorServiceMetrics, HealthMetrics}
 import com.daml.nonempty.NonEmpty
 import com.daml.tracing.DefaultOpenTelemetry
 import com.digitalasset.canton.admin.health.v30.StatusServiceGrpc
@@ -64,7 +64,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
-import com.digitalasset.canton.metrics.{CacheMetrics, DbStorageMetrics, DeclarativeApiMetrics}
+import com.digitalasset.canton.metrics.{DbStorageMetrics, DeclarativeApiMetrics}
 import com.digitalasset.canton.networking.grpc.{
   CantonGrpcUtil,
   CantonMutableHandlerRegistry,
@@ -74,7 +74,7 @@ import com.digitalasset.canton.replica.ReplicaManager
 import com.digitalasset.canton.resource.{Storage, StorageFactory}
 import com.digitalasset.canton.store.IndexedStringStore
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
-import com.digitalasset.canton.time.Clock
+import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.{
   GrpcIdentityInitializationService,
@@ -403,7 +403,12 @@ abstract class CantonNodeBootstrapImpl[
     override def ec: ExecutionContext = CantonNodeBootstrapImpl.this.executionContext
   }
 
-  protected def lookupTopologyClient(storeId: TopologyStoreId): Option[SynchronizerTopologyClient]
+  protected def lookupTopologyClient(
+      psid: PhysicalSynchronizerId
+  ): Option[SynchronizerTopologyClient]
+  protected def lookupSynchronizerTimeTracker(
+      psid: PhysicalSynchronizerId
+  ): Option[SynchronizerTimeTracker]
   protected def lookupActivePSId: PSIdLookup
 
   private val startupStage =
@@ -1002,7 +1007,8 @@ abstract class CantonNodeBootstrapImpl[
                     member(nodeId),
                     temporaryStoreRegistry.stores() ++ sequencedTopologyStores :+ authorizedStore,
                     crypto,
-                    lookupTopologyClient,
+                    topologyClientLookup = lookupTopologyClient,
+                    lookupSynchronizerTimeTracker,
                     lookupActivePSId,
                     processingTimeout = parameters.processingTimeouts,
                     bootstrapStageCallback.loggerFactory,

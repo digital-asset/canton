@@ -5,7 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.config
 
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
-import com.digitalasset.canton.synchronizer.config.PublicServerConfig
+import com.digitalasset.canton.synchronizer.config.{DeclarativeSequencerConfig, PublicServerConfig}
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.SequencerHighAvailabilityConfig
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.synchronizer.sequencer.{SequencerConfig, SequencerHealthConfig}
@@ -58,6 +58,7 @@ final case class SequencerNodeConfig(
     acknowledgementsConflateWindow: Option[PositiveFiniteDuration] = Some(
       PositiveFiniteDuration.ofSeconds(45)
     ),
+    declarative: DeclarativeSequencerConfig = DeclarativeSequencerConfig(),
 ) extends LocalNodeConfig
     with ConfigDefaults[Option[DefaultPorts], SequencerNodeConfig] {
 

@@ -4,15 +4,16 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.{DbConfig, NonNegativeDuration}
+import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
-import com.digitalasset.canton.integration.EnvironmentDefinition.S2M2
+import com.digitalasset.canton.integration.EnvironmentDefinition.S4M4
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
-import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
+import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import monocle.macros.syntax.lens.*
 
@@ -28,7 +29,7 @@ Initial topology:
 - p3 connected to s2
 
 LSU:
-- (s1, m1) upgrade
+- (s1, m1), (s3, m3), (s4, m4) upgrade
 - all participants can perform the automatic lsu
   - p1 can connect to new synchronizer
   - p2, p3 cannot connect to new synchronizer yet (s2 did not upgrade yet)
@@ -38,25 +39,37 @@ LSU:
 final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
   override protected def testName: String = "lsu-late-sequencer"
 
-  // TODO(#30360) Use DA BFT
   registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.Postgres](
+    new UseBftSequencer(
       loggerFactory,
-      MultiSynchronizer.tryCreate(Set("sequencer1", "sequencer2"), Set("sequencer3", "sequencer4")),
+      MultiSynchronizer.tryCreate(
+        Set("sequencer1", "sequencer2", "sequencer3", "sequencer4"),
+        Set("sequencer5", "sequencer6", "sequencer7", "sequencer8"),
+      ),
     )
   )
   registerPlugin(new UsePostgres(loggerFactory))
 
   override protected lazy val newOldSequencers: Map[String, String] =
-    Map("sequencer3" -> "sequencer1", "sequencer4" -> "sequencer2")
+    Map(
+      "sequencer5" -> "sequencer1",
+      "sequencer6" -> "sequencer2",
+      "sequencer7" -> "sequencer3",
+      "sequencer8" -> "sequencer4",
+    )
   override protected lazy val newOldMediators: Map[String, String] =
-    Map("mediator3" -> "mediator1", "mediator4" -> "mediator2")
+    Map(
+      "mediator5" -> "mediator1",
+      "mediator6" -> "mediator2",
+      "mediator7" -> "mediator3",
+      "mediator8" -> "mediator4",
+    )
   override protected lazy val upgradeTime: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(30)
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3S4M4_Config
+    EnvironmentDefinition.P3S8M8_Config
       .withNetworkBootstrap { implicit env =>
-        new NetworkBootstrapper(S2M2)
+        new NetworkBootstrapper(S4M4)
       }
       .addConfigTransforms(configTransforms*)
       .addConfigTransform(
@@ -91,10 +104,14 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
           )
         )
 
-        oldSynchronizerNodes =
-          SynchronizerNodes(Seq(sequencer1, sequencer2), Seq(mediator1, mediator2))
-        newSynchronizerNodes =
-          SynchronizerNodes(Seq(sequencer3, sequencer4), Seq(mediator3, mediator4))
+        oldSynchronizerNodes = SynchronizerNodes(
+          Seq(sequencer1, sequencer2, sequencer3, sequencer4),
+          Seq(mediator1, mediator2, mediator3, mediator4),
+        )
+        newSynchronizerNodes = SynchronizerNodes(
+          Seq(sequencer5, sequencer6, sequencer7, sequencer8),
+          Seq(mediator5, mediator6, mediator7, mediator8),
+        )
       }
 
   "Logical synchronizer upgrade" should {
@@ -118,37 +135,44 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
         successorPSId = fixture.newPSId,
       )
 
-      // only (s1, m1) is upgrading, not (s2, m2)
-      migrateSequencer(
-        migratedSequencer = sequencer3,
-        newStaticSynchronizerParameters = fixture.newStaticSynchronizerParameters,
-        exportDirectory = exportDirectory,
-        oldNodeName = "sequencer1",
-      )
-      migrateMediator(
-        migratedMediator = mediator3,
-        newPSId = fixture.newPSId,
-        newSequencers = Seq(sequencer3),
-        exportDirectory = exportDirectory,
-        oldNodeName = "mediator1",
-      )
+      // only (s1, m1), (s3, m3), (s4, m4) are upgrading, not (s2, m2)
+      newOldSequencers.foreach {
+        case (newNodeName, oldNodeName) if oldNodeName != "sequencer2" =>
+          migrateSequencer(
+            migratedSequencer = s(newNodeName),
+            newStaticSynchronizerParameters = fixture.newStaticSynchronizerParameters,
+            exportDirectory = exportDirectory,
+            oldNodeName = oldNodeName,
+          )
+        case _ => ()
+      }
+      newOldMediators.foreach {
+        case (newNodeName, oldNodeName) if oldNodeName != "mediator2" =>
+          migrateMediator(
+            migratedMediator = m(newNodeName),
+            newPSId = fixture.newPSId,
+            newSequencers = Seq(s(newNodeName.replace("mediator", "sequencer"))),
+            exportDirectory = exportDirectory,
+            oldNodeName = oldNodeName,
+          )
+        case _ => ()
+      }
 
-      // both successors are announced
-      sequencer1.topology.lsu.sequencer_successors.propose_successor(
-        sequencerId = sequencer1.id,
-        endpoints = sequencer3.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-        synchronizerId = fixture.currentPSId,
-      )
-      sequencer2.topology.lsu.sequencer_successors.propose_successor(
-        sequencerId = sequencer2.id,
-        endpoints = sequencer4.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-        synchronizerId = fixture.currentPSId,
-      )
+      // All successors are announced
+      newOldSequencers.foreach {
+        case (newNodeName, oldNodeName) =>
+          s(oldNodeName).topology.lsu.sequencer_successors.propose_successor(
+            sequencerId = s(oldNodeName).id,
+            endpoints = s(newNodeName).sequencerConnection.endpoints.map(_.toURI(useTls = false)),
+            synchronizerId = fixture.currentPSId,
+          )
+        case _ => ()
+      }
+
+      environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
 
       loggerFactory.assertLogsUnorderedOptional(
         {
-          environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
-
           // LSU succeeds for all the participants but only p1 is connected to the successor
           eventually() {
             participant1.synchronizers.is_connected(fixture.currentPSId) shouldBe false
@@ -161,19 +185,25 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
             participant3.synchronizers.is_connected(fixture.currentPSId) shouldBe false
           }
 
+          for (newSequencer <- newOldSequencers.keys) {
+            if (newSequencer != "sequencer6") {
+              waitForTargetTimeOnSequencer(ls(newSequencer), environment.clock.now, logger)
+            }
+          }
+
           participant1.health.ping(participant1)
 
-          // migrate (s2, m2) to (s4, m4)
+          // migrate (s2, m2) to (s6, m6)
           migrateSequencer(
-            migratedSequencer = sequencer4,
+            migratedSequencer = sequencer6,
             newStaticSynchronizerParameters = fixture.newStaticSynchronizerParameters,
             exportDirectory = exportDirectory,
             oldNodeName = "sequencer2",
           )
           migrateMediator(
-            migratedMediator = mediator4,
+            migratedMediator = mediator6,
             newPSId = fixture.newPSId,
-            newSequencers = Seq(sequencer4),
+            newSequencers = Seq(sequencer6),
             exportDirectory = exportDirectory,
             oldNodeName = "mediator2",
           )
@@ -198,6 +228,10 @@ final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
         (
           LogEntryOptionality.OptionalMany,
           _.warningMessage should include(s"Initial connection attempt to $daName failed"),
+        ),
+        (
+          LogEntryOptionality.OptionalMany,
+          _.warningMessage should include(s"Request failed for server-sequencer2-0"),
         ),
       )
 

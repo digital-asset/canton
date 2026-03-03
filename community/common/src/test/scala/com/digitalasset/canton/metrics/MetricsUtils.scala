@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.metrics
 
+import com.daml.metrics.OpenTelemetryOnDemandMetricsReader
 import com.daml.metrics.api.HistogramInventory
 import com.daml.metrics.api.opentelemetry.OpenTelemetryMetricsFactory
 import com.digitalasset.canton.BaseTest

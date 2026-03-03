@@ -56,6 +56,7 @@ object DAMLe {
       iterationsBetweenInterruptions: Long =
         10000, // 10000 is the default value in the engine configuration,
       paranoidMode: Boolean,
+      contractStateMode: Option[ContractStateMachine.Mode] = None,
   ): Engine =
     new Engine(
       EngineConfig(
@@ -69,10 +70,10 @@ object DAMLe {
         profileDir = profileDir,
         snapshotDir = snapshotDir,
         forbidLocalContractIds = true,
-        contractStateMode =
-          // TODO(#30398) revisit how we enable contract key
-          if (enableLfDev) ContractStateMachine.Mode.LegacyNUCK
-          else ContractStateMachine.Mode.NoContractKey,
+        contractStateMode = contractStateMode.getOrElse(
+          if (enableLfDev) ContractStateMachine.Mode.devDefault
+          else ContractStateMachine.Mode.default
+        ),
         iterationsBetweenInterruptions = iterationsBetweenInterruptions,
         paranoid = paranoidMode,
       )
@@ -400,6 +401,9 @@ class DAMLe(
             )
             .flatMap(optCid => EitherT(handleResultInternal(contracts, resume(optCid))))
             .value
+        case ResultNeedNKey(_, _, _, _) =>
+          // TODO(#30398): add support
+          throw new UnsupportedOperationException("Not supported yet")
         case ResultNeedContract(acoid, resume) =>
           (CantonContractIdVersion.extractCantonContractIdVersion(acoid) match {
             case Right(version) =>

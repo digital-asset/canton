@@ -461,6 +461,8 @@ class SequencerNodes(
     timeouts: ProcessingTimeout,
     configs: => Map[String, SequencerNodeConfig],
     parameters: String => SequencerNodeParameters,
+    runnerFactory: String => GrpcAdminCommandRunner,
+    enableAlphaStateViaConfig: Boolean,
     loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
     extends ManagedNodes[
@@ -475,6 +477,10 @@ class SequencerNodes(
       parameters,
       startUpGroup = 0,
       loggerFactory,
+      Option.when(enableAlphaStateViaConfig)(
+        DeclarativeApiManager
+          .forSequencers(runnerFactory, timeouts.dynamicStateConsistencyTimeout, loggerFactory)
+      ),
     )
 
 class MediatorNodes(

@@ -109,10 +109,12 @@ class SubscriptionPoolTest extends AnyWordSpec with BaseTest with HasExecutionCo
       manager.activeSubscriptions() shouldBe empty
       assertNum(0)
 
-      // all should have only been closed once
-      subscription1.closeCount shouldEqual 1
-      subscription2.closeCount shouldEqual 1
-      subscription3.closeCount shouldEqual 1
+      eventually() {
+        // all should have only been closed once
+        subscription1.closeCount shouldEqual 1
+        subscription2.closeCount shouldEqual 1
+        subscription3.closeCount shouldEqual 1
+      }
     }
 
     "drop excess connections" in {
@@ -245,10 +247,12 @@ class SubscriptionPoolTest extends AnyWordSpec with BaseTest with HasExecutionCo
           manager.create(() => FutureUnlessShutdown.pure(sub1), participant1),
           manager.create(() => FutureUnlessShutdown.pure(sub2), participant1),
         ).sequence.value.futureValue
-        _ = manager.closeSubscriptions(participant1, waitForClosed = true)
+        _ = manager.closeSubscriptions(participant1)
       } yield {
-        sub1.isClosing shouldBe true
-        sub2.isClosing shouldBe true
+        eventually() {
+          sub1.isClosing shouldBe true
+          sub2.isClosing shouldBe true
+        }
       }
     }
 

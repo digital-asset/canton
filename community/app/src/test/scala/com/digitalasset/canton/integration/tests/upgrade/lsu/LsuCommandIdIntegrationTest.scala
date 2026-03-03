@@ -13,14 +13,19 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.integration.{EnvironmentDefinition, TestEnvironment}
 import com.digitalasset.canton.ledger.error.groups.ConsistencyErrors.DuplicateCommand
-import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality.Optional
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality.{
+  Optional,
+  OptionalMany,
+}
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
 import com.digitalasset.canton.protocol.LocalRejectError.TimeRejects
 import com.digitalasset.canton.sequencing.protocol.SubmissionRequest
+import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SendDecision}
 import com.digitalasset.canton.topology.PartyId
 import com.google.rpc.Code
 
+import java.time.Duration
 import scala.concurrent.Promise
 import scala.jdk.CollectionConverters.CollectionHasAsScala
 
@@ -150,10 +155,13 @@ final class LsuCommandIdIntegrationTest extends LsuBase with HasProgrammableSequ
 
               // Move forward until the new PSId is up
               environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
-              waitForTargetTimeOnSequencer(sequencer2, environment.clock.now)
+              transferTraffic(suppressLogs = false)
               eventually() {
+                environment.simClock.value.advance(Duration.ofSeconds(1))
                 participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
               }
+              waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
+
               oldSynchronizerNodes.all.stop()
 
               // Move further forward until this decision timeout has expired, and expect to see our submission timeout on the completion stream
@@ -173,6 +181,7 @@ final class LsuCommandIdIntegrationTest extends LsuBase with HasProgrammableSequ
             Optional -> (_.warningMessage should (include regex "Response message for request .* timed out at")),
             Optional -> (_.warningMessage should include("Submission timed out at")),
             Optional -> (_.warningMessage should include("Time validation has failed")),
+            OptionalMany -> (_.shouldBeCantonErrorCode(SequencerError.NotAtUpgradeTimeOrBeyond)),
           )
         }
 

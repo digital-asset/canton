@@ -143,10 +143,10 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
         )
         with TopologyManagerError
 
-    final case class NotFoundForSynchronizer(synchronizerId: SynchronizerId)(implicit
+    final case class NoActiveSynchronizer(synchronizerId: SynchronizerId)(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = s"Topology store for synchronizer $synchronizerId is not known."
+          cause = s"No active synchronizer found for $synchronizerId."
         )
         with TopologyManagerError
 
@@ -950,18 +950,18 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
   }
 
   @Explanation(
-    "This error indicates that an LSU is not scheduled, which prevents some upgrade operations from being performed."
+    "This error indicates that an LSU is not announced, which prevents some upgrade operations from being performed."
   )
   @Resolution("Contact the owners of the synchronizer about the LSU.")
-  object NoLsuScheduled
+  object NoLsuAnnounced
       extends ErrorCode(
-        id = "TOPOLOGY_NO_LSU_SCHEDULED",
+        id = "TOPOLOGY_NO_LSU_ANNOUNCED",
         InvalidGivenCurrentSystemStateOther,
       ) {
     final case class Failure()(implicit
         val loggingContext: ErrorLoggingContext
     ) extends CantonError.Impl(
-          cause = "The operation cannot be performed because no LSU is scheduled"
+          cause = "The operation cannot be performed because no LSU is announced"
         )
         with TopologyManagerError
   }
@@ -1025,8 +1025,24 @@ object TopologyManagerError extends TopologyManagerErrorGroup {
             s"The upgrade time $upgradeTime must be after the effective ${effective.value} of the synchronizer upgrade announcement for synchronizer $synchronizerId."
         )
         with TopologyManagerError
-
   }
+
+  @Explanation("This error indicates that the timestamp to query the topology is incorrect.")
+  @Resolution("Reconnect the node to the synchronizer or use an earlier timestamp for the query.")
+  object InvalidQueryTime
+      extends ErrorCode(id = "TOPOLOGY_INVALID_QUERY_TIME", InvalidGivenCurrentSystemStateOther) {
+    final case class Reject(
+        synchronizerId: SynchronizerId,
+        topologyKnownUntil: CantonTimestamp,
+        queryTime: CantonTimestamp,
+    )(implicit val loggingContext: ErrorLoggingContext)
+        extends CantonError.Impl(
+          cause =
+            s"Topology of synchronizer $synchronizerId is known until $topologyKnownUntil but tried to query at $queryTime"
+        )
+        with TopologyManagerError
+  }
+
   abstract class SynchronizerErrorGroup extends ErrorGroup()
 
   abstract class ParticipantErrorGroup extends ErrorGroup()

@@ -9,8 +9,9 @@ import com.digitalasset.canton.config.*
 import com.digitalasset.canton.console.LocalSequencerReference
 import com.digitalasset.canton.damltestsdev.java.da as DA
 import com.digitalasset.canton.data.CantonTimestamp
+import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.sequencing.client.{SendCallback, SendResult}
-import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver}
+import com.digitalasset.canton.sequencing.protocol.{Batch, Deliver, TimeProof}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.{BaseTest, FutureHelpers}
 import org.scalatest.Assertion
@@ -43,21 +44,39 @@ object TestUtils extends FutureHelpers {
   def waitForTargetTimeOnSequencer(
       sequencer: LocalSequencerReference,
       targetTime: CantonTimestamp,
-  ): Assertion =
-    BaseTest.eventually() {
+      logger: TracedLogger,
+  ): Assertion = {
+    implicit val traceContext: TraceContext =
+      TraceContext.createNew("wait-for-target-time-on-sequencer")
+    logger.debug(s"Waiting for sequencer $sequencer to reach target time $targetTime")
+
+    val assertion = BaseTest.eventually() {
       // send time proofs until we see a successful deliver with
       // a sequencing time greater than or equal to the target time.
+      logger.debug(s"Sending time proof to sequencer $sequencer")
       val sendCallback = SendCallback.future
+      sequencer.underlying.value.sequencer.client.runOnClose(sendCallback.runOnClosing)
       sequencer.underlying.value.sequencer.client
-        .send(Batch(Nil, BaseTest.testedProtocolVersion), callback = sendCallback)(
-          TraceContext.empty,
+        .send(
+          messageId = TimeProof.mkTimeProofRequestMessageId,
+          batch = Batch(Nil, BaseTest.testedProtocolVersion),
+          callback = sendCallback,
+        )(
+          traceContext,
           MetricsContext.Empty,
         )
-        .futureValueUS shouldBe Right(())
+        .succeedOnFutureCompleteOrShutdown
 
-      sendCallback.future.futureValueUS should matchPattern {
+      val sendResult = sendCallback.future.futureValueUS
+      logger.debug(s"Received send result for time proof $sendResult from sequencer $sequencer")
+      sendResult should matchPattern {
         case SendResult.Success(d: Deliver[?]) if d.timestamp >= targetTime =>
       }
     }
+
+    logger.debug(s"Sequencer $sequencer has reached target time $targetTime")
+
+    assertion
+  }
 
 }

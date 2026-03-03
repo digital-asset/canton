@@ -62,16 +62,16 @@ final class LsuEndToEndIntegrationTest extends LsuBase {
       performSynchronizerNodesLsu(fixture)
 
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
+      transferTraffic()
 
       eventually() {
+        environment.simClock.value.advance(Duration.ofSeconds(1))
         participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
         participants.all.forall(_.synchronizers.is_connected(fixture.currentPSId)) shouldBe false
       }
 
       oldSynchronizerNodes.all.stop()
-
-      environment.simClock.value.advance(Duration.ofSeconds(1))
-      waitForTargetTimeOnSequencer(sequencer2, environment.clock.now)
+      waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
 
       /*
       We do several ping, disconnect, reconnect because reconnect comes with crash-recovery

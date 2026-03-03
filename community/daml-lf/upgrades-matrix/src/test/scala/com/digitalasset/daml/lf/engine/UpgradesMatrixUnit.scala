@@ -18,9 +18,11 @@ import org.scalatest.{Assertion, ParallelTestExecution}
 import com.digitalasset.daml.lf.transaction.CreationTime
 import com.digitalasset.daml.lf.speedy.ValueTranslator
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
+import org.scalatest.wordspec.AsyncWordSpec
+import org.scalatest.matchers.should.Matchers
 
 import scala.collection.immutable
-import scala.concurrent.Future
+import scala.concurrent.{Future, ExecutionContext}
 
 // Split the Upgrade unit tests over four suites, which seems to be the sweet
 // spot (~95s instead of ~185s runtime)
@@ -36,15 +38,20 @@ class UpgradesMatrixUnit3 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2Dev, 2
   * sanity checking before running UpgradesMatrixIT.
   */
 class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: Int)
-    extends UpgradesMatrix[Error, (SubmittedTransaction, Transaction.Metadata)](
-      upgradesMatrixCases,
-      Some((n, k)),
-    )
-    with ParallelTestExecution {
+    extends AsyncWordSpec with ParallelTestExecution with Matchers
+    with UpgradesMatrix[Error, (SubmittedTransaction, Transaction.Metadata), Unit] {
+  override val cases = upgradesMatrixCases
+  defineTestCases()
+
+  override def nk = Some((n, k))
+  override def createTestCase(name: String, assertion: ExecutionContext => Future[Assertion]): Unit = {
+    name in assertion(executionContext)
+  }
+
   def toContractId(s: String): ContractId =
     ContractId.V1.assertBuild(crypto.Hash.hashPrivateKey(s), Bytes.assertFromString("00"))
 
-  override def setup(testHelper: cases.TestHelper): Future[UpgradesMatrixCases.SetupData] =
+  override def setup(testHelper: UpgradesMatrixCases#TestHelper)(implicit ec: ExecutionContext): Future[UpgradesMatrixCases.SetupData[Unit]] =
     Future.successful(
       UpgradesMatrixCases.SetupData(
         alice = Party.assertFromString("Alice"),
@@ -52,6 +59,7 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
         clientLocalContractId = toContractId("client-local"),
         clientGlobalContractId = toContractId("client-global"),
         globalContractId = toContractId("1"),
+        additionalSetup = (),
       )
     )
 
@@ -70,8 +78,19 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
   def newEngine() = new Engine(cases.engineConfig)
 
   override def execute(
-      setupData: UpgradesMatrixCases.SetupData,
-      testHelper: cases.TestHelper,
+      setupData: UpgradesMatrixCases.SetupData[Unit],
+      testHelper: UpgradesMatrixCases#TestHelper,
+      apiCommands: ImmArray[ApiCommand],
+      contractOrigin: UpgradesMatrixCases.ContractOrigin,
+      creationPackageStatus: UpgradesMatrixCases.CreationPackageStatus,
+  )(implicit ec: ExecutionContext): Future[Either[Error, (SubmittedTransaction, Transaction.Metadata)]] =
+    // We can drop the implicit ec here, since it will be the same as the one
+    // provided by AsyncWordSpec
+    executeWithoutEC(setupData, testHelper, apiCommands, contractOrigin, creationPackageStatus)
+
+  def executeWithoutEC(
+      setupData: UpgradesMatrixCases.SetupData[Unit],
+      testHelper: UpgradesMatrixCases#TestHelper,
       apiCommands: ImmArray[ApiCommand],
       contractOrigin: UpgradesMatrixCases.ContractOrigin,
       creationPackageStatus: UpgradesMatrixCases.CreationPackageStatus,
@@ -188,7 +207,7 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
   override def assertResultMatchesExpectedOutcome(
       result: Either[Error, (SubmittedTransaction, Transaction.Metadata)],
       expectedOutcome: UpgradesMatrixCases.ExpectedOutcome,
-  ): Assertion = {
+  )(implicit ec: ExecutionContext): Assertion = {
     expectedOutcome match {
       case UpgradesMatrixCases.ExpectSuccess =>
         result shouldBe a[Right[_, _]]

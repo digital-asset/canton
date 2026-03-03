@@ -5,8 +5,8 @@ package com.digitalasset.canton.ledger.api.grpc
 
 import com.daml.grpc.GrpcException
 import com.daml.grpc.adapter.server.rs.MockServerCallStreamObserver
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.scalautil.Statement.discard
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.health.{

@@ -20,7 +20,7 @@ import com.digitalasset.canton.participant.store.PartyReplicationStateManager.{
 }
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.store.{PendingOperation, PendingOperationStore}
-import com.digitalasset.canton.topology.ParticipantId
+import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.{EitherTUtil, FutureUnlessShutdownUtil, SimpleExecutionQueue}
 
@@ -78,12 +78,14 @@ final class PartyReplicationStateManager(
 
   private val partyReplications = new TrieMap[AddPartyRequestId, PartyReplicationStatus]()
 
-  private val targetParticipantStore = PendingOperationStore.apply[PartyReplicationStatus](
-    storage,
-    timeouts,
-    loggerFactory,
-    PartyReplicationStatus,
-  )
+  private val targetParticipantStore =
+    PendingOperationStore.apply[PartyReplicationStatus, SynchronizerId](
+      storage,
+      timeouts,
+      loggerFactory,
+      PartyReplicationStatus,
+      SynchronizerId.fromString,
+    )
 
   // Execution queue serializes db and map access and modifications.
   private val executionQueue = new SimpleExecutionQueue(
@@ -233,10 +235,8 @@ object PartyReplicationStateManager {
 
   private[PartyReplicationStateManager] def pendingDbOperationFromStatus(
       status: PartyReplicationStatus
-  ) =
-    PendingOperation[PartyReplicationStatus](
-      // Synchronizer reconnect triggers onpr activity, but is not the only trigger
-      PendingOperation.PendingOperationTriggerType.SynchronizerReconnect,
+  ): PendingOperation[PartyReplicationStatus, SynchronizerId] =
+    PendingOperation[PartyReplicationStatus, SynchronizerId](
       OnlinePartyReplicationOperationName,
       status.params.requestId.toHexString,
       status,

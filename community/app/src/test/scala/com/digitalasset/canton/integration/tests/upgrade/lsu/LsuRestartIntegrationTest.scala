@@ -17,6 +17,8 @@ import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSeq
 import com.digitalasset.canton.topology.PartyId
 import monocle.macros.syntax.lens.*
 
+import java.time.Duration
+
 /*
  * This test is used to test LSU works well when participants are restarted.
  */
@@ -69,12 +71,7 @@ final class LsuRestartIntegrationTest extends LsuBase {
 
         participants.all.dars.upload(CantonExamplesPath)
 
-        synchronizerOwners1.foreach(
-          _.topology.synchronizer_parameters.propose_update(
-            daId,
-            _.copy(reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)),
-          )
-        )
+        setDefaultsDynamicSynchronizerParameters(daId, synchronizerOwners1)
 
         alice = participant1.parties.enable("Alice")
         bob = participant1.parties.enable("Bob")
@@ -107,14 +104,16 @@ final class LsuRestartIntegrationTest extends LsuBase {
       participant1.synchronizers.reconnect_all()
 
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
+      transferTraffic()
 
       participant2.start() // restarted after the upgrade time
       participant2.synchronizers.reconnect_all()
 
       eventually() {
+        environment.simClock.value.advance(Duration.ofSeconds(1))
         participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
       }
-      waitForTargetTimeOnSequencer(sequencer2, environment.clock.now)
+      waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
 
     // Do not add anything here as the specific test case relies on "fresh" state for P1 and P2
     }

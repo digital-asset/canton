@@ -20,14 +20,13 @@ import com.digitalasset.canton.admin.api.client.data.{
 import com.digitalasset.canton.auth.CantonAdminToken
 import com.digitalasset.canton.config.ClientConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.CommandErrors.{CommandError, GenericCommandError}
-import com.digitalasset.canton.console.declarative.DeclarativeApi.UpdateResult
-import com.digitalasset.canton.console.declarative.DeclarativeParticipantApi.{
+import com.digitalasset.canton.console.GrpcAdminCommandRunner
+import com.digitalasset.canton.console.declarative.DeclarativeApi.{
   Err,
   NotFound,
   QueryResult,
+  UpdateResult,
 }
-import com.digitalasset.canton.console.{CommandSuccessful, GrpcAdminCommandRunner}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.api
 import com.digitalasset.canton.ledger.api.IdentityProviderId
@@ -74,6 +73,7 @@ class DeclarativeParticipantApi(
 
   private val adminApiRunner = runnerFactory(CantonGrpcUtil.ApiName.AdminApi)
   private val ledgerApiRunner = runnerFactory(CantonGrpcUtil.ApiName.LedgerApi)
+
   closeContext.context
     .runOnOrAfterClose(new RunOnClosing {
       override def name: String = "stop-declarative-api"
@@ -86,25 +86,6 @@ class DeclarativeParticipantApi(
     .discard
 
   override protected def activeAdminToken: Option[CantonAdminToken] = adminToken
-
-  private def queryApi[Result](
-      runner: GrpcAdminCommandRunner,
-      cfg: ClientConfig,
-      command: GrpcAdminCommand[?, ?, Result],
-  )(implicit traceContext: TraceContext): Either[QueryResult, Result] = if (
-    closeContext.context.isClosing
-  )
-    Left(Err("Node is shutting down"))
-  else
-    activeAdminToken.fold(Left(Err("Node instance is passive")): Either[QueryResult, Result])(
-      token =>
-        runner.runCommandWithExistingTrace(name, command, cfg, Some(token.secret)) match {
-          case CommandSuccessful(value) => Right(value)
-          case GenericCommandError(cause) if cause.contains("NOT_FOUND/") =>
-            Left(NotFound(cause))
-          case c: CommandError => Left(Err(c.cause))
-        }
-    )
 
   private def queryAdminApi[Result](
       command: GrpcAdminCommand[?, ?, Result]
@@ -962,13 +943,4 @@ class DeclarativeParticipantApi(
       }
     }
 
-}
-
-object DeclarativeParticipantApi {
-
-  private sealed trait QueryResult {
-    def str: String
-  }
-  private final case class Err(str: String) extends QueryResult
-  private final case class NotFound(str: String) extends QueryResult
 }

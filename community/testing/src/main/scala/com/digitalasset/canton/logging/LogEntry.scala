@@ -10,7 +10,8 @@ import com.digitalasset.canton.util.ShowUtil.*
 import org.scalactic.source
 import org.scalatest.AppendedClues.*
 import org.scalatest.Assertion
-import org.scalatest.Inspectors.{forAtLeast, forEvery}
+import org.scalatest.Checkpoints.Checkpoint
+import org.scalatest.Inspectors.forAtLeast
 import org.scalatest.matchers.should.Matchers.{include, *}
 import org.slf4j.MDC
 import org.slf4j.event.Level
@@ -29,28 +30,28 @@ final case class LogEntry(
 
   def errorMessage(implicit pos: source.Position): String = {
     if (level != ERROR) {
-      fail(s"Incorrect log level $level. Expected: ERROR\n$this")
+      fail(s"Incorrect log level $level. Expected: ERROR. Message: $message")
     }
     message
   }
 
   def warningMessage(implicit pos: source.Position): String = {
     if (level != WARN) {
-      fail(s"Incorrect log level $level. Expected: WARN\n$this")
+      fail(s"Incorrect log level $level. Expected: WARN. Message: $message")
     }
     message
   }
 
   def infoMessage(implicit pos: source.Position): String = {
     if (level != INFO) {
-      fail(s"Incorrect log level $level. Expected: INFO\n$this")
+      fail(s"Incorrect log level $level. Expected: INFO. Message: $message")
     }
     message
   }
 
   def debugMessage(implicit pos: source.Position): String = {
     if (level != DEBUG) {
-      fail(s"Incorrect log level $level. Expected: DEBUG\n$this")
+      fail(s"Incorrect log level $level. Expected: DEBUG. Message: $message")
     }
     message
   }
@@ -194,21 +195,113 @@ object LogEntry {
   def assertLogSeq(
       mustContainWithClue: Seq[(LogEntry => Assertion, String)],
       mayContain: Seq[LogEntry => Assertion] = Seq.empty,
-  )(entries: Iterable[LogEntry]): Assertion = {
-    val mustContain = mustContainWithClue.map { case (assertion, _) => assertion }
+  )(entries: Iterable[LogEntry])(implicit pos: source.Position): Assertion = {
+    // Compute entries covered by no assertion
+    // 1st element: the entry
+    // 2nd element: all assertion failures for the entry
+    val unexpectedLogEntries: Iterable[(LogEntry, Checkpoint)] = for {
+      entry <- entries
+      checkpoint <- {
+        val checkpoint = new Checkpoint
+        var success = false
 
-    forEvery(entries) { entry =>
-      withClue(show"Unexpected log entry:\n\t$entry") {
-        forAtLeast(1, mustContain ++ mayContain)(assertion => assertion(entry))
+        def go(assertions: Seq[(LogEntry => Assertion, String)]): Unit =
+          for {
+            (assertion, clue) <- assertions
+            if !success
+          }
+            checkpoint {
+              withClue(s"\tAssertion $clue: ") {
+                assertion(entry)
+              }
+              success = true
+            }
+
+        go(mustContainWithClue.map { case (assertion, clue) =>
+          assertion -> clue.doubleQuoted.toString
+        })
+        go(mayContain.zipWithIndex.map { case (assertion, index) =>
+          assertion -> show"mayContain[$index]"
+        })
+
+        if (success) Seq.empty else Seq(checkpoint)
+      }
+
+    } yield entry -> checkpoint
+
+    // Compute assertions in mustContainWithClue that do not match any log entry.
+    // 1st element: the clue of the assertion
+    // 2nd element: failures of the assertion on all log entries
+    val assertionsNotMatchingAnyLogEntry: Seq[(String, Checkpoint)] = for {
+      (assertion, clue) <- mustContainWithClue
+      checkpoint <- {
+        val checkpoint = new Checkpoint
+        var success = false
+        for {
+          (entry, index) <- entries.zipWithIndex
+          if !success
+        } checkpoint {
+          withClue(show"\tEntry $index: ") {
+            assertion(entry)
+          }
+          success = true
+        }
+
+        if (success) Seq.empty else Seq(checkpoint)
+      }
+
+    } yield clue -> checkpoint
+
+    val globalCheckpoint = new Checkpoint
+
+    // Summary report for unexpected log entries
+    if (unexpectedLogEntries.nonEmpty) {
+      val unexpectedEntriesStr =
+        unexpectedLogEntries.map { case (entry, _) => entry }.mkShow("\n\t", "\n\t", "\n")
+      globalCheckpoint(
+        fail(
+          show"\nUnexpected log entries:$unexpectedEntriesStr"
+        )
+      )
+    }
+
+    // Summary report for assertions not matching any log entry
+    if (assertionsNotMatchingAnyLogEntry.nonEmpty) {
+      val missingEntriesStr = assertionsNotMatchingAnyLogEntry
+        .map { case (clue, _) => clue }
+        .mkShow("\n\t", "\n\t", "\n")
+      globalCheckpoint(
+        fail(show"\nAssertions not matching any log entry:$missingEntriesStr")
+      )
+    }
+
+    // Details for unexpected log entries
+    unexpectedLogEntries.foreach { case (entry, checkpoint) =>
+      globalCheckpoint {
+        withClue(show"\nDetails for unexpected entry: $entry\n") {
+          checkpoint.reportAll()
+        } withClue "\n"
       }
     }
 
-    forEvery(mustContainWithClue) { case (assertion, clue) =>
-      withClue(s"Missing log entry: $clue") {
-        forAtLeast(1, entries)(entry => assertion(entry))
+    // Details for assertions not matching any log entry
+    assertionsNotMatchingAnyLogEntry.foreach { case (clue, checkpoint) =>
+      globalCheckpoint {
+        withClue(show"\nDetails for assertion ${clue.doubleQuoted} without matching log entry:\n") {
+          checkpoint.reportAll()
+        } withClue "\n"
       }
     }
-  } withClue s"\n\nAll log entries:${LogEntry.format(entries)}"
+
+    // All log entries
+    if (unexpectedLogEntries.nonEmpty || assertionsNotMatchingAnyLogEntry.nonEmpty) {
+      globalCheckpoint(fail(s"\nAll log entries:${LogEntry.format(entries)}\n"))
+    }
+
+    // Finally, print all reports
+    globalCheckpoint.reportAll()
+    succeed
+  }
 
   /** Helper to pprint logs to help with debugging Usage is to LogEntry.pprintLogs andThen
     * LogEntry.assertLogSeq(...

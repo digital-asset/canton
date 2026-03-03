@@ -9,7 +9,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.examples.java.iou.Iou
-import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -35,14 +35,17 @@ import scala.concurrent.Future
 import scala.util.control.NonFatal
 
 /** Objective: Test party replication under configurable workload wrt differently hosted parties and
-  * type of commands (creates, archives, exercises) to aid in customized testing during the
-  * milestones of online indexing (removal of indexer pausing during OnPR).
+  * type of commands (creates, archives, exercises) to aid in customized testing under online
+  * indexing and paused indexing.
   *
   * Setup:
   *   - 2 participants: participant1 serves as the source participant (SP), while participant2 is
   *     the target participant (TP)
   *   - SP hosts Alice (replicated to TP) and Carol, TP hosts Alice (onboarding) and Bob.
   *   - 1 mediator/sequencer each
+  *   - test-specific setting of whether indexing is paused or performed in an online fashion, the
+  *     latter of which imposes restrictions on the type of concurrent workload and ACS commitment
+  *     checking (until online indexing is fully implemented).
   */
 trait OnlinePartyReplicationConfigurableWorkloadTest
     extends CommunityIntegrationTest
@@ -60,6 +63,9 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
 
   lazy val darPaths: Seq[String] = Seq(CantonLfV21, CantonExamplesPath)
 
+  // Whether a test pauses the indexer.
+  protected def pauseIndexer: Boolean
+
   private lazy val acsSnapshotFilename =
     tempDirectory.toTempFile(s"canton-acs-export-${this.getClass.getSimpleName}.gz").toString
 
@@ -67,7 +73,9 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
   private val createContractsAlreadyOnTP = true
   private val exerciseContractsAlreadyOnTP = true
   private val createContractsOnboardingOnTP = true
-  protected def exerciseContractsOnboardingOnTP: Boolean
+  // Tests that rely on indexer pausing support arbitrary workload including
+  // exercises of onboarding party contracts.
+  private val exerciseContractsOnboardingOnTP = pauseIndexer
 
   private val numContractsInCreateBatch = 100
   // Approximate target duration of OnPR used if necessary to slow down OnPR so that
@@ -111,7 +119,8 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
     EnvironmentDefinition.P2_S1M1
       .addConfigTransforms(
         ConfigTransforms.enableAlphaOnlinePartyReplicationSupport(
-          Map("participant2" -> (() => createTargetParticipantTestInterceptor()))
+          Map("participant2" -> (() => createTargetParticipantTestInterceptor())),
+          pauseIndexer = pauseIndexer,
         )*
       )
       .addConfigTransform(
@@ -125,7 +134,12 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
         sequencer1.topology.synchronizer_parameters
           .propose_update(
             daId,
-            _.update(reconciliationInterval = PositiveSeconds.tryOfSeconds(10).toConfig),
+            _.update(reconciliationInterval =
+              // TODO(#27707): When not pausing the indexer the ACS commitment processor needs to ignore
+              //  transient mismatches on behalf of onboarding parties.
+              (if (pauseIndexer) PositiveSeconds.tryOfSeconds(1)
+               else PositiveSeconds.tryOfDays(365)).toConfig
+            ),
           )
 
         participants.all.synchronizers.connect_local(sequencer1, daName)
@@ -254,14 +268,16 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
   }
 }
 
-// class OnlinePartyReplicationConfigurableWorkloadTestH2
-//     extends OnlinePartyReplicationConfigurableWorkloadTest {
-//   registerPlugin(new UseH2(loggerFactory))
-// }
+class OnlinePartyReplicationWithIndexerPausingAndArbitraryWorkloadTestH2
+    extends OnlinePartyReplicationConfigurableWorkloadTest {
+  registerPlugin(new UseH2(loggerFactory))
 
-class OnlinePartyReplicationConfigurableWorkloadTestPostgres
+  override protected def pauseIndexer: Boolean = true
+}
+
+class OnlinePartyReplicationWithOnlineIndexingAndLimitedWorkloadTestPostgres
     extends OnlinePartyReplicationConfigurableWorkloadTest {
   registerPlugin(new UsePostgres(loggerFactory))
 
-  override protected def exerciseContractsOnboardingOnTP: Boolean = true
+  override protected def pauseIndexer: Boolean = false
 }

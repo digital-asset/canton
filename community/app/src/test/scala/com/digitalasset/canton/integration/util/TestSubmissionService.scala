@@ -62,6 +62,7 @@ import com.digitalasset.daml.lf.engine.{
   ResultInterruption,
   ResultNeedContract,
   ResultNeedKey,
+  ResultNeedNKey,
   ResultNeedPackage,
   ResultPrefetch,
 }
@@ -377,6 +378,10 @@ class TestSubmissionService(
           r <- resolve(resume(cidO))
         } yield r
 
+      case ResultNeedNKey(_, _, _, _) =>
+        // TODO(#30398): add support if needed
+        throw new IllegalStateException("not supported yet")
+
       case ResultInterruption(continue, _) =>
         resolve(iterateOverInterrupts(continue))
 
@@ -424,10 +429,11 @@ object TestSubmissionService {
           else
             LanguageVersion.stableLfVersionsRange,
         checkAuthorization = checkAuthorization,
-        // TODO(#30398) revisit how we enable contract key
         contractStateMode =
-          if (enableLfDev) ContractStateMachine.Mode.LegacyNUCK
-          else ContractStateMachine.Mode.NoContractKey,
+          if (enableLfDev)
+            ContractStateMachine.Mode.devDefault
+          else
+            ContractStateMachine.Mode.default,
       )
     )
 

@@ -9,16 +9,16 @@ import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.data.ActiveContract
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
 import com.digitalasset.canton.participant.admin.party.{
+  PartyReplicationIndexingWorkflow,
   PartyReplicationStatus,
   PartyReplicationTestInterceptor,
 }
-import com.digitalasset.canton.participant.event.RecordOrderPublisher
+import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
 import com.digitalasset.canton.participant.store.{
   AcsReplicationProgress,
@@ -40,10 +40,9 @@ class PartyReplicationFileImporter(
     partyOnboardingAt: EffectiveTime,
     protected val replicationProgressState: AcsReplicationProgress,
     persistsContracts: TargetParticipantAcsPersistence.PersistsContracts,
-    recordOrderPublisher: RecordOrderPublisher,
     requestTracker: RequestTracker,
-    pureCrypto: CryptoPureApi,
     acsReader: Iterator[ActiveContract],
+    indexingWorkflow: PartyReplicationIndexingWorkflow,
     testOnlyInterceptorO: Option[PartyReplicationTestInterceptor],
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit val executionContext: ExecutionContext)
@@ -53,9 +52,7 @@ class PartyReplicationFileImporter(
       partyOnboardingAt,
       replicationProgressState,
       persistsContracts,
-      recordOrderPublisher,
       requestTracker,
-      pureCrypto,
     ) {
 
   def importEntireAcsSnapshotInOneGo()(implicit
@@ -63,8 +60,8 @@ class PartyReplicationFileImporter(
   ): EitherT[FutureUnlessShutdown, String, Unit] = {
     val numContractsImported = new AtomicInteger(0)
     for {
-      _ <- MonadUtil.sequentialTraverse_(
-        acsReader.grouped(TargetParticipantAcsPersistence.contractsToRequestEachTime.unwrap)
+      contractsToIndex <- MonadUtil.sequentialTraverse(
+        acsReader.grouped(TargetParticipantAcsPersistence.contractsToRequestEachTime.unwrap).toSeq
       ) { contracts =>
         awaitTestInterceptor()
         logger.info(s"About to import contracts starting at ordinal ${numContractsImported.get}")
@@ -72,9 +69,10 @@ class PartyReplicationFileImporter(
           NonEmpty
             .from(contracts)
             .getOrElse(throw new IllegalStateException("Grouped ACS must be nonempty"))
-        importContracts(contractsNE).map(totalNumContractsImported =>
+        importContracts(contractsNE).map { case (totalNumContractsImported, contractsToIndex) =>
           numContractsImported.set(totalNumContractsImported.unwrap)
-        )
+          contractsToIndex
+        }
       }
       progress <- EitherT.fromEither[FutureUnlessShutdown](
         replicationProgressState
@@ -90,9 +88,8 @@ class PartyReplicationFileImporter(
           this,
         ),
       )
-      // Unpause the indexer
       _ <- EitherT.right[String](
-        FutureUnlessShutdown.lift(recordOrderPublisher.publishBufferedEvents())
+        FutureUnlessShutdown.lift(indexingWorkflow.indexAllContractBatches(contractsToIndex))
       )
     } yield ()
   }
@@ -136,22 +133,32 @@ object PartyReplicationFileImporter {
       participantNodePersistentState: Eval[ParticipantNodePersistentState],
       connectedSynchronizer: ConnectedSynchronizer,
       acsReader: Iterator[ActiveContract],
+      config: AlphaOnlinePartyReplicationConfig,
       testOnlyInterceptorO: Option[PartyReplicationTestInterceptor],
       loggerFactory: NamedLoggerFactory,
-  )(implicit executionContext: ExecutionContext) = new PartyReplicationFileImporter(
-    requestId,
-    connectedSynchronizer.psid,
-    partyOnboardingAt,
-    replicationProgressState,
-    new TargetParticipantAcsPersistence.PersistsContractsImpl(participantNodePersistentState),
-    connectedSynchronizer.ephemeral.recordOrderPublisher,
-    connectedSynchronizer.ephemeral.requestTracker,
-    connectedSynchronizer.synchronizerHandle.syncPersistentState.pureCryptoApi,
-    acsReader,
-    testOnlyInterceptorO,
-    loggerFactory
+  )(implicit executionContext: ExecutionContext) = {
+    val requestSpecificLoggerFactory = loggerFactory
       .append("psid", connectedSynchronizer.psid.toProtoPrimitive)
       .append("partyId", partyId.toProtoPrimitive)
-      .append("requestId", requestId.toHexString),
-  )
+      .append("requestId", requestId.toHexString)
+    new PartyReplicationFileImporter(
+      requestId,
+      connectedSynchronizer.psid,
+      partyOnboardingAt,
+      replicationProgressState,
+      new TargetParticipantAcsPersistence.PersistsContractsImpl(participantNodePersistentState),
+      connectedSynchronizer.ephemeral.requestTracker,
+      acsReader,
+      new PartyReplicationIndexingWorkflow(
+        requestId,
+        connectedSynchronizer.psid,
+        connectedSynchronizer.ephemeral.recordOrderPublisher,
+        connectedSynchronizer.synchronizerHandle.syncPersistentState.pureCryptoApi,
+        config.pauseSynchronizerIndexingDuringPartyReplication,
+        requestSpecificLoggerFactory,
+      ),
+      testOnlyInterceptorO,
+      requestSpecificLoggerFactory,
+    )
+  }
 }

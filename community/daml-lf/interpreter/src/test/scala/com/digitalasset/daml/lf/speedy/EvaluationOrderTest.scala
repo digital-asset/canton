@@ -538,7 +538,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
         parties,
         readAs,
         mode =
-          if (withKey) ContractStateMachine.Mode.UCK else ContractStateMachine.Mode.NoContractKey,
+          if (withKey) ContractStateMachine.Mode.UCKWithRollback else ContractStateMachine.Mode.NoContractKey,
         packageResolution = packageResolution,
         traceLog = traceLog,
       )

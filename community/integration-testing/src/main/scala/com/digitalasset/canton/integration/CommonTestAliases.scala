@@ -44,12 +44,18 @@ trait CommonTestAliases {
   lazy val sequencer3: LocalSequencerReference = ls("sequencer3")
   lazy val sequencer4: LocalSequencerReference = ls("sequencer4")
   lazy val sequencer5: LocalSequencerReference = ls("sequencer5")
+  lazy val sequencer6: LocalSequencerReference = ls("sequencer6")
+  lazy val sequencer7: LocalSequencerReference = ls("sequencer7")
+  lazy val sequencer8: LocalSequencerReference = ls("sequencer8")
 
   lazy val mediator1: LocalMediatorReference = lm("mediator1")
   lazy val mediator2: LocalMediatorReference = lm("mediator2")
   lazy val mediator3: LocalMediatorReference = lm("mediator3")
   lazy val mediator4: LocalMediatorReference = lm("mediator4")
   lazy val mediator5: LocalMediatorReference = lm("mediator5")
+  lazy val mediator6: LocalMediatorReference = lm("mediator6")
+  lazy val mediator7: LocalMediatorReference = lm("mediator7")
+  lazy val mediator8: LocalMediatorReference = lm("mediator8")
 
   // Remote
   lazy val remoteSequencer1: RemoteSequencerReference = rs("sequencer1")

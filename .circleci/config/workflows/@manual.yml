@@ -241,7 +241,7 @@ manual_open_source_code_drop:
 manual_topology_chaos_test:
   when:
     and:
-      - equal: [ toxiproxy-chaos-test, << pipeline.parameters.manual_job >> ]
+      - equal: [ topology-chaos-test, << pipeline.parameters.manual_job >> ]
       - not:
           equal: [ main, << pipeline.git.branch >> ]
   jobs:

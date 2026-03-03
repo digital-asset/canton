@@ -15,12 +15,14 @@ import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
   InstanceReference,
+  LocalSequencerReference,
   ParticipantReference,
   SequencerReference,
 }
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.UsePostgres
+import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
 import com.digitalasset.canton.integration.util.EntitySyntax
@@ -36,7 +38,9 @@ private[lsu] trait LsuBase
     extends CommunityIntegrationTest
     with SharedEnvironment
     with EntitySyntax
-    with LogicalUpgradeUtils {
+    with LogicalUpgradeUtils
+    with TrafficBalanceSupport
+    with LsuTrafficManagement {
 
   registerPlugin(new UsePostgres(loggerFactory))
 
@@ -61,6 +65,7 @@ private[lsu] trait LsuBase
     */
   protected def defaultEnvironmentSetup(
       participantsOverride: Option[Seq[ParticipantReference]] = None,
+      hasTrafficControl: Boolean = true,
       connectParticipants: Boolean = true,
   )(implicit env: TestConsoleEnvironment): Unit = {
     import env.{participants as _, *}
@@ -72,17 +77,63 @@ private[lsu] trait LsuBase
       participants.dars.upload(CantonExamplesPath)
     }
 
-    synchronizerOwners1.foreach(
-      _.topology.synchronizer_parameters.propose_update(
-        daId,
-        _.copy(reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)),
-      )
+    setDefaultsDynamicSynchronizerParameters(
+      daId,
+      synchronizerOwners1,
+      hasTrafficControl = hasTrafficControl,
     )
 
     oldSynchronizerNodes =
       SynchronizerNodes(newOldSequencers.values.toSeq.map(ls), newOldMediators.values.toSeq.map(lm))
     newSynchronizerNodes =
       SynchronizerNodes(newOldSequencers.keySet.toSeq.map(ls), newOldMediators.keySet.toSeq.map(lm))
+  }
+
+  protected def setDefaultsDynamicSynchronizerParameters(
+      psid: PhysicalSynchronizerId,
+      synchronizerOwners: Set[InstanceReference],
+      hasTrafficControl: Boolean = true,
+  ): Unit = synchronizerOwners.foreach(
+    _.topology.synchronizer_parameters.propose_update(
+      psid,
+      _.copy(
+        // Enable traffic control
+        trafficControl = Option.when(hasTrafficControl)(generousTrafficControlParameters),
+        // Ensure we have frequent ACS commitments exchange to increase the likelihood of catching issues
+        reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1),
+      ),
+    )
+  )
+
+  /** Transfer traffic from old sequencers to new ones.
+    *
+    * Prerequisite:
+    *   - Time is after upgrade time
+    *
+    * @param fixtureOverride
+    *   If defined, use the provided fixture instead of oldSynchronizerNodes and
+    *   newSynchronizerNodes.
+    * @param suppressLogs
+    *   Whether errors in the log (NotAtUpgradeTimeOrBeyond) should be suppressed. Use false if the
+    *   call to transferTraffic is already in a suppression logger block (since those cannot be
+    *   nested).
+    */
+  protected def transferTraffic(
+      fixtureOverride: Option[Fixture] = None,
+      suppressLogs: Boolean = true,
+  ): Unit = {
+
+    val oldSequencers: Seq[LocalSequencerReference] =
+      fixtureOverride.fold(oldSynchronizerNodes.sequencers)(_.oldSynchronizerNodes.sequencers)
+
+    val newSequencers: Seq[LocalSequencerReference] =
+      fixtureOverride.fold(newSynchronizerNodes.sequencers)(_.newSynchronizerNodes.sequencers)
+
+    transferTraffic(
+      oldSequencers = oldSequencers,
+      newSequencers = newSequencers,
+      suppressLogs = suppressLogs,
+    )
   }
 
   protected def defaultSynchronizerConnectionConfig()(implicit
@@ -161,7 +212,8 @@ private[lsu] trait LsuBase
     *   - Sequencer successors announcements
     */
   protected def performSynchronizerNodesLsu(
-      fixture: Fixture
+      fixture: Fixture,
+      announceSequencerSuccessors: Boolean = true,
   )(implicit consoleEnvironment: ConsoleEnvironment): Unit = {
     fixture.oldSynchronizerOwners.foreach(
       _.topology.lsu.announcement.propose(fixture.newPSId, fixture.upgradeTime)
@@ -179,13 +231,15 @@ private[lsu] trait LsuBase
 
     migrateSynchronizerNodes(fixture)
 
-    fixture.oldSynchronizerNodes.sequencers.zip(fixture.newSynchronizerNodes.sequencers).foreach {
-      case (oldSequencer, newSequencer) =>
-        oldSequencer.topology.lsu.sequencer_successors.propose_successor(
-          sequencerId = oldSequencer.id,
-          endpoints = newSequencer.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-          synchronizerId = fixture.currentPSId,
-        )
+    if (announceSequencerSuccessors) {
+      fixture.oldSynchronizerNodes.sequencers.zip(fixture.newSynchronizerNodes.sequencers).foreach {
+        case (oldSequencer, newSequencer) =>
+          oldSequencer.topology.lsu.sequencer_successors.propose_successor(
+            sequencerId = oldSequencer.id,
+            endpoints = newSequencer.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
+            synchronizerId = fixture.currentPSId,
+          )
+      }
     }
   }
 

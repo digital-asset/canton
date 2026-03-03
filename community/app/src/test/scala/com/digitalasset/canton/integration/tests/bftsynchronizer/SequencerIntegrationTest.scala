@@ -103,8 +103,8 @@ trait SequencerIntegrationTest
     import env.*
     onboardNewSequencer(
       synchronizerId,
-      newSequencerReference = sequencer2,
-      existingSequencerReference = sequencer1,
+      newSequencer = sequencer2,
+      existingSequencer = sequencer1,
       synchronizerOwners = synchronizerOwners.toSet,
     )
   }

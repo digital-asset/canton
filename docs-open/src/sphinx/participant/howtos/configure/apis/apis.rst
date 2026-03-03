@@ -50,33 +50,44 @@ To tweak the keep-alive configuration of a connection, adjust the following para
 * ``timeout``
 * ``permit-keep-alive-time``
 * ``permit-keep-alive-without-calls``
-
-You can adjust the first two parameters for either the Synchronizer Public API client in the ``keep-alive-client`` section, or for the
-server side of the Admin API and the gRPC Ledger API in the ``keep-alive-server`` section. The last two parameters are server only,
-and you can therefore adjust them only in the ``keep-alive-server`` section of the Admin API and the gRPC Ledger API.
-
-The `gRPC documentation <https://grpc.io/docs/guides/keepalive/>`__ further describes these parameters and their effect.
-
-.. note:: ``permit-keep-alive-time`` specifies the most aggressive keep-alive time that a client is permitted to use.
-    If a client uses a keep-alive ``time`` that is more aggressive than the server's ``permit-keep-alive-time``,
-    the connection is terminated with a ``GOAWAY`` error with “too_many_pings” as the debug data.
-
-.. note:: Setting ``permit-keep-alive-without-calls`` to ``true`` allows clients to send ping messages outside of any
-    ongoing gRPC call. Such a ping otherwise results in a ``GOAWAY`` error.
+* ``keep-alive-withouth-calls``
+* ``idle-timeout``
 
 Canton sets different default values for these parameters depending on the API:
 
-+---------------------------------+------------+------------+
-| API                             | Admin API  | Ledger API |
-+=================================+============+============+
-| time                            | 40s        | 10min      |
-+---------------------------------+------------+------------+
-| timeout                         | 20s        | 20s        |
-+---------------------------------+------------+------------+
-| permit-keep-alive-time          | 20s        | 10s        |
-+---------------------------------+------------+------------+
-| permit-keep-alive-without-calls | false      | false      |
-+---------------------------------+------------+------------+
++---------------------------------+------------+------------+------------+
+| Config                          | Admin API  | Ledger API | Client     |
++=================================+============+============+============+
+| time                            | 40s        | 10min      | 40s        |
++---------------------------------+------------+------------+------------+
+| timeout                         | 20s        | 20s        | 15s        |
++---------------------------------+------------+------------+------------+
+| keep-alive-without-calls        | N/A        | N/A        | false      |
++---------------------------------+------------+------------+------------+
+| idle-timeout                    | N/A        | N/A        | 30min      |
++---------------------------------+------------+------------+------------+
+| permit-keep-alive-time          | 20s        | 10s        | N/A        |
++---------------------------------+------------+------------+------------+
+| permit-keep-alive-without-calls | false      | false      | N/A        |
++---------------------------------+------------+------------+------------+
+
+Client values can be adjusted in the ``keep-alive-client`` section of the configuration,
+while server values can be adjusted in the ``keep-alive-server`` of the configuration.
+
+.. important::
+    ``keep-alive-without-calls`` can have a negative performance impact. Be cautious when turning it on, and in general prefer using ``idle-timeout`` when possible.
+
+``permit-keep-alive-time`` specifies the most aggressive keep-alive time that a client is permitted to use.
+If a client uses a keep-alive ``time`` that is more aggressive than the server's ``permit-keep-alive-time``,
+the connection is terminated with a ``GOAWAY`` error with “too_many_pings” as the debug data.
+Setting ``permit-keep-alive-without-calls`` to ``true`` allows clients to send ping messages outside of any ongoing gRPC call. Such a ping otherwise results in a ``GOAWAY`` error.
+When ``keep-alive-without-calls`` is enabled, ``permit-keep-alive-without-calls`` must be enabled on the server side, and ``permit-keep-alive-time`` adjusted to allow for a potentially higher frequency of keep alives coming from the client.
+
+.. tip::
+    The value for ``idle-timeout`` should be set lower than timeouts in the network stack between client and server.
+    In particular, check the idle timeout configuration of Load Balancers. Defaults for `AWS ALB <https://docs.aws.amazon.com/elasticloadbalancing/latest/application/application-load-balancers.html>`__, `AWS NLB <https://docs.aws.amazon.com/elasticloadbalancing/latest/network/update-idle-timeout.html>`__, `GCP <https://docs.cloud.google.com/load-balancing/docs/https/request-distribution#http-keepalive-timeout>`__.
+
+The `gRPC documentation <https://grpc.io/docs/guides/keepalive/>`__ further describes these parameters and their effect.
 
 The following is an example that demonstrates how to configure the keep-alive for the various APIs:
 

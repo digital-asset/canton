@@ -20,12 +20,10 @@ import com.digitalasset.daml.lf.transaction._
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import com.digitalasset.daml.lf.value.Value._
 import org.scalatest.Assertion
-import org.scalatest.freespec.AsyncFreeSpec
-import org.scalatest.matchers.should.Matchers
 
 import scala.annotation.nowarn
 import scala.collection.immutable.ArraySeq
-import scala.concurrent.Future
+import scala.concurrent.{Future, ExecutionContext}
 import scala.language.implicitConversions
 
 /** A test suite for smart contract upgrades.
@@ -57,92 +55,94 @@ import scala.language.implicitConversions
   * pretty well utilized, but gives big improvements for integration tests with
   * multiple Canton runners.
   */
-abstract class UpgradesMatrix[Err, Res](
-    val cases: UpgradesMatrixCases,
-    nk: Option[(Int, Int)] = None,
-) extends AsyncFreeSpec
-    with Matchers {
+trait UpgradesMatrix[Err, Res, AdditionalSetup] {
   implicit val logContext: LoggingContext = LoggingContext.ForTesting
 
+  val cases: UpgradesMatrixCases
+
+  def nk: Option[(Int, Int)] = None
+  def createTestCase(name: String, assertion: ExecutionContext => Future[Assertion]): Unit
+
   def execute(
-      setupData: UpgradesMatrixCases.SetupData,
-      testHelper: cases.TestHelper,
+      setupData: UpgradesMatrixCases.SetupData[AdditionalSetup],
+      testHelper: UpgradesMatrixCases#TestHelper,
       apiCommands: ImmArray[ApiCommand],
       contractOrigin: UpgradesMatrixCases.ContractOrigin,
       creationPackageStatus: UpgradesMatrixCases.CreationPackageStatus,
-  ): Future[Either[Err, Res]]
+  )(implicit ec: ExecutionContext): Future[Either[Err, Res]]
 
-  def setup(testHelper: cases.TestHelper): Future[UpgradesMatrixCases.SetupData]
+  def setup(testHelper: UpgradesMatrixCases#TestHelper)(implicit ec: ExecutionContext): Future[UpgradesMatrixCases.SetupData[AdditionalSetup]]
 
   def assertResultMatchesExpectedOutcome(
       result: Either[Err, Res],
       expectedOutcome: UpgradesMatrixCases.ExpectedOutcome,
-  ): Assertion
+  )(implicit ec: ExecutionContext): Assertion
 
   // Use this to run different sets of tests for different suites
   var testIdx: Int = 0
 
-  // This is the main loop of the test: for every combination of test case, operation, catch behavior, entry point, and
-  // contract origin, we generate an API command, execute it, and check that the result matches the expected outcome.
-  for (testCase <- cases.testCases) {
-    val testHelper = new cases.TestHelper(testCase)
-    for (operation <- cases.operations) {
-      for (catchBehavior <- cases.catchBehaviors) {
-        for (entryPoint <- cases.entryPoints) {
-          for (contractOrigin <- cases.contractOrigins) {
-            for (creationPackageStatus <- cases.creationPackageStatuses) {
-              testHelper
-                .makeApiCommands(
-                  operation,
-                  catchBehavior,
-                  entryPoint,
-                  contractOrigin,
-                  creationPackageStatus,
-                )
-                .foreach { getApiCommands =>
-                  val shouldShow =
-                    // If n, k is specified, then only run tests that belong to the kth group
-                    nk match {
-                      case Some((n, k)) => testIdx % n == k
-                      case None => true
-                    }
-                  if (shouldShow) {
-                    val title =
-                      List(
-                        testCase.templateName,
-                        operation.name,
-                        catchBehavior.name,
-                        entryPoint.name,
-                        contractOrigin.name,
-                        creationPackageStatus.toString,
-                        testCase.expectedOutcome.description,
-                        testIdx.toString,
-                      ).mkString("/")
-                    title in {
-                      for {
-                        setupData <- setup(testHelper)
-                        apiCommands = getApiCommands(setupData)
-                        outcome <- execute(
-                          setupData,
-                          testHelper,
-                          apiCommands,
-                          contractOrigin,
-                          creationPackageStatus,
+  def defineTestCases(): Unit =
+    // This is the main loop of the test: for every combination of test case, operation, catch behavior, entry point, and
+    // contract origin, we generate an API command, execute it, and check that the result matches the expected outcome.
+    for (testCase <- cases.testCases) {
+      val testHelper = new cases.TestHelper(testCase)
+      for (operation <- cases.operations) {
+        for (catchBehavior <- cases.catchBehaviors) {
+          for (entryPoint <- cases.entryPoints) {
+            for (contractOrigin <- cases.contractOrigins) {
+              for (creationPackageStatus <- cases.creationPackageStatuses) {
+                testHelper
+                  .makeApiCommands(
+                    operation,
+                    catchBehavior,
+                    entryPoint,
+                    contractOrigin,
+                    creationPackageStatus,
+                  )
+                  .foreach { getApiCommands =>
+                    val shouldShow =
+                      // If n, k is specified, then only run tests that belong to the kth group
+                      nk match {
+                        case Some((n, k)) => testIdx % n == k
+                        case None => true
+                      }
+                    if (shouldShow) {
+                      val title =
+                        List(
+                          testCase.templateName,
+                          operation.name,
+                          catchBehavior.name,
+                          entryPoint.name,
+                          contractOrigin.name,
+                          creationPackageStatus.toString,
+                          testCase.expectedOutcome.description,
+                          testIdx.toString,
+                        ).mkString("/")
+                      createTestCase(title, { implicit ec: ExecutionContext =>
+                        for {
+                          setupData <- setup(testHelper)
+                          apiCommands = getApiCommands(setupData)
+                          outcome <- execute(
+                            setupData,
+                            testHelper,
+                            apiCommands,
+                            contractOrigin,
+                            creationPackageStatus,
+                          )
+                        } yield assertResultMatchesExpectedOutcome(
+                          outcome,
+                          testCase.expectedOutcome,
                         )
-                      } yield assertResultMatchesExpectedOutcome(
-                        outcome,
-                        testCase.expectedOutcome,
-                      )
+                      })
                     }
+                    testIdx += 1
                   }
-                  testIdx += 1
-                }
+              }
             }
           }
         }
       }
     }
-  }
 }
 
 // Instances of UpgradesMatrixCases which provide cases built with LF 2.dev or the
@@ -319,16 +319,16 @@ class UpgradesMatrixCases(
 
     // Used for creating the "lookup contract by key" map passed to the engine. Specified as SValues instead of Values
     // because the key hashing function acts on SValues.
-    def additionalv1KeyArgsSValue(
+    def additionalv1KeyArgsSValue[AdditionalSetup](
         @nowarn v1PkgId: PackageId,
-        @nowarn setupData: SetupData,
+        @nowarn setupData: SetupData[AdditionalSetup],
     ): List[(Name, SValue)] =
       List.empty
     // Used for creating *ByKey commands. Specified as SValues instead of Values because the key hashing function acts
     // on SValues.
-    def additionalv2KeyArgsSValue(
+    def additionalv2KeyArgsSValue[AdditionalSetup](
         @nowarn v2PkgId: PackageId,
-        @nowarn setupData: SetupData,
+        @nowarn setupData: SetupData[AdditionalSetup],
     ): List[(Name, SValue)] =
       List.empty
     // Used for looking up contracts by key in choice bodies
@@ -898,11 +898,11 @@ class UpgradesMatrixCases(
     override def v2Key = v1Key
 
     // Used for creating disclosures of v1 contracts and the "lookup contract by key" map passed to the engine.
-    override def additionalv1KeyArgsSValue(pkgId: PackageId, setupData: SetupData) =
+    override def additionalv1KeyArgsSValue[AdditionalSetup](pkgId: PackageId, setupData: SetupData[AdditionalSetup]) =
       List(("maintainers2": Name) -> SValue.SList(FrontStack(SValue.SParty(setupData.bob))))
 
     // Used for creating *ByKey commands
-    override def additionalv2KeyArgsSValue(pkgId: PackageId, setupData: SetupData) =
+    override def additionalv2KeyArgsSValue[AdditionalSetup](pkgId: PackageId, setupData: SetupData[AdditionalSetup]) =
       additionalv1KeyArgsSValue(pkgId, setupData)
     // Used for looking up contracts by key in choice bodies
     override def additionalv2KeyArgsLf(v2PkgId: PackageId) =
@@ -1636,7 +1636,7 @@ class UpgradesMatrixCases(
 
     override def additionalv2KeyArgsLf(v2PkgId: PackageId) =
       s", extra = None @Unit"
-    override def additionalv2KeyArgsSValue(v2PkgId: PackageId, setupData: SetupData) =
+    override def additionalv2KeyArgsSValue[AdditionalSetup](v2PkgId: PackageId, setupData: SetupData[AdditionalSetup]) =
       List(("extra": Name) -> SValue.SOptional(None))
 
     override def v1Key = s"""
@@ -1660,7 +1660,7 @@ class UpgradesMatrixCases(
 
     override def additionalv2KeyArgsLf(v2PkgId: PackageId) =
       s", extra = None @Unit"
-    override def additionalv2KeyArgsSValue(v2PkgId: PackageId, setupData: SetupData) =
+    override def additionalv2KeyArgsSValue[AdditionalSetup](v2PkgId: PackageId, setupData: SetupData[AdditionalSetup]) =
       List(("extra": Name) -> SValue.SOptional(None))
 
     override def v1Key = s"""
@@ -1702,7 +1702,7 @@ class UpgradesMatrixCases(
     override def v2AdditionalKeyFields: String = ""
 
     // Used for creating disclosures of v1 contracts and the "lookup contract by key" map passed to the engine.
-    override def additionalv1KeyArgsSValue(v1PkgId: PackageId, setupData: SetupData) =
+    override def additionalv1KeyArgsSValue[AdditionalSetup](v1PkgId: PackageId, setupData: SetupData[AdditionalSetup]) =
       List(("extra": Name) -> SValue.SOptional(Some(SValue.SUnit)))
 
     override def v1Key = s"""
@@ -1886,7 +1886,7 @@ class UpgradesMatrixCases(
   val engineConfig: EngineConfig =
     EngineConfig(
       allowedLanguageVersions = language.LanguageVersion.allUpToVersion(langVersion),
-      contractStateMode = ContractStateMachine.Mode.UCK
+      contractStateMode = ContractStateMachine.Mode.UCKWithRollback
     )
 
   val contractIdVersion: ContractIdVersion = ContractIdVersion.V1
@@ -1969,7 +1969,7 @@ class UpgradesMatrixCases(
       ).slowAppend(testCase.additionalCreateArgsValue(templateDefsV1PkgId)),
     )
 
-    def globalContractv1KeySValue(setupData: SetupData): SValue = {
+    def globalContractv1KeySValue[AdditionalSetup](setupData: SetupData[AdditionalSetup]): SValue = {
       val (additionalFields, additionalValues) =
         testCase.additionalv1KeyArgsSValue(templateDefsV1PkgId, setupData).unzip
       SValue.SRecord(
@@ -1982,7 +1982,7 @@ class UpgradesMatrixCases(
       )
     }
 
-    def globalContractv2KeySValue(setupData: SetupData): SValue = {
+    def globalContractv2KeySValue[AdditionalSetup](setupData: SetupData[AdditionalSetup]): SValue = {
       val (additionalFields, additionalValues) =
         testCase.additionalv2KeyArgsSValue(templateDefsV2PkgId, setupData).unzip
       SValue.SRecord(
@@ -1995,7 +1995,7 @@ class UpgradesMatrixCases(
       )
     }
 
-    def globalContractKeyWithMaintainers(setupData: SetupData): Option[GlobalKeyWithMaintainers] =
+    def globalContractKeyWithMaintainers[AdditionalSetup](setupData: SetupData[AdditionalSetup]): Option[GlobalKeyWithMaintainers] =
       whenKeysOtherwiseNone {
         val keySValue = globalContractv1KeySValue(setupData)
         GlobalKeyWithMaintainers.assertBuild(
@@ -2017,7 +2017,7 @@ class UpgradesMatrixCases(
         entryPoint: EntryPoint,
         contractOrigin: ContractOrigin,
         creationPackageStatus: CreationPackageStatus,
-    ): Option[SetupData => ImmArray[ApiCommand]] = {
+    ): Option[SetupData[Any] => ImmArray[ApiCommand]] = {
 
       val choiceArg = ValueRecord(
         None,
@@ -2189,12 +2189,13 @@ object UpgradesMatrixCases {
   case object ExpectInternalInterpretationError
       extends ExpectedOutcome("should fail with an internal interpretation error")
 
-  case class SetupData(
+  case class SetupData[+AdditionalSetup](
       alice: Party,
       bob: Party,
       clientLocalContractId: ContractId,
       clientGlobalContractId: ContractId,
       globalContractId: ContractId,
+      additionalSetup: AdditionalSetup,
   )
 
   sealed abstract class ContractOrigin(val name: String)

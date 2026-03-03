@@ -80,7 +80,7 @@ import com.digitalasset.canton.sequencing.authentication.{
 }
 import com.digitalasset.canton.sequencing.client.SequencerClientConfig
 import com.digitalasset.canton.synchronizer.block.{SequencerDriver, SequencerDriverFactory}
-import com.digitalasset.canton.synchronizer.config.PublicServerConfig
+import com.digitalasset.canton.synchronizer.config.{DeclarativeSequencerConfig, PublicServerConfig}
 import com.digitalasset.canton.synchronizer.mediator.{
   DeduplicationStoreConfig,
   MediatorConfig,
@@ -109,6 +109,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.BytesUnit
+import com.digitalasset.daml.lf.transaction.ContractStateMachine
 import com.typesafe.config.ConfigException.UnresolvedSubstitution
 import com.typesafe.config.{
   Config,
@@ -632,19 +633,25 @@ final case class CantonConfig(
       .modify(mapWithDefaults)
   }
 
-  def mergeDynamicChanges(newConfig: CantonConfig): CantonConfig =
-    copy(participants =
-      participants
-        .map { case (name, config) =>
-          (name, config, newConfig.participants.get(name))
-        }
-        .map {
-          case (name, old, Some(newConfig)) =>
-            (name, old.copy(alphaDynamic = newConfig.alphaDynamic))
-          case (name, old, None) => (name, old)
-        }
-        .toMap
+  def mergeDynamicChanges(newConfig: CantonConfig): CantonConfig = {
+    def merge[T](cur: Map[InstanceName, T], newConfig: Map[InstanceName, T], merger: (T, T) => T) =
+      cur.map { case (name, config) =>
+        (name, newConfig.get(name).map(merger(config, _)).getOrElse(config))
+      }
+    copy(
+      participants = merge[ParticipantNodeConfig](
+        participants,
+        newConfig.participants,
+        { case (old, cur) => old.copy(alphaDynamic = cur.alphaDynamic) },
+      ),
+      sequencers = merge[SequencerNodeConfig](
+        sequencers,
+        newConfig.sequencers,
+        { case (old, cur) => old.copy(declarative = cur.declarative) },
+      ),
     )
+
+  }
 
 }
 
@@ -1016,15 +1023,17 @@ object CantonConfig {
       deriveReader[SequencerHighAvailabilityConfig]
     lazy implicit final val sequencerConfigDatabaseReader: ConfigReader[SequencerConfig.Database] =
       deriveReader[SequencerConfig.Database]
+
     lazy implicit final val throughputCapConfigReader
-        : ConfigReader[BlockSequencerConfig.ThroughputCapConfig] =
+        : ConfigReader[BlockSequencerConfig.ThroughputCapConfig] = {
+      implicit val throughputCapByMessageTypeConfigReader
+          : ConfigReader[BlockSequencerConfig.ThroughputCapByMessageTypeConfig] = {
+        import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.IndividualThroughputCapConfig.ConfigImplicits.individualCapConfigReader
+        deriveReader[BlockSequencerConfig.ThroughputCapByMessageTypeConfig]
+      }
       deriveReader[BlockSequencerConfig.ThroughputCapConfig]
-    lazy implicit final val throughputCapByMessageTypeConfigReader
-        : ConfigReader[BlockSequencerConfig.ThroughputCapByMessageTypeConfig] =
-      deriveReader[BlockSequencerConfig.ThroughputCapByMessageTypeConfig]
-    lazy implicit final val individualThroughputCapConfigReader
-        : ConfigReader[BlockSequencerConfig.IndividualThroughputCapConfig] =
-      deriveReader[BlockSequencerConfig.IndividualThroughputCapConfig]
+    }
+
     lazy implicit final val individualCircuitBreakerConfigReader
         : ConfigReader[BlockSequencerConfig.IndividualCircuitBreakerConfig] =
       deriveReader[BlockSequencerConfig.IndividualCircuitBreakerConfig]
@@ -1343,6 +1352,13 @@ object CantonConfig {
           )
         }
 
+      implicit val modeConfigReader: ConfigReader[ContractStateMachine.Mode] =
+        ConfigReader.fromString[ContractStateMachine.Mode] { str =>
+          ContractStateMachine.Mode
+            .fromString(str)
+            .toRight(CannotConvert(str, "Mode", "Not a valid contract state machine mode"))
+        }
+
       implicit val cantonEngineConfigReader: ConfigReader[CantonEngineConfig] = {
         implicit val engineLoggingConfigReader: ConfigReader[EngineLoggingConfig] =
           deriveReader[EngineLoggingConfig]
@@ -1439,8 +1455,10 @@ object CantonConfig {
 
     implicit val publicServerConfigReader: ConfigReader[PublicServerConfig] =
       deriveReader[PublicServerConfig]
-    implicit val sequencerNodeConfigReader: ConfigReader[SequencerNodeConfig] =
+    implicit val sequencerNodeConfigReader: ConfigReader[SequencerNodeConfig] = {
+      import DeclarativeSequencerConfig.Readers.*
       deriveReader[SequencerNodeConfig]
+    }
   }
 
   private implicit def cantonConfigReader(implicit
@@ -1740,14 +1758,13 @@ object CantonConfig {
     lazy implicit final val sequencerConfigDatabaseWriter: ConfigWriter[SequencerConfig.Database] =
       deriveWriter[SequencerConfig.Database]
     lazy implicit final val throughputCapConfigWriter
-        : ConfigWriter[BlockSequencerConfig.ThroughputCapConfig] =
+        : ConfigWriter[BlockSequencerConfig.ThroughputCapConfig] = {
+      import BlockSequencerConfig.IndividualThroughputCapConfig.ConfigImplicits.individualCapConfigWriter
+      implicit val throughputCapByMessageTypeConfigWriter
+          : ConfigWriter[BlockSequencerConfig.ThroughputCapByMessageTypeConfig] =
+        deriveWriter[BlockSequencerConfig.ThroughputCapByMessageTypeConfig]
       deriveWriter[BlockSequencerConfig.ThroughputCapConfig]
-    lazy implicit final val throughputCapByMessageTypeConfigWriter
-        : ConfigWriter[BlockSequencerConfig.ThroughputCapByMessageTypeConfig] =
-      deriveWriter[BlockSequencerConfig.ThroughputCapByMessageTypeConfig]
-    lazy implicit final val individualThroughputCapConfigWriter
-        : ConfigWriter[BlockSequencerConfig.IndividualThroughputCapConfig] =
-      deriveWriter[BlockSequencerConfig.IndividualThroughputCapConfig]
+    }
     lazy implicit final val individualCircuitBreakerConfigWriter
         : ConfigWriter[BlockSequencerConfig.IndividualCircuitBreakerConfig] =
       deriveWriter[BlockSequencerConfig.IndividualCircuitBreakerConfig]
@@ -2016,6 +2033,10 @@ object CantonConfig {
 
     lazy implicit final val participantNodeParameterConfigWriter
         : ConfigWriter[ParticipantNodeParameterConfig] = {
+      implicit val modeConfigWriter: ConfigWriter[ContractStateMachine.Mode] =
+        ConfigWriter.fromFunction[ContractStateMachine.Mode](mode =>
+          ConfigWriter[String].to(mode.toString)
+        )
       implicit val cantonEngineConfigWriter: ConfigWriter[CantonEngineConfig] = {
         implicit val engineLoggingConfigWriter: ConfigWriter[EngineLoggingConfig] =
           deriveWriter[EngineLoggingConfig]
@@ -2110,8 +2131,10 @@ object CantonConfig {
     }
     implicit val mediatorNodeConfigWriter: ConfigWriter[MediatorNodeConfig] =
       deriveWriter[MediatorNodeConfig]
-    implicit val sequencerNodeConfigWriter: ConfigWriter[SequencerNodeConfig] =
+    implicit val sequencerNodeConfigWriter: ConfigWriter[SequencerNodeConfig] = {
+      import DeclarativeSequencerConfig.Writers.*
       deriveWriter[SequencerNodeConfig]
+    }
   }
 
   private def makeWriter(confidential: Boolean): ConfigWriter[CantonConfig] = {

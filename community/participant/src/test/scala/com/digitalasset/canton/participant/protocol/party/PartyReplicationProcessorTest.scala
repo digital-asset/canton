@@ -21,6 +21,7 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.participant.admin.party.{
+  PartyReplicationIndexingWorkflow,
   PartyReplicationStatus,
   PartyReplicationTestInterceptor,
 }
@@ -92,9 +93,10 @@ final class PartyReplicationProcessorTest
       val rop = mock[RecordOrderPublisher]
       val requestTracker = mock[RequestTracker]
       when(
-        rop.schedulePublishAddContracts(any[CantonTimestamp => SynchronizerUpdate])(anyTraceContext)
-      )
-        .thenReturn(UnlessShutdown.unit)
+        rop.schedulePublishAddContracts(any[CantonTimestamp => SynchronizerUpdate])(
+          anyTraceContext
+        )
+      ).thenReturn(UnlessShutdown.unit)
       when(rop.publishBufferedEvents()).thenReturn(UnlessShutdown.unit)
       when(
         requestTracker.addReplicatedContracts(
@@ -166,9 +168,15 @@ final class PartyReplicationProcessorTest
         onError = logger.info(_),
         onDisconnect = logger.info(_)(_),
         persistsContracts = persistsContracts,
-        recordOrderPublisher = rop,
         requestTracker = requestTracker,
-        pureCrypto = testSymbolicCrypto,
+        new PartyReplicationIndexingWorkflow(
+          requestId = addPartyRequestId,
+          psid = psid,
+          recordOrderPublisher = rop,
+          pureCrypto = testSymbolicCrypto,
+          pauseSynchronizerIndexingDuringPartyReplication = true,
+          loggerFactory = loggerFactory,
+        ),
         futureSupervisor = futureSupervisor,
         exitOnFatalFailures = true,
         timeouts = timeouts,

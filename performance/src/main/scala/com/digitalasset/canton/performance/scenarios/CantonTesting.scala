@@ -7,15 +7,17 @@ import com.digitalasset.canton.admin.api.client.data.{
   NodeStatus,
   ParticipantStatus,
   StaticSynchronizerParameters,
+  TrafficControlParameters,
 }
 import com.digitalasset.canton.concurrent.*
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.console.*
 import com.digitalasset.canton.console.ConsoleEnvironment.Implicits.*
 import com.digitalasset.canton.console.ConsoleMacros.utils
 import com.digitalasset.canton.console.NodeReferences.ParticipantNodeReferences
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.client.configuration.CommandClientConfiguration
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.*
 import com.digitalasset.canton.participant.admin.ResourceLimits
 import com.digitalasset.canton.performance.*
@@ -34,13 +36,18 @@ import java.time.Duration as JDuration
 import scala.annotation.tailrec
 import scala.concurrent.Future
 import scala.concurrent.duration.*
+import scala.util.Try
 
 /** Our regression test scripts */
 object CantonTesting {
 
   /** Startup script invoked by primary synchronizer process */
-  def runSynchronizers(sequencerName: String = "sequencer", mediatorName: String = "mediator")(
-      implicit consoleEnvironment: ConsoleEnvironment
+  def runSynchronizers(
+      sequencerName: String = "sequencer",
+      mediatorName: String = "mediator",
+      enableTrafficControl: Boolean = sys.env.contains("ENABLE_TRAFFIC_CONTROL"),
+  )(implicit
+      consoleEnvironment: ConsoleEnvironment
   ): Unit = {
 
     import consoleEnvironment.*
@@ -89,6 +96,13 @@ object CantonTesting {
         confirmationResponseTimeout = 60.seconds,
         mediatorReactionTimeout = 60.seconds,
         maxRequestSize = 2000000000,
+        trafficControl = Option.when(enableTrafficControl)(
+          TrafficControlParameters.default.copy(
+            // Give max base traffic so we don't have to top up, but traffic accounting still happens
+            maxBaseTrafficAmount = NonNegativeLong.maxValue,
+            baseEventCost = NonNegativeLong.tryCreate(10),
+          )
+        ),
       ),
     )
 
@@ -223,6 +237,15 @@ object CantonTesting {
       payloadSize: Long = sys.env("PAYLOAD_SIZE").toLong,
       selectParticipants: ParticipantNodeReferences => Seq[ParticipantReference] = _.all,
       repositoryRoot: String = sys.env("REPOSITORY_ROOT"),
+      periodicTrafficSummaries: Option[FiniteDuration] = sys.env
+        .get("PERIODIC_TRAFFIC_SUMMARIES_DURATION")
+        .map(_.toLong)
+        .zip(
+          sys.env.get("PERIODIC_TRAFFIC_SUMMARIES_UNIT")
+        )
+        .map { case (duration, unit) =>
+          FiniteDuration(duration, unit)
+        },
   )(implicit consoleEnvironment: ConsoleEnvironment): Unit = {
 
     import consoleEnvironment.*
@@ -354,6 +377,34 @@ object CantonTesting {
       case Nil => Nil
     }
 
+    def schedulePeriodicTrafficSummaries(
+        runner: PerformanceRunner,
+        periodicTrafficSummaries: FiniteDuration,
+    ): FutureUnlessShutdown[Unit] =
+      unlessClosing(
+        environment.clock
+          .scheduleAfter(
+            _ => {
+              val recordTimes = runner.getRecentlyCreatedTransactionRecordTimes
+              sequencers.all.foreach { sequencer =>
+                println(
+                  s"Retrieving traffic summaries for ${recordTimes.size} events from ${sequencer.name}"
+                )
+                // Traffic summaries can fail for an individual sequencer if that sequencer has not yet
+                // reached the synchronizer time for the timestamps requested. It should eventually though,
+                // so retry until it does
+                utils.retry_until_true(
+                  Try(sequencer.traffic_control.traffic_summaries(recordTimes).discard).isSuccess
+                )
+              }
+            },
+            JDuration.ofNanos(periodicTrafficSummaries.toNanos),
+          )
+          .flatMap(_ => schedulePeriodicTrafficSummaries(runner, periodicTrafficSummaries))(
+            environment.executionContext
+          )
+      )
+
     val runnersStatusF: Seq[Future[Either[String, Unit]]] = runners.map(_.startup())
 
     await(
@@ -367,6 +418,13 @@ object CantonTesting {
     println(
       s"Testing performance for $maxTestDuration or $totalCycles cycles (whichever elapses first)..."
     )
+
+    periodicTrafficSummaries.foreach { duration =>
+      println(
+        s"Starting periodic traffic summaries every ${duration.toSeconds} seconds"
+      )
+      runners.foreach(schedulePeriodicTrafficSummaries(_, duration).discard)
+    }
 
     val measurements = selectParticipants(participants).map { p =>
       val parties = p.parties.list().map(_.party)

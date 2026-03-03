@@ -767,6 +767,10 @@ class IssSegmentModule[E <: Env[E]](
       context: E#ActorContextT[ConsensusSegment.Message],
       traceContext: TraceContext,
   ): Unit = {
+    logger.debug(
+      "Cancelling timeouts and closing module for segment starting with block " +
+        s"${segmentState.segment.firstBlockNumber} in epoch $epochNumber due to '$actionName''"
+    )
     viewChangeTimeoutManager.cancelTimeout()
     blockStartTimeoutManager.cancelTimeout()
     context.become(

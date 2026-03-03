@@ -8,6 +8,7 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.functor.*
 import cats.syntax.parallel.*
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.HashingSchemeVersion as ApiHashingSchemeVersion
+import com.daml.metrics.OpenTelemetryOnDemandMetricsReader
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.opentelemetry.OpenTelemetryMetricsFactory
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervisor, Threading}
@@ -16,7 +17,6 @@ import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTime
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCryptoProvider
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
-import com.digitalasset.canton.metrics.OpenTelemetryOnDemandMetricsReader
 import com.digitalasset.canton.protocol.{
   DynamicSynchronizerParameters,
   StaticSynchronizerParameters,
@@ -269,6 +269,9 @@ trait FutureHelpers extends Assertions with ScalaFuturesWithPatience { self =>
         pos: Position
     ): Either[E, A] =
       eitherT.value.futureValueUS(timeout)(pos)
+
+    def succeedOnFutureCompleteOrShutdown(implicit pos: Position): Unit =
+      eitherT.value.succeedOnFutureCompleteOrShutdown(pos)
   }
 
   implicit class CheckedTFutureUnlessShutdownSyntax[A, N, R](
@@ -297,6 +300,14 @@ trait FutureHelpers extends Assertions with ScalaFuturesWithPatience { self =>
       futureValueUS(PatienceConfiguration.Timeout(defaultPatience.timeout))(pos)
     def futureValueUS(timeout: PatienceConfiguration.Timeout)(implicit pos: Position): A =
       fut.unwrap.futureValue(timeout).onShutdown(fail("Unexpected shutdown"))
+    def succeedOnFutureCompleteOrShutdown(implicit pos: Position): Unit =
+      fut.succeedOnFutureCompleteOrShutdown(PatienceConfiguration.Timeout(defaultPatience.timeout))(
+        pos
+      )
+    def succeedOnFutureCompleteOrShutdown(timeout: PatienceConfiguration.Timeout)(implicit
+        pos: Position
+    ): Unit =
+      fut.unwrap.futureValue(timeout).map(_ => ()).onShutdown(())
   }
 
   implicit class UnlessShutdownSyntax[A](us: UnlessShutdown[A]) {

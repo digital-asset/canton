@@ -660,11 +660,11 @@ class SynchronizerInstallationManual
   }
 }
 
-/* Synchronization is needed because integration tests run in parallel and 3 tests depend on the same DARs
+/* Synchronization is needed because integration tests run in parallel and 4 tests depend on the same DARs
  */
 private object DocsGenerationSynchronization {
   private val finished: AtomicInteger = new AtomicInteger(0)
-  private val expectedCalls: Int = 3
+  private val expectedCalls: Int = 4
   private val darsSymLink = File("dars")
   private val darsDir = File("community/common/target/scala-2.13/classes")
 
@@ -978,6 +978,16 @@ class OperateTrafficSnippetGeneratorTest
 
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))
+
+  override def beforeAll(): Unit = {
+    createDarsSimlink()
+    super.beforeAll()
+  }
+
+  override def afterAll(): Unit = {
+    super.afterAll()
+    cleanUpDarsSimlink()
+  }
 }
 
 class HowtosHealthIntegrationTest

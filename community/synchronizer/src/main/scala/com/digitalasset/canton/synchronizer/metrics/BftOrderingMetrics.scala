@@ -3,16 +3,15 @@
 
 package com.digitalasset.canton.synchronizer.metrics
 
-import com.daml.metrics.HealthMetrics
 import com.daml.metrics.api.*
 import com.daml.metrics.api.HistogramInventory.Item
 import com.daml.metrics.api.MetricHandle.*
+import com.daml.metrics.{CacheMetrics, HealthMetrics}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.BaseMetrics
 import com.digitalasset.canton.logging.pretty.PrettyNameOnlyCase
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.metrics.{
-  CacheMetrics,
   DbStorageHistograms,
   DbStorageMetrics,
   DeclarativeApiMetrics,

@@ -2379,6 +2379,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
       val completionInfo = someCompletionInfo
       val builder = TxBuilder()
       val contractId = builder.newCid
+      val keyValue = Value.ValueUnit
       val createNode = builder
         .create(
           id = contractId,
@@ -2386,6 +2387,11 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           argument = Value.ValueUnit,
           signatories = Set("signatory"),
           observers = Set("observer", "observer2"),
+          key = CreateKey.KeyWithMaintainers(
+            keyValue,
+            crypto.Hash.hashPrivateKey(keyValue.toString),
+            Set("signatory"),
+          ),
         )
 
       val targetSynchronizerId = Target(SynchronizerId.tryFromString("x::synchronizer2"))
@@ -2437,7 +2443,9 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         representative_package_id = createNode.templateId.packageId,
         notPersistedContractId = createNode.coid,
         internal_contract_id = 42L,
-        create_key_hash = None,
+        create_key_hash = Some(
+          crypto.Hash.hashPrivateKey(keyValue.toString).bytes.toHexString
+        ),
       )
       dtos(4) shouldEqual DbDto.CommandCompletion(
         completion_offset = someOffset.unwrap,

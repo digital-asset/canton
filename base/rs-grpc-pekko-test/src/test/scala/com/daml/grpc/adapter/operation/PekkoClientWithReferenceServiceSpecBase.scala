@@ -6,8 +6,8 @@ package com.daml.grpc.adapter.operation
 import com.daml.grpc.adapter.client.ReferenceClientCompatibilityCheck
 import com.daml.grpc.adapter.client.pekko.ClientAdapter
 import com.daml.grpc.adapter.{ExecutionSequencerFactory, TestExecutionSequencerFactory}
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.platform.hello.HelloRequest
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import io.grpc.StatusRuntimeException
 import org.apache.pekko.stream.scaladsl.Sink
 import org.scalatest.BeforeAndAfterAll

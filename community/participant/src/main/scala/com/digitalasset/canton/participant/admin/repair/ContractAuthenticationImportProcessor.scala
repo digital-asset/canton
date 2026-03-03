@@ -27,9 +27,9 @@ sealed abstract class ContractAuthenticationImportProcessor(
   ): EitherT[FutureUnlessShutdown, String, Unit]
 
   /*
-    In the context of a migration combining ACS import and synchronizer change (such as the one we perform
-    as part a major upgrade for early mainnet), the `contract.protocolVersion` and the protocol
-    version of the synchronizer will be different. Hence, we need to query it using the syncPersistentStateLookup.
+    In the context of a migration combining ACS import and synchronizer change, the `contract.protocolVersion`
+    and the protocol version of the synchronizer will be different (for example, when doing an upgrade).
+    Hence, we need to query it using the syncPersistentStateLookup.
    */
   protected def getMaximumSupportedContractIdVersion(
       synchronizerId: SynchronizerId

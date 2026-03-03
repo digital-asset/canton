@@ -114,12 +114,16 @@ class GrpcSequencerInitializationService(
     )
   }
 
-  /** Use for major upgrades and logical upgrades
+  /** Initializes the sequencer from a topology state snapshot.
+    *
+    * Used for major upgrades, logical upgrades, and initializing from an LSU predecessor.
     *
     * @param doResetTimes
-    *   If sequenced and effective time should be set to MinValue Use true for major upgrades
+    *   Determines whether sequenced and effective times should be reset to MinValue. Use `true` for
+    *   genesis states (brand-new networks) to start a new timeline. Use `false` when initializing
+    *   from an LSU predecessor to preserve historical timestamps and maintain continuity.
     * @return
-    *   True if the sequencer is replicated
+    *   True if the sequencer is replicated.
     */
   private def initializeSequencerFromState(
       topologySnapshot: ByteString,

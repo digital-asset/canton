@@ -5,10 +5,19 @@ package com.digitalasset.canton.console.declarative
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
+import com.digitalasset.canton.admin.api.client.commands.GrpcAdminCommand
 import com.digitalasset.canton.auth.CantonAdminToken
 import com.digitalasset.canton.config
+import com.digitalasset.canton.config.ClientConfig
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.declarative.DeclarativeApi.UpdateResult
+import com.digitalasset.canton.console.CommandErrors.{CommandError, GenericCommandError}
+import com.digitalasset.canton.console.declarative.DeclarativeApi.{
+  Err,
+  NotFound,
+  QueryResult,
+  UpdateResult,
+}
+import com.digitalasset.canton.console.{CommandSuccessful, GrpcAdminCommandRunner}
 import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.NamedLogging
 import com.digitalasset.canton.metrics.DeclarativeApiMetrics
@@ -380,9 +389,34 @@ trait DeclarativeApi[Cfg, Prep] extends DeclarativeApiHandle[Cfg] with NamedLogg
     }
   }
 
+  protected def queryApi[Result](
+      runner: GrpcAdminCommandRunner,
+      cfg: ClientConfig,
+      command: GrpcAdminCommand[?, ?, Result],
+  )(implicit traceContext: TraceContext): Either[QueryResult, Result] = if (
+    closeContext.context.isClosing
+  )
+    Left(Err("Node is shutting down"))
+  else
+    activeAdminToken.fold(Left(Err("Node instance is passive")): Either[QueryResult, Result])(
+      token =>
+        runner.runCommandWithExistingTrace(name, command, cfg, Some(token.secret)) match {
+          case CommandSuccessful(value) => Right(value)
+          case GenericCommandError(cause) if cause.contains("NOT_FOUND/") =>
+            Left(NotFound(cause))
+          case c: CommandError => Left(Err(c.cause))
+        }
+    )
+
 }
 
 object DeclarativeApi {
+
+  private[declarative] sealed trait QueryResult {
+    def str: String
+  }
+  private[declarative] final case class Err(str: String) extends QueryResult
+  private[declarative] final case class NotFound(str: String) extends QueryResult
 
   final case class UpdateResult(
       failed: Int = 0,

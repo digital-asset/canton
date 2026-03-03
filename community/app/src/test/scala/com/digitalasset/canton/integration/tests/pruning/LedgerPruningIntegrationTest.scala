@@ -20,7 +20,7 @@ import com.digitalasset.canton.integration.plugins.{
   UseReferenceBlockSequencer,
 }
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
-import com.digitalasset.canton.integration.tests.multihostedparties.DivulgenceIntegrationTest.ParticipantSimpleStreamHelper
+import com.digitalasset.canton.integration.tests.multihostedparties.DivulgenceIntegrationTestHelpers.ParticipantSimpleStreamHelper
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.OffsetOutOfRange
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError.UnsafeToPrune
 import com.digitalasset.canton.protocol.{ContractInstance, LfContractId}

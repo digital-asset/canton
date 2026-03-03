@@ -16,6 +16,8 @@ import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSeq
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.version.ProtocolVersion.{v34, v35}
 
+import java.time.Duration
+
 /*
  * This test validates whether a given physical synchronizer id is accepted or rejected when
  * attempting the upgrade announcement.
@@ -77,12 +79,13 @@ sealed abstract class LsuSuccessorAcceptedIntegrationTest(
         performSynchronizerNodesLsu(fixture)
 
         environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
-
+        transferTraffic()
         eventually() {
+          environment.simClock.value.advance(Duration.ofSeconds(1))
           participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
         }
 
-        waitForTargetTimeOnSequencer(sequencer2, environment.clock.now)
+        waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
     }
   }
 }
@@ -104,8 +107,7 @@ sealed abstract class LsuSuccessorRejectedIntegrationTest(
         loggerFactory.assertLogs(
           assertThrows[CommandFailure] {
             fixture.oldSynchronizerOwners.foreach(
-              _.topology.lsu.announcement
-                .propose(fixture.newPSId, fixture.upgradeTime)
+              _.topology.lsu.announcement.propose(fixture.newPSId, fixture.upgradeTime)
             )
           },
           _.message should include("successor id is not greater than current synchronizer id"),

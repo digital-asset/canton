@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.apiserver.services.admin
 
 import cats.syntax.traverse.*
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.api.v2.admin.party_management_service.AllocateExternalPartyRequest.SignedTransaction
 import com.daml.ledger.api.v2.admin.party_management_service.{
   AllocateExternalPartyRequest,
@@ -16,6 +15,7 @@ import com.daml.ledger.api.v2.admin.party_management_service.{
 import com.daml.ledger.api.v2.crypto.SignatureFormat.SIGNATURE_FORMAT_RAW
 import com.daml.ledger.api.v2.{crypto, crypto as lapicrypto}
 import com.daml.nonempty.NonEmpty
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.tracing.TelemetrySpecBase.*
 import com.daml.tracing.{DefaultOpenTelemetry, NoOpTelemetry}
 import com.digitalasset.base.error.ErrorsAssertions

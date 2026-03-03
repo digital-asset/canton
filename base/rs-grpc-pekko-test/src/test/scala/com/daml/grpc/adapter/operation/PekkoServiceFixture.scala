@@ -5,9 +5,15 @@ package com.daml.grpc.adapter.operation
 
 import com.daml.grpc.adapter.utils.implementations.HelloServicePekkoImplementation
 import com.daml.grpc.adapter.{ExecutionSequencerFactory, TestExecutionSequencerFactory}
-import com.daml.ledger.api.testing.utils.*
 import com.daml.platform.hello.HelloServiceGrpc
 import com.daml.platform.hello.HelloServiceGrpc.HelloServiceStub
+import com.daml.testing.utils.{
+  GrpcServerFixture,
+  PekkoStreamGrpcServerResource,
+  Resource,
+  ServerWithChannelProvider,
+  SuiteResourceManagementAroundAll,
+}
 
 import java.net.SocketAddress
 import java.util.concurrent.TimeUnit

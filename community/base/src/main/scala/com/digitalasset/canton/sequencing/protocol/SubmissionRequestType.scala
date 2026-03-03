@@ -10,6 +10,18 @@ sealed trait SubmissionRequestType {
 }
 
 object SubmissionRequestType {
+
+  val capAdmissible: Seq[SubmissionRequestType] =
+    Seq[SubmissionRequestType](
+      ConfirmationResponse,
+      ConfirmationRequest,
+      Commitment,
+      TopologyTransaction,
+      TimeProof,
+    )
+  def fromStringForCap(name: String): Option[SubmissionRequestType] =
+    capAdmissible.find(_.name == name)
+
   case object ConfirmationResponse extends SubmissionRequestType {
     override val name: String = "confirmation response"
   }

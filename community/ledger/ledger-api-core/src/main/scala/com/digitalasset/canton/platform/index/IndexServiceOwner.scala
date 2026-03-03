@@ -96,6 +96,7 @@ final class IndexServiceOwner(
         contractStateCaches = inMemoryState.contractStateCaches,
         loggerFactory = loggerFactory,
         contractStore = participantContractStore,
+        ledgerEndCache = inMemoryState.ledgerEndCache,
       )(commandExecutionContext)
 
       bufferedTransactionsReader = BufferedUpdateReader(

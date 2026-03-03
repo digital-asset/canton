@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.metrics
 
+import com.daml.metrics.CacheMetrics
 import com.daml.metrics.api.HistogramInventory.Item
 import com.daml.metrics.api.MetricHandle.*
 import com.daml.metrics.api.{HistogramInventory, MetricInfo, MetricName, MetricQualification}
@@ -44,6 +45,15 @@ private[metrics] final class ExecutionHistograms(val prefix: MetricName)(implici
     description = """The interpretation of a command in the ledger api server might require
                       |fetching multiple contract keys. This metric exposes the time needed to lookup
                       |individual contract keys.""",
+    qualification = MetricQualification.Debug,
+  )
+
+  private[metrics] val lookupNContractKey: Item = Item(
+    prefix :+ "lookup_n_contract_key",
+    summary = "The time to lookup individual contract keys during interpretation.",
+    description = """The interpretation of a command in the ledger api server might require
+                      |fetching multiple contract keys. This metric exposes the time needed to lookup
+                      |individual non unique contract keys.""",
     qualification = MetricQualification.Debug,
   )
 
@@ -129,6 +139,8 @@ final class ExecutionMetrics private[metrics] (
     openTelemetryMetricsFactory.histogram(inventory.lookupActiveContractCountPerExecution.info)
 
   val lookupContractKey: Timer = openTelemetryMetricsFactory.timer(inventory.lookupContractKey.info)
+  val lookupNContractKey: Timer =
+    openTelemetryMetricsFactory.timer(inventory.lookupNContractKey.info)
 
   val lookupContractKeyPerExecution: Timer =
     openTelemetryMetricsFactory.timer(inventory.lookupContractKeyPerExecution.info)

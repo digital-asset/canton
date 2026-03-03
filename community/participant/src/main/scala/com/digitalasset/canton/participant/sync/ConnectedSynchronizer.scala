@@ -537,12 +537,7 @@ class ConnectedSynchronizer(
       ] =
         if (lastSequencerTimestamp >= acsChangesReplayStartRt.timestamp) {
           for {
-            res <-
-              loadAcsChanges(
-                from,
-                endToc,
-                batchSize,
-              )
+            res <- loadAcsChanges(from, endToc, batchSize)
             (acsChangesToConsume, count) = res
 
             _ <- NonEmpty.from(acsChangesToConsume) match {

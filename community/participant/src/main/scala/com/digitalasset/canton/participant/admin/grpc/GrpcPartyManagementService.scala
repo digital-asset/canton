@@ -4,7 +4,8 @@
 package com.digitalasset.canton.participant.admin.grpc
 
 import cats.data.EitherT
-import cats.syntax.all.*
+import cats.syntax.either.*
+import cats.syntax.traverse.*
 import com.daml.ledger.api.v2.topology_transaction.TopologyTransaction as LapiTopologyTransaction
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
 import com.digitalasset.canton.admin.participant.v30
@@ -27,13 +28,14 @@ import com.digitalasset.canton.participant.admin.party.*
 import com.digitalasset.canton.participant.admin.party.PartyReplicationAdminWorkflow.PartyReplicationArguments
 import com.digitalasset.canton.participant.admin.repair.RepairServiceError
 import com.digitalasset.canton.participant.sync.CantonSyncService
+import com.digitalasset.canton.participant.topology.TopologyLookup
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SynchronizerOffset
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
 import com.digitalasset.canton.topology.*
-import com.digitalasset.canton.topology.client.SynchronizerTopologyClientWithInit
+import com.digitalasset.canton.topology.processing.EffectiveTime
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.EitherUtil.*
@@ -58,6 +60,7 @@ class GrpcPartyManagementService(
     participantId: ParticipantId,
     partyReplicatorO: Option[PartyReplicator],
     sync: CantonSyncService,
+    topologyLookup: TopologyLookup,
     parameters: ParticipantNodeParameters,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit
@@ -320,13 +323,18 @@ class GrpcPartyManagementService(
 
       (activationOffset, activationTimestamp) = extractOffsetAndTimestamp(topologyTx)
 
-      client <- EitherT
-        .fromEither[FutureUnlessShutdown](findTopologyClient(synchronizerId, sync))
-        .leftMap(PartyManagementServiceError.InvalidState.Error(_))
+      snapshot <- topologyLookup
+        .maybeOfflineAwaitTopologySnapshot(
+          synchronizerId,
+          activationTimestamp.value.immediateSuccessor,
+        )
+        .leftMap(err =>
+          PartyManagementServiceError.InvalidState
+            .Error(
+              s"Unable to query topology for $synchronizerId at ${activationTimestamp.value.immediateSuccessor}: $err"
+            )
+        )
 
-      snapshot <- EitherT.right(
-        client.awaitSnapshot(activationTimestamp.immediateSuccessor)
-      )
       // TODO(#28208) - Indirection because LAPI topology transaction does not include the onboarding flag
       activeParticipants <- EitherT.right(snapshot.activeParticipantsOf(party.toLf))
       _ <-
@@ -344,20 +352,17 @@ class GrpcPartyManagementService(
         )
 
       partiesHostedByTargetParticipant <- EitherT.right(
-        client
-          .awaitSnapshot(activationTimestamp)
-          .flatMap(snapshot =>
-            snapshot.inspectKnownParties(
-              filterParty = "",
-              filterParticipant = targetParticipant.filterString,
-              // we cannot filter by participant in the db, therefore we also cannot impose a limit.
-              limit = Int.MaxValue,
-            )
-          )
+        snapshot.inspectKnownParties(
+          filterParty = "",
+          filterParticipant = targetParticipant.filterString,
+          // we cannot filter by participant in the db, therefore we also cannot impose a limit.
+          limit = Int.MaxValue,
+        )
       )
 
-      otherPartiesHostedByTargetParticipant =
-        partiesHostedByTargetParticipant excl party excl targetParticipant.adminParty
+      otherPartiesHostedByTargetParticipant = partiesHostedByTargetParticipant.filterNot(p =>
+        p == party || p == targetParticipant.adminParty
+      )
 
       _ <- ParticipantCommon
         .writeAcsSnapshot(
@@ -471,25 +476,16 @@ class GrpcPartyManagementService(
 
   private def extractOffsetAndTimestamp(
       topologyTransaction: LapiTopologyTransaction
-  ): (Offset, CantonTimestamp) = (for {
+  ): (Offset, EffectiveTime) = (for {
     offset <- ProtoConverter.parseOffset("offset", topologyTransaction.offset)
     effectiveTime <- ProtoConverter.parseRequired(
       CantonTimestamp.fromProtoTimestamp,
       "record_time",
       topologyTransaction.recordTime,
     )
-  } yield (offset, effectiveTime)).valueOr(error => throw new IllegalStateException(error.message))
-
-  private def findTopologyClient(
-      synchronizerId: SynchronizerId,
-      sync: CantonSyncService,
-  ): Either[String, SynchronizerTopologyClientWithInit] =
-    for {
-      psid <- sync.syncPersistentStateManager
-        .latestKnownPSId(synchronizerId)
-        .toRight(s"Undefined physical synchronizer ID for given $synchronizerId")
-      topoClient <- sync.lookupTopologyClient(psid).toRight("Absent topology client")
-    } yield topoClient
+  } yield (offset, EffectiveTime(effectiveTime))).valueOr(error =>
+    throw new IllegalStateException(s"Unable to parse topology data from LAPI: ${error.message}")
+  )
 
   /*
  Note that `responseObserver` originates from `GrpcStreamingUtils.streamToServer` which is
@@ -877,13 +873,12 @@ class GrpcPartyManagementService(
 
       (_activationOffset, activationTimestamp) = extractOffsetAndTimestamp(topologyTx)
 
-      client <- EitherT
-        .fromEither[FutureUnlessShutdown](findTopologyClient(synchronizerId, sync))
-        .leftMap(PartyManagementServiceError.InvalidState.Error(_))
-
       snapshot <- EitherT.right(
-        client.awaitSnapshot(activationTimestamp.immediateSuccessor)
+        connectedSynchronizer.topologyClient.awaitSnapshot(
+          activationTimestamp.immediateSuccessor.value
+        )
       )
+
       // TODO(#28208) - Indirection because LAPI topology transaction does not include the onboarding flag
       activeParticipants <- EitherT.right(
         snapshot.activeParticipantsOf(party.toLf)
@@ -904,11 +899,11 @@ class GrpcPartyManagementService(
         connectedSynchronizer.ephemeral.onboardingClearanceScheduler
           .requestClearance(
             party,
-            activationTimestamp,
+            activationTimestamp.value,
           )
           .leftMap(PartyManagementServiceError.InvalidState.Error(_): PartyManagementServiceError)
 
-    } yield (onboardingFlagClearanceOutcome)
+    } yield onboardingFlagClearanceOutcome
 
   private def validateClearPartyOnboardingFlagRequest(
       request: v30.ClearPartyOnboardingFlagRequest,

@@ -225,8 +225,8 @@ abstract class DynamicOnboardingIntegrationTest(val name: String)
 
       onboardNewSequencer(
         synchronizerId = daId,
-        newSequencerReference = sequencer2,
-        existingSequencerReference = sequencer1,
+        newSequencer = sequencer2,
+        existingSequencer = sequencer1,
         synchronizerOwners = initializedSynchronizers(daName).synchronizerOwners,
       )
 

@@ -5,7 +5,7 @@ package com.digitalasset.canton.integration.util
 
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.console.{InstanceReference, SequencerReference}
+import com.digitalasset.canton.console.{ConsoleMacros, InstanceReference, SequencerReference}
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.integration.plugins.UseBftSequencer
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
@@ -32,8 +32,8 @@ trait OnboardsNewSequencerNode {
 
   protected def onboardNewSequencer(
       synchronizerId: PhysicalSynchronizerId,
-      newSequencerReference: SequencerReference,
-      existingSequencerReference: SequencerReference,
+      newSequencer: SequencerReference,
+      existingSequencer: SequencerReference,
       synchronizerOwners: Set[InstanceReference],
   )(implicit env: TestConsoleEnvironment): Unit = {
     import env.*
@@ -44,8 +44,8 @@ trait OnboardsNewSequencerNode {
       bootstrap
         .onboard_new_sequencer(
           synchronizerId.logical,
-          newSequencerReference,
-          existingSequencerReference,
+          newSequencer,
+          existingSequencer,
           synchronizerOwners,
           // Avoid issues if things are slow
           customCommandTimeout = Some(config.NonNegativeDuration.tryFromDuration(2.minutes)),
@@ -56,16 +56,28 @@ trait OnboardsNewSequencerNode {
       bootstrap
         .onboard_new_sequencer(
           synchronizerId.logical,
-          newSequencerReference,
-          existingSequencerReference,
+          newSequencer,
+          existingSequencer,
           synchronizerOwners,
         )
     }
 
-    setUpAdditionalConnections(existingSequencerReference, newSequencerReference)
+    setUpAdditionalConnections(existingSequencer, newSequencer)
 
     // user-manual-entry-begin: DynamicallyOnboardBftSequencer-wait-for-initialized
-    newSequencerReference.health.wait_for_initialized()
+    newSequencer.health.wait_for_initialized()
     // user-manual-entry-end: DynamicallyOnboardBftSequencer-wait-for-initialized
+
+    // TODO(#30996): implement disseminations retry and remove the following logic
+    if (bftSequencerPlugin.isDefined) {
+      // Don't disseminate anything until the new sequencer is part of the topology, as else
+      //  disseminations could fail and be stuck.
+      ConsoleMacros.utils.retry_until_true(env.commandTimeouts.bounded) {
+        newSequencer.bft
+          .get_ordering_topology()
+          .sequencerIds
+          .contains(newSequencer.id)
+      }
+    }
   }
 }

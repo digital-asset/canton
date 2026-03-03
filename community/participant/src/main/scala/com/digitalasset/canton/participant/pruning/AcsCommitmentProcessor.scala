@@ -106,6 +106,7 @@ import com.digitalasset.canton.{
   LfPartyId,
   ProtoDeserializationError,
   ReassignmentCounter,
+  RepairCounter,
   checked,
 }
 import com.google.common.annotations.VisibleForTesting
@@ -2165,32 +2166,31 @@ class AcsCommitmentProcessor private (
     def retryLogic(
         msgsFiltered: Seq[(ParticipantId, AcsCommitment)],
         errString: Option[String],
-    ): EitherT[FutureUnlessShutdown, CommitmentSendState, Unit] =
-      EitherT(for {
-        msgsRetry <- filterByActiveParticipants()
-      } yield {
+    ): FutureUnlessShutdown[Either[CommitmentSendState, Unit]] =
+      filterByActiveParticipants().map { msgsRetry =>
         val action =
           if (msgsRetry != msgsFiltered) {
             logger.info(
-              s"Failed sequencing commitments for period $period. Error=[$errString]." +
+              s"Failed sequencing commitments for period $period. Error=[$errString]. " +
                 s"The active counter-participants changed, so sending will be retried automatically."
             )
             logger.debug(s"The actual commitments we failed to sequence were: $msgsFiltered")
             CommitmentSendState.Retry
           } else {
             logger.info(
-              s"Failed sequencing commitments for period $period. Error=[$errString]." +
+              s"Failed sequencing commitments for period $period. Error=[$errString]. " +
                 s"We won't retry sending, because the active counter-participants did not change."
             )
             logger.debug(s"The actual commitments we failed to sequence were: $msgsFiltered")
             CommitmentSendState.StopRetrying
           }
+
         Either.cond(
           action == CommitmentSendState.StopRetrying,
           (),
           CommitmentSendState.Retry,
-        ): Either[CommitmentSendState, Unit]
-      })
+        )
+      }
 
     // returns a left if the commitment send failed, and we want to retry
     // we retry only in the case that the sending failed because some of the recipients are no longer known
@@ -2226,7 +2226,7 @@ class AcsCommitmentProcessor private (
         sendRes <-
           if (signedCmtMsgs.nonEmpty) {
             val batch = Batch.of(protocolVersion, signedCmtMsgs*)
-            EitherT(
+            EitherT[FutureUnlessShutdown, CommitmentSendState, Unit](
               sequencerClient
                 .send(
                   batch,
@@ -2239,7 +2239,7 @@ class AcsCommitmentProcessor private (
                 .value
                 .flatMap {
                   case Left(sendAsyncClientError: SendAsyncClientError) =>
-                    retryLogic(msgsFiltered, Some(sendAsyncClientError.toString)).value
+                    retryLogic(msgsFiltered, Some(sendAsyncClientError.toString))
                   case Right(_) =>
                     sendCallback.future
                       .flatMap {
@@ -2251,7 +2251,7 @@ class AcsCommitmentProcessor private (
                           )
                           FutureUnlessShutdown.pure(Right[CommitmentSendState, Unit](()).either)
                         case notSequenced: SendResult.NotSequenced =>
-                          retryLogic(msgsFiltered, Some(notSequenced.toString)).value
+                          retryLogic(msgsFiltered, Some(notSequenced.toString))
                       }
                 }
             )
@@ -2484,7 +2484,7 @@ class AcsCommitmentProcessor private (
             (rc, _) <- computeRunningCommitmentsFromAcs(
               activeContractStore,
               contractStore,
-              TimeOfChange(timestamp),
+              TimeOfChange(timestamp, Some(RepairCounter.MaxValue)),
               batchingConfig,
             )
 
@@ -2551,7 +2551,7 @@ class AcsCommitmentProcessor private (
   def computeRunningCommitmentsFromAcs(
       activeContractStore: ActiveContractStore,
       contractStore: ContractStore,
-      acsTimestamp: TimeOfChange,
+      acsToc: TimeOfChange,
       batchingConfig: BatchingConfig,
   )(implicit
       ec: ExecutionContext,
@@ -2595,19 +2595,16 @@ class AcsCommitmentProcessor private (
       }
 
     for {
-      activeContracts <- activeContractStore.snapshot(acsTimestamp)(
+      activeContracts <- activeContractStore.snapshot(acsToc)(
         namedLoggingContext.traceContext
       )
       activations = activeContracts.map { case (cid, (_toc, reassignmentCounter)) =>
-        (
-          cid,
-          reassignmentCounter,
-        )
+        (cid, reassignmentCounter)
       }
       change <- lookupChangeMetadata(activations)
     } yield {
       (
-        internalizedRunningCommitmentFromAcsChange(change, RecordTime(acsTimestamp.timestamp, 0)),
+        internalizedRunningCommitmentFromAcsChange(change, RecordTime.fromTimeOfChange(acsToc)),
         activeContracts,
       )
     }
@@ -2641,13 +2638,14 @@ class AcsCommitmentProcessor private (
     implicit val traceContext: TraceContext = namedLoggingContext.traceContext
     implicit val loggerName: LoggerNameFromClass = new LoggerNameFromClass(getClass)
 
-    val acsTimestamp = TimeOfChange(completedPeriod.toInclusive.forgetRefinement)
+    val acsToc =
+      TimeOfChange(completedPeriod.toInclusive.forgetRefinement, Some(RepairCounter.MaxValue))
     val res = if (enableAdditionalConsistencyChecks || commitmentMismatchDebugging) {
       for {
         (rc, activations) <- computeRunningCommitmentsFromAcs(
           activeContractStore,
           contractStore,
-          acsTimestamp,
+          acsToc,
           batchingConfig,
         )
       } yield {
@@ -2664,7 +2662,7 @@ class AcsCommitmentProcessor private (
           if (enableAdditionalConsistencyChecks)
             Errors.InternalError
               .InconsistentRunningCommitmentAndACS(
-                acsTimestamp,
+                acsToc.timestamp,
                 acsCommitments,
                 runningCommitments,
               )
@@ -3148,7 +3146,7 @@ object AcsCommitmentProcessor extends HasLoggerName {
       )
       @Resolution("Contact customer support.")
       final case class InconsistentRunningCommitmentAndACS(
-          toc: TimeOfChange,
+          timestamp: CantonTimestamp,
           acsCommitments: Map[SortedSet[InternedPartyId], AcsCommitment.CommitmentType],
           runningCommitments: Map[SortedSet[InternedPartyId], AcsCommitment.CommitmentType],
       )(implicit val loggingContext: ErrorLoggingContext)

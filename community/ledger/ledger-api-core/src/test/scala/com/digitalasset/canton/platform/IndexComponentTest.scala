@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.platform
 
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, ProcessingTimeout}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId.SameAsContractPackageId
@@ -37,7 +37,6 @@ import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.platform.store.{
   DbSupport,
   FlywayMigrations,
-  LedgerApiContractStore,
   LedgerApiContractStoreImpl,
   PruningOffsetService,
 }
@@ -119,11 +118,12 @@ trait IndexComponentTest
       contracts: Vector[ContractInstance],
   ): Future[Update] =
     // this mimics protocol processing that stores contracts and retrieves their internal contract ids afterward
-    testServices.participantContractStore
+    testServices.participantContractStore.participantContractStore
       .storeContracts(contracts)
+      .failOnShutdownToAbortException("storeContracts")
       .flatMap(_ =>
         testServices.participantContractStore
-          .lookupBatchedInternalIds(
+          .lookupBatchedInternalIdsNonReadThrough(
             contracts.map(_.contractId)
           )
       )
@@ -372,6 +372,6 @@ object IndexComponentTest {
       indexResource: Resource[Any],
       index: IndexService,
       indexer: FutureQueue[Update],
-      participantContractStore: LedgerApiContractStore,
+      participantContractStore: LedgerApiContractStoreImpl,
   )
 }

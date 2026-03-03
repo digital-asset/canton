@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.apiserver.services.admin
 
 import cats.data.EitherT
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.api.v2.admin.package_management_service.{
   PackageManagementServiceGrpc,
   UploadDarFileRequest,
@@ -12,6 +11,7 @@ import com.daml.ledger.api.v2.admin.package_management_service.{
   ValidateDarFileResponse,
 }
 import com.daml.nonempty.NonEmpty
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.tracing.DefaultOpenTelemetry
 import com.daml.tracing.TelemetrySpecBase.*
 import com.digitalasset.base.error.ErrorsAssertions

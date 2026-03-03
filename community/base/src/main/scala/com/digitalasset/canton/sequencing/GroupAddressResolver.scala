@@ -96,7 +96,7 @@ object GroupAddressResolver {
           } else {
 
             topologyOrSequencingSnapshot
-              .allMembers()
+              .knownMembers()
               .map(members => Map((AllMembersOfSynchronizer: GroupRecipient, members)))
           }
         }

@@ -66,12 +66,13 @@ final class LsuExplicitDisclosureIntegrationTest extends LsuBase {
         clue("do LSU") {
           performSynchronizerNodesLsu(fixture)
           environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
+          transferTraffic()
           eventually() {
+            environment.simClock.value.advance(Duration.ofSeconds(1))
             participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
           }
           oldSynchronizerNodes.all.stop()
-          environment.simClock.value.advance(Duration.ofSeconds(1))
-          waitForTargetTimeOnSequencer(sequencer2, environment.clock.now)
+          waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
         }
 
         clue("After LSU, verify Bob can still use Alice's contract via explicit disclosure") {

@@ -36,6 +36,8 @@ sealed trait Result[+A] extends Product with Serializable {
       ResultNeedPackage(pkgId, mbPkg => resume(mbPkg).map(f))
     case ResultNeedKey(gk, resume) =>
       ResultNeedKey(gk, mbAcoid => resume(mbAcoid).map(f))
+    case ResultNeedNKey(gk, limit, token, resume) =>
+      ResultNeedNKey(gk, limit, token, (cids, token) => resume(cids, token).map(f))
     case ResultPrefetch(contractIds, keys, resume) =>
       ResultPrefetch(contractIds, keys, () => resume().map(f))
   }
@@ -51,6 +53,8 @@ sealed trait Result[+A] extends Product with Serializable {
       ResultNeedPackage(pkgId, mbPkg => resume(mbPkg).flatMap(f))
     case ResultNeedKey(gk, resume) =>
       ResultNeedKey(gk, mbAcoid => resume(mbAcoid).flatMap(f))
+    case ResultNeedNKey(gk, limit, token, resume) =>
+      ResultNeedNKey(gk, limit, token, (mbAcoid, nextToken) => resume(mbAcoid, nextToken).flatMap(f))
     case ResultPrefetch(contractIds, keys, resume) =>
       ResultPrefetch(contractIds, keys, () => resume().flatMap(f))
   }
@@ -59,6 +63,7 @@ sealed trait Result[+A] extends Product with Serializable {
       pcs: PartialFunction[ContractId, FatContractInstance] = PartialFunction.empty,
       pkgs: PartialFunction[PackageId, Package] = PartialFunction.empty,
       keys: PartialFunction[GlobalKeyWithMaintainers, ContractId] = PartialFunction.empty,
+      nKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] = PartialFunction.empty,
       hashingMethod: ContractId => Hash.HashingMethod = _ => Hash.HashingMethod.TypedNormalForm,
       idValidator: (ContractId, Hash) => Boolean = (_, _) => true,
   ): Either[Error, A] = {
@@ -76,6 +81,7 @@ sealed trait Result[+A] extends Product with Serializable {
           }))
         case ResultNeedPackage(pkgId, resume) => go(resume(pkgs.lift(pkgId)))
         case ResultNeedKey(key, resume) => go(resume(keys.lift(key)))
+        case ResultNeedNKey(key, _, _, resume) => go(resume(nKeys.lift(key).getOrElse(Vector.empty), None))
         case ResultPrefetch(_, _, result) => go(result())
       }
     go(this)
@@ -178,6 +184,15 @@ final case class ResultNeedKey[A](
     resume: Option[ContractId] => Result[A],
 ) extends Result[A]
 
+final case class ResultNeedNKey[A](
+    key: GlobalKeyWithMaintainers,
+    limit: Int,
+    continuationToken: Option[NKeyContinuationToken],
+    resume: (Vector[FatContractInstance], Option[NKeyContinuationToken]) => Result[A],
+) extends Result[A]
+
+trait NKeyContinuationToken
+
 /** Indicates that the interpretation will likely need to resolve the given contract keys.
   * The caller may resolve the keys in parallel to the interpretation, but does not have to.
   */
@@ -261,6 +276,18 @@ object Result {
                 gk,
                 mbAcoid =>
                   resume(mbAcoid).flatMap(x =>
+                    Result
+                      .sequence(results_)
+                      .map(otherResults => (okResults :+ x) :++ otherResults)
+                  ),
+              )
+            case ResultNeedNKey(gk, limit, token, resume) =>
+              ResultNeedNKey(
+                gk,
+                limit,
+                token,
+                (mbAcoid, token) =>
+                  resume(mbAcoid, token).flatMap(x =>
                     Result
                       .sequence(results_)
                       .map(otherResults => (okResults :+ x) :++ otherResults)

@@ -59,6 +59,7 @@ import com.digitalasset.canton.participant.sync.SynchronizerConnectionsManager.{
   ConnectionListener,
 }
 import com.digitalasset.canton.participant.synchronizer.*
+import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
@@ -125,6 +126,7 @@ private[sync] class SynchronizerConnectionsManager(
     resourceManagementService: ResourceManagementService,
     parameters: ParticipantNodeParameters,
     connectedSynchronizerFactory: ConnectedSynchronizer.Factory[ConnectedSynchronizer],
+    pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore,
     metrics: ParticipantMetrics,
     sequencerInfoLoader: SequencerInfoLoader,
     isActive: () => Boolean,
@@ -184,6 +186,7 @@ private[sync] class SynchronizerConnectionsManager(
         )(alias.traceContext),
       disconnectSynchronizer = (alias: Traced[SynchronizerAlias]) =>
         disconnectSynchronizer(alias.value)(alias.traceContext),
+      pendingHandshakesWithSuccessorsStore,
       timeouts,
       loggerFactory,
     )
@@ -685,7 +688,7 @@ private[sync] class SynchronizerConnectionsManager(
   ): EitherT[FutureUnlessShutdown, SyncServiceError, PhysicalSynchronizerId] =
     connectSynchronizer match {
       case ConnectSynchronizer.HandshakeOnly =>
-        performSynchronizerHandshake(
+        performHandshake(
           synchronizerAlias,
           skipStatusCheck = skipStatusCheck,
         )
@@ -707,13 +710,16 @@ private[sync] class SynchronizerConnectionsManager(
       psid <- connectedSynchronizers.get(lsid).map(_.psid)
     } yield psid
 
-  /** Perform handshake with the given synchronizer.
+  /** Perform handshake with the given synchronizer:
+    *   - static checks (protocol version, crypto schemes)
+    *   - download the topology
+    *
     * @param synchronizerAlias
     *   Alias of the synchronizer
     * @param skipStatusCheck
     *   If false, check that the connection is active (default).
     */
-  private def performSynchronizerHandshake(
+  private def performHandshake(
       synchronizerAlias: SynchronizerAlias,
       skipStatusCheck: Boolean,
   )(implicit
@@ -769,11 +775,14 @@ private[sync] class SynchronizerConnectionsManager(
         } yield psid
     }
 
-  /** Perform a handshake with the given synchronizer.
+  /** Perform a handshake with the given synchronizer. Does only the static (protocol version,
+    * crypto schemes) unlike `performHandshake` above. In particular: does not download the
+    * topology.
+    *
     * @param psid
     *   the physical synchronizer id of the synchronizer.
     */
-  def connectToPSIdWithHandshake(
+  def performPureHandshake(
       psid: PhysicalSynchronizerId
   )(implicit
       traceContext: TraceContext
@@ -798,11 +807,8 @@ private[sync] class SynchronizerConnectionsManager(
           _ = logger.debug(
             s"Performing handshake with synchronizer with id ${synchronizerConnectionConfig.configuredPSId} and config: ${synchronizerConnectionConfig.config}"
           )
-          synchronizerHandleAndUpdatedConfig <- EitherT(
-            synchronizerRegistry.connect(
-              synchronizerConnectionConfig.config,
-              synchronizerConnectionConfig.predecessor,
-            )
+          _ <- EitherT(
+            synchronizerRegistry.pureHandshake(synchronizerConnectionConfig.config)
           )
             .leftMap[SyncServiceError](err =>
               SyncServiceError.SyncServiceFailedSynchronizerConnection(
@@ -810,10 +816,18 @@ private[sync] class SynchronizerConnectionsManager(
                 err,
               )
             )
-          (synchronizerHandle, _) = synchronizerHandleAndUpdatedConfig
 
-          _ = syncCrypto.remove(psid)
-          _ = synchronizerHandle.close()
+          _ <- synchronizerConnectionConfig.predecessor.map(_.psid) match {
+            case Some(predecessorPSId) =>
+              EitherT.rightT[FutureUnlessShutdown, SyncServiceError](
+                pendingHandshakesWithSuccessorsStore.delete(
+                  predecessorPSId,
+                  PendingHandshakeWithLsuSuccessor.operationKey,
+                  PendingHandshakeWithLsuSuccessor.operationName,
+                )
+              )
+            case None => EitherTUtil.unitUS[SyncServiceError]
+          }
         } yield ()
       },
       s"handshake with physical synchronizer $psid",
@@ -1031,15 +1045,14 @@ private[sync] class SynchronizerConnectionsManager(
             synchronizerAlias,
             synchronizerHandle.topologyClient,
             synchronizerConnectionConfigStore,
-            new HandshakeWithPSId {
-              override def performHandshake(
-                  psid: PhysicalSynchronizerId
-              )(implicit
+            new HandshakeWithSuccessor {
+              override def handshakeWithSuccessor(successorPSId: PhysicalSynchronizerId)(implicit
                   traceContext: TraceContext
               ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
-                connectToPSIdWithHandshake(psid)
+                performPureHandshake(successorPSId)
             },
             automaticallyConnectToUpgradedSynchronizer = parameters.automaticallyPerformLsu,
+            pendingHandshakesWithSuccessorsStore,
             loggerFactory,
           )
 
@@ -1073,6 +1086,7 @@ private[sync] class SynchronizerConnectionsManager(
                   synchronizerHandle.topologyClient,
                   ephemeral.recordOrderPublisher,
                   lsuCallback = lsuCallback,
+                  pendingHandshakesWithSuccessorsStore = pendingHandshakesWithSuccessorsStore,
                   retrieveAndStoreMissingSequencerIds = traceContext =>
                     retrieveAndStoreMissingSequencerIds(psid)(traceContext).leftMap(_.toString),
                   synchronizerHandle.syncPersistentState.sequencedEventStore,
@@ -1344,6 +1358,7 @@ private[sync] class SynchronizerConnectionsManager(
           connectedSynchronizers,
           disconnectSynchronizer = (alias: Traced[SynchronizerAlias]) =>
             disconnectSynchronizer(alias.value)(alias.traceContext),
+          pendingHandshakesWithSuccessorsStore,
           timeouts,
           loggerFactory,
         ).upgrade(request)
@@ -1493,8 +1508,6 @@ object SynchronizerConnectionsManager {
 
     /*
       Used when we only want to do the handshake (get the synchronizer parameters) and do not connect to the synchronizer.
-      Use case: major upgrade for early mainnet (we want to be sure we don't process any transaction before
-      the ACS is imported).
      */
     case object HandshakeOnly extends ConnectSynchronizer {
       override def startConnectedSynchronizer: Boolean = false

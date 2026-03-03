@@ -4,7 +4,6 @@
 package com.digitalasset.canton.synchronizer.metrics
 
 import cats.Eval
-import com.daml.metrics.HealthMetrics
 import com.daml.metrics.api.MetricHandle.*
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.{
@@ -15,12 +14,12 @@ import com.daml.metrics.api.{
   MetricsContext,
 }
 import com.daml.metrics.grpc.{DamlGrpcServerHistograms, DamlGrpcServerMetrics}
+import com.daml.metrics.{CacheMetrics, HealthMetrics}
 import com.digitalasset.canton.environment.BaseMetrics
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.metrics.{
   ActiveRequestsMetrics,
-  CacheMetrics,
   DbStorageHistograms,
   DbStorageMetrics,
   DeclarativeApiMetrics,

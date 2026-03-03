@@ -3051,7 +3051,7 @@ class EngineTestHelpers(
 
   val suffixStrictEngine: Engine = newEngine(requireCidSuffixes = true)
   val suffixLenientEngine = newEngine()
-  val contractKeyEngine = newEngine(contractStateMode = ContractStateMachine.Mode.UCK)
+  val contractKeyEngine = newEngine(contractStateMode = ContractStateMachine.Mode.UCKWithRollback)
   val compiledPackages = ConcurrentCompiledPackages(suffixLenientEngine.config.getCompilerConfig)
   val preprocessor = preprocessing.Preprocessor.forTesting(compiledPackages)
 
@@ -3189,7 +3189,7 @@ class EngineTestHelpers(
 
   def newEngine(
     requireCidSuffixes: Boolean = false,
-    contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoContractKey,
+    contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.default,
   ) =
     new Engine(
       EngineConfig(

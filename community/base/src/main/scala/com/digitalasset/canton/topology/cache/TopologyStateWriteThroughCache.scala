@@ -6,6 +6,7 @@ package com.digitalasset.canton.topology.cache
 import cats.syntax.either.*
 import cats.syntax.option.*
 import cats.syntax.parallel.*
+import com.daml.metrics.CacheMetrics
 import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nonempty.NonEmpty
@@ -22,6 +23,7 @@ import com.digitalasset.canton.lifecycle.{
   FlagCloseable,
   FutureUnlessShutdown,
   HasCloseContext,
+  LifeCycle,
   PromiseUnlessShutdown,
   UnlessShutdown,
 }
@@ -32,7 +34,6 @@ import com.digitalasset.canton.logging.{
   NamedLogging,
   TracedLogger,
 }
-import com.digitalasset.canton.metrics.CacheMetrics
 import com.digitalasset.canton.topology.cache.TopologyStateWriteThroughCache.CacheItem.{
   Loaded,
   Loading,
@@ -266,7 +267,8 @@ class TopologyStateWriteThroughCache(
   private val lock = new Mutex()
   // double ended queue with cached items. oldest items are at the beginning, newest items are at the end
   private val cachedKeys = mutable.Queue[StateKey]()
-  metrics.registerSizeGauge(() => lock.exclusive(cachedKeys.size.toLong))
+  private val sizeGaugeHandle =
+    metrics.registerCloseableSizeGauge(() => lock.exclusive(cachedKeys.size.toLong))
   // list of newly fetched states. these states will be appended to the cached queue during the next eviction cycle
   private val fresh = new AtomicReference[(Int, List[StateKey])]((0, List.empty))
   // the actual state cache (UID, Code) => Seq[Tx]
@@ -983,6 +985,8 @@ class TopologyStateWriteThroughCache(
         )
         .map(_.stored)
     }
+
+  override protected def onClosed(): Unit = LifeCycle.close(sizeGaugeHandle)(logger)
 }
 
 object TopologyStateWriteThroughCache {

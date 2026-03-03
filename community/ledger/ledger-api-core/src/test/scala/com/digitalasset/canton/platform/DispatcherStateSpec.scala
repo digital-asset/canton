@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform
 
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.base.error.utils.ErrorDetails
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.data.Offset

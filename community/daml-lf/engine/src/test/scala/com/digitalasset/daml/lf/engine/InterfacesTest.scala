@@ -52,7 +52,7 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
 
   private def loadAndAddPackage(resource: String): (PackageId, Package, Map[PackageId, Package]) = {
     val stream = getClass.getClassLoader.getResourceAsStream(resource)
-    val packages = DarDecoder.readArchive(resource, new ZipInputStream(stream)).toOption.get
+    val packages = DarDecoder.assertReadArchive(resource, new ZipInputStream(stream))
     val (mainPkgId, mainPkg) = packages.main
     assert(
       compiledPackages.addPackage(mainPkgId, mainPkg).consume(pkgs = packages.all.toMap).isRight

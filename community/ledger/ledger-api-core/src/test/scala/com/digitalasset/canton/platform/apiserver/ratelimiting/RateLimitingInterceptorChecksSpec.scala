@@ -3,18 +3,17 @@
 
 package com.digitalasset.canton.platform.apiserver.ratelimiting
 
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.metrics.api.{MetricInfo, MetricQualification, MetricsContext}
 import com.daml.ports.Port
 import com.daml.scalautil.Statement.discard
+import com.daml.testing.utils.{PekkoBeforeAndAfterAll, TestResourceContext}
 import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.grpc.sampleservice.HelloServiceReferenceImplementation
 import com.digitalasset.canton.health.HealthChecks.ComponentName
 import com.digitalasset.canton.health.{HealthChecks, ReportsHealth}
 import com.digitalasset.canton.ledger.api.grpc.{GrpcClientResource, GrpcHealthService}
-import com.digitalasset.canton.ledger.resources.TestResourceContext
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.networking.grpc.ratelimiting.ActiveRequestCounterInterceptor

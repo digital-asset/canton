@@ -652,7 +652,9 @@ The precise way the state is computed is subject to change.
 
 Here is an example monitoring configuration to place inside a node configuration object:
 
-.. literalinclude:: CANTON/community/integration-testing/src/main/resources/include/health-monitoring.conf
+.. literalinclude:: CANTON/community/app/src/pack/config/participant.conf
+   :start-after: user-manual-entry-begin: GrpcHealthServer
+   :end-before: user-manual-entry-end: GrpcHealthServer
 
 .. note::
 
@@ -666,26 +668,13 @@ Here is an example monitoring configuration to place inside a node configuration
 HTTP Health Check
 ~~~~~~~~~~~~~~~~~
 
-Optionally, the ``canton`` process can expose an HTTP endpoint indicating whether the process believes it is healthy. This may be used as an uptime check or as a `Kubernetes liveness probe <https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/>`__. If enabled, the ``/health`` endpoint will respond to a ``GET`` HTTP request with a 200 HTTP status code (if healthy) or 500 (if unhealthy, along with a plain text description of why it is unhealthy).
+Optionally, the Canton node can expose an HTTP endpoint indicating whether the process believes it is healthy. This may be used as an uptime check or as a `Kubernetes liveness probe <https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/>`__. If enabled, the ``/health`` endpoint will respond to a ``GET`` HTTP request with a 200 HTTP status code (if healthy) or 500 (if unhealthy, along with a plain text description of why it is unhealthy).
 
-To enable this health endpoint, add a ``monitoring`` section to the Canton configuration. Since this health check is for the whole process, add it directly to the ``canton`` configuration rather than for a specific node.
+Here is an example monitoring configuration to place inside a node configuration object:
 
-::
-
-  canton {
-    monitoring.health {
-     server {
-        port = 7000
-     }
-
-     check {
-       type = ping
-       participant = participant1
-       interval = 30s
-     }
-  }
-
-This health check causes ``participant1`` to "ledger ping" itself every 30 seconds. The process is considered healthy if the ping is successful.
+.. literalinclude:: CANTON/community/app/src/pack/config/participant.conf
+   :start-after: user-manual-entry-begin: HttpHealthServer
+   :end-before: user-manual-entry-end: HttpHealthServer
 
 .. _creating_dumps:
 

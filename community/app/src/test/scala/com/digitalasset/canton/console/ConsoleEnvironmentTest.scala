@@ -3,12 +3,12 @@
 
 package com.digitalasset.canton.console
 
+import com.daml.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.CantonConfig
 import com.digitalasset.canton.console.CommandErrors.GenericCommandError
 import com.digitalasset.canton.environment.Environment
 import com.digitalasset.canton.logging.{NamedEventCapturingLogger, SuppressingLogger}
-import com.digitalasset.canton.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
 import com.digitalasset.canton.telemetry.ConfiguredOpenTelemetry
 import com.digitalasset.canton.tracing.TracerProvider
 import io.opentelemetry.sdk.OpenTelemetrySdk

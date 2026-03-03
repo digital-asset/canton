@@ -123,7 +123,7 @@ trait LedgerTimeRecordTimeToleranceChangesIntegrationTest
       val command2Time = environment.now
       // Make sure that anything sequenced after this point gets assigned a sequencing time based on the
       // updated simclock, else the test could flake with `LOCAL_VERDICT_LEDGER_TIME_OUT_OF_BOUND`.
-      waitForTargetTimeOnSequencer(sequencer1, command2Time)
+      waitForTargetTimeOnSequencer(sequencer1, command2Time, logger)
       val command2ExpectedConfirmationRequestMaxSequencingTimes = List(
         (
           command2Time,

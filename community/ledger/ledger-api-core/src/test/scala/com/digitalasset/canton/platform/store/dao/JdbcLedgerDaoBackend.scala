@@ -3,11 +3,11 @@
 
 package com.digitalasset.canton.platform.store.dao
 
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.api.{HistogramInventory, MetricName}
 import com.daml.resources.PureResource
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
@@ -34,7 +34,6 @@ import com.digitalasset.canton.platform.store.{
   DbSupport,
   DbType,
   FlywayMigrations,
-  LedgerApiContractStore,
   LedgerApiContractStoreImpl,
   PruningOffsetService,
 }
@@ -183,7 +182,7 @@ private[dao] trait JdbcLedgerDaoBackend extends PekkoBeforeAndAfterAll with Base
 
   protected final var ledgerDao: LedgerDao = _
   protected var ledgerEndCache: MutableLedgerEndCache = _
-  protected var contractStore: LedgerApiContractStore = _
+  protected var contractStore: LedgerApiContractStoreImpl = _
   protected var stringInterningView: StringInterningView = _
   protected val pruningOffsetService: PruningOffsetService = mock[PruningOffsetService]
   when(pruningOffsetService.pruningOffset(any[TraceContext]))

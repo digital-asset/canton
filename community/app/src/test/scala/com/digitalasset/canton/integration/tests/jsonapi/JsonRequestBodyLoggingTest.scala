@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.jsonapi
 
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.auth.{AuthInterceptor, AuthServiceWildcard}
 import com.digitalasset.canton.config.ApiLoggingConfig
 import com.digitalasset.canton.http.json.v2.CirceRelaxedCodec.deriveRelaxedCodec

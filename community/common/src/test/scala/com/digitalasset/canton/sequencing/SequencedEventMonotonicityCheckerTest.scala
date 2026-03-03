@@ -24,7 +24,7 @@ import org.scalatest.wordspec.FixtureAnyWordSpec
 
 import java.util.concurrent.atomic.AtomicReference
 
-class SequencedEventMonotonicityCheckerTest
+final class SequencedEventMonotonicityCheckerTest
     extends FixtureAnyWordSpec
     with BaseTest
     with HasExecutionContext

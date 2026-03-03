@@ -147,7 +147,7 @@ class SubscriptionPool[Subscription <: ManagedSubscription](
       })
     } onShutdown Left(PoolClosed)
 
-  def closeSubscriptions(member: Member, waitForClosed: Boolean = false)(implicit
+  def closeSubscriptions(member: Member)(implicit
       traceContext: TraceContext
   ): Unit = {
     val subscriptions = lock.exclusive {
@@ -160,12 +160,11 @@ class SubscriptionPool[Subscription <: ManagedSubscription](
     }
     logger.debug(s"Closing ${subscriptions.size} subscriptions for $member")
     trackShutdown(
-      subscriptions.map(sub => (member, shutdownSubscription(member, sub))),
-      waitForClosed,
+      subscriptions.map(sub => (member, shutdownSubscription(member, sub)))
     )
   }
 
-  def closeAllSubscriptions(waitForClosed: Boolean = false)(implicit
+  def closeAllSubscriptions()(implicit
       traceContext: TraceContext
   ): Unit = {
     val allSubscriptions = lock.exclusive {
@@ -179,21 +178,16 @@ class SubscriptionPool[Subscription <: ManagedSubscription](
     trackShutdown(
       allSubscriptions.map { case (member, subscription) =>
         (member, shutdownSubscription(member, subscription))
-      },
-      waitForClosed,
+      }
     )
   }
 
-  private def trackShutdown(items: List[(Member, Future[Unit])], waitForClosed: Boolean)(implicit
+  private def trackShutdown(items: List[(Member, Future[Unit])])(implicit
       traceContext: TraceContext
   ): Unit =
     items.foreach { case (member, doneF) =>
       val str = s"closing subscription for $member"
-      if (waitForClosed) {
-        timeouts.unbounded.await(str)(doneF)
-      } else {
-        FutureUtil.doNotAwait(doneF, str)
-      }
+      FutureUtil.doNotAwait(doneF, str)
     }
 
   private def shutdownSubscription(
@@ -250,7 +244,7 @@ class SubscriptionPool[Subscription <: ManagedSubscription](
       )
       // wait for the subscriptions to actually close in case they are already in the process of closing
       // in which case FlagClosable doesn't wait.
-      closeAllSubscriptions(waitForClosed = true)
+      closeAllSubscriptions()
     }
 
 }

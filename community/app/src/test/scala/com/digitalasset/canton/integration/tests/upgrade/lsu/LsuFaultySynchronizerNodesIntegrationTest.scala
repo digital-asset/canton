@@ -3,28 +3,27 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.digitalasset.canton.config
-import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
-import com.digitalasset.canton.integration.EnvironmentDefinition.S2M2
+import com.digitalasset.canton.integration.EnvironmentDefinition.S4M4
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
-import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
+import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.logging.SuppressionRule.LevelAndAbove
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import org.scalatest.Assertion
-import org.slf4j.event
 
+import java.time.Duration
 import scala.concurrent.Future
 
 /*
 Check what happens if some of the synchronizer nodes upgrade late or don't upgrade.
 
-Initial topology:
+Initial topology: 4 sequencers (for BFT fault tolerance, F = 1) and corresponding mediators (SV-like setup)
 - p1 connected to s1
 - p2 connected to s2
 - p3 connected to s1, s2 with trust threshold=1
@@ -32,8 +31,9 @@ Initial topology:
 
 LSU
 - s2 and m2 don't upgrade
-- s1 and m1 upgrade to s3 and m3; m3 upgrade is done late (after the upgrade time)
-  - We check that a request submitted to s3 after upgrade time but before m3 upgrade succeeds eventually
+- s1 and m1 upgrade to s5 and m5, s3 and m3 to s6 and m6, and s4 and m4 to s7 and m7; mediators upgrade is done late
+  (i.e., after the upgrade time)
+  - We check that a request submitted to s5 after upgrade time, but before m5 upgrades, succeeds eventually
 
 What happens
 - p1 automatically upgrade
@@ -45,27 +45,46 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
 
   override protected def testName: String = "lsu-faulty-synchronizer-nodes"
 
-  // TODO(#30360) Use DA BFT
   registerPlugin(
-    new UseReferenceBlockSequencer[DbConfig.Postgres](
+    new UseBftSequencer(
       loggerFactory,
-      MultiSynchronizer.tryCreate(Set("sequencer1", "sequencer2"), Set("sequencer3")),
+      MultiSynchronizer.tryCreate(
+        Set("sequencer1", "sequencer2", "sequencer3", "sequencer4"),
+        Set("sequencer5", "sequencer6", "sequencer7"),
+      ),
     )
   )
   registerPlugin(new UsePostgres(loggerFactory))
 
   override protected lazy val newOldSequencers: Map[String, String] =
-    Map("sequencer3" -> "sequencer1")
-  override protected lazy val newOldMediators: Map[String, String] = Map("mediator3" -> "mediator1")
+    Map(
+      "sequencer5" -> "sequencer1",
+      "sequencer6" -> "sequencer3",
+      "sequencer7" -> "sequencer4",
+    )
+  override protected lazy val newOldMediators: Map[String, String] =
+    Map(
+      "mediator5" -> "mediator1",
+      "mediator6" -> "mediator3",
+      "mediator7" -> "mediator4",
+    )
+
   override protected lazy val upgradeTime: CantonTimestamp = CantonTimestamp.Epoch.plusSeconds(30)
+
+  private val newMediatorsAndSequencers: Map[String, String] =
+    Map(
+      "mediator5" -> "sequencer5",
+      "mediator6" -> "sequencer6",
+      "mediator7" -> "sequencer7",
+    )
 
   private var automaticallyUpgraded: Seq[ParticipantReference] = _
   private var manuallyUpgraded: Seq[LocalParticipantReference] = _
 
   override lazy val environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P4S3M3_Config
+    EnvironmentDefinition.P4S7M7_Config
       .withNetworkBootstrap { implicit env =>
-        new NetworkBootstrapper(S2M2)
+        new NetworkBootstrapper(S4M4)
       }
       .addConfigTransforms(configTransforms*)
       .withSetup { implicit env =>
@@ -85,15 +104,16 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
 
         participants.all.dars.upload(CantonExamplesPath)
 
-        synchronizerOwners1.foreach(
-          _.topology.synchronizer_parameters.propose_update(
-            daId,
-            _.copy(reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)),
-          )
-        )
+        setDefaultsDynamicSynchronizerParameters(daId, synchronizerOwners1)
 
-        oldSynchronizerNodes = SynchronizerNodes(Seq(sequencer1), Seq(mediator1))
-        newSynchronizerNodes = SynchronizerNodes(Seq(sequencer3), Seq(mediator3))
+        oldSynchronizerNodes = SynchronizerNodes(
+          Seq(sequencer1, sequencer3, sequencer4),
+          Seq(mediator1, mediator3, mediator4),
+        )
+        newSynchronizerNodes = SynchronizerNodes(
+          Seq(sequencer5, sequencer6, sequencer7),
+          Seq(mediator5, mediator6, mediator7),
+        )
       }
 
   "Logical synchronizer upgrade" should {
@@ -108,34 +128,38 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
 
       val upgradeFailureError = s"Upgrade to ${fixture.newPSId} failed"
 
-      val logAssertions: Seq[LogEntry] => Assertion = LogEntry.assertLogSeq(
+      val logAssertions: Seq[(LogEntryOptionality, LogEntry => Assertion)] =
         Seq(
           (
+            LogEntryOptionality.Required,
             _.toString should (include("participant2") and include(upgradeFailureError) and include(
               "No sequencer successor was found"
             )),
-            "p2 automatic upgrade failure",
           ),
           (
+            LogEntryOptionality.Required,
             _.toString should (include("participant4") and include(upgradeFailureError) and include(
               "Not enough successors sequencers (1) to meet the sequencer threshold (2)"
             )),
-            "p4 automatic upgrade failure",
           ),
           (
+            LogEntryOptionality.Required,
             entry => {
               entry.toString should include("participant3")
+              // p3 will be connected to only a sequencer after the lsu
               entry.warningMessage should include(
                 s"Missing successor information for the following sequencers: Set($sequencer2). They will be removed from the pool of sequencers."
               )
             },
-            "p3 will be connected to only a sequencer after the lsu",
+          ),
+          (
+            LogEntryOptionality.OptionalMany,
+            _.shouldBeCantonErrorCode(SequencerError.NotAtUpgradeTimeOrBeyond),
           ),
         )
-      )
 
-      val exportDirectory = loggerFactory.assertEventuallyLogsSeq(LevelAndAbove(event.Level.WARN))(
-        clue("Migrate s1") {
+      val exportDirectory = loggerFactory.assertLogsUnorderedOptional(
+        clue("Migrate") {
           fixture.oldSynchronizerOwners.foreach(
             _.topology.lsu.announcement
               .propose(fixture.newPSId, fixture.upgradeTime)
@@ -149,34 +173,41 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
             successorPSId = fixture.newPSId,
           )
 
-          // Note that mediator1 is not migrated yet
-          migrateSequencer(
-            migratedSequencer = sequencer3,
-            newStaticSynchronizerParameters = fixture.newStaticSynchronizerParameters,
-            exportDirectory = exportDirectory,
-            oldNodeName = "sequencer1",
-          )
+          // Note that mediators are not migrated yet
+          newOldSequencers.foreach { case (newSequencerName, oldSequencerName) =>
+            migrateSequencer(
+              migratedSequencer = s(newSequencerName),
+              newStaticSynchronizerParameters = fixture.newStaticSynchronizerParameters,
+              exportDirectory = exportDirectory,
+              oldNodeName = oldSequencerName,
+            )
 
-          sequencer1.topology.lsu.sequencer_successors.propose_successor(
-            sequencerId = sequencer1.id,
-            endpoints = sequencer3.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-            synchronizerId = fixture.currentPSId,
-          )
+            s(oldSequencerName).topology.lsu.sequencer_successors.propose_successor(
+              sequencerId = s(oldSequencerName).id,
+              endpoints =
+                s(newSequencerName).sequencerConnection.endpoints.map(_.toURI(useTls = false)),
+              synchronizerId = fixture.currentPSId,
+            )
+          }
 
           environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
+          transferTraffic(suppressLogs = false)
 
           exportDirectory
         },
-        logAssertions,
+        logAssertions*
       )
 
       eventually() {
+        environment.simClock.value.advance(Duration.ofSeconds(1))
         forEvery(automaticallyUpgraded)(_.synchronizers.is_connected(fixture.newPSId) shouldBe true)
         forEvery(automaticallyUpgraded)(
           _.synchronizers.is_connected(fixture.currentPSId) shouldBe false
         )
       }
-      waitForTargetTimeOnSequencer(sequencer3, environment.clock.now)
+      for (newSequencer <- newOldSequencers.keys) {
+        waitForTargetTimeOnSequencer(ls(newSequencer), environment.clock.now, logger)
+      }
 
       participant1.underlying.value.sync
         .connectedSynchronizerForAlias(daName)
@@ -198,13 +229,15 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
         pingF.isCompleted shouldBe false // ping is not completed
       }
 
-      migrateMediator(
-        migratedMediator = mediator3,
-        newPSId = fixture.newPSId,
-        newSequencers = Seq(sequencer3),
-        exportDirectory = exportDirectory,
-        oldNodeName = "mediator1",
-      )
+      newOldMediators.foreach { case (newMediatorName, oldMediatorName) =>
+        migrateMediator(
+          migratedMediator = m(newMediatorName),
+          newPSId = fixture.newPSId,
+          newSequencers = Seq(s(newMediatorsAndSequencers(newMediatorName))),
+          exportDirectory = exportDirectory,
+          oldNodeName = oldMediatorName,
+        )
+      }
 
       pingF.futureValue // ping should succeed
 
@@ -213,7 +246,7 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
           currentPhysicalSynchronizerId = fixture.currentPSId,
           successorPhysicalSynchronizerId = fixture.newPSId,
           announcedUpgradeTime = fixture.upgradeTime,
-          successorConfig = synchronizerConnectionConfig(sequencer3),
+          successorConfig = synchronizerConnectionConfig(sequencer5),
         )
         p.synchronizers.reconnect_all()
       }

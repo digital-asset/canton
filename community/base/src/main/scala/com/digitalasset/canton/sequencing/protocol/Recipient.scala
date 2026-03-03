@@ -174,9 +174,7 @@ object MediatorGroupRecipient {
     }
 }
 
-/** All known members of the synchronizer, i.e., the return value of
-  * [[com.digitalasset.canton.topology.client.MembersTopologySnapshotClient#allMembers]].
-  */
+/** All known members of the synchronizer. */
 final case object AllMembersOfSynchronizer extends GroupRecipient with MemberRecipientOrBroadcast {
 
   override protected def pretty: Pretty[AllMembersOfSynchronizer.type] =

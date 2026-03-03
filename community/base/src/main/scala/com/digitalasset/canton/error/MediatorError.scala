@@ -19,7 +19,11 @@ import org.slf4j.event.Level
 
 import java.util.UUID
 
-sealed trait MediatorError extends Product with Serializable with PrettyPrinting {
+sealed trait MediatorError
+    extends CantonBaseError
+    with Product
+    with Serializable
+    with PrettyPrinting {
   def isMalformed: Boolean
 }
 
@@ -134,8 +138,7 @@ object MediatorError extends MediatorErrorGroup {
     final case class Reject(
         override val cause: String
     ) extends Alarm(cause)
-        with MediatorError
-        with CantonBaseError {
+        with MediatorError {
 
       override def isMalformed: Boolean = true
 

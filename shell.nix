@@ -18,7 +18,6 @@ pkgs.mkShell {
     circleci-cli
     curl
     dpm
-    entr
     (flyway.override { jre_headless = jre; })
     gitAndTools.gh
     gitAndTools.hub
@@ -26,15 +25,12 @@ pkgs.mkShell {
     glibcLocales
     gnugrep
     gnupg
-    go
-    go-jsonnet
     google-cloud-sdk
     grpcurl
     haproxy
     jo
     jq
     jre
-    jsonnet-bundler
     lnav
     locale
     nodejs

@@ -498,19 +498,16 @@ sealed abstract class HasTxNodes[Tx] {
   )
   def contractKeyInputs: Either[KeyInputError, Map[GlobalKey, KeyInput]] = {
     foldInExecutionOrder[Either[KeyInputError, ContractStateMachine.State[NodeId]]](
-      Right(ContractStateMachine.initial[NodeId](ContractStateMachine.Mode.UCK))
+      Right(ContractStateMachine.initial[NodeId](ContractStateMachine.Mode.UCKWithRollback))
     )(
       exerciseBegin = (acc, nid, exe) =>
         (acc.flatMap(_.handleExercise(nid, exe)), Transaction.ChildrenRecursion.DoRecurse),
-      exerciseEnd = (acc, _, _) => acc,
+      exerciseEnd = (acc, _, _) =>
+        acc,
       rollbackBegin =
         (acc, _, _) => (acc.map(_.beginRollback()), Transaction.ChildrenRecursion.DoRecurse),
       rollbackEnd = (acc, _, _) => acc.map(_.endRollback()),
-      leaf = (
-          acc,
-          nid,
-          leaf,
-      ) =>
+      leaf = (acc, nid, leaf) =>
         acc.flatMap(
           _.handleNode(nid, leaf, None)
         ), // ok to use None as keyInput, because mode is strict

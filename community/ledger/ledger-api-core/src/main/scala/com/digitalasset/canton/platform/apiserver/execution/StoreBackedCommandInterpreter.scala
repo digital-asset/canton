@@ -8,6 +8,7 @@ import com.daml.metrics.{Timed, Tracked}
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.LedgerTimeBoundaries
 import com.digitalasset.canton.ledger.api
+import com.digitalasset.canton.ledger.api.DisclosedContract
 import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.index.{ContractState, ContractStore}
@@ -22,6 +23,7 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
+import com.digitalasset.canton.platform.apiserver.execution.StoreBackedCommandInterpreter.StoreNKeyContinuationToken
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.protocol.{CantonContractIdVersion, LfFatContractInst}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -109,9 +111,7 @@ final class StoreBackedCommandInterpreter(
         commands.actAs,
         commands.readAs,
         submissionResult,
-        commands.disclosedContracts.iterator
-          .map(c => c.fatContractInstance.contractId -> c.fatContractInstance)
-          .toMap,
+        commands.disclosedContracts,
         interpretationTimeNanos,
         commands.commands.ledgerEffectiveTime,
         ledgerTimeRecordTimeToleranceO,
@@ -246,11 +246,12 @@ final class StoreBackedCommandInterpreter(
       }
   }
 
+  // TODO(#30398): add unit testing of the NUCK lookups (especially the intersection with explicit disclosure)
   private def consume[A](
       actAs: Set[Ref.Party],
       readAs: Set[Ref.Party],
       result: Result[A],
-      disclosedContracts: Map[ContractId, FatContract],
+      disclosedContracts: ImmArray[DisclosedContract],
       interpretationTimeNanos: AtomicLong,
       ledgerEffectiveTime: Time.Timestamp,
       ledgerTimeRecordTimeToleranceO: Option[NonNegativeFiniteDuration],
@@ -266,14 +267,28 @@ final class StoreBackedCommandInterpreter(
     val lookupContractKeyTime = new AtomicLong(0L)
     val lookupContractKeyCount = new AtomicLong(0L)
 
-    val disclosedContractsByKey = (for {
-      idC <- disclosedContracts.view
-      (id, c) = idC
-      k <- c.contractKeyWithMaintainers.toList
-    } yield k -> id).toMap
+    val disclosedContractsByKey: Map[GlobalKeyWithMaintainers, Vector[LfFatContractInst]] =
+      disclosedContracts.foldLeft(Map.empty[GlobalKeyWithMaintainers, Vector[LfFatContractInst]]) {
+        case (map, disclosedContract) =>
+          disclosedContract.fatContractInstance.contractKeyWithMaintainers match {
+            case Some(key) =>
+              map.+(
+                key -> map
+                  .getOrElse(key, Vector.empty)
+                  .appended(disclosedContract.fatContractInstance)
+              )
+            case None =>
+              map
+          }
+      }
+
+    val disclosedContractsById: Map[ContractId, LfFatContractInst] =
+      disclosedContracts.iterator
+        .map(c => c.fatContractInstance.contractId -> c.fatContractInstance)
+        .toMap
 
     def disclosedOrStoreLookup(acoid: ContractId): FutureUnlessShutdown[Option[LfFatContractInst]] =
-      disclosedContracts.get(acoid) match {
+      disclosedContractsById.get(acoid) match {
         case Some(fatContract) => FutureUnlessShutdown.pure(Some(fatContract))
         case None => timedLookup(acoid)
       }
@@ -296,10 +311,54 @@ final class StoreBackedCommandInterpreter(
     def disclosedOrStoreKeyLookup(
         key: GlobalKeyWithMaintainers
     ): FutureUnlessShutdown[Option[ContractId]] =
-      disclosedContractsByKey.get(key) match {
-        case Some(fatContract) => FutureUnlessShutdown.pure(Some(fatContract))
+      disclosedContractsByKey.get(key).flatMap(_.headOption) match {
+        case Some(c) => FutureUnlessShutdown.pure(Some(c.contractId))
         case None => timedKeyLookup(key)
       }
+
+    def disclosedOrStoreNKeyLookup(
+        key: GlobalKeyWithMaintainers,
+        limit: Int,
+        continuationToken: Option[NKeyContinuationToken],
+    ): FutureUnlessShutdown[(Vector[LfFatContractInst], Option[NKeyContinuationToken])] = {
+      val disclosedContracts = disclosedContractsByKey.getOrElse(key, Vector.empty)
+      continuationToken
+        .map {
+          case validToken: StoreNKeyContinuationToken => validToken
+          case invalidToken =>
+            throw new IllegalArgumentException(s"Invalid token provided $invalidToken")
+        }
+        .getOrElse(StoreNKeyContinuationToken.ContinueDisclosed(0)) match {
+        case StoreNKeyContinuationToken.ContinueDisclosed(usedFromDisclosed) =>
+          val (fromDisclosed, remainingFromDisclosed) =
+            disclosedContracts.drop(usedFromDisclosed).splitAt(limit)
+          if (remainingFromDisclosed.nonEmpty) {
+            FutureUnlessShutdown.pure(
+              fromDisclosed -> Some(
+                StoreNKeyContinuationToken.ContinueDisclosed(usedFromDisclosed + limit)
+              )
+            )
+          } else {
+            timedNKeyLookup(
+              key = key,
+              limit = limit - fromDisclosed.size,
+              continuationToken = StoreNKeyContinuationToken.ContinueFromStore(None),
+            ).map { case (contracts, token) =>
+              val contractsNotDisclosed = contracts.filterNot(contract =>
+                disclosedContractsById.contains(contract.contractId)
+              )
+              (fromDisclosed ++ contractsNotDisclosed, token)
+            }
+          }
+
+        case token: StoreNKeyContinuationToken.ContinueFromStore =>
+          timedNKeyLookup(
+            key = key,
+            limit = limit,
+            continuationToken = token,
+          )
+      }
+    }
 
     def timedKeyLookup(key: GlobalKeyWithMaintainers): FutureUnlessShutdown[Option[ContractId]] = {
       val start = System.nanoTime
@@ -315,6 +374,45 @@ final class StoreBackedCommandInterpreter(
           }
         }
     }
+
+    def timedNKeyLookup(
+        key: GlobalKeyWithMaintainers,
+        limit: Int,
+        continuationToken: StoreNKeyContinuationToken.ContinueFromStore,
+    ): FutureUnlessShutdown[(Vector[LfFatContractInst], Option[NKeyContinuationToken])] =
+      if (limit <= 0)
+        FutureUnlessShutdown.pure(
+          Vector.empty -> Some(StoreNKeyContinuationToken.ContinueFromStore(None))
+        )
+      else {
+        val start = System.nanoTime
+        Timed
+          .futureUS(
+            metrics.execution.lookupNContractKey,
+            FutureUnlessShutdown.outcomeF(
+              contractStore
+                .lookupNonUniqueContractKey(
+                  readers = readers,
+                  key = key.globalKey,
+                  pageToken = continuationToken.token,
+                  limit = limit,
+                )
+                .map(contractKeyPage =>
+                  (
+                    contractKeyPage.contracts,
+                    contractKeyPage.nextPageToken
+                      .map(token => StoreNKeyContinuationToken.ContinueFromStore(Some(token))),
+                  )
+                )
+            ),
+          )
+          .map {
+            _.tap { _ =>
+              lookupContractKeyTime.addAndGet(System.nanoTime() - start)
+              lookupContractKeyCount.incrementAndGet()
+            }
+          }
+      }
 
     def resolveStep(result: Result[A]): FutureUnlessShutdown[Either[ErrorCause, A]] =
       result match {
@@ -357,6 +455,17 @@ final class StoreBackedCommandInterpreter(
                 )
               )
             )
+
+        case ResultNeedNKey(key, limit, continuationToken, resume) =>
+          disclosedOrStoreNKeyLookup(key, limit, continuationToken)
+            .flatMap { case (cids, token) =>
+              resolveStep(
+                Tracked.value(
+                  metrics.execution.engineRunning,
+                  trackSyncExecution(interpretationTimeNanos)(resume(cids, token)),
+                )
+              )
+            }
 
         case ResultNeedPackage(packageId, resume) =>
           packageResolver
@@ -427,7 +536,7 @@ final class StoreBackedCommandInterpreter(
           // - the read through lookup will ask the contract reader
           // - the contract reader will ask the batchLoader
           // - the batch loader will put independent requests together into db batches and respond
-          val disclosedCids = disclosedContracts.keySet
+          val disclosedCids = disclosedContractsById.keySet
           val initialCids = coids.toSet.diff(disclosedCids)
           import com.digitalasset.canton.util.FutureInstances.*
           // load all contracts
@@ -483,6 +592,12 @@ final class StoreBackedCommandInterpreter(
 }
 
 object StoreBackedCommandInterpreter {
+
+  sealed trait StoreNKeyContinuationToken extends NKeyContinuationToken
+  object StoreNKeyContinuationToken {
+    final case class ContinueDisclosed(usedFromDisclosed: Int) extends StoreNKeyContinuationToken
+    final case class ContinueFromStore(token: Option[Long]) extends StoreNKeyContinuationToken
+  }
 
   def considerDisclosedContractsSynchronizerId(
       prescribedSynchronizerIdO: Option[SynchronizerId],

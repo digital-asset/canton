@@ -21,7 +21,9 @@ import com.digitalasset.canton.admin.sequencer.v30 as sequencerProto
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.sequencer.admin.v30 as proto
-import com.digitalasset.canton.sequencing.protocol.TrafficState
+import com.digitalasset.canton.sequencer.admin.v30.SequencerAdministrationServiceGrpc
+import com.digitalasset.canton.sequencing.protocol.{SubmissionRequestType, TrafficState}
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.IndividualThroughputCapConfig
 import com.digitalasset.canton.synchronizer.sequencer.admin.grpc.InitializeSequencerResponse
 import com.digitalasset.canton.synchronizer.sequencer.traffic.TimestampSelector.TimestampSelector
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
@@ -50,6 +52,17 @@ object SequencerAdminCommands {
         channel: ManagedChannel
     ): proto.SequencerAdministrationServiceGrpc.SequencerAdministrationServiceStub =
       proto.SequencerAdministrationServiceGrpc.stub(channel)
+  }
+
+  abstract class BaseSequencerInspectionCommand[Req, Rep, Res]
+      extends GrpcAdminCommand[Req, Rep, Res] {
+    override type Svc =
+      proto.SequencerTrafficInspectionServiceGrpc.SequencerTrafficInspectionServiceStub
+
+    override def createService(
+        channel: ManagedChannel
+    ): proto.SequencerTrafficInspectionServiceGrpc.SequencerTrafficInspectionServiceStub =
+      proto.SequencerTrafficInspectionServiceGrpc.stub(channel)
   }
 
   final case class GenerateAuthenticationToken(
@@ -159,6 +172,71 @@ object SequencerAdminCommands {
     override protected def handleResponse(
         response: proto.SetTrafficPurchasedResponse
     ): Either[String, Unit] = Either.unit
+  }
+
+  final case class GetTrafficSummaries(
+      timestamps: Seq[CantonTimestamp]
+  ) extends BaseSequencerInspectionCommand[
+        proto.GetTrafficSummariesRequest,
+        proto.GetTrafficSummariesResponse,
+        Seq[proto.TrafficSummary],
+      ] {
+    override protected def createRequest(): Either[String, proto.GetTrafficSummariesRequest] =
+      Right(
+        proto.GetTrafficSummariesRequest(timestamps.map(_.toProtoTimestamp))
+      )
+
+    override protected def submitRequest(
+        service: proto.SequencerTrafficInspectionServiceGrpc.SequencerTrafficInspectionServiceStub,
+        request: proto.GetTrafficSummariesRequest,
+    ): Future[proto.GetTrafficSummariesResponse] =
+      service.getTrafficSummaries(request)
+
+    override protected def handleResponse(
+        response: proto.GetTrafficSummariesResponse
+    ): Either[String, Seq[proto.TrafficSummary]] = Right(response.summary)
+  }
+
+  final case class GetThroughputCap(requestType: SubmissionRequestType)
+      extends BaseSequencerAdministrationCommand[
+        proto.GetThroughputCapRequest,
+        proto.GetThroughputCapResponse,
+        Option[IndividualThroughputCapConfig],
+      ] {
+
+    override protected def submitRequest(
+        service: SequencerAdministrationServiceGrpc.SequencerAdministrationServiceStub,
+        request: proto.GetThroughputCapRequest,
+    ): Future[proto.GetThroughputCapResponse] =
+      service.getThroughputCap(request)
+    override protected def createRequest(): Either[String, proto.GetThroughputCapRequest] =
+      Right(proto.GetThroughputCapRequest(requestType.name))
+    override protected def handleResponse(
+        response: proto.GetThroughputCapResponse
+    ): Either[String, Option[IndividualThroughputCapConfig]] =
+      response.config.traverse(IndividualThroughputCapConfig.fromAdminProto).leftMap(_.message)
+  }
+
+  final case class SetThroughputCap(
+      requestType: SubmissionRequestType,
+      newConfig: Option[IndividualThroughputCapConfig],
+  ) extends BaseSequencerAdministrationCommand[
+        proto.SetThroughputCapRequest,
+        proto.SetThroughputCapResponse,
+        Unit,
+      ] {
+
+    override protected def submitRequest(
+        service: SequencerAdministrationServiceGrpc.SequencerAdministrationServiceStub,
+        request: proto.SetThroughputCapRequest,
+    ): Future[proto.SetThroughputCapResponse] =
+      service.setThroughputCap(request)
+    override protected def createRequest(): Either[String, proto.SetThroughputCapRequest] =
+      Right(proto.SetThroughputCapRequest(requestType.name, newConfig.map(_.toAdminProto)))
+    override protected def handleResponse(
+        response: proto.SetThroughputCapResponse
+    ): Either[String, Unit] = Either.unit
+
   }
 
   final case class InitializeFromOnboardingState(onboardingState: ByteString)
@@ -617,11 +695,13 @@ object SequencerAdminCommands {
       ] {
     override protected def createRequest(): Either[String, proto.GetLsuTrafficControlStateRequest] =
       Right(proto.GetLsuTrafficControlStateRequest())
+
     override protected def submitRequest(
         service: proto.SequencerAdministrationServiceGrpc.SequencerAdministrationServiceStub,
         request: proto.GetLsuTrafficControlStateRequest,
     ): Future[proto.GetLsuTrafficControlStateResponse] =
       service.getLsuTrafficControlState(request)
+
     override protected def handleResponse(
         response: proto.GetLsuTrafficControlStateResponse
     ): Either[String, ByteString] =
@@ -637,11 +717,13 @@ object SequencerAdminCommands {
       ] {
     override protected def createRequest(): Either[String, proto.SetLsuTrafficControlStateRequest] =
       Right(proto.SetLsuTrafficControlStateRequest(membersTraffic))
+
     override protected def submitRequest(
         service: proto.SequencerAdministrationServiceGrpc.SequencerAdministrationServiceStub,
         request: proto.SetLsuTrafficControlStateRequest,
     ): Future[proto.SetLsuTrafficControlStateResponse] =
       service.setLsuTrafficControlState(request)
+
     override protected def handleResponse(
         response: proto.SetLsuTrafficControlStateResponse
     ): Either[String, Unit] = Either.unit

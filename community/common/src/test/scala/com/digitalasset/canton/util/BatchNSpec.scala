@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.util
 
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import org.apache.pekko.stream.Attributes.InputBuffer
 import org.apache.pekko.stream.scaladsl.{Sink, Source}

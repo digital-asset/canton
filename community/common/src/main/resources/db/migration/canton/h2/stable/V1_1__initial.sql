@@ -106,6 +106,22 @@ create table common_node_id(
   primary key (identifier, namespace)
 );
 
+-- Stores the local party metadata
+create table common_party_metadata (
+  -- party id as string
+  party_id varchar not null,
+  -- the main participant id of this party which is our participant if the party is on our node (preferred) or the remote participant
+  participant_id varchar null,
+  -- the submission id used to synchronise the ledger api server
+  submission_id varchar null,
+  -- notification flag used to keep track about pending synchronisations
+  notified boolean not null default false,
+  -- the time when this change will be or became effective
+  effective_at bigint not null,
+  primary key (party_id)
+);
+create index idx_common_party_metadata_notified on common_party_metadata(notified);
+
 -- Stores the dispatching watermarks
 create table common_topology_dispatching (
   -- the target store we are dispatching to (from is always authorized)
@@ -388,8 +404,7 @@ create table seq_block_height (
     -- there is no further event addressed to the sequencer between this timestamp
     -- and the last event in the block.
     -- NULL if no such timestamp is known, e.g., because this block was added before this column was added.
-    latest_sequencer_event_ts bigint,
-    latest_pending_topology_ts bigint
+    latest_sequencer_event_ts bigint
 );
 
 create table mediator_deduplication_store (

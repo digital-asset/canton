@@ -128,7 +128,7 @@ class FixedSyncCryptoApiForSigning(
         traceContext: TraceContext
     ): FutureUnlessShutdown[Seq[MediatorGroup]] = notImplementedUS
 
-    override def allMembers()(implicit
+    override def knownMembers()(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Set[Member]] = notImplementedUS
 

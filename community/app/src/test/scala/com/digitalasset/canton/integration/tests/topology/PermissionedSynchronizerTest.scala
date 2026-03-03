@@ -11,13 +11,16 @@ import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
-import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceSynchronizerDisabledUs
+import com.digitalasset.canton.participant.sync.SyncServiceError.{
+  SyncServiceSynchronizerDisabledUs,
+  SyncServiceSynchronizerDisconnect,
+}
 import com.digitalasset.canton.participant.synchronizer.SynchronizerRegistryError.InitialOnboardingError
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import io.scalaland.chimney.dsl.*
 import org.slf4j.event.Level
 
-trait PermissionedSynchronizerTest
+sealed trait PermissionedSynchronizerTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with HasCycleUtils
@@ -177,6 +180,11 @@ trait PermissionedSynchronizerTest
         mayContain = Seq(
           _.warningMessage should include("PERMISSION_DENIED/Authentication token refresh error"),
           _.warningMessage should include("Token refresh aborted due to shutdown"),
+          // TODO(#30534): Improve the error to explain why the threshold is not reachable.
+          _.shouldBeCantonError(
+            SyncServiceSynchronizerDisconnect,
+            _ should include regex raw"Synchronizer '\S+' fatally disconnected because of Trust threshold \S+ is no longer reachable",
+          ),
         ),
       ),
     )
@@ -268,7 +276,7 @@ trait PermissionedSynchronizerTest
 //  registerPlugin(new UseBftSequencer(loggerFactory))
 //}
 
-class PermissionedSynchronizerTestPostgres extends PermissionedSynchronizerTest {
+final class PermissionedSynchronizerTestPostgres extends PermissionedSynchronizerTest {
   registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UsePostgres(loggerFactory))
 }

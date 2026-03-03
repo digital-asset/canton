@@ -47,7 +47,7 @@ trait LanguageFeaturesGenerated extends LanguageVersionGenerated {
     val unstable = v1_dev
   }
 
-  // --- Generated V2 Features ---
+  // --- Hardcoded V2 Features ---
 
   val featureUnstable: Feature = Feature(
     name = "Unstable, experimental features",
@@ -129,6 +129,11 @@ trait LanguageFeaturesGenerated extends LanguageVersionGenerated {
   val featureNUCK: Feature = Feature(
     name = "Non-unique contract keys",
     versionRange = VersionRange.From(v2_dev), // dev whilst developing, then 2.3(-rcn)
+  )
+
+  val featureExtendedCryptoPrimitives: Feature = Feature(
+    name = "Extended crypto primitives",
+    versionRange = VersionRange.From(v2_3_1),
   )
 
   val allFeatures: List[Feature] = List(

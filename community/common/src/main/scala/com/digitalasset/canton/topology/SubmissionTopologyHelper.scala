@@ -4,11 +4,10 @@
 package com.digitalasset.canton.topology
 
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.crypto.SynchronizerCryptoClient
+import com.digitalasset.canton.crypto.{SynchronizerCryptoClient, SynchronizerSnapshotSyncCryptoApi}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.ErrorLoggingContext
-import com.digitalasset.canton.topology.client.TopologySnapshot
 
 import scala.concurrent.ExecutionContext
 
@@ -36,7 +35,7 @@ object SubmissionTopologyHelper {
   )(implicit
       loggingContext: ErrorLoggingContext,
       ec: ExecutionContext,
-  ): FutureUnlessShutdown[Option[TopologySnapshot]] = {
+  ): FutureUnlessShutdown[Option[SynchronizerSnapshotSyncCryptoApi]] = {
     val maxDelay = timeouts.topologyChangeWarnDelay.toInternal
     val minTs = sequencingTimestamp - maxDelay
 
@@ -45,7 +44,7 @@ object SubmissionTopologyHelper {
         .awaitSnapshotUSSupervised(s"await crypto snapshot $submissionTopologyTimestamp")(
           submissionTopologyTimestamp
         )
-        .map(syncCryptoApi => Some(syncCryptoApi.ipsSnapshot))
+        .map(syncCryptoApi => Some(syncCryptoApi))
     else {
       loggingContext.info(
         s"""Declared submission topology timestamp $submissionTopologyTimestamp is too far in the past (minimum

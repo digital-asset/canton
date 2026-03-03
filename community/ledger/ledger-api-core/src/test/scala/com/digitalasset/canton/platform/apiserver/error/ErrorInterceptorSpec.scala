@@ -4,13 +4,16 @@
 package com.digitalasset.canton.platform.apiserver.error
 
 import com.daml.grpc.test.StreamConsumer
-import com.daml.ledger.api.testing.utils.{PekkoBeforeAndAfterAll, TestingServerInterceptors}
 import com.daml.ledger.resources.ResourceOwner
+import com.daml.testing.utils.{
+  PekkoBeforeAndAfterAll,
+  TestResourceContext,
+  TestingServerInterceptors,
+}
 import com.digitalasset.base.error.*
 import com.digitalasset.base.error.utils.ErrorDetails
 import com.digitalasset.canton.grpc.sampleservice.HelloServiceReferenceImplementation
 import com.digitalasset.canton.ledger.api.grpc.StreamingServiceLifecycleManagement
-import com.digitalasset.canton.ledger.resources.TestResourceContext
 import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
 import com.digitalasset.canton.tracing.TraceContext

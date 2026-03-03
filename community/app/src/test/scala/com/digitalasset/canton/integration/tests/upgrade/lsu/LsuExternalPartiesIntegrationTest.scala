@@ -15,6 +15,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 
+import java.time.Duration
 import java.util.Optional
 import scala.jdk.CollectionConverters.*
 
@@ -71,11 +72,12 @@ final class LsuExternalPartiesIntegrationTest extends LsuBase {
 
       performSynchronizerNodesLsu(fixture)
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
-
+      transferTraffic()
       eventually() {
+        environment.simClock.value.advance(Duration.ofSeconds(1))
         participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
       }
-      waitForTargetTimeOnSequencer(sequencer2, environment.clock.now)
+      waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
       oldSynchronizerNodes.all.stop()
 
       val iou = JavaDecodeUtil.decodeAllCreated(Iou.COMPANION)(txIouAlice).loneElement

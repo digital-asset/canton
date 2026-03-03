@@ -786,7 +786,7 @@ abstract class ProtocolProcessor[
             requestId,
             viewsWithCorrectRootHash,
             snapshot.ipsSnapshot,
-            submissionTopologySnapshotO,
+            submissionTopologySnapshotO.map(_.ipsSnapshot),
           )
         )
         (incorrectRecipients, viewsWithCorrectRootHashAndRecipients) = checkRecipientsResult

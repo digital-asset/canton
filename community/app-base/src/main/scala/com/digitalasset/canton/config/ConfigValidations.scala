@@ -81,6 +81,7 @@ object ConfigValidations extends NamedLogging {
       sessionSigningKeysOnlyWithKmsAndSchemesAreSupported,
       distinctScopesAndAudiencesOnAuthServices,
       engineAdditionalConsistencyChecksParticipants,
+      engineContractStateModeParticipants,
       dbLockFeaturesRequireUsingLockSupportingStorage,
       highlyAvailableSequencerTotalNodeCount,
       noDuplicateStorageUnlessReplicated,
@@ -350,6 +351,19 @@ object ConfigValidations extends NamedLogging {
         participantConfig.parameters.engine.enableAdditionalConsistencyChecks && !config.parameters.nonStandardConfig
       )(
         s"Enabling additional consistency checks on the Daml Engine for participant ${name.unwrap} requires to explicitly set canton.parameters.non-standard-config = true"
+      )
+    }
+    toValidated(errors)
+  }
+
+  private def engineContractStateModeParticipants(
+      config: CantonConfig
+  ): Validated[NonEmpty[Seq[String]], Unit] = {
+    val errors = config.participants.toSeq.mapFilter { case (name, participantConfig) =>
+      Option.when(
+        participantConfig.parameters.engine.contractStateMode.isDefined && !config.parameters.nonStandardConfig
+      )(
+        s"Changing the default contract state machine mode on the Daml Engine for participant ${name.unwrap} requires to explicitly set canton.parameters.non-standard-config = true"
       )
     }
     toValidated(errors)

@@ -18,16 +18,16 @@ import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 
 final case class AvailabilityAck(from: BftNodeId, signature: Signature) {
 
-  def validateIn(currentOrderingTopology: OrderingTopology): Either[ValidationError, Unit] =
+  def validateIn(orderingTopology: OrderingTopology): Either[ValidationError, Unit] =
     for {
       _ <- Either.cond(
-        currentOrderingTopology.contains(from),
+        orderingTopology.contains(from),
         (),
         ValidationError.NodeNotInTopology,
       )
       keyId = FingerprintKeyId.toBftKeyId(signature.authorizingLongTermKey)
       _ <- Either.cond(
-        currentOrderingTopology.nodesTopologyInfo
+        orderingTopology.nodesTopologyInfo
           .get(from)
           .map(_.keyIds)
           .getOrElse(Set.empty)

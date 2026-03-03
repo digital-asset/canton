@@ -86,6 +86,8 @@ private[metrics] final class ServicesHistograms(val prefix: MetricName)(implicit
   private[metrics] val lookupActiveContract: Item = extend("lookup_active_contract", baseInfo)
   private[metrics] val lookupContractState: Item = extend("lookup_contract_state", baseInfo)
   private[metrics] val lookupContractKey: Item = extend("lookup_contract_key", baseInfo)
+  private[metrics] val lookupNonUniqueContractKey: Item =
+    extend("lookup_non_unique_contract_key", baseInfo)
   private[metrics] val getEventsByContractId: Item = extend("get_events_by_contract_id", baseInfo)
   private[metrics] val lookupMaximumLedgerTime: Item =
     extend("lookup_maximum_ledger_time", baseInfo)
@@ -220,6 +222,9 @@ final class ServicesMetrics private[metrics] (
 
     val lookupContractKey: Timer =
       openTelemetryMetricsFactory.timer(inventory.lookupContractKey.info)
+
+    val lookupNonUniqueContractKey: Timer =
+      openTelemetryMetricsFactory.timer(inventory.lookupNonUniqueContractKey.info)
 
     val getEventsByContractId: Timer =
       openTelemetryMetricsFactory.timer(inventory.getEventsByContractId.info)

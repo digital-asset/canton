@@ -49,7 +49,14 @@ final class LsuMinimumSequencingTimeIntegrationTest
       .addConfigTransforms(configTransforms*)
       .withSetup { implicit env =>
         import env.*
-        defaultEnvironmentSetup(participantsOverride = Some(Seq(participant1)))
+        defaultEnvironmentSetup(
+          participantsOverride = Some(Seq(participant1)),
+          /*
+          If traffic control is enabled, submission before upgrade time fails because traffic is not set,
+          which means that we cannot observe the error we want to see. Hence, we disable traffic.
+           */
+          hasTrafficControl = false,
+        )
       }
 
   "Logical synchronizer upgrade" should {
@@ -86,7 +93,7 @@ final class LsuMinimumSequencingTimeIntegrationTest
           environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
 
           eventually() {
-            waitForTargetTimeOnSequencer(sequencer2, upgradeTime.immediateSuccessor)
+            waitForTargetTimeOnSequencer(sequencer2, upgradeTime.immediateSuccessor, logger)
           }
         },
         LogEntry.assertLogSeq(
@@ -104,7 +111,6 @@ final class LsuMinimumSequencingTimeIntegrationTest
 
       participant2.synchronizers.connect_local(sequencer2, daName)
       participant2.health.maybe_ping(participant2) should not be empty
-
     }
   }
 }

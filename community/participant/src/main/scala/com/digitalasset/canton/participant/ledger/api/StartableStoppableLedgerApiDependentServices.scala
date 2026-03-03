@@ -25,6 +25,7 @@ import com.digitalasset.canton.participant.admin.party.PartyReplicator
 import com.digitalasset.canton.participant.admin.{AdminWorkflowServices, PackageService}
 import com.digitalasset.canton.participant.config.ParticipantNodeConfig
 import com.digitalasset.canton.participant.sync.CantonSyncService
+import com.digitalasset.canton.participant.topology.TopologyLookup
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.ParticipantId
@@ -159,6 +160,18 @@ class StartableStoppableLedgerApiDependentServices(
                 )
               )
 
+          val topologyLookup = new TopologyLookup(
+            clock = clock,
+            topologyConfig = config.topology,
+            timeouts = parameters.processingTimeouts,
+            futureSupervisor = futureSupervisor,
+            topologyManagerO = syncService.lookupTopologyManager,
+            psidLookup = syncService.activePSIdForLSId(_),
+            topologyClientO = syncService.lookupTopologyClient,
+            syncPersistentStateO = psid => syncService.syncPersistentStateManager.get(psid),
+            loggerFactory = loggerFactory,
+          )
+
           val (partyManagementGrpc, _) =
             registry
               .addService(
@@ -167,6 +180,7 @@ class StartableStoppableLedgerApiDependentServices(
                     participantId,
                     partyReplicatorO,
                     syncService,
+                    topologyLookup,
                     parameters,
                     loggerFactory,
                   ),

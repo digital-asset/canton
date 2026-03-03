@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.metrics
 
+import com.daml.metrics.OnDemandMetricsReader
 import io.opentelemetry.sdk.metrics.data.MetricData
 
 final case class MetricsSnapshot(

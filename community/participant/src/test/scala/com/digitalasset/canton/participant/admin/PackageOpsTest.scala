@@ -6,9 +6,10 @@ package com.digitalasset.canton.participant.admin
 import cats.Eval
 import cats.data.EitherT
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.{NonNegativeFiniteDuration, ProcessingTimeout}
+import com.digitalasset.canton.config.{NonNegativeFiniteDuration, ProcessingTimeout, TopologyConfig}
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.api.{InitialPageToken, ListVettedPackagesOpts, PageToken}
@@ -29,6 +30,7 @@ import com.digitalasset.canton.participant.topology.{
   TopologyLookup,
 }
 import com.digitalasset.canton.store.{IndexedPhysicalSynchronizer, IndexedSynchronizer}
+import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.{SynchronizerTopologyClient, TopologySnapshot}
 import com.digitalasset.canton.topology.processing.{EffectiveTime, SequencedTime}
@@ -143,7 +145,7 @@ trait PackageOpsTestBase extends AsyncWordSpec with BaseTest with ArgumentMatche
       IndexedPhysicalSynchronizer.tryCreate(synchronizerId1, index = 1)
     )
 
-    when(stateManager.getAll).thenReturn(
+    val persistentStatesList: Map[PhysicalSynchronizerId, SyncPersistentState] =
       if (includeSync2InStateManager)
         Map(
           synchronizerId1 -> syncPersistentState,
@@ -152,7 +154,9 @@ trait PackageOpsTestBase extends AsyncWordSpec with BaseTest with ArgumentMatche
         )
       else
         Map(synchronizerId1 -> syncPersistentState)
-    )
+
+    when(stateManager.getAll).thenReturn(persistentStatesList)
+    when(stateManager.get(synchronizerId1)).thenReturn(Some(syncPersistentState))
     when(stateManager.getAllLogical).thenReturn(
       if (includeSync2InStateManager)
         Map(
@@ -341,15 +345,30 @@ class PackageOpsTest extends PackageOpsTestBase {
     val topologyManagerSync2 = mock[SynchronizerTopologyManager]
     val topologyManagerSync3 = mock[SynchronizerTopologyManager]
 
+    val syncPersistentState1 = mock[SyncPersistentState]
+    val syncPersistentState2 = mock[SyncPersistentState]
+    val syncPersistentState3 = mock[SyncPersistentState]
+
     val topologyTestSetup: Map[
       PhysicalSynchronizerId,
-      (SynchronizerTopologyManager, SynchronizerTopologyClient, CantonTimestamp),
+      (
+          SynchronizerTopologyManager,
+          SyncPersistentState,
+          SynchronizerTopologyClient,
+          CantonTimestamp,
+      ),
     ] = Map(
-      synchronizerId1 -> (topologyManagerSync1, mock[SynchronizerTopologyClient], CantonTimestamp
+      synchronizerId1 -> (topologyManagerSync1, syncPersistentState1, mock[
+        SynchronizerTopologyClient
+      ], CantonTimestamp
         .assertFromLong(1337L)),
-      synchronizerId2 -> (topologyManagerSync2, mock[SynchronizerTopologyClient], CantonTimestamp
+      synchronizerId2 -> (topologyManagerSync2, syncPersistentState2, mock[
+        SynchronizerTopologyClient
+      ], CantonTimestamp
         .assertFromLong(1338L)),
-      synchronizerId3 -> (topologyManagerSync3, mock[SynchronizerTopologyClient], CantonTimestamp
+      synchronizerId3 -> (topologyManagerSync3, syncPersistentState3, mock[
+        SynchronizerTopologyClient
+      ], CantonTimestamp
         .assertFromLong(1339L)),
     )
 
@@ -357,9 +376,15 @@ class PackageOpsTest extends PackageOpsTestBase {
       participantId = participantId1,
       stateManager = stateManager,
       topologyLookup = new TopologyLookup(
-        lookupTopologyManagerByPsid = topologyTestSetup.get(_).map(_._1),
-        lookupActivePsidByLsid = lsid => topologyTestSetup.keySet.find(_.logical == lsid),
-        lookupTopologyClientByPsid = topologyTestSetup.view.mapValues(_._2).get,
+        mock[Clock],
+        TopologyConfig(),
+        timeouts,
+        futureSupervisor: FutureSupervisor,
+        topologyManagerO = topologyTestSetup.get(_).map(_._1),
+        psidLookup = lsid => topologyTestSetup.keySet.find(_.logical == lsid),
+        topologyClientO = topologyTestSetup.view.mapValues(_._3).get,
+        syncPersistentStateO = topologyTestSetup.get(_).map(_._2),
+        loggerFactory = loggerFactory,
       ),
       initialProtocolVersion = testedProtocolVersion,
       loggerFactory = loggerFactory,
@@ -372,14 +397,14 @@ class PackageOpsTest extends PackageOpsTestBase {
         queryAtApproximateTime: Boolean = false,
     ) =
       for {
-        (psId, (topologyManager, topologyClient, approxTime)) <- topologyTestSetup
+        (psId, (topologyManager, persistentState, topologyClient, approxTime)) <- topologyTestSetup
       } yield {
-        when(topologyManager.store).thenReturn(mock[TopologyStore[SynchronizerStore]])
-        when(topologyManager.psid).thenReturn(psId)
+        when(persistentState.topologyStore).thenReturn(mock[TopologyStore[SynchronizerStore]])
+        when(persistentState.psid).thenReturn(psId)
         when(topologyClient.approximateTimestamp).thenReturn(approxTime)
         val asOfExpectedTime = if (queryAtApproximateTime) approxTime else CantonTimestamp.MaxValue
         when(
-          topologyManager.store.findPositiveTransactions(
+          persistentState.topologyStore.findPositiveTransactions(
             eqTo(asOfExpectedTime),
             eqTo(true),
             eqTo(false),
@@ -395,7 +420,7 @@ class PackageOpsTest extends PackageOpsTestBase {
         )
 
         when(
-          topologyManager.store.findPositiveTransactions(
+          persistentState.topologyStore.findPositiveTransactions(
             eqTo(asOfExpectedTime),
             eqTo(true),
             eqTo(false),

@@ -156,10 +156,7 @@ object ProcessingStartingPoints {
   ): Either[String, ProcessingStartingPoints] =
     Either
       .catchOnly[InvalidStartingPointsException](
-        tryCreate(
-          cleanReplay,
-          processing,
-        )
+        tryCreate(cleanReplay, processing)
       )
       .leftMap(_.message)
 

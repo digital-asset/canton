@@ -1094,7 +1094,7 @@ final class SyncStateInspection(
 
         ipsSnapshotFUS
           .flatMap(
-            _.allMembers()
+            _.knownMembers()
               .map(
                 _.collect {
                   case id: ParticipantId if participantFilter.fold(true)(_.contains(id)) => id

@@ -885,6 +885,7 @@ object ConfigTransforms {
         AlphaOnlinePartyReplicationConfig.TestInterceptor,
       ] = Map.empty,
       enableUnsafeSequencerChannelSupport: Boolean = false,
+      pauseIndexer: Boolean = true,
   ): Seq[ConfigTransform] = Seq(updateAllParticipantConfigs { case (name, config) =>
     config
       .focus(_.parameters.alphaOnlinePartyReplicationSupport)
@@ -893,6 +894,7 @@ object ConfigTransforms {
           AlphaOnlinePartyReplicationConfig(
             testInterceptor = participantsWithOnPRInterceptor.get(name),
             unsafeSequencerChannelSupport = enableUnsafeSequencerChannelSupport,
+            pauseSynchronizerIndexingDuringPartyReplication = pauseIndexer,
           )
         )
       )

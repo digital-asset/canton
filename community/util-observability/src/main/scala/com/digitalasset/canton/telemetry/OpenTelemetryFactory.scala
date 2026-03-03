@@ -4,11 +4,10 @@
 package com.digitalasset.canton.telemetry
 
 import better.files.File
-import com.daml.metrics.HistogramDefinition
+import com.daml.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
 import com.daml.metrics.api.{HistogramInventory, MetricsInfoFilter}
+import com.daml.metrics.{HistogramDefinition, OpenTelemetryOnDemandMetricsReader}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, TracedLogger}
-import com.digitalasset.canton.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
-import com.digitalasset.canton.metrics.OpenTelemetryOnDemandMetricsReader
 import com.digitalasset.canton.tracing.{NoopSpanExporter, TraceContext, TracingConfig}
 import com.google.protobuf.ByteString
 import io.opentelemetry.api.trace.propagation.W3CTraceContextPropagator

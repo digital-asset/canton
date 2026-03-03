@@ -461,7 +461,7 @@ class TransactionTreeFactoryImpl(
         previousCsmState
           .advance(
             // advance ignores the resolver in mode Strict
-            if (state.csmState.mode == ContractStateMachine.Mode.UCK) Map.empty
+            if (state.csmState.mode == ContractStateMachine.Mode.UCKWithRollback) Map.empty
             else previousResolver,
             state.csmState,
           )
@@ -657,9 +657,10 @@ class TransactionTreeFactoryImpl(
     *
     * All resolved contract IDs in the map difference are core input contracts by the following
     * argument: Suppose that the map difference resolves a key `k` to a contract ID `cid`.
-    *   - In mode [[com.digitalasset.daml.lf.transaction.ContractStateMachine.Mode.UCK]], the first
-    *     node (in execution order) involving the key `k` determines the key's resolution for the
-    *     view. So the first node `n` in execution order involving `k` is an Exercise, Fetch, or
+    *   - In mode
+    *     [[com.digitalasset.daml.lf.transaction.ContractStateMachine.Mode.UCKWithRollback]], the
+    *     first node (in execution order) involving the key `k` determines the key's resolution for
+    *     the view. So the first node `n` in execution order involving `k` is an Exercise, Fetch, or
     *     positive LookupByKey node.
     *   - In mode [[com.digitalasset.daml.lf.transaction.ContractStateMachine.Mode.LegacyNUCK]], the
     *     first by-key node (in execution order, including Creates) determines the global key input

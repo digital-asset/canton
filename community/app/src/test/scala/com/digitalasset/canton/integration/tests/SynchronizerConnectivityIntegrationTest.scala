@@ -331,6 +331,7 @@ sealed trait SynchronizerConnectivityIntegrationTest
               // because the sequencer may cut the participant's connection before delivering the topology broadcast
               or include regex "Waiting for transaction .* to be observed"
               or (include(SyncServiceSynchronizerDisconnect.id) and include(
+                // TODO(#30534): Improve the error to explain why the threshold is not reachable.
                 "fatally disconnected because of Trust threshold 1 is no longer reachable"
               )))
           },

@@ -68,7 +68,8 @@ object ArbitraryConfig {
 
   val contractKeyUniquenessMode: Gen[ContractStateMachine.Mode] =
     Gen.oneOf(
-      ContractStateMachine.Mode.UCK,
+      ContractStateMachine.Mode.UCKWithRollback,
+      ContractStateMachine.Mode.UCKWithoutRollback,
       ContractStateMachine.Mode.LegacyNUCK,
       ContractStateMachine.Mode.NoContractKey,
     )

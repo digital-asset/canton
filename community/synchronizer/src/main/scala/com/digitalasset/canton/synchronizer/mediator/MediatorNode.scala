@@ -71,8 +71,8 @@ import com.digitalasset.canton.topology.processing.{
   InitialTopologySnapshotValidator,
   TopologyTransactionProcessor,
 }
+import com.digitalasset.canton.topology.store.TopologyStore
 import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
-import com.digitalasset.canton.topology.store.{TopologyStore, TopologyStoreId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -193,15 +193,17 @@ class MediatorNodeBootstrap(
     synchronizerTopologyManager.toList
 
   override protected def lookupTopologyClient(
-      storeId: TopologyStoreId
+      psid: PhysicalSynchronizerId
   ): Option[SynchronizerTopologyClient] =
-    storeId match {
-      case SynchronizerStore(synchronizerId) =>
-        replicaManager.mediatorRuntime
-          .map(_.mediator.topologyClient)
-          .filter(_.psid == synchronizerId)
-      case _ => None
-    }
+    replicaManager.mediatorRuntime
+      .map(_.mediator.topologyClient)
+      .filter(_.psid == psid)
+
+  override protected def lookupSynchronizerTimeTracker(
+      psid: PhysicalSynchronizerId
+  ): Option[SynchronizerTimeTracker] =
+    replicaManager.mediatorRuntime
+      .flatMap(rt => Option.when(rt.mediator.topologyClient.psid == psid)(rt.mediator.timeTracker))
 
   override protected lazy val lookupActivePSId: PSIdLookup =
     synchronizerId =>

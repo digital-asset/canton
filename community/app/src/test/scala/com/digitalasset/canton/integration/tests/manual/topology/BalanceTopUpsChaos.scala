@@ -24,6 +24,7 @@ import com.digitalasset.canton.integration.util.OnboardsNewSequencerNode
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
 import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTrafficControlParameters
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.FutureUtil
 import com.digitalasset.canton.{BaseTest, ScalaFuturesWithPatience, config}
@@ -70,7 +71,25 @@ class BalanceTopUpsChaos(override val logger: TracedLogger)
     Reservations(exclusiveParticipants = Seq("participant5", "participant6"))
 
   private class BalanceUpdater(val member: Member) extends Matchers {
-    private val lastSerial = new AtomicReference[PositiveInt](PositiveInt.one)
+    private def fetchNextSerial(): Option[PositiveInt] = {
+      val serial = activeSequencers
+        .get()
+        .sequencers
+        .head1
+        .traffic_control
+        .traffic_state_of_members(Seq(member))
+        .trafficStates
+        .getOrElse(
+          member,
+          throw new IllegalStateException(s"Expected traffic for member $member to be present"),
+        )
+        .serial
+        .map(_.increment)
+      logger.info(s"Fetched last top-up serial $serial for $member")(TraceContext.empty)
+      serial
+    }
+    private val nextTopUpSerial =
+      new AtomicReference[PositiveInt](fetchNextSerial().getOrElse(PositiveInt.one))
     // Only used to compute a new balance
     private val lastBalance =
       new AtomicReference[NonNegativeLong](NonNegativeLong.zero)
@@ -93,7 +112,7 @@ class BalanceTopUpsChaos(override val logger: TracedLogger)
     ): Future[Unit] = {
       import env.*
 
-      val serial = lastSerial.getAndUpdate(_.increment)
+      val serial = nextTopUpSerial.getAndUpdate(_.increment)
       val topUpValue =
         topUpValueO.getOrElse(
           NonNegativeLong.tryCreate(MinimumTopUp + random.nextLong(MaximumTopUp - MinimumTopUp + 1))
@@ -276,7 +295,7 @@ class BalanceTopUpsChaos(override val logger: TracedLogger)
   }
 
   private val trafficControlParameters = TrafficControlParameters(
-    maxBaseTrafficAmount = NonNegativeNumeric.tryCreate(20 * 1000L),
+    maxBaseTrafficAmount = NonNegativeNumeric.tryCreate(20_000L),
     readVsWriteScalingFactor = InternalTrafficControlParameters.DefaultReadVsWriteScalingFactor,
     // Enough to bootstrap the synchronizer and connect the participant after 1 second
     maxBaseTrafficAccumulationDuration = config.PositiveFiniteDuration.ofSeconds(1L),
@@ -308,8 +327,8 @@ class BalanceTopUpsChaos(override val logger: TracedLogger)
         sequencersToOnboard.foreach { sequencer =>
           onboardNewSequencer(
             daId,
-            newSequencerReference = sequencer,
-            existingSequencerReference = currentSequencers.head1,
+            newSequencer = sequencer,
+            existingSequencer = currentSequencers.head1,
             synchronizerOwners = synchronizerOwners,
           )
         }

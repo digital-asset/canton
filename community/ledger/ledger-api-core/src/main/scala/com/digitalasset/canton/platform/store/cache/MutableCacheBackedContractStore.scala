@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.store.cache
 import com.digitalasset.canton.ledger.participant.state.index
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus.ExistingContractStatus
 import com.digitalasset.canton.ledger.participant.state.index.{
+  ContractKeyPage,
   ContractState,
   ContractStateStatus,
   ContractStore,
@@ -16,6 +17,7 @@ import com.digitalasset.canton.platform.store.LedgerApiContractStore
 import com.digitalasset.canton.platform.store.cache.ContractKeyStateValue.*
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.KeyState
+import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.transaction.GlobalKey
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -25,6 +27,7 @@ private[platform] class MutableCacheBackedContractStore(
     val loggerFactory: NamedLoggerFactory,
     private[cache] val contractStateCaches: ContractStateCaches,
     contractStore: LedgerApiContractStore,
+    ledgerEndCache: LedgerEndCache,
 )(implicit executionContext: ExecutionContext)
     extends ContractStore
     with NamedLogging {
@@ -33,7 +36,7 @@ private[platform] class MutableCacheBackedContractStore(
       loggingContext: LoggingContextWithTrace
   ): Future[Option[FatContract]] =
     lookupContractState(contractId)
-      .map(contractStateToResponse(readers))
+      .map(contractStateToFatContract(readers))
 
   override def lookupContractState(
       contractId: ContractId
@@ -67,6 +70,30 @@ private[platform] class MutableCacheBackedContractStore(
       .getOrElse(readThroughKeyCache(key))
       .flatMap(keyStateToResponse(_, readers))
 
+  override def lookupNonUniqueContractKey(
+      readers: Set[Ref.Party],
+      key: GlobalKey,
+      pageToken: Option[Long],
+      limit: Int,
+  )(implicit loggingContext: LoggingContextWithTrace): Future[ContractKeyPage] =
+    for {
+      keyPageResult <- contractsReader.lookupNonUniqueKey(
+        key = key,
+        validAtEventSeqId = ledgerEndCache().map(_.lastEventSeqId).getOrElse(0L),
+        nextPageToken = pageToken,
+        limit = limit,
+      )
+      contractIdLookup <- contractStore.lookupBatchedContractIdsNonReadThrough(
+        keyPageResult.internalContractIds
+      )
+      contractIds = keyPageResult.internalContractIds.flatMap(contractIdLookup.get)
+      contracts <- Future.sequence(contractIds.map(contractStore.lookupPersisted))
+      filteredContracts = contracts.view.flatten.map(_.inst).filter(visibleFor(readers)).toVector
+    } yield ContractKeyPage(
+      contracts = filteredContracts,
+      nextPageToken = keyPageResult.nextPageToken,
+    )
+
   private def readThroughContractsCache(contractId: ContractId)(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[ContractStateStatus] =
@@ -82,21 +109,20 @@ private[platform] class MutableCacheBackedContractStore(
   )(implicit loggingContext: LoggingContextWithTrace): Future[Option[ContractId]] = value match {
     case Assigned(contractId) =>
       lookupContractState(contractId).map(
-        contractStateToResponse(readers)(_).map(_.contractId)
+        contractStateToFatContract(readers)(_).map(_.contractId)
       )
 
     case _: Assigned | Unassigned => Future.successful(None)
   }
 
-  private def contractStateToResponse(readers: Set[Party])(
+  private def contractStateToFatContract(readers: Set[Party])(
       value: index.ContractState
   ): Option[FatContract] =
-    value match {
-      case ContractState.Active(contract) if nonEmptyIntersection(contract.stakeholders, readers) =>
-        Some(contract)
-      case _ =>
-        None
-    }
+    value.toContractOption.filter(visibleFor(readers))
+
+  private def visibleFor(readers: Set[Party])(
+      contract: FatContract
+  ): Boolean = contract.stakeholders.view.exists(readers)
 
   private val toContractCacheValue: Option[ExistingContractStatus] => ContractStateStatus =
     _.getOrElse(ContractStateStatus.NotFound)
@@ -123,9 +149,6 @@ private[platform] class MutableCacheBackedContractStore(
         key,
         contractsReader.lookupKeyState(key, _).map(toKeyCacheValue),
       )
-
-  private def nonEmptyIntersection[T](one: Set[T], other: Set[T]): Boolean =
-    one.intersect(other).nonEmpty
 }
 
 private[platform] object MutableCacheBackedContractStore {

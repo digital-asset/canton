@@ -138,7 +138,7 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
     val resolveInternalContractIdsF = (tc: TraceContext) =>
       (contractIds: Iterable[ContractId]) =>
         contractStore
-          .lookupBatchedInternalIds(contractIds)(tc)
+          .lookupBatchedInternalIdsNonReadThrough(contractIds)(tc)
     def updateBatchWeightMetrics(w: Long): Unit = metrics.indexer.inputMapping.batchWeight.update(w)
     val batchingFlow: Flow[(Offset, Update), Iterable[(Offset, Update)], NotUsed] =
       if (useWeightedBatching) {

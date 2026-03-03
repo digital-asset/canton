@@ -97,6 +97,16 @@ object ErrorUtil {
   )(implicit loggingContext: ErrorLoggingContext): Future[Nothing] =
     internalErrorAsync(new IllegalStateException(message))
 
+  /** Indicate an illegal state by logging an ERROR and return a IllegalStateException in a failed
+    * future.
+    * @return
+    *   The throwable in a failed [[com.digitalasset.canton.lifecycle.FutureUnlessShutdown]].
+    */
+  def invalidStateAsyncShutdown(
+      message: => String
+  )(implicit loggingContext: ErrorLoggingContext): FutureUnlessShutdown[Nothing] =
+    internalErrorAsyncShutdown(new IllegalStateException(message))
+
   /** Log a throwable at ERROR level with proper formatting.
     * @return
     *   The throwable in a failed future.

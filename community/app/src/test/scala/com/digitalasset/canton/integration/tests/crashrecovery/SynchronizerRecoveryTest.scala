@@ -51,6 +51,7 @@ final class SynchronizerRecoveryTest extends BaseSynchronizerRestartTest with Ha
     // This is similar to the line above: the connection pool catches mismatches while validating connections
     _.message should include("Sequencer connection has changed attributes"),
     _.message should (include(SyncServiceSynchronizerDisconnect.id) and include(
+      // TODO(#30534): Improve the error to explain why the threshold is not reachable.
       "fatally disconnected because of Trust threshold 1 is no longer reachable"
     )),
     _.message should (include("PERMISSION_DENIED") and include("access is disabled")),

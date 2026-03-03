@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.platform.indexer.parallel
 
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.util.BatchN
 import org.apache.pekko.NotUsed

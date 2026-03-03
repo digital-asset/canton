@@ -224,6 +224,36 @@ public abstract class ContractCompanion<Ct, Id, Data>
         String templateClassName,
         Identifier templateId,
         Function<String, Id> newContractId,
+        FromJson<Data> fromJson,
+        NewContract<Ct, Id, Data, Key> newContract,
+        List<Choice<Data, ?, ?>> choices,
+        ValueDecoder<Data> valueDecoder,
+        Function<Value, Key> keyFromValue) {
+      super(
+          packageInfo,
+          templateClassName,
+          templateId,
+          newContractId,
+          fromJson,
+          choices,
+          valueDecoder);
+      this.newContract = newContract;
+      this.keyFromValue = keyFromValue;
+    }
+
+    /**
+     * <strong>INTERNAL API</strong>: this is meant for use by <a
+     * href="https://docs.daml.com/app-dev/bindings-java/codegen.html">the Java code generator</a>,
+     * and <em>should not be referenced directly</em>. Applications should refer to the {@code
+     * COMPANION} field on generated {@link Template} subclasses instead.
+     *
+     * @hidden
+     */
+    public WithKey(
+        ContractTypeCompanion.Package packageInfo,
+        String templateClassName,
+        Identifier templateId,
+        Function<String, Id> newContractId,
         Function<DamlRecord, Data> fromValue,
         FromJson<Data> fromJson,
         NewContract<Ct, Id, Data, Key> newContract,

@@ -66,8 +66,9 @@ final class LsuParticipantOnboardingDuringLsuIntegrationTest extends LsuBase {
       )
 
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
-
+      transferTraffic()
       eventually() {
+        environment.simClock.value.advance(Duration.ofSeconds(1))
         participant1.synchronizers.is_connected(fixture.newPSId) shouldBe true
 
         // P2 can now join
@@ -75,9 +76,7 @@ final class LsuParticipantOnboardingDuringLsuIntegrationTest extends LsuBase {
       }
 
       oldSynchronizerNodes.all.stop()
-
-      environment.simClock.value.advance(Duration.ofSeconds(1))
-      waitForTargetTimeOnSequencer(sequencer2, environment.clock.now)
+      waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
     }
   }
 }
