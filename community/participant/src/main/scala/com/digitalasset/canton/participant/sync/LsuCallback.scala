@@ -13,7 +13,7 @@ import com.digitalasset.canton.util.FutureUnlessShutdownUtil
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
 
-trait LogicalSynchronizerUpgradeCallback {
+sealed trait LsuCallback {
 
   /** Trigger the upgrade to the successor.
     *
@@ -26,8 +26,8 @@ trait LogicalSynchronizerUpgradeCallback {
   def unregisterCallback(): Unit
 }
 
-object LogicalSynchronizerUpgradeCallback {
-  val NoOp: LogicalSynchronizerUpgradeCallback = new LogicalSynchronizerUpgradeCallback {
+object LsuCallback {
+  val NoOp: LsuCallback = new LsuCallback {
     override def registerCallback(successor: SynchronizerSuccessor)(implicit
         traceContext: TraceContext
     ): Unit = ()
@@ -36,13 +36,13 @@ object LogicalSynchronizerUpgradeCallback {
   }
 }
 
-class LogicalSynchronizerUpgradeCallbackImpl(
+class LsuCallbackImpl(
     psid: PhysicalSynchronizerId,
     synchronizerTimeTracker: SynchronizerTimeTracker,
     synchronizerConnectionsManager: SynchronizerConnectionsManager,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
-    extends LogicalSynchronizerUpgradeCallback
+    extends LsuCallback
     with NamedLogging {
 
   private val registered: AtomicReference[Option[SynchronizerSuccessor]] = new AtomicReference(None)

@@ -18,7 +18,7 @@ import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import io.scalaland.chimney.dsl.*
 import org.slf4j.event.Level
 
-trait PermissionedSynchronizerTest
+sealed trait PermissionedSynchronizerTest
     extends CommunityIntegrationTest
     with SharedEnvironment
     with HasCycleUtils
@@ -268,7 +268,7 @@ trait PermissionedSynchronizerTest
 //  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
 //}
 
-class PermissionedSynchronizerTestPostgres extends PermissionedSynchronizerTest {
+final class PermissionedSynchronizerTestPostgres extends PermissionedSynchronizerTest {
   registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))
   registerPlugin(new UsePostgres(loggerFactory))
 }

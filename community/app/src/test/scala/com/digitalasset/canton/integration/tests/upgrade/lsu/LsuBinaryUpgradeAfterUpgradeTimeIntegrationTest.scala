@@ -119,7 +119,7 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
 
         loggerFactory.assertLogsUnordered(
           {
-            performSynchronizerNodesLSU(fixture)
+            performSynchronizerNodesLsu(fixture)
             environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
             eventually() {
               participant1.synchronizers.is_connected(fixture.newPSId) shouldBe true

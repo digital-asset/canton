@@ -11,6 +11,7 @@ import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.{CantonNode, CantonNodeBootstrap}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.config.ParticipantNodeConfig
+import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -39,6 +40,50 @@ trait DeclarativeApiManager[NodeConfig <: LocalNodeConfig] {
 }
 
 object DeclarativeApiManager {
+
+  def forSequencers(
+      runnerFactory: String => GrpcAdminCommandRunner,
+      consistencyTimeout: config.NonNegativeDuration,
+      loggerFactory: NamedLoggerFactory,
+  ): DeclarativeApiManager[SequencerNodeConfig] =
+    new DeclarativeApiManager[SequencerNodeConfig] {
+      override def started(
+          name: String,
+          initialConfig: SequencerNodeConfig,
+          instance: CantonNodeBootstrap[CantonNode],
+      )(implicit
+          executionContext: ExecutionContext,
+          traceContext: TraceContext,
+      ): EitherT[Future, String, DeclarativeApiHandle[SequencerNodeConfig]] = {
+        val myLoggerFactory = loggerFactory.append("sequencer", name)
+        val api = new DeclarativeSequencerApi(
+          name,
+          initialConfig.adminApi.clientConfig,
+          consistencyTimeout,
+          instance.getNode.flatMap(n =>
+            Option.when(n.isActive)(n.adminTokenDispenser.getCurrentToken)
+          ),
+          runnerFactory,
+          instance.closeContext,
+          instance.metrics.declarativeApiMetrics,
+          myLoggerFactory,
+        )
+
+        val logger = myLoggerFactory.getLogger(getClass)
+        logger.info(
+          s"Starting declarative state refresh for $name"
+        )
+        val res = api.newConfig(initialConfig.declarative)
+        if (res) {
+          instance.registerDeclarativeChangeTrigger(() => api.runSync().discard)
+          EitherT.rightT(DeclarativeApiHandle.mapConfig(api, _.declarative))
+        } else {
+          EitherT.leftT(s"Initial declarative state refresh for $name failed")
+        }
+
+      }
+
+    }
 
   def forParticipants(
       runnerFactory: String => GrpcAdminCommandRunner,

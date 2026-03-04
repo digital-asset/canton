@@ -19,8 +19,10 @@ message Filters {
   // also be accumulated.
   // A template or an interface SHOULD NOT appear twice in the accumulative field.
   // A wildcard filter SHOULD NOT be defined more than once in the accumulative field.
-  // Optional, if no ``CumulativeFilter`` defined, the default of a single ``WildcardFilter`` with
+  // If no ``CumulativeFilter`` defined, the default of a single ``WildcardFilter`` with
   // include_created_event_blob unset is used.
+  //
+  // Optional: can be empty
   repeated CumulativeFilter cumulative = 1;
 }
 
@@ -29,11 +31,13 @@ message Filters {
 message CumulativeFilter {
   oneof identifier_filter {
     // A wildcard filter that matches all templates
+    //
     // Optional
     WildcardFilter wildcard_filter = 1;
 
     // Include an ``InterfaceView`` for every ``InterfaceFilter`` matching a contract.
     // The ``InterfaceFilter`` instances MUST each use a unique ``interface_id``.
+    //
     // Optional
     InterfaceFilter interface_filter = 2;
 
@@ -41,6 +45,7 @@ message CumulativeFilter {
     // ``create_arguments`` of a matching ``CreatedEvent``.
     // If a contract is simultaneously selected by a template filter and one or more interface filters,
     // the corresponding ``include_created_event_blob`` are consolidated using an OR operation.
+    //
     // Optional
     TemplateFilter template_filter = 3;
   }
@@ -51,6 +56,7 @@ message WildcardFilter {
   // Whether to include a ``created_event_blob`` in the returned ``CreatedEvent``.
   // Use this to access the contract create event payload in your API client
   // for submitting it as a disclosed contract with future commands.
+  //
   // Optional
   bool include_created_event_blob = 1;
 }
@@ -68,12 +74,14 @@ message InterfaceFilter {
 
   // Whether to include the interface view on the contract in the returned ``CreatedEvent``.
   // Use this to access contract data in a uniform manner in your API client.
+  //
   // Optional
   bool include_interface_view = 2;
 
   // Whether to include a ``created_event_blob`` in the returned ``CreatedEvent``.
   // Use this to access the contract create event payload in your API client
   // for submitting it as a disclosed contract with future commands.
+  //
   // Optional
   bool include_created_event_blob = 3;
 }
@@ -92,6 +100,7 @@ message TemplateFilter {
   // Whether to include a ``created_event_blob`` in the returned ``CreatedEvent``.
   // Use this to access the contract event payload in your API client
   // for submitting it as a disclosed contract with future commands.
+  //
   // Optional
   bool include_created_event_blob = 2;
 }
@@ -110,16 +119,18 @@ message EventFormat {
   // 2. For **transaction and active-contract-set streams** create and archive events are returned for all contracts whose
   //    stakeholders include at least one of the listed parties and match the per-party filter.
   //
-  // Optional
+  // Optional: can be empty
   map<string, Filters> filters_by_party = 1;
 
   // Wildcard filters that apply to all the parties existing on the participant. The interpretation of the filters is the same
   // with the per-party filter as described above.
+  //
   // Optional
   Filters filters_for_any_party = 2;
 
   // If enabled, values served over the API will contain more information than strictly necessary to interpret the data.
   // In particular, setting the verbose flag to true triggers the ledger to include labels for record fields.
+  //
   // Optional
   bool verbose = 3;
 }
@@ -147,6 +158,7 @@ message TransactionFormat {
   EventFormat event_format = 1;
 
   // What transaction shape to use for interpreting the filters of the event format.
+  //
   // Required
   TransactionShape transaction_shape = 2;
 }
@@ -154,7 +166,9 @@ message TransactionFormat {
 // A format specifying which topology transactions to include and how to render them.
 message TopologyFormat {
   // Include participant authorization topology events in streams.
-  // Optional, if unset no participant authorization topology events are emitted in the stream.
+  // If unset, no participant authorization topology events are emitted in the stream.
+  //
+  // Optional
   ParticipantAuthorizationTopologyFormat include_participant_authorization_events = 1;
 }
 
@@ -162,21 +176,29 @@ message TopologyFormat {
 message ParticipantAuthorizationTopologyFormat {
   // List of parties for which the topology transactions should be sent.
   // Empty means: for all parties.
+  //
+  // Optional: can be empty
   repeated string parties = 1;
 }
 
 // A format specifying what updates to include and how to render them.
 message UpdateFormat {
   // Include Daml transactions in streams.
-  // Optional, if unset, no transactions are emitted in the stream.
+  // If unset, no transactions are emitted in the stream.
+  //
+  // Optional
   TransactionFormat include_transactions = 1;
 
   // Include (un)assignments in the stream.
   // The events in the result take the shape TRANSACTION_SHAPE_ACS_DELTA.
-  // Optional, if unset, no (un)assignments are emitted in the stream.
+  // If unset, no (un)assignments are emitted in the stream.
+  //
+  // Optional
   EventFormat include_reassignments = 2;
 
   // Include topology events in streams.
-  // Optional, if unset no topology events are emitted in the stream.
+  // If unset no topology events are emitted in the stream.
+  //
+  // Optional
   TopologyFormat include_topology_events = 3;
 }

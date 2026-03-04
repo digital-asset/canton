@@ -23,7 +23,7 @@ import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.{MediatorId, ParticipantId}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil}
+import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, FutureUnlessShutdownUtil}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.concurrent.ExecutionContext
@@ -374,12 +374,15 @@ private[mediator] class DefaultVerdictSender(
                 sendVerdict <-
                   shouldSendVerdict(mediatorGroup, snapshot.ipsSnapshot)
               } yield {
-                sendResultBatch(
-                  requestId,
-                  batch,
-                  decisionTime,
-                  aggregationRule = aggregationRuleO,
-                  sendVerdict,
+                FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+                  sendResultBatch(
+                    requestId,
+                    batch,
+                    decisionTime,
+                    aggregationRule = aggregationRuleO,
+                    sendVerdict,
+                  ),
+                  s"Failed to send REJECT verdict for request=$requestId",
                 )
               }
           }

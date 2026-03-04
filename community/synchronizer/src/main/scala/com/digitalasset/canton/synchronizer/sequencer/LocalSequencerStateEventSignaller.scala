@@ -52,7 +52,14 @@ class LocalSequencerStateEventSignaller(
         .conflate((left, right) =>
           Traced(left.value.union(right.value))(right.traceContext)
         ) // keep the trace context of the latest notification
-        .toMat(BroadcastHub.sink(1))(Keep.both),
+        .async
+        .toMat(
+          BroadcastHub
+            .sink(1)
+            // the default input buffer is 16, but due to the conflation, we don't actually
+            // want to buffer many stream elements here
+            .addAttributes(Attributes.inputBuffer(1, 1))
+        )(Keep.both),
       errorLogMessagePrefix = "LocalStateEventSignaller flow failed",
     )
   }

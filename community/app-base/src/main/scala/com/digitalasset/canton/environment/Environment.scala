@@ -313,6 +313,8 @@ class Environment(
     timeouts,
     config.sequencersByString,
     config.sequencerNodeParametersByString,
+    apiName => GrpcAdminCommandRunner(this, apiName),
+    config.parameters.enableAlphaStateViaConfig,
     loggerFactory,
   )
 

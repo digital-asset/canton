@@ -169,7 +169,10 @@ final case class CachingConfigs(
     kmsMetadataCache: CacheConfig = CachingConfigs.kmsMetadataCache,
     finalizedMediatorConfirmationRequests: CacheConfig =
       CachingConfigs.defaultFinalizedMediatorConfirmationRequestsCache,
-    sequencerPayloadCache: CacheConfigWithMemoryBounds = CachingConfigs.defaultSequencerPayloadCache,
+    sequencerPayloadCache: CacheConfigWithMemoryBounds =
+      CachingConfigs.defaultSequencerPayloadCache,
+    sequencerCatchupPayloadCache: CacheConfigWithMemoryBounds =
+      CachingConfigs.defaultSequencerPayloadCache,
 ) extends UniformCantonConfigValidation
 
 object CachingConfigs {

@@ -21,6 +21,7 @@ import com.digitalasset.canton.participant.protocol.submission.{
   SubmissionTrackingData,
   TransactionSubmissionTrackingData,
 }
+import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor
 import com.digitalasset.canton.protocol.GeneratorsProtocol
 import com.digitalasset.canton.topology.{GeneratorsTopology, PhysicalSynchronizerId, SynchronizerId}
 import com.digitalasset.canton.version.ProtocolVersion
@@ -149,4 +150,14 @@ final class GeneratorsParticipant(
     } yield PartyReplicationTargetParticipantMessage.apply(instruction, version)
   )
 
+  implicit val pendingHandshakeWithLsuSuccessorArb: Arbitrary[PendingHandshakeWithLsuSuccessor] =
+    Arbitrary(
+      Arbitrary
+        .arbitrary[PhysicalSynchronizerId]
+        .map(
+          PendingHandshakeWithLsuSuccessor(_)(
+            PendingHandshakeWithLsuSuccessor.protocolVersionRepresentativeFor(version)
+          )
+        )
+    )
 }

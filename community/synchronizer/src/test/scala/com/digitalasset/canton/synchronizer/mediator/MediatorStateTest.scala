@@ -148,6 +148,7 @@ class MediatorStateTest
         loggerFactory,
       )
       sut.initialize(CantonTimestamp.MinValue).futureValueUS
+      sut.registerTimeoutForRequest(requestId, requestId.unwrap.plusSeconds(30))
       currentVersion
         .asFinalized(testedProtocolVersion)
         .fold(sut.registerPendingRequest(currentVersion))(sut.add(_).futureValueUS)

@@ -165,7 +165,7 @@ abstract class LsuTimeoutInFlightIntegrationTest extends LsuBase with HasProgram
               .numberOfDirtyRequests() shouldBe 1
           }
 
-          performSynchronizerNodesLSU(fixture)
+          performSynchronizerNodesLsu(fixture)
 
           fetchTime(sequencer1) should be < upgradeTime
           environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)

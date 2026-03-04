@@ -18,6 +18,7 @@ import com.digitalasset.canton.sequencing.client.SequencerClientSend
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.IndividualThroughputCapConfig
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.RegisterError
 import com.digitalasset.canton.synchronizer.sequencer.admin.data.{
   SequencerAdminStatus,
@@ -211,6 +212,17 @@ trait Sequencer
       successorO: Option[SynchronizerSuccessor],
       announcementEffectiveTime: EffectiveTime,
   )(implicit traceContext: TraceContext): Unit
+
+  /** Query current throughput caps */
+  def getThroughputCap(requestType: SubmissionRequestType): Option[IndividualThroughputCapConfig] =
+    None
+
+  /** Set current throughput caps */
+  def setThroughputCap(
+      requestType: SubmissionRequestType,
+      config: Option[IndividualThroughputCapConfig],
+  )(implicit traceContext: TraceContext): Unit = ()
+
 }
 
 /** Sequencer pruning interface.

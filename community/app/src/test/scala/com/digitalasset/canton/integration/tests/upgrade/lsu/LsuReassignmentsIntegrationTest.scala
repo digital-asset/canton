@@ -82,7 +82,7 @@ abstract class LsuReassignmentsIntegrationTest extends LsuBase {
       assignationsInitial.get(iou1.id.contractId).value shouldBe acmeId.logical
       assignationsInitial.get(iou2.id.contractId).value shouldBe daId.logical
 
-      performSynchronizerNodesLSU(fixture)
+      performSynchronizerNodesLsu(fixture)
 
       val reassignment1Id = participant1.ledger_api.commands
         .submit_unassign(alice, Seq(iou1Cid), acmeId, daId)

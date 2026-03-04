@@ -3,15 +3,13 @@
 
 package com.digitalasset.canton.store
 
+import cats.data.EitherT
 import cats.syntax.either.*
 import com.digitalasset.canton.config.CantonRequireTypes.NonEmptyString
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.protobuf.VersionedMessageV0
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
-import com.digitalasset.canton.store.PendingOperation.{
-  ConflictingPendingOperationError,
-  PendingOperationTriggerType,
-}
+import com.digitalasset.canton.store.PendingOperation.ConflictingPendingOperationError
 import com.digitalasset.canton.store.PendingOperationStoreTest.TestPendingOperationMessage.createMessage
 import com.digitalasset.canton.store.PendingOperationStoreTest.{
   TestPendingOperationMessage,
@@ -22,7 +20,8 @@ import com.digitalasset.canton.store.PendingOperationStoreTest.{
   op3,
 }
 import com.digitalasset.canton.store.db.DbDeserializationException
-import com.digitalasset.canton.topology.DefaultTestIdentities
+import com.digitalasset.canton.topology.{DefaultTestIdentities, SynchronizerId}
+import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.version.*
 import com.digitalasset.canton.{BaseTest, FailOnShutdown, HasExecutionContext}
 import com.google.protobuf.ByteString
@@ -41,22 +40,26 @@ trait PendingOperationStoreTest[Op <: HasProtocolVersionedWrapper[Op]]
     * public `insert` method.
     */
   protected def insertCorruptedData(
-      op: PendingOperation[TestPendingOperationMessage],
-      store: Option[PendingOperationStore[TestPendingOperationMessage]] = None,
+      op: PendingOperation[TestPendingOperationMessage, SynchronizerId],
+      store: Option[PendingOperationStore[TestPendingOperationMessage, SynchronizerId]] = None,
       corruptOperationBytes: Option[ByteString] = None,
   ): Future[Unit]
 
-  def pendingOperationsStore(mk: () => PendingOperationStore[TestPendingOperationMessage]): Unit = {
+  def pendingOperationsStore(
+      mk: () => PendingOperationStore[TestPendingOperationMessage, SynchronizerId]
+  ): Unit = {
 
     def withStore(
-        testCode: PendingOperationStore[TestPendingOperationMessage] => Future[Assertion]
+        testCode: PendingOperationStore[TestPendingOperationMessage, SynchronizerId] => Future[
+          Assertion
+        ]
     ): Future[Assertion] =
       testCode(mk())
 
     "insert and retrieve an operation" in withStore { store =>
       for {
         _ <- store.insert(op1).value
-        retrieved <- store.get(op1.synchronizerId, op1.key, op1.name).value
+        retrieved <- store.get(op1.synchronizer, op1.key, op1.name).value
       } yield retrieved shouldBe Some(op1)
     }
 
@@ -75,7 +78,7 @@ trait PendingOperationStoreTest[Op <: HasProtocolVersionedWrapper[Op]]
       for {
         _ <- store.insert(op1).value
         _ <- store.insert(op1).value
-        retrieved <- store.get(op1.synchronizerId, op1.key, op1.name).value
+        retrieved <- store.get(op1.synchronizer, op1.key, op1.name).value
       } yield retrieved shouldBe Some(op1)
     }
 
@@ -87,7 +90,7 @@ trait PendingOperationStoreTest[Op <: HasProtocolVersionedWrapper[Op]]
 
       conflictingInsertResult.value.map { result =>
         val expectedError = ConflictingPendingOperationError(
-          synchronizerId = op1.synchronizerId,
+          synchronizer = op1.synchronizer,
           key = op1.key,
           name = op1.name,
         )
@@ -95,14 +98,58 @@ trait PendingOperationStoreTest[Op <: HasProtocolVersionedWrapper[Op]]
       }
     }
 
+    "insert and update an operation" in withStore { store =>
+      for {
+        insertResult <- store.insert(op1).value
+        _ = insertResult shouldBe Right(())
+        retrievedBefore <- store.get(op1.synchronizer, op1.key, op1.name).value
+        _ = retrievedBefore shouldBe Some(op1)
+        _ <- store.updateOperation(op1Modified.operation, op1.synchronizer, op1.name, op1.key)
+        retrievedAfter <- store.get(op1.synchronizer, op1.key, op1.name).value
+      } yield {
+        retrievedBefore shouldBe Some(op1)
+        retrievedAfter shouldBe Some(op1Modified)
+      }
+    }
+
+    "succeed when updating a non-existent operation" in withStore { store =>
+      for {
+        _ <- store.updateOperation(op1.operation, op1.synchronizer, op1.name, op1.key)
+        notUpdated <- store.get(op1.synchronizer, op1.key, op1.name).value
+      } yield notUpdated shouldBe None
+    }
+
+    "retrieve only operations matching operation name" in withStore { store =>
+      val da = SynchronizerId.tryFromString("da::default")
+      val acme = SynchronizerId.tryFromString("acme::default")
+      val onpr = NonEmptyString.tryCreate("onpr")
+      val offpr = NonEmptyString.tryCreate("offpr")
+      val onprDa = (1 to 5).toList.map(i => createOp(onpr.unwrap, s"key$i", s"onpr$i", da))
+      val offprDa = (6 to 10).toList.map(i => createOp(offpr.unwrap, s"key$i", s"offpr$i", da))
+      val onprAcme = (11 to 15).toList.map(i => createOp(onpr.unwrap, s"key$i", s"onpr$i", acme))
+      val offprAcme = (16 to 20).toList.map(i => createOp(offpr.unwrap, s"key$i", s"offpr$i", acme))
+      val allOperations = onprDa ++ offprDa ++ onprAcme ++ offprAcme
+
+      for {
+        empty <- EitherT.right[ConflictingPendingOperationError](store.getAll(onpr))
+        _ <- MonadUtil.sequentialTraverse(allOperations)(store.insert)
+        onprs <- EitherT.right[ConflictingPendingOperationError](store.getAll(onpr))
+        offprs <- EitherT.right[ConflictingPendingOperationError](store.getAll(offpr))
+      } yield {
+        empty shouldBe Set.empty
+        onprs shouldBe onprDa.toSet ++ onprAcme
+        offprs shouldBe offprDa.toSet ++ offprAcme.toSet
+      }
+    }
+
     "insert and delete an operation" in withStore { store =>
       for {
         insertResult <- store.insert(op2).value
         _ = insertResult shouldBe Right(())
-        retrievedBefore <- store.get(op2.synchronizerId, op2.key, op2.name).value
+        retrievedBefore <- store.get(op2.synchronizer, op2.key, op2.name).value
         _ = retrievedBefore shouldBe Some(op2)
-        _ <- store.delete(op2.synchronizerId, op2.key, op2.name)
-        retrievedAfter <- store.get(op2.synchronizerId, op2.key, op2.name).value
+        _ <- store.delete(op2.synchronizer, op2.key, op2.name)
+        retrievedAfter <- store.get(op2.synchronizer, op2.key, op2.name).value
       } yield {
         retrievedAfter shouldBe None
       }
@@ -119,7 +166,7 @@ trait PendingOperationStoreTest[Op <: HasProtocolVersionedWrapper[Op]]
       for {
         _ <- store.insert(opWithEmptyKey).value
         retrieved <- store
-          .get(opWithEmptyKey.synchronizerId, opWithEmptyKey.key, opWithEmptyKey.name)
+          .get(opWithEmptyKey.synchronizer, opWithEmptyKey.key, opWithEmptyKey.name)
           .value
       } yield retrieved shouldBe Some(opWithEmptyKey)
     }
@@ -133,7 +180,7 @@ trait PendingOperationStoreTest[Op <: HasProtocolVersionedWrapper[Op]]
             corruptOperationBytes = Some(ByteString.copyFromUtf8("unparseable garbage")),
           )
         )
-        _ <- store.get(op3.synchronizerId, op3.key, op3.name).value
+        _ <- store.get(op3.synchronizer, op3.key, op3.name).value
       } yield ()
 
       whenReady(testFlow.unwrap.failed) { e =>
@@ -164,7 +211,7 @@ trait PendingOperationStoreTest[Op <: HasProtocolVersionedWrapper[Op]]
 
       for {
         results <- allInsertsF // Wait for all concurrent inserts to complete
-        actuallyStoredOp <- store.get(op1.synchronizerId, op1.key, op1.name).value
+        actuallyStoredOp <- store.get(op1.synchronizer, op1.key, op1.name).value
       } yield {
         val (successfulInserts, failedInserts) = results.partition(_.isRight)
 
@@ -204,29 +251,27 @@ object PendingOperationStoreTest {
       name: String,
       key: String,
       data: String,
-  ): PendingOperation[TestPendingOperationMessage] =
+      synchronizerId: SynchronizerId = DefaultTestIdentities.synchronizerId,
+  ): PendingOperation[TestPendingOperationMessage, SynchronizerId] =
     PendingOperation
       .create(
-        trigger = PendingOperationTriggerType.SynchronizerReconnect.asString,
         name = name,
         key = key,
         operationBytes = createMessage(data).toByteString,
         operationDeserializer = TestPendingOperationMessage.fromTrustedByteString,
-        synchronizerId = DefaultTestIdentities.synchronizerId.toProtoPrimitive,
+        synchronizer = synchronizerId,
       )
       .valueOr(errorMessage => throw new DbDeserializationException(errorMessage))
 
   def createInvalid(
-      trigger: String = PendingOperationTriggerType.SynchronizerReconnect.asString,
       name: String = "valid-name",
       key: String = "valid-key",
       operationBytes: ByteString = createMessage("valid-data").toByteString,
       operationDeserializer: ByteString => ParsingResult[TestPendingOperationMessage] =
         TestPendingOperationMessage.fromTrustedByteString,
-      synchronizerId: String = DefaultTestIdentities.synchronizerId.toProtoPrimitive,
-  ): Either[String, PendingOperation[TestPendingOperationMessage]] =
+      synchronizerId: SynchronizerId = DefaultTestIdentities.synchronizerId,
+  ): Either[String, PendingOperation[TestPendingOperationMessage, SynchronizerId]] =
     PendingOperation.create(
-      trigger,
       name,
       key,
       operationBytes,
@@ -234,14 +279,14 @@ object PendingOperationStoreTest {
       synchronizerId,
     )
 
-  protected val op1: PendingOperation[TestPendingOperationMessage] =
+  protected val op1: PendingOperation[TestPendingOperationMessage, SynchronizerId] =
     createOp("opName1", "opKey1", "operation-1-data")
-  protected val op2: PendingOperation[TestPendingOperationMessage] =
+  protected val op2: PendingOperation[TestPendingOperationMessage, SynchronizerId] =
     createOp("opName2", "opKey2", "operation-2-data")
-  protected val op3: PendingOperation[TestPendingOperationMessage] =
+  protected val op3: PendingOperation[TestPendingOperationMessage, SynchronizerId] =
     createOp("opName3", "opKey3", "operation-3-data")
-  protected val op1Modified: PendingOperation[TestPendingOperationMessage] =
-    op1.cp(operation = createMessage("modified-data"))
+  protected val op1Modified: PendingOperation[TestPendingOperationMessage, SynchronizerId] =
+    op1.copy(operation = createMessage("modified-data"))
 
   private def protocolVersionRepresentative(
       pv: ProtocolVersion
@@ -285,12 +330,6 @@ final class PendingOperationTest extends AnyWordSpec with BaseTest {
   import com.digitalasset.canton.store.PendingOperationStoreTest.createInvalid
 
   "PendingOperation" should {
-
-    "fail to create an operation with an unknown trigger" in {
-      val result = createInvalid(trigger = "unknown-trigger")
-      result shouldBe Left("Unknown pending operation trigger type: unknown-trigger")
-    }
-
     "fail to create an operation with an empty name" in {
       val result = createInvalid(name = "")
       result shouldBe Left("Missing pending operation name (blank): ")
@@ -300,12 +339,5 @@ final class PendingOperationTest extends AnyWordSpec with BaseTest {
       val result = createInvalid(operationBytes = ByteString.copyFromUtf8("some-data"))
       result.left.value should include("Failed to deserialize pending operation byte string")
     }
-
-    "fail to create an operation with invalid synchronizer ID" in {
-      val result = createInvalid(synchronizerId = "invalid-sync-id")
-      result.left.value should include("Failed to deserialize synchronizer ID string")
-    }
-
   }
-
 }

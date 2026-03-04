@@ -57,7 +57,7 @@ abstract class LsuEndToEndIntegrationTest extends LsuBase {
       val bank = participant2.parties.enable("Bank")
       IouSyntax.createIou(participant2)(bank, alice).discard
 
-      performSynchronizerNodesLSU(fixture)
+      performSynchronizerNodesLsu(fixture)
 
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
 

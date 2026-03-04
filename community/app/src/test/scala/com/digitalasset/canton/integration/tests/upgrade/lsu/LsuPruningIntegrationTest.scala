@@ -79,7 +79,7 @@ abstract class LsuPruningIntegrationTest extends LsuBase {
       IouSyntax.archive(participant2)(tempIou, bank)
       IouSyntax.createIou(participant2)(bank, alice).discard
 
-      performSynchronizerNodesLSU(fixture)
+      performSynchronizerNodesLsu(fixture)
 
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
 

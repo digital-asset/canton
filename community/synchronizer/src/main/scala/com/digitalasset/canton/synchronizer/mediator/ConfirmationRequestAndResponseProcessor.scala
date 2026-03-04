@@ -67,7 +67,8 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
   override def observeTimestampWithoutEvent(sequencingTimestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): HandlerResult =
-    handleTimeouts(sequencingTimestamp)
+    if (asynchronousProcessing) handleTimeouts(sequencingTimestamp)
+    else HandlerResult.synchronous(handleTimeouts(sequencingTimestamp).flatMap(_.unwrap))
 
   override def handleMediatorEvent(
       event: MediatorEvent
@@ -190,7 +191,8 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
       timestamp: CantonTimestamp,
   ): FutureUnlessShutdown[Unit] = {
     def pendingRequestNotFound: FutureUnlessShutdown[Unit] = {
-      noTracingLogger.debug(
+      // This is logged at trace, because otherwise this would be logged for each request on DEBUG, which is actually not very helpful and just noise.
+      noTracingLogger.trace(
         s"Pending aggregation for request [$requestId] not found. This implies the request has been finalized since the timeout was scheduled."
       )
       FutureUnlessShutdown.unit
@@ -264,12 +266,11 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
                     crypto.staticSynchronizerParameters.protocolVersion
                   ) match {
                     case None =>
-                      // in case the aggregation is not finalized, we need to update the mediator state on the synchronous path
+                      // in case the aggregation is not finalized, we need to update the mediator state
                       mediatorState.registerPendingRequest(aggregation)
                       FutureUnlessShutdown.unit
                     case Some(finalizedResponse) =>
-                      // if the request is finalized, we don't update the in-memory state, but instead we can write the result
-                      // on the asynchronous path
+                      // if the request is finalized, we write the result
                       mediatorState.add(finalizedResponse)
                   }
                 } yield {
@@ -811,7 +812,7 @@ private[mediator] class ConfirmationRequestAndResponseProcessor(
     responseAggregation.asFinalized(psid.protocolVersion) match {
       case Some(finalizedResponse) =>
         logger.info(
-          s"Phase 6: Finalized request=${finalizedResponse.requestId} with verdict ${finalizedResponse.verdict}"
+          s"Phase 6: Finalized request=${finalizedResponse.requestId} with verdict ${finalizedResponse.verdict} at $decisionTime"
         )
 
         // We've reached a verdict. Cancel any outstanding request for a tick of the participant response deadline.

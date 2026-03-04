@@ -65,15 +65,17 @@ trait LsuBase
     *   - Set reconciliation interval to 1s
     */
   protected def defaultEnvironmentSetup(
-      participantsOverride: Option[Seq[ParticipantReference]] = None
+      participantsOverride: Option[Seq[ParticipantReference]] = None,
+      connectParticipants: Boolean = true,
   )(implicit env: TestConsoleEnvironment): Unit = {
     import env.{participants as _, *}
 
-    val participants = participantsOverride.getOrElse(env.participants.all)
+    if (connectParticipants) {
+      val participants = participantsOverride.getOrElse(env.participants.all)
 
-    participants.synchronizers.connect(defaultSynchronizerConnectionConfig())
-
-    participants.dars.upload(CantonExamplesPath)
+      participants.synchronizers.connect(defaultSynchronizerConnectionConfig())
+      participants.dars.upload(CantonExamplesPath)
+    }
 
     synchronizerOwners1.foreach(
       _.topology.synchronizer_parameters.propose_update(
@@ -161,17 +163,18 @@ trait LsuBase
     *   - Migration of synchronizer nodes
     *   - Sequencer successors announcements
     */
-  protected def performSynchronizerNodesLSU(
-      fixture: Fixture
+  protected def performSynchronizerNodesLsu(
+      fixture: Fixture,
+      announceSequencerSuccessors: Boolean = true,
   ): Unit = {
     fixture.oldSynchronizerOwners.foreach(
-      _.topology.synchronizer_upgrade.announcement.propose(fixture.newPSId, fixture.upgradeTime)
+      _.topology.lsu.announcement.propose(fixture.newPSId, fixture.upgradeTime)
     )
 
     // Ensure all nodes see the announcement
     eventually() {
       forAll(fixture.oldSynchronizerNodes.all)(
-        _.topology.synchronizer_upgrade.announcement
+        _.topology.lsu.announcement
           .list(store = Some(fixture.currentPSId))
           .filter(_.item.successorSynchronizerId == fixture.newPSId)
           .loneElement
@@ -180,14 +183,15 @@ trait LsuBase
 
     migrateSynchronizerNodes(fixture)
 
-    fixture.oldSynchronizerNodes.sequencers.zip(fixture.newSynchronizerNodes.sequencers).foreach {
-      case (oldSequencer, newSequencer) =>
-        oldSequencer.topology.synchronizer_upgrade.sequencer_successors.propose_successor(
-          sequencerId = oldSequencer.id,
-          endpoints = newSequencer.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
-          synchronizerId = fixture.currentPSId,
-        )
-    }
+    if (announceSequencerSuccessors)
+      fixture.oldSynchronizerNodes.sequencers.zip(fixture.newSynchronizerNodes.sequencers).foreach {
+        case (oldSequencer, newSequencer) =>
+          oldSequencer.topology.lsu.sequencer_successors.propose_successor(
+            sequencerId = oldSequencer.id,
+            endpoints = newSequencer.sequencerConnection.endpoints.map(_.toURI(useTls = false)),
+            synchronizerId = fixture.currentPSId,
+          )
+      }
   }
 
   /** Instantiate the new synchronizer nodes with identity of the previous ones and import topology

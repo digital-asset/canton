@@ -20,6 +20,7 @@ import sbtbuildinfo.BuildInfoPlugin.autoImport.*
 import sbtide.Keys.ideExcludedDirectories
 import sbtprotoc.ProtocPlugin.autoImport.{AsProtocPlugin, PB}
 import scalafix.sbt.ScalafixPlugin
+import scalafix.sbt.ScalafixPlugin.autoImport.scalafix
 import scoverage.ScoverageKeys.*
 import wartremover.WartRemover
 import wartremover.WartRemover.autoImport.*

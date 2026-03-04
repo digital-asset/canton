@@ -14,27 +14,33 @@ option java_package = "com.daml.ledger.api.v2";
 message ListPackagesResponse {
   // The IDs of all Daml-LF packages supported by the server.
   // Each element must be a valid PackageIdString (as described in ``value.proto``).
-  // Required
+  //
+  // Required: must be non-empty
   repeated string package_ids = 1;
 }
 
 message GetPackageResponse {
   // The hash function we use to calculate the hash.
+  //
   // Required
   HashFunction hash_function = 1;
 
   // Contains a ``daml_lf`` ArchivePayload. See further details in ``daml_lf.proto``.
-  // Required
+  //
+  // Required: must be non-empty
   bytes archive_payload = 2;
 
   // The hash of the archive payload, can also used as a ``package_id``.
   // Must be a valid PackageIdString (as described in ``value.proto``).
+  //
   // Required
   string hash = 3;
 }
 
 message GetPackageStatusResponse {
   // The status of the package.
+  //
+  // Required
   PackageStatus package_status = 1;
 }
 
@@ -71,6 +77,7 @@ message ListPackagesRequest {}
 message GetPackageRequest {
   // The ID of the requested package.
   // Must be a valid PackageIdString (as described in ``value.proto``).
+  //
   // Required
   string package_id = 1;
 }
@@ -78,6 +85,7 @@ message GetPackageRequest {
 message GetPackageStatusRequest {
   // The ID of the requested package.
   // Must be a valid PackageIdString (as described in ``value.proto``).
+  //
   // Required
   string package_id = 1;
 }
@@ -92,10 +100,14 @@ message GetPackageStatusRequest {
 message PackageMetadataFilter {
   // If this list is non-empty, any vetted package with a package ID in this
   // list will match the filter.
+  //
+  // Optional: can be empty
   repeated string package_ids = 1;
 
   // If this list is non-empty, any vetted package with a name matching at least
   // one prefix in this list will match the filter.
+  //
+  // Optional: can be empty
   repeated string package_name_prefixes = 2;
 }
 
@@ -114,19 +126,25 @@ message TopologyStateFilter {
   // listed in this field match the filter.
   // Query the current Ledger API's participant's ID via the public
   // ``GetParticipantId`` command in ``PartyManagementService``.
+  //
+  // Optional: can be empty
   repeated string participant_ids = 1;
 
   // If this list is non-empty, only vetted packages from the topology state of
   // the synchronizers in this list match the filter.
+  //
+  // Optional: can be empty
   repeated string synchronizer_ids = 2;
 }
 
 message ListVettedPackagesRequest {
   // The package metadata filter the returned vetted packages set must satisfy.
+  //
   // Optional
   PackageMetadataFilter package_metadata_filter = 1;
 
   // The topology filter the returned vetted packages set must satisfy.
+  //
   // Optional
   TopologyStateFilter topology_state_filter = 2;
 
@@ -164,9 +182,13 @@ message ListVettedPackagesResponse {
   // All ``VettedPackages`` that contain at least one ``VettedPackage`` matching
   // both a ``PackageMetadataFilter`` and a ``TopologyStateFilter``.
   // Sorted by synchronizer_id then participant_id.
+  //
+  // Optional: can be empty
   repeated VettedPackages vetted_packages = 1;
 
   // Pagination token to retrieve the next page.
   // Empty string if there are no further results.
+  //
+  // Optional
   string next_page_token = 2;
 }

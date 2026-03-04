@@ -73,7 +73,7 @@ sealed abstract class LsuSuccessorAcceptedIntegrationTest(
         val fixture =
           fixtureWithDefaults(newPVOverride = Some(nextPV), newSerialOverride = Some(nextSerial))
 
-        performSynchronizerNodesLSU(fixture)
+        performSynchronizerNodesLsu(fixture)
 
         environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
 
@@ -101,7 +101,7 @@ sealed abstract class LsuSuccessorRejectedIntegrationTest(
         loggerFactory.assertLogs(
           assertThrows[CommandFailure] {
             fixture.oldSynchronizerOwners.foreach(
-              _.topology.synchronizer_upgrade.announcement
+              _.topology.lsu.announcement
                 .propose(fixture.newPSId, fixture.upgradeTime)
             )
           },

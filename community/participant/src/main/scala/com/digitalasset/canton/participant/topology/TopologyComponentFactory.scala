@@ -20,7 +20,8 @@ import com.digitalasset.canton.participant.config.UnsafeOnlinePartyReplicationCo
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing
-import com.digitalasset.canton.participant.sync.LogicalSynchronizerUpgradeCallback
+import com.digitalasset.canton.participant.sync.LsuCallback
+import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.store.SequencedEventStore
 import com.digitalasset.canton.time.Clock
@@ -76,7 +77,8 @@ class TopologyComponentFactory(
       sequencerConnectionSuccessorListener: SequencerConnectionSuccessorListener,
       topologyClient: SynchronizerTopologyClientWithInit,
       recordOrderPublisher: RecordOrderPublisher,
-      lsuCallback: LogicalSynchronizerUpgradeCallback,
+      lsuCallback: LsuCallback,
+      pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore,
       retrieveAndStoreMissingSequencerIds: TraceContext => EitherT[
         FutureUnlessShutdown,
         String,
@@ -101,6 +103,7 @@ class TopologyComponentFactory(
         pauseSynchronizerIndexingDuringPartyReplication = unsafeOnlinePartyReplication.nonEmpty,
         synchronizerPredecessor = synchronizerPredecessor,
         lsuCallback = lsuCallback,
+        pendingHandshakesWithSuccessorsStore = pendingHandshakesWithSuccessorsStore,
         retrieveAndStoreMissingSequencerIds = retrieveAndStoreMissingSequencerIds,
         loggerFactory,
       )

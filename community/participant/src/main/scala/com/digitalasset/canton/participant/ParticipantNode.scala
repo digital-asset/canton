@@ -755,7 +755,10 @@ class ParticipantNodeBootstrap(
           () => triggerDeclarativeChange(),
         )
 
-        _ <- sync.finishLSUs()
+        _ <-
+          if (sync.isActive()) sync.finishLSUs() else EitherT.pure[FutureUnlessShutdown, String](())
+
+        _ = if (sync.isActive()) sync.attemptPendingHandshakesSuccessors()
 
         _ = {
           connectedSynchronizerHealth.set(sync.connectedSynchronizerHealth)

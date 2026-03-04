@@ -52,18 +52,38 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
       globalKbpsCap: Double = defaultGlobalKbpsCap,
       perClientTpsCap: Double = defaultPerClientTpsCap,
       perClientKbpsCap: Double = defaultPerClientKbpsCap,
-      strict: Boolean = true,
-      thresholds: NonEmpty[Seq[PositiveDouble]] =
-        NonEmpty.mk(Seq, 0.9, 0.8, 0.7).map(PositiveDouble.tryCreate),
   ): IndividualThroughputCapConfig = IndividualThroughputCapConfig(
     globalTpsCap = PositiveDouble.tryCreate(globalTpsCap),
     globalKbpsCap = PositiveDouble.tryCreate(globalKbpsCap),
     perClientTpsCap = PositiveDouble.tryCreate(perClientTpsCap),
     perClientKbpsCap = PositiveDouble.tryCreate(perClientKbpsCap),
-    thresholds = thresholds,
-    strict = strict,
-    updateEveryMs = NonNegativeInt.zero,
   )
+
+  private def mkCap(
+      config: IndividualThroughputCapConfig,
+      strict: Boolean = true,
+      thresholds: NonEmpty[Seq[PositiveDouble]] =
+        NonEmpty.mk(Seq, 0.9, 0.8, 0.7).map(PositiveDouble.tryCreate),
+      observationPeriodSeconds: Int = 1,
+  ) = {
+    val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
+    (
+      observationPeriodSeconds,
+      clock,
+      new IndividualBlockSequencerThroughputCap(
+        observationPeriodSeconds,
+        strict,
+        thresholds,
+        updateEveryMs = NonNegativeInt.zero,
+        config,
+        SubmissionRequestType.ConfirmationRequest,
+        clock,
+        sequencerMetrics,
+        timeouts,
+        loggerFactory = loggerFactory,
+      ),
+    )
+  }
 
   private def createConfig(
       observationPeriodSeconds: Int,
@@ -157,17 +177,7 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
 
     "initialize the cap logic correctly" in {
       val config = createIndividualConfig()
-      val observationPeriodSeconds = 1
-      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
-      val tpsCap = new IndividualBlockSequencerThroughputCap(
-        observationPeriodSeconds,
-        config,
-        SubmissionRequestType.ConfirmationRequest,
-        clock,
-        sequencerMetrics,
-        timeouts,
-        loggerFactory = loggerFactory,
-      )
+      val (observationPeriodSeconds, clock, tpsCap) = mkCap(config)
       val thresholdLevel = 0
       val eventSize: Long = 128
 
@@ -192,18 +202,8 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
     }
 
     "advance window if no events arrive and enough time elapsed to run the scheduled tick" in {
-      val observationPeriodSeconds = 1
       val config = createIndividualConfig()
-      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
-      val tpsCap = new IndividualBlockSequencerThroughputCap(
-        observationPeriodSeconds,
-        config,
-        SubmissionRequestType.ConfirmationRequest,
-        clock,
-        sequencerMetrics,
-        timeouts,
-        loggerFactory = loggerFactory,
-      )
+      val (observationPeriodSeconds, clock, tpsCap) = mkCap(config)
       val thresholdLevel = 0
       val eventSize: Long = 128
 
@@ -230,18 +230,8 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
     }
 
     "allow large events to temporarily exceed caps and then rate limit accordingly" in {
-      val observationPeriodSeconds = 1
       val config = createIndividualConfig()
-      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
-      val tpsCap = new IndividualBlockSequencerThroughputCap(
-        observationPeriodSeconds,
-        config,
-        SubmissionRequestType.ConfirmationRequest,
-        clock,
-        sequencerMetrics,
-        timeouts,
-        loggerFactory = loggerFactory,
-      )
+      val (observationPeriodSeconds, clock, tpsCap) = mkCap(config)
       val thresholdLevel = 0
       val smallEvent: Long = config.globalKbpsCap.value.toLong * 1024 * observationPeriodSeconds / 4
       val bigClientEvent: Long =
@@ -295,18 +285,9 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
     }
 
     "enforce threshold level caps from TPS increases" in {
-      val observationPeriodSeconds = 1
+
       val config = createIndividualConfig()
-      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
-      val tpsCap = new IndividualBlockSequencerThroughputCap(
-        observationPeriodSeconds,
-        config,
-        SubmissionRequestType.ConfirmationRequest,
-        clock,
-        sequencerMetrics,
-        timeouts,
-        loggerFactory = loggerFactory,
-      )
+      val (observationPeriodSeconds, clock, tpsCap) = mkCap(config)
       val eventSize: Long = 128
 
       // initialize the tps cap logic
@@ -358,18 +339,9 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
     }
 
     "enforce threshold level caps from KB/s increases" in {
-      val observationPeriodSeconds = 1
+
       val config = createIndividualConfig()
-      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
-      val tpsCap = new IndividualBlockSequencerThroughputCap(
-        observationPeriodSeconds,
-        config,
-        SubmissionRequestType.ConfirmationRequest,
-        clock,
-        sequencerMetrics,
-        timeouts,
-        loggerFactory = loggerFactory,
-      )
+      val (observationPeriodSeconds, clock, tpsCap) = mkCap(config)
       val bytesCap = config.globalKbpsCap.value * 1024 * observationPeriodSeconds
 
       // initialize the tps cap logic
@@ -422,19 +394,10 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
     }
 
     "enforce throttling when high TPS reaches highest threshold level" in {
-      val observationPeriodSeconds = 1
+
       val config =
         createIndividualConfig(perClientTpsCap = defaultGlobalTpsCap * 0.4)
-      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
-      val tpsCap = new IndividualBlockSequencerThroughputCap(
-        observationPeriodSeconds,
-        config,
-        SubmissionRequestType.ConfirmationRequest,
-        clock,
-        sequencerMetrics,
-        timeouts,
-        loggerFactory = loggerFactory,
-      )
+      val (observationPeriodSeconds, clock, tpsCap) = mkCap(config)
       val eventSize: Long = 128
 
       // initialize the tps cap logic
@@ -487,19 +450,11 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
     }
 
     "enforce throttling when high KB/s reaches highest threshold level" in {
+
       val observationPeriodSeconds = 1
       val bytesCap = defaultGlobalKbpsCap * 1024 * observationPeriodSeconds
       val config = createIndividualConfig(perClientKbpsCap = bytesCap * 0.4)
-      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
-      val tpsCap = new IndividualBlockSequencerThroughputCap(
-        observationPeriodSeconds,
-        config,
-        SubmissionRequestType.ConfirmationRequest,
-        clock,
-        sequencerMetrics,
-        timeouts,
-        loggerFactory = loggerFactory,
-      )
+      val (_, clock, tpsCap) = mkCap(config)
       val eventSize = (bytesCap * 0.1).toLong
 
       // initialize the tps cap logic
@@ -553,18 +508,9 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
     }
 
     "set member usage back to None if no activity within the observation window" in {
-      val observationPeriodSeconds = 1
+
       val config = createIndividualConfig()
-      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
-      val tpsCap = new IndividualBlockSequencerThroughputCap(
-        observationPeriodSeconds,
-        config,
-        SubmissionRequestType.ConfirmationRequest,
-        clock,
-        sequencerMetrics,
-        timeouts,
-        loggerFactory = loggerFactory,
-      )
+      val (observationPeriodSeconds, clock, tpsCap) = mkCap(config)
       val eventSize: Long = 128
 
       tpsCap.addEvent(clock.now, m1, eventSize)
@@ -577,17 +523,8 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
     }
 
     "track per-member rejection metrics when individual caps are exceeded" in {
-      val observationPeriodSeconds = 1
-      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
-      val tpsCap = new IndividualBlockSequencerThroughputCap(
-        observationPeriodSeconds,
-        createIndividualConfig(),
-        SubmissionRequestType.ConfirmationRequest,
-        clock,
-        sequencerMetrics,
-        timeouts,
-        loggerFactory = loggerFactory,
-      )
+
+      val (observationPeriodSeconds, clock, tpsCap) = mkCap(createIndividualConfig())
       val eventSize: Long = 128
 
       tpsCap.addEvent(clock.now, m1, eventSize)
@@ -617,17 +554,9 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
     }
 
     "track global rejection metrics when throttled rate is exceeded" in {
-      val observationPeriodSeconds = 1
-      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
-      val tpsCap = new IndividualBlockSequencerThroughputCap(
-        observationPeriodSeconds,
-        createIndividualConfig(perClientTpsCap = defaultGlobalTpsCap * 0.4),
-        SubmissionRequestType.ConfirmationRequest,
-        clock,
-        sequencerMetrics,
-        timeouts,
-        loggerFactory = loggerFactory,
-      )
+
+      val (observationPeriodSeconds, clock, tpsCap) =
+        mkCap(createIndividualConfig(perClientTpsCap = defaultGlobalTpsCap * 0.4))
       val eventSize: Long = 128
 
       // Initialize the cap logic
@@ -667,17 +596,8 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
     }
 
     "track rejection metrics independently for multiple members" in {
-      val observationPeriodSeconds = 1
-      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
-      val tpsCap = new IndividualBlockSequencerThroughputCap(
-        observationPeriodSeconds,
-        createIndividualConfig(),
-        SubmissionRequestType.ConfirmationRequest,
-        clock,
-        sequencerMetrics,
-        timeouts,
-        loggerFactory = loggerFactory,
-      )
+      val config = createIndividualConfig()
+      val (observationPeriodSeconds, clock, tpsCap) = mkCap(config)
       val eventSize: Long = 128
 
       // Initialize the cap logic
@@ -732,23 +652,17 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
     }
 
     "cap TPS sensibly in non-strict mode" in {
-      val observationPeriodSeconds = 1
-      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
-      val tpsCap = new IndividualBlockSequencerThroughputCap(
-        observationPeriodSeconds,
-        createIndividualConfig(
-          globalTpsCap = 4.0,
-          globalKbpsCap = 1000,
-          perClientTpsCap = 4.0,
-          perClientKbpsCap = 1000,
-          strict = false,
-          thresholds = NonEmpty.mk(Seq, 0.001).map(PositiveDouble.tryCreate),
-        ),
-        SubmissionRequestType.ConfirmationRequest,
-        clock,
-        sequencerMetrics,
-        timeouts,
-        loggerFactory = loggerFactory,
+
+      val config = createIndividualConfig(
+        globalTpsCap = 4.0,
+        globalKbpsCap = 1000,
+        perClientTpsCap = 4.0,
+        perClientKbpsCap = 1000,
+      )
+      val (observationPeriodSeconds, clock, tpsCap) = mkCap(
+        config,
+        strict = false,
+        thresholds = NonEmpty.mk(Seq, 0.001).map(PositiveDouble.tryCreate),
       )
       val eventSize: Long = 100
 
@@ -814,24 +728,18 @@ class BlockSequencerThroughputCapTest extends AsyncWordSpec with BaseTest with M
     }
 
     "cap Kbps sensibly in non-strict mode" in {
-      val observationPeriodSeconds = 1
-      val clock = new SimClock(CantonTimestamp.Epoch, loggerFactory)
-      val tpsCap = new IndividualBlockSequencerThroughputCap(
-        observationPeriodSeconds,
-        createIndividualConfig(
-          globalTpsCap = 100.0, // high value we don't expect to exceed
-          globalKbpsCap = defaultPerClientKbpsCap,
-          perClientTpsCap = 100.0, // high value we don't expect to exceed
-          perClientKbpsCap = defaultPerClientKbpsCap,
-          strict = false,
-          thresholds = NonEmpty.mk(Seq, 0.001).map(PositiveDouble.tryCreate),
-        ),
-        SubmissionRequestType.ConfirmationRequest,
-        clock,
-        sequencerMetrics,
-        timeouts,
-        loggerFactory = loggerFactory,
+      val config = createIndividualConfig(
+        globalTpsCap = 100.0, // high value we don't expect to exceed
+        globalKbpsCap = defaultPerClientKbpsCap,
+        perClientTpsCap = 100.0, // high value we don't expect to exceed
+        perClientKbpsCap = defaultPerClientKbpsCap,
       )
+      val (observationPeriodSeconds, clock, tpsCap) = mkCap(
+        config,
+        strict = false,
+        thresholds = NonEmpty.mk(Seq, 0.001).map(PositiveDouble.tryCreate),
+      )
+
       val bytesCap = defaultPerClientKbpsCap * 1024 * observationPeriodSeconds
       val eventSize: Long = (bytesCap * 0.25).toLong
 

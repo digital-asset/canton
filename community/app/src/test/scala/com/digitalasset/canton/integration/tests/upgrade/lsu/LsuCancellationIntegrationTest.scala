@@ -189,7 +189,7 @@ abstract class LsuCancellationIntegrationTest extends LsuBase {
       sequencer2.start()
       mediator2.start()
 
-      performSynchronizerNodesLSU(fixture1)
+      performSynchronizerNodesLsu(fixture1)
 
       eventually()(checkLSUOngoing(Some(fixture1.synchronizerSuccessor)))
 
@@ -202,7 +202,7 @@ abstract class LsuCancellationIntegrationTest extends LsuBase {
       clock.advanceTo(upgradeTime1.minusSeconds(5))
 
       fixture1.oldSynchronizerOwners.foreach(
-        _.topology.synchronizer_upgrade.announcement.revoke(fixture1.newPSId, fixture1.upgradeTime)
+        _.topology.lsu.announcement.revoke(fixture1.newPSId, fixture1.upgradeTime)
       )
 
       eventually()(checkLSUOngoing(None))
@@ -240,7 +240,7 @@ abstract class LsuCancellationIntegrationTest extends LsuBase {
       sequencer3.start()
       mediator3.start()
 
-      performSynchronizerNodesLSU(fixture2)
+      performSynchronizerNodesLsu(fixture2)
 
       clock.advanceTo(upgradeTime2.immediateSuccessor)
 

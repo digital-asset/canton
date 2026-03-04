@@ -4,6 +4,10 @@
 package com.digitalasset.canton.http
 
 import com.daml.ledger.api.v2.transaction_filter.CumulativeFilter.IdentifierFilter
+import com.daml.ledger.api.v2.transaction_filter.TransactionShape.{
+  TRANSACTION_SHAPE_ACS_DELTA,
+  TRANSACTION_SHAPE_LEDGER_EFFECTS,
+}
 import com.daml.ledger.api.v2.transaction_filter.{
   CumulativeFilter,
   EventFormat,
@@ -17,13 +21,14 @@ import com.digitalasset.canton.http.json.v2.LegacyDTOs.TransactionFilter
 import com.digitalasset.canton.tracing.NoTracing
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AsyncWordSpec
-import org.scalatest.{Inside, LoneElement}
+import org.scalatest.{Inside, LoneElement, OptionValues}
 
 class JsUpdateServiceTest
     extends AsyncWordSpec
     with Matchers
     with Inside
     with LoneElement
+    with OptionValues
     with NoTracing {
 
   private val combinations = for {
@@ -72,6 +77,10 @@ class JsUpdateServiceTest
 
         val updateFormat = toUpdateFormat(filter = txFilter, verbose = verbose, forTrees = true)
 
+        updateFormat.includeTransactions
+          .map(_.transactionShape)
+          .value shouldBe TRANSACTION_SHAPE_LEDGER_EFFECTS
+
         updateFormat.includeTransactions.flatMap(_.eventFormat) should not be empty
         checkEventFormat(
           eventFormat = updateFormat.includeTransactions.flatMap(_.eventFormat).toList.loneElement,
@@ -112,6 +121,10 @@ class JsUpdateServiceTest
 
         val updateFormat = toUpdateFormat(filter = txFilter, verbose = verbose, forTrees = true)
 
+        updateFormat.includeTransactions
+          .map(_.transactionShape)
+          .value shouldBe TRANSACTION_SHAPE_LEDGER_EFFECTS
+
         updateFormat.includeTransactions.flatMap(_.eventFormat) should not be empty
         checkEventFormat(
           eventFormat = updateFormat.includeTransactions.flatMap(_.eventFormat).toList.loneElement,
@@ -146,6 +159,10 @@ class JsUpdateServiceTest
         val updateFormat = toUpdateFormat(filter = txFilter, verbose = verbose, forTrees = false)
 
         updateFormat.includeTransactions.flatMap(_.eventFormat) should not be empty
+        updateFormat.includeTransactions
+          .map(_.transactionShape)
+          .value shouldBe TRANSACTION_SHAPE_ACS_DELTA
+
         val eventFormatTx =
           updateFormat.includeTransactions.flatMap(_.eventFormat).toList.loneElement
         eventFormatTx.verbose shouldBe verbose

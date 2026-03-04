@@ -64,7 +64,7 @@ abstract class LsuExternalPartiesIntegrationTest extends LsuBase {
           IouSyntax.testIou(charlie.partyId, charlie.partyId).create().commands().asScala.toSeq,
         )
 
-      performSynchronizerNodesLSU(fixture)
+      performSynchronizerNodesLsu(fixture)
       environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
 
       eventually() {
