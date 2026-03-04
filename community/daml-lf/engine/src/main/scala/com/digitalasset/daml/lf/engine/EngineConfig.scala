@@ -31,6 +31,7 @@ import com.digitalasset.daml.lf.transaction.ContractStateMachine
   *     disabled if the option is empty.
   * @param snapshotDir The optional specifies the directory where Daml snapshots
   *      will be saved. Snapshots are disabled if the option is empty.
+  * @param contractStateMode Contract state machine is configured to use this mode for validating transactions.
   * @param forbidLocalContractIds Since August 2018 we expect new
   *     ledgers to suffix CIDs before committing a transaction.
   *     This option should be disabled for backward compatibility in ledger
@@ -52,7 +53,8 @@ final case class EngineConfig(
   stackTraceMode: Boolean = false,
   profileDir: Option[Path] = None,
   snapshotDir: Option[Path] = None,
-  contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoContractKey,
+  // TODO (#30398): ensure a sensible default mode is chosen
+  contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.default,
   forbidLocalContractIds: Boolean = false,
   limits: interpretation.Limits = interpretation.Limits.Lenient,
   checkAuthorization: Boolean = true,

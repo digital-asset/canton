@@ -5,13 +5,13 @@ package com.digitalasset.canton.caching
 
 import cats.syntax.flatMap.*
 import cats.{FlatMap, Functor}
+import com.daml.metrics.CacheMetrics
 import com.daml.metrics.api.MetricHandle.Gauge
 import com.digitalasset.canton.checked
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
-import com.digitalasset.canton.metrics.CacheMetrics
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{ErrorUtil, FutureUtil}
 import com.github.benmanes.caffeine.cache.RemovalCause
@@ -344,6 +344,15 @@ object ScaffeineCache {
     )
 
     /** @see
+      *   com.github.blemale.scaffeine.AsyncLoadingCache.getIfPresent
+      */
+    def getIfPresent(key: K): Option[F[V]] = (
+      // The Caffeine cache's get method wraps exceptions from the loader in a `CompletionException`.
+      // We should strip it here.
+      underlying.getIfPresent(key).map(f => tunnel.exit(FutureUtil.unwrapCompletionException(f)))
+    )
+
+    /** @see
       *   com.github.blemale.scaffeine.AsyncLoadingCache.getAll
       */
     def getAll(keys: Iterable[K]): F[Map[K, V]] =
@@ -421,6 +430,12 @@ object ScaffeineCache {
       F.map(underlying.getAll(keys.map(Traced(_))))(_.map { case (tracedKey, value) =>
         tracedKey.unwrap -> value
       })
+
+    /** @see
+      *   com.github.blemale.scaffeine.AsyncLoadingCache.getIfPresent
+      */
+    def getIfPresent(key: K)(implicit traceContext: TraceContext): Option[F[V]] =
+      underlying.getIfPresent(Traced(key))
 
     /** @see
       *   com.github.blemale.scaffeine.AsyncLoadingCache.put

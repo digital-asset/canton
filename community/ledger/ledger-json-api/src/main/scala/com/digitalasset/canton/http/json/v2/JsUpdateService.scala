@@ -86,11 +86,11 @@ class JsUpdateService(
     ),
     websocket(
       JsUpdateService.getUpdatesFlatEndpoint,
-      getFlats,
+      getUpdates,
     ),
     asList(
       JsUpdateService.getUpdatesFlatListEndpoint,
-      getFlats,
+      getUpdates,
       timeoutOpenEndedStream = (r: LegacyDTOs.GetUpdatesRequest) => r.endInclusive.isEmpty,
     ),
     websocket(
@@ -333,20 +333,6 @@ class JsUpdateService(
       implicit val tc = caller.traceContext()
       Flow[LegacyDTOs.GetUpdatesRequest].map { request =>
         toGetUpdatesRequest(request, forTrees = false)
-      } via
-        prepareSingleWsStream(
-          updateServiceClient(caller.token())(TraceContext.empty).getUpdates,
-          (r: update_service.GetUpdatesResponse) => protocolConverters.GetUpdatesResponse.toJson(r),
-        )
-    }
-
-  private def getFlats(
-      caller: CallerContext
-  ): TracedInput[Unit] => Flow[LegacyDTOs.GetUpdatesRequest, JsGetUpdatesResponse, NotUsed] =
-    _ => {
-      implicit val tc = caller.traceContext()
-      Flow[LegacyDTOs.GetUpdatesRequest].map { req =>
-        toGetUpdatesRequest(req, forTrees = false)
       } via
         prepareSingleWsStream(
           updateServiceClient(caller.token())(TraceContext.empty).getUpdates,
@@ -723,7 +709,8 @@ object JsUpdateServiceConverters {
     )
 
     val transactionFormat = TransactionFormat(
-      transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
+      transactionShape =
+        if (forTrees) TRANSACTION_SHAPE_LEDGER_EFFECTS else TRANSACTION_SHAPE_ACS_DELTA,
       eventFormat = Some(eventFormat),
     )
 

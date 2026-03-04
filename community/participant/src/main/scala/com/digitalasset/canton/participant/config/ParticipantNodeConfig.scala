@@ -524,6 +524,7 @@ object ContractLoaderConfig {
 final case class AlphaOnlinePartyReplicationConfig(
     testInterceptor: Option[AlphaOnlinePartyReplicationConfig.TestInterceptor] = None,
     unsafeSequencerChannelSupport: Boolean = false,
+    pauseSynchronizerIndexingDuringPartyReplication: Boolean = false,
 )
 
 object AlphaOnlinePartyReplicationConfig {

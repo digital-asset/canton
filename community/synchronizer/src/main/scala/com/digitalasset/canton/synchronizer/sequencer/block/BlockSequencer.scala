@@ -3,10 +3,11 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block
 
-import cats.data.EitherT
+import cats.data.{EitherT, OptionT}
 import cats.syntax.bifunctor.*
 import cats.syntax.either.*
 import cats.syntax.foldable.*
+import cats.syntax.traverse.*
 import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.RichGeneratedMessage
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -18,15 +19,22 @@ import com.digitalasset.canton.error.CantonBaseError
 import com.digitalasset.canton.lifecycle.*
 import com.digitalasset.canton.logging.pretty.CantonPrettyPrinter
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.protocol.messages.EncryptedViewMessage
 import com.digitalasset.canton.resource.{DbExceptionRetryPolicy, Storage}
+import com.digitalasset.canton.sequencer.admin.v30.{EnvelopeTrafficSummary, TrafficSummary}
+import com.digitalasset.canton.sequencing.GroupAddressResolver
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.protocol.SequencerErrors.{
   Overloaded,
   SubmissionRequestRefused,
 }
-import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
+import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.{
+  TrafficControlDisabled,
+  TrafficControlError,
+}
 import com.digitalasset.canton.sequencing.traffic.{
+  EventCostCalculator,
   TrafficConsumed,
   TrafficControlErrors,
   TrafficPurchasedSubmissionHandler,
@@ -49,7 +57,7 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   MissingSynchronizerPredecessor,
   SequencerPastUpgradeTime,
 }
-import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore
+import com.digitalasset.canton.synchronizer.sequencer.store.{PayloadId, SequencerStore}
 import com.digitalasset.canton.synchronizer.sequencer.traffic.TimestampSelector.*
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   LsuTrafficState,
@@ -75,6 +83,7 @@ import org.slf4j.event.Level
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.nowarn
 import scala.collection.concurrent.TrieMap
+import scala.collection.immutable.SortedSet
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, Promise}
 import scala.util.{Failure, Success}
@@ -227,7 +236,6 @@ class BlockSequencer(
     materializer,
     loggerFactory,
   )
-
   private val throughputCap =
     new BlockSequencerThroughputCap(
       blockSequencerConfig.throughputCap,
@@ -446,7 +454,7 @@ class BlockSequencer(
       EitherT.leftT(
         Overloaded("Sequencer can't take requests because it is behind on processing events")
       )
-    else EitherT.rightT(())
+    else EitherTUtil.unitUS
 
   private def rejectAcknowledgementIfOverloaded()
       : EitherT[FutureUnlessShutdown, SequencerDeliverError, Unit] =
@@ -454,7 +462,7 @@ class BlockSequencer(
       EitherT.leftT(
         Overloaded("Sequencer can't take requests because it is behind on processing events")
       )
-    else EitherT.rightT(())
+    else EitherTUtil.unitUS
 
   override protected def sendAsyncSignedInternal(
       signedSubmission: SignedContent[SubmissionRequest]
@@ -471,8 +479,14 @@ class BlockSequencer(
       _,
       _,
     ) = submission
+
+    val maybeDelayedProcessingMessage =
+      if (lsuTrafficInitialized.isCompleted)
+        ""
+      else " Traffic is not yet initialized. Handling of submission request might be delayed."
+
     logger.debug(
-      s"Request to send submission with id ${submission.messageId} with max sequencing time $maxSequencingTime from $sender to ${batch.allRecipients}"
+      s"Request to send submission with id ${submission.messageId} with max sequencing time $maxSequencingTime from $sender to ${batch.allRecipients}. $maybeDelayedProcessingMessage"
     )
 
     for {
@@ -560,6 +574,134 @@ class BlockSequencer(
           BlockNotFound.InvalidTimestamp(timestamp): SequencerError
         )
     }
+  }
+
+  override protected def readPayloadsFromTimestampsInternal(timestamps: Seq[CantonTimestamp])(
+      implicit traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[PayloadId, Batch[ClosedEnvelope]]] =
+    // In the block sequencer, payload Ids are sequencing timestamps so we can use that to look up payloads directly
+    // We don't load them in the cache though to avoid interfering with optimizations on event delivery to members
+    reader.readPayloadsByIdWithoutCacheLoading(timestamps.map(PayloadId(_)))
+
+  private val eventCostCalculator = new EventCostCalculator(loggerFactory)
+
+  override def getTrafficSummaries(timestamps: Seq[CantonTimestamp])(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficControlError, Seq[TrafficSummary]] = {
+
+    val timestampsSet = SortedSet.from(timestamps)
+    val headBlock = stateManager.getHeadState.block
+    val latestSequencedTimestamp = headBlock.lastTs
+    val latestSequencerEventTimestamp = headBlock.latestSequencerEventTimestamp
+
+    // Get the latest snapshot available by making use of the latestSequencerEventTimestamp in the head state
+    // This ensures we can immediately get topology snapshots for events that have been sequenced without
+    // waiting for the head topolog snapshot to get updated
+    def getSnapshot(timestamp: CantonTimestamp) = SyncCryptoClient
+      .getSnapshotForTimestamp(
+        cryptoApi,
+        timestamp,
+        latestSequencerEventTimestamp,
+      )
+      .map(_.ipsSnapshot)
+
+    // Computes the detailed event cost for a batch at the sequencing timestamp
+    def computeDetailedEventCostForBatch(
+        batch: Batch[ClosedEnvelope],
+        sequencingTime: CantonTimestamp,
+    ): EitherT[FutureUnlessShutdown, TrafficControlError, EventCostCalculator.EventCostDetails] = {
+
+      // TODO(i29505): remove once flat fees for broadcasts is implemented
+      val groups =
+        batch.envelopes.flatMap(_.recipients.allRecipients).collect { case g: GroupRecipient => g }
+
+      for {
+        topologySnapshot <- OptionT.liftF(getSnapshot(sequencingTime))
+        trafficParams <- OptionT(
+          topologySnapshot.trafficControlParameters(protocolVersion)
+        )
+        groupToMembers <- OptionT.liftF(
+          GroupAddressResolver.resolveGroupsToMembers(groups.toSet, topologySnapshot)
+        )
+        eventCost = eventCostCalculator.computeEventCost(
+          batch,
+          trafficParams.readVsWriteScalingFactor,
+          groupToMembers,
+          // Use the reperesentative protocol version with which the batch has been sequenced here.
+          // This is not necessarily correct if there are multiple
+          // NOT the current protocol version of this sequencer (which could be higher)
+          batch.representativeProtocolVersion.representative,
+          trafficParams.baseEventCost,
+        )
+      } yield eventCost
+    }
+      .toRight(TrafficControlErrors.TrafficControlDisabled.Error())
+      .leftWiden[TrafficControlError]
+
+    def buildEnvelopeTrafficSummary(
+        eventCostDetails: EventCostCalculator.EventCostDetails
+    ): EitherT[FutureUnlessShutdown, TrafficControlError, Seq[EnvelopeTrafficSummary]] =
+      EitherT
+        .fromEither[FutureUnlessShutdown](
+          eventCostDetails.envelopes.toSeq.traverse { case (closedEnvelope, costDetails) =>
+            closedEnvelope
+              .toOpenEnvelope(cryptoApi.pureCrypto, protocolVersion)
+              .leftMap(err => TrafficControlErrors.EnvelopeTrafficSummaryError.Error(err))
+              .map { openEnvelope =>
+                val viewHashes = openEnvelope.protocolMessage match {
+                  // For encrypted view messages, extract the view hash
+                  case message: EncryptedViewMessage[?] =>
+                    List(message.viewHash.unwrap.getCryptographicEvidence)
+                  case _ => List.empty
+                }
+                EnvelopeTrafficSummary(
+                  envelopeTrafficCost = costDetails.finalCost,
+                  viewHashes = viewHashes,
+                )
+              }
+          }
+        )
+        .leftWiden[TrafficControlError]
+
+    def computeSummary(
+        batch: Batch[ClosedEnvelope],
+        sequencingTimestamp: CantonTimestamp,
+    ): EitherT[FutureUnlessShutdown, TrafficControlError, TrafficSummary] = for {
+      eventCostDetails <- computeDetailedEventCostForBatch(batch, sequencingTimestamp)
+      envelopeSummaries <- buildEnvelopeTrafficSummary(eventCostDetails)
+    } yield TrafficSummary(
+      sequencingTime = Some(sequencingTimestamp.toProtoTimestamp),
+      totalTrafficCost = eventCostDetails.eventCost.value,
+      envelopes = envelopeSummaries,
+    )
+
+    for {
+      // Check that the latest timestamp is not above the latest sequenced timestamp
+      _ <- timestampsSet.lastOption
+        .find(_ > latestSequencedTimestamp)
+        .fold(EitherTUtil.unitUS[TrafficControlError])(inTheFuture =>
+          EitherT.leftT[FutureUnlessShutdown, Unit](
+            TrafficControlErrors.RequestedTimestampInTheFuture.Error(inTheFuture)
+          )
+        )
+        .leftWiden[TrafficControlError]
+      eventsMap <- EitherT.liftF(readPayloadsFromTimestampsInternal(timestamps))
+      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+        eventsMap.sizeIs == timestampsSet.size,
+        TrafficControlErrors.NoEventAtTimestamps.Error(
+          timestampsSet.diff(eventsMap.keySet.map(_.unwrap))
+        ),
+      )
+      head = cryptoApi.headSnapshot.ipsSnapshot.timestamp
+      current <- EitherT.liftF(cryptoApi.currentSnapshotApproximation.map(_.ipsSnapshot.timestamp))
+      trafficSummaries <- MonadUtil
+        .parTraverseWithLimit(batchingConfig.parallelism)(
+          eventsMap.toSeq
+        ) { case (payloadId, batch) =>
+          val sequencingTime = payloadId.unwrap
+          computeSummary(batch, sequencingTime)
+        }
+    } yield trafficSummaries
   }
 
   override def awaitContainingBlockLastTimestamp(timestamp: CantonTimestamp)(implicit
@@ -853,23 +995,30 @@ class BlockSequencer(
   @nowarn("cat=deprecation")
   override def trafficStatus(requestedMembers: Seq[Member], selector: TimestampSelector)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[SequencerTrafficStatus] =
+  ): EitherT[FutureUnlessShutdown, TrafficControlError, SequencerTrafficStatus] =
     for {
-      topologySnapshot <- cryptoApi.currentSnapshotApproximation
-      members <-
+      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+        lsuTrafficInitialized.futureUS.isCompleted,
+        TrafficControlErrors.LsuTrafficNotInitialized.Error(),
+      )
+      topologySnapshot <- EitherT.right(cryptoApi.currentSnapshotApproximation)
+      members <- EitherT.right(
         if (requestedMembers.isEmpty) {
           // If requestedMembers is not set get the traffic states of all known members
-          topologySnapshot.ipsSnapshot.allMembers()
+          topologySnapshot.ipsSnapshot.knownMembers()
         } else {
           topologySnapshot.ipsSnapshot
-            .allMembers()
+            .knownMembers()
             .map { registered =>
               requestedMembers.toSet.intersect(registered)
             }
         }
-      trafficState <- trafficStatesForMembers(
-        members,
-        selector,
+      )
+      trafficState <- EitherT.right(
+        trafficStatesForMembers(
+          members,
+          selector,
+        )
       )
     } yield SequencerTrafficStatus(trafficState)
 
@@ -922,12 +1071,22 @@ class BlockSequencer(
   @nowarn("cat=deprecation")
   override def getLsuTrafficControlState(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, LsuSequencerError, LsuTrafficState] =
+  ): EitherT[FutureUnlessShutdown, CantonBaseError, LsuTrafficState] =
     for {
       // - Check that LSU is ongoing
-      upgrade <- EitherT.fromOption[FutureUnlessShutdown](
-        ongoingSynchronizerUpgrade.get(),
-        SequencerError.NoOngoingLsu.Error(cryptoApi.psid, cryptoApi.topologyKnownUntilTimestamp),
+      upgrade <- EitherT
+        .fromOption[FutureUnlessShutdown](
+          ongoingSynchronizerUpgrade.get(),
+          SequencerError.NoOngoingLsu.Error(cryptoApi.psid, cryptoApi.topologyKnownUntilTimestamp),
+        )
+        .leftWiden[CantonBaseError]
+      // - Traffic control is enabled
+      _ <- EitherT(
+        cryptoApi.ips.currentSnapshotApproximation
+          .flatMap(
+            _.trafficControlParameters(protocolVersion)
+          )
+          .map(_.toRight[CantonBaseError](TrafficControlDisabled.Error()))
       )
 
       // - Basic time check against the wall clock
@@ -970,7 +1129,7 @@ class BlockSequencer(
       )
       // - Get all members known at the upgrade time
       allMembers <- EitherT.right[LsuSequencerError](
-        topologySnapshot.ipsSnapshot.allMembers()
+        topologySnapshot.ipsSnapshot.knownMembers()
       )
       // - Get traffic states at the upgrade time for all members
       consumedRecordsPerMember <- EitherT.right[LsuSequencerError](
@@ -998,7 +1157,7 @@ class BlockSequencer(
           .leftMap(error =>
             SequencerError.LsuTrafficNotFound.Error(
               s"Failed to get traffic states for all members at upgrade time: $error"
-            ): LsuSequencerError
+            ): CantonBaseError
           )
           .map(_.toMap)
       _ = {
@@ -1020,19 +1179,26 @@ class BlockSequencer(
 
   override def setLsuTrafficControlState(
       state: LsuTrafficState
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, LsuSequencerError, Unit] =
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
     for {
       // - Check that there's an LSU predecessor
-      upgradeTime <- EitherT.fromOption[FutureUnlessShutdown](
-        sequencingTimeLowerBoundExclusive,
-        MissingSynchronizerPredecessor.Error(cryptoApi.psid, sequencerId),
+      upgradeTime <- EitherT
+        .fromOption[FutureUnlessShutdown](
+          sequencingTimeLowerBoundExclusive,
+          MissingSynchronizerPredecessor.Error(cryptoApi.psid, sequencerId),
+        )
+        .leftWiden[CantonBaseError]
+      _ <- EitherT(
+        cryptoApi.ips.currentSnapshotApproximation
+          .flatMap(
+            _.trafficControlParameters(protocolVersion)
+          )
+          .map(_.toRight(TrafficControlDisabled.Error()))
       )
       // Check if the initialization has already been completed
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
         !lsuTrafficInitialized.futureUS.isCompleted,
-        LsuTrafficAlreadyInitialized.Error(
-          cryptoApi.psid
-        ),
+        LsuTrafficAlreadyInitialized.Error(cryptoApi.psid),
       )
       // - Check that the node has not progressed beyond the upgrade time
       _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
@@ -1078,10 +1244,24 @@ class BlockSequencer(
           )
         }
       )
+      // The method below normally deletes the data > the passed argument for crash recovery purposes.
+      // With CantonTimestamp.MaxValue this will only reset the TrafficConsumedManager's cache.
+      _ <- EitherT.right(blockRateLimitManager.resetStateTo(CantonTimestamp.MaxValue))
       _ <- EitherT.right(trafficPurchasedStore.setInitialTimestamp(upgradeTime))
     } yield {
       blockRateLimitManager.trafficPurchasedManager.tick(upgradeTime)
       logger.info(s"LSU traffic control state has been initialized")
       lsuTrafficInitialized.success(UnlessShutdown.unit)
     }
+
+  override def getThroughputCap(
+      requestType: SubmissionRequestType
+  ): Option[BlockSequencerConfig.IndividualThroughputCapConfig] =
+    throughputCap.getCap(requestType)
+
+  override def setThroughputCap(
+      requestType: SubmissionRequestType,
+      config: Option[BlockSequencerConfig.IndividualThroughputCapConfig],
+  )(implicit traceContext: TraceContext): Unit = throughputCap.replaceCap(requestType, config)
+
 }

@@ -23,6 +23,7 @@ import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlo
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
+import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.topology.{Party, SynchronizerId}
 import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
@@ -47,10 +48,7 @@ import scala.util.Random
   *   - Old synchronizer: sequencer1, sequencer2
   *   - New synchronizer: sequencer3, sequencer4
   */
-abstract class LsuTrafficAccountingIntegrationTest
-    extends LsuBase
-    with LsuTrafficManagement
-    with TrafficBalanceSupport {
+abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficBalanceSupport {
 
   override protected def testName: String = "lsu-traffic-accounting"
 
@@ -225,6 +223,13 @@ abstract class LsuTrafficAccountingIntegrationTest
       // Participants should not be able to connect to the new sequencers before the traffic state has been set
       participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe false
 
+      clue("check that traffic state is not available on new sequencers before it's set") {
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
+          sequencer3.traffic_control.traffic_state_of_all_members(),
+          _.shouldBeCantonErrorCode(TrafficControlErrors.LsuTrafficNotInitialized),
+        )
+      }
+
       logger.debug("Setting traffic state on new sequencers")
       sequencer3.traffic_control.set_lsu_state(oldTrafficStateSeq1)
       sequencer4.traffic_control.set_lsu_state(oldTrafficStateSeq2)
@@ -236,7 +241,7 @@ abstract class LsuTrafficAccountingIntegrationTest
       )
 
       eventually(maxPollInterval = 100.millis) {
-        environment.simClock.value.advance(java.time.Duration.ofSeconds(1))
+        environment.simClock.value.advance(Duration.ofSeconds(1))
         participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
       }
 
@@ -484,8 +489,8 @@ final class LsuReferenceTrafficAccountingIntegrationTest
 }
 
 // TODO(#16789) Re-enable test once dynamic onboarding (traffic control) is supported for DA BFT
-//final class LSUBftOrderingTrafficAccountingTest
-//  extends LSUTrafficAccountingTest {
+//final class LsuBftOrderingTrafficAccountingIntegrationTest
+//  extends LsuTrafficAccountingIntegrationTest {
 //    registerPlugin(
 //      new UseBftSequencer(
 //        loggerFactory,

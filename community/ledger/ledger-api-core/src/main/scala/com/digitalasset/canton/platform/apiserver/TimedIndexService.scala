@@ -165,6 +165,17 @@ final class TimedIndexService(delegate: IndexService, metrics: LedgerApiServerMe
       delegate.getEventsByContractId(contractId, eventFormat),
     )
 
+  override def lookupNonUniqueContractKey(
+      readers: Set[Party],
+      key: Key,
+      pageToken: Option[Long],
+      limit: Int,
+  )(implicit loggingContext: LoggingContextWithTrace): Future[ContractKeyPage] =
+    Timed.future(
+      metrics.services.index.lookupNonUniqueContractKey,
+      delegate.lookupNonUniqueContractKey(readers, key, pageToken, limit),
+    )
+
   // TODO(i16065): Re-enable getEventsByContractKey tests
 //  override def getEventsByContractKey(
 //      contractKey: Value,

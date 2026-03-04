@@ -4,8 +4,8 @@
 package com.digitalasset.canton.integration.tests.operations
 
 import com.digitalasset.canton.config.DbConfig
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.CommandFailure
+import com.digitalasset.canton.config.RequireTypes.{PositiveDouble, PositiveInt}
+import com.digitalasset.canton.console.{CommandFailure, SequencerReference}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
@@ -31,6 +31,10 @@ import com.digitalasset.canton.participant.config.{
   DeclarativeUserRightsConfig,
   ParticipantPermissionConfig,
 }
+import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType.ConfirmationRequest
+import com.digitalasset.canton.synchronizer.config.DeclarativeSequencerConfig
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.IndividualThroughputCapConfig
+import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig
 import com.digitalasset.canton.{HasActorSystem, HasExecutionContext, UniquePortGenerator}
 import monocle.macros.syntax.lens.*
 import org.apache.pekko.http.scaladsl.Http
@@ -71,6 +75,23 @@ final class DeclarativeApiIntegrationTest
           _.focus(_.alphaDynamic).replace(declarativeP1.get())
         ),
         _.focus(_.parameters.enableAlphaStateViaConfig).replace(true),
+        ConfigTransforms.updateAllSequencerConfigs_ { config =>
+          config.sequencer match {
+            case external: SequencerConfig.External =>
+              config
+                .focus(_.sequencer)
+                .replace(
+                  external
+                    .focus(_.block.throughputCap.strict)
+                    .replace(true)
+                    .focus(_.block.throughputCap.enabled)
+                    .replace(true)
+                    .focus(_.block.throughputCap.messages.confirmationRequest.globalTpsCap)
+                    .replace(PositiveDouble.tryCreate(5.0))
+                )
+            case _ => fail("unexpected sequencer")
+          }
+        },
       )
 
   override def beforeAll(): Unit = {
@@ -100,11 +121,20 @@ final class DeclarativeApiIntegrationTest
       .discard
   }
 
-  protected def updateConfig(env: TestConsoleEnvironment, participant: String)(
+  protected def updateParticipantConfig(env: TestConsoleEnvironment, participant: String)(
       update: DeclarativeParticipantConfig => DeclarativeParticipantConfig
   ): Unit = {
     val newConfig = ConfigTransforms.updateParticipantConfig(participant)(
       _.focus(_.alphaDynamic).modify(update)
+    )(env.environment.config)
+    env.environment.pokeOrUpdateConfig(Some(Right(newConfig)))
+  }
+
+  protected def updateSequencerConfig(env: TestConsoleEnvironment, sequencer: String)(
+      update: DeclarativeSequencerConfig => DeclarativeSequencerConfig
+  ): Unit = {
+    val newConfig = ConfigTransforms.updateSequencerConfig(sequencer)(
+      _.focus(_.declarative).modify(update)
     )(env.environment.config)
     env.environment.pokeOrUpdateConfig(Some(Right(newConfig)))
   }
@@ -122,7 +152,7 @@ final class DeclarativeApiIntegrationTest
 
   "starting with initially empty config succeeds" in { implicit env =>
     import env.*
-    updateConfig(env, "participant1")(
+    updateParticipantConfig(env, "participant1")(
       _.focus(_.dars).replace(Seq.empty)
     )
     participant1.start()
@@ -131,7 +161,7 @@ final class DeclarativeApiIntegrationTest
   "adding idps" in { implicit env =>
     import env.*
     loggerFactory.assertLogs(
-      updateConfig(env, "participant1")(
+      updateParticipantConfig(env, "participant1")(
         _.focus(_.idps)
           .replace(
             Seq(
@@ -161,7 +191,7 @@ final class DeclarativeApiIntegrationTest
 
   "adding idps for real" in { implicit env =>
     import env.*
-    updateConfig(env, "participant1")(
+    updateParticipantConfig(env, "participant1")(
       _.focus(_.idps).replace(
         Seq(
           DeclarativeIdpConfig(
@@ -187,7 +217,7 @@ final class DeclarativeApiIntegrationTest
 
   "adding users" in { implicit env =>
     import env.*
-    updateConfig(env, "participant1")(
+    updateParticipantConfig(env, "participant1")(
       _.focus(_.parties)
         .replace(Seq("Alice", "Bob", "Charlie").map(p => DeclarativePartyConfig(party = p)))
         .focus(_.users)
@@ -266,9 +296,44 @@ final class DeclarativeApiIntegrationTest
     )(env).bootstrap()
   }
 
+  "modifying throughput caps" in { implicit env =>
+    import env.*
+
+    // check caps are initially at 5
+    def checkCap(seq: SequencerReference, expected: Double) = {
+      val currentCap = seq.traffic_control
+        .get_throughput_cap(ConfirmationRequest)
+        .value
+        .globalTpsCap
+      assert(
+        Math.abs(currentCap.value - expected) < 1.0e-6,
+        s"Expected cap to be $expected, found $currentCap",
+      )
+    }
+    checkCap(sequencer1, 5.0)
+    checkCap(sequencer2, 5.0)
+
+    // update config
+    updateSequencerConfig(env, "sequencer1") { cfg =>
+      cfg
+        .focus(_.throughputCap)
+        .replace(
+          cfg.throughputCap.updated(
+            "confirmation request",
+            IndividualThroughputCapConfig(globalTpsCap = 10.0),
+          )
+        )
+    }
+
+    // caps should now be at 10.0
+    checkCap(sequencer1, 10.0)
+    checkCap(sequencer2, 5.0)
+
+  }
+
   "adding a ledger connection" in { implicit env =>
     import env.*
-    updateConfig(env, "participant1")(
+    updateParticipantConfig(env, "participant1")(
       _.focus(_.connections).replace(
         Seq(
           DeclarativeConnectionConfig.tryCreate(
@@ -300,7 +365,7 @@ final class DeclarativeApiIntegrationTest
 
   "modifying ledger connections" in { implicit env =>
     import env.*
-    updateConfig(env, "participant1")(
+    updateParticipantConfig(env, "participant1")(
       _.focus(_.connections).replace(
         Seq(
           DeclarativeConnectionConfig.tryCreate(
@@ -325,7 +390,7 @@ final class DeclarativeApiIntegrationTest
 
   "add dars" in { implicit env =>
     import env.*
-    updateConfig(env, "participant1")(
+    updateParticipantConfig(env, "participant1")(
       _.focus(_.dars)
         .replace(
           Seq(
@@ -349,7 +414,7 @@ final class DeclarativeApiIntegrationTest
   "removing parties and users" in { implicit env =>
     import env.*
     // here we remove a party that is registered with a user, so the order must be right
-    updateConfig(env, "participant1")(
+    updateParticipantConfig(env, "participant1")(
       _.focus(_.parties)
         .replace(
           Seq(

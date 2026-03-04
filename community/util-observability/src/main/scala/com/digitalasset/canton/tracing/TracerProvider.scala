@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.tracing
 
+import com.daml.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.OnDemandMetricsReader.NoOpOnDemandMetricsReader$
 import com.digitalasset.canton.telemetry.{
   ConfiguredOpenTelemetry,
   UnsetSpanEndingThreadReferenceSpanProcessor,

@@ -41,7 +41,7 @@ class AvailabilityModuleMessageVerificationTest
           val cryptoProvider = mock[CryptoProvider[ProgrammableUnitTestEnv]]
           val messageAuthorizer = mock[MessageAuthorizer]
           when(messageAuthorizer.isAuthorized(any[BftNodeId], any[BftKeyId])) thenReturn false
-          val availability = createAvailability[ProgrammableUnitTestEnv](
+          val availability = createAndStartAvailability[ProgrammableUnitTestEnv](
             cryptoProvider = cryptoProvider,
             customMessageAuthorizer = Some(messageAuthorizer),
           )
@@ -74,7 +74,7 @@ class AvailabilityModuleMessageVerificationTest
             : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
           new ProgrammableUnitTestContext
         val cryptoProvider = mock[CryptoProvider[ProgrammableUnitTestEnv]]
-        val availability = createAvailability[ProgrammableUnitTestEnv](
+        val availability = createAndStartAvailability[ProgrammableUnitTestEnv](
           cryptoProvider = cryptoProvider,
           otherNodes = Set(Node1),
           otherNodesCustomKeys =
@@ -103,7 +103,7 @@ class AvailabilityModuleMessageVerificationTest
             : ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
           new ProgrammableUnitTestContext
         val cryptoProvider = mock[CryptoProvider[ProgrammableUnitTestEnv]]
-        val availability = createAvailability[ProgrammableUnitTestEnv](
+        val availability = createAndStartAvailability[ProgrammableUnitTestEnv](
           cryptoProvider = cryptoProvider,
           otherNodes = Set(Node1),
           otherNodesCustomKeys =

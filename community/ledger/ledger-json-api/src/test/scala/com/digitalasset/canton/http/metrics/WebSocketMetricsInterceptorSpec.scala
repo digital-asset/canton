@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.http.metrics
 
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.metrics.api.MetricHandle.{Histogram, Meter}
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, MetricValues}
 import com.daml.metrics.api.{MetricInfo, MetricName, MetricQualification, MetricsContext}
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import org.apache.pekko.http.scaladsl.model.ws.{BinaryMessage, Message, TextMessage}
 import org.apache.pekko.stream.scaladsl.{Flow, Sink, Source}
 import org.apache.pekko.util.ByteString

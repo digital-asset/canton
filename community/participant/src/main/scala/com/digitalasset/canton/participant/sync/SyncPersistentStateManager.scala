@@ -120,7 +120,7 @@ trait SyncPersistentStateLookup {
 class SyncPersistentStateManager(
     participantId: ParticipantId,
     aliasResolution: SynchronizerAliasResolution,
-    storage: Storage,
+    val storage: Storage,
     val indexedStringStore: IndexedStringStore,
     acsCounterParticipantConfigStore: AcsCounterParticipantConfigStore,
     parameters: ParticipantNodeParameters,

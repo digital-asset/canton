@@ -24,6 +24,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.admin.party.PartyReplicationStatus
+import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
 import com.digitalasset.canton.participant.party.PartyReplicationTestInterceptorImpl
 import com.digitalasset.canton.participant.protocol.party.{
   PartyReplicationSourceParticipantProcessor,
@@ -259,6 +260,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
         noOpProgressAndCompletionCallback2,
         targetParticipant.underlying.value.sync.participantNodePersistentState,
         connectedSynchronizer,
+        AlphaOnlinePartyReplicationConfig(pauseSynchronizerIndexingDuringPartyReplication = true),
         futureSupervisor,
         exitOnFatalFailures = false,
         timeouts,

@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.admin.api.client.data.DynamicSynchronizerParameters as ConsoleDynamicSynchronizerParameters
-import com.digitalasset.canton.config
 import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
 import com.digitalasset.canton.discard.Implicits.*
@@ -21,6 +20,7 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.topology.{PartyId, TopologyManagerError}
 import com.digitalasset.canton.version.ProtocolVersion
 
+import java.time.Duration
 import scala.annotation.nowarn
 
 /** The goal is to ensure that an LSU can be cancelled and that another LSU can be done
@@ -98,12 +98,7 @@ final class LsuCancellationIntegrationTest extends LsuBase {
         participants.all.dars.upload(CantonExamplesPath)
         participant1.health.ping(participant1)
 
-        synchronizerOwners1.foreach(
-          _.topology.synchronizer_parameters.propose_update(
-            daId,
-            _.copy(reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)),
-          )
-        )
+        setDefaultsDynamicSynchronizerParameters(daId, synchronizerOwners1)
       }
 
   /** Check whether an LSU is ongoing
@@ -240,11 +235,12 @@ final class LsuCancellationIntegrationTest extends LsuBase {
       performSynchronizerNodesLsu(fixture2)
 
       clock.advanceTo(upgradeTime2.immediateSuccessor)
-
+      transferTraffic(Some(fixture2))
       eventually() {
+        environment.simClock.value.advance(Duration.ofSeconds(1))
         participants.all.forall(_.synchronizers.is_connected(fixture2.newPSId)) shouldBe true
       }
-      waitForTargetTimeOnSequencer(sequencer3, environment.clock.now)
+      waitForTargetTimeOnSequencer(sequencer3, environment.clock.now, logger)
 
       // Time offset is applied on the old sequencer
       sequencer1.underlying.value.sequencer.timeTracker

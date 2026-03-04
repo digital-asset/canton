@@ -21,7 +21,7 @@ import com.digitalasset.canton.util.ResourceUtil
 /** Verifies that all tables have a debug view that contains all columns. This is to keep the debug
   * views in sync with changes to the tables.
   */
-trait ViewConsistencyTest
+sealed trait ViewConsistencyTest
     extends CommunityIntegrationTest
     with IsolatedEnvironments
     with FlagCloseable
@@ -96,10 +96,9 @@ trait ViewConsistencyTest
         )
       else succeed
     }
-
   }
-
 }
-class ViewConsistencyTestPostgres extends ViewConsistencyTest {
+
+final class ViewConsistencyTestPostgres extends ViewConsistencyTest {
   registerPlugin(new UsePostgres(loggerFactory))
 }

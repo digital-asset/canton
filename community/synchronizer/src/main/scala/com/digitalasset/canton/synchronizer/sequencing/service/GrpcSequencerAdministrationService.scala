@@ -19,22 +19,30 @@ import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.*
 import com.digitalasset.canton.protocol.StaticSynchronizerParameters
+import com.digitalasset.canton.protocol.v30.TrafficState
 import com.digitalasset.canton.sequencer.admin.v30
 import com.digitalasset.canton.sequencer.admin.v30.{
   GenerateAuthenticationTokenRequest,
   GenerateAuthenticationTokenResponse,
   GetLsuTrafficControlStateRequest,
   GetLsuTrafficControlStateResponse,
+  GetThroughputCapRequest,
+  GetThroughputCapResponse,
   OnboardingStateResponse,
   OnboardingStateV2Request,
   OnboardingStateV2Response,
   SetLsuTrafficControlStateRequest,
   SetLsuTrafficControlStateResponse,
+  SetThroughputCapRequest,
+  SetThroughputCapResponse,
   SetTrafficPurchasedRequest,
   SetTrafficPurchasedResponse,
 }
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
+import com.digitalasset.canton.sequencing.protocol.SubmissionRequestType
+import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
 import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.IndividualThroughputCapConfig
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{LsuTrafficState, TimestampSelector}
 import com.digitalasset.canton.synchronizer.sequencer.{
   OnboardingStateForSequencer,
@@ -153,26 +161,33 @@ class GrpcSequencerAdministrationService(
                   .map(member -> _)
                   .leftMap(member -> _)
             }
-            if (errors.nonEmpty) {
-              val errorMessage = errors.mkShow().toString
-              FutureUnlessShutdown.failed(
-                io.grpc.Status.INTERNAL
-                  .withDescription(
-                    s"Failed to retrieve traffic state for some members: $errorMessage"
+            val res: EitherT[FutureUnlessShutdown, TrafficControlError, Map[String, TrafficState]] =
+              if (errors.nonEmpty) {
+                val errorMessage = errors.mkShow().toString
+                EitherT.left[Map[String, TrafficState]](
+                  FutureUnlessShutdown.failed(
+                    io.grpc.Status.INTERNAL
+                      .withDescription(
+                        s"Failed to retrieve traffic state for some members: $errorMessage"
+                      )
+                      .asRuntimeException()
                   )
-                  .asRuntimeException()
-              )
-            } else {
-              FutureUnlessShutdown.pure(
-                trafficStates.map { case (member, state) =>
-                  member.toProtoPrimitive -> state.toProtoV30
-                }.toMap
-              )
-            }
+                )
+              } else {
+                EitherT.right[TrafficControlError](
+                  FutureUnlessShutdown.pure(
+                    trafficStates.map { case (member, state) =>
+                      member.toProtoPrimitive -> state.toProtoV30
+                    }.toMap
+                  )
+                )
+              }
+
+            res
           }
           .map(v30.TrafficControlStateResponse(_))
 
-        CantonGrpcUtil.mapErrNewEUS(EitherT.right(response))
+        CantonGrpcUtil.mapErrNewEUS(response)
     }
   }
 
@@ -485,5 +500,45 @@ class GrpcSequencerAdministrationService(
     } yield SetLsuTrafficControlStateResponse()
 
     mapErrNewEUS(result)
+  }
+
+  private def parseRequestType(requestType: String) =
+    SubmissionRequestType
+      .fromStringForCap(requestType)
+      .toRight(
+        ProtoDeserializationError.ValueConversionError(
+          "type",
+          s"Unknown submission type $requestType",
+        )
+      )
+
+  override def setThroughputCap(
+      request: SetThroughputCapRequest
+  ): Future[SetThroughputCapResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val SetThroughputCapRequest(requestType, config) = request
+    val result = for {
+      cfg <- config.traverse(IndividualThroughputCapConfig.fromAdminProto)
+      requestType <- parseRequestType(requestType)
+    } yield {
+      sequencer.setThroughputCap(requestType, cfg)
+      SetThroughputCapResponse()
+    }
+    mapErrNewEUS(wrapErrUS(result))
+  }
+
+  override def getThroughputCap(
+      request: GetThroughputCapRequest
+  ): Future[GetThroughputCapResponse] = {
+    implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
+    val GetThroughputCapRequest(requestType) = request
+    val result = parseRequestType(requestType)
+      .map { cap =>
+        GetThroughputCapResponse(
+          config = sequencer.getThroughputCap(cap).map(_.toAdminProto)
+        )
+      }
+    mapErrNewEUS(wrapErrUS(result))
+
   }
 }

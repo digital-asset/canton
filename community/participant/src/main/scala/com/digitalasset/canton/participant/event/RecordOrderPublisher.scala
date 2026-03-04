@@ -302,17 +302,18 @@ class RecordOrderPublisher private (
   )(implicit traceContext: TraceContext): UnlessShutdown[Unit] =
     scheduleBufferingEventTaskImmediately { timestamp =>
       logger.debug(s"Publish add contracts at $timestamp")
-      ledgerApiIndexerBuffer.get() match {
+      val (event, log) = ledgerApiIndexerBuffer.get() match {
         case None =>
-          throw new IllegalStateException(
-            "Buffering of LedgerApiIndexer events should be started before adding contracts"
-          )
+          (buildEventAtRecordTime(timestamp), /* no details to log: */ "")
         case Some(buffer) =>
-          val event = buffer.markEventsWithRecordTime(buildEventAtRecordTime)
-
-          logger.debug(s"Publishing contract add $event")
-          publishLedgerApiIndexerEvent(event)
+          (
+            buffer.markEventsWithRecordTime(buildEventAtRecordTime),
+            " with synchronizer indexing paused",
+          )
       }
+
+      logger.debug(s"Publishing contract add $event$log")
+      publishLedgerApiIndexerEvent(event)
     }
 
   /** Schedules flushing of events that were buffered during Online Party Replication as soon as

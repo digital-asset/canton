@@ -190,9 +190,7 @@ class PruningProcessor(
           val rewoundBoundInclusive: Offset =
             if (beforeOrAtOffset >= boundInclusive) boundInclusive else beforeOrAtOffset
           firstUnsafeOffsetComputation
-            .perform(
-              rewoundBoundInclusive
-            )
+            .perform(rewoundBoundInclusive)
             .map { firstUnsafeOffset =>
               val result = firstUnsafeOffset
                 .map(_.offset)

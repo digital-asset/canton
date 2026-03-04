@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.pekkostreams.dispatcher
 
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import org.apache.pekko.stream.scaladsl.Sink
 import org.apache.pekko.stream.testkit.scaladsl.TestSink

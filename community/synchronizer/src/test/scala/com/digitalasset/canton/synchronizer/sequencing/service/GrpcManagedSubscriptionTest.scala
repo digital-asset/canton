@@ -27,7 +27,6 @@ import com.digitalasset.canton.tracing.SerializableTraceContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import io.grpc.Status.Code
 import io.grpc.StatusException
-import io.grpc.stub.ServerCallStreamObserver
 import org.mockito.ArgumentCaptor
 import org.scalatest.wordspec.AnyWordSpec
 
@@ -44,7 +43,7 @@ class GrpcManagedSubscriptionTest extends AnyWordSpec with BaseTest with HasExec
     ).toPhysical
     var handler: Option[SequencedEventOrErrorHandler[SequencedEventError]] = None
     val member = ParticipantId(DefaultTestIdentities.uid)
-    val observer = mock[ServerCallStreamObserver[v30.SubscriptionResponse]]
+    val observer = mock[GrpcObserverHandle[v30.SubscriptionResponse]]
 
     def createSequencerSubscription(
         newHandler: SequencedEventOrErrorHandler[SequencedEventError]
@@ -106,6 +105,7 @@ class GrpcManagedSubscriptionTest extends AnyWordSpec with BaseTest with HasExec
   "GrpcManagedSubscription" should {
     "send received events" in new Env {
       createManagedSubscription()
+      when(observer.onNext(any[v30.SubscriptionResponse])).thenReturn(FutureUnlessShutdown.unit)
       deliver()
       verify(observer).onNext(any[v30.SubscriptionResponse])
     }

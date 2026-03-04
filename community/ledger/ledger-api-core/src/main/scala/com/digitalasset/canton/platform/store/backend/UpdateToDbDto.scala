@@ -577,6 +577,7 @@ object UpdateToDbDto {
       representative_package_id = assign.createNode.templateId.packageId,
       notPersistedContractId = assign.createNode.coid,
       internal_contract_id = assign.internalContractId,
+      create_key_hash = assign.createNode.keyOpt.map(_.globalKey.hash.bytes.toHexString),
     )(
       stakeholders = assign.createNode.stakeholders,
       template_id = templateIdWithPackageName(assign),

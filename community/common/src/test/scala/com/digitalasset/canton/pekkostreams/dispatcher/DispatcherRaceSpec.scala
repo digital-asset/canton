@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.pekkostreams.dispatcher
 
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.concurrent.{DirectExecutionContext, Threading}
 import com.digitalasset.canton.discard.Implicits.DiscardOps

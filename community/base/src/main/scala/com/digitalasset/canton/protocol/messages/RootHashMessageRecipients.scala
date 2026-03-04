@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.protocol.messages
 
+import cats.data.EitherT
 import cats.syntax.alternative.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPartyId
@@ -13,7 +14,7 @@ import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
-import com.digitalasset.canton.util.{Checked, ErrorUtil}
+import com.digitalasset.canton.util.{Checked, EitherTUtil, ErrorUtil}
 
 import scala.concurrent.ExecutionContext
 
@@ -108,24 +109,28 @@ object RootHashMessageRecipients extends HasLoggerName {
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
-  ): FutureUnlessShutdown[WrongMembers] = {
+  ): EitherT[FutureUnlessShutdown, String, Unit] = {
     val participants = rootHashMessagesRecipients.collect {
       case MemberRecipient(p: ParticipantId) => p
     }
     for {
-      allInformeeParticipants <- topologySnapshot
-        .activeParticipantsOfParties(request.allInformees.toList)
-        .map(_.values.toSet.flatten)
-    } yield {
-      val participantsSet = participants.toSet
-      val missingInformeeParticipants = allInformeeParticipants diff participantsSet
-      val superfluousMembers = participantsSet diff allInformeeParticipants
-      WrongMembers(missingInformeeParticipants, superfluousMembers)
-    }
-  }
+      allInformeeParticipants <- EitherT.right(
+        topologySnapshot
+          .activeParticipantsOfParties(request.allInformees.toList)
+          .map(_.values.toSet.flatten)
+      )
+      participantsSet = participants.toSet
+      missingInformeeParticipants = allInformeeParticipants diff participantsSet
+      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+        missingInformeeParticipants.isEmpty,
+        show"Missing root hash message for informee participants: $missingInformeeParticipants",
+      )
+      superfluousMembers = participantsSet diff allInformeeParticipants
+      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+        superfluousMembers.isEmpty,
+        show"Superfluous root hash message for members: $superfluousMembers",
+      )
 
-  final case class WrongMembers(
-      missingInformeeParticipants: Set[ParticipantId],
-      superfluousMembers: Set[ParticipantId],
-  )
+    } yield ()
+  }
 }

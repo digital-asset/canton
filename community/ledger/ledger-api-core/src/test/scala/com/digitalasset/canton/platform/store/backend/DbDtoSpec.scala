@@ -111,6 +111,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           representative_package_id = someRepresentativePackageId,
           notPersistedContractId = hashCid("1"),
           internal_contract_id = 3,
+          create_key_hash = Some("abc"),
         )(
           stakeholders = someParties("party3", "party4"),
           template_id = someTemplateId,
@@ -136,7 +137,7 @@ class DbDtoSpec extends AnyWordSpec with Matchers {
           representative_package_id = someRepresentativePackageId,
           notPersistedContractId = hashCid("1"),
           internal_contract_id = 3,
-          create_key_hash = None,
+          create_key_hash = Some("abc"),
         ),
         DbDto.IdFilterActivateStakeholder(
           IdFilter(

@@ -13,20 +13,22 @@ import com.digitalasset.canton.health.HealthListener
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
+import com.digitalasset.canton.sequencer.admin.v30.TrafficSummary
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
+import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.RegisterError
 import com.digitalasset.canton.synchronizer.sequencer.admin.data.{
   SequencerAdminStatus,
   SequencerHealthStatus,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockOrderer
-import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.LsuSequencerError
 import com.digitalasset.canton.synchronizer.sequencer.errors.{
   CreateSubscriptionError,
   SequencerError,
 }
+import com.digitalasset.canton.synchronizer.sequencer.store.PayloadId
 import com.digitalasset.canton.synchronizer.sequencer.traffic.TimestampSelector.TimestampSelector
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   LsuTrafficState,
@@ -177,7 +179,7 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
 
     override def trafficStatus(members: Seq[Member], selector: TimestampSelector)(implicit
         traceContext: TraceContext
-    ): FutureUnlessShutdown[SequencerTrafficStatus] = ???
+    ): EitherT[FutureUnlessShutdown, TrafficControlError, SequencerTrafficStatus] = ???
 
     override protected def timeouts: ProcessingTimeout = ProcessingTimeout()
     override def setTrafficPurchased(
@@ -226,13 +228,21 @@ class BaseSequencerTest extends AsyncWordSpec with BaseTest with FailOnShutdown 
 
     override private[canton] def orderer: Option[BlockOrderer] = ???
 
+    override protected def readPayloadsFromTimestampsInternal(timestamps: Seq[CantonTimestamp])(
+        implicit traceContext: TraceContext
+    ): FutureUnlessShutdown[Map[PayloadId, Batch[ClosedEnvelope]]] = ???
+
+    override def getTrafficSummaries(timestamps: Seq[CantonTimestamp])(implicit
+        traceContext: TraceContext
+    ): EitherT[FutureUnlessShutdown, TrafficControlError, Seq[TrafficSummary]] = ???
+
     override def getLsuTrafficControlState(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, LsuSequencerError, LsuTrafficState] = ???
+    ): EitherT[FutureUnlessShutdown, CantonBaseError, LsuTrafficState] = ???
 
     override def setLsuTrafficControlState(state: LsuTrafficState)(implicit
         traceContext: TraceContext
-    ): EitherT[FutureUnlessShutdown, LsuSequencerError, Unit] = ???
+    ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] = ???
   }
 
   "sendAsyncSigned" should {

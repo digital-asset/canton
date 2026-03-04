@@ -62,6 +62,11 @@ final class SegmentClosingBehaviour[E <: Env[E]](
       case ConsensusSegment.Internal.BlockInactivityTimeout =>
         ignoreMessage(message)
 
+      case _: ConsensusSegment.ConsensusMessage.CancelEpoch =>
+        // This can still be received while already closing due `PreIssConsensusModule` processing postponed messages
+        //  that trigger the catch-up detector
+        ignoreMessage(message)
+
       case _ =>
         logger.error(
           s"Segment module $firstBlockNumber $actionName epoch $epochNumber but got unexpected message: $message"

@@ -99,7 +99,11 @@ class LocalSequencerStateEventSignallerTest
         errorLogMessagePrefix = "writer updates",
       )
     } yield {
-      aliceSignals should have size (2) // there is a one item buffer on both the source queue and broadcast hub
+      aliceSignals should have size (
+        1 + // an item in the source queue
+          1 + // an item in the async boundary buffer
+          1 // an item in broadcast hub
+      )
     }
   }
 

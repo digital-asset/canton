@@ -243,11 +243,17 @@ private[bftordering] final class P2PGrpcConnectionManager(
         case State(UnlessShutdown.Outcome(state)) =>
           state
             .map { case (p2pEndpointId, outgoingConnectionStatus) =>
-              p2pEndpointId -> outgoingConnectionStatus.channelO
-                .map { case (channel, authenticationContextO) =>
-                  shutdownGrpcChannelIfNeeded(p2pEndpointId, channel, authenticationContextO)
-                }
-                .getOrElse(FutureUnlessShutdown.unit)
+              p2pEndpointId ->
+                (for {
+                  _ <-
+                    outgoingConnectionStatus.connectWorkerO.getOrElse(FutureUnlessShutdown.unit)
+                  _ <-
+                    outgoingConnectionStatus.channelO
+                      .map { case (channel, authenticationContextO) =>
+                        shutdownGrpcChannelIfNeeded(p2pEndpointId, channel, authenticationContextO)
+                      }
+                      .getOrElse(FutureUnlessShutdown.unit)
+                } yield ())
             }
             .map { case (p2pEndpointId, closer) =>
               AsyncCloseable(
@@ -1811,16 +1817,15 @@ private[bftordering] object P2PGrpcConnectionManager {
   }
 
   sealed trait P2POutgoingConnectionStatus extends Product with Serializable {
-    val channelO: Option[(ManagedChannel, Option[GrpcSequencerClientAuth])]
+    val channelO: Option[(ManagedChannel, Option[GrpcSequencerClientAuth])] = None
+    val connectWorkerO: Option[FutureUnlessShutdown[Unit]] = None
   }
   object P2POutgoingConnectionStatus {
-    final case object Connecting extends P2POutgoingConnectionStatus {
-      override val channelO: Option[(ManagedChannel, Option[GrpcSequencerClientAuth])] = None
-    }
+    final case object Connecting extends P2POutgoingConnectionStatus
     final case class ConnectingOnChannel(
         channel: ManagedChannel,
         authenticationContextO: Option[GrpcSequencerClientAuth],
-        connectWorkerO: Option[FutureUnlessShutdown[Unit]],
+        override val connectWorkerO: Option[FutureUnlessShutdown[Unit]],
     ) extends P2POutgoingConnectionStatus {
       override val channelO: Option[(ManagedChannel, Option[GrpcSequencerClientAuth])] =
         Some(channel -> authenticationContextO)
@@ -1839,6 +1844,7 @@ private[bftordering] object P2PGrpcConnectionManager {
     ) extends P2POutgoingConnectionStatus {
       override val channelO: Option[(ManagedChannel, Option[GrpcSequencerClientAuth])] =
         Some(channel -> authenticationContextO)
+      override val connectWorkerO: Option[FutureUnlessShutdown[Unit]] = Some(connectWorker)
     }
   }
 

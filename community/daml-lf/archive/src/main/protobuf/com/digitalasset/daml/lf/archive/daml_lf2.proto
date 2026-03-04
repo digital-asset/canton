@@ -369,8 +369,9 @@ enum BuiltinFunction {
 
   SHA256_HEX = 71;
   SECP256K1_WITH_ECDSA_BOOL = 72;
+  SECP256K1_VALIDATE_KEY = 73; // *Available in versions >= 2.3
 
-  // Next id is 73.
+  // Next id is 74.
 
   /* Dev Builtins */
   // We use fields above 1000 for dev features
@@ -388,7 +389,7 @@ enum BuiltinFunction {
 
   TYPE_REP_TYCON_NAME = 3011; // *Available in versions >= 2.dev*
 
-  SECP256K1_VALIDATE_KEY = 4001; // *Available in versions >= 2.dev*
+  //SECP256K1_VALIDATE_KEY = 4001; // REMAINS HERE TEMPORARELY TO PARSE CHECKED IN DARS
 }
 
 // Builtin literals

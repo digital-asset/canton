@@ -65,7 +65,7 @@ private class JdbcLedgerWriteDao(
     ) => FutureUnlessShutdown[Vector[Offset]],
     contractLoader: ContractLoader,
     lfValueTranslation: LfValueTranslation,
-    contractStore: LedgerApiContractStore,
+    contractStore: LedgerApiContractStoreImpl,
     pruningOffsetService: PruningOffsetService,
 )(implicit ec: ExecutionContext)
     extends LedgerReadDao
@@ -237,7 +237,7 @@ private class JdbcLedgerWriteDao(
       loggingContext: LoggingContextWithTrace
   ): Future[PersistenceResponse] = for {
     _ <- Future.successful(logger.info("Storing contracts into participant contract store"))
-    _ <- contractStore
+    _ <- contractStore.participantContractStore
       .storeContracts(
         transaction.nodes.values
           .collect { case create: Node.Create => create }
@@ -252,12 +252,13 @@ private class JdbcLedgerWriteDao(
           )
           .toSeq
       )
+      .failOnShutdownToAbortException("storeTransaction")
 
     contractIds =
       transaction.nodes.values
         .collect { case create: Node.Create => create.coid }
 
-    internalContractIds <- contractStore.lookupBatchedInternalIds(contractIds)
+    internalContractIds <- contractStore.lookupBatchedInternalIdsNonReadThrough(contractIds)
 
     _ <- Future.successful(logger.info("Storing transaction"))
     _ <- dbDispatcher

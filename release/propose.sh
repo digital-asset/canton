@@ -160,7 +160,7 @@ create_release_commit() {
 
 create_checksums_commit() {
   local -r release_version=$1
-  run "Add SHA256 checksums for new Flyway migration scripts" "$REPO_ROOT/$DB_MIGRATION_PATH/recompute-sha256sums.sh" "$REPO_ROOT/$DB_MIGRATION_PATH"
+  run "Add SHA256 checksums for new Flyway migration scripts" "$REPO_ROOT/$DB_MIGRATION_PATH/recompute-sha256sums.sh"
   run "Stage SHA256 checksum updates" "$_GIT" add "$REPO_ROOT/$DB_MIGRATION_PATH/*.sha256"
 
   # if the commit message is changed, please adapt it also in `finish_release_process`

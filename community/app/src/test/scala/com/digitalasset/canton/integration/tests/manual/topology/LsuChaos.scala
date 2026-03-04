@@ -5,7 +5,11 @@ package com.digitalasset.canton.integration.tests.manual.topology
 
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.console.{InstanceReference, LocalInstanceReference}
+import com.digitalasset.canton.console.{
+  InstanceReference,
+  LocalInstanceReference,
+  LocalSequencerReference,
+}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.integration.tests.manual.topology.LsuChaos.{
@@ -31,6 +35,8 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, config}
+import org.apache.pekko.actor.Scheduler
+import org.scalatest.EitherValues
 import org.scalatest.OptionValues.*
 import org.scalatest.matchers.should.Matchers
 
@@ -40,6 +46,7 @@ import scala.annotation.nowarn
 import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.{Future, blocking}
+import scala.jdk.DurationConverters.JavaDurationOps
 import scala.math.Ordering.Implicits.*
 
 /** This class performs repeated LSUs. It assumes the synchronizer has only one sequencer
@@ -59,9 +66,11 @@ import scala.math.Ordering.Implicits.*
 private[topology] class LsuChaos(
     maxLsu: PositiveInt,
     val logger: TracedLogger,
+    scheduler: Scheduler,
 ) extends TopologyOperations
     with LogicalUpgradeUtils
-    with Matchers {
+    with Matchers
+    with EitherValues {
   override val name: String = LsuChaos.name
 
   override protected def testName: String = name
@@ -154,6 +163,7 @@ private[topology] class LsuChaos(
       currentPSId: PhysicalSynchronizerId,
       newSynchronizer: SynchronizerData,
       upgradeTime: CantonTimestamp,
+      scheduler: Scheduler,
   )(implicit
       env: TestConsoleEnvironment,
       errorLoggingContext: ErrorLoggingContext,
@@ -237,6 +247,41 @@ private[topology] class LsuChaos(
       )
       .discard
 
+    logger.info(
+      s"[$lsuId] Waiting for the upgrade time $upgradeTime to be reached on the sequencer $currentSequencer"
+    )
+
+    scheduler.scheduleOnce(
+      (upgradeTime - CantonTimestamp.now()).toScala
+    ) {
+      logOperationStep(lsuId)("Transferring LSU traffic state")
+      logger.info(s"[$lsuId] Downloading LSU traffic state $currentSequencer")
+      val trafficState = BaseTest.eventually(retryOnTestFailuresOnly = false)(
+        currentSequencer.traffic_control.get_lsu_state()
+      )
+
+      // Note: this command returns approximate traffic state, so we only use it to list the members
+      val members =
+        currentSequencer.traffic_control.traffic_state_of_all_members().trafficStates.keySet
+
+      def getTraffic(sequencer: LocalSequencerReference) =
+        members.map { m =>
+          logger.info(s"[$lsuId] Getting traffic state for $m from $sequencer")
+          m -> sequencer.underlying.value.sequencer.sequencer
+            .getTrafficStateAt(m, upgradeTime.immediateSuccessor)
+            .futureValueUS
+            .value
+        }.toMap
+
+      val trafficStateBeforeLsu = getTraffic(currentSequencer)
+      logger.info(s"[$lsuId] Uploading LSU traffic state $newSequencer")
+      newSequencer.traffic_control.set_lsu_state(trafficState)
+      val trafficStateAfterLsu = getTraffic(newSequencer)
+      trafficStateAfterLsu shouldEqual trafficStateBeforeLsu
+
+      logOperationStep(lsuId)(s"Upgrade to $lsuId is finished")
+    }
+
     logger.info(s"[$lsuId] All operations scheduled")
   }
 
@@ -254,7 +299,7 @@ private[topology] class LsuChaos(
     nextAction() match {
       case LsuChaos.NoAction => Future.unit
       case PerformLsu(currentPSId, nextSynchronizer, upgradeTime) =>
-        Future(performLsu(currentPSId, nextSynchronizer, upgradeTime))
+        Future(performLsu(currentPSId, nextSynchronizer, upgradeTime, scheduler))
     }
   }
 
@@ -332,7 +377,11 @@ private[topology] object LsuChaos extends TopologyOperationsCompanion {
 
   override def acceptableLogEntries: Seq[String] = Seq(
     // If submission is done during the LSU
-    "SUBMISSION_SYNCHRONIZER_NOT_READY"
+    "SUBMISSION_SYNCHRONIZER_NOT_READY",
+    // Handshakes and sequencer connections while the traffic is still being initialized on the sequencer
+    "FAILED_TO_CONNECT_TO_SEQUENCERS_TRANSIENT",
+    // Traffic transfer is scheduled on the wall clock, leaving sequencer a bit behind, it will retry with this error
+    "SEQUENCER_LSU_NOT_AT_UPGRADE_TIME_OR_BEYOND",
   )
 
   override def acceptableNonRetryableLogEntries: Seq[String] = Seq(

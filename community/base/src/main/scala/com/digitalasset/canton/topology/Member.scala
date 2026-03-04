@@ -157,6 +157,8 @@ sealed trait Synchronizer
 
   def logical: SynchronizerId
 
+  def toProtoPrimitive: String
+
   def isCompatibleWith(other: Synchronizer): Boolean = (this, other) match {
     case (a: PhysicalSynchronizerId, b: PhysicalSynchronizerId) => a == b
     case (a, b) => a.logical == b.logical

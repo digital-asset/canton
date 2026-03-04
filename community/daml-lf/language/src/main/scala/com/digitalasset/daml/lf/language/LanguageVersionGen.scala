@@ -11,7 +11,6 @@ import com.digitalasset.daml.lf.language.LanguageVersion.Minor._
 import scala.annotation.nowarn
 import scala.collection.MapView
 
-
 trait LanguageVersionGenerated {
   val allStableLegacyLfVersions: List[LanguageVersion] =
     List(6, 7, 8, 11, 12, 13, 14, 15, 17).map(i => LanguageVersion(V1, Stable(i)))
@@ -27,6 +26,9 @@ trait LanguageVersionGenerated {
 
   lazy val v2_1: LanguageVersion = explicitVersions("v2_1")
   lazy val v2_2: LanguageVersion = explicitVersions("v2_2")
+  // 2.3 staging changelog
+  // 02/26 introduced rev 1
+  // 02/26 added SECP256K1_VALIDATE_KEY to rev 1 (no breaking change, no new rev)
   lazy val v2_3_1: LanguageVersion = explicitVersions("v2_3_1")
   lazy val v2_3: LanguageVersion = explicitVersions("v2_3")
   lazy val v2_dev: LanguageVersion = explicitVersions("v2_dev")

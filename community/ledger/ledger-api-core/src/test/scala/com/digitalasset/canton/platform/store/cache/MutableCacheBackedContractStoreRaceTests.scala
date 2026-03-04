@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.store.cache
 
 import cats.data.NonEmptyVector
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus.{
@@ -17,6 +17,7 @@ import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFact
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.participant.store.memory.InMemoryContractStore
 import com.digitalasset.canton.platform.*
+import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
 import com.digitalasset.canton.platform.store.cache.MutableCacheBackedContractStoreRaceTests.{
   IndexViewContractsReader,
   assert_sync_vs_async_race_contract,
@@ -132,7 +133,7 @@ private object MutableCacheBackedContractStoreRaceTests {
 
   private def test(
       indexViewContractsReader: IndexViewContractsReader,
-      participantContractStore: LedgerApiContractStore,
+      participantContractStore: LedgerApiContractStoreImpl,
       workload: Seq[Long => SimplifiedContractStateEvent],
       unboundedExecutionContext: ExecutionContext,
   )(
@@ -387,6 +388,7 @@ private object MutableCacheBackedContractStoreRaceTests {
         loggerFactory = loggerFactory,
       )(ec),
       contractStore = participantContractStore,
+      ledgerEndCache = MutableLedgerEndCache(),
       loggerFactory = loggerFactory,
     )(ec)
   }
@@ -499,18 +501,29 @@ private object MutableCacheBackedContractStoreRaceTests {
     override def lookupKeyStatesFromDb(keys: Seq[Key], notEarlierThanEventSeqId: Long)(implicit
         loggingContext: LoggingContextWithTrace
     ): Future[Map[Key, Long]] = ??? // not used in this test
+
+    override def lookupNonUniqueKey(
+        key: Key,
+        validAtEventSeqId: CreatedAt,
+        nextPageToken: Option[CreatedAt],
+        limit: Int,
+    )(implicit
+        loggingContext: LoggingContextWithTrace
+    ): Future[ContractStorageBackend.KeysPageResult] =
+      ??? // not used in this test
   }
 
-  def update(contractStore: LedgerApiContractStore, event: SimplifiedContractStateEvent)(implicit
-      ec: ExecutionContext
+  def update(contractStore: LedgerApiContractStoreImpl, event: SimplifiedContractStateEvent)(
+      implicit ec: ExecutionContext
   ): Future[Unit] =
     if (event.created) {
       val contract =
         ContractInstance
           .create(event.contract)
           .getOrElse(fail(s"Failed creating contract ${event.contract.contractId}"))
-      contractStore
+      contractStore.participantContractStore
         .storeContracts(Seq(contract))
+        .failOnShutdownToAbortException("update")
         .map(_ => ())
     } else Future.unit
 }

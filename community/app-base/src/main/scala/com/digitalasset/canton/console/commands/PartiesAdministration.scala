@@ -876,7 +876,7 @@ class ParticipantPartiesAdministrationGroup(
         ParticipantAdminCommands.PartyManagement.ImportPartyAcsV2(
           new java.io.File(importFilePath),
           synchronizerId,
-          workflowIdPrefix = workflowIdPrefix,
+          if (workflowIdPrefix.nonEmpty) workflowIdPrefix else s"import-${UUID.randomUUID}",
           contractImportMode,
           representativePackageIdOverride,
         )

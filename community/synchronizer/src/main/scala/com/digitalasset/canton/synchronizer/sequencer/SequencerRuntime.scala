@@ -21,6 +21,7 @@ import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencer.admin.v30.{
   SequencerAdministrationServiceGrpc,
   SequencerPruningAdministrationServiceGrpc,
+  SequencerTrafficInspectionServiceGrpc,
 }
 import com.digitalasset.canton.sequencer.api.v30
 import com.digitalasset.canton.sequencing.client.SequencerClient
@@ -239,6 +240,12 @@ class SequencerRuntime(
       )
     )
     register(
+      SequencerTrafficInspectionServiceGrpc.bindService(
+        SequencerTrafficInspectionService,
+        executionContext,
+      )
+    )
+    register(
       SequencerPruningAdministrationServiceGrpc.bindService(
         new GrpcSequencerPruningAdministrationService(sequencer, loggerFactory),
         executionContext,
@@ -430,6 +437,12 @@ class SequencerRuntime(
       staticSynchronizerParameters,
       authenticationServices.memberAuthenticationService,
       localNodeParameters,
+      loggerFactory,
+    )
+
+  private val SequencerTrafficInspectionService =
+    new GrpcSequencerTrafficInspectionService(
+      sequencer,
       loggerFactory,
     )
 

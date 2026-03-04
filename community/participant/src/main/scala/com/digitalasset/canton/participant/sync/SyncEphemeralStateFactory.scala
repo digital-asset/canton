@@ -194,32 +194,64 @@ object SyncEphemeralStateFactory {
   )(implicit
       ec: ExecutionContext,
       loggingContext: ErrorLoggingContext,
-  ): FutureUnlessShutdown[ProcessingStartingPoints] = {
-
-    val updatedSynchronizerIndexO = synchronizerPredecessor match {
-      case Some(synchronizerPredecessor) =>
-        synchronizerIndexO.flatMap { synchronizerIndex =>
-          // If recordTime <= upgradeTime, it means that processing should start from genesis (as the clean index is before the upgrade time).
-          Option.when(synchronizerIndex.recordTime > synchronizerPredecessor.upgradeTime)(
-            synchronizerIndex
+  ): FutureUnlessShutdown[ProcessingStartingPoints] =
+    (synchronizerPredecessor, synchronizerIndexO) match {
+      case (Some(synchronizerPredecessor), Some(synchronizerIndex)) =>
+        if (synchronizerIndex.recordTime > synchronizerPredecessor.upgradeTime) {
+          loggingContext.info(
+            s"Computing starting points with synchronizer index after upgrade time"
           )
+          startingPointsInternal(requestJournalStore, sequencedEventStore, synchronizerIndexO)
+
+        } else {
+          /*
+         The goal of this comment is to explain what we don't have clean replay.
+
+          A clean replay would mean that the interleaving would have happened as follows:
+
+          ┌──────────────────────────────────────────────────────────────────────┐
+          │                                                                      │
+          │                                                                      ▼
+        request                synchronizer          request                  verdict
+         rc=0                      idx                rc=1                     sc=30
+         sc=10                                        sc=20
+       ──────────────────────────────────────────────────────────────────────────────►
+
+          Since in this branch of the conditional we have synchronizerIndex <= upgradeTime,
+          it would mean that request time of request with rc=0 would be <= upgradeTime, which is
+          impossible (all sequencing time on the synchronizer are strictly bigger than upgrade time.
+           */
+
+          loggingContext.info("Using LSU genesis starting points")
+          val messageProcessingStartingPoint = MessageProcessingStartingPoint(
+            nextRequestCounter = RequestCounter.Genesis,
+            nextSequencerCounter = SequencerCounter.Genesis,
+            lastSequencerTimestamp = synchronizerPredecessor.upgradeTime,
+            currentRecordTime = synchronizerPredecessor.upgradeTime,
+            nextRepairCounter = nextRepairCounter(synchronizerIndexO),
+          )
+
+          val noCleanReplay = messageProcessingStartingPoint.toMessageCleanReplayStartingPoint
+
+          val startingPoints = ProcessingStartingPoints.tryCreate(
+            noCleanReplay,
+            messageProcessingStartingPoint,
+          )
+
+          FutureUnlessShutdown.pure(startingPoints)
         }
 
-      case None => synchronizerIndexO
+      case _ =>
+        startingPointsInternal(requestJournalStore, sequencedEventStore, synchronizerIndexO)
     }
 
-    startingPointsInternal(requestJournalStore, sequencedEventStore, updatedSynchronizerIndexO)
-  }
-
-  /** See scaladoc of [[startingPoints]] above for the generic documentation and invariants.
-    * @param updatedSynchronizerIndexO
-    *   Constructed from a [[SynchronizerIndex]] as follows: changed to None if the
-    *   updatedSynchronizerIndexO' record time is before the upgrade time.
+  /** See scaladoc of [[startingPoints]] above for the generic documentation and invariants. Should
+    * be used only when this is not a "genesis startup post LSU".
     */
   private def startingPointsInternal(
       requestJournalStore: RequestJournalStore,
       sequencedEventStore: SequencedEventStore,
-      updatedSynchronizerIndexO: Option[SynchronizerIndex],
+      synchronizerIndexO: Option[SynchronizerIndex],
   )(implicit
       ec: ExecutionContext,
       loggingContext: ErrorLoggingContext,
@@ -227,14 +259,14 @@ object SyncEphemeralStateFactory {
     implicit val traceContext: TraceContext = loggingContext.traceContext
 
     for {
-      requestCounterO <- updatedSynchronizerIndexO
+      requestCounterO <- synchronizerIndexO
         .flatTraverse(si =>
           requestJournalStore.lastRequestTimeWithRequestTimestampBeforeOrAt(si.recordTime)
         )
 
       sequencerCounterO <- sequencerCounterFromSynchronizerIndex(
         sequencedEventStore,
-        updatedSynchronizerIndexO,
+        synchronizerIndexO,
       )
 
       messageProcessingStartingPoint = MessageProcessingStartingPoint(
@@ -242,9 +274,9 @@ object SyncEphemeralStateFactory {
         nextSequencerCounter = sequencerCounterO
           .map(_ + 1)
           .getOrElse(SequencerCounter.Genesis),
-        lastSequencerTimestamp = lastSequencerTimestamp(updatedSynchronizerIndexO),
-        currentRecordTime = currentRecordTime(updatedSynchronizerIndexO),
-        nextRepairCounter = nextRepairCounter(updatedSynchronizerIndexO),
+        lastSequencerTimestamp = lastSequencerTimestamp(synchronizerIndexO),
+        currentRecordTime = currentRecordTime(synchronizerIndexO),
+        nextRepairCounter = nextRepairCounter(synchronizerIndexO),
       )
 
       replayOpt <- requestJournalStore

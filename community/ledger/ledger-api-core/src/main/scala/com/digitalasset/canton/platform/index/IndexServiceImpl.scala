@@ -561,6 +561,14 @@ private[index] class IndexServiceImpl(
         }
     }
   }
+
+  override def lookupNonUniqueContractKey(
+      readers: Set[Party],
+      key: Key,
+      pageToken: Option[Long],
+      limit: Int,
+  )(implicit loggingContext: LoggingContextWithTrace): Future[ContractKeyPage] =
+    contractStore.lookupNonUniqueContractKey(readers, key, pageToken, limit)
 }
 
 object IndexServiceImpl {

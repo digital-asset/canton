@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.digitalasset.canton.config
 import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.*
@@ -85,15 +84,10 @@ final class LsuConsecutiveIntegrationTest extends LsuBase {
 
         participants.all.synchronizers.connect(defaultSynchronizerConnectionConfig())
 
+        setDefaultsDynamicSynchronizerParameters(daId, synchronizerOwners1)
+
         participants.all.dars.upload(CantonExamplesPath)
         participant1.health.ping(participant2)
-
-        synchronizerOwners1.foreach(
-          _.topology.synchronizer_parameters.propose_update(
-            daId,
-            _.copy(reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)),
-          )
-        )
       }
 
   "LSU" should {
@@ -136,18 +130,18 @@ final class LsuConsecutiveIntegrationTest extends LsuBase {
         performSynchronizerNodesLsu(fixture)
 
         environment.simClock.value.advanceTo(fixture.upgradeTime.immediateSuccessor)
-
+        transferTraffic(Some(fixture))
         eventually() {
+          environment.simClock.value.advance(Duration.ofSeconds(1))
           participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
         }
 
         fixture.oldSynchronizerNodes.all.stop()
 
-        environment.simClock.value.advance(Duration.ofSeconds(1))
-
         waitForTargetTimeOnSequencer(
           fixture.newSynchronizerNodes.sequencers.loneElement,
           environment.clock.now,
+          logger,
         )
 
         IouSyntax.createIou(participant2)(bank, alice).discard

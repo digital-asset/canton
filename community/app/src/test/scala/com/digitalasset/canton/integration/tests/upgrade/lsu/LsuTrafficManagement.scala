@@ -19,6 +19,7 @@ import com.digitalasset.canton.console.{
 }
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality.Optional
 import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTrafficControlParameters
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
@@ -48,6 +49,18 @@ private[lsu] trait LsuTrafficManagement {
     baseEventCost = NonNegativeLong.tryCreate(baseEventCost),
     freeConfirmationResponses = true,
   )
+
+  protected lazy val generousTrafficControlParameters: TrafficControlParameters =
+    TrafficControlParameters(
+      maxBaseTrafficAmount = NonNegativeNumeric.tryCreate(1_000_000_000_000L),
+      readVsWriteScalingFactor = InternalTrafficControlParameters.DefaultReadVsWriteScalingFactor,
+      // Enough to bootstrap the synchronizer and connect the participant after 1 second
+      maxBaseTrafficAccumulationDuration = config.PositiveFiniteDuration.ofSeconds(1L),
+      setBalanceRequestSubmissionWindowSize = config.PositiveFiniteDuration.ofMinutes(5L),
+      enforceRateLimiting = true,
+      baseEventCost = NonNegativeLong.tryCreate(1L),
+      freeConfirmationResponses = true,
+    )
 
   protected def initialTrafficPurchase(
       traffic: Map[InstanceReference, PositiveLong],
@@ -106,4 +119,43 @@ private[lsu] trait LsuTrafficManagement {
         (Optional, _.shouldBeCantonErrorCode(SequencerError.NotAtUpgradeTimeOrBeyond)),
       )
     }
+
+  /** Transfer traffic from old sequencers to new ones.
+    *
+    * Prerequisite:
+    *   - Time is after upgrade time
+    *
+    * @param suppressLogs
+    *   Whether errors in the log (NotAtUpgradeTimeOrBeyond) should be suppressed. Use false if the
+    *   call to transferTraffic is already in a suppression logger block (since those cannot be
+    *   nested).
+    */
+  protected def transferTraffic(
+      oldSequencers: Seq[LocalSequencerReference],
+      newSequencers: Seq[LocalSequencerReference],
+      suppressLogs: Boolean,
+  ): Unit = {
+    val trafficStates = if (suppressLogs) {
+      loggerFactory.assertLogsUnorderedOptional(
+        eventually(retryOnTestFailuresOnly = false) {
+          oldSequencers.map(s => (s.id -> s.traffic_control.get_lsu_state()))
+        }.toMap,
+        (
+          LogEntryOptionality.OptionalMany,
+          _.shouldBeCantonErrorCode(SequencerError.NotAtUpgradeTimeOrBeyond),
+        ),
+      )
+    } else {
+      eventually(retryOnTestFailuresOnly = false) {
+        oldSequencers.map(s => (s.id -> s.traffic_control.get_lsu_state()))
+      }.toMap
+    }
+
+    if (trafficStates.values.toSet.sizeIs != 1) {
+      fail(s"Not all sequencers agree on traffic state: $trafficStates")
+    }
+
+    val traffic: ByteString = trafficStates.head._2
+    newSequencers.foreach(_.traffic_control.set_lsu_state(traffic))
+  }
 }

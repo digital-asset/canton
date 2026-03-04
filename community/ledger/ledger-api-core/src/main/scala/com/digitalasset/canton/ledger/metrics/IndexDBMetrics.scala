@@ -298,6 +298,15 @@ private[metrics] class MainIndexDBHistograms(val prefix: MetricName)(implicit
     qualification = MetricQualification.Debug,
   )
 
+  private[metrics] val lookupNonUniqueKey: Item = Item(
+    prefix :+ "lookup_non_unique_key",
+    summary = "The time spent looking up contracts using its key.",
+    description = """This metric exposes the time spent looking up contracts using its key in the
+                      |index db. It is then used by the Daml interpreter when evaluating a command
+                      |into a transaction.""",
+    qualification = MetricQualification.Debug,
+  )
+
   private[metrics] val lookupActiveContract: Item = Item(
     prefix :+ "lookup_active_contract",
     summary = "The time spent fetching a contract using its id.",
@@ -402,6 +411,8 @@ class MainIndexDBMetrics(
   private val prefix = inventory.prefix
 
   val lookupKey: Timer = openTelemetryMetricsFactory.timer(inventory.lookupKey.info)
+  val lookupNonUniqueKey: Timer =
+    openTelemetryMetricsFactory.timer(inventory.lookupNonUniqueKey.info)
 
   val lookupActiveContract: Timer =
     openTelemetryMetricsFactory.timer(inventory.lookupActiveContract.info)
@@ -447,6 +458,9 @@ class MainIndexDBMetrics(
   )
   val lookupContractByKeyDbMetrics: DatabaseMetrics = createDbMetrics(
     "lookup_contract_by_key"
+  )
+  val lookupNonUniqueContractByKeyDbMetrics: DatabaseMetrics = createDbMetrics(
+    "lookup_non_unique_contract_by_key"
   )
   val lookupLastActivationsDbMetrics: DatabaseMetrics = createDbMetrics(
     "lookup_last_activations"

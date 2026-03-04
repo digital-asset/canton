@@ -5,7 +5,7 @@ package com.daml.grpc.adapter.operation
 
 import com.daml.grpc.adapter.client.ReferenceClientCompatibilityCheck
 import com.daml.grpc.adapter.{ExecutionSequencerFactory, TestExecutionSequencerFactory}
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import org.awaitility.Awaitility.*
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.matchers.should.Matchers

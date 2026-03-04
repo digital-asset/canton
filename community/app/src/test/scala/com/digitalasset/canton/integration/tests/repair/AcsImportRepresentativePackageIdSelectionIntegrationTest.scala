@@ -4,8 +4,8 @@
 package com.digitalasset.canton.integration.tests.repair
 
 import better.files.File
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.api.v2.{state_service, transaction_filter, value as apiValue}
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton
 import com.digitalasset.canton.admin.api.client.data.TemplateId
 import com.digitalasset.canton.config.RequireTypes.PositiveInt

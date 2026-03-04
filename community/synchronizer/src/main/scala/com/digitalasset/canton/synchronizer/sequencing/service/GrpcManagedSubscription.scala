@@ -23,7 +23,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.tracing.TraceContext.withNewTraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import io.grpc.Status
-import io.grpc.stub.ServerCallStreamObserver
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContext, Future}
@@ -65,7 +64,7 @@ private[service] class GrpcManagedSubscription[T](
       CreateSubscriptionError,
       SequencerSubscription[SequencedEventError],
     ],
-    observer: ServerCallStreamObserver[T],
+    grpcObserverHandle: GrpcObserverHandle[T],
     val member: Member,
     val expireAt: Option[CantonTimestamp],
     override protected val timeouts: ProcessingTimeout,
@@ -101,14 +100,9 @@ private[service] class GrpcManagedSubscription[T](
   private val handler: SequencedEventOrErrorHandler[SequencedEventError] = {
     case Right(event) =>
       implicit val traceContext: TraceContext = event.traceContext
-      FutureUnlessShutdown
-        .outcomeF {
-          Future {
-            Right(synchronizeWithClosingSync("grpc-managed-subscription-handler") {
-              observer.onNext(toSubscriptionResponse(event))
-            }.onShutdown(()))
-          }
-        }
+      synchronizeWithClosing("grpc-managed-subscription-handler")(
+        grpcObserverHandle.onNext(toSubscriptionResponse(event)).map(Right(_))
+      )
         .recover { case NonFatal(e) =>
           logger.warn(
             "Unexpected error was thrown while publishing a sequencer event to GRPC subscriber",
@@ -187,13 +181,13 @@ private[service] class GrpcManagedSubscription[T](
           .fold(logger.debug("Closing but underlying subscription has not been created"))(_.close())
 
         closeSignal match {
-          case CompleteSignal => observer.onCompleted()
-          case ErrorSignal(cause) => observer.onError(cause)
+          case CompleteSignal => grpcObserverHandle.onCompleted()
+          case ErrorSignal(cause) => grpcObserverHandle.onError(cause)
         }
       } finally notifyClosed()
   }
 
-  override def isCancelled: Boolean = observer.isCancelled
+  override def isCancelled: Boolean = grpcObserverHandle.isCancelled
 }
 
 private object GrpcManagedSubscription {

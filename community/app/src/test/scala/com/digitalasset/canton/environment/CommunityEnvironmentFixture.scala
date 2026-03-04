@@ -162,6 +162,7 @@ trait CommunityEnvironmentFixture extends BaseTest with HasExecutionContext { th
         )(implicit
             executionContext: ExecutionContextIdlenessExecutorService,
             scheduler: ScheduledExecutorService,
+            executionSequencerFactory: ExecutionSequencerFactory,
             actorSystem: ActorSystem,
         ): Either[String, SequencerNodeBootstrap] =
           Right(createSequencerMock(arguments.name, arguments.config))

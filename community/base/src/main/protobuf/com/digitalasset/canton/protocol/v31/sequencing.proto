@@ -12,6 +12,10 @@ import "com/digitalasset/canton/protocol/v30/traffic_control_parameters.proto";
 import "google/rpc/status.proto";
 import "scalapb/scalapb.proto";
 
+// Compared to v30 (Envelope):
+//  - Removed the "recipients" fields
+//  - Renamed from "Envelope" to "EnvelopeWithoutRecipients"
+//  - Removed "option (scalapb.message).companion_extends"
 message EnvelopeWithoutRecipients {
   // Contains a v30.EnvelopeContent if signatures are empty and a v30.TypedSignedProtocolMessageContent otherwise
   bytes content = 1;
@@ -21,6 +25,9 @@ message EnvelopeWithoutRecipients {
   repeated com.digitalasset.canton.crypto.v30.Signature signatures = 2;
 }
 
+// Compared to v30:
+//  - Added the "compressed_recipients" field (which has been removed from Envelope)
+//  - Removed the "Batch" type. We store envelopes directly now in the "compressed_envelopes" field
 message CompressedBatch {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 
@@ -31,13 +38,16 @@ message CompressedBatch {
     repeated v30.Recipients recipients = 1;
   }
 
-  // DecompressedRecipients
+  // Contains the compressed bytes of DecompressedRecipients
   bytes compressed_recipients = 2;
 
   // contains possibly compressed v31.EnvelopeWithoutRecipients
   repeated bytes compressed_envelopes = 3;
 }
 
+// Compared to v30:
+//  - Replaced the type for "batch" (from v30 to v31)
+//  - Removed the reserved (unused) field
 message SequencedEvent {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.AlphaProtoVersion";
 
@@ -75,6 +85,8 @@ message SequencedEvent {
   com.digitalasset.canton.protocol.v30.TrafficReceipt traffic_receipt = 8;
 }
 
+// Compared to v30:
+//  - Replaced the type for "batch" (from v30 to v31)
 message SubmissionRequest {
   option (scalapb.message).companion_extends = "com.digitalasset.canton.version.StableProtoVersion";
 

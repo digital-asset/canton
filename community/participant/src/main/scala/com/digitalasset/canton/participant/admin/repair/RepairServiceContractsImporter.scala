@@ -326,7 +326,6 @@ final class RepairServiceContractsImporter(
                         EitherT.right[String](
                           writeContractsAddedEvents(
                             synchronizer.psid.logical,
-                            recordTime = synchronizer.currentRecordTime,
                             contractsToAddWithInternalIds,
                             workflowIds,
                             repairIndexer,
@@ -436,7 +435,6 @@ final class RepairServiceContractsImporter(
               } else {
                 writeContractsAddedEvents(
                   synchronizerId,
-                  recordTime = synchronizer.currentRecordTime,
                   contractsToAddWithInternalContractIds,
                   workflowProvider,
                   repairIndexer,
@@ -706,7 +704,6 @@ final class RepairServiceContractsImporter(
 
   private def writeContractsAddedEvents(
       synchronizerId: SynchronizerId,
-      recordTime: CantonTimestamp,
       contractsAdded: Seq[(TimeOfRepair, (CreationTime.CreatedAt, Seq[(ContractToAdd, Long)]))],
       workflowIds: Iterator[Option[LfWorkflowId]],
       repairIndexer: FutureQueue[RepairUpdate],
@@ -718,7 +715,7 @@ final class RepairServiceContractsImporter(
           .offer(
             prepareAddedEvents(
               synchronizerId = synchronizerId,
-              recordTime = recordTime,
+              recordTime = timeOfChange.timestamp,
               repairCounter = timeOfChange.repairCounter,
               ledgerCreateTime = timestamp,
               contractsAdded = contractsToAdd,

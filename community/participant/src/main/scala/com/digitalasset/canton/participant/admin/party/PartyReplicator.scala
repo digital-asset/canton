@@ -298,6 +298,7 @@ final class PartyReplicator(
             syncService.participantNodePersistentState,
             connectedSynchronizer,
             acsReader,
+            config,
             testInterceptorO,
             loggerFactory,
           )
@@ -856,6 +857,7 @@ final class PartyReplicator(
                     markDisconnected(requestId),
                     syncService.participantNodePersistentState,
                     connectedSynchronizer,
+                    config,
                     futureSupervisor,
                     exitOnFatalFailures,
                     timeouts,

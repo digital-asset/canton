@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.*
@@ -43,11 +42,8 @@ Notes:
   - Have P2 and P3 share the DB
   - Ensure P2 and P3 do not run at the same
  */
-// TODO(i30956): This test is flaky
-@UnstableTest
 final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
     extends LsuBase
-    with LsuTrafficManagement
     with TrafficBalanceSupport
     with TestPredicateFiltersFixtureAnyWordSpec {
 
@@ -141,6 +137,8 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
             sequencer2.traffic_control.set_lsu_state(oldTrafficState)
 
             eventually() {
+              // need to keep advancing the clock to trigger the scheduled synchronizer connect retry attempts
+              environment.simClock.value.advance(Duration.ofSeconds(1))
               participant1.synchronizers.is_connected(fixture.newPSId) shouldBe true
               // no dev support
               participant2.synchronizers.is_connected(fixture.newPSId) shouldBe false
@@ -151,7 +149,7 @@ final class LsuBinaryUpgradeAfterUpgradeTimeIntegrationTest
 
             oldSynchronizerNodes.all.stop()
             environment.simClock.value.advance(Duration.ofSeconds(1))
-            waitForTargetTimeOnSequencer(sequencer2, environment.clock.now)
+            waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
 
             participant1.ledger_api.javaapi.commands.submit_async(
               Seq(participant1.adminParty),

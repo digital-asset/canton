@@ -671,7 +671,7 @@ trait MembersTopologySnapshotClient {
       "Do not use methods that scan the topology state as they don’t scale and don’t work with topology scalability.",
     since = "3.5.0",
   )
-  def allMembers()(implicit traceContext: TraceContext): FutureUnlessShutdown[Set[Member]]
+  def knownMembers()(implicit traceContext: TraceContext): FutureUnlessShutdown[Set[Member]]
 
   /** Convenience method to check `isMemberKnown` for several members. */
   def areMembersKnown(members: Set[Member])(implicit

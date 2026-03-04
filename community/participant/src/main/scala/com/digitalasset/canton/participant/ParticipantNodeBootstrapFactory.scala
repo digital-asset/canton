@@ -49,6 +49,7 @@ trait ParticipantNodeBootstrapFactory {
     iterationsBetweenInterruptions =
       arguments.parameterConfig.engine.iterationsBetweenInterruptions,
     paranoidMode = arguments.parameterConfig.engine.enableAdditionalConsistencyChecks,
+    contractStateMode = arguments.parameterConfig.engine.contractStateMode,
   )
 
   protected def createResourceService(

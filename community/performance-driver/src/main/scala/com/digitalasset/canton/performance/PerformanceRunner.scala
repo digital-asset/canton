@@ -13,6 +13,7 @@ import com.daml.tls.TlsClientConfig
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.console.{ConsoleMacros, ParticipantReference}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.client.configuration.CommandClientConfiguration
 import com.digitalasset.canton.lifecycle.LifeCycle
@@ -282,6 +283,9 @@ class PerformanceRunner(
   )
   private val drivers = ListBuffer[BaseDriver]()
   private val active_ = new AtomicBoolean(true)
+
+  def getRecentlyCreatedTransactionRecordTimes: Seq[CantonTimestamp] =
+    drivers.flatMap(_.getRecentlyCreatedTransactionRecordTimes).toSeq
 
   override def active: Boolean = active_.get()
 

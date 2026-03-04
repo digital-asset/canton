@@ -3,13 +3,13 @@
 
 package com.daml.metrics
 
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.metrics.InstrumentedGraph.*
 import com.daml.metrics.InstrumentedGraphSpec.{MaxValueCounter, SamplingCounter}
 import com.daml.metrics.api.noop.NoOpCounter
 import com.daml.metrics.api.testing.InMemoryMetricsFactory.{InMemoryCounter, InMemoryTimer}
 import com.daml.metrics.api.testing.MetricValues
 import com.daml.metrics.api.{MetricInfo, MetricName, MetricQualification, MetricsContext}
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import org.apache.pekko.stream.QueueOfferResult
 import org.apache.pekko.stream.scaladsl.{Keep, Sink, Source}
 import org.scalatest.flatspec.AsyncFlatSpec

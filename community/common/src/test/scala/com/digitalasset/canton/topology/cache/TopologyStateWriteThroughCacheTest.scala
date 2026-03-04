@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.topology.cache
 
+import com.daml.metrics.CacheMetrics
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
@@ -14,7 +15,6 @@ import com.digitalasset.canton.lifecycle.{
   PromiseUnlessShutdown,
   UnlessShutdown,
 }
-import com.digitalasset.canton.metrics.CacheMetrics
 import com.digitalasset.canton.topology.processing.{
   EffectiveTime,
   SequencedTime,

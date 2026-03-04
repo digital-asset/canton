@@ -164,7 +164,7 @@ private[dao] trait JdbcLedgerDaoContractsSpec extends LoneElement with Inside wi
         .lookupKeyStatesFromDb(keys, eventSeqId)
         .flatMap(resultsWithInternalContractIds =>
           contractStore
-            .lookupBatchedContractIds(resultsWithInternalContractIds.values)
+            .lookupBatchedContractIdsNonReadThrough(resultsWithInternalContractIds.values)
             .map(internalToContractIds =>
               keys.map { key =>
                 key -> resultsWithInternalContractIds

@@ -19,14 +19,18 @@ import com.digitalasset.canton.integration.plugins.{
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.logging.LogEntry
+import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.participant.protocol.TransactionProcessor.SubmissionErrors
 import com.digitalasset.canton.protocol.LocalRejectError
+import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.{
   HasProgrammableSequencer,
   ProgrammableSequencerPolicies,
   SendDecision,
 }
+import org.scalatest.Assertion
 
+import java.time.Duration
 import scala.concurrent.Future
 import scala.jdk.CollectionConverters.*
 
@@ -122,38 +126,42 @@ final class LsuTimeoutInFlightIntegrationTest extends LsuBase with HasProgrammab
           .submit(Seq(bob), iou2.id.exerciseArchive().commands().asScala.toSeq)
       }
 
-      val checkedLogEntries = LogEntry.assertLogSeq(
+      val checkedLogEntries: Seq[(LogEntryOptionality, LogEntry => Assertion)] =
         Seq(
           // p1 confirmation request dropped
           (
+            LogEntryOptionality.Required,
             _.warningMessage should include("Submission timed out at"),
-            "participant confirmation request timed out",
           ),
           // rejection of iou1 archival
           (
+            LogEntryOptionality.Required,
             _.errorMessage should include(
               "Transaction was not sequenced within the pre-defined max sequencing time and has therefore timed out"
             ),
-            "command 1 submission fails",
           ),
           // p2 confirmation response dropped
           (
+            LogEntryOptionality.Required,
             _.warningMessage should (include("Response message for request") and include(
               "timed out at"
             )),
-            "participant confirmation response timed out",
           ),
           // rejection of iou2 archival
           (
+            LogEntryOptionality.Required,
             _.errorMessage should include(
               "Rejected transaction due to a participant determined timeout"
             ),
-            "command 2 submission fails",
+          ),
+          // sequencers are not ready to serve LSU traffic state
+          (
+            LogEntryOptionality.OptionalMany,
+            _.shouldBeCantonErrorCode(SequencerError.NotAtUpgradeTimeOrBeyond),
           ),
         )
-      )(_)
 
-      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+      loggerFactory.assertLogsUnorderedOptional(
         {
           eventually() {
             // Request 1 is considered as unsequenced
@@ -177,14 +185,16 @@ final class LsuTimeoutInFlightIntegrationTest extends LsuBase with HasProgrammab
 
           fetchTime(sequencer1) should be < upgradeTime
           environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
+          transferTraffic(suppressLogs = false)
 
           // We don't want the old mediator to interact with the sequencer
           mediator1.stop()
 
           eventually() {
+            environment.simClock.value.advance(Duration.ofSeconds(1))
             participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
           }
-          waitForTargetTimeOnSequencer(sequencer2, environment.clock.now)
+          waitForTargetTimeOnSequencer(sequencer2, environment.clock.now, logger)
 
           archive2F.failed.futureValue shouldBe a[Throwable]
           participant2.ledger_api.completions
@@ -232,9 +242,8 @@ final class LsuTimeoutInFlightIntegrationTest extends LsuBase with HasProgrammab
             .message should include(SubmissionErrors.TimeoutError.Error().cause)
 
           archive1F.failed.futureValue
-
         },
-        checkedLogEntries,
+        checkedLogEntries*
       )
     }
   }

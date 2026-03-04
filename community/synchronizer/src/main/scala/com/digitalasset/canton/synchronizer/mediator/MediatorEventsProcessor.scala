@@ -3,10 +3,10 @@
 
 package com.digitalasset.canton.synchronizer.mediator
 
-import cats.Monad
 import cats.syntax.alternative.*
 import cats.syntax.foldable.*
 import cats.syntax.functorFilter.*
+import cats.syntax.semigroup.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.SequencerCounter
 import com.digitalasset.canton.data.CantonTimestamp
@@ -67,33 +67,39 @@ private[mediator] class MediatorEventsProcessor(
         }
         .map(_.separate)
         .map { case (deduplicatedMediatorEvents, storeFs) =>
-          (deduplicatedMediatorEvents.flattenOption, storeFs.sequence_)
+          (deduplicatedMediatorEvents.flattenOption, AsyncResult(storeFs.sequence_))
         }
-      (deduplicatedMediatorEvents, storeF) = deduplicatorResult
+      (deduplicatedMediatorEvents, deduplicatorStoreAsyncResult) = deduplicatorResult
       lastEventTimestamp = events.last1.value.timestamp
 
       // we need to advance time on the confirmation response even if there are no relevant mediator events
-      _ <- NonEmpty.from(deduplicatedMediatorEvents) match {
+      asyncMediatorHandlerResult <- NonEmpty.from(deduplicatedMediatorEvents) match {
         case None =>
           handler.observeTimestampWithoutEvent(lastEventTimestamp)(events.last1.traceContext)
         case Some(mediatorEventsNE) =>
           for {
-            _ <- MonadUtil.sequentialTraverseMonoid(mediatorEventsNE)(stage =>
-              handler.handleMediatorEvent(
-                stage.value
-              )(stage.traceContext)
+            asyncEventHandlingResult <- MonadUtil.sequentialTraverseMonoid(mediatorEventsNE)(
+              stage =>
+                handler.handleMediatorEvent(
+                  stage.value
+                )(stage.traceContext)
             )
             // if the sequencing timestamp of the last event is higher than the timestamp of the last mediator event,
             // trigger an additional round of timeout detection with that timestamp
-            _ <- Monad[FutureUnlessShutdown].whenA(
-              mediatorEventsNE.last1.value.sequencingTimestamp < lastEventTimestamp
-            )(handler.observeTimestampWithoutEvent(lastEventTimestamp)(events.last1.traceContext))
-          } yield ()
+            asyncTimeoutHandlingResult <-
+              (if (mediatorEventsNE.last1.value.sequencingTimestamp < lastEventTimestamp)
+                 handler.observeTimestampWithoutEvent(lastEventTimestamp)(events.last1.traceContext)
+               else HandlerResult.done)
+          } yield asyncEventHandlingResult |+| asyncTimeoutHandlingResult
       }
 
       resultIdentity <- identityF
     } yield {
-      resultIdentity.andThenF(_ => storeF)
+      Seq(
+        resultIdentity,
+        deduplicatorStoreAsyncResult,
+        asyncMediatorHandlerResult,
+      ).combineAll
     }
   }
 

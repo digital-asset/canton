@@ -9,6 +9,7 @@ import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFact
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
+import com.digitalasset.canton.platform.store.backend.ContractStorageBackend.KeysPageQuery
 import com.digitalasset.canton.platform.store.dao.DbDispatcher
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.*
@@ -72,6 +73,30 @@ private[dao] sealed class ContractsReader(
     Timed.future(
       metrics.index.db.lookupActiveContract,
       contractLoader.contracts.load(contractId -> notEarlierThanEventSeqId),
+    )
+
+  override def lookupNonUniqueKey(
+      key: Key,
+      validAtEventSeqId: Long,
+      nextPageToken: Option[Long],
+      limit: Int,
+  )(implicit
+      loggingContext: LoggingContextWithTrace
+  ): Future[ContractStorageBackend.KeysPageResult] =
+    Timed.future(
+      metrics.index.db.lookupNonUniqueKey,
+      dispatcher.executeSql(
+        metrics.index.db.lookupNonUniqueContractByKeyDbMetrics
+      )(
+        storageBackend.nonUniqueContractKey(
+          KeysPageQuery(
+            key = key,
+            limit = limit,
+            nextPageToken = nextPageToken,
+            validAtEventSeqId = validAtEventSeqId,
+          )
+        )
+      ),
     )
 }
 

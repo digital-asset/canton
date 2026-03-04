@@ -13,7 +13,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Module.ModuleControl.Send
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.RetransmissionsMessage
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.P2PNetworkOut
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
+  ConsensusSegment,
+  P2PNetworkOut,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.SimulationModuleSystem.{
   MachineInitializer,
   SimulationEnv,
@@ -307,6 +310,9 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
           // TODO(#23434) check if can be fixed differently
           case Send(RetransmissionsMessage.StatusRequest(_), _, _, _, _) =>
             // We don't care about status requests after the module is gone
+            None
+          case Send(ConsensusSegment.ConsensusMessage.CancelEpoch(_), _, _, _, _) =>
+            // We don't care about epoch cancellations after the segment module is gone
             None
           case _ if machine.isCrashed =>
             // machine is crashed don't send message

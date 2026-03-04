@@ -279,15 +279,17 @@ final class LsuAnnouncementTopologyIntegrationTest
         .setPhysicalSynchronizerId(daName, daId)
         .futureValueUS
         .discard
-      // Perform a manual handshake that just downloads the topology state.
-      // During an actual LSU, the participant would make this call after every announcement. Here, we just want to test
-      // whether the call works as expected.
+
+      // Perform a manual handshake
+      // During an actual LSU, the participant would make this call after every sequencer announcement.
+      // Here, we just want to test whether the call works as expected
+      participant3.underlying.value.sync.syncPersistentStateManager.get(daId) shouldBe None
       participant3.underlying.value.sync
-        .connectToPSIdWithHandshake(daId)
+        .performPureHandshake(daId)
         .futureValueUS
 
       eventually() {
-        participant3.topology.sequencers.list(daId) should not be empty
+        participant3.underlying.value.sync.syncPersistentStateManager.get(daId) shouldBe defined
       }
   }
 

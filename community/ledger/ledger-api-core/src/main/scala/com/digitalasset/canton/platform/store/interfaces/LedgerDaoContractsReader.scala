@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.store.interfaces
 
 import com.digitalasset.canton.ledger.participant.state.index.ContractStateStatus.ExistingContractStatus
 import com.digitalasset.canton.logging.LoggingContextWithTrace
+import com.digitalasset.canton.platform.store.backend.ContractStorageBackend
 import com.digitalasset.canton.platform.store.interfaces.LedgerDaoContractsReader.*
 import com.digitalasset.daml.lf.transaction.GlobalKey
 import com.google.common.annotations.VisibleForTesting
@@ -54,6 +55,13 @@ private[platform] trait LedgerDaoContractsReader {
   def lookupKeyStatesFromDb(keys: Seq[GlobalKey], notEarlierThanEventSeqId: Long)(implicit
       loggingContext: LoggingContextWithTrace
   ): Future[Map[GlobalKey, Long]]
+
+  def lookupNonUniqueKey(
+      key: GlobalKey,
+      validAtEventSeqId: Long,
+      nextPageToken: Option[Long],
+      limit: Int,
+  )(implicit loggingContext: LoggingContextWithTrace): Future[ContractStorageBackend.KeysPageResult]
 
 }
 

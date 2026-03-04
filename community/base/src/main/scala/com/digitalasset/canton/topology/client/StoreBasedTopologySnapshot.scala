@@ -163,7 +163,7 @@ class StoreBasedTopologySnapshot(
       "Do not use methods that scan the topology state as they don’t scale and don’t work with topology scalability.",
     since = "3.5.0",
   )
-  override def allMembers()(implicit
+  override def knownMembers()(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Set[Member]] =
     findTransactionsByType(

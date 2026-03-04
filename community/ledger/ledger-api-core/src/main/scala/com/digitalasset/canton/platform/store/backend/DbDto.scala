@@ -312,6 +312,7 @@ object DbDto {
       // contract related columns
       notPersistedContractId: ContractId,
       internal_contract_id: Long,
+      create_key_hash: Option[String],
   )(stakeholders: Set[Party], template_id: NameTypeConRef): Iterator[DbDto] =
     Iterator(
       EventActivate(
@@ -337,7 +338,7 @@ object DbDto {
         // contract related columns
         notPersistedContractId = notPersistedContractId,
         internal_contract_id = internal_contract_id,
-        create_key_hash = None,
+        create_key_hash = create_key_hash,
       )
     ) ++ idFilters(
       event_sequential_id = event_sequential_id,

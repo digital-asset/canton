@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.apiserver
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.metrics.api.testing.{InMemoryMetricsFactory, MetricValues}
 import com.daml.metrics.api.{HistogramInventory, MetricName}
+import com.daml.testing.utils.TestResourceContext
 import com.digitalasset.base.error.{ErrorGenerator, RpcError}
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.grpc.sampleservice.HelloServiceReferenceImplementation
@@ -13,7 +14,6 @@ import com.digitalasset.canton.ledger.client.GrpcChannel
 import com.digitalasset.canton.ledger.client.configuration.LedgerClientChannelConfiguration
 import com.digitalasset.canton.ledger.error.LedgerApiErrors
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
-import com.digitalasset.canton.ledger.resources.TestResourceContext
 import com.digitalasset.canton.logging.{
   ErrorLoggingContext,
   LoggingContextWithTrace,

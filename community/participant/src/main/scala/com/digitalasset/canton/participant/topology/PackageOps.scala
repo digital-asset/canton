@@ -261,17 +261,14 @@ class PackageOpsImpl(
           if (remainingPageSize <= 0)
             EitherT.pure[FutureUnlessShutdown, ParticipantTopologyManagerError](state)
           else
-            for {
-              topologyManager <- topologyLookup.activeBySynchronizerId(synchronizerId)
-              newResultsWithinPage <- getVettedPackagesForSynchronizer(
-                topologyManager = topologyManager,
-                participantsFilter = participantsFilter,
-                pageLimit = remainingPageSize,
-                participantStartExclusive = participantStartExclusive,
-                // ListVettedPackages returns the state as of the approximate topology snapshot
-                useApproximateTopologySnapshot = true,
-              )
-            } yield {
+            getVettedPackagesForSynchronizer(
+              synchronizer = synchronizerId,
+              participantsFilter = participantsFilter,
+              pageLimit = remainingPageSize,
+              participantStartExclusive = participantStartExclusive,
+              // ListVettedPackages returns the state as of the approximate topology snapshot
+              useApproximateTopologySnapshot = true,
+            ).map { newResultsWithinPage =>
               val newRemainingPageSize = remainingPageSize - newResultsWithinPage.length
               val newResultsSoFar = resultsSoFar ++ newResultsWithinPage
               (newRemainingPageSize, newResultsSoFar)
@@ -281,7 +278,7 @@ class PackageOpsImpl(
   }
 
   private def getVettedPackagesForSynchronizer(
-      topologyManager: SynchronizerTopologyManager,
+      synchronizer: Synchronizer,
       participantsFilter: Option[NonEmpty[Set[ParticipantId]]],
       pageLimit: Int,
       participantStartExclusive: Option[ParticipantId] = None,
@@ -292,42 +289,48 @@ class PackageOpsImpl(
     FutureUnlessShutdown,
     ParticipantTopologyManagerError,
     Seq[ParticipantVettedPackages],
-  ] = for {
-    asOf <-
-      if (useApproximateTopologySnapshot)
-        topologyLookup.lookupTopologyClientByPsId(topologyManager.psid).map(_.approximateTimestamp)
-      else
-        EitherT.pure[FutureUnlessShutdown, ParticipantTopologyManagerError](
-          CantonTimestamp.MaxValue
-        )
-    vettedPackages <- EitherT.right(
-      synchronizeWithClosing(functionFullName)(
-        topologyManager.store
-          .findPositiveTransactions(
-            asOf = asOf,
-            asOfInclusive = true,
-            isProposal = false,
-            types = Seq(VettedPackages.code),
-            filterUid = participantsFilter.map(_.toSeq.map(_.uid)),
-            filterNamespace = None,
-            pagination = Some((participantStartExclusive.map(_.uid), pageLimit)),
+  ] =
+    for {
+      asOf <-
+        if (useApproximateTopologySnapshot)
+          topologyLookup.maybeOfflineApproximateTimestamp(synchronizer)
+        else
+          EitherT.pure[FutureUnlessShutdown, ParticipantTopologyManagerError](
+            CantonTimestamp.MaxValue
           )
-      )
-    )
 
-    transactions = vettedPackages.collectOfMapping[VettedPackages].result
+      topologyStore <- topologyLookup
+        .topologyStore(synchronizer)
+        .toEitherT[FutureUnlessShutdown]
 
-    participantVettedPackages = transactions
-      .map { currentMapping =>
-        ParticipantVettedPackages(
-          currentMapping.mapping.packages,
-          currentMapping.mapping.participantId,
-          topologyManager.psid.logical,
-          currentMapping.serial,
+      vettedPackages <- EitherT.right(
+        synchronizeWithClosing(functionFullName)(
+          topologyStore
+            .findPositiveTransactions(
+              asOf = asOf,
+              asOfInclusive = true,
+              isProposal = false,
+              types = Seq(VettedPackages.code),
+              filterUid = participantsFilter.map(_.toSeq.map(_.uid)),
+              filterNamespace = None,
+              pagination = Some((participantStartExclusive.map(_.uid), pageLimit)),
+            )
         )
-      }
-      .sorted(PageToken.orderingVettedPackages)
-  } yield participantVettedPackages
+      )
+
+      transactions = vettedPackages.collectOfMapping[VettedPackages].result
+
+      participantVettedPackages = transactions
+        .map { currentMapping =>
+          ParticipantVettedPackages(
+            currentMapping.mapping.packages,
+            currentMapping.mapping.participantId,
+            synchronizer.logical,
+            currentMapping.serial,
+          )
+        }
+        .sorted(PageToken.orderingVettedPackages)
+    } yield participantVettedPackages
 
   private def checkCurrentSerial(
       currentSerial: Option[PositiveInt],
@@ -385,11 +388,11 @@ class PackageOpsImpl(
     vettingExecutionQueue.executeEUS(
       description = operationName,
       execution = for {
-        topologyManager <- topologyLookup.lookupTopologyManagerByPsId(psid)
+        topologyManager <- topologyLookup.topologyManager(psid)
 
         currentState <-
           getVettedPackagesForSynchronizer(
-            topologyManager = topologyManager,
+            synchronizer = psid,
             participantsFilter = Some(NonEmpty(Set, participantId)),
             pageLimit = 1,
             useApproximateTopologySnapshot = false,

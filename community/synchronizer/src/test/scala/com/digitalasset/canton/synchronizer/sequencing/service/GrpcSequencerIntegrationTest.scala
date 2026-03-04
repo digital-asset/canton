@@ -202,6 +202,7 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
       SequencerTestMetrics,
       loggerFactory,
       authenticationCheck,
+      (_, _) => FutureUnlessShutdown.pure(true),
       new SubscriptionPool[GrpcManagedSubscription[?]](
         clock,
         SequencerTestMetrics,
@@ -538,6 +539,7 @@ class GrpcSequencerIntegrationTest
             SequencerTestMetrics,
             env.loggerFactory,
             authenticationCheck,
+            (_, _) => FutureUnlessShutdown.pure(true),
             new SubscriptionPool[GrpcManagedSubscription[?]](
               clock,
               SequencerTestMetrics,

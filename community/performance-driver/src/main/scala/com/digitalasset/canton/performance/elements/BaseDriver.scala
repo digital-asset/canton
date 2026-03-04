@@ -24,6 +24,7 @@ import com.digitalasset.base.error.utils.ErrorDetails.ErrorInfoDetail
 import com.digitalasset.base.error.utils.{DecodedCantonError, ErrorDetails}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.config.{FullClientConfig, ProcessingTimeout}
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.TransactionRoutingError.TopologyErrors.{
   UnknownInformees,
@@ -46,6 +47,7 @@ import com.digitalasset.canton.tracing.{NoReportingTracerProvider, NoTracing, Tr
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.FutureInstances.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
+import com.github.benmanes.caffeine.cache as caffeine
 import com.google.protobuf.any.Any
 import com.google.rpc.Code
 import com.google.rpc.status.Status
@@ -60,6 +62,7 @@ import scala.collection.concurrent.TrieMap
 import scala.collection.mutable.ListBuffer
 import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContextExecutor, Future, Promise}
+import scala.jdk.CollectionConverters.*
 import scala.util.{Failure, Success, Try}
 
 trait DriverControl {
@@ -134,6 +137,17 @@ abstract class BaseDriver(
   protected val currentStatus = new AtomicReference[Option[DriverStatus]](None)
   protected val running = new AtomicBoolean(true)
   protected val done_ = Promise[Unit]()
+
+  // Arbitrary default to avoid this cache growing uncontrollably
+  // Should be enough to support aggressive load testing
+  private val maximumRecentlyCreatedTransactionRecordTimes =
+    sys.env.getOrElse("TRANSACTIONS_RECORD_TIMES_CACHE_MAX", "5000").toLong
+
+  // Cache to maintain a recently created transaction record times
+  private val recentlyCreatedTransactionsRecordTimes = caffeine.Caffeine
+    .newBuilder()
+    .maximumSize(maximumRecentlyCreatedTransactionRecordTimes)
+    .build[CantonTimestamp, Unit]()
 
   protected def finished(): Unit =
     if (running.getAndSet(false)) {
@@ -243,6 +257,11 @@ abstract class BaseDriver(
 
   def done(): Future[Unit] = done_.future
 
+  /** Get the current available set of record times
+    */
+  def getRecentlyCreatedTransactionRecordTimes: Set[CantonTimestamp] =
+    recentlyCreatedTransactionsRecordTimes.asMap().keySet().asScala.toSet
+
   private def processUpdates(transaction: Transaction): Boolean = {
     logger.info(
       s"Observed transaction with commandId=${transaction.commandId} and updateId=${transaction.updateId} and offset=${transaction.offset}"
@@ -253,7 +272,11 @@ abstract class BaseDriver(
     transaction.events.toList
       .map(_.event)
       .map {
-        case Created(createEvent) => processCreate(createEvent)
+        case Created(createEvent) =>
+          transaction.recordTime
+            .flatMap(CantonTimestamp.fromProtoTimestamp(_).toOption)
+            .foreach(recentlyCreatedTransactionsRecordTimes.put(_, ()))
+          processCreate(createEvent)
         case Archived(archiveEvent) => listeners.map(_.processArchive(archiveEvent)).exists(x => x)
         case Exercised(_) =>
           logger.warn("Exercised event is not expected here")

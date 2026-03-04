@@ -1013,7 +1013,7 @@ object Engine {
   def DevEngine: Engine = new Engine(
     EngineConfig(
       allowedLanguageVersions = LanguageVersion.allLfVersionsRange,
-      contractStateMode = ContractStateMachine.Mode.UCK
+      contractStateMode = ContractStateMachine.Mode.devDefault,
     )
   )
 

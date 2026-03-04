@@ -26,7 +26,11 @@ import com.digitalasset.canton.participant.store.{
 }
 import com.digitalasset.canton.participant.sync.AutomaticLogicalSynchronizerUpgrade.UpgradabilityCheckResult
 import com.digitalasset.canton.participant.sync.LogicalSynchronizerUpgrade.NegativeResult
-import com.digitalasset.canton.participant.synchronizer.SynchronizerConnectionConfig
+import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
+import com.digitalasset.canton.participant.synchronizer.{
+  PendingHandshakeWithLsuSuccessor,
+  SynchronizerConnectionConfig,
+}
 import com.digitalasset.canton.resource.DbExceptionRetryPolicy
 import com.digitalasset.canton.sequencing.{SequencerConnection, SequencerConnections}
 import com.digitalasset.canton.topology.client.StoreBasedTopologySnapshot
@@ -264,6 +268,7 @@ class AutomaticLogicalSynchronizerUpgrade(
       SyncServiceError,
       Unit,
     ],
+    pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -424,6 +429,18 @@ class AutomaticLogicalSynchronizerUpgrade(
           SynchronizerConnectionConfigStore.LsuSource,
         )
         .leftMap(err => s"Unable to mark current synchronizer $currentPSId as inactive: $err")
+
+      /*
+       Handshake is useless now: the node is doing the LSU regardless of the outcome of the handshake.
+       Potential issues will be flagged upon connection attempt to the synchronizer.
+       */
+      _ <- EitherT.rightT[FutureUnlessShutdown, String](
+        pendingHandshakesWithSuccessorsStore.delete(
+          currentPSId,
+          PendingHandshakeWithLsuSuccessor.operationKey,
+          PendingHandshakeWithLsuSuccessor.operationName,
+        )
+      )
 
       // Comes last to indicate that the node is ready to connect to the successor
       _ = logger.info(s"Marking synchronizer connection ${synchronizerSuccessor.psid} as active")
@@ -720,6 +737,7 @@ class ManualLogicalSynchronizerUpgrade(
       SyncServiceError,
       Unit,
     ],
+    pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore,
     override val timeouts: ProcessingTimeout,
     override val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
@@ -776,6 +794,18 @@ class ManualLogicalSynchronizerUpgrade(
           SynchronizerConnectionConfigStore.LsuSource,
         )
         .leftMap(_.message)
+
+      /*
+       Handshake is useless now: the node is doing the LSU regardless of the outcome of the handshake.
+       Potential issues will be flagged upon connection attempt to the synchronizer.
+       */
+      _ <- EitherT.rightT[FutureUnlessShutdown, String](
+        pendingHandshakesWithSuccessorsStore.delete(
+          currentPSId,
+          PendingHandshakeWithLsuSuccessor.operationKey,
+          PendingHandshakeWithLsuSuccessor.operationName,
+        )
+      )
 
       _ <- synchronizerConnectionConfigStore.get(successorPSId) match {
         case Left(_: UnknownPSId) =>

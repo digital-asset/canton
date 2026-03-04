@@ -4,6 +4,7 @@
 package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.data.EitherT
+import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.sequencer.v30.SequencerStatusServiceGrpc
 import com.digitalasset.canton.auth.CantonAdminTokenDispenser
@@ -98,7 +99,6 @@ import com.digitalasset.canton.topology.store.TopologyStoreId.SynchronizerStore
 import com.digitalasset.canton.topology.store.{
   StoreBasedTopologyStateForInitializationService,
   TopologyStore,
-  TopologyStoreId,
 }
 import com.digitalasset.canton.topology.transaction.{
   LsuAnnouncement,
@@ -130,6 +130,7 @@ class SequencerNodeBootstrap(
     ]
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
+    executionSequencerFactory: ExecutionSequencerFactory,
     scheduler: ScheduledExecutorService,
     actorSystem: ActorSystem,
 ) extends CantonNodeBootstrapImpl[
@@ -170,6 +171,7 @@ class SequencerNodeBootstrap(
 
   private val synchronizerTopologyManager = new SingleUseCell[SynchronizerTopologyManager]()
   private val topologyClient = new SingleUseCell[SynchronizerTopologyClient]()
+  private val synchronizerTimeTracker = new SingleUseCell[SynchronizerTimeTracker]()
 
   override protected def sequencedTopologyStores: Seq[TopologyStore[SynchronizerStore]] =
     synchronizerTopologyManager.get.map(_.store).toList
@@ -178,13 +180,16 @@ class SequencerNodeBootstrap(
     synchronizerTopologyManager.get.toList
 
   override protected def lookupTopologyClient(
-      storeId: TopologyStoreId
-  ): Option[SynchronizerTopologyClient] =
-    storeId match {
-      case SynchronizerStore(synchronizerId) =>
-        topologyClient.get.filter(_.psid == synchronizerId)
-      case _ => None
-    }
+      psid: PhysicalSynchronizerId
+  ): Option[SynchronizerTopologyClient] = topologyClient.get.filter(_.psid == psid)
+
+  override protected def lookupSynchronizerTimeTracker(
+      psid: PhysicalSynchronizerId
+  ): Option[SynchronizerTimeTracker] =
+    // The synchronizer time tracker doesn't carry a psid, therefore we substitute the psid check
+    // by looking up the topology client. If we find one, we know the psid is correct and
+    // we can return the time tracker.
+    lookupTopologyClient(psid).flatMap(_ => synchronizerTimeTracker.get)
 
   override protected lazy val lookupActivePSId: PSIdLookup =
     synchronizerId =>
@@ -792,6 +797,10 @@ class SequencerNodeBootstrap(
             arguments.metrics,
             authenticationConfig.check,
             clock,
+            (member, tc) =>
+              authenticationServices.memberAuthenticationService.isMemberCurrentlyActive(member)(
+                tc
+              ),
             sequencerSynchronizerParamsLookup,
             parameters,
             staticSynchronizerParameters.protocolVersion,
@@ -864,6 +873,11 @@ class SequencerNodeBootstrap(
             timeouts,
             loggerFactory,
           )
+          _ = synchronizerTimeTracker.putIfAbsent(timeTracker).foreach { _ =>
+            ErrorUtil.invalidState(
+              "Attempted to set the time tracker during startup, but it was already set."
+            )
+          }
           _ = topologyClient.setSynchronizerTimeTracker(timeTracker)
 
           synchronizerTopologyManager = new SynchronizerTopologyManager(

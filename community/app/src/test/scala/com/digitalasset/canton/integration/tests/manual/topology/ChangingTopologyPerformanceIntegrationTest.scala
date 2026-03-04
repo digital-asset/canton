@@ -6,9 +6,15 @@ package com.digitalasset.canton.integration.tests.manual.topology
 import cats.syntax.foldable.*
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.admin.api.client.data.TrafficControlParameters
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
-import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
+import com.digitalasset.canton.config.RequireTypes.{
+  NonNegativeInt,
+  NonNegativeLong,
+  NonNegativeNumeric,
+  PositiveInt,
+}
 import com.digitalasset.canton.console.{
   InstanceReference,
   LocalInstanceReference,
@@ -34,6 +40,7 @@ import com.digitalasset.canton.logging.{LogEntry, NamedLogging}
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
 import com.digitalasset.canton.performance.elements.DriverStatus
 import com.digitalasset.canton.performance.{PerformanceRunner, RateSettings}
+import com.digitalasset.canton.sequencing.TrafficControlParameters as InternalTrafficControlParameters
 import com.digitalasset.canton.topology.PhysicalSynchronizerId
 import com.digitalasset.canton.topology.TopologyManagerError.SerialMismatch
 import com.digitalasset.canton.topology.store.TimeQuery
@@ -47,7 +54,7 @@ import com.digitalasset.canton.topology.transaction.{
 }
 import com.digitalasset.canton.{TestEssentials, config}
 import monocle.macros.syntax.lens.*
-import org.apache.pekko.actor.ActorSystem
+import org.apache.pekko.actor.{ActorSystem, Scheduler}
 import org.scalatest.Assertion
 import org.scalatest.time.{Millis, Minutes, Span}
 import org.slf4j.event.Level
@@ -91,13 +98,26 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
   private val shouldStopRunTest = new AtomicReference(false)
 
   private lazy val actorSystem = ActorSystem()
-  private lazy val scheduler = actorSystem.scheduler
+  protected lazy val scheduler: Scheduler = actorSystem.scheduler
 
   protected def numMediators: Int
   protected def numSequencers: Int
   protected def numParticipants: Int
 
   protected def operations: NonEmpty[Seq[TopologyOperations]]
+
+  protected def trafficControlParameters: Option[TrafficControlParameters] =
+    Some(
+      TrafficControlParameters(
+        maxBaseTrafficAmount = NonNegativeNumeric.tryCreate(20_000_000L),
+        maxBaseTrafficAccumulationDuration = config.PositiveFiniteDuration.ofSeconds(1L),
+        setBalanceRequestSubmissionWindowSize = config.PositiveFiniteDuration.ofMinutes(5L),
+        readVsWriteScalingFactor = InternalTrafficControlParameters.DefaultReadVsWriteScalingFactor,
+        enforceRateLimiting = true,
+        baseEventCost = NonNegativeLong.tryCreate(50L),
+        freeConfirmationResponses = true,
+      )
+    )
 
   /*
    Result of the progress checker:
@@ -179,11 +199,28 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
                   .ofMillis(performanceRunnerTargetLatencyMs.toLong + computationMarginMs),
                 mediatorReactionTimeout = config.NonNegativeFiniteDuration
                   .ofMillis(performanceRunnerTargetLatencyMs.toLong + computationMarginMs),
+                trafficControl = trafficControlParameters,
               ),
               // when there are multiple synchronizer owners, waiting for the update to become effective would only work
               // after the nth synchronizer owner submitted the proposal that would fulfill the synchronizer owner quorum
               synchronize = None,
             )
+        )
+
+        eventually() {
+          // check that traffic control parameters are effective on sequencer1
+          val synchronizerParameters =
+            sequencer1.topology.synchronizer_parameters.get_dynamic_synchronizer_parameters(daId)
+          synchronizerParameters.trafficControl should not be empty
+        }
+
+        // top up traffic for participants and mediator
+        Seq[LocalInstanceReference](participant1, participant2, mediator1).foreach(member =>
+          sequencer1.traffic_control.set_traffic_balance(
+            member.id.member,
+            serial = PositiveInt.one,
+            newBalance = NonNegativeLong.maxValue,
+          )
         )
 
         operations.foreach(_.additionalSetupPhase())
@@ -757,12 +794,23 @@ class ChangingTopologyKeyRotationOwnerToKeyTest extends ChangingTopologyPerforma
 }
 
 class ChangingTopologyLsuTest extends ChangingTopologyPerformanceIntegrationTest {
-  private lazy val maxLsu: Int = 3
+  private lazy val maxLsu: Int = 6
 
   protected val numMediators: Int = 1 + maxLsu
   protected val numSequencers: Int = 1 + maxLsu
 
   protected val numParticipants = 2
+
+  // To test LSU traffic transfer with non-trivial (zeros) extra traffic,
+  // we reduce the default base traffic amount to be insufficient
+  override protected val trafficControlParameters: Option[TrafficControlParameters] =
+    super.trafficControlParameters.map(
+      _.copy(maxBaseTrafficAmount = NonNegativeNumeric.tryCreate(20_000L))
+    )
+  require(
+    trafficControlParameters.nonEmpty,
+    "LSU chaos requires traffic control parameters to be set",
+  )
 
   /*
   For LSU we don't want to use the target latency settings.
@@ -782,7 +830,7 @@ class ChangingTopologyLsuTest extends ChangingTopologyPerformanceIntegrationTest
   override lazy val operations: NonEmpty[Seq[TopologyOperations]] =
     NonEmpty.apply(
       Seq,
-      new LsuChaos(PositiveInt.tryCreate(maxLsu), logger),
+      new LsuChaos(PositiveInt.tryCreate(maxLsu), logger, scheduler),
     )
 }
 

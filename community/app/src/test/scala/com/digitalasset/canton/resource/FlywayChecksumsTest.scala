@@ -16,7 +16,7 @@ import org.scalatest.wordspec.AnyWordSpec
   * hasn't changed compared to the saved SHA256 checksum. Checksum for new Flyway SQL migration
   * files are added during the release process.
   */
-class FlywayChecksumsTest extends AnyWordSpec {
+final class FlywayChecksumsTest extends AnyWordSpec {
 
   "Postgres flyway migration files" should {
     "always have a valid SHA-256 digest file accompanied" in {

@@ -12,11 +12,13 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.{HasLoggerName, NamedLogging}
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
+import com.digitalasset.canton.sequencer.admin.v30.TrafficSummary
 import com.digitalasset.canton.sequencing.*
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
 import com.digitalasset.canton.serialization.HasCryptographicEvidence
+import com.digitalasset.canton.synchronizer.sequencer.BlockSequencerConfig.IndividualThroughputCapConfig
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.RegisterError
 import com.digitalasset.canton.synchronizer.sequencer.admin.data.{
   SequencerAdminStatus,
@@ -24,7 +26,6 @@ import com.digitalasset.canton.synchronizer.sequencer.admin.data.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockOrderer
 import com.digitalasset.canton.synchronizer.sequencer.errors.*
-import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.LsuSequencerError
 import com.digitalasset.canton.synchronizer.sequencer.traffic.TimestampSelector.TimestampSelector
 import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   LsuTrafficState,
@@ -162,11 +163,20 @@ trait Sequencer
     * will depend on current time. To get the state at a specific timestamp, use
     * [[getTrafficStateAt]] instead. If the list is empty, return the status of all members.
     * Requested members who are not registered in the Sequencer will not be in the response.
-    * Registered members with no sent or received event will return an empty status.
+    * Registered members with no sent or received event will return an empty status. Returns an
+    * error if the sequencer is awaiting LSU traffic state initialization.
     */
   def trafficStatus(members: Seq[Member], selector: TimestampSelector)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[SequencerTrafficStatus]
+  ): EitherT[FutureUnlessShutdown, TrafficControlError, SequencerTrafficStatus]
+
+  /** Retrieve traffic summaries for the events at the provided timestamps
+    * @param timestamps
+    *   timestamps for which to get traffic summaries for
+    */
+  def getTrafficSummaries(timestamps: Seq[CantonTimestamp])(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficControlError, Seq[TrafficSummary]]
 
   /** Sets the traffic purchased of a member to the new provided value. This will only become
     * effective if / when properly authorized by enough sequencers according to the synchronizer
@@ -207,11 +217,22 @@ trait Sequencer
 
   def getLsuTrafficControlState(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, LsuSequencerError, LsuTrafficState]
+  ): EitherT[FutureUnlessShutdown, CantonBaseError, LsuTrafficState]
 
   def setLsuTrafficControlState(
       state: LsuTrafficState
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, LsuSequencerError, Unit]
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, CantonBaseError, Unit]
+
+  /** Query current throughput caps */
+  def getThroughputCap(requestType: SubmissionRequestType): Option[IndividualThroughputCapConfig] =
+    None
+
+  /** Set current throughput caps */
+  def setThroughputCap(
+      requestType: SubmissionRequestType,
+      config: Option[IndividualThroughputCapConfig],
+  )(implicit traceContext: TraceContext): Unit = ()
+
 }
 
 /** Sequencer pruning interface.

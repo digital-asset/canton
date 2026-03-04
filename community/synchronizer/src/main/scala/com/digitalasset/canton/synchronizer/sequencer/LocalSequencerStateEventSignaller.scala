@@ -49,7 +49,14 @@ class LocalSequencerStateEventSignaller(
         .queue[WriteNotification](1, OverflowStrategy.backpressure)
         // this conflate kicks in, when there is no downstream consumer, to not exert backpressure to the upstream producer
         .conflate(_ union _)
-        .toMat(BroadcastHub.sink(1))(Keep.both),
+        .async
+        .toMat(
+          BroadcastHub
+            .sink(1)
+            // the default input buffer is 16, but due to the conflation, we don't actually
+            // want to buffer many stream elements here
+            .addAttributes(Attributes.inputBuffer(1, 1))
+        )(Keep.both),
       errorLogMessagePrefix = "LocalStateEventSignaller flow failed",
     )
   }

@@ -5,6 +5,7 @@ package com.digitalasset.canton.participant.topology
 
 import cats.Eval
 import cats.data.EitherT
+import com.daml.metrics.CacheMetrics
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
@@ -18,7 +19,6 @@ import com.digitalasset.canton.crypto.SynchronizerCrypto
 import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerPredecessor}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.CacheMetrics
 import com.digitalasset.canton.participant.admin.party.OnboardingClearanceScheduler
 import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
@@ -27,6 +27,7 @@ import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminate
 import com.digitalasset.canton.participant.store.SyncPersistentState
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
 import com.digitalasset.canton.participant.sync.LsuCallback
+import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.store.SequencedEventStore
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
@@ -95,6 +96,7 @@ class TopologyComponentFactory(
       topologyClient: SynchronizerTopologyClientWithInit,
       recordOrderPublisher: RecordOrderPublisher,
       lsuCallback: LsuCallback,
+      pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore,
       retrieveAndStoreMissingSequencerIds: TraceContext => EitherT[
         FutureUnlessShutdown,
         String,
@@ -116,10 +118,12 @@ class TopologyComponentFactory(
         topologyStore,
         initialRecordTime = recordOrderPublisher.initTimestamp,
         participantId,
-        pauseSynchronizerIndexingDuringPartyReplication =
-          alphaOnlinePartyReplicationSupport.nonEmpty,
+        pauseSynchronizerIndexingDuringPartyReplication = alphaOnlinePartyReplicationSupport.exists(
+          _.pauseSynchronizerIndexingDuringPartyReplication
+        ),
         synchronizerPredecessor = synchronizerPredecessor,
         lsuCallback = lsuCallback,
+        pendingHandshakesWithSuccessorsStore = pendingHandshakesWithSuccessorsStore,
         retrieveAndStoreMissingSequencerIds = retrieveAndStoreMissingSequencerIds,
         loggerFactory,
       )

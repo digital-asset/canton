@@ -170,46 +170,44 @@ private[execution] class TopologyAwareCommandExecutor(
       submissionSeed = submissionSeed,
       syncService = syncService,
     )
-
-    val tapsPass1: tapsExecutionFactory.TapsPass[Commands] = {
-      val submitterParty =
+    def tapsPass1(): FutureUnlessShutdown[TapsResult] = {
+      val requiredSubmitter =
         commands.actAs.headOption.getOrElse(sys.error("act_as must be non-empty"))
-      new tapsExecutionFactory.TapsPass[Commands](
+      tapsExecutionFactory.executePass(
         tapsPassDescription = "1st TAPS pass",
-        computeRequiredSubmitters = _ => Set(submitterParty),
-        computePartyPackageRequirements = _ => Map(submitterParty -> rootLevelPackageNames),
-        computePackagePreferenceSet = (_, perSynchronizerPreferenceSet) =>
+        requiredSubmitters = Set(requiredSubmitter),
+        partyPackageRequirements = Map(requiredSubmitter -> rootLevelPackageNames),
+        computePackagePreferenceSet = perSynchronizerPreferenceSet =>
           FutureUnlessShutdown.pure(
             perSynchronizerPreferenceSet.values.flatten
               .map(_.unsafeToPackageReference(packageIndex))
               .groupBy(_.packageName)
-              .view
-              .mapValues(
-                _.maxOption.getOrElse(sys.error("Unexpected empty references set after groupBy"))
+              .valuesIterator
+              .map(
+                _.maxOption
+                  .getOrElse(sys.error("Unexpected empty references set after groupBy"))
+                  .pkgId
               )
-              .values
-              .map(_.pkgId)
               .toSet
           ),
       )
     }
 
-    val tapsPass2: tapsExecutionFactory.TapsPass[CommandInterpretationResult] =
-      new tapsExecutionFactory.TapsPass[CommandInterpretationResult](
+    def tapsPass2(passInput: CommandInterpretationResult): FutureUnlessShutdown[TapsResult] = {
+      val partyPackageRequirements = Blinding
+        .partyPackages(passInput.transaction)
+        .map { case (party, pkgIds) =>
+          party -> pkgIds.map(
+            // It is fine to use unsafe here since the package must have been indexed on the participant
+            // if it appeared in the draft transaction
+            _.unsafeToPackageReference(packageIndex).packageName
+          )
+        }
+      tapsExecutionFactory.executePass(
         tapsPassDescription = "2nd TAPS pass",
-        computeRequiredSubmitters = passInput =>
-          rootNodesRequiredAuthorizers(passInput.transaction),
-        computePartyPackageRequirements = passInput =>
-          Blinding
-            .partyPackages(passInput.transaction)
-            .map { case (party, pkgIds) =>
-              party -> pkgIds.map(
-                // It is fine to use unsafe here since the package must have been indexed on the participant
-                // if it appeared in the draft transaction
-                _.unsafeToPackageReference(packageIndex).packageName
-              )
-            },
-        computePackagePreferenceSet = (passInput, perSynchronizerPreferenceSet) =>
+        requiredSubmitters = rootNodesRequiredAuthorizers(passInput.transaction),
+        partyPackageRequirements = partyPackageRequirements,
+        computePackagePreferenceSet = perSynchronizerPreferenceSet =>
           syncService
             .computeHighestRankedSynchronizerFromAdmissible(
               submitterInfo = passInput.submitterInfo,
@@ -225,13 +223,16 @@ private[execution] class TopologyAwareCommandExecutor(
               checked(perSynchronizerPreferenceSet(highestRankedSync))
             },
       )
-
-    EitherT {
-      for {
-        pass1Result <- tapsPass1.execute(commands)
-        pass2Result <- pass1Result.attemptNewPassOnRoutingFailed(tapsPass2)
-      } yield pass2Result.toSubmissionResult
     }
+
+    val result = for {
+      pass1Result <- tapsPass1()
+      pass2Result <- pass1Result match {
+        case TapsResult.RoutingFailed(interpretation, _) => tapsPass2(interpretation)
+        case successOrFailure => FutureUnlessShutdown.pure(successOrFailure)
+      }
+    } yield pass2Result.toSubmissionResult
+    EitherT(result)
   }
 
   private def rootNodesRequiredAuthorizers(transaction: SubmittedTransaction): Set[Party] =

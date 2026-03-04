@@ -9,9 +9,8 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors.AbortedDueToShutdown
 import com.digitalasset.canton.participant.store.{ContractStore, PersistedContractInstance}
-import com.digitalasset.canton.protocol.{ContractInstance, LfContractId}
+import com.digitalasset.canton.protocol.LfContractId
 import com.digitalasset.canton.tracing.TraceContext
-import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -22,22 +21,17 @@ trait LedgerApiContractStore {
       traceContext: TraceContext
   ): Future[Option[PersistedContractInstance]]
 
-  def lookupBatched(internalContractIds: Iterable[Long])(implicit
+  def lookupBatchedNonReadThrough(internalContractIds: Iterable[Long])(implicit
       traceContext: TraceContext
   ): Future[Map[Long, PersistedContractInstance]]
 
-  def lookupBatchedInternalIds(contractIds: Iterable[LfContractId])(implicit
+  def lookupBatchedInternalIdsNonReadThrough(contractIds: Iterable[LfContractId])(implicit
       traceContext: TraceContext
   ): Future[Map[LfContractId, Long]]
 
-  def lookupBatchedContractIds(internalContractIds: Iterable[Long])(implicit
+  def lookupBatchedContractIdsNonReadThrough(internalContractIds: Iterable[Long])(implicit
       traceContext: TraceContext
   ): Future[Map[Long, LfContractId]]
-
-  @VisibleForTesting
-  def storeContracts(contracts: Seq[ContractInstance])(implicit
-      traceContext: TraceContext
-  ): Future[Map[LfContractId, Long]]
 }
 
 final case class LedgerApiContractStoreImpl(
@@ -60,7 +54,7 @@ final case class LedgerApiContractStoreImpl(
         ),
       )
 
-  def lookupBatched(internalContractIds: Iterable[Long])(implicit
+  def lookupBatchedNonReadThrough(internalContractIds: Iterable[Long])(implicit
       traceContext: TraceContext
   ): Future[Map[Long, PersistedContractInstance]] =
     Timed.future(
@@ -71,7 +65,7 @@ final case class LedgerApiContractStoreImpl(
       ),
     )
 
-  def lookupBatchedInternalIds(contractIds: Iterable[LfContractId])(implicit
+  def lookupBatchedInternalIdsNonReadThrough(contractIds: Iterable[LfContractId])(implicit
       traceContext: TraceContext
   ): Future[Map[LfContractId, Long]] =
     Timed.future(
@@ -82,7 +76,7 @@ final case class LedgerApiContractStoreImpl(
       ),
     )
 
-  def lookupBatchedContractIds(internalContractIds: Iterable[Long])(implicit
+  def lookupBatchedContractIdsNonReadThrough(internalContractIds: Iterable[Long])(implicit
       traceContext: TraceContext
   ): Future[Map[Long, LfContractId]] =
     Timed
@@ -93,14 +87,6 @@ final case class LedgerApiContractStoreImpl(
             .lookupBatchedContractIdsNonReadThrough(internalContractIds)
         ),
       )
-
-  def storeContracts(contracts: Seq[ContractInstance])(implicit
-      traceContext: TraceContext
-  ): Future[Map[LfContractId, Long]] =
-    failOnShutdown(
-      participantContractStore
-        .storeContracts(contracts)
-    )
 
   private def failOnShutdown[T](f: FutureUnlessShutdown[T])(implicit
       errorLoggingContext: ErrorLoggingContext

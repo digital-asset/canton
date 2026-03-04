@@ -140,6 +140,11 @@ class SequencerReader(
     }
   }
 
+  def readPayloadsByIdWithoutCacheLoading(payloadIds: Seq[PayloadId])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Map[PayloadId, Batch[ClosedEnvelope]]] =
+    store.readPayloadsByIdWithoutCacheLoading(payloadIds)
+
   def read(member: Member, requestedTimestampInclusive: Option[CantonTimestamp])(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CreateSubscriptionError, Sequencer.SequencedEventSource] =

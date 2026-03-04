@@ -250,6 +250,13 @@ class MemberAuthenticationService(
         })
     }
 
+  // public wrapper method around isActive for use by the GrpcSequencerService
+  // to check active state immediately next to creation of subscription
+  def isMemberCurrentlyActive(member: Member)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Boolean] =
+    isActive(member).isRight
+
   private def correctSynchronizer(
       member: Member,
       intendedSynchronizerId: PhysicalSynchronizerId,

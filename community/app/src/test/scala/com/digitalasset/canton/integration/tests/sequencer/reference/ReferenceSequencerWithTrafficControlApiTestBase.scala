@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.sequencer.reference
 
 import cats.data.EitherT
+import com.daml.metrics.OpenTelemetryOnDemandMetricsReader
 import com.daml.metrics.api.{HistogramInventory, MetricName}
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton
@@ -23,16 +24,13 @@ import com.digitalasset.canton.environment.CantonNodeParameters
 import com.digitalasset.canton.integration.tests.sequencer.reference.ReferenceSequencerWithTrafficControlApiTestBase.RateLimitManagerImplTest
 import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown, LifeCycle}
 import com.digitalasset.canton.logging.{LogEntry, NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.metrics.{
-  LedgerApiServerHistograms,
-  MetricsUtils,
-  OpenTelemetryOnDemandMetricsReader,
-}
+import com.digitalasset.canton.metrics.{LedgerApiServerHistograms, MetricsUtils}
 import com.digitalasset.canton.protocol.SynchronizerParameters
 import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.sequencing.TrafficControlParameters
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.protocol.RecipientsTest.*
+import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
 import com.digitalasset.canton.sequencing.traffic.{
   EventCostCalculator,
   TrafficPurchased,
@@ -431,7 +429,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
   private def getStateFor(
       member: Member,
       sequencer: Sequencer,
-  ): FutureUnlessShutdown[Option[TrafficState]] =
+  ): EitherT[FutureUnlessShutdown, TrafficControlError, Option[TrafficState]] =
     sequencer
       .trafficStatus(Seq(member), TimestampSelector.LastUpdatePerMember)
       .map(_.trafficStates.get(member))
@@ -459,9 +457,11 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
             _ <- readForMembers(List(sender), sequencer)
             allMemberStates <- sequencer
               .trafficStatus(Seq.empty, TimestampSelector.LastUpdatePerMember)
+              .valueOrFail("trafficStatus failure")
 
             filteredMemberStates <- sequencer
               .trafficStatus(Seq(p11), TimestampSelector.LastUpdatePerMember)
+              .valueOrFail("trafficStatus failure")
 
           } yield {
             val allMediatorsAndParticipants =
@@ -493,7 +493,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
         for {
           _ <- sequencer.sendAsyncSigned(sign(request)).valueOrFail("Send async")
           messages1 <- readForMembers(List(sender), sequencer)
-          traffic1Sender <- getStateFor(sender, sequencer)
+          traffic1Sender <- getStateFor(sender, sequencer).valueOrFail("trafficStatus failure")
           _ = traffic1Sender.value.extraTrafficPurchased.value shouldBe 1000L
           _ = traffic1Sender.value.extraTrafficConsumed.value should be > 0L
         } yield {
@@ -637,14 +637,14 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
 
         for {
           // Check sender has no status
-          senderLive1 <- getStateFor(sender, sequencer)
+          senderLive1 <- getStateFor(sender, sequencer).valueOrFail("trafficStatus failure")
           _ = senderLive1 shouldBe Some(TrafficState.empty(CantonTimestamp.MinValue))
           _ = env.currentBalances.put(sender, Right(NonNegativeLong.tryCreate(1000L))).discard
           _ = env.currentBalances.put(p11, Right(p11ExtraTrafficLimit)).discard
           _ <- sequencer.sendAsyncSigned(sign(request1)).valueOrFail("Send async")
           messages1 <- readForMembers(List(sender, p11), sequencer)
           // Sender traffic consumed should have increased
-          senderLive2 <- getStateFor(sender, sequencer)
+          senderLive2 <- getStateFor(sender, sequencer).valueOrFail("trafficStatus failure")
           _ = senderLive2.value.extraTrafficConsumed.value > 0L shouldBe true
           // Send another message
           _ <- sequencer.sendAsyncSigned(sign(request2)).valueOrFail("Send async")
@@ -653,10 +653,10 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
             sequencer,
             startTimestamp = firstEventTimestamp(p11)(messages1).map(_.immediateSuccessor),
           )
-          senderLive3 <- getStateFor(sender, sequencer)
+          senderLive3 <- getStateFor(sender, sequencer).valueOrFail("trafficStatus failure")
           _ =
             senderLive3.value.extraTrafficConsumed.value > senderLive2.value.extraTrafficConsumed.value shouldBe true
-          recipientState <- getStateFor(p11, sequencer)
+          recipientState <- getStateFor(p11, sequencer).valueOrFail("trafficStatus failure")
           _ =
             recipientState.value.extraTrafficConsumed.value shouldBe 0
         } yield {
@@ -766,13 +766,13 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
 
         for {
           // Check sender has no status
-          senderLive1 <- getStateFor(sender, sequencer)
+          senderLive1 <- getStateFor(sender, sequencer).valueOrFail("trafficStatus failure")
           _ = senderLive1 shouldBe Some(TrafficState.empty(CantonTimestamp.MinValue))
           _ = env.currentBalances.put(sender, Right(NonNegativeLong.tryCreate(120L))).discard
           _ <- sequencer.sendAsyncSigned(sign(request1)).valueOrFail("Send async")
           messages1 <- readForMembers(List(sender, p11), sequencer)
           // Sender traffic remainder should have decreased
-          traffic1Sender <- getStateFor(sender, sequencer)
+          traffic1Sender <- getStateFor(sender, sequencer).valueOrFail("trafficStatus failure")
           /*
               Cost should be:
                100 + 100 * 7 * 200 / 10000 = 114
@@ -834,17 +834,17 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
           _ <- sequencer.sendAsyncSigned(sign(request1)).valueOrFail("Send async")
           messages1 <- readForMembers(List(sender, p11, p12), sequencer)
           // Sender traffic should have decreased
-          traffic1Sender <- getStateFor(sender, sequencer)
+          traffic1Sender <- getStateFor(sender, sequencer).valueOrFail("trafficStatus failure")
           _ =
             traffic1Sender.value.availableTraffic shouldBe senderExtraTrafficLimit.value - messageContent.length.toLong
 
-          p11GetTraffic <- getStateFor(p11, sequencer)
+          p11GetTraffic <- getStateFor(p11, sequencer).valueOrFail("trafficStatus failure")
           _ = {
             val expected = expectedTrafficStateP11
             // in timestamp because reference and bft sequencer generate a different one, and we only really car about the traffic values
             p11GetTraffic.value.copy(timestamp = CantonTimestamp.MinValue) shouldBe expected
           }
-          p12GetTraffic <- getStateFor(p12, sequencer)
+          p12GetTraffic <- getStateFor(p12, sequencer).valueOrFail("trafficStatus failure")
           _ =
             p12GetTraffic.value.copy(timestamp =
               CantonTimestamp.MinValue
@@ -905,7 +905,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
         for {
           _ <- sequencer.sendAsyncSigned(sign(request)).value
           messages <- readForMembers(Seq(sender), sequencer)
-          senderTraffic <- getStateFor(sender, sequencer)
+          senderTraffic <- getStateFor(sender, sequencer).valueOrFail("trafficStatus failure")
         } yield {
           checkRejection(
             messages,
@@ -1089,7 +1089,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
           _ = res.left.toOption.map(
             _.cause.contains("Submission was rejected because no traffic is available")
           ) shouldBe Some(true)
-          senderTraffic <- getStateFor(sender, sequencer)
+          senderTraffic <- getStateFor(sender, sequencer).valueOrFail("trafficStatus failure")
         } yield {
           senderTraffic.value.extraTrafficConsumed.value shouldBe 0L
           senderTraffic.value.extraTrafficRemainder shouldBe 1L
@@ -1117,7 +1117,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
         for {
           _ <- sequencer.sendAsyncSigned(sign(request)).value
           messages <- readForMembers(Seq(sender), sequencer)
-          senderTraffic <- getStateFor(sender, sequencer)
+          senderTraffic <- getStateFor(sender, sequencer).valueOrFail("trafficStatus failure")
         } yield {
           eventually() {
             assertLongValue("daml.sequencer.traffic-control.wasted-traffic", 5L) // Cost of "hello"
@@ -1160,7 +1160,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
         for {
           _ <- sequencer.sendAsyncSigned(sign(request)).valueOrFail("Send async")
           messages <- readForMembers(List(sender, p11), sequencer)
-          senderTraffic <- getStateFor(sender, sequencer)
+          senderTraffic <- getStateFor(sender, sequencer).valueOrFail("trafficStatus failure")
         } yield {
           senderTraffic shouldBe empty
           checkMessages(
@@ -1217,7 +1217,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
         for {
           _ <- sequencer.sendAsyncSigned(sign(request)).valueOrFail("Send async")
           messages <- readForMembers(List(sender), sequencer)
-          senderTraffic <- getStateFor(sender, sequencer)
+          senderTraffic <- getStateFor(sender, sequencer).valueOrFail("trafficStatus failure")
         } yield {
           val expectedConsumedTraffic =
             if (freeConfirmationResponses) 0L else messageContent.length.toLong

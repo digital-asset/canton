@@ -731,8 +731,7 @@ final class ResourceOwnerSpec extends AsyncWordSpec with Matchers with Eventuall
       }
     }
 
-    // TODO (#30892): enable flaky test
-    "wait at teardown for submitted task to finish for only gracefulAwaitTerminationMillis and then it should interrupt the threads, and wait for the thread to finish for only forcefulAwaitTerminationMillis" ignore {
+    "wait at teardown for submitted task to finish for only gracefulAwaitTerminationMillis and then it should interrupt the threads, and wait for the thread to finish for only forcefulAwaitTerminationMillis" in {
       val interruptedPromise = Promise[Unit]()
       val testPromise = Promise[Unit]()
       val resource = for {

@@ -19,6 +19,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.language.LanguageVersion
+import com.digitalasset.daml.lf.transaction.ContractStateMachine
 import io.circe.*
 import io.circe.parser.*
 import monocle.macros.syntax.lens.*
@@ -192,6 +193,7 @@ abstract class DamlScriptIT
       .addConfigTransforms(useTestingTimeService)
       .addConfigTransforms(ConfigTransforms.useStaticTime)
       .addConfigTransforms(maybeEnableLfDev*)
+      .addConfigTransforms(withContractStateMode(ContractStateMachine.Mode.default)*)
       .withSetup { env =>
         import env.*
 
@@ -326,12 +328,17 @@ abstract class DamlScriptIT
 //  Split the tests into a stable and a dev suite and run the dev suite only with the dev protocol version
 abstract class DamlScriptDevIT extends DamlScriptIT {
 
+  import DamlScriptIT.withContractStateMode
   import DamlScriptIT.ExpectedResult.*
 
   override lazy val uckMode = true
   override lazy val langVersion = LanguageVersion.v2_dev
   override lazy val projectName = "ScriptDevTests"
   override lazy val minimumProtocolVersion = ProtocolVersion.dev
+
+  override def environmentDefinition: EnvironmentDefinition =
+    super.environmentDefinition
+      .addConfigTransforms(withContractStateMode(ContractStateMachine.Mode.LegacyNUCK)*)
 
   override val expectedResults = SortedMap(
     "ActionTest:testFilterA" -> Success(),
@@ -518,6 +525,14 @@ object DamlScriptIT {
 
     final case object Ignored extends ExpectedResult
   }
+
+  def withContractStateMode(contractStateMode: ContractStateMachine.Mode): Seq[ConfigTransform] =
+    Seq(
+      ConfigTransforms.enableNonStandardConfig,
+      ConfigTransforms.updateAllParticipantConfigs_(
+        _.focus(_.parameters.engine.contractStateMode).replace(Some(contractStateMode))
+      ),
+    )
 
   private implicit val decodeResult: Decoder[Either[String, Json]] = Decoder.instance { c =>
     c.downField("error").as[String].map(Left(_)) orElse c.downField("result").as[Json].map(Right(_))

@@ -3,7 +3,8 @@
 
 package com.digitalasset.canton.sequencing.client
 
-import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
+import com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown
+import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, RunOnClosing, UnlessShutdown}
 import com.digitalasset.canton.logging.TracedLogger
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -39,6 +40,19 @@ object SendCallback {
 
     override def apply(result: UnlessShutdown[SendResult]): Unit =
       promise.trySuccess(result).discard
+
+    /** A utility to be used in conjunction with
+      * [[com.digitalasset.canton.lifecycle.HasRunOnClosing]] methods to integrate the callback
+      * future with a component's shutdown. Will complete the future with
+      * [[com.digitalasset.canton.lifecycle.UnlessShutdown.AbortedDueToShutdown]] when called.
+      */
+    def runOnClosing: RunOnClosing =
+      new RunOnClosing {
+        override def name: String = "close-send-callback-future"
+        override def done: Boolean = promise.future.isCompleted
+        override def run()(implicit traceContext: TraceContext): Unit =
+          promise.trySuccess(AbortedDueToShutdown).discard
+      }
   }
 
   def future: CallbackFuture = new CallbackFuture

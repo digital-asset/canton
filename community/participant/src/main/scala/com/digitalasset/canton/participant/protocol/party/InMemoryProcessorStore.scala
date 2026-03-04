@@ -3,11 +3,13 @@
 
 package com.digitalasset.canton.participant.protocol.party
 
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FlagCloseable
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.admin.party.PartyReplicationIndexingWorkflow.ContractToIndex
 import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.atomic.AtomicReference
@@ -140,12 +142,14 @@ object TargetParticipantStore {
     *   1. once initialized, the initial contract ordinal according to the most recent
     *      initialization.
     *   1. whether the TP has been notified that end of the ACS has been reached.
+    *   1. the thus-far-imported contracts to send to the indexer after ACS import.
     */
   private final case class TPState(
       requestedContractsCount: NonNegativeInt,
       processedContractsCount: NonNegativeInt,
       initialContractOrdinalInclusiveO: Option[NonNegativeInt],
       hasEndOfACSBeenReached: Boolean,
+      importedContractsToIndex: Seq[NonEmpty[Seq[ContractToIndex]]],
   )
 }
 
@@ -156,6 +160,7 @@ final class TargetParticipantStore extends PartyReplicationProcessorStore {
       processedContractsCount = NonNegativeInt.zero,
       initialContractOrdinalInclusiveO = None,
       hasEndOfACSBeenReached = false,
+      importedContractsToIndex = Seq.empty,
     )
   )
 
@@ -166,8 +171,19 @@ final class TargetParticipantStore extends PartyReplicationProcessorStore {
       .discard
 
   def processedContractsCount: NonNegativeInt = state.get().processedContractsCount
-  private[party] def setProcessedContractsCount(count: NonNegativeInt): Unit =
-    state.updateAndGet(_.copy(processedContractsCount = count)).discard
+  private[party] def addImportedContracts
+      : ((NonNegativeInt, NonEmpty[Seq[ContractToIndex]])) => Unit = {
+    case (count, contractsToIndex) =>
+      state
+        .updateAndGet(before =>
+          before.copy(
+            processedContractsCount = count,
+            importedContractsToIndex = before.importedContractsToIndex :+ contractsToIndex,
+          )
+        )
+        .discard
+  }
+  private[party] def contractsToIndex = state.get().importedContractsToIndex
 
   private[party] def initialContractOrdinalInclusiveO: Option[NonNegativeInt] =
     state.get().initialContractOrdinalInclusiveO

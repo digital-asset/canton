@@ -15,6 +15,10 @@ Template for a bigger topic
 #### Specific Changes
 #### Impact and Migration
 
+### Sequencer Inspection Service
+A new service is available on the Admin API of the sequencer.
+It provides an RPC that allows to query for traffic summaries of sequenced events.
+Refer to the [traffic documentation](https://docs.digitalasset.com/subnet/3.4/howtos/operate/traffic.html) for more details.
 
 ### Protocol Changes
 
@@ -125,11 +129,19 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
 - `PrepareSubmissionRequest.hashing_scheme_version` can now be populated with the desired hashing version to be
    used for the transaction. The default hashing scheme is `HASHING_SCHEME_VERSION_V2` but integrators are encouraged to move to `HASHING_SCHEME_VERSION_V3` for
   synchronizers using protocol version 35.
+- *BREAKING* The
+  - `/v2/updates` HTTP POST and websocket GET endpoints
+  - `/v2/updates/flats` HTTP POST and websocket GET endpoints
+
+  were incorrectly retuning LedgerEffects events (i.e., `CreatedEvent` and `ExercisedEvent`). They are now corrected to return
+  AcsDelta (flat) events (i.e., `CreatedEvent` and `ArchivedEvent`).
 
 ### Preview Features
 - preview feature
 
-## Bugfixes
+### Bugfixes
+- Switched the gRPC service `SequencerService.subscribe` and `SequencerService.downloadTopologyStateForInit` to manual
+  control flow, so that the sequencer doesn't crash with an `OutOfMemoryError` when responding to slow clients.
 
 - Fixed a bug preventing automatic synchronization of protocol feature flags.
 Automatic synchronization can be disabled by setting `parameters.auto-sync-protocol-feature-flags = false` in the participant's configuration object.
@@ -199,6 +211,20 @@ Using the default (Create events) resets this counter to zero.
 Note: Multi-synchronizer support is currently in Alpha; most Ledger API consumers may not yet be compatible with
 Assign/Unassign events. Only enable this if your application specifically requires non-zero reassignment counters
 and can process these event types.
+
+### Removal of legacy party replication repair console macros
+
+The original party replication method, which relied on a silent synchronizer, has been superseded by the offline party
+replication process. Consequently, the obsolete repair console macros associated with the legacy approach have
+been removed.
+
+Specifically, the following macros are no longer available:
+- `step1_hold_and_store_acs`
+- `step2_import_acs`
+
+If you previously relied on the _Silent synchronizer replication procedure_, you will need to transition to the
+current offline party replication process. For details, please consult the
+[Offline Party Replication documentation](https://docs.digitalasset.com/operate/3.5/howtos/operate/parties/party_replication.html#offline-party-replication)
 
 ### Only PackageName is accepted on Ledger API
 

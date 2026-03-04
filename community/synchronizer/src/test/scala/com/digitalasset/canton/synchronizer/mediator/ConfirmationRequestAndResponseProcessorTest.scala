@@ -42,6 +42,7 @@ import com.google.protobuf.ByteString
 import io.grpc.Status.Code
 import org.scalatest.Assertion
 import org.scalatest.wordspec.AsyncWordSpec
+import org.slf4j.event.Level
 
 import java.util
 import scala.annotation.nowarn
@@ -469,12 +470,15 @@ class ConfirmationRequestAndResponseProcessorTest
               batchAlsoContainsTopologyTransaction = false,
             )
             .failOnShutdown,
-          _.shouldBeCantonError(
-            MediatorError.MalformedMessage,
-            _ should startWith(
-              s"Received a mediator confirmation request with id $requestId from $participant with an invalid signature. Rejecting request.\nDetailed error: SignatureWithWrongKey"
-            ),
-          ),
+          entry => {
+            entry.level shouldBe Level.WARN
+            entry.shouldBeCantonError(
+              MediatorError.MalformedMessage,
+              _ should startWith(
+                s"Received a mediator confirmation request with id $requestId from $participant with an invalid signature. Rejecting request.\nDetailed error: SignatureWithWrongKey"
+              ),
+            )
+          },
         )
       } yield {
         val sentResult = sut.verdictSender.sentResults.loneElement
@@ -1734,10 +1738,13 @@ class ConfirmationRequestAndResponseProcessorTest
               batchAlsoContainsTopologyTransaction = false,
             )
             .failOnShutdown,
-          _.shouldBeCantonError(
-            MediatorError.InvalidMessage,
-            _ shouldBe s"Received a mediator confirmation request with id $requestId with some informees not being hosted by an active participant: ${Set(observer, extra, signatory)}. Rejecting request...",
-          ),
+          entry => {
+            entry.level shouldBe Level.WARN
+            entry.shouldBeCantonError(
+              MediatorError.InvalidMessage,
+              _ shouldBe s"Received a mediator confirmation request with id $requestId with some informees not being hosted by an active participant: ${Set(observer, extra, signatory)}. Rejecting request...",
+            )
+          },
         )
       } yield succeed
     }

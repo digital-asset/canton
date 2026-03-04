@@ -90,6 +90,7 @@ import com.digitalasset.canton.participant.sync.SynchronizerConnectionsManager.{
   ConnectionListener,
 }
 import com.digitalasset.canton.participant.synchronizer.*
+import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
 import com.digitalasset.canton.participant.topology.*
 import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTracker
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.CostEstimationHints
@@ -99,6 +100,7 @@ import com.digitalasset.canton.replica.ReplicaState
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.sequencing.SequencerConnectionValidation
+import com.digitalasset.canton.store.PendingOperationStore
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration, SynchronizerTimeTracker}
 import com.digitalasset.canton.topology.*
@@ -180,6 +182,15 @@ class CantonSyncService(
     with HasCloseContext
     with InternalIndexServiceProviderImpl {
 
+  private val pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore =
+    PendingOperationStore(
+      syncPersistentStateManager.storage,
+      timeouts,
+      loggerFactory,
+      PendingHandshakeWithLsuSuccessor,
+      PhysicalSynchronizerId.fromString,
+    )
+
   private val connectionsManager = new SynchronizerConnectionsManager(
     participantId,
     synchronizerRegistry,
@@ -198,6 +209,7 @@ class CantonSyncService(
     resourceManagementService,
     parameters,
     connectedSynchronizerFactory,
+    pendingHandshakesWithSuccessorsStore,
     metrics,
     sequencerInfoLoader,
     isActive,
@@ -379,10 +391,8 @@ class CantonSyncService(
 
   private val packageResolver: PackageResolver = packageService.packageResolver
 
-  val contractValidator: ContractValidator =
+  private val contractValidator: ContractValidator =
     ContractValidator(syncCrypto.pureCrypto, engine, packageResolver)
-
-  val contractHasher: ContractHasher = ContractHasher(engine, packageResolver)
 
   val repairService: RepairService = new RepairService(
     participantId,
@@ -918,14 +928,14 @@ class CantonSyncService(
     connectionsManager.lookupSynchronizerTimeTracker(synchronizer)
 
   def lookupTopologyClient(
-      synchronizerId: PhysicalSynchronizerId
+      psid: PhysicalSynchronizerId
   ): Option[SynchronizerTopologyClientWithInit] =
-    connectionsManager.lookupTopologyClient(synchronizerId)
+    connectionsManager.lookupTopologyClient(psid)
 
   def lookupTopologyManager(
-      synchronizerId: PhysicalSynchronizerId
+      psid: PhysicalSynchronizerId
   ): Option[SynchronizerTopologyManager] =
-    connectionsManager.lookupTopologyManager(synchronizerId)
+    connectionsManager.lookupTopologyManager(psid)
 
   /** Adds a new synchronizer to the sync service's configuration.
     *
@@ -1175,6 +1185,26 @@ class CantonSyncService(
     }
   }
 
+  /** All pending handshakes with LSU successors are attempted. They are done in parallel and we
+    * don't wait on the result.
+    */
+  def attemptPendingHandshakesSuccessors()(implicit traceContext: TraceContext): Unit = {
+    val resF: FutureUnlessShutdown[Unit] = pendingHandshakesWithSuccessorsStore
+      .getAll(PendingHandshakeWithLsuSuccessor.operationName)
+      .map(_.foreach { pendingHandshake =>
+        EitherTUtil.doNotAwaitUS(
+          performPureHandshake(pendingHandshake.operation.successorPSId),
+          message =
+            s"Failed to perform the synchronizer handshake with ${pendingHandshake.operation.successorPSId}",
+        )
+      })
+
+    FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
+      future = resF,
+      failureMessage = "Failed to perform handshakes",
+    )
+  }
+
   /* Verify that specified synchronizer has inactive status and prune synchronizer stores.
    */
   def purgeDeactivatedSynchronizer(synchronizerAlias: SynchronizerAlias)(implicit
@@ -1253,17 +1283,19 @@ class CantonSyncService(
       onlyActive = onlyActive,
     )
 
-  /** Perform a handshake with the given synchronizer.
+  /** Perform a handshake with the given synchronizer. Does only the static (protocol version,
+    * crypto schemes) unlike `performHandshake` above. In particular: does not download the
+    * topology.
+    *
     * @param psid
     *   the physical synchronizer id of the synchronizer.
-    * @return
     */
-  def connectToPSIdWithHandshake(
+  def performPureHandshake(
       psid: PhysicalSynchronizerId
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SyncServiceError, Unit] =
-    connectionsManager.connectToPSIdWithHandshake(psid)
+    connectionsManager.performPureHandshake(psid)
 
   /** Disconnect the given synchronizer from the sync service. */
   def disconnectSynchronizer(

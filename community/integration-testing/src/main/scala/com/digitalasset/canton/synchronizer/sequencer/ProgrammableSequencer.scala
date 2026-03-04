@@ -30,14 +30,15 @@ import com.digitalasset.canton.protocol.messages.{
 }
 import com.digitalasset.canton.resource.Storage
 import com.digitalasset.canton.scheduler.PruningScheduler
+import com.digitalasset.canton.sequencer.admin.v30.TrafficSummary
 import com.digitalasset.canton.sequencing.client.SequencerClientSend
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
+import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors.TrafficControlError
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.RegisterError
 import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.External
 import com.digitalasset.canton.synchronizer.sequencer.admin.data.SequencerAdminStatus
 import com.digitalasset.canton.synchronizer.sequencer.block.BlockOrderer
-import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.LsuSequencerError
 import com.digitalasset.canton.synchronizer.sequencer.errors.{
   CreateSubscriptionError,
   SequencerAdministrationError,
@@ -107,9 +108,8 @@ class ProgrammableSequencer(
 
   override def trafficStatus(members: Seq[Member], selector: TimestampSelector)(implicit
       traceContext: com.digitalasset.canton.tracing.TraceContext
-  ): FutureUnlessShutdown[
-    SequencerTrafficStatus
-  ] = baseSequencer.trafficStatus(members, selector)
+  ): EitherT[FutureUnlessShutdown, TrafficControlError, SequencerTrafficStatus] =
+    baseSequencer.trafficStatus(members, selector)
 
   override def sequencingTime(implicit
       traceContext: TraceContext
@@ -456,14 +456,19 @@ class ProgrammableSequencer(
 
   override private[canton] def orderer: Option[BlockOrderer] = baseSequencer.orderer
 
+  override def getTrafficSummaries(timestamps: Seq[CantonTimestamp])(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, TrafficControlError, Seq[TrafficSummary]] =
+    baseSequencer.getTrafficSummaries(timestamps)
+
   override def getLsuTrafficControlState(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, LsuSequencerError, LsuTrafficState] =
+  ): EitherT[FutureUnlessShutdown, CantonBaseError, LsuTrafficState] =
     baseSequencer.getLsuTrafficControlState
 
   override def setLsuTrafficControlState(state: LsuTrafficState)(implicit
       traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, LsuSequencerError, Unit] =
+  ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
     baseSequencer.setLsuTrafficControlState(state)
 }
 

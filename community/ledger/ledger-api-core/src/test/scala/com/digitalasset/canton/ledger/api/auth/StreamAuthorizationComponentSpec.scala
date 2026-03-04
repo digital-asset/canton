@@ -4,7 +4,6 @@
 package com.digitalasset.canton.ledger.api.auth
 
 import com.daml.grpc.adapter.client.pekko.ClientAdapter
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_ACS_DELTA
 import com.daml.ledger.api.v2.transaction_filter.{
   EventFormat,
@@ -15,6 +14,7 @@ import com.daml.ledger.api.v2.transaction_filter.{
 import com.daml.ledger.api.v2.update_service.*
 import com.daml.ledger.api.v2.update_service.UpdateServiceGrpc.{UpdateService, UpdateServiceStub}
 import com.daml.ledger.resources.{ResourceContext, ResourceOwner}
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.auth.{
   AuthInterceptor,

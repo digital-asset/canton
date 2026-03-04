@@ -10,15 +10,15 @@ import com.digitalasset.canton.RepairCounter
 import com.digitalasset.canton.concurrent.FutureSupervisor
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.party.PartyReplicator.AddPartyRequestId
 import com.digitalasset.canton.participant.admin.party.{
+  PartyReplicationIndexingWorkflow,
   PartyReplicationStatus,
   PartyReplicationTestInterceptor,
 }
-import com.digitalasset.canton.participant.event.RecordOrderPublisher
+import com.digitalasset.canton.participant.config.AlphaOnlinePartyReplicationConfig
 import com.digitalasset.canton.participant.protocol.conflictdetection.RequestTracker
 import com.digitalasset.canton.participant.protocol.party.TargetParticipantAcsPersistence.contractsToRequestEachTime
 import com.digitalasset.canton.participant.store.{
@@ -69,9 +69,8 @@ class PartyReplicationTargetParticipantProcessor(
     protected val onError: String => Unit,
     protected val onDisconnect: (String, TraceContext) => Unit,
     persistsContracts: TargetParticipantAcsPersistence.PersistsContracts,
-    recordOrderPublisher: RecordOrderPublisher,
     requestTracker: RequestTracker,
-    pureCrypto: CryptoPureApi,
+    indexingWorkflow: PartyReplicationIndexingWorkflow,
     protected val futureSupervisor: FutureSupervisor,
     protected val exitOnFatalFailures: Boolean,
     protected val timeouts: ProcessingTimeout,
@@ -84,9 +83,7 @@ class PartyReplicationTargetParticipantProcessor(
       partyOnboardingAt,
       replicationProgressState,
       persistsContracts,
-      recordOrderPublisher,
       requestTracker,
-      pureCrypto,
     )
     with PartyReplicationProcessor {
 
@@ -149,8 +146,8 @@ class PartyReplicationTargetParticipantProcessor(
               replicatedContractCount.unwrap + contracts.size <= processorStore.requestedContractsCount.unwrap,
               s"Received too many contracts from SP: processed ${replicatedContractCount.unwrap} + received ${contracts.size} > requested ${processorStore.requestedContractsCount.unwrap}",
             )
-            updatedProcessedContractsCount <- importContracts(contracts)
-            _ = processorStore.setProcessedContractsCount(updatedProcessedContractsCount)
+            importedContracts <- importContracts(contracts)
+            _ = processorStore.addImportedContracts(importedContracts)
           } yield ()
         case PartyReplicationSourceParticipantMessage.EndOfACS =>
           logger.info(
@@ -200,9 +197,10 @@ class PartyReplicationTargetParticipantProcessor(
     replicatedContractCount = replicationProgress.processedContractCount
     _ <-
       if (replicationProgress.fullyProcessedAcs) {
+        val contractsToIndex = processorStore.contractsToIndex
         EitherT(
           FutureUnlessShutdown
-            .lift(recordOrderPublisher.publishBufferedEvents())
+            .lift(indexingWorkflow.indexAllContractBatches(contractsToIndex))
             .flatMap(_ =>
               sendCompleted(
                 "completing in response to source participant notification of end of data"
@@ -282,13 +280,18 @@ object PartyReplicationTargetParticipantProcessor {
       onDisconnect: (String, TraceContext) => Unit,
       participantNodePersistentState: Eval[ParticipantNodePersistentState],
       connectedSynchronizer: ConnectedSynchronizer,
+      config: AlphaOnlinePartyReplicationConfig,
       futureSupervisor: FutureSupervisor,
       exitOnFatalFailures: Boolean,
       timeouts: ProcessingTimeout,
       loggerFactory: NamedLoggerFactory,
       testInterceptor: PartyReplicationTestInterceptor =
         PartyReplicationTestInterceptor.AlwaysProceed,
-  )(implicit executionContext: ExecutionContext): PartyReplicationTargetParticipantProcessor =
+  )(implicit executionContext: ExecutionContext): PartyReplicationTargetParticipantProcessor = {
+    val requestSpecificLoggerFactory = loggerFactory
+      .append("psid", connectedSynchronizer.psid.toProtoPrimitive)
+      .append("partyId", partyId.toProtoPrimitive)
+      .append("requestId", requestId.toHexString)
     new PartyReplicationTargetParticipantProcessor(
       requestId,
       connectedSynchronizer.psid,
@@ -297,16 +300,20 @@ object PartyReplicationTargetParticipantProcessor {
       onError,
       onDisconnect,
       new TargetParticipantAcsPersistence.PersistsContractsImpl(participantNodePersistentState),
-      connectedSynchronizer.ephemeral.recordOrderPublisher,
       connectedSynchronizer.ephemeral.requestTracker,
-      connectedSynchronizer.synchronizerHandle.syncPersistentState.pureCryptoApi,
+      new PartyReplicationIndexingWorkflow(
+        requestId,
+        connectedSynchronizer.psid,
+        connectedSynchronizer.ephemeral.recordOrderPublisher,
+        connectedSynchronizer.synchronizerHandle.syncPersistentState.pureCryptoApi,
+        config.pauseSynchronizerIndexingDuringPartyReplication,
+        requestSpecificLoggerFactory,
+      ),
       futureSupervisor,
       exitOnFatalFailures,
       timeouts,
-      loggerFactory
-        .append("psid", connectedSynchronizer.psid.toProtoPrimitive)
-        .append("partyId", partyId.toProtoPrimitive)
-        .append("requestId", requestId.toHexString),
+      requestSpecificLoggerFactory,
       testInterceptor,
     )
+  }
 }

@@ -14,10 +14,10 @@ import com.daml.jwt.{
   JwtVerifier,
   RSA256Verifier,
 }
+import com.daml.metrics.CacheMetrics
 import com.digitalasset.canton.auth.CachedJwtVerifierLoader.CacheKey
 import com.digitalasset.canton.caching.ScaffeineCache
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.metrics.CacheMetrics
 import com.github.blemale.scaffeine.Scaffeine
 
 import java.security.interfaces.{ECPublicKey, RSAPublicKey}

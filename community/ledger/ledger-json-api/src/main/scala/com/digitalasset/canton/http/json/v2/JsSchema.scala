@@ -25,7 +25,7 @@ import com.google.protobuf.ByteString
 import com.google.protobuf.field_mask.FieldMask
 import com.google.protobuf.struct.Struct
 import com.google.protobuf.util.JsonFormat
-import com.google.rpc.error_details.{ErrorInfo, RetryInfo}
+import com.google.rpc.error_details.{ErrorInfo, RequestInfo, ResourceInfo, RetryInfo}
 import io.circe
 import io.circe.generic.extras.Configuration
 import io.circe.generic.extras.semiauto.deriveConfiguredCodec
@@ -504,26 +504,29 @@ object JsSchema {
         } yield com.google.rpc.status.Status(code, message, details)
     }
 
+    implicit val grpcErrorInfoEncoder: Encoder[ErrorInfo] = deriveCodec
+    implicit val grpcRetryInfoEncoder: Encoder[RetryInfo] = deriveCodec
+    implicit val grpcResourceInfoEncoder: Encoder[ResourceInfo] = deriveCodec
+    implicit val grpcRequestInfoEncoder: Encoder[RequestInfo] = deriveCodec
+
     implicit val grpcAnyEncoder: Encoder[com.google.protobuf.any.Any] = Encoder.instance { any =>
       import io.circe.syntax.*
-      def decodeAny(source: com.google.protobuf.any.Any): String =
+      def decodeAny(source: com.google.protobuf.any.Any): Json =
         try {
-          source.typeUrl match {
-            case "type.googleapis.com/google.rpc.ErrorInfo" =>
-              ErrorInfo.parseFrom(source.value.toByteArray).toString
-            case "type.googleapis.com/google.rpc.RetryInfo" =>
-              RetryInfo.parseFrom(source.value.toByteArray).toString
-            case _ =>
-              "Unknown type for decoding"
+          source match {
+            case detail if detail.is[ErrorInfo] => detail.unpack[ErrorInfo].asJson
+            case detail if detail.is[RetryInfo] => detail.unpack[RetryInfo].asJson
+            case detail if detail.is[ResourceInfo] => detail.unpack[ResourceInfo].asJson
+            case detail if detail.is[RequestInfo] => detail.unpack[RequestInfo].asJson
+            case _ => Json.fromString("Unknown type for decoding")
           }
-        } catch {
-          case e: Exception => "Failed to decode: " + e.getMessage
-        }
+        } catch { case e: Exception => Json.fromString(s"Failed to decode: ${e.getMessage}") }
+
       Json.obj(
         "typeUrl" -> any.typeUrl.asJson,
         "value" -> Base64.getEncoder.encodeToString(any.value.toByteArray).asJson,
+        "valueDecoded" -> decodeAny(any),
         "unknownFields" -> any.unknownFields.asJson,
-        "valueDecoded" -> decodeAny(any).asJson,
       )
     }
 

@@ -103,7 +103,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
         committers = Set(alice),
         // we test only with contract key mode,
         // the state machine should no have any impact for this test.
-        mode = ContractStateMachine.Mode.UCK,
+        mode = ContractStateMachine.Mode.UCKWithRollback,
       )
     SpeedyTestLib
       .run(machine, getContract = getContract, getKey = getKey)

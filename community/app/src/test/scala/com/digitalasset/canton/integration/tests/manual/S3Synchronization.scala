@@ -40,19 +40,21 @@ trait S3Synchronization extends FutureHelpers with TestEssentials {
 
     def mkContinuityDumpRef(path: String): ContinuityDumpRef
 
-    /** List the dumps on S3
-      * @param majorUpgradeTestFrom
-      *   If defined, tests major upgrade from the specified version
+    /** List the dumps on S3.
+      *
+      * @param latestFromMajorMinor
+      *   If defined, restricts the returned dumps to only the single most recent release (patch or
+      *   snapshot) from the specified (major, minor) version line.
       * @param perProtocolVersion
       *   - If true, returns the reference to the sub-directory corresponding to the pv
       *   - If false, returns the reference to the top-level directory corresponding to the release
       *     version
       */
     private def releaseDumpDirectories(
-        majorUpgradeTestFrom: Option[(Int, Int)],
+        latestFromMajorMinor: Option[(Int, Int)],
         perProtocolVersion: Boolean,
     ): List[(ContinuityDumpRef, ReleaseVersion)] = {
-      val onlyLatestDump = majorUpgradeTestFrom.isDefined
+      val onlyLatestDump = latestFromMajorMinor.isDefined
       val baseListing = if (perProtocolVersion) listPvDirectories() else listVersionDirectories()
 
       val listing = baseListing
@@ -67,7 +69,7 @@ trait S3Synchronization extends FutureHelpers with TestEssentials {
 
       val latestDumpReleaseVersion = listing
         .map(getReleaseVersion)
-        .filter(v => majorUpgradeTestFrom.forall(_ == v.majorMinor))
+        .filter(v => latestFromMajorMinor.forall(_ == v.majorMinor))
         .max
 
       listing
@@ -91,24 +93,28 @@ trait S3Synchronization extends FutureHelpers with TestEssentials {
         .collect { case ((version, ref), idx) if version.isStable || idx == 0 => (ref, version) }
     }
 
-    /** Returns the list of dumps, one for each release version (discarding protocol versions)
-      * @param majorUpgradeTestFrom
-      *   If defined, tests major upgrade from the specified version
+    /** Returns the list of dumps, one for each release version (discarding protocol versions).
+      *
+      * @param latestFromMajorMinor
+      *   If defined, restricts the returned dumps to only the single most recent release (patch or
+      *   snapshot) from the specified (major, minor) version line.
       */
     def getDumpBaseDirectoriesForVersion(
-        majorUpgradeTestFrom: Option[(Int, Int)] = None
+        latestFromMajorMinor: Option[(Int, Int)] = None
     ): List[(ContinuityDumpRef, ReleaseVersion)] =
-      releaseDumpDirectories(majorUpgradeTestFrom, perProtocolVersion = false)
+      releaseDumpDirectories(latestFromMajorMinor, perProtocolVersion = false)
 
     /** Returns the list of dumps and protocol versions to be tested.
-      * @param majorUpgradeTestFrom
-      *   If defined, tests major upgrade from the specified version
+      *
+      * @param latestFromMajorMinor
+      *   If defined, restricts the returned dumps to only the single most recent release (patch or
+      *   snapshot) from the specified (major, minor) version line.
       */
     def getDumpDirectories(
-        majorUpgradeTestFrom: Option[(Int, Int)] = None
+        latestFromMajorMinor: Option[(Int, Int)] = None
     ): List[(ContinuityDumpRef, ProtocolVersion)] = {
       val testedReleaseDirectories =
-        releaseDumpDirectories(majorUpgradeTestFrom, perProtocolVersion = true)
+        releaseDumpDirectories(latestFromMajorMinor, perProtocolVersion = true)
 
       val dumps: List[(ContinuityDumpRef, ProtocolVersion)] = testedReleaseDirectories.flatMap {
         case (pvDirectory, _) =>

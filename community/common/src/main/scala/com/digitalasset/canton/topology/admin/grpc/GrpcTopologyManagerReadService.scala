@@ -22,6 +22,7 @@ import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.{mapErrNewEUS, wra
 import com.digitalasset.canton.protocol.v30
 import com.digitalasset.canton.serialization.ProtoConverter
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
+import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.v30.*
 import com.digitalasset.canton.topology.admin.{grpc, v30 as adminProto}
@@ -111,7 +112,8 @@ class GrpcTopologyManagerReadService(
     member: Member,
     stores: => Seq[topology.store.TopologyStore[topology.store.TopologyStoreId]],
     crypto: Crypto,
-    topologyClientLookup: topology.store.TopologyStoreId => Option[SynchronizerTopologyClient],
+    topologyClientLookup: PhysicalSynchronizerId => Option[SynchronizerTopologyClient],
+    timeTrackerLookup: PhysicalSynchronizerId => Option[SynchronizerTimeTracker],
     physicalSynchronizerIdLookup: PSIdLookup,
     processingTimeout: ProcessingTimeout,
     val loggerFactory: NamedLoggerFactory,
@@ -159,16 +161,18 @@ class GrpcTopologyManagerReadService(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, RpcError, topology.store.TopologyStore[
-    topology.store.TopologyStoreId
+    topology.store.TopologyStoreId.SynchronizerStore
   ]] = {
-    val synchronizerStores
-        : Either[RpcError, topology.store.TopologyStore[topology.store.TopologyStoreId]] =
+    val synchronizerStores =
       storeO match {
         case Some(store) =>
           activePSIdFor(store).flatMap { targetStoreInternal =>
-            val synchronizerStores = stores.filter { s =>
-              s.storeId.isSynchronizerStore && s.storeId == targetStoreInternal
-            }
+            val synchronizerStores = stores
+              .flatMap(
+                topology.store.TopologyStoreId
+                  .select[topology.store.TopologyStoreId.SynchronizerStore]
+              )
+              .filter(store => store.storeId == targetStoreInternal)
             synchronizerStores match {
               case Nil =>
                 TopologyManagerError.TopologyStoreUnknown
@@ -225,8 +229,13 @@ class GrpcTopologyManagerReadService(
   // otherwise, we might read stuff from the database that isn't yet known to the node
   private def getApproximateTimestamp(
       storeId: topology.store.TopologyStoreId
-  ): Option[CantonTimestamp] =
-    topologyClientLookup(storeId).map(_.approximateTimestamp)
+  ): Option[CantonTimestamp] = storeId match {
+    case topology.store.TopologyStoreId.SynchronizerStore(psid) =>
+      topologyClientLookup(psid).map(_.approximateTimestamp)
+    case topology.store.TopologyStoreId.TemporaryStore(_) |
+        topology.store.TopologyStoreId.AuthorizedStore =>
+      None
+  }
 
   private def collectFromStoresByFilterString(
       baseQueryProto: Option[adminProto.BaseQuery],
@@ -949,25 +958,92 @@ class GrpcTopologyManagerReadService(
       )
 
       synchronizerTopologyStore <- collectSynchronizerStore(topologyStoreO)
+      psid = synchronizerTopologyStore.storeId.psid
+
+      timeTracker <- EitherT.fromOption[FutureUnlessShutdown](
+        timeTrackerLookup(psid),
+        TopologyManagerError.InternalError.Unexpected(
+          s"Unable to find synchronizer time tracker for $psid."
+        ),
+      )
 
       topologyClient <- EitherT.fromEither[FutureUnlessShutdown](
-        topologyClientLookup(synchronizerTopologyStore.storeId).toRight(
+        topologyClientLookup(psid).toRight(
           TopologyManagerError.TopologyStoreUnknown.Failure(synchronizerTopologyStore.storeId)
         )
       )
 
-      topologySnapshot <- EitherT.liftF(topologyClient.currentSnapshotApproximation)
+      // Find announcments in the store in the head state
+      announcements <- EitherT.right(
+        synchronizerTopologyStore
+          .findPositiveTransactions(
+            asOf = CantonTimestamp.MaxValue,
+            asOfInclusive = false,
+            isProposal = false,
+            types = Seq(LsuAnnouncement.code),
+            filterUid = Some(NonEmpty(Seq, psid.uid)),
+            filterNamespace = None,
+            pagination = None,
+          )
+          .map(_.collectOfMapping[LsuAnnouncement].result)
+      )
+
+      // Extract the effective time of the single effective announcement or raise an error accordingly.
+      referenceEffectiveTime <- (announcements match {
+        case Seq(single) => EitherT.rightT[FutureUnlessShutdown, RpcError](single.validFrom)
+        case Seq() =>
+          EitherT.leftT[FutureUnlessShutdown, EffectiveTime][RpcError](
+            TopologyManagerError.NoLsuAnnounced.Failure()
+          )
+        case multiple =>
+          EitherT.leftT[FutureUnlessShutdown, EffectiveTime][RpcError](
+            TopologyManagerError.InternalError.Unexpected(
+              s"Found multiple LsuAnnouncement mappings, but only expected one: $multiple"
+            )
+          )
+      })
+
+      // Check for an announced LSU with the topology snapshot logic at the reference time.
+      // This check is somewhat redundant, with the lookup above, however:
+      // the topology snapshot likely contains additional validation logic that we don't want to copy
+      // here but rather make use of.
+      topologySnapshot <- EitherT.liftF(
+        // Use the immediateSuccessor of the reference effective time, as that is the first
+        // timestamp at which the transaction is effective in the topology state.
+        topologyClient.awaitSnapshot(referenceEffectiveTime.immediateSuccessor.value)
+      )
       _ <- EitherT.fromOptionF(
         fopt = topologySnapshot.synchronizerUpgradeOngoing(),
-        ifNone = TopologyManagerError.NoLsuScheduled.Failure(): RpcError,
+        ifNone = TopologyManagerError.NoLsuAnnounced.Failure(): RpcError,
       )
+
+      // Wait for effective time to be observed on the synchronizer (and optionally request a time tick).
+      // We need to wait for all transactions with a sequencedTime <= referenceEffectiveTime, otherwise we would
+      // miss them in the topology snapshot.
+      _ <- EitherT.right[RpcError](
+        FutureUnlessShutdown.outcomeF(
+          timeTracker.awaitTick(referenceEffectiveTime.value).getOrElse(Future.unit)
+        )
+      )
+
+      // Wait for the topology client to have observed the effective time as sequenced time.
+      // We need to wait for the topology client to observe referenceEffectiveTime as sequenced time,
+      // so that we know all the topology processing up to that timestamp has completed.
+      _ <- EitherT.right[RpcError](
+        topologyClient
+          .awaitSequencedTimestamp(SequencedTime(referenceEffectiveTime.value))
+          .getOrElse(FutureUnlessShutdown.unit)
+      )
+
     } yield {
+      // Now all the stores are in sync and we can actually query the store
+
       // The specific filter here must be kept in sync with the filters for the local copy in
       // - DbTopologyStore.copyFromPredecessorSynchronizerStore
       // - InMemoryTopologyStore.copyFromPredecessorSynchronizerStore
       synchronizerTopologyStore.protocolVersion -> synchronizerTopologyStore
         .findEssentialStateAtSequencedTime(
-          SequencedTime(topologySnapshot.timestamp),
+          SequencedTime(referenceEffectiveTime.value),
           includeRejected = false,
         )
         .filter { stored =>

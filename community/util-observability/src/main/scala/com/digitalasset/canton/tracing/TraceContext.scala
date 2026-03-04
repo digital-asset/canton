@@ -7,7 +7,6 @@ import cats.Show.Shown
 import com.daml.nonempty.NonEmpty
 import com.daml.tracing as damlTelemetry
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
-import com.digitalasset.daml.lf.data.NoCopy
 import io.opentelemetry.api.trace.{Span, Tracer}
 import io.opentelemetry.context.Context as OpenTelemetryContext
 import io.opentelemetry.sdk.trace.ReadableSpan
@@ -19,8 +18,7 @@ import scala.language.implicitConversions
   */
 class TraceContext private[tracing] (val context: OpenTelemetryContext)
     extends Equals
-    with Serializable
-    with NoCopy {
+    with Serializable {
 
   lazy val asW3CTraceContext: Option[W3CTraceContext] =
     W3CTraceContext.fromOpenTelemetryContext(context)

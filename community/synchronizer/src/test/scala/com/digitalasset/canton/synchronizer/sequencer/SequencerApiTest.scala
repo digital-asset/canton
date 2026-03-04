@@ -1212,7 +1212,7 @@ trait SequencerApiTestUtils
   def registerAllTopologyMembers(headSnapshot: TopologySnapshot, sequencer: Sequencer): Unit =
     (for {
       allMembers <- EitherT
-        .right[Sequencer.RegisterError](headSnapshot.allMembers())
+        .right[Sequencer.RegisterError](headSnapshot.knownMembers())
       _ <- allMembers.toSeq
         .parTraverse_ { member =>
           for {

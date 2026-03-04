@@ -4,9 +4,9 @@
 package com.daml.grpc.adapter.operation
 
 import com.daml.grpc.sampleservice.implementations.HelloServiceReferenceImplementation
-import com.daml.ledger.api.testing.utils.{GrpcServiceFixture, SuiteResourceManagementAroundAll}
 import com.daml.platform.hello.HelloServiceGrpc
 import com.daml.platform.hello.HelloServiceGrpc.HelloServiceStub
+import com.daml.testing.utils.{GrpcServiceFixture, SuiteResourceManagementAroundAll}
 
 import java.util.concurrent.TimeUnit
 

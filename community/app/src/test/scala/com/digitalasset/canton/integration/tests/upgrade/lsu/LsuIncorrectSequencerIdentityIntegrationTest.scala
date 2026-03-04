@@ -17,6 +17,7 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import org.scalatest.Assertion
 
 import java.time.Duration
@@ -95,8 +96,9 @@ final class LsuIncorrectSequencerIdentityIntegrationTest extends LsuBase {
           )
 
           environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
-
+          transferTraffic(suppressLogs = false)
           eventually() {
+            environment.simClock.value.advance(Duration.ofSeconds(1))
             participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe false
             participants.all.forall(
               _.synchronizers.is_connected(fixture.currentPSId)
@@ -128,6 +130,10 @@ final class LsuIncorrectSequencerIdentityIntegrationTest extends LsuBase {
         (
           LogEntryOptionality.Required,
           _.errorMessage should include(s"Upgrade to ${fixture.newPSId} failed"),
+        ),
+        (
+          LogEntryOptionality.OptionalMany,
+          _.shouldBeCantonErrorCode(SequencerError.NotAtUpgradeTimeOrBeyond),
         ),
       )
     }
@@ -224,7 +230,7 @@ final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
         entry.loggerName should include(s"participant=${p.name}")
       }
 
-      loggerFactory.assertLogsUnordered(
+      loggerFactory.assertLogsUnorderedOptional(
         {
           sequencer1.topology.lsu.sequencer_successors.propose_successor(
             sequencerId = sequencer1.id,
@@ -256,8 +262,9 @@ final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
           }
 
           environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
-
+          transferTraffic(suppressLogs = false)
           eventually() {
+            environment.simClock.value.advance(Duration.ofSeconds(1))
             participant1.synchronizers.is_connected(fixture.newPSId) shouldBe false
             participant2.synchronizers.is_connected(fixture.newPSId) shouldBe true
 
@@ -267,19 +274,25 @@ final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
           }
 
           environment.simClock.value.advance(Duration.ofSeconds(1))
-          waitForTargetTimeOnSequencer(sequencer3, environment.clock.now)
+          waitForTargetTimeOnSequencer(sequencer3, environment.clock.now, logger)
 
           participant2.health.ping(participant2)
         },
+        // initial handshake and connect
+        (LogEntryOptionality.OptionalMany, incorrectSequencerPSId(_, participant1)),
         // initial handshake
-        incorrectSequencerPSId(_, participant1),
-        incorrectSequencerPSId(_, participant2),
-        failedHandshakeLogLine(_, participant1),
-        failedHandshakeLogLine(_, participant2),
-        // connect
-        incorrectSequencerPSId(_, participant1),
+        (LogEntryOptionality.Required, incorrectSequencerPSId(_, participant2)),
+        (LogEntryOptionality.Required, failedHandshakeLogLine(_, participant1)),
+        (LogEntryOptionality.Required, failedHandshakeLogLine(_, participant2)),
         // TODO(#30534) This message can be made more explicit (also include resolution) when individual errors bubble up
-        _.errorMessage should include(s"Upgrade to ${fixture.newPSId} failed"),
+        (
+          LogEntryOptionality.Required,
+          _.errorMessage should include(s"Upgrade to ${fixture.newPSId} failed"),
+        ),
+        (
+          LogEntryOptionality.OptionalMany,
+          _.shouldBeCantonErrorCode(SequencerError.NotAtUpgradeTimeOrBeyond),
+        ),
       )
     }
   }

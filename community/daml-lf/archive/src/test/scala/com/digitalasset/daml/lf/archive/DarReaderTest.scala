@@ -168,6 +168,7 @@ class DarReaderTest
           "GHC.Base",
           "LibraryModules",
           "GHC.Tuple.Check",
+          "DA.Internal.Serializable",
         )
     }
 

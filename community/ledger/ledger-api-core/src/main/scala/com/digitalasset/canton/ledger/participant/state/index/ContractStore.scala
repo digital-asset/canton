@@ -28,6 +28,13 @@ trait ContractStore {
       loggingContext: LoggingContextWithTrace
   ): Future[Option[ContractId]]
 
+  def lookupNonUniqueContractKey(
+      readers: Set[Ref.Party],
+      key: GlobalKey,
+      pageToken: Option[Long],
+      limit: Int,
+  )(implicit loggingContext: LoggingContextWithTrace): Future[ContractKeyPage]
+
   /** Querying the state of the contracts.
     */
   def lookupContractState(
@@ -37,7 +44,14 @@ trait ContractStore {
   ): Future[ContractState]
 }
 
-sealed trait ContractState
+final case class ContractKeyPage(
+    contracts: Vector[LfFatContractInst],
+    nextPageToken: Option[Long],
+)
+
+sealed trait ContractState {
+  def toContractOption: Option[LfFatContractInst] = None
+}
 
 sealed trait ContractStateStatus extends Product with Serializable {
   def isActive: Boolean = this match {
@@ -61,5 +75,7 @@ object ContractStateStatus {
 object ContractState {
   case object NotFound extends ContractState
   case object Archived extends ContractState
-  final case class Active(contractInstance: LfFatContractInst) extends ContractState
+  final case class Active(contractInstance: LfFatContractInst) extends ContractState {
+    override def toContractOption: Option[LfFatContractInst] = Some(contractInstance)
+  }
 }

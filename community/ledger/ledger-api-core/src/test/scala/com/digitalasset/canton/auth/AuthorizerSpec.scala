@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.auth
 
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.{BaseTest, LfLedgerString}
 import com.digitalasset.daml.lf.data.Ref

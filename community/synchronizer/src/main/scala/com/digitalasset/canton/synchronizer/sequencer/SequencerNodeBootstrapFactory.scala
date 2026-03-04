@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer
 
+import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
 import com.digitalasset.canton.environment.{
   CantonNodeBootstrapCommonArguments,
@@ -31,6 +32,7 @@ trait SequencerNodeBootstrapFactory {
   )(implicit
       executionContext: ExecutionContextIdlenessExecutorService,
       scheduler: ScheduledExecutorService,
+      executionSequencerFactory: ExecutionSequencerFactory,
       actorSystem: ActorSystem,
   ): Either[String, SequencerNodeBootstrap]
 }
@@ -45,6 +47,7 @@ object SequencerNodeBootstrapFactoryImpl extends SequencerNodeBootstrapFactory {
   )(implicit
       executionContext: ExecutionContextIdlenessExecutorService,
       scheduler: ScheduledExecutorService,
+      executionSequencerFactory: ExecutionSequencerFactory,
       actorSystem: ActorSystem,
   ): Either[String, SequencerNodeBootstrap] = {
     val storageFactory = new StorageMultiFactory(

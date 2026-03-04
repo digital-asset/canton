@@ -150,3 +150,31 @@ Now let's run ``ping`` between participants and observe the traffic consumption:
 Observe the traffic balances for the Participants and the Mediator decrease.
 
 For more information on traffic control and its configuration parameters, read the :externalref:`traffic control overview <overview-explanation-traffic-management>`.
+
+.. _sequencer-traffic-summaries:
+
+Query Traffic Summaries
+-----------------------
+
+The `SequencerTrafficInspectionService` API available on the Admin API of sequencers can be used to query traffic summaries for sequenced events.
+
+Example using an ``Iou`` contract, please refer to the :externalref:`getting started <canton-getting-started>` for details on DAR files and contracts:
+
+.. snippet:: howto_operate_traffic
+    .. success:: participants.all.dars.upload("dars/CantonExamples.dar")
+    .. success:: val pkgIou = participant1.packages.find_by_module("Iou").head
+    .. success:: val alice = participant1.parties.enable("Alice")
+    .. success:: val bank = participant2.parties.enable("Bank")
+    .. success(output=6):: val createIouCmd = ledger_api_utils.create(pkgIou.packageId,"Iou","Iou",Map("payer" -> bank,"owner" -> alice,"amount" -> Map("value" -> 100.0, "currency" -> "EUR"),"viewers" -> List()))
+    .. success(output=12):: val transaction = participant2.ledger_api.commands.submit(Seq(bank), Seq(createIouCmd))
+
+With the transaction in hand, query the sequencer for the traffic summary at the transaction's record time
+
+.. snippet:: howto_operate_traffic
+    .. success:: val recordTime = com.digitalasset.canton.data.CantonTimestamp.fromProtoTimestamp(transaction.recordTime.get).right.get
+    .. success:: sequencer1.traffic_control.traffic_summaries(Seq(recordTime))
+
+.. important::
+
+    This API should be used with care as it may negatively impact peformance on the sequencer if hit too frequently or heavily.
+    Make use of the batching capabilities by querying for a range of timestamps at once to mitigate the performance impact.

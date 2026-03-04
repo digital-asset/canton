@@ -196,7 +196,7 @@ class DbActiveContractStore(
   )(implicit
       traceContext: TraceContext
   ): CheckedT[FutureUnlessShutdown, AcsError, AcsWarning, Unit] = {
-    val (operationName, operation) =
+    val (_operationName, operation) =
       if (isArchival) (ActivenessChangeDetail.archive, ActivenessChangeDetail.Archive)
       else (ActivenessChangeDetail.purge, ActivenessChangeDetail.Purge)
 
@@ -403,16 +403,13 @@ class DbActiveContractStore(
         )
       case Some(neContracts) =>
         storage
-          .query(
-            activenessQuery(neContracts),
-            functionFullName,
-          )
+          .query(activenessQuery(neContracts), functionFullName)
           .map { res =>
             SortedMap.from(
               res
-                .groupBy { case (cid, ts, operation) => cid }
+                .groupBy { case (cid, _ts, _operation) => cid }
                 .map { case (cid, seq) =>
-                  cid -> seq.map { case (cid2, ts, operation) => (ts, operation) }.toSeq
+                  cid -> seq.map { case (_cid2, ts, operation) => (ts, operation) }
                 }
             )
           }

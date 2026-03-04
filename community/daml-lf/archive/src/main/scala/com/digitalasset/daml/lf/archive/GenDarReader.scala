@@ -30,6 +30,14 @@ sealed abstract class GenDarReader[A] {
       darStream: ZipInputStream,
       entrySizeThreshold: Int = EntrySizeThreshold,
   ): Either[Error, Dar[A]]
+
+  @throws[Error]
+  def assertReadArchive(
+                   name: String,
+                   darStream: ZipInputStream,
+                   entrySizeThreshold: Int = EntrySizeThreshold,
+                 ): Dar[A] =
+    assertRight(readArchive(name, darStream, entrySizeThreshold))
 }
 
 private[archive] final class GenDarReaderImpl[A](reader: GenReader[A]) extends GenDarReader[A] {

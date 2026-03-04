@@ -3,8 +3,8 @@
 
 package com.digitalasset.canton.platform.indexer.parallel
 
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.platform.indexer.ha.Handle
 import org.apache.pekko.stream.KillSwitch

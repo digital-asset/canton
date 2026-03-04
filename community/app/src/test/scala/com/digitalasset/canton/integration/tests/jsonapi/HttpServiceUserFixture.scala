@@ -4,8 +4,8 @@
 package com.digitalasset.canton.integration.tests.jsonapi
 
 import com.daml.jwt.Jwt
-import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.api.v2.admin.user_management_service.{CreateUserRequest, Right, User}
+import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.http
 import com.digitalasset.canton.http.json.v2.JsUserManagementCodecs.*
 import com.digitalasset.canton.http.util.ClientUtil.uniqueId

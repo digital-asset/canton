@@ -18,7 +18,8 @@ final case class Membership(
 
 object Membership {
 
-  /** A simple constructor for tests so that we don't have to provide a full ordering topology. */
+  // Simple constructors for tests so that we don't have to provide a full ordering topology.
+
   @VisibleForTesting
   private[bftordering] def forTesting(
       myId: BftNodeId,
@@ -35,4 +36,11 @@ object Membership {
     val nodes = orderingTopology.sortedNodes
     Membership(myId, orderingTopology, leaders.getOrElse(nodes))
   }
+
+  @VisibleForTesting
+  private[bftordering] def forTesting(
+      myId: BftNodeId,
+      orderingTopology: OrderingTopology,
+  ): Membership =
+    Membership(myId, orderingTopology, orderingTopology.sortedNodes)
 }
