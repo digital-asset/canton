@@ -44,7 +44,7 @@ import scala.util.control.NonFatal
   */
 abstract class CantonAppDriver extends App with NamedLogging with NoTracing {
 
-  protected def environmentFactory: EnvironmentFactory
+  protected de environmentFactory: EnvironmentFactory
 
   protected def withManualStart(config: CantonConfig): CantonConfig =
     config.copy(parameters = config.parameters.copy(manualStart = true))
