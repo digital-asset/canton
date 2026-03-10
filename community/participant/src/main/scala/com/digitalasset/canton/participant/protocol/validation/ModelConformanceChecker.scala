@@ -252,12 +252,34 @@ class ModelConformanceChecker(
     val seed = viewParticipantData.actionDescription.seedOption
 
     // Extract stored external call results from the action description (if exercise)
-    val storedExternalCallResults: StoredExternalCallResults =
-      viewParticipantData.actionDescription match {
-        case exercise: ExerciseActionDescription =>
-          StoredExternalCallResults.fromResults(exercise.externalCallResults)
-        case _ => StoredExternalCallResults.empty
+    // IMPORTANT: Also aggregate results from ALL subviews because external calls may occur
+    // in nested exercises (child views) but need to be replayed when reinterpreting the parent view.
+    val storedExternalCallResults: StoredExternalCallResults = {
+      // Helper to extract results from a single view's action description
+      def extractFromView(v: TransactionView): StoredExternalCallResults = {
+        v.viewParticipantData.unwrap match {
+          case Right(vpd) =>
+            vpd.actionDescription match {
+              case exercise: ExerciseActionDescription =>
+                StoredExternalCallResults.fromResults(exercise.externalCallResults)
+              case _ =>
+                StoredExternalCallResults.empty
+            }
+          case Left(_) =>
+            // Blinded view - no data available
+            StoredExternalCallResults.empty
+        }
       }
+
+      // Collect results from this view AND all subviews (flatten includes this view as first element)
+      val allViewResults = view.flatten.map(extractFromView)
+      val allResults = allViewResults.foldLeft(StoredExternalCallResults.empty)(_ ++ _)
+
+      logger.info(
+        s"reInterpret: Aggregated ${allResults.size} external call results from ${view.flatten.size} views"
+      )
+      allResults
+    }
 
     val inputContracts = view.inputContracts.fmap(_.contract)
 
@@ -266,11 +288,16 @@ class ModelConformanceChecker(
     // Determine if this participant is a confirmer (signatory) for this view
     // Confirmers must re-execute external calls; observers replay stored results
     val confirmingParties = view.viewCommonData.tryUnwrap.viewConfirmationParameters.confirmers
+    logger.info(s"reInterpret: participantId=$participantId, confirmingParties=$confirmingParties, topologySnapshot=${topologySnapshot.isDefined}")
     val isConfirmerF: FutureUnlessShutdown[Boolean] = topologySnapshot match {
       case Some(snapshot) =>
-        snapshot.canConfirm(participantId, confirmingParties).map(_.nonEmpty)
+        snapshot.canConfirm(participantId, confirmingParties).map { canConfirmParties =>
+          logger.info(s"reInterpret: canConfirm returned $canConfirmParties for participant=$participantId, confirmers=$confirmingParties")
+          canConfirmParties.nonEmpty
+        }
       case None =>
         // No topology snapshot available - assume not a confirmer (conservative)
+        logger.warn(s"reInterpret: No topology snapshot available, assuming not a confirmer")
         FutureUnlessShutdown.pure(false)
     }
 
@@ -338,6 +365,7 @@ class ModelConformanceChecker(
             ledgerTime,
             preparationTime,
             getEngineAbortStatus,
+            Some(topologySnapshot),
           )
         )
 

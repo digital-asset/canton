@@ -17,7 +17,7 @@ object VersionedTransactionHasher {
     */
   @throws[NodeHashingError]
   private[hash] def tryHashTransaction(
-      @unused hashVersion: HashingSchemeVersion,
+      hashVersion: HashingSchemeVersion,
       versionedTransaction: VersionedTransaction,
       nodeSeeds: Map[NodeId, LfHash],
       hashTracer: HashTracer = HashTracer.NoOp,
@@ -26,6 +26,7 @@ object VersionedTransactionHasher {
       HashPurpose.PreparedSubmission,
       hashTracer,
       enforceNodeSeedForCreateNodes = true,
+      hashingSchemeVersion = hashVersion,
     ).addPurpose()
       .withContext("Serialization Version")(
         _.addString(SerializationVersion.toProtoValue(versionedTransaction.version))

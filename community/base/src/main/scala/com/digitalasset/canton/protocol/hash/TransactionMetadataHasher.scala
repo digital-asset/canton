@@ -25,6 +25,7 @@ object TransactionMetadataHasher {
       HashPurpose.PreparedSubmission,
       hashTracer,
       enforceNodeSeedForCreateNodes = false,
+      hashingSchemeVersion = hashVersion,
     ).addPurpose()
       .addMetadataEncodingVersion(1)
       .withContext("Act As Parties")(

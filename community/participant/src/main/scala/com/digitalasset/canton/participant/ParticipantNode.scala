@@ -35,6 +35,10 @@ import com.digitalasset.canton.participant.admin.*
 import com.digitalasset.canton.participant.admin.grpc.*
 import com.digitalasset.canton.participant.config.*
 import com.digitalasset.canton.participant.health.admin.ParticipantStatus
+import com.digitalasset.canton.participant.extension.{
+  ExtensionServiceExternalCallHandler,
+  ExtensionServiceManager,
+}
 import com.digitalasset.canton.participant.ledger.api.{
   AcsCommitmentPublicationPostProcessor,
   LedgerApiIndexer,
@@ -671,6 +675,27 @@ class ParticipantNodeBootstrap(
             .flatMap(syncPersistentStateManager.get)
             .map(_.topologyManager)
 
+        // Create extension service manager early so it can be shared with both CantonSyncService and LedgerApiServer
+        extensionServiceManagerOpt = if (parameters.engine.extensions.nonEmpty) {
+          val manager = new ExtensionServiceManager(
+            extensionConfigs = parameters.engine.extensions,
+            engineExtensionsConfig = parameters.engine.extensionSettings,
+            loggerFactory = loggerFactory,
+          )
+          logger.info(
+            s"Extension service manager initialized with ${parameters.engine.extensions.size} extension(s): " +
+              s"${parameters.engine.extensions.keys.mkString(", ")}"
+          )
+          Some(manager)
+        } else {
+          None
+        }
+
+        // Create external call handler from extension service manager for use in transaction reinterpretation
+        externalCallHandler = extensionServiceManagerOpt.map(manager =>
+          new ExtensionServiceExternalCallHandler(manager)
+        )
+
         // Sync Service
         sync = CantonSyncService.create(
           participantId,
@@ -701,6 +726,7 @@ class ParticipantNodeBootstrap(
           ledgerApiIndexerContainer,
           connectedSynchronizersLookupContainer,
           () => triggerDeclarativeChange(),
+          externalCallHandler,
         )
 
         _ = {
@@ -733,6 +759,7 @@ class ParticipantNodeBootstrap(
                 participantNodePersistentState = persistentState,
                 sync = sync,
                 tracerProvider = tracerProvider,
+                extensionServiceManagerOpt = extensionServiceManagerOpt,
               )
             ),
           loggerFactory = loggerFactory,

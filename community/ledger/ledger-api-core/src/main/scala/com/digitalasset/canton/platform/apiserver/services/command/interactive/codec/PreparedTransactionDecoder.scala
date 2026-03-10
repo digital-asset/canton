@@ -221,6 +221,11 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
       .withFieldConst(_.byKey, false)
       .buildTransformer
 
+    // Transformer for external call results
+    private implicit val externalCallResultTransformer
+        : Transformer[isdv1.ExternalCallResult, lf.transaction.ExternalCallResult] =
+      Transformer.derive[isdv1.ExternalCallResult, lf.transaction.ExternalCallResult]
+
     private[interactive] implicit def exerciseTransformer(implicit
         errorLoggingContext: ErrorLoggingContext
     ): PartialTransformer[isdv1.Exercise, lf.transaction.Node.Exercise] =
@@ -239,7 +244,10 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
         .withFieldConst(_.keyOpt, None)
         .withFieldConst(_.byKey, false)
         .withFieldConst(_.choiceAuthorizers, None)
-        .withFieldConst(_.externalCallResults, ImmArray.empty)
+        .withFieldComputed(
+          _.externalCallResults,
+          ex => ImmArray.from(ex.externalCallResults.map(_.transformInto[lf.transaction.ExternalCallResult])),
+        )
         .buildTransformer
 
     private implicit val rollbackTransformer
