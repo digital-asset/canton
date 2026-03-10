@@ -49,8 +49,9 @@ object TransactionHash {
       HashPurpose.PreparedSubmission,
       hashTracer,
       enforceNodeSeedForCreateNodes = true,
+      hashingSchemeVersion = hashVersion,
     ).addPurpose()
-      .addHashingSchemeVersion(HashingSchemeVersion.V2)
+      .addHashingSchemeVersion(hashVersion)
       .addHash(
         VersionedTransactionHasher.tryHashTransaction(
           hashVersion,

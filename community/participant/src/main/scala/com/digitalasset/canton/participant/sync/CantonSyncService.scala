@@ -1790,6 +1790,7 @@ object CantonSyncService {
       ledgerApiIndexer: LifeCycleContainer[LedgerApiIndexer],
       connectedSynchronizersLookupContainer: ConnectedSynchronizersLookupContainer,
       triggerDeclarativeChange: () => Unit,
+      externalCallHandler: Option[ExternalCallHandler] = None,
   )(implicit ec: ExecutionContextExecutor, mat: Materializer, tracer: Tracer): CantonSyncService = {
 
     // Set initial replica state
@@ -1826,6 +1827,7 @@ object CantonSyncService {
         testingConfig,
         ledgerApiIndexer,
         connectedSynchronizersLookupContainer,
+        externalCallHandler,
       )
     syncService
   }

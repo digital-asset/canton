@@ -42,13 +42,14 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.{
 import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.client.TopologySnapshot
-import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.{ParticipantId, SynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractValidator, ErrorUtil, RoseTree}
-import com.digitalasset.canton.version.HashingSchemeVersion
+import com.digitalasset.canton.version.{HashingSchemeVersion, ProtocolVersion}
 import com.digitalasset.canton.{LfKeyResolver, LfPartyId, checked}
+import com.digitalasset.canton.data.ActionDescription.ExerciseActionDescription
 import com.digitalasset.daml.lf.data.Ref.{CommandId, PackageId, PackageName}
 
 import java.util.UUID
@@ -255,6 +256,36 @@ class ModelConformanceChecker(
       viewParticipantData.rootAction
 
     val seed = viewParticipantData.actionDescription.seedOption
+
+    // Extract stored external call results from the action description (if exercise)
+    // IMPORTANT: Also aggregate results from ALL subviews because external calls may occur
+    // in nested exercises (child views) but need to be replayed when reinterpreting the parent view.
+    val storedExternalCallResults: StoredExternalCallResults = {
+      // Helper to extract results from a single view's action description
+      def extractFromView(v: TransactionView): StoredExternalCallResults = {
+        v.viewParticipantData.unwrap match {
+          case Right(vpd) =>
+            vpd.actionDescription match {
+              case exercise: ExerciseActionDescription =>
+                StoredExternalCallResults.fromResults(exercise.externalCallResults)
+              case _ =>
+                StoredExternalCallResults.empty
+            }
+          case Left(_) =>
+            // Blinded view - no data available
+            StoredExternalCallResults.empty
+        }
+      }
+
+      // Collect results from this view AND all subviews (flatten includes this view as first element)
+      val allViewResults = view.flatten.map(extractFromView)
+      val allResults = allViewResults.foldLeft(StoredExternalCallResults.empty)(_ ++ _)
+
+      logger.info(
+        s"reInterpret: Aggregated ${allResults.size} external call results from ${view.flatten.size} views"
+      )
+      allResults
+    }
 
     val inputContracts = view.inputContracts.fmap(_.contract)
 
@@ -466,8 +497,9 @@ object ModelConformanceChecker {
         commandId: CommandId,
         transactionUUID: UUID,
         mediatorGroup: Int,
-        physicalSynchronizerId: PhysicalSynchronizerId,
+        synchronizerId: SynchronizerId,
         maxRecordTime: Option[CantonTimestamp],
+        protocolVersion: ProtocolVersion,
         transactionEnricher: TransactionEnricher,
         contractEnricher: ContractEnricher,
         hashTracer: HashTracer,
@@ -505,14 +537,14 @@ object ModelConformanceChecker {
                 commandId = commandId,
                 transactionUUID = transactionUUID,
                 mediatorGroup = mediatorGroup,
-                synchronizer = physicalSynchronizerId.forExternalTransactionHashing,
+                synchronizerId = synchronizerId,
                 timeBoundaries = reInterpretationResult.timeBoundaries,
                 preparationTime = reInterpretationResult.metadata.preparationTime.toLf,
                 maxRecordTime = maxRecordTime.map(_.toLf),
                 disclosedContracts = enrichedInputContracts,
               ),
               reInterpretationResult.metadata.seeds,
-              physicalSynchronizerId.protocolVersion,
+              protocolVersion,
               hashTracer = hashTracer,
             )
             .leftMap(_.message)
