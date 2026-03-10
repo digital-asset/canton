@@ -11,6 +11,7 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.config.TestingConfigInternal
 import com.digitalasset.canton.crypto.{
   Signature,
@@ -623,6 +624,7 @@ abstract class ProtocolProcessor[
       rc: RequestCounter,
       sc: SequencerCounter,
       batch: steps.RequestBatch,
+      trafficCost: NonNegativeLong,
   )(implicit traceContext: TraceContext): HandlerResult = {
     val RequestAndRootHashMessage(_viewMessages, _rootHashMessage, _mediatorId, _isReceipt) = batch
     val requestId = RequestId(ts)
@@ -655,7 +657,15 @@ abstract class ProtocolProcessor[
           )
           .map { requestDataHandle =>
             // If the result is not a success, we still need to complete the request data in some way
-            processRequestInternal(ts, rc, sc, batch, requestDataHandle, freshOwnTimelyTxF)
+            processRequestInternal(
+              ts,
+              rc,
+              sc,
+              batch,
+              requestDataHandle,
+              freshOwnTimelyTxF,
+              trafficCost,
+            )
               .thereafter {
                 case Failure(exception) => requestDataHandle.failed(exception)
                 case Success(UnlessShutdown.Outcome(Left(_))) => requestDataHandle.complete(None)
@@ -678,6 +688,7 @@ abstract class ProtocolProcessor[
         steps.requestType.PendingRequestData
       ],
       freshOwnTimelyTxF: FutureUnlessShutdown[Boolean],
+      trafficCost: NonNegativeLong,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, steps.RequestError, Unit] = {
@@ -835,6 +846,7 @@ abstract class ProtocolProcessor[
                     rootHash,
                     freshOwnTimelyTxF,
                     error,
+                    trafficCost,
                   )
                 } yield ()
 
@@ -900,6 +912,7 @@ abstract class ProtocolProcessor[
                       mediator,
                       snapshot,
                       synchronizerParameters,
+                      trafficCost,
                     )
                   )
 
@@ -943,6 +956,7 @@ abstract class ProtocolProcessor[
       rootHash: RootHash,
       freshOwnTimelyTxF: FutureUnlessShutdown[Boolean],
       error: TransactionError,
+      trafficCost: NonNegativeLong,
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, steps.RequestError, Unit] =
@@ -958,6 +972,7 @@ abstract class ProtocolProcessor[
             rootHash,
             freshOwnTimelyTx,
             error,
+            trafficCost,
           )
         }
         .getOrElse((None, None))
@@ -1034,6 +1049,7 @@ abstract class ProtocolProcessor[
             parsedRequest.rootHash,
             FutureUnlessShutdown.pure(parsedRequest.isFreshOwnTimelyRequest),
             error,
+            parsedRequest.trafficCost,
           )
         }
     } yield ()

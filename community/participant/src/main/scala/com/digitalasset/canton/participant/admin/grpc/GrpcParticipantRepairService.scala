@@ -57,6 +57,7 @@ import com.digitalasset.canton.util.{
 }
 import com.digitalasset.canton.{
   LfPartyId,
+  ProtoDeserializationError,
   ReassignmentCounter,
   SequencerCounter,
   SynchronizerAlias,
@@ -590,14 +591,14 @@ final class GrpcParticipantRepairService(
           SynchronizerAlias.create(request.sourceSynchronizerAlias).map(Source(_))
         )
         conf <- EitherT
-          .fromEither[Future](
-            request.targetSynchronizerConnectionConfig
+          .fromEither[Future](for {
+            confP <- request.targetSynchronizerConnectionConfig
               .toRight("The target synchronizer connection configuration is required")
-              .flatMap(
-                SynchronizerConnectionConfig.fromProtoV30(_).leftMap(_.toString)
-              )
-              .map(Target(_))
-          )
+            conf <- SynchronizerConnectionConfig.fromProtoV30(confP).leftMap(_.toString)
+            _ <- conf.sequencerConnections.submissionRequestAmplification.validate.leftMap(
+              message => s"Target synchronizer connection config error in amplification: $message"
+            )
+          } yield Target(conf))
         _ <- EitherT(
           sync
             .migrateSynchronizer(sourceSynchronizerAlias, conf, force = request.force)
@@ -880,6 +881,16 @@ final class GrpcParticipantRepairService(
 
     val res = for {
       validatedRequest <- CantonGrpcUtil.wrapErrUS(ManualLSURequest.fromProtoV30(request))
+      _ <- CantonGrpcUtil.wrapErrUS(
+        validatedRequest.successorConfig.sequencerConnections.submissionRequestAmplification.validate
+          .leftMap(
+            ProtoDeserializationError.ValueConversionError(
+              "SynchronizerConnectionConfig.SequencerConnections.SubmissionRequestAmplification",
+              _,
+            )
+          )
+      )
+
       _ <- sync
         .manuallyUpgradeSynchronizerTo(validatedRequest)
         .leftMap[RpcError](

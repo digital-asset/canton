@@ -7,6 +7,7 @@ import com.digitalasset.canton.logging.pretty.Pretty
 import io.scalaland.chimney.Transformer
 import io.scalaland.chimney.dsl.TransformerOps
 import monocle.Lens
+import monocle.function.Each
 import pureconfig.{ConfigReader, ConfigWriter}
 
 import scala.collection.immutable
@@ -60,6 +61,11 @@ object NonEmptyUtil {
 
     implicit class NonEmptyLensOps[A, F[_], B](val lens: Lens[A, NonEmpty[F[B]]]) extends AnyVal {
       def toNEF: Lens[A, NonEmptyF[F, B]] = lensToNEF(lens)
+    }
+
+    implicit def eachNonEmpty[A, B](implicit F: Each[A, B]): Each[NonEmpty[A], B] = {
+      type K[T[_]] = Each[T[A], B]
+      NonEmptyColl.Instance.subst[K](F)
     }
   }
 

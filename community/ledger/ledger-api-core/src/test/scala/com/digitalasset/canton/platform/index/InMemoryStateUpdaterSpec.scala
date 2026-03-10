@@ -7,9 +7,12 @@ import cats.data.NonEmptyVector
 import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.completion.Completion
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
 import com.digitalasset.canton.crypto.{Hash, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
+import com.digitalasset.canton.ledger.api.ApiMocks.userId
+import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.Update.CommandRejected.FinalReason
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.Added
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.{
@@ -45,6 +48,7 @@ import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate.{
   CreatedEvent,
   TransactionAccepted,
+  TransactionRejected,
 }
 import com.digitalasset.canton.platform.store.interning.StringInterningView
 import com.digitalasset.canton.platform.{DispatcherState, InMemoryState}
@@ -194,6 +198,46 @@ class InMemoryStateUpdaterSpec
     inside(preparedWithoutHashResult.updates.loneElement) {
       case transactionAccepted: TransactionAccepted =>
         transactionAccepted.externalTransactionHash shouldBe None
+    }
+  }
+
+  "prepare" should "correctly populate traffic cost" in new Scope {
+    val paidTrafficCost = NonNegativeLong.tryCreate(1235)
+    val completionInfo = Some(
+      state.CompletionInfo(
+        actAs = List(party1),
+        userId = userId,
+        commandId = commandId,
+        optDeduplicationPeriod = None,
+        submissionId = Some(submissionId),
+        paidTrafficCost = paidTrafficCost,
+      )
+    )
+    val accepted = offset(11L) -> transactionAccepted(
+      t = 0L,
+      synchronizerId = synchronizerId1,
+      completionInfoO = completionInfo,
+    )
+
+    val preparedWithTrafficCostResult = InMemoryStateUpdater.prepare(
+      Vector(accepted),
+      someLedgerEnd,
+      traceContext,
+    )
+    inside(preparedWithTrafficCostResult.updates.loneElement) {
+      case transactionAccepted: TransactionAccepted =>
+        transactionAccepted.paidTrafficCost shouldBe paidTrafficCost
+    }
+
+    val rejected = offset(12L) -> commandRejected(4, synchronizerId1, trafficCost = paidTrafficCost)
+    val preparedRejectedWithTrafficCostResult = InMemoryStateUpdater.prepare(
+      Vector(rejected),
+      someLedgerEnd,
+      traceContext,
+    )
+    inside(preparedRejectedWithTrafficCostResult.updates.loneElement) {
+      case transactionRejected: TransactionRejected =>
+        transactionRejected.completionStreamResponse.completionResponse.completion.value.paidTrafficCost shouldBe paidTrafficCost.value
     }
   }
 
@@ -544,6 +588,8 @@ object InMemoryStateUpdaterSpec {
 
   private val party1 = Ref.Party.assertFromString("someparty1")
   private val party2 = Ref.Party.assertFromString("someparty2")
+  private val commandId = Ref.CommandId.assertFromString("commandid")
+  private val submissionId = Ref.SubmissionId.assertFromString("submissionid")
 
   private val templateId = Identifier.assertFromString("pkgId1:Mod:I")
   private val templateId2 = Identifier.assertFromString("pkgId2:Mod:I2")
@@ -581,6 +627,7 @@ object InMemoryStateUpdaterSpec {
         synchronizerId = synchronizerId1.toProtoPrimitive,
         recordTime = Timestamp.Epoch,
         externalTransactionHash = None,
+        paidTrafficCost = NonNegativeLong.zero,
       )(emptyTraceContext)
 
     val assignLogUpdate =
@@ -773,6 +820,7 @@ object InMemoryStateUpdaterSpec {
         synchronizerId = synchronizerId1.toProtoPrimitive,
         recordTime = Timestamp(1),
         externalTransactionHash = None,
+        paidTrafficCost = NonNegativeLong.zero,
       )(emptyTraceContext)
 
     val tx_accepted_withoutCompletionStreamResponse: TransactionLogUpdate.TransactionAccepted =
@@ -1112,9 +1160,10 @@ object InMemoryStateUpdaterSpec {
       transaction: CommittedTransaction = CommittedTransaction(TransactionBuilder.Empty),
       contractAuthenticationData: Map[Value.ContractId, Bytes] = Map.empty,
       contractActivenessChanged: Boolean = true,
+      completionInfoO: Option[CompletionInfo] = None,
   ): Update.TransactionAccepted =
     Update.SequencedTransactionAccepted(
-      completionInfoO = None,
+      completionInfoO = completionInfoO,
       transactionMeta = someTransactionMeta,
       transaction = transaction,
       updateId = txId1,
@@ -1190,7 +1239,11 @@ object InMemoryStateUpdaterSpec {
       internalContractIds = Map.empty,
     )
 
-  private def commandRejected(t: Long, synchronizerId: SynchronizerId): Update.CommandRejected =
+  private def commandRejected(
+      t: Long,
+      synchronizerId: SynchronizerId,
+      trafficCost: NonNegativeLong = NonNegativeLong.zero,
+  ): Update.CommandRejected =
     Update.SequencedCommandRejected(
       completionInfo = CompletionInfo(
         actAs = List.empty,
@@ -1198,6 +1251,7 @@ object InMemoryStateUpdaterSpec {
         commandId = Ref.CommandId.assertFromString("cmdId"),
         optDeduplicationPeriod = None,
         submissionId = None,
+        paidTrafficCost = trafficCost,
       ),
       reasonTemplate = FinalReason(new Status()),
       synchronizerId = synchronizerId,

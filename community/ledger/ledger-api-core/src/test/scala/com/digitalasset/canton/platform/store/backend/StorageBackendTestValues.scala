@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.platform.store.backend
 
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
 import com.digitalasset.canton.crypto.{Hash as CantonHash, HashPurpose}
 import com.digitalasset.canton.data.{CantonTimestamp, Offset}
@@ -468,6 +469,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       updateId: Option[Array[Byte]] = Some(new Array[Byte](0)),
       publicationTime: Timestamp = someTime,
       isTransaction: Boolean = true,
+      trafficCost: NonNegativeLong = NonNegativeLong.zero,
   ): DbDto.CommandCompletion =
     DbDto.CommandCompletion(
       completion_offset = offset.unwrap,
@@ -488,6 +490,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
       message_uuid = messageUuid,
       is_transaction = isTransaction,
       trace_context = traceContext,
+      traffic_cost = trafficCost.value,
     )
 
   def dtoTransactionMeta(

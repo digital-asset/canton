@@ -172,8 +172,6 @@ class SynchronizerTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
 
       for {
         _ <- advanceTo(2)
-        _ = requestSubmitter.hasRequestedTime shouldBe false
-        _ <- advanceAndFlush(observationLatencySecs)
       } yield requestSubmitter.hasRequestedTime shouldBe true
     }
 
@@ -205,26 +203,11 @@ class SynchronizerTimeTrackerTest extends FixtureAsyncWordSpec with BaseTest {
       // would cause the timestamp we're looking for to overflow
       loggerFactory.assertLogs(
         timeTracker.requestTicks(
-          Seq(
-            CantonTimestamp.MaxValue,
-            CantonTimestamp.MaxValue.minusSeconds(2),
-            CantonTimestamp.MaxValue.minusSeconds(1),
-          ).map(Traced(_))
+          Seq(CantonTimestamp.MaxValue).map(Traced(_))
         ),
-        _.warningMessage should (include(
-          s"Ignoring request for 3 ticks from ${CantonTimestamp.MaxValue.minusSeconds(2)} to ${CantonTimestamp.MaxValue} as they are too large"
-        )),
-      )
-      timeTracker.earliestExpectedObservationTime() shouldBe None
-
-      // the upper bound is the time - observationLatency
-      loggerFactory.assertLogs(
-        timeTracker.requestTick(
-          CantonTimestamp.MaxValue.minus(synchronizerTimeTrackerConfig.observationLatency.asJava)
+        _.warningMessage should include(
+          s"Ignoring request for 1 ticks from ${CantonTimestamp.MaxValue} to ${CantonTimestamp.MaxValue} as they are too large"
         ),
-        _.warningMessage should (include("Ignoring request for 1 ticks") and include(
-          "as they are too large"
-        )),
       )
       timeTracker.earliestExpectedObservationTime() shouldBe None
 

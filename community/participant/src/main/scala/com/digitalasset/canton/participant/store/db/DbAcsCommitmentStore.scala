@@ -48,7 +48,9 @@ import com.digitalasset.canton.util.ErrorUtil
 import com.digitalasset.canton.util.collection.IterableUtil.Ops
 import com.digitalasset.canton.version.ProtocolVersionValidation
 import com.digitalasset.canton.{InternedPartyId, LfPartyId}
+import com.google.common.annotations.VisibleForTesting
 import com.google.protobuf.ByteString
+import slick.dbio.DBIOAction
 import slick.jdbc.TransactionIsolation.Serializable
 import slick.jdbc.canton.SQLActionBuilder
 import slick.jdbc.{
@@ -513,6 +515,9 @@ class DbIncrementalCommitmentStore(
   import storage.api.*
   import storage.converters.*
 
+  @VisibleForTesting
+  def stringInterning: StringInterning = stringInterningEval.value
+
   private implicit val getInternedPartyIdSortedSet: GetResult[Vector[Int]] =
     DbParameterUtils.getIntArrayResultsDb.andThen(_.toVector)
 
@@ -594,7 +599,7 @@ class DbIncrementalCommitmentStore(
     def deleteCommitments(
         stakeholders: List[SortedSet[InternedPartyId]]
     ): Seq[DbAction.All[Unit]] = {
-      val stringInterning = stringInterningEval.value
+      val stringInterning = this.stringInterning
 
       val deleteStatements = tablesToUpdate.map { table =>
         s"delete from $table where synchronizer_idx = ? and stakeholders_hash = ?"
@@ -611,7 +616,7 @@ class DbIncrementalCommitmentStore(
     def storeUpdates(
         updates: List[(SortedSet[InternedPartyId], AcsCommitment.CommitmentType)]
     ): Seq[DbAction.All[Unit]] = {
-      val stringInterning = stringInterningEval.value
+      val stringInterning = this.stringInterning
 
       def setParams(
           pp: PositionedParameters
@@ -725,6 +730,18 @@ class DbIncrementalCommitmentStore(
         """
     }
     storage.update(query, functionFullName).map(nrRows => if (nrRows > 0) true else false)
+  }
+
+  override def forgetCheckpoints()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    val queries = DBIOAction
+      .seq(
+        sqlu"delete from par_commitment_checkpoint_snapshot where synchronizer_idx = $indexedSynchronizer",
+        sqlu"delete from par_commitment_checkpoint_snapshot_time where synchronizer_idx = $indexedSynchronizer",
+      )
+      .transactionally
+    storage.update(queries, functionFullName)
   }
 }
 

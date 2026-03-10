@@ -11,6 +11,7 @@ import com.daml.logging.LoggingContext
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.*
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
   SessionEncryptionKeyCacheConfig,
@@ -273,6 +274,7 @@ final class AssignmentProcessingStepsTest
       cryptoSnapshot,
       cryptoSnapshot.ipsSnapshot.findDynamicSynchronizerParameters().futureValueUS.value,
       view.reassignmentId,
+      NonNegativeLong.tryCreate(1235),
     )
   }
 
@@ -564,6 +566,7 @@ final class AssignmentProcessingStepsTest
               parsedRequest.mediator,
               parsedRequest.snapshot,
               parsedRequest.synchronizerParameters,
+              parsedRequest.trafficCost,
             ),
             _.shouldBeCantonError(
               SyncServiceAlarm,

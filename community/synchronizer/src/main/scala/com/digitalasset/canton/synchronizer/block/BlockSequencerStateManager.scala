@@ -45,7 +45,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SubmissionOutcome,
 }
 import com.digitalasset.canton.synchronizer.sequencing.traffic.store.TrafficConsumedStore
-import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId, SequencerId}
+import com.digitalasset.canton.topology.{Member, SequencerId}
 import com.digitalasset.canton.tracing.{NoTracing, TraceContext, Traced}
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -911,8 +911,8 @@ class BlockSequencerStateManager(
 object BlockSequencerStateManager {
 
   def create(
-      synchronizerId: PhysicalSynchronizerId,
       sequencerId: SequencerId,
+      initialHeadBlockO: Option[BlockEphemeralState],
       store: SequencerBlockStore,
       trafficConsumedStore: TrafficConsumedStore,
       asyncWriterParameters: AsyncWriterParameters,
@@ -926,39 +926,31 @@ object BlockSequencerStateManager {
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
-  ): UnlessShutdown[BlockSequencerStateManager] = {
+  ): BlockSequencerStateManager = {
     val logger = loggerFactory.getTracedLogger(getClass)
-    implicit val errorLoggingContext: ErrorLoggingContext =
-      ErrorLoggingContext.fromTracedLogger(logger)
-    timeouts.unbounded
-      .awaitUS(s"Reading the head of the $synchronizerId sequencer state")(store.readHead)
-      .map { headBlockO =>
-        val headBlock = headBlockO.getOrElse(BlockEphemeralState.empty)
-        // required to prevent warnings on earlier events that we won't be processing
-        progressSupervisorO.foreach(_.ignoreTimestampsBefore(headBlock.latestBlock.lastTs))
-        new AtomicReference[HeadState]({
-          logger.debug(
-            s"Initialized the block sequencer with head block ${headBlock.latestBlock}"
-          )
-          HeadState.fullyProcessed(headBlock)
-        })
-      }
-      .map { headState =>
-        new BlockSequencerStateManager(
-          store = store,
-          trafficConsumedStore = trafficConsumedStore,
-          asyncWriterParameters = asyncWriterParameters,
-          enableInvariantCheck = enableInvariantCheck,
-          timeouts = timeouts,
-          futureSupervisor = futureSupervisor,
-          loggerFactory = loggerFactory,
-          headState = headState,
-          streamInstrumentationConfig = streamInstrumentationConfig,
-          blockMetrics = blockMetrics,
-          progressSupervisorO = progressSupervisorO,
-          sequencerId = sequencerId,
-        )
-      }
+    val headBlock = initialHeadBlockO.getOrElse(BlockEphemeralState.empty)
+    // required to prevent warnings on earlier events that we won't be processing
+    progressSupervisorO.foreach(_.ignoreTimestampsBefore(headBlock.latestBlock.lastTs))
+    val headState = new AtomicReference[HeadState]({
+      logger.debug(
+        s"Initialized the block sequencer with head block ${headBlock.latestBlock}"
+      )
+      HeadState.fullyProcessed(headBlock)
+    })
+    new BlockSequencerStateManager(
+      store = store,
+      trafficConsumedStore = trafficConsumedStore,
+      asyncWriterParameters = asyncWriterParameters,
+      enableInvariantCheck = enableInvariantCheck,
+      timeouts = timeouts,
+      futureSupervisor = futureSupervisor,
+      loggerFactory = loggerFactory,
+      headState = headState,
+      streamInstrumentationConfig = streamInstrumentationConfig,
+      blockMetrics = blockMetrics,
+      progressSupervisorO = progressSupervisorO,
+      sequencerId = sequencerId,
+    )
   }
 
   /** Keeps track of the accumulated state changes by processing chunks of updates from a block

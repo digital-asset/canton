@@ -97,7 +97,8 @@ class TrafficPurchasedSubmissionHandlerTest
         any[MessageId],
         aggregationRuleCapture.capture(),
         callbackCapture.capture(),
-        any[Boolean],
+        amplify = any[Boolean],
+        useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])
     ).thenReturn(EitherT.pure(()))
 
@@ -177,7 +178,8 @@ class TrafficPurchasedSubmissionHandlerTest
         any[MessageId],
         any[Option[AggregationRule]],
         callbackCapture.capture(),
-        any[Boolean],
+        amplify = any[Boolean],
+        useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])
     ).thenReturn(EitherT.pure(()))
 
@@ -230,7 +232,8 @@ class TrafficPurchasedSubmissionHandlerTest
         any[MessageId],
         any[Option[AggregationRule]],
         any[SendCallback],
-        any[Boolean],
+        amplify = any[Boolean],
+        useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])
     )
       .thenReturn(EitherT.leftT(SendAsyncClientError.RequestFailed("failed")))
@@ -264,7 +267,8 @@ class TrafficPurchasedSubmissionHandlerTest
         any[MessageId],
         any[Option[AggregationRule]],
         callbackCapture.capture(),
-        any[Boolean],
+        amplify = any[Boolean],
+        useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])
     )
       .thenReturn(EitherT.pure(()))
@@ -324,7 +328,8 @@ class TrafficPurchasedSubmissionHandlerTest
         any[MessageId],
         any[Option[AggregationRule]],
         callbackCapture.capture(),
-        any[Boolean],
+        amplify = any[Boolean],
+        useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])
     )
       .thenReturn(EitherT.pure(()))

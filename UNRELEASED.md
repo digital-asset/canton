@@ -4,6 +4,18 @@ Canton CANTON_VERSION has been released on RELEASE_DATE.
 
 INFO: Note that the "## Until YYYY-MM-DD" headers below should all be Wednesdays until 2pm CET to align with the weekly release schedule, i.e. if you add an entry effective at or after the first header, prepend the new date header that corresponds to the Wednesday after your change.
 
+## Until 2026-03-11
+### Minor Improvements
+- JSON API: Synthetic `value` fields in oneOf wrapper types (e.g., `AssignCommand`, `UnassignCommand`, `Completion`) are now marked as required in the OpenAPI and AsyncAPI specifications, matching the actual API logic where these fields must always be present.
+- Added optional parameters `confirmationResponseFactorO` and `confirmationResponsePatienceO` in `SubmissionRequestAmplification`.
+  When sending confirmation responses, these parameters, if defined, override respectively the `factor` and `patience` parameters.
+- Added a few metrics regarding submission requests amplification:
+  - `attempt-sync-errors`: Count of send request attempts which receive a synchronous error
+  - `amplified-attempts`: Count of send request attempts which are amplified
+  - `amplification`: Rate and timings of submission request attempts to a sequencer
+  - `no-connection-available`: Count of send attempts which are skipped because no connection is available
+- Fixed a bug where reinitialized ACS commitments might fail to correctly persist the new commitments, causing mismatches to possibly reappear after a restart.
+
 ## Until 2026-03-04
 ### Minor Improvements
 - *BREAKING* The
@@ -30,6 +42,12 @@ The JSON API server remains compatible with specification files from all 3.4.x v
 `GetUpdatesRequest.updateFormat` now appears marked as required in the OpenAPI/AsyncAPI specs even though it was previously optional.
 This is a specification fix to align with the actual behavior of the API, which requires this field.
 If your client code was previously omitting this field, you will need to update it to include a valid value.
+
+### Bug Fixes
+- Use an upper bound for max sequencing timestamp when reading the head state. This should prevent PostgreSQL executing
+  the query for inflight aggregations with a sequential scan instead of using the available indices. In the past, this issue
+  caused long startup times of the sequencer of more than 10 minutes.
+- Fixed a bug where the storage config parameter `in-flight-aggregations-query-interval` was ignored.
 
 ## Until 2026-02-25
 

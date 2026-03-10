@@ -466,6 +466,14 @@ class InMemoryIncrementalCommitments(
     }
     FutureUnlessShutdown.pure(completedSuccessfully)
   }
+
+  override def forgetCheckpoints()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Unit] = {
+    checkpointSnap.clear()
+    checkpointRt.set(RecordTime.MinValue)
+    FutureUnlessShutdown.unit
+  }
 }
 
 class InMemoryCommitmentQueue(implicit val ec: ExecutionContext) extends CommitmentQueue {

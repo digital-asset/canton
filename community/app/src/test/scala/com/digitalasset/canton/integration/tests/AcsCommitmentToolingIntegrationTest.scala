@@ -146,7 +146,7 @@ trait AcsCommitmentToolingIntegrationTest
           p.dars.upload(CantonExamplesPath, synchronizerId = daId)
           p.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
         }
-        passTopologyRegistrationTimeout(env)
+        passTopologyRegistrationTimeout()
       }
 
   "Commitment retrieval inspection" should {

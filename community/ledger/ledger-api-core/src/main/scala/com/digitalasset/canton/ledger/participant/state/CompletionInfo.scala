@@ -4,6 +4,7 @@
 package com.digitalasset.canton.ledger.participant.state
 
 import com.daml.logging.entries.{LoggingValue, ToLoggingValue}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.DeduplicationPeriod
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.daml.lf.data.Ref
@@ -43,6 +44,7 @@ final case class CompletionInfo(
     commandId: Ref.CommandId,
     optDeduplicationPeriod: Option[DeduplicationPeriod],
     submissionId: Option[Ref.SubmissionId],
+    paidTrafficCost: NonNegativeLong,
 ) extends PrettyPrinting {
   def changeId: ChangeId = ChangeId(userId, commandId, actAs.toSet)
 
@@ -52,19 +54,28 @@ final case class CompletionInfo(
     param("userId", _.userId),
     paramIfDefined("deduplication period", _.optDeduplicationPeriod),
     param("submissionId", _.submissionId),
+    param("paidTrafficCost", _.paidTrafficCost),
     indicateOmittedFields,
   )
 }
 
 object CompletionInfo {
   implicit val `CompletionInfo to LoggingValue`: ToLoggingValue[CompletionInfo] = {
-    case CompletionInfo(actAs, userId, commandId, deduplicationPeriod, submissionId) =>
+    case CompletionInfo(
+          actAs,
+          userId,
+          commandId,
+          deduplicationPeriod,
+          submissionId,
+          paidTrafficCost,
+        ) =>
       LoggingValue.Nested.fromEntries(
         "actAs " -> actAs,
         "userId " -> userId,
         "commandId " -> commandId,
         "deduplicationPeriod " -> deduplicationPeriod,
         "submissionId" -> submissionId,
+        "paidTrafficCost" -> paidTrafficCost.value,
       )
   }
 }

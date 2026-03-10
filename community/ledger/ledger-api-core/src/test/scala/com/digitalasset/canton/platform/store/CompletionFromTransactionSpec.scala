@@ -78,6 +78,7 @@ class CompletionFromTransactionSpec
             "userId",
             "synchronizer id",
             traceContext,
+            4324L,
             submissionId,
             deduplicationOffset,
             deduplicationDurationSeconds,
@@ -94,6 +95,7 @@ class CompletionFromTransactionSpec
           completion.submissionId shouldBe expectedSubmissionId
           completion.deduplicationPeriod shouldBe expectedDeduplicationPeriod
           completion.actAs.toSet shouldBe Set("party1", "party2")
+          completion.paidTrafficCost shouldBe 4324
       }
     }
 
@@ -115,6 +117,7 @@ class CompletionFromTransactionSpec
             "userId",
             "synchronizer id",
             traceContext,
+            4324L,
             Some("submissionId"),
             None,
             deduplicationDurationSeconds,
@@ -135,6 +138,7 @@ class CompletionFromTransactionSpec
         "userId",
         "synchronizer id",
         traceContext,
+        4324L,
         Some("submissionId"),
       )
 
@@ -147,6 +151,7 @@ class CompletionFromTransactionSpec
       completion.submissionId shouldBe "submissionId"
       completion.status shouldBe Some(status)
       completion.actAs shouldBe Seq("party")
+      completion.paidTrafficCost shouldBe 4324
     }
   }
 }

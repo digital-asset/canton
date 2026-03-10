@@ -215,6 +215,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       message_uuid = None,
       is_transaction = true,
       trace_context = serializableTraceContext,
+      traffic_cost = 4324L,
     ),
     DbDto.SequencerIndexMoved(SynchronizerId.tryFromString("x::synchronizer9")),
     DbDto.EventPartyToParticipant(

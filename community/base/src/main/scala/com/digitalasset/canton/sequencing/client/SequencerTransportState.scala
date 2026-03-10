@@ -68,7 +68,10 @@ trait SequencerTransportLookup {
     *   sequencer).
     */
   // TODO(#12377) Be more intelligent about choosing a sequencer
-  def nextAmplifiedTransport(previous: Seq[SequencerId])(implicit
+  def nextAmplifiedTransport(
+      previous: Seq[SequencerId],
+      useConfirmationResponseAmplificationParameters: Boolean,
+  )(implicit
       traceContext: TraceContext
   ): (
       SequencerAlias,
@@ -171,7 +174,10 @@ class SequencersTransportState(
       transportInternal(Set.empty)
     }).clientTransport
 
-  override def nextAmplifiedTransport(previous: Seq[SequencerId])(implicit
+  override def nextAmplifiedTransport(
+      previous: Seq[SequencerId],
+      useConfirmationResponseAmplificationParameters: Boolean,
+  )(implicit
       traceContext: TraceContext
   ): (
       SequencerAlias,
@@ -179,8 +185,9 @@ class SequencersTransportState(
       SequencerClientTransportCommon,
       Option[config.NonNegativeFiniteDuration],
   ) =
-    (lock.exclusive {
-      val SubmissionRequestAmplification(factor, patience) = submissionRequestAmplification.get()
+    lock.exclusive {
+      val (factor, patience) =
+        submissionRequestAmplification.get.getActual(useConfirmationResponseAmplificationParameters)
       val transportContainer = transportInternal(previous.toSet)
       (
         transportContainer.sequencerAlias,
@@ -188,7 +195,7 @@ class SequencersTransportState(
         transportContainer.clientTransport,
         Option.when(previous.sizeIs < factor.value - 1)(patience),
       )
-    })
+    }
 
   /** Pick a random healthy sequencer connection, avoiding those in `avoid` if possible. If are no
     * healthy sequencers, returns an unhealthy sequencer connection. Must only be called inside a

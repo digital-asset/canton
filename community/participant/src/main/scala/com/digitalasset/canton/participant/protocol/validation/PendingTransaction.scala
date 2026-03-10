@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol.validation
 
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.participant.protocol.EngineController.EngineAbortStatus
@@ -12,7 +13,10 @@ import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.time.SynchronizerTimeTracker
 import com.digitalasset.canton.{RequestCounter, SequencerCounter}
 
-/** Storing metadata of pending transactions required for emitting transactions on the sync API. */
+/** Storing metadata of pending transactions required for emitting transactions on the sync API.
+  * @param trafficCost
+  *   Traffic cost of the associated confirmation request
+  */
 final case class PendingTransaction(
     freshOwnTimelyTx: Boolean,
     requestTime: CantonTimestamp,
@@ -24,6 +28,7 @@ final case class PendingTransaction(
     override val abortEngine: String => Unit,
     override val engineAbortStatusF: FutureUnlessShutdown[EngineAbortStatus],
     decisionTimeTickRequest: SynchronizerTimeTracker.TickRequest,
+    trafficCost: NonNegativeLong,
 ) extends PendingRequestData {
 
   val requestId: RequestId = RequestId(requestTime)

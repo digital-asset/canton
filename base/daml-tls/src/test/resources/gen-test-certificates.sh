@@ -11,7 +11,7 @@ cd test-certificates
 mkdir newcerts
 
 ABSOLUTE_OUT=$(pwd)
-DAYS=7300
+DAYS=7305  # 20 years (accounting for leap years)
 
 # Generate SSL config from the template
 cat ../openssl-template.cnf | sed -e "s;<ROOTDIR>;$ABSOLUTE_OUT;g" > openssl.cnf
@@ -105,7 +105,7 @@ openssl req -new -key "client.pem" \
     -out "client.csr"
 # Sign Client Cert
 openssl ca -batch -config "openssl.cnf" \
-    -extensions usr_cert -notext -md sha256 \
+    -extensions usr_cert -days $DAYS -notext -md sha256 \
     -in "client.csr" \
     -out "client.crt"
 # Validate cert is correct
@@ -134,7 +134,7 @@ create_pem "client-revoked"
 create_csr "client-revoked" "/CN=0.0.0.0.clientrevoked" "DNS:localhost, IP:127.0.0.1"
 # Sign Client Cert
 openssl ca -batch -config "openssl.cnf" \
-    -extensions usr_cert -notext -md sha256 \
+    -extensions usr_cert -days $DAYS -notext -md sha256 \
     -in "client-revoked.csr" \
     -out "client-revoked.crt"
 # Validate cert is correct

@@ -716,6 +716,7 @@ abstract class ReassignmentServiceIntegrationTest
       traceContext = unassignmentCompletion.traceContext,
       offset = 0L,
       synchronizerTime = None,
+      paidTrafficCost = 0L,
     )
 
     unassignmentCompletion.copy(
@@ -776,6 +777,7 @@ abstract class ReassignmentServiceIntegrationTest
       traceContext = assignmentCompletion.traceContext,
       offset = 0L,
       synchronizerTime = None,
+      paidTrafficCost = 0L,
     )
 
     assignmentCompletion.copy(

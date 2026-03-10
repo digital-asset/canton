@@ -7,6 +7,7 @@ import cats.data.{EitherT, OptionT}
 import cats.syntax.alternative.*
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.{HashOps, Signature, SynchronizerSnapshotSyncCryptoApi}
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod, ViewType}
 import com.digitalasset.canton.error.TransactionError
@@ -441,6 +442,7 @@ trait ProcessingSteps[
       mediator: MediatorGroupRecipient,
       snapshot: SynchronizerSnapshotSyncCryptoApi,
       synchronizerParameters: DynamicSynchronizerParametersWithValidity,
+      trafficCost: NonNegativeLong,
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[ParsedRequestType]
 
   /** Phase 3, step 2 (some good views) */
@@ -464,6 +466,8 @@ trait ProcessingSteps[
     * @param freshOwnTimelyTx
     *   The resolved status from
     *   [[com.digitalasset.canton.participant.protocol.SubmissionTracker.register]]
+    * @param trafficCost
+    *   Traffic cost of the associated confirmation request
     *
     * @return
     *   The optional rejection event to be published in the event log, and the optional submission
@@ -476,6 +480,7 @@ trait ProcessingSteps[
       rootHash: RootHash,
       freshOwnTimelyTx: Boolean,
       error: TransactionError,
+      trafficCost: NonNegativeLong,
   )(implicit
       traceContext: TraceContext
   ): (Option[SequencedUpdate], Option[PendingSubmissionId])
@@ -753,6 +758,10 @@ object ProcessingSteps {
     def isFreshOwnTimelyRequest: Boolean
     def synchronizerParameters: DynamicSynchronizerParametersWithValidity
     def rootHash: RootHash
+
+    /** Traffic cost incurred by this participant for sequencing the request
+      */
+    def trafficCost: NonNegativeLong
 
     def decisionTime: CantonTimestamp = synchronizerParameters
       .decisionTimeFor(requestTimestamp)

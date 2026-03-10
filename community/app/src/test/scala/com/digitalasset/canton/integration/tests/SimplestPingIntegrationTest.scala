@@ -51,7 +51,6 @@ class SimplestPingIntegrationTestInMemory extends SimplestPingIntegrationTest {
       .addConfigTransform(_.focus(_.monitoring.logging.api.messagePayloads).replace(false))
 
   registerPlugin(new UseReferenceBlockSequencer[StorageConfig.Memory](loggerFactory))
-
 }
 
 class SimplestPingReferenceIntegrationTestH2 extends SimplestPingIntegrationTest {

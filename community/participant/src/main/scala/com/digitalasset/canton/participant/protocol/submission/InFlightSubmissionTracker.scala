@@ -355,6 +355,7 @@ class InFlightSubmissionSynchronizerTracker(
         newTrackingData <- unsequenced.trackingData.updateOnNotSequenced(
           deliverError.timestamp,
           deliverError.reason,
+          deliverError.trafficCost,
         )
       } yield (inFlight.changeIdHash, newTrackingData, inFlight.submissionTraceContext)
 

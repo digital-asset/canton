@@ -5,7 +5,7 @@ package com.digitalasset.canton.integration.tests
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt, PositiveLong}
-import com.digitalasset.canton.console.LocalInstanceReference
+import com.digitalasset.canton.console.InstanceReference
 import com.digitalasset.canton.integration.TestConsoleEnvironment
 import com.digitalasset.canton.sequencing.protocol.TrafficState
 import com.digitalasset.canton.topology.Member
@@ -23,7 +23,7 @@ trait TrafficBalanceSupport extends BaseTest {
   }
 
   protected def updateBalanceForMember(
-      instance: LocalInstanceReference,
+      instance: InstanceReference,
       newBalance: PositiveLong,
       beforeCheck: () => Unit,
   )(implicit env: TestConsoleEnvironment) = {

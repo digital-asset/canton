@@ -7,6 +7,7 @@ import cats.data.EitherT
 import cats.implicits.catsSyntaxEitherId
 import com.daml.logging.LoggingContext
 import com.digitalasset.canton.*
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.crypto.{Signature, SigningKeyUsage}
 import com.digitalasset.canton.data.{
@@ -333,6 +334,7 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
     cryptoSnapshot,
     cryptoSnapshot.ipsSnapshot.findDynamicSynchronizerParameters().futureValueUS.value,
     reassignmentId,
+    NonNegativeLong.tryCreate(915),
   )
 
   private def validateUnassignmentTree(

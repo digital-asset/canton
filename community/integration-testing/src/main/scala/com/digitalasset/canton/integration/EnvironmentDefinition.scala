@@ -39,7 +39,7 @@ import com.digitalasset.canton.synchronizer.mediator.MediatorNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.tracing.TracingConfig
 import com.digitalasset.canton.tracing.TracingConfig.Propagation
-import com.digitalasset.canton.{BaseTest, SynchronizerAlias}
+import com.digitalasset.canton.{BaseTest, SynchronizerAlias, config}
 import com.typesafe.config.ConfigFactory
 import com.typesafe.scalalogging.LazyLogging
 import monocle.macros.syntax.lens.*
@@ -77,12 +77,22 @@ final case class EnvironmentDefinition(
   def withManualStart: EnvironmentDefinition =
     copy(baseConfig = baseConfig.focus(_.parameters.manualStart).replace(true))
 
+  /** Enable traffic control on all configured synchronizers
+    * @param trafficControlParameters
+    *   parameters to use
+    * @param topUpAllMembers
+    *   whether to top up all known members with maximum traffic credit
+    * @param disableCommitments
+    *   whether to disable ACS commitments to avoid background traffic being used
+    */
   def withTrafficControl(
       trafficControlParameters: TrafficControlParameters =
         // Give max base traffic by default which is virtually equivalent to unlimited traffic
         // This works better than topping up members because it works for members not yet connected to the network
         // as it is not possible to top up unknown members
-        TrafficControlParameters.default.copy(maxBaseTrafficAmount = NonNegativeLong.maxValue)
+        TrafficControlParameters.default.copy(maxBaseTrafficAmount = NonNegativeLong.maxValue),
+      topUpAllMembers: Boolean = false,
+      disableCommitments: Boolean = false,
   ): EnvironmentDefinition =
     withSetup { implicit env =>
       env.initializedSynchronizers.values.foreach {
@@ -98,9 +108,27 @@ final case class EnvironmentDefinition(
           allSequencersOfDomain.foreach {
             _.topology.synchronizer_parameters.propose_update(
               synchronizerId = physicalSynchronizerId.logical,
-              _.update(trafficControl = Some(trafficControlParameters)),
+              original =>
+                original.update(
+                  trafficControl = Some(trafficControlParameters),
+                  reconciliationInterval =
+                    if (disableCommitments) config.PositiveDurationSeconds.ofDays(365)
+                    else original.reconciliationInterval,
+                ),
               synchronize = Some(environmentTimeouts.default),
             )
+          }
+
+          if (topUpAllMembers) {
+            (participants.all ++ mediators.all).foreach { node =>
+              allSequencersOfDomain.foreach {
+                _.traffic_control.set_traffic_balance(
+                  node.id.member,
+                  PositiveInt.one,
+                  NonNegativeLong.maxValue,
+                )
+              }
+            }
           }
       }
     }

@@ -5,6 +5,7 @@ package com.digitalasset.canton.platform.indexer.parallel
 
 import com.daml.metrics.api.testing.MetricValues
 import com.daml.metrics.api.{MetricHandle, MetricsContext}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
 import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.TestAcsChangeFactory
@@ -50,6 +51,7 @@ class EventMetricsUpdaterSpec extends AnyWordSpec with MetricValues {
       commandId = Ref.CommandId.assertFromString("c0"),
       optDeduplicationPeriod = None,
       submissionId = None,
+      paidTrafficCost = NonNegativeLong.zero,
     )
     val someTransactionMeta = state.TransactionMeta(
       ledgerEffectiveTime = Time.Timestamp.assertFromLong(2),

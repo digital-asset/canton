@@ -41,6 +41,7 @@ class TestSequencerClientSend(implicit val executionContext: ExecutionContext)
       aggregationRule: Option[AggregationRule],
       callback: SendCallback,
       amplify: Boolean,
+      useConfirmationResponseAmplificationParameters: Boolean,
   )(implicit
       traceContext: TraceContext,
       metricsContext: MetricsContext,

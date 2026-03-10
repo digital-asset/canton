@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant
 
 import com.digitalasset.canton.config.GeneratorsConfig
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.DeduplicationPeriod
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.{CompletionInfo, Update}
@@ -49,7 +50,8 @@ final class GeneratorsParticipant(
       commandId <- ledgerSubmissionIdArb.arbitrary
       optDedupPeriod <- Gen.option(Arbitrary.arbitrary[DeduplicationPeriod])
       submissionId <- Gen.option(lfSubmissionIdArb.arbitrary)
-    } yield CompletionInfo(actAs, userId, commandId, optDedupPeriod, submissionId)
+      trafficCost <- Arbitrary.arbitrary[NonNegativeLong]
+    } yield CompletionInfo(actAs, userId, commandId, optDedupPeriod, submissionId, trafficCost)
   }
 
   implicit val finalReasonArb: Arbitrary[Update.CommandRejected.FinalReason] =

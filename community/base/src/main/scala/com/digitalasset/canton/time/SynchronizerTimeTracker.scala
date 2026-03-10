@@ -94,7 +94,9 @@ class SynchronizerTimeTracker(
     lock.exclusive(fn)
 
   // the maximum timestamp we can support waiting for without causing an overflow
-  private val maxPendingTick = CantonTimestamp.MaxValue.minus(config.observationLatency.asJava)
+  private val maxPendingTick =
+    if (clock.isSimClock) CantonTimestamp.MaxValue
+    else CantonTimestamp.MaxValue.minus(config.observationLatency.asJava)
 
   private val timestampRef: AtomicReference[LatestAndNext[CantonTimestamp]] =
     new AtomicReference[LatestAndNext[CantonTimestamp]](LatestAndNext.empty)
@@ -337,7 +339,10 @@ class SynchronizerTimeTracker(
   @VisibleForTesting
   private[time] def earliestExpectedObservationTime(): Option[(Traced[CantonTimestamp], String)] =
     firstUncancelledTick().map(tick =>
-      Traced(tick.desiredTimestamp.add(config.observationLatency.asJava))(
+      Traced(
+        if (clock.isSimClock) tick.desiredTimestamp
+        else tick.desiredTimestamp.add(config.observationLatency.asJava)
+      )(
         tick.traceContext
       ) -> tick.creationStackTrace
     )

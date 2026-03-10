@@ -39,8 +39,7 @@ class LogEntryTest extends AnyWordSpec with BaseTest {
 
       val failure = the[TestFailedException] thrownBy entry.errorMessage
       failure.message.value shouldBe
-        """Incorrect log level WARN. Expected: ERROR
-          |## WARN   - test""".stripMargin
+        """Incorrect log level WARN. Expected: ERROR. Message: test""".stripMargin
     }
 
     "mention incorrect log level and logger" in {
@@ -52,6 +51,88 @@ class LogEntryTest extends AnyWordSpec with BaseTest {
           |Incorrect logger name MyLogger. Expected one of:
           |  com.digitalasset.canton.integration.EnvironmentDefinition, com.digitalasset.canton.integration.EnvironmentDefinition
           |## WARN  MyLogger - test""".stripMargin
+    }
+
+    "produce nice reports for unexpected log entries" in {
+      val failure = the[TestFailedException] thrownBy LogEntry.assertLogSeq(
+        mustContainWithClue = Seq(
+          (_.warningMessage shouldBe "line 1", "nudelsalat")
+        ),
+        mayContain = Seq(_.warningMessage shouldBe "line 2"),
+      )(Seq(LogEntry(Level.WARN, "", "line 1"), LogEntry(Level.WARN, "", "line 3")))
+
+      failure.message.value.replaceAll("LogEntryTest\\.scala:\\d+", "LogEntryTest.scala") shouldBe """
+                                       |Unexpected log entries:
+                                       |	## WARN   - line 3
+                                       | (in Checkpoint) at LogEntryTest.scala
+                                       |
+                                       |Details for unexpected entry: ## WARN   - line 3
+                                       |	Assertion "nudelsalat": "line [3]" was not equal to "line [1]" (in Checkpoint) at LogEntryTest.scala
+                                       |	Assertion mayContain[0]: "line [3]" was not equal to "line [2]" (in Checkpoint) at LogEntryTest.scala
+                                       | (in Checkpoint) at LogEntryTest.scala
+                                       |
+                                       |All log entries:
+                                       |	## WARN   - line 1
+                                       |	## WARN   - line 3
+                                       |
+                                       | (in Checkpoint) at LogEntryTest.scala""".stripMargin
+    }
+
+    "produce nice reports for assertions without a matching log entry" in {
+      val failure = the[TestFailedException] thrownBy LogEntry.assertLogSeq(
+        mustContainWithClue = Seq(
+          (_.warningMessage shouldBe "line 1", "nudelsalat")
+        ),
+        mayContain = Seq(_.warningMessage shouldBe "line 2"),
+      )(Seq(LogEntry(Level.WARN, "", "line 2")))
+
+      failure.message.value.replaceAll("LogEntryTest\\.scala:\\d+", "LogEntryTest.scala") shouldBe """
+                                       |Assertions not matching any log entry:
+                                       |	nudelsalat
+                                       | (in Checkpoint) at LogEntryTest.scala
+                                       |
+                                       |Details for assertion "nudelsalat" without matching log entry:
+                                       |	Entry 0: "line [2]" was not equal to "line [1]" (in Checkpoint) at LogEntryTest.scala
+                                       | (in Checkpoint) at LogEntryTest.scala
+                                       |
+                                       |All log entries:
+                                       |	## WARN   - line 2
+                                       |
+                                       | (in Checkpoint) at LogEntryTest.scala""".stripMargin
+    }
+
+    "produce nice reports for unexpected log entries and assertions without a matching log entry" in {
+      val failure = the[TestFailedException] thrownBy LogEntry.assertLogSeq(
+        mustContainWithClue = Seq(
+          (_.warningMessage shouldBe "line 1", "nudelsalat")
+        ),
+        mayContain = Seq(_.warningMessage shouldBe "line 2"),
+      )(Seq(LogEntry(Level.WARN, "", "line 2"), LogEntry(Level.WARN, "", "line 3")))
+
+      failure.message.value.replaceAll("LogEntryTest\\.scala:\\d+", "LogEntryTest.scala") shouldBe """
+                                       |Unexpected log entries:
+                                       |	## WARN   - line 3
+                                       | (in Checkpoint) at LogEntryTest.scala
+                                       |
+                                       |Assertions not matching any log entry:
+                                       |	nudelsalat
+                                       | (in Checkpoint) at LogEntryTest.scala
+                                       |
+                                       |Details for unexpected entry: ## WARN   - line 3
+                                       |	Assertion "nudelsalat": "line [3]" was not equal to "line [1]" (in Checkpoint) at LogEntryTest.scala
+                                       |	Assertion mayContain[0]: "line [3]" was not equal to "line [2]" (in Checkpoint) at LogEntryTest.scala
+                                       | (in Checkpoint) at LogEntryTest.scala
+                                       |
+                                       |Details for assertion "nudelsalat" without matching log entry:
+                                       |	Entry 0: "line [2]" was not equal to "line [1]" (in Checkpoint) at LogEntryTest.scala
+                                       |	Entry 1: "line [3]" was not equal to "line [1]" (in Checkpoint) at LogEntryTest.scala
+                                       | (in Checkpoint) at LogEntryTest.scala
+                                       |
+                                       |All log entries:
+                                       |	## WARN   - line 2
+                                       |	## WARN   - line 3
+                                       |
+                                       | (in Checkpoint) at LogEntryTest.scala""".stripMargin
     }
   }
 }

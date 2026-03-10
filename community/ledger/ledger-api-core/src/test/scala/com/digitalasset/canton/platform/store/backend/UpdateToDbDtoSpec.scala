@@ -6,6 +6,7 @@ package com.digitalasset.canton.platform.store.backend
 import com.daml.metrics.api.MetricsContext
 import com.daml.platform.v1.index.StatusDetails
 import com.digitalasset.canton.RepairCounter
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.DeduplicationPeriod.{DeduplicationDuration, DeduplicationOffset}
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
 import com.digitalasset.canton.ledger.participant.state
@@ -158,6 +159,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           message_uuid = None,
           is_transaction = true,
           trace_context = serializedEmptyTraceContext,
+          traffic_cost = completionInfo.paidTrafficCost.value,
         )
       )
     }
@@ -195,6 +197,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           message_uuid = Some(messageUuid.toString),
           is_transaction = true,
           trace_context = serializedEmptyTraceContext,
+          traffic_cost = completionInfo.paidTrafficCost.value,
         )
       )
     }
@@ -318,6 +321,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           message_uuid = None,
           is_transaction = true,
           trace_context = serializedEmptyTraceContext,
+          traffic_cost = completionInfo.paidTrafficCost.value,
         )
         val dtoTransactionMeta = DbDto.TransactionMeta(
           update_id = updateIdByteArray,
@@ -508,6 +512,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         message_uuid = None,
         is_transaction = true,
         trace_context = serializedEmptyTraceContext,
+        traffic_cost = completionInfo.paidTrafficCost.value,
       )
       val dtoTransactionMeta = DbDto.TransactionMeta(
         update_id = updateIdByteArray,
@@ -657,6 +662,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           message_uuid = None,
           is_transaction = true,
           trace_context = serializedEmptyTraceContext,
+          traffic_cost = completionInfo.paidTrafficCost.value,
         )
       dtos(4) shouldEqual
         DbDto.TransactionMeta(
@@ -784,6 +790,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           message_uuid = None,
           is_transaction = true,
           trace_context = serializedEmptyTraceContext,
+          traffic_cost = completionInfo.paidTrafficCost.value,
         )
       dtos(4) shouldEqual
         DbDto.TransactionMeta(
@@ -919,6 +926,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           message_uuid = None,
           is_transaction = true,
           trace_context = serializedEmptyTraceContext,
+          traffic_cost = completionInfo.paidTrafficCost.value,
         ),
         DbDto.TransactionMeta(
           update_id = updateIdByteArray,
@@ -1141,6 +1149,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           message_uuid = None,
           is_transaction = true,
           trace_context = serializedEmptyTraceContext,
+          traffic_cost = completionInfo.paidTrafficCost.value,
         ),
         DbDto.TransactionMeta(
           update_id = updateIdByteArray,
@@ -1366,6 +1375,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           message_uuid = None,
           is_transaction = true,
           trace_context = serializedEmptyTraceContext,
+          traffic_cost = completionInfo.paidTrafficCost.value,
         ),
         DbDto.TransactionMeta(
           update_id = updateIdByteArray,
@@ -1637,6 +1647,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           message_uuid = None,
           is_transaction = true,
           trace_context = serializedEmptyTraceContext,
+          traffic_cost = completionInfo.paidTrafficCost.value,
         ),
         DbDto.TransactionMeta(
           update_id = updateIdByteArray,
@@ -1717,6 +1728,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           message_uuid = None,
           is_transaction = true,
           trace_context = serializedEmptyTraceContext,
+          traffic_cost = completionInfo.paidTrafficCost.value,
         ),
         DbDto.TransactionMeta(
           update_id = updateIdByteArray,
@@ -1852,6 +1864,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           message_uuid = None,
           is_transaction = true,
           trace_context = serializedEmptyTraceContext,
+          traffic_cost = completionInfo.paidTrafficCost.value,
         ),
         DbDto.TransactionMeta(
           update_id = updateIdByteArray,
@@ -2027,6 +2040,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         message_uuid = None,
         is_transaction = true,
         trace_context = serializedEmptyTraceContext,
+        traffic_cost = completionInfo.paidTrafficCost.value,
       )
       dtos(8) shouldEqual DbDto.TransactionMeta(
         update_id = updateIdByteArray,
@@ -2104,6 +2118,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
           message_uuid = None,
           is_transaction = true,
           trace_context = serializedEmptyTraceContext,
+          traffic_cost = completionInfo.paidTrafficCost.value,
         ),
         DbDto.TransactionMeta(
           update_id = updateIdByteArray,
@@ -2250,6 +2265,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
               message_uuid = None,
               is_transaction = true,
               trace_context = serializedEmptyTraceContext,
+              traffic_cost = completionInfo.paidTrafficCost.value,
             )
           )
       }
@@ -2351,6 +2367,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
             message_uuid = None,
             is_transaction = true,
             trace_context = serializedEmptyTraceContext,
+            traffic_cost = completionInfo.paidTrafficCost.value,
           )
           dtos(4) shouldEqual DbDto.TransactionMeta(
             update_id = updateIdByteArray,
@@ -2448,6 +2465,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         message_uuid = None,
         is_transaction = false,
         trace_context = serializedEmptyTraceContext,
+        traffic_cost = completionInfo.paidTrafficCost.value,
       )
       dtos(5) shouldEqual DbDto.TransactionMeta(
         update_id = updateIdByteArray,
@@ -2585,6 +2603,7 @@ class UpdateToDbDtoSpec extends AnyWordSpec with Matchers {
         message_uuid = None,
         is_transaction = false,
         trace_context = serializedEmptyTraceContext,
+        traffic_cost = completionInfo.paidTrafficCost.value,
       )
       dtos(5) shouldEqual DbDto.TransactionMeta(
         update_id = updateIdByteArray,
@@ -2843,6 +2862,7 @@ object UpdateToDbDtoSpec {
   private val otherParticipantId =
     Ref.ParticipantId.assertFromString("UpdateToDbDtoSpecRemoteParticipant")
   private val someOffset = Offset.tryFromLong(12345678L)
+  private val someTrafficCost = NonNegativeLong.tryCreate(31380)
   private val someRecordTime =
     CantonTimestamp(
       Time.Timestamp.assertFromInstant(Instant.parse(("2000-01-01T00:00:00.000000Z")))
@@ -2862,6 +2882,7 @@ object UpdateToDbDtoSpec {
     commandId = someCommandId,
     optDeduplicationPeriod = None,
     submissionId = Some(someSubmissionId),
+    paidTrafficCost = someTrafficCost,
   )
   private val someSynchronizerId1 = SynchronizerId.tryFromString("x::synchronizer1")
   private val someTransactionMeta = state.TransactionMeta(

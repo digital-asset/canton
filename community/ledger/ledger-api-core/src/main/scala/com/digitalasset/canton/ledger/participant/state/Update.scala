@@ -6,6 +6,7 @@ package com.digitalasset.canton.ledger.participant.state
 import com.daml.logging.entries.{LoggingEntry, LoggingValue, ToLoggingValue}
 import com.digitalasset.base.error.GrpcStatuses
 import com.digitalasset.canton.RepairCounter
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.{CantonTimestamp, DeduplicationPeriod}
 import com.digitalasset.canton.ledger.participant.state.Update.CommandRejected.RejectionReasonTemplate
@@ -277,6 +278,9 @@ object Update {
       */
     def representativePackageIds: RepresentativePackageIds
 
+    /** Transaction hash signed by the external party to authorize the transaction. Only on
+      * externally signed transactions
+      */
     def externalTransactionHash: Option[Hash]
 
     def isAcsDelta(contractId: Value.ContractId): Boolean
@@ -437,7 +441,7 @@ object Update {
   )(implicit override val traceContext: TraceContext)
       extends ReassignmentAccepted
       with SequencedUpdate
-      with AcsChangeSequencedUpdate
+      with AcsChangeSequencedUpdate {}
 
   final case class RepairReassignmentAccepted(
       workflowId: Option[Ref.WorkflowId],
@@ -740,6 +744,9 @@ object Update {
 
     def synchronizerId(synchronizerId: SynchronizerId): LoggingEntry =
       "synchronizerId" -> synchronizerId.toString
+
+    def trafficCost(trafficCost: NonNegativeLong): LoggingEntry =
+      "trafficCost" -> trafficCost.value.toString
   }
 
 }

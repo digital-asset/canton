@@ -68,7 +68,8 @@ class CompletionStorageBackendTemplate(
               deduplication_duration_seconds,
               deduplication_duration_nanos,
               synchronizer_id,
-              trace_context
+              trace_context,
+              traffic_cost
             FROM
               lapi_command_completions
             WHERE
@@ -91,7 +92,9 @@ class CompletionStorageBackendTemplate(
   }
 
   private val sharedColumns: RowParser[
-    Seq[Party] ~ Offset ~ Timestamp ~ String ~ Int ~ Option[String] ~ Int ~ TraceContext
+    Seq[Party] ~ Offset ~ Timestamp ~ String ~ Int ~ Option[
+      String
+    ] ~ Int ~ TraceContext ~ Long
   ] =
     parties(stringInterning)("submitters") ~
       offset("completion_offset") ~
@@ -100,12 +103,13 @@ class CompletionStorageBackendTemplate(
       int("user_id") ~
       str("submission_id").? ~
       int("synchronizer_id") ~
-      traceContextOption("trace_context")(noTracingLogger)
+      traceContextOption("trace_context")(noTracingLogger) ~
+      long("traffic_cost").?.map(_.getOrElse(0L))
 
   private val acceptedCommandSharedColumns: RowParser[
     Seq[Party] ~ Offset ~ Timestamp ~ String ~ Int ~ Option[
       String
-    ] ~ Int ~ TraceContext ~ UpdateId
+    ] ~ Int ~ TraceContext ~ Long ~ UpdateId
   ] =
     sharedColumns ~ updateId("update_id")
 
@@ -122,8 +126,8 @@ class CompletionStorageBackendTemplate(
     acceptedCommandSharedColumns ~
       deduplicationOffsetColumn ~
       deduplicationDurationSecondsColumn ~ deduplicationDurationNanosColumn map {
-        case submitters ~ offset ~ recordTime ~ commandId ~ internedUserId ~ submissionId ~ internedSynchronizerId ~ traceContext ~ updateId ~
-            deduplicationOffset ~ deduplicationDurationSeconds ~ deduplicationDurationNanos =>
+        case submitters ~ offset ~ recordTime ~ commandId ~ internedUserId ~ submissionId ~ internedSynchronizerId ~ traceContext ~ trafficCost ~
+            updateId ~ deduplicationOffset ~ deduplicationDurationSeconds ~ deduplicationDurationNanos =>
           submitters -> CompletionFromTransaction.acceptedCompletion(
             submitters = submitters.filter(parties).toSet,
             recordTime = recordTime,
@@ -138,6 +142,7 @@ class CompletionStorageBackendTemplate(
             synchronizerId =
               stringInterning.synchronizerId.unsafe.externalize(internedSynchronizerId),
             traceContext = traceContext,
+            trafficCost = trafficCost,
           )
       }
 
@@ -156,7 +161,7 @@ class CompletionStorageBackendTemplate(
       rejectionStatusMessageColumn ~
       rejectionStatusDetailsColumn map {
         case submitters ~ offset ~ recordTime ~ commandId ~ internedUserId ~ submissionId ~ internedSynchronizerId ~ traceContext ~
-            deduplicationOffset ~ deduplicationDurationSeconds ~ deduplicationDurationNanos ~
+            trafficCost ~ deduplicationOffset ~ deduplicationDurationSeconds ~ deduplicationDurationNanos ~
             rejectionStatusCode ~ rejectionStatusMessage ~ rejectionStatusDetails =>
           val status =
             buildStatusProto(rejectionStatusCode, rejectionStatusMessage, rejectionStatusDetails)
@@ -174,6 +179,7 @@ class CompletionStorageBackendTemplate(
             synchronizerId =
               stringInterning.synchronizerId.unsafe.externalize(internedSynchronizerId),
             traceContext = traceContext,
+            trafficCost = trafficCost,
           )
       }
 

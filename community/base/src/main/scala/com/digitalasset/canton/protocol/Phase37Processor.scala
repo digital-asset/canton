@@ -4,6 +4,7 @@
 package com.digitalasset.canton.protocol
 
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.HandlerResult
@@ -37,6 +38,7 @@ trait Phase37Processor[RequestBatch] {
       rc: RequestCounter,
       sc: SequencerCounter,
       batch: RequestBatch,
+      trafficCost: NonNegativeLong,
   )(implicit
       traceContext: TraceContext
   ): HandlerResult

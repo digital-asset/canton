@@ -107,7 +107,8 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
             any[MessageId],
             any[Option[AggregationRule]],
             any[SendCallback],
-            any[Boolean],
+            amplify = any[Boolean],
+            useConfirmationResponseAmplificationParameters = eqTo(false),
           )(any[TraceContext], any[MetricsContext])
       }.discard
 
@@ -131,6 +132,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
           aggregationRule = any[Option[AggregationRule]],
           callback = any[SendCallback],
           amplify = eqTo(false),
+          useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
       ).thenReturn(EitherTUtil.unitUS[SendAsyncClientError])
 
@@ -199,6 +201,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
           aggregationRule = eqTo(Some(expectedAggregationRule)),
           callback = any[SendCallback],
           amplify = eqTo(false),
+          useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
 
       subscriber.close()
@@ -267,7 +270,8 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
           any[MessageId],
           any[Option[AggregationRule]],
           any[SendCallback],
-          any[Boolean],
+          amplify = any[Boolean],
+          useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
       }.discard
 
@@ -303,7 +307,8 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
           any[MessageId],
           any[Option[AggregationRule]],
           any[SendCallback],
-          any[Boolean],
+          amplify = any[Boolean],
+          useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
       ).thenReturn(EitherTUtil.unitUS)
 
@@ -379,7 +384,8 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
         any[MessageId],
         any[Option[AggregationRule]],
         any[SendCallback],
-        any[Boolean],
+        amplify = any[Boolean],
+        useConfirmationResponseAmplificationParameters = eqTo(false),
       )(any[TraceContext], any[MetricsContext])
 
       subscriber.close()
@@ -402,6 +408,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
           aggregationRule = any[Option[AggregationRule]],
           callback = any[SendCallback],
           amplify = eqTo(false),
+          useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
       ).thenReturn(EitherTUtil.unitUS[SendAsyncClientError])
 
@@ -475,6 +482,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
             aggregationRule = any[Option[AggregationRule]],
             callback = any[SendCallback],
             amplify = any[Boolean],
+            useConfirmationResponseAmplificationParameters = eqTo(false),
           )(any[TraceContext], any[MetricsContext])
       }.discard
 
@@ -498,6 +506,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
           aggregationRule = any[Option[AggregationRule]],
           callback = any[SendCallback],
           amplify = eqTo(false),
+          useConfirmationResponseAmplificationParameters = eqTo(false),
         )(any[TraceContext], any[MetricsContext])
       ).thenReturn(EitherTUtil.unitUS[SendAsyncClientError])
 
@@ -561,6 +570,7 @@ class TimeAdvancingTopologySubscriberV2Test extends AnyWordSpec with BaseTest {
             aggregationRule = any[Option[AggregationRule]],
             callback = any[SendCallback],
             amplify = any[Boolean],
+            useConfirmationResponseAmplificationParameters = eqTo(false),
           )(any[TraceContext], any[MetricsContext])
       }.discard
 

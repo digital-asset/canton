@@ -21,15 +21,19 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   InFlightAggregationUpdates,
   SequencerInitialState,
 }
+import com.digitalasset.canton.synchronizer.sequencing.integrations.state.SequencerStateManagerStore
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
+import com.google.common.annotations.VisibleForTesting
 
 import scala.concurrent.ExecutionContext
 
 trait SequencerBlockStore extends AutoCloseable {
   this: NamedLogging =>
 
-  protected def executionContext: ExecutionContext
+  protected implicit def executionContext: ExecutionContext
+
+  protected val stateManagerStore: SequencerStateManagerStore
 
   /** Set initial state of the sequencer node from which it supports serving requests. This should
     * be called at most once. If not called, it means this sequencer node can server requests from
@@ -42,17 +46,63 @@ trait SequencerBlockStore extends AutoCloseable {
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit]
 
+  /** The current head [[BlockInfo]] of the sequencer, which can be used when the node is restarted
+    * to deterministically derive the following counters and timestamps.
+    *
+    * @return
+    *   `None` if no block has been written yet, `Some` otherwise.
+    */
+  def readHeadBlockInfo()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[BlockInfo]]
+
   /** The current state of the sequencer, which can be used when the node is restarted to
     * deterministically derive the following counters and timestamps.
     *
     * The state excludes updates of unfinalized blocks added with [[storeInflightAggregations]].
     *
+    * @param maxSequencingTimeUpperBound
+    *   the upper bound of the max sequencing time of inflight aggregations. This is an optimization
+    *   for the DB backend to make the postgres query planner not choose a sequential scan.
     * @return
     *   `None` if no block has been written yet, `Some` otherwise.
     */
-  def readHead(implicit
+  def readHead(maxSequencingTimeUpperBound: CantonTimestamp)(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[BlockEphemeralState]]
+  ): FutureUnlessShutdown[Option[BlockEphemeralState]] = for {
+    blockInfoO <- readHeadBlockInfo()
+    state <- blockInfoO match {
+      case None => FutureUnlessShutdown.pure(None)
+      case Some(blockInfo) =>
+        readStateAtBlock(blockInfo, maxSequencingTimeUpperBound).map(Some(_))
+    }
+
+  } yield state
+
+  /** like `readHead`, but without a a maxSequencingUpperBound and only used as convenience for
+    * testing
+    */
+  @VisibleForTesting
+  final def readHeadUnbounded()(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Option[BlockEphemeralState]] = readHead(CantonTimestamp.MaxValue)
+
+  /** Reads the block state at the specified block.
+    * @param maxSequencingTimeBound
+    *   the upper bound for the max sequencing time of inflight aggregations
+    */
+  protected def readStateAtBlock(
+      block: BlockInfo,
+      maxSequencingTimeBound: CantonTimestamp,
+  )(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[BlockEphemeralState] =
+    stateManagerStore
+      .readInFlightAggregations(
+        timestamp = block.lastTs,
+        maxSequencingTimeUpperBound = maxSequencingTimeBound,
+      )
+      .map(inFlightAggregations => BlockEphemeralState(block, inFlightAggregations))
 
   /** The block information for the block that contains the requested timestamp. */
   def findBlockContainingTimestamp(
@@ -90,7 +140,8 @@ trait SequencerBlockStore extends AutoCloseable {
     */
   def storeInflightAggregations(
       inFlightAggregationUpdates: InFlightAggregationUpdates
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
+    stateManagerStore.addInFlightAggregationUpdates(inFlightAggregationUpdates)
 
   /** Finalizes the current block whose updates have been added in the calls to
     * [[storeInflightAggregations]] since the last call to [[finalizeBlockUpdates]].
