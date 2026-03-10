@@ -139,6 +139,11 @@ final class PreparedTransactionEncoder(
    * V1 Transformers
    */
   object v1 {
+    // Transformer for external call results
+    private implicit val externalCallResultTransformer
+        : Transformer[lf.transaction.ExternalCallResult, isdv1.ExternalCallResult] =
+      Transformer.derive[lf.transaction.ExternalCallResult, isdv1.ExternalCallResult]
+
     private implicit def createNodeTransformer(implicit
         serializationVersion: SerializationVersion
     ): PartialTransformer[lf.transaction.Node.Create, isdv1.Create] = Transformer
@@ -169,6 +174,10 @@ final class PreparedTransactionEncoder(
         _.keyOpt.traverse(_.transformIntoPartial[iscd.GlobalKeyWithMaintainers]),
       )
       .withFieldComputed(_.byKey, _.byKey)
+      .withFieldComputed(
+        _.externalCallResults,
+        _.externalCallResults.toSeq.map(_.transformInto[isdv1.ExternalCallResult]),
+      )
       .buildTransformer
 
     private[interactive] implicit def fetchTransformer(implicit

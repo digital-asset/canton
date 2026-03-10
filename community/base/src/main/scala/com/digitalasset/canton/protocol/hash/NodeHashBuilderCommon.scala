@@ -110,15 +110,15 @@ private[hash] abstract class NodeHashBuilderCommon(
           exerciseResult,
           keyOpt,
           byKey,
-          externalCallResults,
+          _, // externalCallResults - not included in the LF node hash.
+             // Security: external call results ARE included in the Canton protocol hash
+             // via ViewParticipantData -> ActionDescription -> ExerciseActionDescription,
+             // which is serialized into the MerkleTreeLeaf and covered by the view signature.
+             // Excluding them from the LF hash avoids upstream changes to the LF hash spec.
           version,
         ) =>
       if (choiceAuthorizers.nonEmpty)
         notSupported("choiceAuthorizers in Exercise node", version) // 2.dev feature
-      // TODO(https://github.com/digital-asset/canton/issues/513)
-      // handle external calls
-      if (externalCallResults.nonEmpty)
-        notSupported("externalCallResults in Exercise node", version) // 2.dev feature
       if (keyOpt.nonEmpty && version == V1) notSupported("keyOpt in Exercise node", version)
       if (byKey && version == V1) notSupported("byKey in Exercise node", version)
       addContext("Exercise Node")

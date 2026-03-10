@@ -81,7 +81,7 @@ private object NodeHashBuilder {
       : SortedMap[HashingSchemeVersion, SerializationVersion] =
     SortedMap(
       HashingSchemeVersion.V2 -> SerializationVersion.V1,
-      HashingSchemeVersion.V3 -> SerializationVersion.V2,
+      HashingSchemeVersion.V3 -> SerializationVersion.VDev,
     )
   private[hash] val LFSerializationVersionMappingToMinimumHashingSchemeVersion
       : Map[SerializationVersion, HashingSchemeVersion] =

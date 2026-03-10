@@ -30,7 +30,7 @@ import com.digitalasset.canton.platform.apiserver.services.command.interactive.c
 import com.digitalasset.canton.platform.apiserver.services.command.interactive.codec.PreparedTransactionCodec.*
 import com.digitalasset.canton.protocol.{LfNode, LfNodeId}
 import com.digitalasset.canton.serialization.ProtoConverter
-import com.digitalasset.canton.topology.Synchronizer
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.data.Ref.TypeConId
@@ -290,6 +290,11 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
         }
       }
 
+    // Transformer for external call results
+    private implicit val externalCallResultTransformer
+        : Transformer[isdv1.ExternalCallResult, lf.transaction.ExternalCallResult] =
+      Transformer.derive[isdv1.ExternalCallResult, lf.transaction.ExternalCallResult]
+
     private[interactive] implicit def exerciseTransformer(implicit
         errorLoggingContext: ErrorLoggingContext
     ): PartialTransformer[isdv1.Exercise, lf.transaction.Node.Exercise] =
@@ -315,7 +320,13 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
             .withFieldComputedPartial(_.byKey, byKeyDecoder(_.byKey))
             // Only supported in LF-dev
             .withFieldConst(_.choiceAuthorizers, None)
-            .withFieldConst(_.externalCallResults, lf.transaction.ExternalCallResult.Empty)
+            .withFieldComputed(
+              _.externalCallResults,
+              ex =>
+                ImmArray.from(
+                  ex.externalCallResults.map(_.transformInto[lf.transaction.ExternalCallResult])
+                ),
+            )
             .transform
         }
       }
@@ -504,9 +515,9 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
         )
         .transform
         .toFutureWithLoggedFailuresDecode("Failed to deserialize submitter info", logger)
-      synchronizer <- Future.fromTry(
-        Synchronizer
-          .fromLogicalOrPhysicalString(metadataProto.synchronizerId, "synchronizer_id")
+      synchronizerId <- Future.fromTry(
+        SynchronizerId
+          .fromProtoPrimitive(metadataProto.synchronizerId, "synchronizer_id")
           .leftMap(_.message)
           .leftMap(RequestValidationErrors.InvalidArgument.Reject(_).asGrpcError)
           .toTry
@@ -585,7 +596,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
     } yield {
       ExecuteTransactionData(
         submitterInfo = submitterInfo,
-        synchronizer = synchronizer,
+        synchronizerId = synchronizerId,
         transactionMeta = transactionMeta,
         transaction = lf.transaction.SubmittedTransaction(transaction),
         globalKeyMapping = Map.empty, // This field is deprecated
