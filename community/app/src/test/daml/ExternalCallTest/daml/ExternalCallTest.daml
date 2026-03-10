@@ -15,6 +15,10 @@ template ExternalCallContract
     signatory signatory_
     observer observers_
 
+    interface instance ExternalCallInterface for ExternalCallContract where
+      view = ExternalCallInterfaceView with owner = signatory_
+      getSignatory = signatory_
+
     -- Basic external call
     choice CallExternal : BytesHex
       with
@@ -370,6 +374,26 @@ template MultipleRollbackContract
           GeneralError _ -> pure None
 
         pure (r1, r2)
+
+-- | Interface for testing external calls via interface exercises
+interface ExternalCallInterface where
+  viewtype ExternalCallInterfaceView
+  getSignatory : Party
+
+  choice DoExternalCall : BytesHex
+    with
+      extensionId : Text
+      functionId : Text
+      configHash : BytesHex
+      input : BytesHex
+    controller (getSignatory this)
+    do
+      externalCall extensionId functionId configHash input
+
+data ExternalCallInterfaceView = ExternalCallInterfaceView
+  with
+    owner : Party
+  deriving (Eq, Show)
 
 -- | Helper to convert Int to hex string (simple implementation)
 hexDigit : Int -> Text
