@@ -83,10 +83,22 @@ class OriginalLeaderSegmentState(
   private var observedOrderedBlockWithNonZeroView =
     initialCompletedBlocks.exists(_.commitCertificate.prePrepare.message.viewNumber > 0)
 
+  // When we start working on a new block, we first ask availability for a proposal, at which point
+  // it can respond with either a proposal or a message saying it does not have anything to propose at the moment.
+  // We want to at least wait for this message to arrive before we allow the slot to be filled with an empty block,
+  // so this flag takes care of keeping track of that.
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  private var waitingForAvailabilityResponse = false
+
+  def receivedResponseFromAvailability(): Unit = waitingForAvailabilityResponse = false
+  def startWaitingForAvailabilityResponse(): Unit = waitingForAvailabilityResponse = true
+
   logger.debug(
     s"At segment creation with initialCompletedBlocks = ${initialCompletedBlocks.map(_.blockNumber)}, " +
       s"next relative block to propose = $nextRelativeBlockToPropose$absoluteNextBlockToProposeLogSuffix"
   )(TraceContext.empty)
+
+  def segmentIsInProgress: Boolean = segment.slotNumbers.sizeIs > nextRelativeBlockToPropose
 
   // `canReceiveProposals` determines whether this ordering node should request a proposal
   //  (of batches of submission requests) from the Availability module to sequence within the locally-owned segment.
@@ -101,7 +113,8 @@ class OriginalLeaderSegmentState(
   //  from being provided simultaneously, which would potentially exceed the Consensus segment module
   //  original leader's segment size, resulting in a potential `IndexOutOfBounds` exception in `assignToSlot`.
   def canReceiveProposals: Boolean =
-    segment.slotNumbers.sizeIs > nextRelativeBlockToPropose && // we haven't filled all slots
+    segmentIsInProgress && // we haven't filled all slots
+      !waitingForAvailabilityResponse && // availability has already responded
       !viewChangeOccurred && // we haven't entered a view change ever in this epoch for our segment (view = 0)
       !observedOrderedBlockWithNonZeroView &&
       (nextRelativeBlockToPropose == 0 || state.isBlockComplete(
@@ -138,7 +151,7 @@ class OriginalLeaderSegmentState(
 
   private def absoluteNextBlockToProposeLogSuffix =
     s" (segment = ${segment.slotNumbers}, " +
-      (if (segment.slotNumbers.sizeIs > nextRelativeBlockToPropose)
+      (if (segmentIsInProgress)
          s"absolute = $nextBlockToPropose)"
        else s"beyond segment end at block ${segment.slotNumbers.last1})")
 

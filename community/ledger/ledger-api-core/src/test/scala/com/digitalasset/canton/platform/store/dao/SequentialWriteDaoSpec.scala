@@ -10,7 +10,10 @@ import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective
 import com.digitalasset.canton.ledger.participant.state.{SynchronizerIndex, Update}
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
+  AchsLastPointers,
+  LedgerEnd,
+}
 import com.digitalasset.canton.platform.store.backend.{
   DbDto,
   IngestionStorageBackend,
@@ -243,17 +246,17 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
     override def postProcessingEnd(connection: Connection): Option[Offset] =
       throw new UnsupportedOperationException
 
-    override def fetchACHSState(connection: Connection): Option[ParameterStorageBackend.ACHSState] =
+    override def fetchACHSState(connection: Connection): Option[ParameterStorageBackend.AchsState] =
       throw new UnsupportedOperationException
 
-    override def insertACHSState(achsState: ParameterStorageBackend.ACHSState)(
+    override def insertACHSState(achsState: ParameterStorageBackend.AchsState)(
         connection: Connection
     ): Unit = throw new UnsupportedOperationException
 
     override def updateACHSValidAt(validAt: Long)(connection: Connection): Unit =
       throw new UnsupportedOperationException
 
-    override def updateACHSLastPointers(lastRemoved: Long, lastPopulated: Long)(
+    override def updateACHSLastPointers(lastPointers: AchsLastPointers)(
         connection: Connection
     ): Unit =
       throw new UnsupportedOperationException
@@ -267,7 +270,7 @@ class SequentialWriteDaoSpec extends AnyFlatSpec with Matchers {
 object SequentialWriteDaoSpec {
 
   private val serializableTraceContext =
-    SerializableTraceContext(TraceContext.empty).toDamlProto.toByteArray
+    SerializableTraceContext(TraceContext.empty).toSerializedDamlProto
 
   private val externalTransactionHash =
     Hash

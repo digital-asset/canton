@@ -86,62 +86,76 @@ private[update] final class SequencedSubmissionsValidator(
         )
       SubmissionRequestValidationResult(inFlightAggregations, outcome, sequencerEventTimestamp) =
         newStateAndOutcome
-      result <-
-        processSubmissionOutcome(
-          inFlightAggregations,
-          outcome,
-          resultIfNoDeliverEvents = partialResult,
-          inFlightAggregationUpdates,
-          sequencerEventTimestamp,
-          remainingReversedOutcomes = reversedOutcomes,
-        )
-      _ = logger.debug(
+    } yield {
+      logger.debug(
         s"At block $height, the submission request ${signedSubmissionRequest.content.messageId} " +
           s"at $sequencingTimestamp validated to: ${SubmissionOutcome.prettyString(outcome)}"
       )
-    } yield result
+      updateSequencedSubmissionsWithNewResult(
+        inFlightAggregations,
+        outcome,
+        resultIfNoDeliverEvents = partialResult,
+        inFlightAggregationUpdates,
+        sequencerEventTimestamp,
+        remainingReversedOutcomes = reversedOutcomes,
+      )
+    }
   }
 
-  private def processSubmissionOutcome(
+  private def updateSequencedSubmissionsWithNewResult(
       inFlightAggregations: InFlightAggregations,
       outcome: SubmissionOutcome,
       resultIfNoDeliverEvents: SequencedSubmissionsValidationResult,
-      inFlightAggregationUpdates: InFlightAggregationUpdates,
+      previouslyAccumulatedInFlightAggregationUpdates: InFlightAggregationUpdates,
       sequencerEventTimestamp: Option[CantonTimestamp],
       remainingReversedOutcomes: Seq[SubmissionOutcome],
   )(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[SequencedSubmissionsValidationResult] =
+  ): SequencedSubmissionsValidationResult =
     outcome match {
       case deliverable: DeliverableSubmissionOutcome =>
+        // we potentially computed an update to the inflight aggregation related to this
+        // submission. we now need to apply it to the ephemeral state which we'll then
+        // use for the next outcome
         val (newInFlightAggregations, newInFlightAggregationUpdates) =
-          deliverable.inFlightAggregation.fold(inFlightAggregations -> inFlightAggregationUpdates) {
-            case (aggregationId, inFlightAggregationUpdate) =>
-              InFlightAggregations.tryApplyUpdates(
-                inFlightAggregations,
-                Map(aggregationId -> inFlightAggregationUpdate),
-                ignoreInFlightAggregationErrors = false,
-              ) ->
-                MapsUtil.extendedMapWith(
-                  inFlightAggregationUpdates,
-                  Iterable(aggregationId -> inFlightAggregationUpdate),
-                )(_ tryMerge _)
+          deliverable.inFlightAggregation.fold(
+            inFlightAggregations -> previouslyAccumulatedInFlightAggregationUpdates
+          ) { case (aggregationId, inFlightAggregation, inFlightAggregationUpdate) =>
+            val updatedInFlightAggregationState =
+              inFlightAggregations.updated(aggregationId, inFlightAggregation)
+            val updatedAccumulatedInflightAggregationUpdates = MapsUtil.extendedMapWith(
+              previouslyAccumulatedInFlightAggregationUpdates,
+              Iterable(aggregationId -> inFlightAggregationUpdate),
+            )(_ tryMerge _)
+            updatedInFlightAggregationState -> updatedAccumulatedInflightAggregationUpdates
           }
-        FutureUnlessShutdown.pure(
-          SequencedSubmissionsValidationResult(
-            newInFlightAggregations,
-            newInFlightAggregationUpdates,
-            sequencerEventTimestamp,
-            outcome +: remainingReversedOutcomes,
-          )
+
+        SequencedSubmissionsValidationResult(
+          newInFlightAggregations,
+          newInFlightAggregationUpdates,
+          sequencerEventTimestamp,
+          outcome +: remainingReversedOutcomes,
         )
+
       case _ => // Discarded submission
-        FutureUnlessShutdown.pure(resultIfNoDeliverEvents)
+        resultIfNoDeliverEvents
     }
 }
 
 private[update] object SequencedSubmissionsValidator {
 
+  /** Accumulates the submissions within a chunk
+    *
+    * We perform a foldLeft on the sequenced submissions and accumulate the state changes in here.
+    * @param inFlightAggregations
+    *   the current state of inflight aggregations
+    * @param inFlightAggregationUpdates
+    *   the state changes in this chunk, stored separately as we need to persist them
+    * @param reversedOutcomes
+    *   the processed submission requests
+    * @param lastSequencerEventTimestamp
+    *   the timestamp of the last sequencer event processed while validating the submissions
+    */
   final case class SequencedSubmissionsValidationResult(
       inFlightAggregations: InFlightAggregations,
       inFlightAggregationUpdates: InFlightAggregationUpdates = Map.empty,

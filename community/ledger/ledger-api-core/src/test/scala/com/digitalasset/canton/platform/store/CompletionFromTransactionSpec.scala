@@ -8,6 +8,8 @@ import com.digitalasset.canton.TestEssentials
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.platform.store.CompletionFromTransaction.CommonCompletionProperties
 import com.digitalasset.canton.protocol.TestUpdateId
+import com.digitalasset.canton.tracing.SerializableTraceContext
+import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
 import com.digitalasset.daml.lf.data.Time
 import com.google.protobuf.duration.Duration
 import com.google.protobuf.timestamp.Timestamp
@@ -80,7 +82,7 @@ class CompletionFromTransactionSpec
                 userId = "userId",
                 submissionId = submissionId,
                 synchronizerId = "synchronizer id",
-                traceContext = traceContext,
+                traceContext = SerializableTraceContext(traceContext).toDamlProto,
                 deduplicationOffset = deduplicationOffset,
                 deduplicationDurationSeconds = deduplicationDurationSeconds,
                 deduplicationDurationNanos = deduplicationDurationNanos,
@@ -119,7 +121,7 @@ class CompletionFromTransactionSpec
               userId = "userId",
               submissionId = Some("submissionId"),
               synchronizerId = "synchronizer id",
-              traceContext = traceContext,
+              traceContext = SerializableTraceContext(traceContext).toDamlProto,
               deduplicationOffset = None,
               deduplicationDurationSeconds = deduplicationDurationSeconds,
               deduplicationDurationNanos = deduplicationDurationNanos,
@@ -142,7 +144,7 @@ class CompletionFromTransactionSpec
             userId = "userId",
             submissionId = Some("submissionId"),
             synchronizerId = "synchronizer id",
-            traceContext = traceContext,
+            traceContext = SerializableTraceContext(traceContext).toDamlProto,
             deduplicationOffset = None,
             deduplicationDurationSeconds = None,
             deduplicationDurationNanos = None,

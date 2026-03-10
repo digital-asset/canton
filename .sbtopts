@@ -11,11 +11,9 @@
 # Increase code cache size, as the default is occasionally insufficient for running the coverage instrumented integration tests
 -J-XX:ReservedCodeCacheSize=600M
 
-# Crash on OutOfMemoryErrors and produce a heap dump
+# Crash on OutOfMemoryErrors
 -J-XX:+CrashOnOutOfMemoryError
 
-# Actually this produces an usable heap dump on OOM
--J-XX:+HeapDumpOnOutOfMemoryError
 
 # Print out native memory usage statistics on exit
 # Comment out if needed - slows down execution

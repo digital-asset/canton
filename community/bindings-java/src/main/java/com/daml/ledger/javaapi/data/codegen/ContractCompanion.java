@@ -210,6 +210,7 @@ public abstract class ContractCompanion<Ct, Id, Data>
   public static final class WithKey<Ct, Id, Data, Key> extends ContractCompanion<Ct, Id, Data> {
     private final NewContract<Ct, Id, Data, Key> newContract;
     private final Function<Value, Key> keyFromValue;
+    private final ValueDecoder<Key> keyDecoder;
 
     /**
      * <strong>INTERNAL API</strong>: this is meant for use by <a
@@ -228,7 +229,7 @@ public abstract class ContractCompanion<Ct, Id, Data>
         NewContract<Ct, Id, Data, Key> newContract,
         List<Choice<Data, ?, ?>> choices,
         ValueDecoder<Data> valueDecoder,
-        Function<Value, Key> keyFromValue) {
+        ValueDecoder<Key> keyDecoder) {
       super(
           packageInfo,
           templateClassName,
@@ -238,7 +239,8 @@ public abstract class ContractCompanion<Ct, Id, Data>
           choices,
           valueDecoder);
       this.newContract = newContract;
-      this.keyFromValue = keyFromValue;
+      this.keyFromValue = keyDecoder::decode;
+      this.keyDecoder = keyDecoder;
     }
 
     /**
@@ -263,6 +265,7 @@ public abstract class ContractCompanion<Ct, Id, Data>
           packageInfo, templateClassName, templateId, newContractId, fromValue, fromJson, choices);
       this.newContract = newContract;
       this.keyFromValue = keyFromValue;
+      this.keyDecoder = value -> value.asRecord().map(keyFromValue).orElseThrow();
     }
 
     public Ct fromIdAndRecord(
@@ -281,7 +284,9 @@ public abstract class ContractCompanion<Ct, Id, Data>
       return fromIdAndRecord(
           event.getContractId(),
           event.getArguments(),
-          event.getContractKey().map(keyFromValue),
+          event
+              .getContractKey()
+              .map(value -> keyDecoder.decode(value, UnknownTrailingFieldPolicy.STRICT)),
           event.getSignatories(),
           event.getObservers());
     }

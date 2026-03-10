@@ -2907,5 +2907,5 @@ object UpdateToDbDtoSpec {
   implicit private val DbDtoEqual: org.scalactic.Equality[DbDto] = ScalatestEqualityHelpers.DbDtoEq
 
   private val serializedEmptyTraceContext =
-    SerializableTraceContext(emptyTraceContext).toDamlProto.toByteArray
+    SerializableTraceContext(emptyTraceContext).toSerializedDamlProto
 }

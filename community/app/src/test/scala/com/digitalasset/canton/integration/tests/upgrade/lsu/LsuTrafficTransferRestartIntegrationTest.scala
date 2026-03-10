@@ -60,7 +60,11 @@ abstract class LsuTrafficTransferRestartIntegrationTest extends LsuBase with Tra
       .withSetup { implicit env =>
         import env.*
 
-        defaultEnvironmentSetup(connectParticipants = false)
+        defaultEnvironmentSetup(
+          connectParticipants = false,
+          // Done below
+          changeDynamicSynchronizerParameters = false,
+        )
         participant1.synchronizers.connect_by_config(synchronizerConnectionConfig(sequencer1))
         participant2.synchronizers.connect_by_config(synchronizerConnectionConfig(sequencer2))
 

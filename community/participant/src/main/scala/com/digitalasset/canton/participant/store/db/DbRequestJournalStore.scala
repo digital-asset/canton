@@ -392,7 +392,7 @@ class DbRequestJournalStore(
         select max(request_timestamp)
         from par_journal_requests
         where physical_synchronizer_idx = $physicalSynchronizerIdx and request_timestamp <= $requestTimestamp
-        """.as[CantonTimestamp].headOption,
+        """.as[Option[CantonTimestamp]].headOption.map(_.flatten),
       functionFullName,
     )
 }

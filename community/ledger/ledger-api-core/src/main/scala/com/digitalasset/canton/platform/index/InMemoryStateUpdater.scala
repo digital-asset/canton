@@ -21,6 +21,7 @@ import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater.{PrepareResult, UpdaterFlow}
 import com.digitalasset.canton.platform.indexer.TransactionTraversalUtils.NodeInfo
+import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription.Batch
 import com.digitalasset.canton.platform.store.CompletionFromTransaction
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.cache.OffsetCheckpoint
@@ -28,7 +29,8 @@ import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent
 import com.digitalasset.canton.platform.store.dao.events.ContractStateEvent.ReassignmentAccepted
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
 import com.digitalasset.canton.platform.{InMemoryState, Key}
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
+import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.transaction.Node.{Create, Exercise}
 import org.apache.pekko.NotUsed
@@ -60,12 +62,16 @@ private[platform] object InMemoryStateUpdaterFlow {
       prepare: (Vector[(Offset, Update)], LedgerEnd, TraceContext) => PrepareResult,
       update: (PrepareResult, Boolean) => Unit,
   )(implicit traceContext: TraceContext): UpdaterFlow = { repairMode =>
-    Flow[(Vector[(Offset, Update)], LedgerEnd, TraceContext)]
-      .filter(_._1.nonEmpty)
+    Flow[Batch[?]]
+      .filter(_.offsetsUpdates.nonEmpty)
       .via(updateOffsetCheckpointCacheFlow(inMemoryState, offsetCheckpointCacheUpdateInterval))
-      .mapAsync(prepareUpdatesParallelism) { case (batch, ledgerEnd, batchTraceContext) =>
+      .mapAsync(prepareUpdatesParallelism) { batch =>
         Future {
-          batch -> prepare(batch, ledgerEnd, batchTraceContext)
+          batch -> prepare(
+            batch.offsetsUpdates,
+            batch.ledgerEnd,
+            batch.batchTraceContext,
+          )
         }(prepareUpdatesExecutionContext)
           .checkIfComplete(preparePackageMetadataTimeOutWarning)(
             logger.warn(
@@ -87,8 +93,8 @@ private[platform] object InMemoryStateUpdaterFlow {
       inMemoryState: InMemoryState,
       interval: FiniteDuration,
   ): Flow[
-    (Vector[(Offset, Update)], LedgerEnd, TraceContext),
-    (Vector[(Offset, Update)], LedgerEnd, TraceContext),
+    Batch[?],
+    Batch[?],
     NotUsed,
   ] = {
     // tick source so that we update offset checkpoint caches
@@ -104,8 +110,8 @@ private[platform] object InMemoryStateUpdaterFlow {
       updateOffsetCheckpointCache: OffsetCheckpoint => Unit,
       tick: Source[Option[Nothing], NotUsed],
   ): Flow[
-    (Vector[(Offset, Update)], LedgerEnd, TraceContext),
-    (Vector[(Offset, Update)], LedgerEnd, TraceContext),
+    Batch[?],
+    Batch[?],
     NotUsed,
   ] =
     Flow.fromGraph(GraphDSL.create() { implicit builder =>
@@ -116,16 +122,16 @@ private[platform] object InMemoryStateUpdaterFlow {
       // them with a tick source that ticks every interval seconds to signify the update of the cache
 
       val broadcast =
-        builder.add(Broadcast[(Vector[(Offset, Update)], LedgerEnd, TraceContext)](2))
+        builder.add(Broadcast[Batch[?]](2))
 
       val merge =
         builder.add(Merge[Option[(Offset, Update)]](inputPorts = 2, eagerComplete = true))
 
-      val preprocess: Flow[(Vector[(Offset, Update)], LedgerEnd, TraceContext), Option[
+      val preprocess: Flow[Batch[?], Option[
         (Offset, Update)
       ], NotUsed] =
-        Flow[(Vector[(Offset, Update)], LedgerEnd, TraceContext)]
-          .map(_._1)
+        Flow[Batch[?]]
+          .map(_.offsetsUpdates)
           .mapConcat(identity)
           .map(Some(_))
 
@@ -188,9 +194,7 @@ private[platform] object InMemoryStateUpdater {
       batchTraceContext: TraceContext,
   )
   type UpdaterFlow =
-    Boolean => Flow[(Vector[(Offset, Update)], LedgerEnd, TraceContext), Vector[
-      (Offset, Update)
-    ], NotUsed]
+    Boolean => Flow[Batch[?], Batch[?], NotUsed]
   def owner(
       inMemoryState: InMemoryState,
       prepareUpdatesParallelism: Int,
@@ -530,7 +534,7 @@ private[platform] object InMemoryStateUpdater {
               deduplicationDurationSeconds = deduplicationDurationSeconds,
               deduplicationDurationNanos = deduplicationDurationNanos,
               synchronizerId = txAccepted.synchronizerId.toProtoPrimitive,
-              traceContext = txAccepted.traceContext,
+              traceContext = SerializableTraceContext(txAccepted.traceContext).toDamlProto,
             ),
           updateId = txAccepted.updateId,
         )
@@ -571,7 +575,7 @@ private[platform] object InMemoryStateUpdater {
           deduplicationDurationSeconds = deduplicationDurationSeconds,
           deduplicationDurationNanos = deduplicationDurationNanos,
           synchronizerId = u.synchronizerId.toProtoPrimitive,
-          traceContext = u.traceContext,
+          traceContext = SerializableTraceContext(u.traceContext).toDamlProto,
         ),
         status = u.reasonTemplate.status,
       ),
@@ -600,7 +604,7 @@ private[platform] object InMemoryStateUpdater {
               deduplicationDurationSeconds = deduplicationDurationSeconds,
               deduplicationDurationNanos = deduplicationDurationNanos,
               synchronizerId = u.synchronizerId.toProtoPrimitive,
-              traceContext = u.traceContext,
+              traceContext = SerializableTraceContext(u.traceContext).toDamlProto,
             ),
           updateId = u.updateId,
         )

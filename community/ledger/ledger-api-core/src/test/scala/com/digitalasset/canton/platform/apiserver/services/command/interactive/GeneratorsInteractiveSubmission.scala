@@ -23,6 +23,7 @@ import com.digitalasset.canton.{
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Time}
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
   FatContractInstance,
@@ -229,8 +230,8 @@ final class GeneratorsInteractiveSubmission(
     optByKeyNodeO,
   )
 
-  private val globalKeyMappingGen: Gen[Map[GlobalKey, Option[Value.ContractId]]] =
-    boundedMapGen[GlobalKey, Option[Value.ContractId]]
+  private val globalKeyMappingGen: Gen[Map[GlobalKey, Vector[Value.ContractId]]] =
+    boundedMapGen[GlobalKey, Option[Value.ContractId]].map(_.transform((_, v) => v.asCidVector))
 
   private def inputContractsGen(overrideCid: Value.ContractId): Gen[LfFatContractInst] = for {
     create <- ValueGenerators

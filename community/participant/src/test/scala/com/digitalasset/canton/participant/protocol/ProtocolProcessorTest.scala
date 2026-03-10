@@ -160,7 +160,8 @@ class ProtocolProcessorTest
       any[MessageId],
       any[Option[AggregationRule]],
       any[SendCallback],
-      any[Boolean],
+      amplify = any[Boolean],
+      useConfirmationResponseAmplificationParameters = any[Boolean],
     )(anyTraceContext, any[MetricsContext])
   )
     .thenAnswer {
@@ -487,7 +488,8 @@ class ProtocolProcessorTest
           any[MessageId],
           any[Option[AggregationRule]],
           any[SendCallback],
-          any[Boolean],
+          amplify = any[Boolean],
+          useConfirmationResponseAmplificationParameters = any[Boolean],
         )(anyTraceContext, any[MetricsContext])
       )
         .thenReturn(EitherT.leftT[FutureUnlessShutdown, Unit](sendError))

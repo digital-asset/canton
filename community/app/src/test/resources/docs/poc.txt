@@ -27,7 +27,7 @@ Bootstrap the synchronizer
         mediators = Seq(mediator1),
         synchronizerOwners = Seq(sequencer1, mediator1),
         synchronizerThreshold = PositiveInt.two,
-        staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+        staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
     )
 
 Connect the participants
@@ -44,7 +44,7 @@ Bootstrap the synchronizer
         mediators = Seq(mediator1),
         synchronizerOwners = Seq(sequencer1, mediator1),
         synchronizerThreshold = PositiveInt.two,
-        staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+        staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
     )
 
 .. snippet:: connect_and_ping

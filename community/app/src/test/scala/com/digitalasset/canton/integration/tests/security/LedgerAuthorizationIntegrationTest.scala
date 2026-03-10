@@ -28,6 +28,7 @@ import com.digitalasset.canton.error.MediatorError.{
   ParticipantEquivocation,
 }
 import com.digitalasset.canton.error.TransactionRoutingError.TopologyErrors.NoSynchronizerOnWhichAllSubmittersCanSubmit
+import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{
   UseProgrammableSequencer,
   UseReferenceBlockSequencer,
@@ -35,18 +36,9 @@ import com.digitalasset.canton.integration.plugins.{
 import com.digitalasset.canton.integration.tests.security.SecurityTestHelpers.SignedMessageTransform
 import com.digitalasset.canton.integration.util.TestSubmissionService
 import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWithMetadata
-import com.digitalasset.canton.integration.{
-  CommunityIntegrationTest,
-  ConfigTransforms,
-  EnvironmentDefinition,
-  HasCycleUtils,
-  SharedEnvironment,
-  TestConsoleEnvironment,
-}
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
-import com.digitalasset.canton.participant.protocol.ProtocolProcessor
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.protocol.messages.*
@@ -405,55 +397,57 @@ trait LedgerAuthorizationIntegrationTest
             loggerAssertion = loggerAssertion,
           )
 
-        // We need to disable the check ensuring the mediator does not approve a transaction we
-        // have rejected because this test will trigger it.
-        // TODO(i15395): to be adapted when a more graceful check is implemented
-        ProtocolProcessor.withApprovalContradictionCheckDisabled(loggerFactory) {
-          loggerFactory.assertLoggedWarningsAndErrorsSeq(
-            {
-              // Create a new version of the contract with party2 as signatory
-              // without authorization from party2.
-              val unhappyCaseCommand = replaceCmd(cid2, party2, Some(party3))
+        loggerFactory.assertLoggedWarningsAndErrorsSeq(
+          {
+            // Create a new version of the contract with party2 as signatory
+            // without authorization from party2.
+            val unhappyCaseCommand = replaceCmd(cid2, party2, Some(party3))
 
-              val ((_, maliciousCaseEvents), _) =
-                // Force approval by the mediator to check if the participants partly rollback nevertheless.
-                replacingConfirmationResult(
-                  daId,
-                  sequencer1,
-                  mediator1,
-                  withMediatorVerdict(mediatorApprove),
-                )(
-                  trackingLedgerEvents(Seq(participant1, participant2), Seq(party1, party2))(
-                    maliciousP1.submitCommand(unhappyCaseCommand).futureValueUS
-                  )
+            val ((_, maliciousCaseEvents), _) =
+              // Force approval by the mediator to check if the participants partly rollback nevertheless.
+              replacingConfirmationResult(
+                daId,
+                sequencer1,
+                mediator1,
+                withMediatorVerdict(mediatorApprove),
+              )(
+                trackingLedgerEvents(Seq(participant1, participant2), Seq(party1, party2))(
+                  maliciousP1.submitCommand(unhappyCaseCommand).futureValueUS
                 )
-
-              // The transaction succeeds because the child view passes the conformance check
-              maliciousCaseEvents.assertStatusOk(participant1)
-
-              // Both participants create the new contract (child view)
-              val p1Created =
-                maliciousCaseEvents.allCreated(UniversalContract.COMPANION)(participant1)
-              val p2Created =
-                maliciousCaseEvents.allCreated(UniversalContract.COMPANION)(participant2)
-              p1Created.loneElement shouldBe p2Created.loneElement
-
-              // No participant archives the original contract because the root view is rolled back
-              val p1Archived =
-                maliciousCaseEvents.allArchived(UniversalContract.COMPANION)(participant1)
-              val p2Archived =
-                maliciousCaseEvents.allArchived(UniversalContract.COMPANION)(participant2)
-              p1Archived shouldBe empty
-              p2Archived shouldBe empty
-            },
-            LogEntry.assertLogSeq(
-              assertPhase3Alert(checkAlert, "model conformance check")(
-                participant1,
-                participant2,
               )
-            ),
-          )
-        }
+
+            // The transaction succeeds because the child view passes the conformance check
+            maliciousCaseEvents.assertStatusOk(participant1)
+
+            // Both participants create the new contract (child view)
+            val p1Created =
+              maliciousCaseEvents.allCreated(UniversalContract.COMPANION)(participant1)
+            val p2Created =
+              maliciousCaseEvents.allCreated(UniversalContract.COMPANION)(participant2)
+            p1Created.loneElement shouldBe p2Created.loneElement
+
+            // No participant archives the original contract because the root view is rolled back
+            val p1Archived =
+              maliciousCaseEvents.allArchived(UniversalContract.COMPANION)(participant1)
+            val p2Archived =
+              maliciousCaseEvents.allArchived(UniversalContract.COMPANION)(participant2)
+            p1Archived shouldBe empty
+            p2Archived shouldBe empty
+          },
+          LogEntry.assertLogSeq(
+            assertPhase3Alert(checkAlert, "model conformance check")(
+              participant1,
+              participant2,
+            ) :+
+              (
+                _.shouldBeCantonError(
+                  SyncServiceAlarm,
+                  _ shouldBe "Mediator approved a request that has been locally rejected.",
+                ),
+                "unexpected mediator approval",
+              )
+          ),
+        )
       }
     }
   }
@@ -1219,6 +1213,12 @@ trait LedgerAuthorizationIntegrationTest
           assertPhase3Alert(assertViewReconstructionErrorForLogger, "view reconstruction error")(
             participant1,
             participant2,
+          ) :+ (
+            _.shouldBeCantonError(
+              SyncServiceAlarm,
+              _ shouldBe "Mediator approved a request that has been locally rejected.",
+            ),
+            "unexpected mediator approval",
           )
         ),
       )
@@ -1244,32 +1244,27 @@ trait LedgerAuthorizationIntegrationTest
           ledgerTime = environment.now.toLf,
         )
 
-      // We need to disable the check ensuring the mediator does not approve a transaction we
-      // have rejected because this test will trigger it.
-      // TODO(i15395): to be adapted when a more graceful check is implemented
-      ProtocolProcessor.withApprovalContradictionCheckDisabled(loggerFactory) {
-        loggerFactory.assertLoggedWarningsAndErrorsSeq(
-          replacingConfirmationResult(
-            daId,
-            sequencer1,
-            mediator1,
-            withMediatorVerdict(mediatorApprove),
-          ) {
-            val (_, events) = trackingLedgerEvents(participants.all, Seq.empty)(
-              maliciousP1
-                .submitCommand(
-                  cmd,
-                  transactionTreeInterceptor = interceptor,
-                )
-                .futureValueUS
-            )
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        replacingConfirmationResult(
+          daId,
+          sequencer1,
+          mediator1,
+          withMediatorVerdict(mediatorApprove),
+        ) {
+          val (_, events) = trackingLedgerEvents(participants.all, Seq.empty)(
+            maliciousP1
+              .submitCommand(
+                cmd,
+                transactionTreeInterceptor = interceptor,
+              )
+              .futureValueUS
+          )
 
-            events.assertNoCompletionsExceptFor(participant1)
-            events.assertNoTransactions()
-          }._1,
-          logAssertion,
-        )
-      }
+          events.assertNoCompletionsExceptFor(participant1)
+          events.assertNoTransactions()
+        }._1,
+        logAssertion,
+      )
     }
 
     def assertViewReconstructionErrorForLogger(
@@ -1312,6 +1307,12 @@ trait LedgerAuthorizationIntegrationTest
           assertPhase3Alert(assertViewReconstructionErrorForLogger, "view reconstruction error")(
             participant1,
             participant2,
+          ) :+ (
+            _.shouldBeCantonError(
+              SyncServiceAlarm,
+              _ shouldBe "Mediator approved a request that has been locally rejected.",
+            ),
+            "unexpected mediator approval",
           )
         ),
       )
@@ -1348,6 +1349,12 @@ trait LedgerAuthorizationIntegrationTest
           assertPhase3Alert(assertViewReconstructionErrorForLogger, "view reconstruction error")(
             participant1,
             participant2,
+          ) :+ (
+            _.shouldBeCantonError(
+              SyncServiceAlarm,
+              _ shouldBe "Mediator approved a request that has been locally rejected.",
+            ),
+            "unexpected mediator approval",
           )
         ),
       )
@@ -1378,6 +1385,12 @@ trait LedgerAuthorizationIntegrationTest
           assertPhase3Alert(assertViewReconstructionErrorForLogger, "view reconstruction error")(
             participant1,
             participant2,
+          ) :+ (
+            _.shouldBeCantonError(
+              SyncServiceAlarm,
+              _ shouldBe "Mediator approved a request that has been locally rejected.",
+            ),
+            "unexpected mediator approval",
           )
         ),
       )
@@ -1409,14 +1422,23 @@ trait LedgerAuthorizationIntegrationTest
           assertPhase3Alert(assertViewReconstructionErrorForLogger, "view reconstruction error")(
             participant1,
             participant2,
-          ) :+
-            // Alert at Mediator
-            (
-              _.shouldBeCantonError(
-                MediatorError.MalformedMessage,
-                _ should fullyMatch regex raw"Received a mediator confirmation request with id RequestId\S+ for transaction view at ViewPosition\S+, where no quorum of the list satisfies the minimum threshold\. Rejecting request\.\.\.",
+          ) ++
+            Seq(
+              // Alert at Mediator
+              (
+                _.shouldBeCantonError(
+                  MediatorError.MalformedMessage,
+                  _ should fullyMatch regex raw"Received a mediator confirmation request with id RequestId\S+ for transaction view at ViewPosition\S+, where no quorum of the list satisfies the minimum threshold\. Rejecting request\.\.\.",
+                ),
+                "mediator",
               ),
-              "mediator",
+              (
+                _.shouldBeCantonError(
+                  SyncServiceAlarm,
+                  _ shouldBe "Mediator approved a request that has been locally rejected.",
+                ),
+                "unexpected mediator approval",
+              ),
             )
         ),
       )

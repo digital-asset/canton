@@ -165,7 +165,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
 
       // Wait for partyToParticipant mapping to become effective on the source participant via ledger api
       val partyToSourceParticipantEffectiveAtOffset = eventually() {
-        val offsetPartyAddedToTPO = (for {
+        val offsetPartyOnboardingOnTPO = (for {
           ptp <- sourceParticipant.ledger_api.updates.topology_transactions(
             completeAfter = PositiveInt.two,
             partyIds = Seq(alice),
@@ -173,14 +173,14 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
           )
           topologyEvent <- ptp.topologyTransaction.events
           offset = ptp.topologyTransaction.offset
-          partyAdded <- topologyEvent.event.participantAuthorizationAdded.toList
-        } yield (partyAdded, offset)).collect {
-          case (partyAdded, offset)
-              if partyAdded.participantId == targetParticipant.id.uid.toProtoPrimitive =>
+          partyOnboarding <- topologyEvent.event.participantAuthorizationOnboarding.toList
+        } yield (partyOnboarding, offset)).collect {
+          case (onboarding, offset)
+              if onboarding.participantId == targetParticipant.id.uid.toProtoPrimitive =>
             Offset.tryFromLong(offset)
         }.lastOption
-        offsetPartyAddedToTPO.nonEmpty shouldBe true
-        offsetPartyAddedToTPO.value
+        offsetPartyOnboardingOnTPO.nonEmpty shouldBe true
+        offsetPartyOnboardingOnTPO.value
       }
 
       // Run a ping to make sure the AcsInspection does not get upset about the timestamp at the end

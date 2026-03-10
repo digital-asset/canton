@@ -6,23 +6,13 @@ package com.digitalasset.canton.config
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.nonempty.NonEmpty
 import com.daml.tls.{TlsClientConfig, TlsClientConfigOnlyTrustFile, TlsServerConfig}
-import com.daml.tracing.Telemetry
 import com.digitalasset.canton.SequencerAlias
-import com.digitalasset.canton.auth.CantonAdminTokenDispenser
 import com.digitalasset.canton.config.AdminServerConfig.defaultAddress
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, Port}
-import com.digitalasset.canton.logging.NamedLoggerFactory
-import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.networking.Endpoint
-import com.digitalasset.canton.networking.grpc.{
-  CantonCommunityServerInterceptors,
-  CantonServerBuilder,
-  CantonServerInterceptors,
-}
+import com.digitalasset.canton.networking.grpc.CantonServerBuilder
 import com.digitalasset.canton.sequencing.GrpcSequencerConnection
 import com.digitalasset.canton.topology.SequencerId
-import com.digitalasset.canton.tracing.TracingConfig
-import io.grpc.ServerInterceptor
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 
 import scala.concurrent.duration.DurationInt
@@ -112,38 +102,6 @@ trait ServerConfig extends Product with Serializable {
 
   /** configure limits for open streams per service */
   def limits: Option[ActiveRequestLimitsConfig]
-
-  /** Use the configuration to instantiate the interceptors for this server */
-  def instantiateServerInterceptors(
-      api: String,
-      tracingConfig: TracingConfig,
-      apiLoggingConfig: ApiLoggingConfig,
-      loggerFactory: NamedLoggerFactory,
-      grpcMetrics: GrpcServerMetricsX,
-      authServices: Seq[AuthServiceConfig],
-      adminTokenDispenser: Option[CantonAdminTokenDispenser],
-      jwtTimestampLeeway: Option[JwtTimestampLeeway],
-      adminTokenConfig: AdminTokenConfig,
-      jwksCacheConfig: JwksCacheConfig,
-      telemetry: Telemetry,
-      additionalInterceptors: Seq[ServerInterceptor] = Seq.empty,
-      requestLimits: Option[ActiveRequestLimitsConfig],
-  ): CantonServerInterceptors = new CantonCommunityServerInterceptors(
-    api,
-    tracingConfig,
-    apiLoggingConfig,
-    loggerFactory,
-    grpcMetrics,
-    authServices,
-    adminTokenDispenser,
-    jwtTimestampLeeway,
-    adminTokenConfig,
-    jwksCacheConfig,
-    telemetry,
-    additionalInterceptors,
-    requestLimits,
-  )
-
 }
 
 object ServerConfig {

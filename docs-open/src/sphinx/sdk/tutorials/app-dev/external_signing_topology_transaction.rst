@@ -62,7 +62,7 @@ To proceed, gather the following information by running the commands below in th
           mediators = Seq(mediator1),
           synchronizerOwners = Seq(sequencer1, mediator1),
           synchronizerThreshold = 2,
-          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
         )
     .. success:: participant1.config.adminApi.address
     .. success:: participant1.config.adminApi.port.unwrap
@@ -367,7 +367,7 @@ The Canton console on a sequencer node of the target synchronizer also provides 
           mediators = Seq(mediator1),
           synchronizerOwners = Seq(sequencer1, mediator1),
           synchronizerThreshold = 2,
-          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
         )
     .. success:: sequencer1.synchronizer_parameters.static.get.protocolVersion
 

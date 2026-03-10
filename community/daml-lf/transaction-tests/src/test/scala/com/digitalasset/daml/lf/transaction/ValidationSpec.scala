@@ -6,6 +6,7 @@ package transaction
 
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.data.Ref.{Party, Identifier, PackageName, TypeConId, ChoiceName}
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits._
 import com.digitalasset.daml.lf.value.{Value => V}
 import org.scalatest.freespec.AnyFreeSpec
 import org.scalatest.matchers.should.Matchers
@@ -356,7 +357,7 @@ class ValidationSpec extends AnyFreeSpec with Matchers with TableDrivenPropertyC
     tweakKeyMaintainers.run(nl.key).map { x => nl.copy(key = x) }
   }
   private val tweakLookupResult = Tweak[Node] { case nl: Node.LookupByKey =>
-    tweakOptContractId.run(nl.result).map { x => nl.copy(result = x) }
+    tweakOptContractId.run(nl.result.asCidOption).map { x => nl.copy(result = x.asCidVector) }
   }
   private val tweakLookupVersion = Tweak.single[Node] { case nl: Node.LookupByKey =>
     nl.copy(version = changeVersion(nl.version))

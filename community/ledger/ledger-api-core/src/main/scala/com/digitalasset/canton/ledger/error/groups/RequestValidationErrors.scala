@@ -405,6 +405,28 @@ object RequestValidationErrors extends RequestValidationErrorGroup {
   }
 
   @Explanation(
+    """This error is emitted when a submitted ledger API command contains a continuation token which cannot be verified.
+      |When an ACS request is made with a continuation token, the token must be taken from a valid
+      |GetActiveContractsResponse and used with the same EventFormat settings, with the same Canton participant
+      |running the same Canton version. These tokens are not intended to be stored and used much later under different circumstances."""
+  )
+  @Resolution("Inspect the reason given and correct your application.")
+  object InvalidContinuationToken
+      extends ErrorCode(
+        id = "INVALID_CONTINUATION_TOKEN",
+        ErrorCategory.InvalidIndependentOfSystemState,
+      ) {
+    final case class Reject()(implicit
+        loggingContext: ErrorLoggingContext
+    ) extends DamlErrorWithDefiniteAnswer(
+          cause =
+            s"The submitted command contains an invalid continuation token. Tokens used in ACS requests must be taken " +
+              "from a valid GetActiveContractsResponse and used with the same EventFormat settings, with the same Canton " +
+              "participant running the same Canton version."
+        )
+  }
+
+  @Explanation(
     "This error is emitted when a submitted ledger API command specifies an invalid deduplication period."
   )
   @Resolution(

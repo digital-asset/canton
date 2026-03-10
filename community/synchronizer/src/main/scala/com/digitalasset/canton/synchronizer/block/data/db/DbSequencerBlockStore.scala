@@ -16,13 +16,10 @@ import com.digitalasset.canton.synchronizer.block.data.{
   BlockInfo,
   SequencerBlockStore,
 }
+import com.digitalasset.canton.synchronizer.sequencer.SequencerInitialState
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.BlockNotFound
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerStore
-import com.digitalasset.canton.synchronizer.sequencer.{
-  InFlightAggregationUpdates,
-  SequencerInitialState,
-}
 import com.digitalasset.canton.synchronizer.sequencing.integrations.state.DbSequencerStateManagerStore
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.ProtocolVersion
@@ -45,7 +42,7 @@ class DbSequencerBlockStore(
 
   private val topRow = storage.limitSql(1)
 
-  private val stateManagerStore = new DbSequencerStateManagerStore(
+  protected override val stateManagerStore = new DbSequencerStateManagerStore(
     storage,
     protocolVersion,
     timeouts,
@@ -53,10 +50,9 @@ class DbSequencerBlockStore(
     batchingConfig,
     sequencerStore,
   )
-
-  override def readHead(implicit
+  override def readHeadBlockInfo()(implicit
       traceContext: TraceContext
-  ): FutureUnlessShutdown[Option[BlockEphemeralState]] =
+  ): FutureUnlessShutdown[Option[BlockInfo]] =
     storage.query(
       for {
         watermark <- safeWaterMarkDBIO
@@ -64,12 +60,7 @@ class DbSequencerBlockStore(
           case Some(watermark) => findBlockForCrashRecoveryForWatermark(watermark)
           case None => DBIO.successful(None)
         }
-        state <- blockInfoO match {
-          case None => DBIO.successful(None)
-          case Some(blockInfo) =>
-            readAtBlock(blockInfo, maxSequencingTimeBound = CantonTimestamp.MaxValue).map(Some(_))
-        }
-      } yield state,
+      } yield blockInfoO,
       functionFullName,
     )
 
@@ -105,13 +96,9 @@ class DbSequencerBlockStore(
   override def findBlockContainingTimestamp(
       timestamp: CantonTimestamp
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, SequencerError, BlockInfo] =
-    EitherT(
-      storage
-        .query(findBlockContainingTimestampDBIO(timestamp), functionFullName)
-        .map {
-          case Some(block) => Right(block)
-          case None => Left(BlockNotFound.InvalidTimestamp(timestamp))
-        }
+    EitherT.fromOptionF(
+      storage.query(findBlockContainingTimestampDBIO(timestamp), functionFullName),
+      BlockNotFound.InvalidTimestamp(timestamp),
     )
 
   override def readStateForBlockContainingTimestamp(
@@ -120,35 +107,10 @@ class DbSequencerBlockStore(
   )(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, SequencerError, BlockEphemeralState] =
-    EitherT(
-      storage.query(
-        for {
-          heightAndTimestamp <- findBlockContainingTimestampDBIO(timestamp)
-          state <- heightAndTimestamp match {
-            case None => DBIO.successful(Left(BlockNotFound.InvalidTimestamp(timestamp)))
-            case Some(block) => readAtBlock(block, maxSequencingTimeBound).map(Right.apply)
-          }
-        } yield state,
-        functionFullName,
-      )
-    )
-
-  private def readAtBlock(
-      block: BlockInfo,
-      maxSequencingTimeBound: CantonTimestamp,
-  ): DBIOAction[BlockEphemeralState, NoStream, Effect.Read with Effect.Transactional] =
-    stateManagerStore
-      .readInFlightAggregationsDBIO(
-        timestamp = block.lastTs,
-        sequencingTimeLowerBound = block.lastTs,
-        sequencingTimeUpperBound = maxSequencingTimeBound,
-      )
-      .map(inFlightAggregations => BlockEphemeralState(block, inFlightAggregations))
-
-  override def storeInflightAggregations(
-      inFlightAggregationUpdates: InFlightAggregationUpdates
-  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] =
-    stateManagerStore.addInFlightAggregationUpdates(inFlightAggregationUpdates)
+    for {
+      block <- findBlockContainingTimestamp(timestamp)
+      state <- EitherT.right(readStateAtBlock(block, maxSequencingTimeBound))
+    } yield state
 
   override def finalizeBlockUpdates(blocks: Seq[BlockInfo])(implicit
       traceContext: TraceContext

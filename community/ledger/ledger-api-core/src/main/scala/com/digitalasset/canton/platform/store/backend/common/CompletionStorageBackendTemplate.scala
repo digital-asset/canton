@@ -77,7 +77,7 @@ class CompletionStorageBackendTemplate(
       userId(stringInterning),
       submissionId.?,
       synchronizerId(stringInterning).map(_.toProtoPrimitive),
-      traceContext.?.map(Conversions.traceContextOption(_)(noTracingLogger)),
+      traceContext.map(Conversions.protoTraceContextFrom(noTracingLogger)),
       deduplicationOffset,
       deduplicationDurationSeconds,
       deduplicationDurationNanos,
@@ -116,7 +116,7 @@ class CompletionStorageBackendTemplate(
       publicationTime.map(CantonTimestamp.apply),
       submissionId.?,
       updateId.?.map(_.isDefined),
-      traceContext.?.map(Conversions.traceContextOption(_)(noTracingLogger)),
+      traceContext.map(Conversions.traceContextFrom(noTracingLogger)),
     ).mapN(PostPublishData.apply)
 
     def postPublishDataParser: RowDef[Option[PostPublishData]] = isTransaction.branch(

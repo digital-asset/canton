@@ -65,6 +65,7 @@ final class ExportContractsIntegrationTest
           participantId = participant1.id,
           synchronizerId = daId,
           completeAfter = PositiveInt.one,
+          onboarding = false,
         )
 
         File.usingTemporaryFile() { file =>
@@ -91,6 +92,7 @@ final class ExportContractsIntegrationTest
             participantId = participant1.id,
             synchronizerId = daId,
             completeAfter = PositiveInt.one,
+            onboarding = false,
           )
 
           File.usingTemporaryFile() { file =>

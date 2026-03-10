@@ -2477,6 +2477,18 @@ class AcsCommitmentProcessor private (
       traceContext: TraceContext,
   ): Boolean =
     if (reinitializationEnqueued.compareAndSet(false, true)) {
+      def forgetAndPersist(
+          snapshot: CommitmentSnapshot[InternedPartyId],
+          timestamp: CantonTimestamp,
+      ): FutureUnlessShutdown[Unit] =
+        for {
+          // Forget the running commitments before reinitializing them to purge all stakeholder groups
+          // for which there are no active contracts. Otherwise, they would survive as rows in the DB that
+          // get picked up after the next restart
+          _ <- store.runningCommitments.forgetCheckpoints()
+          _ <- persistRunningCommitments(snapshot, isCheckpointAtTimestamp = Some(timestamp))
+        } yield ()
+
       val fut = publishQueue
         .executeUS(
           for {
@@ -2490,10 +2502,10 @@ class AcsCommitmentProcessor private (
 
             snapshot = rc.snapshot()
             _ <- checkpointQueue.executeUS(
-              persistRunningCommitments(snapshot, isCheckpointAtTimestamp = Some(timestamp)),
+              forgetAndPersist(snapshot, timestamp),
               s"persist running commitments for checkpointing as a result of reinitialization at time $timestamp",
             )
-            lastCheckpointTs = timestamp
+            _ = { lastCheckpointTs = timestamp }
             // invalidate cached commitments
             _ = cachedCommitmentsForRetroactiveSends.clear()
             _ = cachedCommitments.map(_.clear())

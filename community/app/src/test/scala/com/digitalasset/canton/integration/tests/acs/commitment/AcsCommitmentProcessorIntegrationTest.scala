@@ -146,7 +146,7 @@ sealed trait AcsCommitmentProcessorIntegrationTest
         participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
         participants.all.dars.upload(CantonExamplesPath, synchronizerId = daId)
         participants.all.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
-        passTopologyRegistrationTimeout(env)
+        passTopologyRegistrationTimeout()
       }
 
   "Participants can compute and receive ACS commitments" in { implicit env =>
@@ -268,7 +268,7 @@ sealed trait AcsCommitmentProcessorIntegrationTest
       participant1.commitments.received(daName, start, end, Some(participant2)) shouldBe empty
     }
 
-    passTopologyRegistrationTimeout(env)
+    passTopologyRegistrationTimeout()
   }
 
   "ACS commitments trigger counter-commitments" in { implicit env =>

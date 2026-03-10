@@ -5,6 +5,8 @@ package com.digitalasset.canton.integration.tests.multihostedparties
 
 import com.daml.ledger.api.v2.event.Event.Event.{Created, Exercised}
 import com.daml.ledger.api.v2.event.{CreatedEvent, Event}
+import com.daml.ledger.api.v2.state_service.ParticipantPermission as LapiParticipantPermission
+import com.daml.ledger.api.v2.topology_transaction.*
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.transaction_filter.TransactionShape.TRANSACTION_SHAPE_LEDGER_EFFECTS
 import com.daml.ledger.api.v2.value.Value.Sum.Party
@@ -25,6 +27,7 @@ import com.digitalasset.canton.console.{
   InstanceReference,
   LocalInstanceReference,
   LocalParticipantReference,
+  ParticipantReference,
 }
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -55,9 +58,9 @@ import com.digitalasset.canton.{SequencerAlias, config}
 import monocle.macros.syntax.lens.*
 import org.slf4j.event.Level
 
+import scala.annotation.nowarn
 import scala.concurrent.duration.DurationInt
 import scala.jdk.CollectionConverters.*
-import scala.util.chaining.scalaUtilChainingOps
 
 /** Objective: Test the negotiation of party replication via the PartyReplication.daml workflow.
   *
@@ -68,6 +71,7 @@ import scala.util.chaining.scalaUtilChainingOps
   *     connectivityMap), and only sequencer1, sequencer2, and sequencer4 support channels (see
   *     selectivelyEnablePartyReplicationOnSequencers).
   */
+@nowarn("msg=match may not be exhaustive")
 sealed trait OnlinePartyReplicationNegotiationTest
     extends CommunityIntegrationTest
     with SharedEnvironment {
@@ -207,64 +211,68 @@ sealed trait OnlinePartyReplicationNegotiationTest
             serial = serial,
             participantPermission = ParticipantPermission.Confirmation,
           )
-        ).tap { _ =>
-          def partyToReplicate(create: CreatedEvent) = create.createArguments
-            .getOrElse(fail("missing arguments record"))
-            .fields
-            .collect { case RecordField("partyId", Some(Value(Party(partyId)))) =>
-              partyId
-            }
-            .loneElement
+        )
 
-          Seq(sourceParticipant, targetParticipant).foreach { participant =>
-            clue(s"Checking participant ${participant.name}: ") {
-              eventually() {
-                val txs = participant.ledger_api.updates.transactions(
-                  Set(sourceParticipant.adminParty),
-                  completeAfter = 10,
-                  timeout = config.NonNegativeDuration.ofSeconds(1),
-                  transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
-                )
+      // Remember the offsets to help query subsequent LAPI topology events.
+      val spOffsetAgreement +: tpOffsetAgreement +: Nil = {
+        def partyToReplicate(create: CreatedEvent) = create.createArguments
+          .getOrElse(fail("missing arguments record"))
+          .fields
+          .collect { case RecordField("partyId", Some(Value(Party(partyId)))) =>
+            partyId
+          }
+          .loneElement
 
-                // The TP asks the SP to replicate Alice via proposal
-                val createProposal = txs.flatMap { case TransactionWrapper(tx: Transaction) =>
+        Seq(sourceParticipant, targetParticipant).map { participant =>
+          clue(s"Checking participant ${participant.name}: ") {
+            eventually() {
+              val txs = participant.ledger_api.updates.transactions(
+                Set(sourceParticipant.adminParty),
+                completeAfter = 10,
+                timeout = config.NonNegativeDuration.ofSeconds(1),
+                transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
+              )
+
+              // The TP asks the SP to replicate Alice via proposal
+              val createProposal = txs.flatMap { case TransactionWrapper(tx: Transaction) =>
+                tx.events.collect {
+                  case Event(Created(event))
+                      if event.templateId.contains(
+                        PartyReplicationAdminWorkflow.proposalTemplate
+                      ) =>
+                    event
+                }
+              }.loneElement
+              val party = partyToReplicate(createProposal)
+              createProposal.signatories shouldBe Seq(
+                targetParticipant.adminParty.toProtoPrimitive
+              )
+              party shouldBe alice.toProtoPrimitive
+
+              // The SP accepts the party replication proposal
+              val accept = txs
+                .collect { case TransactionWrapper(tx: Transaction) =>
                   tx.events.collect {
-                    case Event(Created(event))
+                    case Event(Exercised(event))
                         if event.templateId.contains(
                           PartyReplicationAdminWorkflow.proposalTemplate
                         ) =>
                       event
                   }
-                }.loneElement
-                val party = partyToReplicate(createProposal)
-                createProposal.signatories shouldBe Seq(
-                  targetParticipant.adminParty.toProtoPrimitive
-                )
-                party shouldBe alice.toProtoPrimitive
-
-                // The SP accepts the party replication proposal
-                val accept = txs
-                  .collect { case TransactionWrapper(tx: Transaction) =>
-                    tx.events.collect {
-                      case Event(Exercised(event))
-                          if event.templateId.contains(
-                            PartyReplicationAdminWorkflow.proposalTemplate
-                          ) =>
-                        event
-                    }
-                  }
-                  .flatten
-                  .loneElement
-                accept.choice shouldBe "Accept"
-                accept.consuming shouldBe true
-                accept.contractId shouldBe createProposal.contractId
-                accept.actingParties shouldBe Seq(
-                  sourceParticipant.adminParty.toProtoPrimitive
-                )
-              }
+                }
+                .flatten
+                .loneElement
+              accept.choice shouldBe "Accept"
+              accept.consuming shouldBe true
+              accept.contractId shouldBe createProposal.contractId
+              accept.actingParties shouldBe Seq(
+                sourceParticipant.adminParty.toProtoPrimitive
+              )
+              accept.offset
             }
           }
         }
+      }
 
       // Wait until both participants observe that both participants are allowed to host the party.
       eventually()(Seq(sourceParticipant, targetParticipant).foreach { participant =>
@@ -294,6 +302,40 @@ sealed trait OnlinePartyReplicationNegotiationTest
         assert(tpStatus.hasCompleted, "Target participant must complete")
         assert(spStatus.hasCompleted, "Source participant must complete")
       }
+
+      // Ensure both SP and TP first publish the Onboarding topology event followed by Added.
+      // Read from spOffsetAgreement/tpOffsetAgreement to skip over the test bootstrap topology events.
+      val expectedLapiOnboardingEvent = TopologyEvent.Event.ParticipantAuthorizationOnboarding(
+        ParticipantAuthorizationOnboarding(
+          partyId = alice.toProtoPrimitive,
+          participantId = targetParticipant.id.uid.toProtoPrimitive,
+          LapiParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION,
+        )
+      )
+      val expectedLapiAddedEvent = TopologyEvent.Event.ParticipantAuthorizationAdded(
+        ParticipantAuthorizationAdded(
+          partyId = alice.toProtoPrimitive,
+          participantId = targetParticipant.id.uid.toProtoPrimitive,
+          LapiParticipantPermission.PARTICIPANT_PERMISSION_CONFIRMATION,
+        )
+      )
+      def readLapiTopologyTransactions(
+          participant: ParticipantReference,
+          offset: Long,
+      ): Seq[TopologyEvent.Event] =
+        participant.ledger_api.updates
+          .topology_transactions(PositiveInt.two, beginOffsetExclusive = offset)
+          .flatMap(_.topologyTransaction.events.map(_.event))
+
+      val spLapiTopologyEvents = readLapiTopologyTransactions(sourceParticipant, spOffsetAgreement)
+      spLapiTopologyEvents should have size 2
+      spLapiTopologyEvents.head shouldBe expectedLapiOnboardingEvent
+      spLapiTopologyEvents.tail.head shouldBe expectedLapiAddedEvent
+
+      val tpLapiTopologyEvents = readLapiTopologyTransactions(targetParticipant, tpOffsetAgreement)
+      tpLapiTopologyEvents should have size 2
+      tpLapiTopologyEvents.head shouldBe expectedLapiOnboardingEvent
+      tpLapiTopologyEvents.tail.head shouldBe expectedLapiAddedEvent
   }
 
   "Prevent malformed party replication proposals" onlyRunWith ProtocolVersion.dev in {

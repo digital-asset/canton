@@ -34,8 +34,10 @@ import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater.PrepareResult
 import com.digitalasset.canton.platform.index.InMemoryStateUpdaterSpec.*
+import com.digitalasset.canton.platform.indexer.parallel.ParallelIndexerSubscription.Batch
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
 import com.digitalasset.canton.platform.store.cache.{
+  AchsStateCache,
   ContractStateCaches,
   InMemoryFanoutBuffer,
   MutableLedgerEndCache,
@@ -84,6 +86,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.util.concurrent.ConcurrentLinkedQueue
+import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future}
@@ -706,6 +709,7 @@ object InMemoryStateUpdaterSpec {
       )(emptyTraceContext)
 
     val ledgerEndCache: MutableLedgerEndCache = mock[MutableLedgerEndCache]
+    val achsStateCache: AchsStateCache = mock[AchsStateCache]
     val contractStateCaches: ContractStateCaches = mock[ContractStateCaches]
     val offsetCheckpointCache: OffsetCheckpointCache = mock[OffsetCheckpointCache]
     val inMemoryFanoutBuffer: InMemoryFanoutBuffer = mock[InMemoryFanoutBuffer]
@@ -733,6 +737,7 @@ object InMemoryStateUpdaterSpec {
     val inMemoryState = new InMemoryState(
       participantId = participantId,
       ledgerEndCache = ledgerEndCache,
+      achsStateCache = achsStateCache,
       contractStateCaches = contractStateCaches,
       offsetCheckpointCache = offsetCheckpointCache,
       inMemoryFanoutBuffer = inMemoryFanoutBuffer,
@@ -915,7 +920,18 @@ object InMemoryStateUpdaterSpec {
     def runFlow(
         input: Seq[(Vector[(Offset, Update)], LedgerEnd, TraceContext)]
     )(implicit mat: Materializer): Done =
-      Source(input)
+      Source(input.map { case (updates, ledgerEnd, tc) =>
+        Batch(
+          ledgerEnd = ledgerEnd,
+          batch = (),
+          batchSize = updates.size,
+          offsetsUpdates = updates,
+          activeContracts = mutable.LinkedHashMap.empty,
+          missingDeactivatedActivations = Map.empty,
+          eventCount = 0L,
+          batchTraceContext = tc,
+        ): Batch[?]
+      })
         .via(inMemoryStateUpdater(false))
         .runWith(Sink.ignore)
         .futureValue
@@ -1136,7 +1152,18 @@ object InMemoryStateUpdaterSpec {
     var checkpoints: Seq[OffsetCheckpoint] = Seq.empty
 
     val output = sourceSomes
-      .map((_, someLedgerEnd, emptyTraceContext))
+      .map(updates =>
+        Batch(
+          ledgerEnd = someLedgerEnd,
+          batch = (),
+          batchSize = updates.size,
+          offsetsUpdates = updates,
+          activeContracts = mutable.LinkedHashMap.empty,
+          missingDeactivatedActivations = Map.empty,
+          eventCount = 0L,
+          batchTraceContext = emptyTraceContext,
+        )
+      )
       .via(
         InMemoryStateUpdaterFlow
           .updateOffsetCheckpointCacheFlowWithTickingSource(
@@ -1147,7 +1174,7 @@ object InMemoryStateUpdaterSpec {
             tick = sourceNones,
           )
       )
-      .map(_._1)
+      .map(_.offsetsUpdates)
       .alsoTo(Sink.foreach(_ => offerNext()))
       .runWith(Sink.seq)
 

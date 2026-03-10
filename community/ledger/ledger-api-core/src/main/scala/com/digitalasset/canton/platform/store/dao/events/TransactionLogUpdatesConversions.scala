@@ -257,7 +257,7 @@ private[events] object TransactionLogUpdatesConversions {
             events = events,
             offset = transactionAccepted.offset.unwrap,
             synchronizerId = transactionAccepted.synchronizerId,
-            traceContext = SerializableTraceContext(traceContext).toDamlProtoOpt,
+            traceContext = SerializableTraceContext(traceContext).toDamlProto,
             recordTime = Some(TimestampConversion.fromLf(transactionAccepted.recordTime)),
             externalTransactionHash = transactionAccepted.externalTransactionHash.map(_.unwrap),
           )
@@ -644,7 +644,7 @@ private[events] object TransactionLogUpdatesConversions {
           workflowId = reassignmentAccepted.workflowId,
           offset = reassignmentAccepted.offset.unwrap,
           events = events,
-          traceContext = SerializableTraceContext(traceContext).toDamlProtoOpt,
+          traceContext = SerializableTraceContext(traceContext).toDamlProto,
           recordTime = Some(TimestampConversion.fromLf(reassignmentAccepted.recordTime)),
           synchronizerId = reassignmentAccepted.synchronizerId,
         )
@@ -666,7 +666,7 @@ private[events] object TransactionLogUpdatesConversions {
           authorizationEvent = event.authorizationEvent,
         )
       ),
-      traceContext = SerializableTraceContext(topologyTransaction.traceContext).toDamlProtoOpt,
+      traceContext = SerializableTraceContext(topologyTransaction.traceContext).toDamlProto,
     )
   }
 }

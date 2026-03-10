@@ -41,6 +41,10 @@ class GrpcMediatorInitializationService(
           .fromProtoV30(requestP)
           .leftMap(ProtoDeserializationFailure.Wrap(_))
       )
+      _ <- EitherT.fromEither[Future](
+        request.sequencerConnections.submissionRequestAmplification.validate
+          .leftMap(FailedToInitialiseSynchronizerNode.Failure(_))
+      )
       result <- handler
         .initialize(request)
         .leftMap(FailedToInitialiseSynchronizerNode.Failure(_))

@@ -8,7 +8,6 @@ import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.noop.NoOpMetricsFactory
 import com.daml.metrics.grpc.DamlGrpcServerMetrics
 import com.daml.tls.TlsServerConfig
-import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.auth.AsyncForwardingListener
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.{AdminServerConfig, ApiLoggingConfig, CantonConfig}
@@ -141,18 +140,16 @@ class UseOtlp(
 
     val serverBuilder = CantonServerBuilder
       .forConfig(
-        serverConfig,
-        None,
-        executionContext,
-        loggerFactory,
+        config = serverConfig,
+        executor = executionContext,
+        loggerFactory = loggerFactory,
         apiLoggingConfig = ApiLoggingConfig(messagePayloads = false),
-        TracingConfig(),
-        (
+        tracing = TracingConfig(),
+        grpcMetrics = (
           new DamlGrpcServerMetrics(NoOpMetricsFactory, "test"),
           new ActiveRequestsMetrics(NoOpMetricsFactory, "test")(MetricsContext.Empty),
         ),
-        NoOpTelemetry,
-        Seq(new HeaderPrinter(loggerFactory)),
+        additionalInterceptors = Seq(new HeaderPrinter(loggerFactory)),
       )
       .addService(otlpServer.bindService)
     val server = serverBuilder.build.start()

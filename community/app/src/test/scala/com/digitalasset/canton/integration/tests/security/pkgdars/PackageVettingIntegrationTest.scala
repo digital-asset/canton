@@ -28,10 +28,10 @@ import com.digitalasset.canton.integration.util.TestSubmissionService.CommandsWi
 import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors.NotFound
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.participant.protocol.ProtocolProcessor
 import com.digitalasset.canton.participant.protocol.reassignment.ReassignmentDataHelpers
 import com.digitalasset.canton.participant.protocol.validation.ModelConformanceChecker.UnvettedPackages
 import com.digitalasset.canton.participant.store.DamlPackageStore
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects
 import com.digitalasset.canton.protocol.LocalRejectError.MalformedRejects.ModelConformance
 import com.digitalasset.canton.protocol.messages.{LocalApprove, Verdict}
@@ -87,6 +87,17 @@ sealed trait PackageVettingIntegrationTest
       )
       .withSetup { implicit env =>
         import env.*
+
+        // Increase the reconciliation interval to a large value to effectively disable the AcsCommitmentProcessor.
+        // Otherwise, it could complain about mismatches, as some tests fork the ledger.
+        runOnAllInitializedSynchronizersForAllOwners((owner, synchronizer) =>
+          owner.topology.synchronizer_parameters
+            .propose_update(
+              synchronizer.synchronizerId,
+              _.update(reconciliationInterval = config.PositiveDurationSeconds.ofDays(100000)),
+            )
+        )
+
         Seq(participant1, participant2, participant3).foreach(
           _.synchronizers.connect_local(sequencer1, alias = daName)
         )
@@ -299,42 +310,44 @@ sealed trait PackageVettingIntegrationTest
         .map(c => Command.fromJavaProto(c.toProtoCommand))
     val cmd = CommandsWithMetadata(rawCmds, Seq(participant2.adminParty))
 
-    // We need to disable the check ensuring the mediator does not approve a transaction we
-    // have rejected because this test will trigger it.
-    // TODO(i15395): to be adapted when a more graceful check is implemented
-    ProtocolProcessor.withApprovalContradictionCheckDisabled(loggerFactory) {
-      val ((_, events), _) = loggerFactory.assertLoggedWarningsAndErrorsSeq(
-        replacingConfirmationResult(
-          daId,
-          sequencer1,
-          mediator1,
-          withMediatorVerdict(Verdict.Approve(testedProtocolVersion)),
-        ) {
-          trackingLedgerEvents(Seq(participant2), Seq.empty) {
-            maliciousP2.submitCommand(cmd).futureValueUS
-          }
-        },
-        LogEntry.assertLogSeq(
-          // Use (?s) to enable java.util.regex.Pattern.DOTALL pattern matching
-          mustContainWithClue = Seq(
-            (
-              _.shouldBeCantonError(
-                MalformedRejects.ModelConformance,
-                _ should include regex raw"(?s)DAMLeError.*EngineError.*MissingPackage",
-              ),
-              "unvetted packages error",
-            )
+    val ((_, events), _) = loggerFactory.assertLoggedWarningsAndErrorsSeq(
+      replacingConfirmationResult(
+        daId,
+        sequencer1,
+        mediator1,
+        withMediatorVerdict(Verdict.Approve(testedProtocolVersion)),
+      ) {
+        trackingLedgerEvents(Seq(participant2), Seq.empty) {
+          maliciousP2.submitCommand(cmd).futureValueUS
+        }
+      },
+      LogEntry.assertLogSeq(
+        // Use (?s) to enable java.util.regex.Pattern.DOTALL pattern matching
+        mustContainWithClue = Seq(
+          (
+            _.shouldBeCantonError(
+              MalformedRejects.ModelConformance,
+              _ should include regex raw"(?s)DAMLeError.*EngineError.*MissingPackage",
+            ),
+            "unvetted packages error",
           ),
-          mayContain = Seq(
-            _.loggerName should include(
-              "participant=participant2"
-            ) // Ignore errors from malicious P2
+          (
+            _.shouldBeCantonError(
+              SyncServiceAlarm,
+              _ shouldBe "Mediator approved a request that has been locally rejected.",
+            ),
+            "unexpected mediator approval",
           ),
         ),
-      )
+        mayContain = Seq(
+          _.loggerName should include(
+            "participant=participant2"
+          ) // Ignore errors from malicious P2
+        ),
+      ),
+    )
 
-      events.assertNoTransactions()
-    }
+    events.assertNoTransactions()
   }
 
   "rolls back a view referring to a package with ledger time outside the package validity period" taggedAs ledgerIntegrity
@@ -434,7 +447,7 @@ sealed trait PackageVettingIntegrationTest
       logger.info("Unassigning contract from da...")
 
       val (_, events) =
-        ProtocolProcessor.withApprovalContradictionCheckDisabled(loggerFactory) {
+        loggerFactory.assertLogs(
           // participant2 would reject as participant has not vetted the package on the target synchronizer.
           // Override that by approve.
           replacingConfirmationResponses(
@@ -450,8 +463,12 @@ sealed trait PackageVettingIntegrationTest
                 maliciousP2.submitUnassignmentRequest(unassignmentTree, None).futureValueUS
               )
             }
-          }
-        }
+          },
+          _.shouldBeCantonError(
+            SyncServiceAlarm,
+            _ shouldBe "Mediator approved a request that has been locally rejected.",
+          ),
+        )
 
       val unassignment = events.unassignments(participant2).futureValue.loneElement
 

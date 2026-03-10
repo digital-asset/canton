@@ -497,6 +497,7 @@ protected abstract class EstablishTestSet extends LargeAcsExportAndImportTestBas
           throw new RuntimeException("missing begin offset")
         ),
         completeAfter = PositiveInt.one,
+        onboarding = false,
       )
 
       acsExportFile.get.foreach { acsExport =>

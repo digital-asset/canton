@@ -65,7 +65,7 @@ Run this command from the same directory where you started Canton such that the 
     .. shell:: SYNCHRONIZER_ID=$(curl -f -sS -L ${PARTICIPANT1}/v2/state/connected-synchronizers | jq ".connectedSynchronizers[0].synchronizerId")
 
 Next, create a private Ed25519 key for the external party (other types of keys are supported as well).
-The public key is then extracted in DER format and convert the binary DER format to base64.
+The public key is then extracted in DER format and converted the binary DER format to base64.
 
 .. snippet:: party_management
     .. shell:: openssl genpkey -algorithm ed25519 -outform DER -out private_key.der

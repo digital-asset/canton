@@ -25,7 +25,7 @@ The following section explains how to onboard a (local) party. Refer to the foll
           mediators = Seq(mediator1),
           synchronizerOwners = Seq(sequencer1),
           synchronizerThreshold = PositiveInt.one,
-          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
         )
     .. hidden:: bootstrap.synchronizer(
           synchronizerName = "acme",
@@ -33,7 +33,7 @@ The following section explains how to onboard a (local) party. Refer to the foll
           mediators = Seq(mediator2),
           synchronizerOwners = Seq(sequencer2),
           synchronizerThreshold = PositiveInt.one,
-          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
         )
     .. hidden:: participant1.synchronizers.connect_local(sequencer1, "my-synchronizer")
     .. hidden:: participant1.synchronizers.connect_local(sequencer2, "my-second-synchronizer")

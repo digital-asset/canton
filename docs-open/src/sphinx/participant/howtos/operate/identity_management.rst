@@ -360,7 +360,7 @@ In this section, we present how you can manage participant users using the Canto
 First, we create three parties that we'll use in subsequent examples:
 
 .. snippet:: user_management
-    .. hidden:: bootstrap.synchronizer(synchronizerName = "da", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1, mediator1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest))
+    .. hidden:: bootstrap.synchronizer(synchronizerName = "da", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1, mediator1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer))
     .. hidden:: participant1.synchronizers.connect_local(sequencer1, "mysynchronizer")
     .. success:: val Seq(alice, bob, eve) = Seq("alice", "bob", "eve").map(p => participant1.parties.enable(name = p))
 
@@ -535,7 +535,7 @@ For this process, we use a participant node which won't be connected to any sync
 node, but just the topology manager. First, we need to find out the participant ID of the hosting node:
 
 .. snippet:: client_controlled_party
-    .. hidden:: val synchronizerId = bootstrap.synchronizer(synchronizerName = "da", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1, mediator1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest))
+    .. hidden:: val synchronizerId = bootstrap.synchronizer(synchronizerName = "da", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1, mediator1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer))
     .. hidden:: participant2.synchronizers.connect_local(sequencer1, "mysynchronizer")
     .. hidden:: val client = participant1
     .. hidden:: val hosting = participant2

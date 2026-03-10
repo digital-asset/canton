@@ -673,6 +673,7 @@ class TransactionServiceFiltersIT extends LedgerTestSuite {
     GetActiveContractsRequest(
       activeAtOffset = activeAtOffset,
       eventFormat = Some(eventFormat),
+      streamContinuationToken = None,
     )
 
   private def eventBlobFlagFromInterfaces(format: EventFormat): Boolean =

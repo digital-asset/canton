@@ -134,6 +134,7 @@ final class ContractIdValidationIntegrationTest
             partyId = alice.partyId,
             participantId = participant2.id,
             synchronizerId = daId,
+            onboarding = false,
           )
       }
 

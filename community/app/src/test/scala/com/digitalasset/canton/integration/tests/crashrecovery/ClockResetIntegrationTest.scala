@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.crashrecovery
 
 import cats.syntax.option.*
-import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.UniquePortGenerator
 import com.digitalasset.canton.config.RequireTypes.Port
 import com.digitalasset.canton.config.{AdminServerConfig, ApiLoggingConfig, FullClientConfig}
@@ -43,6 +42,8 @@ class ClockResetIntegrationTest extends ParticipantRestartTest with HasCycleUtil
     EnvironmentDefinition.P1S1M1_Manual
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
+        // enabling retries to be on the safe side
+        ConfigTransforms.setPingRetries(true),
         ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory),
         ConfigTransforms.updateMaxDeduplicationDurations(java.time.Duration.ofMinutes(1)),
       )
@@ -115,14 +116,12 @@ object ClockResetIntegrationTest {
     val separateTimeServer = {
       val serverBuilder = CantonServerBuilder
         .forConfig(
-          clockServerConfig,
-          None,
-          executionContext,
-          loggerFactory,
+          config = clockServerConfig,
+          executor = executionContext,
+          loggerFactory = loggerFactory,
           apiLoggingConfig = ApiLoggingConfig(messagePayloads = false),
-          environment.config.monitoring.tracing,
-          ParticipantTestMetrics.grpcMetrics,
-          NoOpTelemetry,
+          tracing = environment.config.monitoring.tracing,
+          grpcMetrics = ParticipantTestMetrics.grpcMetrics,
         )
         .addService(
           v30.IdentityInitializationServiceGrpc.bindService(timeService, executionContext)

@@ -374,7 +374,7 @@ final class StateTransferBehavior[E <: Env[E]](
   ): Unit =
     dependencies.availability.asyncSend(
       Availability.Consensus.UpdateTopologyDuringStateTransfer(
-        newEpochTopology.membership.orderingTopology,
+        newEpochTopology.membership,
         // TODO(#25220) If the onboarding/starting epoch (`e_start`) is always immediately before the one where
         //  the node is active in the topology, the below distinction could go away.
         DelegationCryptoProvider(

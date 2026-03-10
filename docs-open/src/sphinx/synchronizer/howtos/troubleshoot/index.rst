@@ -49,7 +49,7 @@ To generate the token, we'll need the ID of the node for which the token will be
       mediators = Seq(mediator1),
       synchronizerOwners = Seq(sequencer1),
       synchronizerThreshold = 1,
-      staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+      staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
     )
     .. hidden:: participant1.synchronizers.connect_local(sequencer1, "da")
     .. success:: val memberId = participant1.id.toProtoPrimitive

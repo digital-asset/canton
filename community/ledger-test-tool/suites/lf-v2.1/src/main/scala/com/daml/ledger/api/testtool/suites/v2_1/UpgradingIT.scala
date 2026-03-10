@@ -993,6 +993,7 @@ object UpgradingIT {
     GetActiveContractsRequest(
       activeAtOffset = activeAtOffset,
       eventFormat = Some(eventFormat(subscriptionFilter, party, includeCreatedEventBlobs)),
+      streamContinuationToken = None,
     )
 
   def txRequest(

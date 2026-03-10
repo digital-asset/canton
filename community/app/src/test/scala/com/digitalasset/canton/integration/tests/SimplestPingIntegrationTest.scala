@@ -45,7 +45,6 @@ class SimplestPingIntegrationTestInMemory extends SimplestPingIntegrationTest {
       .addConfigTransform(_.focus(_.monitoring.logging.api.messagePayloads).replace(false))
 
   registerPlugin(new UseBftSequencer(loggerFactory))
-
 }
 
 class SimplestPingBftOrderingIntegrationTestH2 extends SimplestPingIntegrationTest {

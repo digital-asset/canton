@@ -702,7 +702,7 @@ object SequenceWritesFlow {
         _ <- checkMaxSequencingTime(presequencedEvent)
         _ <- checkSequencingTimeLowerBound(presequencedEvent)
         checkedEvent = deliverErrorForInvalidTopologyTimestamp(presequencedEvent)
-      } yield Sequenced(timestamp, checkedEvent.event)
+      } yield Sequenced(timestamp, checkedEvent.event, fromStore = false)
 
       resultE.tapLeft { error =>
         // log here as we don't have the trace context in the error itself

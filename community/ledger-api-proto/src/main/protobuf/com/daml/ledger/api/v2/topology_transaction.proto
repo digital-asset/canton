@@ -55,6 +55,7 @@ message TopologyEvent {
     ParticipantAuthorizationChanged participant_authorization_changed = 1;
     ParticipantAuthorizationRevoked participant_authorization_revoked = 2;
     ParticipantAuthorizationAdded participant_authorization_added = 3;
+    ParticipantAuthorizationOnboarding participant_authorization_onboarding = 4;
   }
 }
 
@@ -86,4 +87,15 @@ message ParticipantAuthorizationRevoked {
 
   // Required
   string participant_id = 2;
+}
+
+message ParticipantAuthorizationOnboarding {
+  // Required
+  string party_id = 1;
+
+  // Required
+  string participant_id = 2;
+
+  // Required
+  ParticipantPermission participant_permission = 3;
 }

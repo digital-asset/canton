@@ -55,6 +55,19 @@ message GetActiveContractsRequest {
   // TRANSACTION_SHAPE_ACS_DELTA.
   // Required
   EventFormat event_format = 4;
+
+  // Opaque representation of a continuation token defining a position in the active contracts snapshot.
+  // The prefix of the active contracts snapshot will be omitted up to and including the element from which
+  // the continuation token was read.
+  // To reuse the continuation token from a `GetActiveContractsPageResponse`:
+  //
+  // - subsequent request must be executed on the same participant with the same version of canton,
+  // - subsequent request must have the same active_at_offset,
+  // - subsequent request must have the same event_format
+  // - and the participant must not have been pruned after the active_at_offset.
+  //
+  // Optional, if not specified, the whole active contracts snapshot will be returned.
+  optional bytes stream_continuation_token = 5;
 }
 
 message GetActiveContractsResponse {

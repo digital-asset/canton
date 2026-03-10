@@ -178,6 +178,9 @@ fi
 # Setup metaspace
 SBT_CMD+=("-J-XX:MaxMetaspaceSize=$EXECUTOR_JVM_METASPACE_SIZE")
 
+# Create a heap dump on OOME
+SBT_CMD+=("-J-XX:+HeapDumpOnOutOfMemoryError")
+
 # Setup execution context size
 SBT_CMD+=("-J-Dscala.concurrent.context.numThreads=${EXECUTION_CONTEXT_SIZE}")
 SBT_CMD+=("-J-Dscala.concurrent.context.maxThreads=${EXECUTION_CONTEXT_SIZE}")

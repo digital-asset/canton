@@ -15,6 +15,7 @@ import com.digitalasset.canton.platform.store.backend.common.UpdateStreamingQuer
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   IdFilterInput,
   IdFilterPaginationInput,
+  PaginationFromTo,
   PaginationInput,
   PaginationLastOnlyInput,
 }
@@ -211,18 +212,22 @@ object UpdateStreamingQueries {
             Some((templateIdFilterClause, templateIdOrderingClause)),
           ) =>
         def filterTableSelect(
-            startExclusive: Long,
-            endInclusive: Long,
+            paginationFromTo: PaginationFromTo,
             limit: Option[Int],
             idFilter: Option[CompositeSql],
-        ): CompositeSql =
+        ): CompositeSql = {
+          val idBoundsSQL =
+            if (paginationFromTo.descending)
+              cSQL"${paginationFromTo.toInclusive} <= filters.event_sequential_id AND filters.event_sequential_id < ${paginationFromTo.fromExclusive}"
+            else
+              cSQL"${paginationFromTo.fromExclusive} < filters.event_sequential_id AND filters.event_sequential_id <= ${paginationFromTo.toInclusive}"
+          val idOrderDirectionSQL = if (paginationFromTo.descending) cSQL"DESC" else cSQL"ASC"
           cSQL"""
             SELECT filters.event_sequential_id event_sequential_id
             FROM
               #$tableName filters
             WHERE
-              $startExclusive < filters.event_sequential_id
-              AND filters.event_sequential_id <= $endInclusive
+              $idBoundsSQL
               $partyIdFilterClause
               $templateIdFilterClause
               $firstPerSequentialIdClause
@@ -230,52 +235,52 @@ object UpdateStreamingQueries {
             ORDER BY
               $partyIdOrderingClause
               $templateIdOrderingClause
-              filters.event_sequential_id -- deliver in index order
+              filters.event_sequential_id $idOrderDirectionSQL -- deliver in index order
             ${limit.map(l => cSQL"LIMIT $l").getOrElse(cSQL"")}"""
+        }
+
         idPaginationInput =>
           val sql = idPaginationInput match {
-            case PaginationInput(startExclusive, endInclusive, limit) =>
+            case PaginationInput(fromTo, limit) =>
               filterTableSelect(
-                startExclusive = startExclusive,
-                endInclusive = endInclusive,
+                paginationFromTo = fromTo,
                 limit = Some(limit),
                 idFilter =
                   None, // disable regardless - this is the case where we reuse the query for a no-ID-filter population case
               )
 
-            case IdFilterInput(_, _) if idFilter.isEmpty =>
+            case IdFilterInput(_) if idFilter.isEmpty =>
               throw new IllegalStateException(
                 "Using non-id-filter compliant query for ID filtration. In this case the ID filter needs to be defined"
               )
 
-            case IdFilterInput(startExclusive, endInclusive) =>
+            case IdFilterInput(fromTo) =>
               filterTableSelect(
-                startExclusive = startExclusive,
-                endInclusive = endInclusive,
+                paginationFromTo = fromTo,
                 limit = None,
                 idFilter = idFilter,
               )
 
-            case PaginationLastOnlyInput(_, _, _) if idFilter.isEmpty =>
+            case PaginationLastOnlyInput(_, _) if idFilter.isEmpty =>
               throw new IllegalStateException(
                 "Using non-id-filter compliant query for ID filtration. In this case the ID filter needs to be defined"
               )
 
-            case PaginationLastOnlyInput(startExclusive, endInclusive, limit) =>
+            case PaginationLastOnlyInput(fromTo, limit) =>
               val filterTableSQL = filterTableSelect(
-                startExclusive = startExclusive,
-                endInclusive = endInclusive,
+                paginationFromTo = fromTo,
                 limit = Some(limit),
                 idFilter =
                   None, // disable regardless - this is the case where we reuse the query for a ID-filter population: the paginated query
               )
+              val direction = if (fromTo.descending) cSQL"ASC" else cSQL"DESC"
               cSQL"""
                 WITH unfiltered_ids AS (
                 $filterTableSQL
                 )
                 SELECT unfiltered_ids.event_sequential_id event_sequential_id
                 FROM unfiltered_ids
-                ORDER BY event_sequential_id DESC
+                ORDER BY event_sequential_id $direction
                 LIMIT 1"""
           }
           SQL"$sql".asVectorOf(long("event_sequential_id"))(connection)

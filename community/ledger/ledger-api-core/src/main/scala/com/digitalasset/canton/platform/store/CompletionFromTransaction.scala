@@ -11,8 +11,6 @@ import com.daml.ledger.api.v2.offset_checkpoint.SynchronizerTime
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.util.TimestampConversion.fromInstant
 import com.digitalasset.canton.protocol.UpdateId
-import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
-import com.digitalasset.canton.tracing.{SerializableTraceContext, TraceContext}
 import com.digitalasset.daml.lf.data.Time.Timestamp
 import com.google.protobuf.duration.Duration
 import com.google.rpc.status.Status as StatusProto
@@ -31,11 +29,11 @@ object CompletionFromTransaction {
       commandId: String,
       userId: String,
       submissionId: Option[String],
-      traceContext: TraceContext,
+      traceContext: Option[com.daml.ledger.api.v2.trace_context.TraceContext],
       deduplicationOffset: Option[Long],
       deduplicationDurationSeconds: Option[Long],
       deduplicationDurationNanos: Option[Int],
-  ) {}
+  )
 
   object CommonCompletionProperties {
     def createFromRecordTimeAndSynchronizerId(
@@ -46,7 +44,7 @@ object CompletionFromTransaction {
         userId: String,
         submissionId: Option[String],
         synchronizerId: String,
-        traceContext: TraceContext,
+        traceContext: Option[com.daml.ledger.api.v2.trace_context.TraceContext],
         deduplicationOffset: Option[Long],
         deduplicationDurationSeconds: Option[Long],
         deduplicationDurationNanos: Option[Int],
@@ -120,8 +118,7 @@ object CompletionFromTransaction {
       actAs = commonCompletionProperties.submitters.toSeq,
       submissionId = commonCompletionProperties.submissionId.getOrElse(""),
       deduplicationPeriod = optDeduplicationPeriod.getOrElse(Empty),
-      traceContext =
-        SerializableTraceContext(commonCompletionProperties.traceContext).toDamlProtoOpt,
+      traceContext = commonCompletionProperties.traceContext,
       offset = commonCompletionProperties.completionOffset,
       synchronizerTime = commonCompletionProperties.synchronizerTime,
     )

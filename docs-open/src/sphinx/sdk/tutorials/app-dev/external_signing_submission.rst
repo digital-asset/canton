@@ -439,7 +439,7 @@ It is strongly recommended that the transaction hash be recomputed from the tran
 The pre-computed hash provided in the ``Prepare`` step is for debugging purposes.
 
 * The hashing algorithm specification is available :ref:`here <external_signing_hashing_algo>` as well as in the release artifact under ``protobuf/ledger-api/com/daml/ledger/api/v2/interactive/README.md``
-* An example implementation in python is available in the release articact under ``examples/08-interactive-submission/daml_transaction_hashing_v2.py``
+* An example implementation in python is available in the release artifact under ``examples/08-interactive-submission/daml_transaction_hashing_v2.py``
 
 .. _canton_externally_sign_transaction:
 

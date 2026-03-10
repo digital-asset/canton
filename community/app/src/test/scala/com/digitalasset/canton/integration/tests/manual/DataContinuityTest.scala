@@ -291,6 +291,17 @@ trait DataContinuityTest
         s"Data continuity dumps should be empty. Dumps found in directories: $nonEmptyDirectories"
       )
   }
+
+  /** Ensure the network topology description uses the correct protocol version.
+    *
+    * This is useful because the protocol versions is used to compute the expected physical
+    * synchronizer id.
+    */
+  protected def updateNetworkTopologyDescription(
+      n: NetworkTopologyDescription,
+      pv: ProtocolVersion,
+  ): NetworkTopologyDescription =
+    n.focus(_.staticSynchronizerParameters.protocolVersion).replace(pv)
 }
 
 trait DataContinuityTestFixturePostgres extends DataContinuityTest {
@@ -398,7 +409,7 @@ trait BasicDataContinuityTest extends BasicDataContinuityTestSetup {
             Seq(sequencer1),
             Seq(mediator1),
             Seq(participant1, participant2),
-            Seq(S1M1),
+            Seq(updateNetworkTopologyDescription(S1M1, protocolVersion)),
             dumpDirectory.localDownloadPath,
           )
           val alice = participant1.parties.list(filterParty = "Alice").headOption.value.party
@@ -469,7 +480,7 @@ trait BasicDataContinuityTest extends BasicDataContinuityTestSetup {
             Seq(sequencer1),
             Seq(mediator1),
             Seq(participant1, participant2),
-            Seq(S1M1),
+            Seq(updateNetworkTopologyDescription(S1M1, protocolVersion)),
             dumpDirectory.localDownloadPath,
           )
           // initialize needed state - sadly unable to decouple this from implementation details of the workflow
@@ -630,7 +641,7 @@ trait SynchronizerChangeDataContinuityTest extends SynchronizerChangeDataContinu
               sequencers,
               mediators,
               participants,
-              S1M1_S1M1,
+              S1M1_S1M1.map(updateNetworkTopologyDescription(_, protocolVersion)),
               dumpDirectory.localDownloadPath,
             )
 

@@ -8,6 +8,7 @@ import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose}
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.{
   Added,
   ChangedTo,
+  Onboarding,
   Revoked,
 }
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.TopologyEvent.PartyToParticipantAuthorization
@@ -19,6 +20,7 @@ import com.digitalasset.canton.protocol.UpdateId
 import com.digitalasset.canton.topology.transaction.*
 import com.digitalasset.canton.topology.transaction.SignedTopologyTransactions.PositiveSignedTopologyTransactions
 import com.digitalasset.canton.topology.{ParticipantId, PhysicalSynchronizerId}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{LedgerParticipantId, LfPartyId}
 
 private[protocol] object TopologyTransactionDiff {
@@ -43,29 +45,25 @@ private[protocol] object TopologyTransactionDiff {
       localParticipantId: ParticipantId,
   ): Option[TopologyTransactionDiff] = {
 
-    val before = partyToParticipant(oldRelevantState)
-    val after = partyToParticipant(currentRelevantState)
-
-    def locallyAddedPartiesExistingOnOtherParticipants(
-        added: Set[PartyToParticipantAuthorization]
-    ): Set[LfPartyId] = {
-      // Adding a party that existed before on another participant means the local participant needs to
-      // initiate party replication.
-      val locallyAddedParties: Set[LfPartyId] =
-        added.filter(_.participant == localParticipantId.toLf).map(_.party)
-      val partiesExistingOnOtherParticipants = before.view.collect {
-        case ((partyId, participantId), _) if participantId != localParticipantId.toLf => partyId
-      }.toSet
-      locallyAddedParties intersect partiesExistingOnOtherParticipants
-    }
+    val before = partyToParticipant(oldRelevantState, psid.protocolVersion)
+    val after = partyToParticipant(currentRelevantState, psid.protocolVersion)
 
     val added: Set[PartyToParticipantAuthorization] = after.view.collect {
-      case ((partyId, participantId), permission) if !before.contains(partyId -> participantId) =>
+      case ((partyId, participantId), (permission, onboardingAfter))
+          // party was added if didn't exist before or was onboarding
+          if !onboardingAfter && !before.get(partyId -> participantId).exists {
+            case (_, onboardingBefore) => !onboardingBefore
+          } =>
         PartyToParticipantAuthorization(partyId, participantId, Added(permission))
     }.toSet
+    val onboarding: Set[PartyToParticipantAuthorization] = after.view.collect {
+      case ((partyId, participantId), (permission, onboardingAfter))
+          if onboardingAfter && !before.contains(partyId -> participantId) =>
+        PartyToParticipantAuthorization(partyId, participantId, Onboarding(permission))
+    }.toSet
     val changed: Set[TopologyEvent] = after.view.collect {
-      case ((partyId, participantId), permission)
-          if before.get(partyId -> participantId).exists(_ != permission) =>
+      case ((partyId, participantId), (permission, _))
+          if before.get(partyId -> participantId).exists { case (p, _) => p != permission } =>
         PartyToParticipantAuthorization(partyId, participantId, ChangedTo(permission))
     }.toSet
     val removed: Set[TopologyEvent] = before.view.collect {
@@ -73,7 +71,7 @@ private[protocol] object TopologyTransactionDiff {
         PartyToParticipantAuthorization(partyId, participantId, Revoked)
     }.toSet
 
-    val allEvents: Set[TopologyEvent] = added ++ changed ++ removed
+    val allEvents: Set[TopologyEvent] = added ++ changed ++ removed ++ onboarding
 
     NonEmpty
       .from(allEvents)
@@ -81,8 +79,7 @@ private[protocol] object TopologyTransactionDiff {
         TopologyTransactionDiff(
           _,
           updateId(psid, oldRelevantState, currentRelevantState),
-          requiresLocalParticipantPartyReplication =
-            locallyAddedPartiesExistingOnOtherParticipants(added).nonEmpty,
+          onboardingLocalParty = onboarding.exists(_.participant == localParticipantId.toLf),
         )
       )
   }
@@ -114,19 +111,33 @@ private[protocol] object TopologyTransactionDiff {
     UpdateId(hash)
   }
 
+  /** Given a state of topology transactions, extract per party and participant id party hosting
+    * information.
+    *
+    * Returns a map specifying each party and participant's authorization level along with a flag
+    * that specifies whether the party is in the "onboarding" state on the participant. The
+    * onboarding flag is only set starting with ProtocolVersion.v35.
+    */
   private def partyToParticipant(
-      state: PositiveSignedTopologyTransactions
-  ): Map[(LfPartyId, LedgerParticipantId), AuthorizationLevel] = {
+      state: PositiveSignedTopologyTransactions,
+      pv: ProtocolVersion,
+  ): Map[(LfPartyId, LedgerParticipantId), (AuthorizationLevel, Boolean)] = {
     val fromPartyToParticipantMapping = for {
       topologyTransaction <- SignedTopologyTransactions
         .collectOfMapping[TopologyChangeOp.Replace, PartyToParticipant](state)
         .view
       mapping = topologyTransaction.mapping
       participant <- mapping.participants
-    } yield (
-      mapping.partyId.toLf -> participant.participantId.toLf,
-      toAuthorizationLevel(participant.permission),
-    )
+    } yield {
+      val isPartyOnboardingAtLeastAtProtocolVersion35 = pv match {
+        case ProtocolVersion.v34 => false
+        case ProtocolVersion(_) => participant.onboarding
+      }
+      (
+        mapping.partyId.toLf -> participant.participantId.toLf,
+        (toAuthorizationLevel(participant.permission), isPartyOnboardingAtLeastAtProtocolVersion35),
+      )
+    }
     val forAdminParties = SignedTopologyTransactions
       .collectOfMapping[TopologyChangeOp.Replace, SynchronizerTrustCertificate](state)
       .view
@@ -134,7 +145,7 @@ private[protocol] object TopologyTransactionDiff {
       .map(m =>
         (
           m.participantId.adminParty.toLf -> m.participantId.toLf,
-          AuthorizationLevel.Submission,
+          (AuthorizationLevel.Submission, false /* admin not onboarding */ ),
         )
       )
     fromPartyToParticipantMapping
@@ -152,5 +163,5 @@ private[protocol] object TopologyTransactionDiff {
 private[protocol] final case class TopologyTransactionDiff(
     topologyEvents: NonEmpty[Set[TopologyEvent]],
     updateId: UpdateId,
-    requiresLocalParticipantPartyReplication: Boolean,
+    onboardingLocalParty: Boolean,
 )

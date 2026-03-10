@@ -63,20 +63,18 @@ class FixedFileBasedOrderingTopologyProvider(
       Map(
         BftNodeId(standaloneConfig.thisSequencerId) ->
           OrderingTopology.NodeTopologyInfo(
-            ConventionalBootstrapTopologyActivationTime,
-            Set(BftKeyId(pubKey.fingerprint.toProtoPrimitive)),
+            Set(BftKeyId(pubKey.fingerprint.toProtoPrimitive))
           )
       ) ++ standaloneConfig.peers.map { peerConfig =>
         BftNodeId(peerConfig.sequencerId) ->
           OrderingTopology.NodeTopologyInfo(
-            ConventionalBootstrapTopologyActivationTime,
             Set(
               BftKeyId(
                 peerSigningPublicKeys(
                   BftNodeId(peerConfig.sequencerId)
                 ).fingerprint.toProtoPrimitive
               )
-            ),
+            )
           )
       },
       SequencingParameters.Default,
@@ -97,6 +95,21 @@ class FixedFileBasedOrderingTopologyProvider(
           orderingTopology,
           new FixedKeysCryptoProvider(privKey, peerSigningPublicKeys, crypto, metrics),
         )
+      )
+    )
+
+  override def getFirstKnownAt(activationTime: TopologyActivationTime)(implicit
+      traceContext: TraceContext
+  ): PekkoFutureUnlessShutdown[Option[Map[BftNodeId, TopologyActivationTime]]] =
+    PekkoFutureUnlessShutdown.pure(
+      Some(
+        Map(
+          BftNodeId(standaloneConfig.thisSequencerId) ->
+            ConventionalBootstrapTopologyActivationTime
+        ) ++ standaloneConfig.peers.map { peerConfig =>
+          BftNodeId(peerConfig.sequencerId) ->
+            ConventionalBootstrapTopologyActivationTime
+        }
       )
     )
 

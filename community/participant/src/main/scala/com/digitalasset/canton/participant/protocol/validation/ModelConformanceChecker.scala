@@ -414,7 +414,7 @@ class ModelConformanceChecker(
 object ModelConformanceChecker {
 
   def apply(
-      damlE: DAMLe,
+      reinterpreter: HasReinterpret,
       transactionTreeFactory: TransactionTreeFactory,
       contractValidator: ContractValidator,
       participantId: ParticipantId,
@@ -423,7 +423,7 @@ object ModelConformanceChecker {
       loggerFactory: NamedLoggerFactory,
   )(implicit executionContext: ExecutionContext): ModelConformanceChecker =
     new ModelConformanceChecker(
-      damlE,
+      reinterpreter,
       transactionTreeFactory,
       participantId,
       contractValidator,

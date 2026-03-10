@@ -8,24 +8,9 @@ package transaction
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.transaction.ContractStateMachine._
 import com.digitalasset.daml.lf.transaction.ContractStateMachineSpec._
-import com.digitalasset.daml.lf.transaction.Transaction.{
-  ChildrenRecursion,
-  KeyCreate,
-  KeyInput,
-  NegativeKeyLookup,
-}
-import com.digitalasset.daml.lf.transaction.TransactionErrors.{
-  DuplicateContractId,
-  DuplicateContractKey,
-  InconsistentContractKey,
-  KeyInputError,
-}
-import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits.{
-  defaultPackageId,
-  toIdentifier,
-  toName,
-  toParty,
-}
+import com.digitalasset.daml.lf.transaction.Transaction.{ChildrenRecursion, KeyCreate, KeyInput, NegativeKeyLookup}
+import com.digitalasset.daml.lf.transaction.TransactionError.{DuplicateContractId, DuplicateContractKey, InconsistentContractKey}
+import com.digitalasset.daml.lf.transaction.test.TransactionBuilder.Implicits.{defaultPackageId, toIdentifier, toName, toParty}
 import com.digitalasset.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
@@ -155,14 +140,14 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       version = txVersion,
     )
 
-  def inconsistentContractKey[X](key: GlobalKey): Left[KeyInputError, X] =
-    Left(KeyInputError.inject(InconsistentContractKey(key)))
+  def inconsistentContractKey[X](key: GlobalKey): ErrOr[X] =
+    Left(InconsistentContractKey(key))
 
-  def duplicateContractKey[X](key: GlobalKey): Left[KeyInputError, X] =
-    Left(KeyInputError.inject(DuplicateContractKey(key)))
+  def duplicateContractKey[X](key: GlobalKey): ErrOr[X] =
+    Left(DuplicateContractKey(key))
 
-  def duplicateContractId[X](contractId: ContractId): Left[KeyInputError, X] =
-    Left(KeyInputError.inject(DuplicateContractId(contractId)))
+  def duplicateContractId[X](contractId: ContractId): ErrOr[X] =
+    Left(DuplicateContractId(contractId))
 
   def createRbExLbkLbk: TestCase = {
     // [ Create c1 (key=k1), Rollback [ Exe c1 [ LBK k1 -> None ]], LBK k1 -> c1 ]
@@ -309,7 +294,7 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
     val _ = builder.add(mkLookupByKey("key1", None), exercise1Nid)
     val tx = builder.build()
     // Custom resolver for visibility restriction due to divulgence
-    val resolver = Map(gkey("key1") -> None)
+    val resolver = Map(gkey("key1") -> Vector.empty)
     val expected = Right(
       TestResult(
         globalKeyInputs = Map(gkey("key1") -> KeyCreate),
@@ -492,7 +477,7 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
     TestCase(
       "DivulgedLookup",
       tx,
-      Map(gkey("key1") -> KeyInactive),
+      Map(gkey("key1") -> KeyInactive()),
       Map(
         ContractStateMachine.Mode.UCKWithRollback -> inconsistentContractKey(gkey("key1")),
         ContractStateMachine.Mode.LegacyNUCK -> expected,
@@ -750,6 +735,231 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
     }
   }
 
+  val nullUnitTest: UnitTest = {
+    val expectedVal = Right(StateMachineResult.empty)
+
+    UnitTest(
+      name = "null (no interaction)",
+      interaction = Right(_),
+      expected = expectedVal
+    )
+  }
+
+  val singleCreateUnitTest: UnitTest = {
+    val id = 1
+    val expectedVal = Right(TestResult.empty.copy(
+      activeState = ActiveLedgerState.empty[Unit].copy(locallyCreatedThisTimeline = Set(id))
+    ))
+
+    UnitTest.oldApply(
+      name = s"Single create}",
+      interaction = state =>
+        for {
+          state2 <- state.visitCreate(id, None)
+        } yield state2,
+      expected = expectedVal,
+    )
+  }
+
+  val createThenRollbackUnitTest: UnitTest = {
+    val id = 1
+    val expectedVal = Right(StateMachineResult.empty)
+
+    UnitTest(
+      name = s"Create then rollback",
+      interaction = s1 =>
+        for {
+          s2 <- Right(s1.beginRollback())
+          s3 <- s2.visitCreate(id, None)
+          s4 <- Right(s3.endRollback())
+        } yield s4,
+      expected = expectedVal,
+    )
+  }
+
+  val singleFetchUnitTest: UnitTest = {
+    val id = 1
+    val expectedVal = Right(StateMachineResult.empty.copy(
+      inputContractIds = Set(id)
+    ))
+
+    UnitTest(
+      name = s"Single fetch",
+      interaction = state =>
+        for {
+          state2 <- state.visitFetch(id, None, false)
+        } yield state2,
+      expected = expectedVal,
+    )
+  }
+
+  val fetchThenRollbackUnitTest: UnitTest = {
+    val id = 1
+    val expectedVal = Right(StateMachineResult.empty.copy(
+      inputContractIds = Set(id)
+    ))
+
+    UnitTest(
+      name = s"Fetch then rollback",
+      interaction = s1 =>
+        for {
+          s2 <- Right(s1.beginRollback())
+          s3 <- s2.visitFetch(id, None, false)
+          s4 <- Right(s3.endRollback())
+        } yield s4,
+      expected = expectedVal,
+    )
+  }
+
+  val singleLookupUnitTest: UnitTest = {
+    val key = "key1"
+    val expectedVal = Right(StateMachineResult.empty.copy(
+      globalKeyInputs = Map(gkey(key) -> NegativeKeyLookup)
+    ))
+
+    UnitTest(
+      name = s"Single lookup",
+      interaction = state =>
+        for {
+          state2 <- state.visitQueryByKey(gkey(key), Vector.empty[ContractId], Vector.empty[ContractId])
+        } yield state2,
+      expected = expectedVal,
+    )
+  }
+
+  val lookupThenRollbackUnitTest: UnitTest = {
+    val key = "key1"
+    val expectedVal = Right(StateMachineResult.empty.copy(
+      globalKeyInputs = Map(gkey(key) -> NegativeKeyLookup)
+    ))
+
+    UnitTest(
+      name = s"Lookup then rollback}",
+      interaction = s1 =>
+        for {
+          s2 <- Right(s1.beginRollback())
+          s3 <- s2.visitQueryByKey(gkey(key), Vector.empty[ContractId], Vector.empty[ContractId])
+          s4 <- Right(s3.endRollback())
+        } yield s4,
+      expected = expectedVal,
+    )
+  }
+
+  val singleNonconsumingExerciseUnitTest: UnitTest = {
+    val id = 1
+    val expectedVal = Right(StateMachineResult.empty.copy(
+      inputContractIds = Set(id)
+    ))
+
+    UnitTest(
+      name = s"Single nonconsuming exercise",
+      interaction = state =>
+        for {
+          state2 <- state.visitExercise((), id, None, false, false)
+        } yield state2,
+      expected = expectedVal,
+    )
+  }
+
+  val nonconsumingExerciseThenRollbackUnitTest: UnitTest = {
+    val id = 1
+    val expectedVal = Right(StateMachineResult.empty.copy(
+      inputContractIds = Set(id)
+    ))
+
+    UnitTest(
+      name = s"Nonconsuming exercise then rollback}",
+      interaction = s1 =>
+        for {
+          s2 <- Right(s1.beginRollback())
+          s3 <- s2.visitExercise((), id, None, false, false)
+          s4 <- Right(s3.endRollback())
+        } yield s4,
+      expected = expectedVal,
+    )
+  }
+
+  val singleConsumingExerciseUnitTest: UnitTest = {
+    val id = 1
+    val expectedVal = Right(StateMachineResult.empty.copy(
+      consumed = Set(id),
+      inputContractIds = Set(id),
+    ))
+
+    UnitTest(
+      name = s"Single consuming exercise",
+      interaction = state =>
+        for {
+          state2 <- state.visitExercise((), id, None, false, true)
+        } yield state2,
+      expected = expectedVal,
+    )
+  }
+
+  val consumingExerciseThenRollbackUnitTest: UnitTest = {
+    val id = 1
+    val expectedVal = Right(StateMachineResult.empty.copy(
+      inputContractIds = Set(id)
+    ))
+
+    UnitTest(
+      name = s"Consuming exercise then rollback}",
+      interaction = s1 =>
+        for {
+          s2 <- Right(s1.beginRollback())
+          s3 <- s2.visitExercise((), id, None, false, true)
+          s4 <- Right(s3.endRollback())
+        } yield s4,
+      expected = expectedVal,
+    )
+  }
+
+  val unitTests: Seq[UnitTest] = Seq(
+    nullUnitTest,
+    singleCreateUnitTest,
+    createThenRollbackUnitTest,
+    singleFetchUnitTest,
+    fetchThenRollbackUnitTest,
+    singleLookupUnitTest,
+    lookupThenRollbackUnitTest,
+    singleNonconsumingExerciseUnitTest,
+    nonconsumingExerciseThenRollbackUnitTest,
+    singleConsumingExerciseUnitTest,
+    consumingExerciseThenRollbackUnitTest
+  )
+
+  "unitTests" should {
+
+    unitTests.foreach { case UnitTest(name, interaction, expected) =>
+      s"pass $name" when {
+        expected.foreach { case (mode, expectedResult) =>
+          s"mode $mode" in {
+            val fresh = ContractStateMachine.initial[Unit](mode)
+            val result = interaction.apply(fresh).map(_.toStateMachineResult)
+
+            (result, expectedResult) match {
+              case (Left(err1), Left(err2)) => err1 shouldBe err2
+              case (Right(state), Right(res)) =>
+                withClue("inputContractIds") {
+                  state.inputContractIds shouldBe res.inputContractIds
+                }
+                withClue("globalKeyInputs") {
+                  state.globalKeyInputs shouldBe res.globalKeyInputs
+                }
+                withClue("localKeys") {
+                  state.localKeys shouldBe res.localKeys
+                }
+                withClue("consumed") {
+                  state.consumed shouldBe res.consumed
+                }
+              case _ => fail(s"$result was not equal to $expectedResult")
+            }
+          }
+        }
+      }
+    }
+  }
+
   "ActiveLedgerState.isEquivalent" should {
     val s = ActiveLedgerState(
       Set(1, 2, 3, 4, 5),
@@ -833,12 +1043,12 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       root: NodeId,
       resolver: KeyResolver,
       state: ContractStateMachine.State[Unit],
-  ): Either[KeyInputError, ContractStateMachine.State[Unit]] = {
+  ): ErrOr[ContractStateMachine.State[Unit]] = {
     val node = nodes(root)
     for {
       next <- node match {
         case actionNode: Node.Action =>
-          state.handleNode((), actionNode, actionNode.gkeyOpt.flatMap(resolver))
+          state.handleNode((), actionNode, actionNode.gkeyOpt.fold(Vector.empty[ContractId])(resolver(_)))
         case _: Node.Rollback =>
           Right(state.beginRollback())
       }
@@ -864,7 +1074,7 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
       roots: Seq[NodeId],
       resolver: KeyResolver,
       state: ContractStateMachine.State[Unit],
-  ): Either[KeyInputError, ContractStateMachine.State[Unit]] =
+  ): ErrOr[ContractStateMachine.State[Unit]] =
     roots match {
       case Seq() => Right(state)
       case root +: tail =>
@@ -897,13 +1107,31 @@ class ContractStateMachineSpec extends AnyWordSpec with Matchers with TableDrive
 }
 
 object ContractStateMachineSpec {
-  type OptTestResult =
-    Either[KeyInputError, TestResult]
+  type OptTestResult = ErrOr[TestResult]
+  type OptStateMachineResult = ErrOr[StateMachineResult]
   case class TestResult(
       globalKeyInputs: Map[GlobalKey, KeyInput],
       activeState: ActiveLedgerState[Unit],
       inputContractIds: Set[ContractId],
-  )
+  ) {
+    def toStateMachineResult = StateMachineResult(
+      inputContractIds = inputContractIds,
+      globalKeyInputs = globalKeyInputs,
+      localKeys = activeState.localKeys,
+      consumed = activeState.consumedBy.keySet
+    )
+  }
+
+  object TestResult {
+    def empty =  TestResult(
+      globalKeyInputs = Map[GlobalKey, KeyInput](),
+      activeState = ActiveLedgerState.empty[Unit],
+      inputContractIds = Set.empty,
+    )
+
+
+  }
+
   case class TestCase(
       name: String,
       transaction: HasTxNodes[?],
@@ -919,7 +1147,29 @@ object ContractStateMachineSpec {
     ): TestCase = TestCase(name, transaction, resolverFromTx(transaction), expected)
   }
 
-  def resolverFromTx(tx: HasTxNodes[?]): KeyResolver = {
+  case class UnitTest(
+                       name: String,
+                       interaction: State[Unit] => ErrOr[State[Unit]],
+                       expected: Map[ContractStateMachine.Mode, OptStateMachineResult],
+                     )
+
+  object UnitTest {
+    def apply(name: String,
+                 interaction: State[Unit] => Either[TransactionError, State[Unit]],
+                 expected: OptStateMachineResult): UnitTest = UnitTest(name, interaction, allModesMap(expected))
+
+    def oldApply(name: String,
+              interaction: State[Unit] => Either[TransactionError, State[Unit]],
+              expected: OptTestResult): UnitTest = UnitTest(name, interaction, allModesMap(expected.map(_.toStateMachineResult)))
+
+
+    def allModesMap(expected: OptStateMachineResult) = Map[ContractStateMachine.Mode, OptStateMachineResult](
+      ContractStateMachine.Mode.UCKWithRollback -> expected,
+      ContractStateMachine.Mode.LegacyNUCK -> expected,
+    )
+  }
+
+  def resolverFromTx(tx: HasTxNodes[_]): KeyResolver = {
     def updateKey(
         resolver: KeyResolver,
         mbKey: Option[GlobalKey],
@@ -935,7 +1185,7 @@ object ContractStateMachineSpec {
       exerciseEnd = (s, _, _) => s,
       leaf = (s, _, leaf) =>
         leaf match {
-          case create: Node.Create => updateKey(s, create.gkeyOpt, KeyInactive)
+          case create: Node.Create => updateKey(s, create.gkeyOpt, KeyInactive())
           case fetch: Node.Fetch =>
             updateKey(s, fetch.gkeyOpt, KeyActive(fetch.coid))
           case lookup: Node.LookupByKey =>

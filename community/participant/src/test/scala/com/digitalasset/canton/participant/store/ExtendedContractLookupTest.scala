@@ -86,7 +86,7 @@ class ExtendedContractLookupTest extends AsyncWordSpec with BaseTest with FailOn
 
     val extendedStore = new ExtendedContractLookup(
       overwrites,
-      Map(key00 -> Some(coid00), key1 -> None),
+      Map(key00 -> Vector(coid00), key1 -> Vector.empty),
     )
 
     "not make up contracts" in {

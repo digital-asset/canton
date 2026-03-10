@@ -76,7 +76,7 @@ private[mediator] class Mediator(
     sequencedEventStore: SequencedEventStore,
     parameters: CantonNodeParameters,
     clock: Clock,
-    metrics: MediatorMetrics,
+    val metrics: MediatorMetrics,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext, tracer: Tracer)
     extends NamedLogging

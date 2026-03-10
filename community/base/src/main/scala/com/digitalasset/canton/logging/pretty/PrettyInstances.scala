@@ -17,8 +17,7 @@ import com.digitalasset.canton.util.{ErrorUtil, HexString}
 import com.digitalasset.canton.{LedgerUserId, LfPartyId, LfTimestamp, LfVersioned, Uninhabited}
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.data.Ref.{DottedName, PackageId, QualifiedName}
-import com.digitalasset.daml.lf.transaction.TransactionErrors.*
-import com.digitalasset.daml.lf.transaction.{CreationTime, Versioned}
+import com.digitalasset.daml.lf.transaction.{CreationTime, TransactionError, Versioned}
 import com.digitalasset.daml.lf.value.Value
 import com.google.protobuf.ByteString
 import io.grpc.Status
@@ -298,13 +297,13 @@ trait PrettyInstances {
     unnamedParam(_.traceContext),
   )
 
-  implicit val prettyKeyInputError: Pretty[KeyInputError] = {
-    case InconsistentContractKeyKIError(e: InconsistentContractKey) =>
-      prettyOfClass[InconsistentContractKey](unnamedParam(_.key)).treeOf(e)
-    case DuplicateContractKeyKIError(e: DuplicateContractKey) =>
-      prettyOfClass[DuplicateContractKey](unnamedParam(_.key)).treeOf(e)
-    case DuplicateContractIdKIError(e: DuplicateContractId) =>
-      prettyOfClass[DuplicateContractId](unnamedParam(_.contractId)).treeOf(e)
+  implicit val prettyKeyInputError: Pretty[TransactionError] = {
+    case e: TransactionError.InconsistentContractKey =>
+      prettyOfClass[TransactionError.InconsistentContractKey](unnamedParam(_.key)).treeOf(e)
+    case e: TransactionError.DuplicateContractKey =>
+      prettyOfClass[TransactionError.DuplicateContractKey](unnamedParam(_.key)).treeOf(e)
+    case e: TransactionError.DuplicateContractId =>
+      prettyOfClass[TransactionError.DuplicateContractId](unnamedParam(_.contractId)).treeOf(e)
   }
 
   implicit val prettyPort: Pretty[Port] = prettyOfString(_.unwrap.toString)

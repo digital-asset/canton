@@ -249,6 +249,7 @@ private[topology] class PartyReplicationChaos(val logger: TracedLogger) extends 
       validFrom = Some(onboardingTx.validFrom),
       beginOffsetExclusive = fromLedgerEnd,
       completeAfter = PositiveInt.one,
+      onboarding = false,
     )
     logOperationStep("party replication")(
       s"Exporting ACS at offset $partyAddedOffset for $party from ${from.id}"

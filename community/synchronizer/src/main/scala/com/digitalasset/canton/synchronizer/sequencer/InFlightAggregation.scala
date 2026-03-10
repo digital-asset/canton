@@ -9,8 +9,8 @@ import com.digitalasset.canton.checked
 import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
-import com.digitalasset.canton.logging.{ErrorLoggingContext, HasLoggerName, NamedLoggingContext}
-import com.digitalasset.canton.sequencing.protocol.{AggregationId, AggregationRule}
+import com.digitalasset.canton.logging.{HasLoggerName, NamedLoggingContext}
+import com.digitalasset.canton.sequencing.protocol.AggregationRule
 import com.digitalasset.canton.synchronizer.sequencer.InFlightAggregation.AggregationBySender
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.util.ErrorUtil
@@ -239,48 +239,4 @@ object InFlightAggregation {
     )
   }
 
-  def tryApplyUpdate(
-      aggregationId: AggregationId,
-      inFlightAggregationO: Option[InFlightAggregation],
-      update: InFlightAggregationUpdate,
-      ignoreInFlightAggregationErrors: Boolean,
-  )(implicit loggingContext: ErrorLoggingContext): InFlightAggregation = {
-    val InFlightAggregationUpdate(freshO, aggregatedSenders) = update
-    val inFlightAggregation = inFlightAggregationO match {
-      case None =>
-        val fresh = freshO.getOrElse(
-          ErrorUtil.internalError(
-            new IllegalArgumentException(
-              s"Missing in-flight aggregation information for ID $aggregationId"
-            )
-          )
-        )
-        InFlightAggregation.initial(fresh)
-      case Some(inFlightAggregation) =>
-        freshO.foreach { fresh =>
-          val existing = FreshInFlightAggregation(
-            inFlightAggregation.maxSequencingTimestamp,
-            inFlightAggregation.rule,
-          )
-          ErrorUtil.requireArgument(
-            fresh == existing,
-            s"Mismatch with existing in-flight aggregation: existing: $existing, new: $fresh",
-          )
-        }
-        inFlightAggregation
-    }
-    aggregatedSenders.foldLeft(inFlightAggregation)((inFlightAgg, senderAggregation) =>
-      inFlightAgg
-        .tryAggregate(senderAggregation)
-        .valueOr(err =>
-          if (ignoreInFlightAggregationErrors) inFlightAgg
-          else
-            ErrorUtil.internalError(
-              new IllegalArgumentException(
-                s"Failed to apply aggregation update for id $aggregationId: $err"
-              )
-            )
-        )
-    )
-  }
 }

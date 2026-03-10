@@ -4,8 +4,8 @@
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability
 
 import com.daml.metrics.api.MetricsContext
-import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.crypto.Signature.noSignature
+import com.digitalasset.canton.crypto.{Hash, Signature}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.BftBlockOrdererConfig
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.AuthenticatedMessageType.BftSignedAvailabilityMessage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.{
@@ -21,10 +21,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   EpochNumber,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.*
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.{
-  Membership,
-  OrderingTopology,
-}
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.Membership
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.{
   OrderingRequestBatch,
   OrderingRequestBatchStats,
@@ -83,7 +80,7 @@ class AvailabilityModuleConsensusProposalRequestTest
               .CreateProposal(
                 BlockNumber.First,
                 EpochNumber.First,
-                OrderingTopologyNode0,
+                MembershipNode0,
                 failingCryptoProvider,
               )
           )
@@ -124,7 +121,7 @@ class AvailabilityModuleConsensusProposalRequestTest
             .CreateProposal(
               BlockNumber.First,
               EpochNumber.First,
-              OrderingTopologyNodes0And1,
+              MembershipNodes0And1,
               failingCryptoProvider,
             )
         )
@@ -167,7 +164,7 @@ class AvailabilityModuleConsensusProposalRequestTest
               .CreateProposal(
                 BlockNumber.First,
                 EpochNumber.First,
-                OrderingTopologyNodes0To6,
+                MembershipNodes0To6,
                 failingCryptoProvider,
               )
           )
@@ -210,7 +207,7 @@ class AvailabilityModuleConsensusProposalRequestTest
               .CreateProposal(
                 BlockNumber.First,
                 EpochNumber.First,
-                OrderingTopologyNodes0To6,
+                MembershipNodes0To6,
                 cryptoProvider,
               )
           )
@@ -290,7 +287,7 @@ class AvailabilityModuleConsensusProposalRequestTest
                 .CreateProposal(
                   BlockNumber.First,
                   EpochNumber.First,
-                  OrderingTopologyNode0,
+                  MembershipNode0,
                   failingCryptoProvider,
                 )
             )
@@ -377,7 +374,7 @@ class AvailabilityModuleConsensusProposalRequestTest
                 .CreateProposal(
                   BlockNumber.First,
                   EpochNumber.First,
-                  OrderingTopologyNode0,
+                  MembershipNode0,
                   failingCryptoProvider,
                 )
             )
@@ -402,7 +399,7 @@ class AvailabilityModuleConsensusProposalRequestTest
                 .CreateProposal(
                   BlockNumber(1),
                   EpochNumber.First,
-                  OrderingTopologyNode0,
+                  MembershipNode0,
                   failingCryptoProvider,
                 )
             )
@@ -422,7 +419,7 @@ class AvailabilityModuleConsensusProposalRequestTest
               Availability.Consensus.CreateProposal(
                 BlockNumber(2),
                 EpochNumber.First,
-                OrderingTopologyNode0,
+                MembershipNode0,
                 failingCryptoProvider,
                 orderedBatchIds = proposedProofsOfAvailability.map(_.batchId),
               )
@@ -501,7 +498,7 @@ class AvailabilityModuleConsensusProposalRequestTest
                 .CreateProposal(
                   BlockNumber.First,
                   EpochNumber.First,
-                  OrderingTopologyNode0,
+                  MembershipNode0,
                   failingCryptoProvider,
                 )
             )
@@ -558,7 +555,7 @@ class AvailabilityModuleConsensusProposalRequestTest
                 .CreateProposal(
                   BlockNumber.First,
                   EpochNumber.First,
-                  OrderingTopologyNodes0To3,
+                  MembershipNodes0To3,
                   failingCryptoProvider,
                 )
             )
@@ -618,7 +615,7 @@ class AvailabilityModuleConsensusProposalRequestTest
               .CreateProposal(
                 BlockNumber.First,
                 EpochNumber.First,
-                OrderingTopologyNodes0To6,
+                MembershipNodes0To6,
                 failingCryptoProvider,
               )
           )
@@ -697,7 +694,7 @@ class AvailabilityModuleConsensusProposalRequestTest
                 .CreateProposal(
                   BlockNumber(1),
                   EpochNumber.First,
-                  OrderingTopologyNodes0To3,
+                  MembershipNodes0To3,
                   failingCryptoProvider,
                 )
             )
@@ -789,13 +786,13 @@ class AvailabilityModuleConsensusProposalRequestTest
               .toEither
               .getOrElse(fail("Batch should be complete with the given metadata"))
           )
-          val newTopology = OrderingTopology.forTesting(Node0To6.filterNot(_ == "node6"))
+          val newMembership = Membership.forTesting(Node0, Node0To6.filterNot(_ == "node6"))
           availability.receive(
             Availability.Consensus
               .CreateProposal(
                 BlockNumber.First,
                 EpochNumber.First,
-                newTopology,
+                newMembership,
                 failingCryptoProvider,
               )
           )
@@ -854,37 +851,38 @@ class AvailabilityModuleConsensusProposalRequestTest
               availabilityStore = availabilityStore,
               consensus = fakeRecordingModule(consensusBuffer),
             )
-          val newTopology =
-            OrderingTopologyNodes0To6.copy(
-              nodesTopologyInfo =
-                OrderingTopologyNodes0To6.nodesTopologyInfo.map { case (nodeId, nodeInfo) =>
-                  // Change the key of node5 and node6 so that the PoA is only left with 2 valid acks < f+1 = 3
-                  nodeId -> (if (nodeId == "node5" || nodeId == "node6")
-                               nodeInfo.copy(keyIds =
-                                 Set(
-                                   BftKeyId(
-                                     anotherNoSignature.authorizingLongTermKey.toProtoPrimitive
+          val newMembership =
+            Membership.forTesting(
+              Node0,
+              OrderingTopologyNodes0To6.copy(
+                nodesTopologyInfo =
+                  OrderingTopologyNodes0To6.nodesTopologyInfo.map { case (nodeId, nodeInfo) =>
+                    // Change the key of node5 and node6 so that the PoA is only left with 2 valid acks < f+1 = 3
+                    nodeId -> (if (nodeId == "node5" || nodeId == "node6")
+                                 nodeInfo.copy(keyIds =
+                                   Set(
+                                     BftKeyId(
+                                       anotherNoSignature.authorizingLongTermKey.toProtoPrimitive
+                                     )
                                    )
                                  )
-                               )
-                             else nodeInfo)
-                }
+                               else nodeInfo)
+                  }
+              ),
             )
           availability.receive(
             Availability.Consensus
               .CreateProposal(
                 BlockNumber.First,
                 EpochNumber.First,
-                newTopology,
+                newMembership,
                 failingCryptoProvider,
               )
           )
 
           val reviewedProgress =
             AnotherBatchReadyForOrdering6NodesQuorumNodes0And4To6Votes._2
-              .changeMembership(
-                availability.getActiveMembership.copy(orderingTopology = newTopology)
-              )
+              .changeMembership(newMembership)
               .toEither
               .leftOrFail("Progress was not regressed")
 
@@ -943,34 +941,49 @@ class AvailabilityModuleConsensusProposalRequestTest
               p2pNetworkOut = fakeRecordingModule(p2pNetworkOutBuffer),
               cryptoProvider = spiedNoSignatureCryptoProvider,
             )
-          val newTopology =
-            OrderingTopologyNodes0To6.copy(
-              nodesTopologyInfo =
-                OrderingTopologyNodes0To6.nodesTopologyInfo.map { case (nodeId, nodeInfo) =>
-                  // Change the key of node0 and node6 so that the PoA is only left with 2 valid acks < f+1 = 3
-                  //  and it will be re-signed by node0
-                  nodeId -> (if (nodeId == "node0" || nodeId == "node6")
-                               nodeInfo.copy(keyIds =
-                                 Set(
-                                   BftKeyId(
-                                     anotherNoSignature.authorizingLongTermKey.toProtoPrimitive
+          val newMembership =
+            Membership.forTesting(
+              Node0,
+              OrderingTopologyNodes0To6.copy(
+                nodesTopologyInfo =
+                  OrderingTopologyNodes0To6.nodesTopologyInfo.map { case (nodeId, nodeInfo) =>
+                    // Change the key of node0 and node6 so that the PoA is only left with 1 valid ack < f+1 = 3
+                    //  and it will be re-signed and disseminated by node0
+                    nodeId -> (if (nodeId == "node0" || nodeId == "node5" || nodeId == "node6")
+                                 nodeInfo.copy(keyIds =
+                                   Set(
+                                     BftKeyId(
+                                       anotherNoSignature.authorizingLongTermKey.toProtoPrimitive
+                                     )
                                    )
                                  )
-                               )
-                             else nodeInfo)
-                }
+                               else nodeInfo)
+                  }
+              ),
             )
           availability.receive(
             Availability.Consensus
               .CreateProposal(
                 BlockNumber.First,
                 EpochNumber.First,
-                newTopology,
+                newMembership,
                 spiedNoSignatureCryptoProvider,
               )
           )
 
-          disseminationProtocolState.disseminationInProgressView should not be empty
+          disseminationProtocolState.disseminationInProgressView should contain only (AnotherBatchId ->
+            AnotherBatchReadyForOrdering6NodesQuorumNodes0And4To6Votes._2
+              .changeMembership(newMembership)
+              .toEither
+              .leftOrFail("Progress was not regressed")
+              .copy(
+                batchSentTo = Set(Node1),
+                acks = AnotherBatchReadyForOrdering6NodesQuorumNodes0And4To6Votes._2.acks
+                  .filterNot(a => a.from == "node0" || a.from == "node5" || a.from == "node6"),
+                // Regressions are reset by metrics emission
+                regressionsToSigning = 0,
+                disseminationRegressions = 0,
+              ))
           disseminationProtocolState.nextToBeProvidedToConsensus shouldBe
             NextToBeProvidedToConsensus(BlockNumber.First, Some(16))
           disseminationProtocolState.disseminationCompleteView shouldBe empty
@@ -986,11 +999,32 @@ class AvailabilityModuleConsensusProposalRequestTest
 
           ctx.runPipedMessagesUntilNoMorePiped(availability)
 
+          // Node 0 signed, so also acked
+
+          verify(spiedNoSignatureCryptoProvider, times(1)).signHash(
+            any[Hash],
+            eqTo("availability-sign-local-batchId"),
+          )(anyTraceContext, any[MetricsContext])
+
+          disseminationProtocolState.disseminationInProgressView should contain only (AnotherBatchId ->
+            AnotherBatchReadyForOrdering6NodesQuorumNodes0And4To6Votes._2
+              .changeMembership(newMembership)
+              .toEither
+              .leftOrFail("Progress was not regressed")
+              .copy(
+                batchSentTo = Set(Node1, Node2, Node3, node(5), node(6)),
+                acks = AnotherBatchReadyForOrdering6NodesQuorumNodes0And4To6Votes._2.acks
+                  .filterNot(a => a.from == "node5" || a.from == "node6"),
+                // Regressions are reset by metrics emission
+                regressionsToSigning = 0,
+                disseminationRegressions = 0,
+              ))
+
+          // For dissemination we expect 1 message signing and 1 multicast to the nodes that need to receive the batch,
+          //  i.e., the ones in the active membership that hadn't acked it and weren't yet sent the batch.
+
           val disseminationMessage = Availability.RemoteDissemination.RemoteBatch
             .create(AnotherBatchId, ABatch, from = Node0)
-
-          // We expect only 1 signing call and 1 multicast to the nodes that need to receive the batch,
-          //  i.e., the ones in the active membership that hadn't acked it and weren't yet sent the batch.
 
           verify(spiedNoSignatureCryptoProvider, times(1)).signMessage(
             eqTo(disseminationMessage),
@@ -1004,7 +1038,7 @@ class AvailabilityModuleConsensusProposalRequestTest
             P2PNetworkOut
               .Multicast(
                 remoteMessage,
-                Set(Node2, Node3, node(6)),
+                Set(Node2, Node3, node(5), node(6)),
               )
         }
     }
@@ -1066,13 +1100,13 @@ class AvailabilityModuleConsensusProposalRequestTest
               .CreateProposal(
                 BlockNumber.First,
                 initialEpochNumber,
-                OrderingTopologyNode0,
+                MembershipNode0,
                 failingCryptoProvider,
               )
           ),
           log => {
             log.level shouldBe Level.WARN
-            log.message should include("Discarding the expired batches")
+            log.message should include("discarding expired batches")
           },
         )
 
@@ -1141,13 +1175,13 @@ class AvailabilityModuleConsensusProposalRequestTest
               .CreateProposal(
                 BlockNumber.First,
                 initialEpochNumber,
-                OrderingTopologyNodes0To3,
+                MembershipNodes0To3,
                 failingCryptoProvider,
               )
           ),
           log => {
             log.level shouldBe Level.WARN
-            log.message should include("Discarding the expired batches")
+            log.message should include("discarding expired batches")
           },
         )
 
@@ -1176,7 +1210,7 @@ class AvailabilityModuleConsensusProposalRequestTest
               .CreateProposal(
                 BlockNumber(blockNum.toLong),
                 EpochNumber.First,
-                OrderingTopologyNode0,
+                MembershipNode0,
                 failingCryptoProvider,
               )
           )
@@ -1205,7 +1239,7 @@ class AvailabilityModuleConsensusProposalRequestTest
             .CreateProposal(
               BlockNumber.First,
               EpochNumber.First,
-              OrderingTopologyNode0,
+              MembershipNode0,
               failingCryptoProvider,
             )
         )
@@ -1217,7 +1251,7 @@ class AvailabilityModuleConsensusProposalRequestTest
               .CreateProposal(
                 BlockNumber.First,
                 EpochNumber.First,
-                OrderingTopologyNode0,
+                MembershipNode0,
                 failingCryptoProvider,
               )
           )),
@@ -1230,7 +1264,7 @@ class AvailabilityModuleConsensusProposalRequestTest
             .CreateProposal(
               BlockNumber(2),
               EpochNumber.First,
-              OrderingTopologyNode0,
+              MembershipNode0,
               failingCryptoProvider,
             )
         )
@@ -1242,7 +1276,7 @@ class AvailabilityModuleConsensusProposalRequestTest
               .CreateProposal(
                 BlockNumber.First,
                 EpochNumber.First,
-                OrderingTopologyNode0,
+                MembershipNode0,
                 failingCryptoProvider,
               )
           )),

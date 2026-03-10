@@ -166,6 +166,7 @@ class JsStateService(
         state_service.GetActiveContractsRequest(
           activeAtOffset = req.activeAtOffset,
           eventFormat = req.eventFormat,
+          streamContinuationToken = None,
         )
       case (None, None, _) =>
         throw RequestValidationErrors.InvalidArgument
@@ -183,6 +184,7 @@ class JsStateService(
               verbose = verbose,
             )
           ),
+          streamContinuationToken = None,
         )
     }
 

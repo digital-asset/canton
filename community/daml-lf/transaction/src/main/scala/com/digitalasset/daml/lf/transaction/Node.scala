@@ -6,6 +6,7 @@ package transaction
 
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.ImmArray
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits._
 import com.digitalasset.daml.lf.value.Value.{ContractId, VersionedThinContractInstance}
 import com.digitalasset.daml.lf.value._
 
@@ -232,28 +233,42 @@ object Node {
     override def requiredAuthorizers: Set[Party] = actingParties
   }
 
-  final case class LookupByKey(
+  /** Denotes a transaction node for a `queryNByKey` operation.
+   *
+   * This node records the results of a key lookup that allows for multiple active
+   * contracts. It stores the `results` found during interpretation, up to a
+   * maximum of 'n' contracts.
+   *
+   * The `exhaustive` flag indicates whether the search for active contracts was
+   * completed:
+   * - If `true`: The number of active contracts found was strictly less than the
+   * limit 'n', meaning all active contracts for this key are included in `results`.
+   * - If `false`: Exactly 'n' contracts were found. In this case, it is unknown
+   * if additional active contracts for this key exist on the ledger.
+   */
+  final case class QueryByKey(
       override val packageName: PackageName,
       override val templateId: TypeConId,
+      exhaustive: Boolean,
       key: GlobalKeyWithMaintainers,
-      result: Option[ContractId],
+      result: Vector[ContractId],
       // For the sake of consistency between types with a version field, keep this field the last.
       override val version: SerializationVersion,
   ) extends LeafOnlyAction
-      with CidContainer[LookupByKey] {
+      with CidContainer[QueryByKey] {
 
     override def keyOpt: Some[GlobalKeyWithMaintainers] = Some(key)
 
     def gkey: GlobalKey = key.globalKey
 
-    override def mapCid(f: ContractId => ContractId): Node.LookupByKey =
+    override def mapCid(f: ContractId => ContractId): Node.QueryByKey =
       copy(result = result.map(f))
 
     def keyMaintainers: Set[Party] = key.maintainers
 
     override def byKey: Boolean = true
 
-    override private[lf] def updateVersion(version: SerializationVersion): Node.LookupByKey =
+    override private[lf] def updateVersion(version: SerializationVersion): Node.QueryByKey =
       copy(version = version, key = rehash(key))
 
     override def packageIds: Iterable[PackageId] = Iterable(templateId.packageId)
@@ -265,6 +280,34 @@ object Node {
       // become a Fetch.
       keyMaintainers
     def requiredAuthorizers: Set[Party] = keyMaintainers
+  }
+
+  type LookupByKey = QueryByKey
+
+  object LookupByKey {
+    def apply(
+      packageName: PackageName,
+      templateId: TypeConId,
+      key: GlobalKeyWithMaintainers,
+      result: Option[ContractId],
+      version: SerializationVersion
+    ): LookupByKey = QueryByKey(packageName, templateId, true, key, result.asCidVector, version)
+
+    def unapply(n: QueryByKey): Some[(
+      PackageName,
+        TypeConId,
+        GlobalKeyWithMaintainers,
+        Option[ContractId],
+        SerializationVersion,
+      )] = Some(
+        (
+          n.packageName,
+          n.templateId,
+          n.key,
+          n.result.asCidOption,
+          n.version
+        )
+      )
   }
 
   @deprecated("use GlobalKey", since = "2.6.0")

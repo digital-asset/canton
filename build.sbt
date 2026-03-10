@@ -469,6 +469,7 @@ lazy val `ledger-test-tool-2-dev` = CommunityProjects.`ledger-test-tool-2-dev`
 lazy val `conformance-testing` = CommunityProjects.`conformance-testing`
 lazy val `upgrading-integration-tests` =
   CommunityProjects.`upgrading-integration-tests`
+lazy val `model-based-testing` = CommunityProjects.`model-based-testing`
 
 lazy val `scalatest-utils` = DamlProjects.`scalatest-utils`
 lazy val `scala-utils` = DamlProjects.`scala-utils`

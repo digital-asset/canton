@@ -84,6 +84,7 @@ class TopologyTransactionsStreamReader(
             idPageBufferSize = maxPagesPerIdPagesBuffer,
             initialFromIdExclusive = queryRange.startInclusiveEventSeqId,
             initialEndInclusive = queryRange.endInclusiveEventSeqId,
+            descendingOrder = false,
           )(
             idDbQuery.fetchIds(
               stakeholder = partyO
@@ -97,7 +98,7 @@ class TopologyTransactionsStreamReader(
               }
           )
         }
-        .pipe(EventIdsUtils.sortAndDeduplicateIds)
+        .pipe(EventIdsUtils.sortAndDeduplicateIds(descendingOrder = false))
         .batchN(
           maxBatchSize = maxPayloadsPerPayloadsPage,
           maxBatchCount = maxOutputBatchCount,
@@ -154,7 +155,7 @@ class TopologyTransactionsStreamReader(
 
     UpdateReader
       .groupContiguous(payloads)(by = _.updateId)
-      .mapConcat(TransactionConversions.toTopologyTransaction)
+      .mapConcat(TransactionConversions.toTopologyTransaction(noTracingLogger))
   }
 
 }

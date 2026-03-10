@@ -80,7 +80,7 @@ final class TopologyTransactionPointwiseReader(
       requestingParties = requestingParties,
       toResponse = (topologyEvents: Vector[RawParticipantAuthorization]) =>
         Future.successful(
-          TransactionConversions.toTopologyTransaction(topologyEvents).map(_._2)
+          TransactionConversions.toTopologyTransaction(noTracingLogger)(topologyEvents).map(_._2)
         ),
     )
   }

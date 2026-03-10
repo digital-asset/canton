@@ -17,7 +17,7 @@ For an overview of external parties and how they differ from local parties, plea
 
 Assume ``Alice`` is an external party already onboarded to the network.
 
-You must take four steps to submit a transaction on behalf of ``Alice``
+You must take four steps to submit a transaction on behalf of ``Alice``.
 
 Step 1: Prepare the transaction
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

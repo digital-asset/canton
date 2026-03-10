@@ -47,7 +47,7 @@ object JdbcIndexer {
       loggerFactory: NamedLoggerFactory,
       dataSourceProperties: DataSourceProperties,
       highAvailability: HaConfig,
-      indexSericeDbDispatcher: Option[DbDispatcher],
+      indexServiceDbDispatcher: Option[DbDispatcher],
       clock: Clock,
       reassignmentOffsetPersistence: ReassignmentOffsetPersistence,
       postProcessor: (Vector[PostPublishData], TraceContext) => Future[Unit],
@@ -72,12 +72,17 @@ object JdbcIndexer {
       val stringInterningStorageBackend = factory.createStringInterningStorageBackend
       val completionStorageBackend =
         factory.createCompletionStorageBackend(inMemoryState.stringInterningView, loggerFactory)
+      val eventStorageBackend = factory.createEventStorageBackend(
+        inMemoryState.ledgerEndCache,
+        inMemoryState.stringInterningView,
+        loggerFactory,
+      )
       val dbConfig = dataSourceProperties
       // in case H2 backend, we share a single connection between indexer and index service
       // to prevent H2 synchronization bug to materialize
       // the ingestion parallelism is also limited to 1 in this case
       val (ingestionParallelism, indexerDbDispatcherOverride) =
-        if (factory == H2StorageBackendFactory) 1 -> indexSericeDbDispatcher
+        if (factory == H2StorageBackendFactory) 1 -> indexServiceDbDispatcher
         else config.ingestionParallelism.unwrap -> None
       ParallelIndexerFactory(
         inputMappingParallelism = config.inputMappingParallelism.unwrap,
@@ -102,6 +107,7 @@ object JdbcIndexer {
           parameterStorageBackend = parameterStorageBackend,
           ingestionStorageBackend = ingestionStorageBackend,
           contractStorageBackend = contractStorageBackend,
+          eventStorageBackend = eventStorageBackend,
           participantId = participantId,
           translation = new LfValueTranslation(
             metrics = metrics,
@@ -126,6 +132,9 @@ object JdbcIndexer {
           submissionBatchInsertionSize = config.submissionBatchInsertionSize,
           maxTailerBatchSize = config.maxTailerBatchSize,
           postProcessingParallelism = config.postProcessingParallelism,
+          achsPopulationParallelism = config.achsPopulationParallelism.unwrap,
+          achsRemovalParallelism = config.achsRemovalParallelism.unwrap,
+          achsAggregationThreshold = config.achsAggregationThreshold,
           maxOutputBatchedBufferSize = config.maxOutputBatchedBufferSize,
           metrics = metrics,
           inMemoryStateUpdaterFlow = apiUpdaterFlow,
@@ -139,6 +148,7 @@ object JdbcIndexer {
           loggerFactory = loggerFactory,
           executionContext = executionContext,
         ),
+        achsConfigO = config.achsConfig,
         mat = materializer,
         executionContext = executionContext,
         initializeInMemoryState = inMemoryState.initializeTo,

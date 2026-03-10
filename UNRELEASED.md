@@ -91,15 +91,15 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
   ```
 - On Ledger API interface subscriptions, the `CreatedEvent.interface_views` now returns the ID of the package containing
   the interface implementation that was used to compute the specific interface view as `InterfaceView.implementation_package_id`.
-- *BREAKING* The Postgres configuration of the indexer is separated from the Postgres configuration of the lapi server
+- The Postgres connection tuning configuration of the indexer is now separated from the configuration of the Ledger API server
   (`canton.participants.<participant>.ledger-api.postgres-data-source`).
-  The new parameter `canton.participants.<participant>.parameters.ledger-api-server.indexer.postgres-data-source` should
-  be used instead.
-- Added network timeout and client_connection_check_interval for db operations in the lapi server and indexer to avoid
+  The new configuration section `canton.participants.<participant>.parameters.ledger-api-server.indexer.postgres-data-source` should
+  be used instead to tune the indexer's Postgres connections.
+- Added network timeout and client_connection_check_interval for db operations in the Ledger API server and indexer to avoid
   hanging connections for Postgres (see PostgresDataSourceConfig). The defaults are 60 seconds network timeout and
-  5 seconds client_connection_check_interval for the lapi server, and 20 seconds network timeout and
+  5 seconds client_connection_check_interval for the Ledger API server, and 20 seconds network timeout and
   5 seconds client_connection_check_interval for the indexer. These values can be configured via the new configuration parameters
-  `canton.participants.<participant>.ledger-api.postgres-data-source.network-timeout` for network timeout of the lapi
+  `canton.participants.<participant>.ledger-api.postgres-data-source.network-timeout` for network timeout of the Ledger API
   server and `canton.participants.<participant>.parameters.ledger-api-server.indexer.postgres-data-source.client-connection-check-interval`
   for the client_connection_check_interval of the indexer.
 - We have changed the way that OffsetCheckpoints are populated to always generate at least one when an open-ended
@@ -129,12 +129,8 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
 - `PrepareSubmissionRequest.hashing_scheme_version` can now be populated with the desired hashing version to be
    used for the transaction. The default hashing scheme is `HASHING_SCHEME_VERSION_V2` but integrators are encouraged to move to `HASHING_SCHEME_VERSION_V3` for
   synchronizers using protocol version 35.
-- *BREAKING* The
-  - `/v2/updates` HTTP POST and websocket GET endpoints
-  - `/v2/updates/flats` HTTP POST and websocket GET endpoints
-
-  were incorrectly retuning LedgerEffects events (i.e., `CreatedEvent` and `ExercisedEvent`). They are now corrected to return
-  AcsDelta (flat) events (i.e., `CreatedEvent` and `ArchivedEvent`).
+- Deprecated: removed the feature flag `canton.sequencers.<node>.parameters.async-writer.enabled`, as async writing is now
+  the only supported mode.
 
 ### Preview Features
 - preview feature
@@ -238,6 +234,14 @@ current offline party replication process. For details, please consult the
     - SubmitAndWaitForTransaction (the optional `transaction_format`)
     - SubmitAndWaitForReassignmentRequest
     - ExecuteSubmissionAndWaitForTransactionRequest
+
+### Party replication onboarding topology event is exposed on Ledger API
+
+The `PartyToParticipant` topology "onboarding" state used in the process of replicating a party with existing
+contracts is now visible via the Ledger API when a party onboards on a synchronizer on protocol version 35 or higher.
+Starting with PV=35, the newly introduced `ParticipantAuthorizationOnboarding` Ledger API topology event signals
+the beginning of party replication and transitions to `ParticipantAuthorizationAdded` once the party's ACS is fully
+visible on the Ledger API.
 
 ### Party replication repair console macro removal
 

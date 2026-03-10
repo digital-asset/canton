@@ -49,7 +49,7 @@ First generate the keys used for the decentralized namespace:
           mediators = Seq(mediatorBanking),
           synchronizerOwners = Seq(sequencerBanking),
           synchronizerThreshold = 1,
-          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
         )
     .. hidden:: participant1.synchronizers.connect_local(sequencerBanking, "global")
     .. hidden:: participant2.synchronizers.connect_local(sequencerBanking, "global")

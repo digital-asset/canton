@@ -49,6 +49,7 @@ import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, GrpcRequestLoggi
 import com.digitalasset.canton.participant.config.{
   LedgerApiServerConfig,
   ParticipantNodeConfig,
+  ParticipantStoreConfig,
   TestingTimeServiceConfig,
 }
 import com.digitalasset.canton.participant.store.{
@@ -131,6 +132,7 @@ class LedgerApiServer(
     commandProgressTracker: CommandProgressTracker,
     ledgerApiStore: Eval[LedgerApiStore],
     ledgerApiIndexer: Eval[LedgerApiIndexer],
+    pruningConfig: ParticipantStoreConfig,
     val loggerFactory: NamedLoggerFactory,
 )(implicit
     executionContext: ExecutionContextIdlenessExecutorService,
@@ -416,6 +418,7 @@ class LedgerApiServer(
         packagePreferenceBackend = packagePreferenceBackend,
         apiLoggingConfig = cantonParameterConfig.loggingConfig.api,
         apiContractService = apiContractService,
+        safeToPruneCommitmentState = pruningConfig.safeToPruneCommitmentState,
       )
       _ <- startHttpApiIfEnabled(
         timedSyncService,
@@ -579,6 +582,7 @@ object LedgerApiServer {
       participantId: LedgerParticipantId,
       participantNodePersistentState: Eval[ParticipantNodePersistentState],
       sync: CantonSyncService,
+      pruningConfig: ParticipantStoreConfig,
       tracerProvider: TracerProvider,
   )(implicit
       actorSystem: ActorSystem,
@@ -635,6 +639,7 @@ object LedgerApiServer {
       ledgerApiStore = participantNodePersistentState.map(_.ledgerApiStore),
       ledgerApiIndexer = ledgerApiIndexer,
       loggerFactory = loggerFactory,
+      pruningConfig = pruningConfig,
     ).owner()
     new ResourceOwnerFlagCloseableOps(ledgerApiServerOwner)
       .acquireFlagCloseable("Ledger API Server")

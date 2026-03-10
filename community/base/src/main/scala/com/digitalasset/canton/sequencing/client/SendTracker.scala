@@ -5,7 +5,8 @@ package com.digitalasset.canton.sequencing.client
 
 import cats.syntax.option.*
 import com.daml.metrics.api.MetricsContext
-import com.daml.metrics.api.MetricsContext.withEmptyMetricsContext
+import com.daml.metrics.api.MetricsContext.{withEmptyMetricsContext, withExtraMetricLabels}
+import com.digitalasset.canton.SequencerAlias
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.data.CantonTimestamp
@@ -26,7 +27,8 @@ import com.digitalasset.canton.store.{SavePendingSendError, SendTrackerStore}
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.google.common.annotations.VisibleForTesting
 
-import java.time.Instant
+import java.time.temporal.ChronoUnit
+import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
 
 /** When we make a send request to the sequencer it will not be sequenced until some point in the
@@ -50,12 +52,14 @@ class SendTracker(
     with FlagCloseableAsync
     with AutoCloseable {
 
+  import SendTracker.LatestAttemptRef
+
   private implicit val directExecutionContext: DirectExecutionContext = DirectExecutionContext(
     noTracingLogger
   )
 
   /** Details of sends in-flight
-    * @param startedAt
+    * @param startedAtNanoO
     *   The time the request was made for calculating the elapsed duration for metrics. We use the
     *   host clock time for this value and it is only tracked ephemerally as the elapsed value will
     *   not be useful if the local process restarts during sequencing.
@@ -63,7 +67,8 @@ class SendTracker(
   private case class PendingSend(
       maxSequencingTime: CantonTimestamp,
       callback: SendCallback,
-      startedAt: Option[Instant],
+      startedAtNanoO: Option[Long],
+      latestAttemptRef: LatestAttemptRef,
       traceContext: TraceContext,
       metricsContext: MetricsContext,
   )
@@ -75,7 +80,8 @@ class SendTracker(
         messageId -> PendingSend(
           maxSequencingTime,
           SendCallback.empty,
-          startedAt = None,
+          startedAtNanoO = None,
+          latestAttemptRef = new LatestAttemptRef(None),
           TraceContext.empty,
           MetricsContext.Empty,
         )
@@ -88,16 +94,18 @@ class SendTracker(
   )(implicit
       traceContext: TraceContext,
       metricsContext: MetricsContext,
-  ): Either[SavePendingSendError, Unit] =
+  ): Either[SavePendingSendError, LatestAttemptRef] =
     for {
       _ <- store.savePendingSend(messageId, maxSequencingTime)
     } yield {
+      val latestAttempt = new LatestAttemptRef(None)
       pendingSends.put(
         messageId,
         PendingSend(
           maxSequencingTime,
           callback,
-          startedAt = Some(Instant.now()),
+          startedAtNanoO = Some(System.nanoTime),
+          latestAttemptRef = latestAttempt,
           traceContext,
           metricsContext,
         ),
@@ -114,6 +122,8 @@ class SendTracker(
         case _none => // we're good
       }
       metrics.submissions.inFlight.inc()
+
+      latestAttempt
     }
 
   /** Cancels a pending send without notifying any callers of the result. Should only be used if the
@@ -159,7 +169,7 @@ class SendTracker(
       timestamp: CantonTimestamp
   ): Unit = {
     val timedOut = pendingSends.collect {
-      case (messageId, PendingSend(maxSequencingTime, _, _, traceContext, _))
+      case (messageId, PendingSend(maxSequencingTime, _, _, _, traceContext, _))
           if maxSequencingTime < timestamp =>
         Traced(messageId)(traceContext)
     }.toList
@@ -193,19 +203,33 @@ class SendTracker(
     }
 
   private def updateSequencedMetrics(pendingSend: PendingSend, result: SendResult): Unit = {
-    def recordSequencingTime(): Unit =
+    def recordSequencingTime(success: Boolean): Unit = {
+      val now = System.nanoTime
+
       withEmptyMetricsContext { implicit metricsContext =>
-        pendingSend.startedAt foreach { startedAt =>
-          val elapsed = java.time.Duration.between(startedAt, Instant.now())
+        pendingSend.startedAtNanoO foreach { startedAtNano =>
+          val elapsed = java.time.Duration.of(now - startedAtNano, ChronoUnit.NANOS)
           metrics.submissions.sequencingTime.update(elapsed)
         }
       }
 
+      pendingSend.latestAttemptRef.get.foreach { attempt =>
+        val elapsed = java.time.Duration.of(now - attempt.startedAtNano, ChronoUnit.NANOS)
+
+        withExtraMetricLabels(
+          "sequencerAlias" -> attempt.sequencerAlias.toString,
+          "success" -> success.toString,
+        ) { metricsContext =>
+          metrics.submissions.attemptSequencingTime.update(elapsed)(metricsContext)
+        }(pendingSend.metricsContext)
+      }
+    }
+
     result match {
-      case SendResult.Success(_) => recordSequencingTime()
+      case SendResult.Success(_) => recordSequencingTime(success = true)
       case SendResult.Error(_) =>
         // even though it's an error the sequencer still sequenced our request
-        recordSequencingTime()
+        recordSequencingTime(success = false)
       case SendResult.Timeout(_) =>
         // intentionally not updating sequencing time as this implies no event was sequenced from our request
         metrics.submissions.dropped.inc()
@@ -321,4 +345,13 @@ class SendTracker(
       SyncCloseable("send-tracker-store", store.close()),
     )
   }
+}
+
+object SendTracker {
+  private[sequencing] final case class LatestAttempt(
+      sequencerAlias: SequencerAlias,
+      startedAtNano: Long,
+  )
+
+  type LatestAttemptRef = AtomicReference[Option[LatestAttempt]]
 }

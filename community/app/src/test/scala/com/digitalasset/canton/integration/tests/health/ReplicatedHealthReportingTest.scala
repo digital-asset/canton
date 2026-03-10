@@ -7,6 +7,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   ComponentHealthState,
   StaticSynchronizerParameters,
 }
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
 import com.digitalasset.canton.console.{
@@ -530,6 +531,7 @@ class HealthReportingNodeReferenceIntegrationTestPostgres
   }
 }
 
+@UnstableTest // TODO(#29329)
 class HealthReportingNodeBftOrderingIntegrationTestPostgres
     extends HealthReportingIndividualNodeTest {
   registerPlugin(new UseBftSequencer(loggerFactory))

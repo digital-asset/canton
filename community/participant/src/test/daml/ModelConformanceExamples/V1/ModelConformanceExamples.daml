@@ -2,7 +2,9 @@
 
 module ModelConformanceExamples where
 
+import DA.Exception
 import Daml.Script
+import DA.Assert ((===))
 
 template MultiReader with
   reader : Party
@@ -38,8 +40,8 @@ template MultiReader with
         create this
 
 
-test: Script ()
-test = script do
+testMultiReader: Script ()
+testMultiReader = script do
   alice <- allocateParty "Alice"
   bob <- allocateParty "Bob"
   mr1Cid <- submit alice $ createCmd MultiReader with reader = alice, observer = alice
@@ -47,6 +49,125 @@ test = script do
   mr3Cid <- submit alice $ createCmd MultiReader with reader = alice, observer = alice
   submit alice $ exerciseCmd mr1Cid (MultiReader_Lookup with cid1 = mr2Cid, cid2 = mr3Cid)
   submit alice $ exerciseCmd mr1Cid MultiReader_Clone
+  pure ()
+
+template ExceptionTester
+  with
+    p : Party
+    id: Int
+  where
+    signatory p
+
+    nonconsuming choice ET_GetId : Int
+      controller p
+      do pure this.id
+
+    choice ET_ConsumingGetId : Int
+      controller p
+        do pure this.id
+
+    nonconsuming choice ET_Fail : ()
+      controller p
+      do
+        throw (ArithmeticError "Overflow!")
+        pure ()
+
+    nonconsuming choice ET_CatchFail : ()
+      with
+        cid: ContractId ExceptionTester
+      controller p
+        do
+        try do
+          _ <- exercise cid ET_Fail
+          pure ()
+        catch
+          ArithmeticError msg -> pure ()
+
+
+    nonconsuming choice ET_FailCreate : ContractId ExceptionTester
+      controller p
+      do
+        create this with p = p, id = -1
+
+    nonconsuming choice ET_Create : ContractId ExceptionTester
+      controller p
+      do
+        create this with p = p, id = id+1
+
+    nonconsuming choice ET_CatchGetFail : Optional Int
+      with
+        cid: ContractId ExceptionTester
+      controller p
+        do
+          _ <- exercise cid ET_GetId
+          try do
+            id <- exercise cid ET_GetId
+            _ <- exercise cid ET_Fail
+            pure $ Some id
+          catch
+            ArithmeticError msg -> pure None
+
+    nonconsuming choice ET_CatchCreateFail : Optional (ContractId ExceptionTester)
+      with
+        cid: ContractId ExceptionTester
+      controller p
+        do
+          try do
+            newCid <- create this with p = p, id = id+1
+            _ <- exercise cid ET_Fail
+            pure $ Some newCid
+          catch
+            ArithmeticError msg -> pure None
+
+
+    nonconsuming choice ET_CatchExecFail : Optional Int
+      with
+        cidConsume: ContractId ExceptionTester
+        cidFail: ContractId ExceptionTester
+      controller p
+        do
+          try do
+            rId <- exercise cidConsume ET_ConsumingGetId
+            _ <- exercise cidFail ET_Fail
+            pure $ Some (rId)
+          catch
+            ArithmeticError msg -> pure None
+
+
+
+testExceptions: Script ()
+testExceptions = script do
+  alice <- allocateParty "Alice"
+  cid1 <- submit alice $ createCmd ExceptionTester with p = alice, id = 1
+  cid2 <- submit alice $ createCmd ExceptionTester with p = alice, id = 2
+  cid3 <- submit alice $ createCmd ExceptionTester with p = alice, id = 3
+
+  -- GetId
+  r1 <- submit alice $ exerciseCmd cid1 $ ET_GetId
+  r1 === 1
+
+  -- Fail
+  ex <- trySubmit alice $ exerciseCmd cid1 $ ET_Fail
+  case ex of
+    Left (_) -> assert True
+    _ -> assertMsg "Expected ArithmeticError" False
+
+  -- Catch fail
+  r1 <- submit alice $ exerciseCmd cid1 $ ET_CatchFail with cid = cid2
+  r1 === ()
+
+  -- Catch after non-consuming exec
+  r2 <- submit alice $ exerciseCmd cid1 $ ET_CatchGetFail with cid = cid2
+  r2 === None
+
+  -- Catch after create
+  r3 <- submit alice $ exerciseCmd cid1 $ ET_CatchCreateFail with cid = cid2
+  r3 === None
+
+  -- Catch after consuming exec
+  r4 <- submit alice $ exerciseCmd cid1 $ ET_CatchExecFail with cidConsume = cid2, cidFail = cid3
+  r4 === None
+
   pure ()
 
 

@@ -30,7 +30,7 @@ A Participant Node can have different permissions on behalf of a party it is hos
 Submitting participant node
 ===========================
 
-A node with submission permissions is called a **Submitting Participant Node** (SPN).
+A node with submission permissions on behalf of a party is called a **Submitting Participant Node** (SPN).
 A party entrusts its SPNs to unilaterally authorize the submission of Daml transactions to the ledger on their behalf.
 Each SPN uses its own private key to sign and authorize transactions on the party's behalf.
 This is the strongest permission available for participant nodes; SPNs by definition are also CPNs and OPNs (see below).
@@ -53,12 +53,7 @@ An immediate consequence of this is a tradeoff between availability and security
 * the higher the threshold, the higher the security but the lower the availability guarantees: it takes fewer offline CPNs to block transactions from being approved
 * the lower the threshold, the higher the availability guarantees but the lower the security: it takes fewer malicious CPNs to approve an invalid transaction
 
-.. note::
-
-    Due to Canton's privacy properties, only CPNs and SPNs can reliably enforce that the submitting node has submission permissions.
-    This means that in principle, a malicious CPN could attempt to submit a transaction on behalf of a party even though it lacks submission permissions.
-    Opting for multiple hosting CPNs with a threshold > 1 is an effective mitigation against that risk.
-    It also effectively renders submission on behalf of that party impossible if the party is local, as no SPN can singlehandedly authorize submission of the transaction.
+Please refer to the :ref:`trust assumption <party_trust_model>` to understand the implications of different choices in detail.
 
 Observing participant node
 ===========================
@@ -234,13 +229,13 @@ Trust model
 Definitions
 ===========
 
-* **User**: Leger API user with permission to ``actAs`` the party. Is assumed to act faithfully according to the party's intents on command submissions.
+* **User**: Leger API user with permission to ``actAs`` the local party. Is assumed to act faithfully according to the party's intents on command submissions.
 * **Party owner**: Individual or entity with control over the party's namespace keys. Is assumed to act faithfully according to the party's intents on party governance.
 
 Trust relationships
 ===================
 
-* **SPN**: The user fully trusts the SPN.
+* **SPN**: The user (of a local party) fully trusts the SPN.
   For example, the SPN can submit and authorize any transaction for which the local party is a required authorizer without the user's approval.
 * **CPN**:
 

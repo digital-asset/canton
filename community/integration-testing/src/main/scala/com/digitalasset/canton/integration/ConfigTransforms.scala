@@ -398,8 +398,15 @@ object ConfigTransforms {
     val disableSessionKeys =
       ConfigTransforms.setSessionSigningKeys(SessionSigningKeysConfig.disabled)
 
-    mainUpdates compose sequencerWriteBound compose disableSessionKeys
+    // Disable retries so that failed pings won't run forever
+    val disablePingRetries = setPingRetries(false)
+
+    mainUpdates compose sequencerWriteBound compose disableSessionKeys compose disablePingRetries
   }
+
+  def setPingRetries(enabled: Boolean): ConfigTransform = updateAllParticipantConfigs_(
+    _.focus(_.parameters.adminWorkflow.retries).replace(enabled)
+  )
 
   /** Enable the testing time service in the ledger API */
   def useTestingTimeService: ParticipantNodeConfig => ParticipantNodeConfig =

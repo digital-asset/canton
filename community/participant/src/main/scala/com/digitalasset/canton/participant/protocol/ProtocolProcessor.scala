@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.protocol
 
-import cats.data.{EitherT, Nested, NonEmptyChain}
+import cats.data.{EitherT, Nested}
 import cats.syntax.either.*
 import cats.syntax.foldable.*
 import cats.syntax.functor.*
@@ -50,7 +50,6 @@ import com.digitalasset.canton.participant.protocol.conflictdetection.{
 import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.protocol.submission.CommandDeduplicator.DeduplicationFailed
 import com.digitalasset.canton.participant.protocol.validation.RecipientsValidator
-import com.digitalasset.canton.participant.store
 import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.*
@@ -76,7 +75,7 @@ import com.digitalasset.canton.{LfPartyId, RequestCounter, SequencerCounter, che
 import com.google.common.annotations.VisibleForTesting
 
 import java.util.UUID
-import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
+import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.ExecutionContext
 import scala.util.{Failure, Success}
 
@@ -621,6 +620,16 @@ abstract class ProtocolProcessor[
     doLog(result.map(doLog))
   }
 
+  // methods to measure validation performance
+  // phase 3 starts
+  protected def phase3validationStarts(rootHash: RootHash): Unit = ()
+  // phase 3 completed, 4 starts
+  protected def phase3validationCompleted(rootHash: RootHash): Unit = ()
+  // phase 4 completed
+  protected def phase4responseCompleted(rootHash: RootHash): Unit = ()
+  // phase 7 starts
+  protected def phase7startsWithVerdict(rootHash: RootHash): Unit = ()
+
   override def processRequest(
       ts: CantonTimestamp,
       rc: RequestCounter,
@@ -644,6 +653,7 @@ abstract class ProtocolProcessor[
       )
 
       val rootHash = batch.rootHashMessage.rootHash
+      phase3validationStarts(rootHash)
       val freshOwnTimelyTxF = ephemeral.submissionTracker.register(rootHash, requestId)
 
       val processedET = synchronizeWithClosing(
@@ -769,6 +779,7 @@ abstract class ProtocolProcessor[
         submitterMetadataO = steps.getSubmitterInformation(
           viewsWithCorrectRootHash.map { case (view, _) => view.unwrap }
         )
+
         submissionDataForTrackerO = submitterMetadataO.flatMap(_.submissionTrackerData)
 
         submissionTopologyTimestamp = rootHashMessage.submissionTopologyTimestamp
@@ -1008,6 +1019,7 @@ abstract class ProtocolProcessor[
     val ts = parsedRequest.requestTimestamp
     val mediator = parsedRequest.mediator
 
+    phase3validationCompleted(parsedRequest.rootHash)
     // Check whether the declared mediator is still an active mediator.
     for {
       mediatorIsActive <- EitherT
@@ -1024,7 +1036,7 @@ abstract class ProtocolProcessor[
               requestDataHandle,
               publishUpdate,
             )
-          } yield ()
+          } yield phase4responseCompleted(parsedRequest.rootHash)
         else {
           SyncServiceAlarm
             .Warn(
@@ -1073,7 +1085,6 @@ abstract class ProtocolProcessor[
     val ts = parsedRequest.requestTimestamp
     val mediator = parsedRequest.mediator
     val decisionTime = parsedRequest.decisionTime
-
     val engineController = EngineController(
       participantId,
       requestId,
@@ -1303,6 +1314,7 @@ abstract class ProtocolProcessor[
       logger.debug(
         show"Got result for ${steps.requestKind.unquoted} request at $requestId: $resultEnvelopes"
       )
+      phase7startsWithVerdict(result.message.rootHash)
 
       Nested(processResultInternal1(event, result, requestId, ts, counter))
     }.value
@@ -1558,9 +1570,12 @@ abstract class ProtocolProcessor[
     val pendingSubmissionDataO = removePendingSubmissionForRequest(pendingRequestDataOrReplayData)
 
     for {
-      // TODO(i15395): handle this more gracefully
       locallyRejected <- EitherT.right(locallyRejectedF)
-      _ = checkContradictoryMediatorApprove(locallyRejected, verdict)
+      _ = if (verdict.isApprove && locallyRejected) {
+        SyncServiceAlarm
+          .Warn(s"Mediator approved a request that has been locally rejected.")
+          .report()
+      }
 
       commitAndEventFactory <- pendingRequestDataOrReplayData match {
         case Wrapped(pendingRequestData) =>
@@ -1637,18 +1652,6 @@ abstract class ProtocolProcessor[
       }
     } yield logger.debug(show"Finished async result processing of request $requestId")
   }
-
-  private def checkContradictoryMediatorApprove(
-      locallyRejected: Boolean,
-      verdict: Verdict,
-  )(implicit traceContext: TraceContext): Unit =
-    if (
-      isApprovalContradictionCheckEnabled(
-        loggerFactory.name
-      ) && verdict.isApprove && locallyRejected
-    ) {
-      ErrorUtil.invalidState(s"Mediator approved a request that we have locally rejected")
-    }
 
   private[this] def logResultWarnings(
       resultTimestamp: CantonTimestamp,
@@ -1863,48 +1866,6 @@ abstract class ProtocolProcessor[
 
 object ProtocolProcessor {
 
-  private val approvalContradictionCheckIsEnabled = new AtomicReference[Boolean](true)
-  private val lock = new Mutex()
-  private val testsAllowedToDisableApprovalContradictionCheck = Seq(
-    "LedgerAuthorizationReferenceIntegrationTestDefault",
-    "LedgerAuthorizationBftOrderingIntegrationTestDefault",
-    "PackageVettingIntegrationTestInMemory",
-    "ModelConformanceIntegrationTestPostgres",
-  )
-
-  private[protocol] def isApprovalContradictionCheckEnabled(loggerName: String): Boolean = {
-    val checkIsEnabled = approvalContradictionCheckIsEnabled.get()
-
-    // Ensure check is enabled except for tests allowed to disable it
-    checkIsEnabled || !testsAllowedToDisableApprovalContradictionCheck.exists(loggerName.startsWith)
-  }
-
-  @VisibleForTesting
-  def withApprovalContradictionCheckDisabled[A](
-      loggerFactory: NamedLoggerFactory
-  )(body: => A): A = {
-    // Limit disabling the checks to specific tests
-    require(
-      testsAllowedToDisableApprovalContradictionCheck.exists(loggerFactory.name.startsWith),
-      "The approval contradiction check can only be disabled for some specific tests",
-    )
-
-    val logger = loggerFactory.getLogger(this.getClass)
-
-    {
-      lock.exclusive {
-        logger.info("Disabling approval contradiction check")
-        approvalContradictionCheckIsEnabled.set(false)
-        try {
-          body
-        } finally {
-          approvalContradictionCheckIsEnabled.set(true)
-          logger.info("Re-enabling approval contradiction check")
-        }
-      }
-    }
-  }
-
   sealed trait ProcessorError extends Product with Serializable with PrettyPrinting
 
   sealed trait SubmissionProcessingError extends ProcessorError
@@ -1960,13 +1921,6 @@ object ProtocolProcessor {
       extends RequestProcessingError
       with ResultProcessingError {
     override protected def pretty: Pretty[RequestTrackerError] = prettyOfParam(_.error)
-  }
-
-  final case class ContractStoreError(error: NonEmptyChain[store.ContractStoreError])
-      extends ResultProcessingError {
-    override protected def pretty: Pretty[ContractStoreError] = prettyOfParam(
-      _.error.toChain.toList
-    )
   }
 
   final case class DecisionTimeElapsed(requestId: RequestId, timestamp: CantonTimestamp)

@@ -4,7 +4,7 @@
 package com.digitalasset.canton.platform.indexer
 
 import com.digitalasset.canton.config
-import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, NonNegativeLong}
 import com.digitalasset.canton.platform.indexer.IndexerConfig.*
 import com.digitalasset.canton.platform.store.DbSupport.{ConnectionPoolConfig, DataSourceProperties}
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
@@ -48,6 +48,12 @@ final case class IndexerConfig(
     queueRecoveryRetryAttemptErrorThreshold: Int = DefaultQueueRecoveryRetryAttemptErrorThreshold,
     disableMonotonicityChecks: Boolean = false,
     postgresDataSource: PostgresDataSourceConfig = DefaultPostgresDataSourceConfig,
+    achsConfig: Option[AchsConfig] = DefaultAchsConfig,
+    achsPopulationParallelism: NonNegativeInt =
+      NonNegativeInt.tryCreate(DefaultAchsPopulationParallelism),
+    achsRemovalParallelism: NonNegativeInt =
+      NonNegativeInt.tryCreate(DefaultAchsRemovalParallelism),
+    achsAggregationThreshold: Long = DefaultAchsAggregationThreshold,
 )
 
 object IndexerConfig {
@@ -74,7 +80,12 @@ object IndexerConfig {
     ConnectionPoolConfig(
       connectionPoolSize =
         indexerConfig.ingestionParallelism.unwrap + indexerConfig.dbPrepareParallelism.unwrap +
-          2, // + 2 for the tailing ledger_end and post processing end updates
+          2 + // + 2 for the tailing ledger_end and post processing end updates
+          indexerConfig.achsConfig
+            .map(_ =>
+              indexerConfig.achsPopulationParallelism.unwrap + indexerConfig.achsRemovalParallelism.unwrap + 2
+            )
+            .getOrElse(0), // + achsPopulationParallelism + achsRemovalParallelism + 2 for bump validAt and update last pointers
       connectionTimeout = connectionTimeout,
     )
 
@@ -100,4 +111,24 @@ object IndexerConfig {
   val DefaultQueueRecoveryRetryAttemptErrorThreshold: Int = 100
   val DefaultPostgresDataSourceConfig: PostgresDataSourceConfig =
     PostgresDataSourceConfig(networkTimeout = Some(config.NonNegativeFiniteDuration.ofSeconds(20)))
+  val DefaultAchsConfig: Option[AchsConfig] = None
+  val DefaultAchsPopulationParallelism: Int = 2
+  val DefaultAchsRemovalParallelism: Int = 2
+  val DefaultAchsAggregationThreshold: Long = 10000L
+
+  /** Configuration for the Active Contracts Head Snapshot (ACHS). See
+    * [[com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.AchsState]] for more.
+    *
+    * @param validAtDistanceTarget
+    *   The target distance (in event sequential ids) between the current ledger end and the valid
+    *   at of the ACHS.
+    * @param lastPopulatedDistanceTarget
+    *   The target distance (in event sequential ids) between the valid at and the last populated
+    *   offset of the ACHS.
+    */
+  final case class AchsConfig(
+      validAtDistanceTarget: NonNegativeLong,
+      lastPopulatedDistanceTarget: NonNegativeLong,
+  )
+
 }

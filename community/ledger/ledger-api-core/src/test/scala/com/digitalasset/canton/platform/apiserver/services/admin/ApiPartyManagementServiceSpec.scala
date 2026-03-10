@@ -896,7 +896,7 @@ class ApiPartyManagementServiceSpec
         val txs = response.topologyTransactions.toList
           .traverse(tx =>
             TopologyTransaction
-              .fromByteString(ProtocolVersion.latest, tx)
+              .fromByteString(testedProtocolVersion, tx)
           )
           .valueOrFail("unable to parse topology txs")
           .map(_.mapping)

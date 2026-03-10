@@ -51,6 +51,13 @@ message GetCommandStatusRequest {
 message GetCommandStatusResponse {
   repeated CommandStatus command_status = 1;
 }
+message Timing {
+  // Description of the timing stage (may be subject to change)
+  // Required
+  string description = 1;
+  // Required
+  uint32 duration_ms = 2;
+}
 
 message CommandStatus {
   google.protobuf.Timestamp started = 1;
@@ -60,6 +67,13 @@ message CommandStatus {
   repeated Command commands = 5;
   RequestStatistics request_statistics = 6;
   CommandUpdates updates = 7;
+  // Synchronizer-ID. May be optional if the transaction was not yet routed.
+  // Optional
+  string synchronizer_id = 8;
+
+  // Timings for the individual stages
+  // Optional
+  repeated Timing timings = 9;
 }
 
 message RequestStatistics {

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.admin.api.client.data.FlagSet
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.console.{InstanceReference, ParticipantReference}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
@@ -248,6 +249,7 @@ final class LsuOffPRFirstLsuThenOffPR extends LsuOfflinePartyReplicationIntegrat
  *   f. Target reconnects and performs the LSU
  *   g. Perform another LSU
  */
+@UnstableTest // TODO(#31090)
 final class LsuOffPRInterleavedLsuBeforeSourceAuthorizesOffPR
     extends LsuOfflinePartyReplicationIntegrationTest {
   "Logical synchronizer upgrade" should {

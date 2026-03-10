@@ -347,7 +347,7 @@ class StateTransferBehaviorTest
       verify(epochStoreMock, times(1)).startEpoch(newEpoch)
       verify(availabilityMock, times(1)).asyncSend(
         Availability.Consensus.UpdateTopologyDuringStateTransfer[ProgrammableUnitTestEnv](
-          aMembership.orderingTopology,
+          aMembership,
           DelegationCryptoProvider(aFakeCryptoProviderInstance, aFakeCryptoProviderInstance),
         )
       )

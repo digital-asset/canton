@@ -8,16 +8,20 @@ import com.daml.ledger.api.v2.admin.command_inspection_service.{
   CommandStatus as ApiCommandStatus,
   CommandUpdates,
   RequestStatistics,
+  Timing,
 }
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.api.v2.completion.Completion
 import com.digitalasset.base.error.utils.DecodedCantonError
 import com.digitalasset.canton.ProtoDeserializationError
+import com.digitalasset.canton.crypto.Hash
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.platform.store.interfaces.TransactionLogUpdate
+import com.digitalasset.canton.protocol.RootHash
 import com.digitalasset.canton.serialization.ProtoConverter
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
 import io.grpc.StatusRuntimeException
 
@@ -33,6 +37,9 @@ final case class CommandStatus(
     commands: Seq[Command],
     requestStatistics: RequestStatistics,
     updates: CommandUpdates,
+    synchronizerId: Option[SynchronizerId],
+    rootHash: Option[Hash],
+    timings: Seq[(String, Int)],
 ) extends PrettyPrinting {
   def toProto: ApiCommandStatus =
     ApiCommandStatus(
@@ -43,10 +50,21 @@ final case class CommandStatus(
       commands = commands,
       requestStatistics = Some(requestStatistics),
       updates = Some(updates),
+      synchronizerId = synchronizerId.map(_.toProtoPrimitive).getOrElse(""),
+      timings = timings.map { case (desc, millis) => Timing(desc, millis) },
     )
+
+  override def pretty: Pretty[CommandStatus] = CommandStatus.pretty
 
   def decodedError: Option[DecodedCantonError] =
     completion.status.flatMap(s => DecodedCantonError.fromGrpcStatus(s).toOption)
+
+}
+
+object CommandStatus {
+
+  import com.digitalasset.canton.logging.pretty.PrettyUtil.*
+  import com.digitalasset.canton.util.ShowUtil.*
 
   private implicit val prettyRequestStats: Pretty[RequestStatistics] = prettyOfClass(
     param("requestSize", _.requestSize),
@@ -61,11 +79,10 @@ final case class CommandStatus(
     param("fetched", _.fetched),
     param("lookedUpByKey", _.lookedUpByKey),
   )
-
   private def nonEmptyUpdate(update: CommandUpdates): Boolean =
     update.created.nonEmpty || update.archived.nonEmpty || update.exercised > 0 || update.fetched > 0 || update.lookedUpByKey > 0
 
-  override lazy val pretty: Pretty[CommandStatus] = prettyOfClass(
+  private val pretty: Pretty[CommandStatus] = prettyOfClass(
     param("commandId", _.completion.commandId.singleQuoted),
     param("started", _.started),
     paramIfDefined("completed", _.completed),
@@ -83,11 +100,9 @@ final case class CommandStatus(
       "update",
       x => Option.when(nonEmptyUpdate(x.updates))(x.updates),
     ),
+    param("timings", _.timings.map { case (desc, ms) => s"$ms ms - $desc".unquoted }),
   )
 
-}
-
-object CommandStatus {
   def fromProto(
       proto: ApiCommandStatus
   ): Either[ProtoDeserializationError, CommandStatus] = {
@@ -99,6 +114,8 @@ object CommandStatus {
       commandsP,
       requestStatisticsP,
       updatesP,
+      synchronizerIdP,
+      timings,
     ) = proto
     for {
       started <- ProtoConverter.parseRequired(
@@ -112,6 +129,10 @@ object CommandStatus {
       completion <- ProtoConverter.required("completion", completionP)
       requestsStatistics <- ProtoConverter.required("requestStatistics", requestStatisticsP)
       updates <- ProtoConverter.required("updates", updatesP)
+      synchronizerId <-
+        if (synchronizerIdP.nonEmpty)
+          SynchronizerId.fromProtoPrimitive(synchronizerIdP, "synchronizer_id").map(Some(_))
+        else Right(None)
     } yield CommandStatus(
       started = started,
       completed = completed,
@@ -120,6 +141,9 @@ object CommandStatus {
       commands = commandsP,
       requestStatistics = requestsStatistics,
       updates = updates,
+      synchronizerId = synchronizerId,
+      rootHash = None,
+      timings = timings.map(tt => (tt.description, tt.durationMs)),
     )
   }
 }
@@ -129,7 +153,7 @@ trait CommandResultHandle {
 
   def failedSync(err: StatusRuntimeException): Unit
   def internalErrorSync(err: Throwable): Unit
-
+  def transactionSequenced(): Unit
   def extractFailure[T](
       f: FutureUnlessShutdown[T]
   )(implicit executionContext: ExecutionContext): FutureUnlessShutdown[T] =
@@ -143,7 +167,12 @@ trait CommandResultHandle {
       case rr => rr
     }
 
-  def recordEnvelopeSizes(batchSize: Int, numRecipients: Int, numEnvelopes: Int): Unit
+  def recordEnvelopeSizes(
+      rootHash: RootHash,
+      batchSize: Int,
+      numRecipients: Int,
+      numEnvelopes: Int,
+  ): Unit
 
   def recordTransactionImpact(
       transaction: com.digitalasset.daml.lf.transaction.SubmittedTransaction
@@ -155,7 +184,13 @@ object CommandResultHandle {
   lazy val NoOp: CommandResultHandle = new CommandResultHandle {
     override def failedSync(err: StatusRuntimeException): Unit = ()
     override def internalErrorSync(err: Throwable): Unit = ()
-    override def recordEnvelopeSizes(batchSize: Int, numRecipients: Int, numEnvelopes: Int): Unit =
+    override def transactionSequenced(): Unit = ()
+    override def recordEnvelopeSizes(
+        rootHash: RootHash,
+        batchSize: Int,
+        numRecipients: Int,
+        numEnvelopes: Int,
+    ): Unit =
       ()
     override def recordTransactionImpact(
         transaction: com.digitalasset.daml.lf.transaction.SubmittedTransaction
@@ -193,6 +228,10 @@ trait CommandProgressTracker {
       submissionId: Option[String],
   ): CommandResultHandle
 
+  def validationStarts(rootHash: RootHash): Unit = ()
+  def validationCompleted(rootHash: RootHash): Unit = ()
+  def validationResponseCompleted(rootHash: RootHash): Unit = ()
+  def validationVerdict(rootHash: RootHash): Unit = ()
   def processLedgerUpdate(update: TransactionLogUpdate): Unit
 
 }

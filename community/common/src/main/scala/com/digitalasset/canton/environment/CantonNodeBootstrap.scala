@@ -16,7 +16,7 @@ import com.daml.metrics.{CacheMetrics, ExecutorServiceMetrics, HealthMetrics}
 import com.daml.nonempty.NonEmpty
 import com.daml.tracing.DefaultOpenTelemetry
 import com.digitalasset.canton.admin.health.v30.StatusServiceGrpc
-import com.digitalasset.canton.auth.CantonAdminTokenDispenser
+import com.digitalasset.canton.auth.{CantonAdminTokenDispenser, GrpcAuthInterceptorFactory}
 import com.digitalasset.canton.concurrent.{
   ExecutionContextIdlenessExecutorService,
   FutureSupervisor,
@@ -533,14 +533,24 @@ abstract class CantonNodeBootstrapImpl[
       val openTelemetry = new DefaultOpenTelemetry(tracerProvider.openTelemetry)
       val builder = CantonServerBuilder
         .forConfig(
-          adminApiConfig,
-          Some(adminTokenDispenser),
-          executionContext,
-          bootstrapStageCallback.loggerFactory,
-          arguments.parameterConfig.loggingConfig.api,
-          arguments.parameterConfig.tracing,
-          arguments.metrics.grpcMetrics,
-          openTelemetry,
+          config = adminApiConfig,
+          executor = executionContext,
+          loggerFactory = bootstrapStageCallback.loggerFactory,
+          apiLoggingConfig = arguments.parameterConfig.loggingConfig.api,
+          tracing = arguments.parameterConfig.tracing,
+          grpcMetrics = arguments.metrics.grpcMetrics,
+          additionalInterceptors = Seq(
+            GrpcAuthInterceptorFactory.createInterceptor(
+              bootstrapStageCallback.loggerFactory,
+              arguments.parameterConfig.loggingConfig.api,
+              openTelemetry,
+              adminTokenDispenser,
+              adminApiConfig.authServices,
+              adminApiConfig.jwtTimestampLeeway,
+              adminApiConfig.adminTokenConfig,
+              adminApiConfig.jwksCacheConfig,
+            )
+          ),
         )
 
       val registry = builder.mutableHandlerRegistry()

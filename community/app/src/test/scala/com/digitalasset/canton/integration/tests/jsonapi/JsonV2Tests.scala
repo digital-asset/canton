@@ -963,6 +963,7 @@ class JsonV2Tests
               .GetActiveContractsRequest(
                 activeAtOffset = endOffset,
                 eventFormat = Some(allTransactionsFormat),
+                streamContinuationToken = None,
               )
 
             val message = TextMessage(
@@ -1090,6 +1091,7 @@ class JsonV2Tests
                 .GetActiveContractsRequest(
                   activeAtOffset = endOffset,
                   eventFormat = Some(allTransactionsFormat),
+                  streamContinuationToken = None,
                 )
                 .asJson,
               headers,
@@ -1184,6 +1186,7 @@ class JsonV2Tests
                 .GetActiveContractsRequest(
                   activeAtOffset = endOffset + 100,
                   eventFormat = Some(allTransactionsFormat),
+                  streamContinuationToken = None,
                 )
                 .asJson,
               headers,

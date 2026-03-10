@@ -49,7 +49,7 @@ class DbAvailabilityStore(
 
   private val addBatchBatchAggregator = {
     val processor =
-      new BatchAggregator.Processor[(BatchId, OrderingRequestBatch), Unit] {
+      new BatchAggregator.Processor[(BatchId, OrderingRequestBatch), Boolean] {
 
         override val kind: String = "Add availability batches"
 
@@ -60,11 +60,10 @@ class DbAvailabilityStore(
         )(implicit
             traceContext: TraceContext,
             callerCloseContext: CloseContext,
-        ): FutureUnlessShutdown[immutable.Iterable[Unit]] =
+        ): FutureUnlessShutdown[immutable.Iterable[Boolean]] =
           // Sorting should prevent deadlocks in Postgres when using concurrent clashing batched inserts
           //  with idempotency "on conflict do nothing" clauses.
           runAddBatches(items.sortBy(_.value._1).map(_.value))
-            .map(_ => Seq.fill(items.size)(()))
 
         override def prettyItem: Pretty[(BatchId, OrderingRequestBatch)] = {
           import com.digitalasset.canton.logging.pretty.PrettyUtil.*
@@ -149,7 +148,7 @@ class DbAvailabilityStore(
       batch: OrderingRequestBatch,
   )(implicit
       traceContext: TraceContext
-  ): PekkoFutureUnlessShutdown[Unit] = {
+  ): PekkoFutureUnlessShutdown[Boolean] = {
     val name = addBatchActionName(batchId)
     PekkoFutureUnlessShutdown(
       name,
@@ -157,7 +156,7 @@ class DbAvailabilityStore(
         lookupBatchCache.getIfPresent(batchId) match {
           case Some(_) =>
             // batch already in cache we don't need to do add it again
-            FutureUnlessShutdown.unit
+            FutureUnlessShutdown.pure(false)
           case None =>
             addBatchBatchAggregator.run((batchId, batch))
         },
@@ -170,7 +169,7 @@ class DbAvailabilityStore(
   )(implicit
       errorLoggingContext: ErrorLoggingContext,
       traceContext: TraceContext,
-  ): FutureUnlessShutdown[Unit] =
+  ): FutureUnlessShutdown[Seq[Boolean]] =
     storage.synchronizeWithClosing("add-batches") {
       val insertSql =
         profile match {
@@ -198,10 +197,16 @@ class DbAvailabilityStore(
           maxRetries = 1,
         )
         .map { results =>
-          batches.view.zip(results).filter(_._2 != 0).map(_._1).foreach {
-            case (batchId, orderingRequestBatch) =>
-              lookupBatchCache.put(batchId, orderingRequestBatch)
-          }
+          batches.view
+            .zip(results)
+            .map { case ((batchId, orderingRequestBatch), numRowsUpdated) =>
+              val didUpdate = numRowsUpdated != 0
+              if (didUpdate) {
+                lookupBatchCache.put(batchId, orderingRequestBatch)
+              }
+              didUpdate
+            }
+            .toSeq
         }
     }
 

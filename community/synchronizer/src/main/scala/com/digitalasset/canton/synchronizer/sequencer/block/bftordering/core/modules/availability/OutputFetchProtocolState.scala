@@ -17,7 +17,11 @@ import scala.concurrent.duration.FiniteDuration
 import scala.util.Random
 
 @SuppressWarnings(Array("org.wartremover.warts.Var"))
-final case class JitterStream(jitter: Jitter, initialDelay: FiniteDuration) {
+final case class JitterStream(
+    jitter: Jitter,
+    initialDelay: FiniteDuration,
+    minimumDelay: FiniteDuration,
+) {
   private var lastDelay: FiniteDuration = initialDelay
   private var lastAttempt: Int = 1
 
@@ -27,7 +31,7 @@ final case class JitterStream(jitter: Jitter, initialDelay: FiniteDuration) {
       lastDelay = jitter(initialDelay, lastDelay, attempt)
       lastAttempt = attempt
     }
-    lastDelay
+    lastDelay.plus(minimumDelay)
   }
 }
 
@@ -36,6 +40,7 @@ object JitterStream {
     JitterStream(
       Jitter.full(config.outputFetchTimeoutCap, Jitter.randomSource(random.self)),
       config.outputFetchTimeout,
+      config.outputFetchMinimumDelay,
     )
 }
 

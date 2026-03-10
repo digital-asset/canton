@@ -61,6 +61,8 @@ trait AuthenticationTokenIntegrationTest
     EnvironmentDefinition.P2_S2M2
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
+        // retries are needed so that pings succeed after rolling the token
+        ConfigTransforms.setPingRetries(true),
         ConfigTransforms.updateAllSequencerConfigs_(
           _.focus(_.publicApi.maxTokenExpirationInterval)
             .replace(config.NonNegativeFiniteDuration.ofHours(1))

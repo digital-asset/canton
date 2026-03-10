@@ -135,6 +135,9 @@ object FutureUnlessShutdown {
   ): FutureUnlessShutdown[T] =
     FutureUnlessShutdown.unit.flatMap(_ => body)
 
+  /** Analog to [[scala.concurrent.Future]]`.successful`, but with a value of [[UnlessShutdown]] */
+  def fromUnlessShutdown[T](value: UnlessShutdown[T]): FutureUnlessShutdown[T] =
+    FutureUnlessShutdown(Future.successful(value))
 }
 
 /** Monad combination of `Future` and [[UnlessShutdown]]

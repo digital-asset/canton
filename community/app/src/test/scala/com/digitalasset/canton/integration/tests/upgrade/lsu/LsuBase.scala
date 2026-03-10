@@ -57,6 +57,10 @@ private[lsu] trait LsuBase
     ConfigTransforms.disableAutoInit(newOldNodesResolution.keySet),
     ConfigTransforms.useStaticTime,
   ) ++ ConfigTransforms.enableAlphaVersionSupport
+    ++ ConfigTransforms.setTopologyTransactionRegistrationTimeout(
+      // As we advance the clock quite a bit, we need to bump this parameter to avoid sequencing timeouts.
+      config.NonNegativeFiniteDuration.ofHours(1)
+    )
 
   /** Prepare the environment for LSU with default values.
     *   - Connect `participants.all` (except if override is used) to synchronizer and upload dar
@@ -66,6 +70,7 @@ private[lsu] trait LsuBase
   protected def defaultEnvironmentSetup(
       participantsOverride: Option[Seq[ParticipantReference]] = None,
       hasTrafficControl: Boolean = true,
+      changeDynamicSynchronizerParameters: Boolean = true,
       connectParticipants: Boolean = true,
   )(implicit env: TestConsoleEnvironment): Unit = {
     import env.{participants as _, *}
@@ -77,11 +82,12 @@ private[lsu] trait LsuBase
       participants.dars.upload(CantonExamplesPath)
     }
 
-    setDefaultsDynamicSynchronizerParameters(
-      daId,
-      synchronizerOwners1,
-      hasTrafficControl = hasTrafficControl,
-    )
+    if (changeDynamicSynchronizerParameters)
+      setDefaultsDynamicSynchronizerParameters(
+        daId,
+        synchronizerOwners1,
+        hasTrafficControl = hasTrafficControl,
+      )
 
     oldSynchronizerNodes =
       SynchronizerNodes(newOldSequencers.values.toSeq.map(ls), newOldMediators.values.toSeq.map(lm))
@@ -93,17 +99,29 @@ private[lsu] trait LsuBase
       psid: PhysicalSynchronizerId,
       synchronizerOwners: Set[InstanceReference],
       hasTrafficControl: Boolean = true,
-  ): Unit = synchronizerOwners.foreach(
-    _.topology.synchronizer_parameters.propose_update(
-      psid,
-      _.copy(
-        // Enable traffic control
-        trafficControl = Option.when(hasTrafficControl)(generousTrafficControlParameters),
-        // Ensure we have frequent ACS commitments exchange to increase the likelihood of catching issues
-        reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1),
-      ),
+  ): Unit = {
+    val reconciliationInterval = config.PositiveDurationSeconds.ofSeconds(1)
+
+    synchronizerOwners.foreach(
+      _.topology.synchronizer_parameters.propose_update(
+        psid,
+        _.copy(
+          // Enable traffic control
+          trafficControl = Option.when(hasTrafficControl)(generousTrafficControlParameters),
+          // Ensure we have frequent ACS commitments exchange to increase the likelihood of catching issues
+          reconciliationInterval = reconciliationInterval,
+        ),
+      )
     )
-  )
+
+    eventually() {
+      synchronizerOwners.foreach(
+        _.topology.synchronizer_parameters
+          .get_dynamic_synchronizer_parameters(psid)
+          .reconciliationInterval shouldBe reconciliationInterval
+      )
+    }
+  }
 
   /** Transfer traffic from old sequencers to new ones.
     *

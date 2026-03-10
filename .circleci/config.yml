@@ -697,7 +697,7 @@ commands:
                       --env CANTON_PROTOCOL_VERSION \
                       --security-opt seccomp=unconfined \
                       << parameters.additional_docker_args >> \
-                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-fe89159c669d \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1bf294a74dcb \
                       nix-shell \
                       -I nixpkgs=./nix/nixpkgs.nix \
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
@@ -2177,6 +2177,7 @@ jobs:
                 filter: ""
                 num_parallel_tasks: "1"
                 num_test_buckets: ""
+            - slack_red_main_with_volunteer
     replicate_docs:
         executor: canton-xlarge-docker-with-postgres
         parameters:
@@ -2797,8 +2798,8 @@ workflows:
                     branches:
                         ignore:
                             - /^gh-readonly-queue\/main\/.*/
-                name: test_protocol_version_35
-                protocol_version: "35"
+                name: test_protocol_version_34
+                protocol_version: "34"
                 requires:
                     - compile
             - test:
@@ -2820,7 +2821,7 @@ workflows:
                 name: test_protocol_version_dev
                 protocol_version: DEV
                 requires:
-                    - test_protocol_version_35
+                    - test_protocol_version_34
             - temp_nuck_tests_pv_dev:
                 context:
                     - datadog
@@ -3758,7 +3759,7 @@ workflows:
             equal:
                 - test-ping
                 - << pipeline.parameters.manual_job >>
-    manual_test_protocol_version_35:
+    manual_test_protocol_version_34:
         jobs:
             - compile:
                 context:
@@ -3779,13 +3780,13 @@ workflows:
                 filters:
                     tags:
                         only: /^v.*/
-                name: test_protocol_version_35
-                protocol_version: "35"
+                name: test_protocol_version_34
+                protocol_version: "34"
                 requires:
                     - compile
         when:
             equal:
-                - test-protocol-version-35
+                - test-protocol-version-34
                 - << pipeline.parameters.manual_job >>
     manual_test_protocol_version_dev:
         jobs:

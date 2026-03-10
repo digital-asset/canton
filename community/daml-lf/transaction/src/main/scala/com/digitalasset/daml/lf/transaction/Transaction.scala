@@ -9,7 +9,6 @@ import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.digitalasset.daml.lf.transaction.ContractStateMachine.KeyMapping
-import com.digitalasset.daml.lf.transaction.TransactionErrors.KeyInputError
 
 import scala.annotation.tailrec
 import scala.collection.immutable.HashMap
@@ -496,8 +495,8 @@ sealed abstract class HasTxNodes[Tx] {
   @throws[IllegalArgumentException](
     "If a contract key contains a contract id"
   )
-  def contractKeyInputs: Either[KeyInputError, Map[GlobalKey, KeyInput]] = {
-    foldInExecutionOrder[Either[KeyInputError, ContractStateMachine.State[NodeId]]](
+  def contractKeyInputs: ErrOr[Map[GlobalKey, KeyInput]] = {
+    foldInExecutionOrder[ErrOr[ContractStateMachine.State[NodeId]]](
       Right(ContractStateMachine.initial[NodeId](ContractStateMachine.Mode.UCKWithRollback))
     )(
       exerciseBegin = (acc, nid, exe) =>
@@ -509,7 +508,7 @@ sealed abstract class HasTxNodes[Tx] {
       rollbackEnd = (acc, _, _) => acc.map(_.endRollback()),
       leaf = (acc, nid, leaf) =>
         acc.flatMap(
-          _.handleNode(nid, leaf, None)
+          _.handleNode(nid, leaf, Vector.empty)
         ), // ok to use None as keyInput, because mode is strict
     ).map(_.globalKeyInputs)
   }
@@ -690,7 +689,7 @@ object Transaction {
       usedPackages: Set[PackageId],
       timeBoundaries: Time.Range,
       nodeSeeds: ImmArray[(NodeId, crypto.Hash)],
-      globalKeyMapping: Map[GlobalKey, Option[ContractId]],
+      globalKeyMapping: Map[GlobalKey, Vector[ContractId]],
   ) {
     def dependsOnTime: Boolean =
       timeBoundaries != Time.Range.unconstrained
@@ -716,7 +715,7 @@ object Transaction {
   /** No active contract with the given key.
     */
   sealed trait KeyInactive extends KeyInput {
-    override def toKeyMapping: KeyMapping = ContractStateMachine.KeyInactive
+    override def toKeyMapping: KeyMapping = ContractStateMachine.KeyInactive()
     override def isActive: Boolean = false
   }
 

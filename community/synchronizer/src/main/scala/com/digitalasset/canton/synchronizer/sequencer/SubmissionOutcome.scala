@@ -37,7 +37,14 @@ sealed trait DeliverableSubmissionOutcome extends SubmissionOutcome {
       trafficReceiptO: Option[TrafficReceipt]
   ): DeliverableSubmissionOutcome
 
-  def inFlightAggregation: Option[(AggregationId, InFlightAggregationUpdate)]
+  /** Contains the computed inflight aggregation update result
+    *
+    * If this submission contained an aggregation rule, then we return here:
+    *   - the aggregation id
+    *   - the updated inflight aggregation with this request included
+    *   - the update applied separately (so it can be stored in a batch update)
+    */
+  def inFlightAggregation: Option[(AggregationId, InFlightAggregation, InFlightAggregationUpdate)]
 }
 
 object SubmissionOutcome {
@@ -61,7 +68,9 @@ object SubmissionOutcome {
       batch: Batch[ClosedEnvelope],
       override val submissionTraceContext: TraceContext,
       override val trafficReceiptO: Option[TrafficReceipt],
-      override val inFlightAggregation: Option[(AggregationId, InFlightAggregationUpdate)],
+      override val inFlightAggregation: Option[
+        (AggregationId, InFlightAggregation, InFlightAggregationUpdate)
+      ],
   ) extends DeliverableSubmissionOutcome {
     override def updateTrafficReceipt(
         trafficReceiptO: Option[TrafficReceipt]
@@ -85,7 +94,9 @@ object SubmissionOutcome {
       override val sequencingTime: CantonTimestamp,
       override val submissionTraceContext: TraceContext,
       override val trafficReceiptO: Option[TrafficReceipt],
-      override val inFlightAggregation: Option[(AggregationId, InFlightAggregationUpdate)],
+      override val inFlightAggregation: Option[
+        (AggregationId, InFlightAggregation, InFlightAggregationUpdate)
+      ],
   ) extends DeliverableSubmissionOutcome {
     override def recipients: Set[MemberRecipientOrBroadcast] =
       Set(MemberRecipient(submission.sender))
@@ -131,7 +142,8 @@ object SubmissionOutcome {
         trafficReceiptO: Option[TrafficReceipt]
     ): DeliverableSubmissionOutcome = copy(trafficReceiptO = trafficReceiptO)
 
-    override def inFlightAggregation: Option[(AggregationId, InFlightAggregationUpdate)] = None
+    override def inFlightAggregation
+        : Option[(AggregationId, InFlightAggregation, InFlightAggregationUpdate)] = None
   }
 
   object Reject {

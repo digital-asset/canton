@@ -586,6 +586,12 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
           openapi.ParticipantAuthorizationRevoked.fromJson
         ),
         Mapping[
+          v2.topology_transaction.TopologyEvent.Event.ParticipantAuthorizationOnboarding,
+          openapi.ParticipantAuthorizationOnboarding,
+        ](
+          openapi.ParticipantAuthorizationOnboarding.fromJson
+        ),
+        Mapping[
           v2.topology_transaction.ParticipantAuthorizationAdded,
           openapi.ParticipantAuthorizationAdded1,
         ](
@@ -602,6 +608,12 @@ class OpenapiTypesTest extends AnyWordSpec with Matchers {
           openapi.ParticipantAuthorizationRevoked1,
         ](
           openapi.ParticipantAuthorizationRevoked1.fromJson
+        ),
+        Mapping[
+          v2.topology_transaction.ParticipantAuthorizationOnboarding,
+          openapi.ParticipantAuthorizationOnboarding1,
+        ](
+          openapi.ParticipantAuthorizationOnboarding1.fromJson
         ),
         Mapping[
           v2.transaction_filter.ParticipantAuthorizationTopologyFormat,

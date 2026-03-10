@@ -42,6 +42,7 @@ class TestSequencerClientSend(implicit
       aggregationRule: Option[AggregationRule],
       callback: SendCallback,
       amplify: Boolean,
+      useConfirmationResponseAmplificationParameters: Boolean,
   )(implicit
       traceContext: TraceContext,
       metricsContext: MetricsContext,

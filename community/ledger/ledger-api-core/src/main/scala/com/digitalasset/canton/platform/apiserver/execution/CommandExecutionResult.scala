@@ -44,7 +44,7 @@ private[canton] final case class CommandInterpretationResult(
     transaction: SubmittedTransaction,
     dependsOnLedgerTime: Boolean,
     interpretationTimeNanos: Long,
-    globalKeyMapping: Map[GlobalKey, Option[Value.ContractId]],
+    globalKeyMapping: Map[GlobalKey, Vector[Value.ContractId]],
     processedDisclosedContracts: ImmArray[LfFatContractInst],
     // TODO(#25385): Consider removing the prescribed synchronizer decision from command interpreter
     //               and factor this field out of here as well.

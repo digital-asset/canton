@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability
 
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.AvailabilityModule
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
@@ -18,7 +19,7 @@ import com.digitalasset.canton.util.BooleanUtil.implicits.*
 
 import java.time.Instant
 
-sealed trait DisseminationStatus extends Product with Serializable {
+sealed trait DisseminationStatus extends Product with Serializable with PrettyPrinting {
 
   import DisseminationStatus.*
 
@@ -48,6 +49,9 @@ sealed trait DisseminationStatus extends Product with Serializable {
   /** Acknowledgements received for this dissemination progress. */
   def acks: Set[AvailabilityAck]
 
+  /** Acknowledgements received for this dissemination progress. */
+  def previousAcks: Option[Set[AvailabilityAck]]
+
   /** Updates the dissemination status for a new membership. */
   def changeMembership(newMembership: Membership): DisseminationStatus = {
     val myId = newMembership.myId
@@ -56,8 +60,13 @@ sealed trait DisseminationStatus extends Product with Serializable {
       DisseminationStatus.ackOf(myId, updatedAcks).isEmpty
     val disseminationRegressed =
       !regressedToSigning &&
-        computeSendTo(recipients, acks, batchSentTo).sizeIs <
-        computeSendTo(newMembership.otherNodes, updatedAcks, batchSentTo).size
+        computeSendTo(membership, acks, batchSentTo).sizeIs <
+        computeSendTo(
+          newMembership,
+          updatedAcks,
+          batchSentTo,
+          previousAcks = acks,
+        ).size
     val updatedRegressionsToSigning = regressionsToSigning + regressedToSigning.toInt
     val updatedDisseminationRegressions = disseminationRegressions + disseminationRegressed.toInt
     update(
@@ -65,6 +74,7 @@ sealed trait DisseminationStatus extends Product with Serializable {
       updatedAcks,
       updatedRegressionsToSigning,
       updatedDisseminationRegressions,
+      previousAcks = Some(acks),
     )
   }
 
@@ -111,6 +121,7 @@ sealed trait DisseminationStatus extends Product with Serializable {
       acks,
       regressionsToSigning,
       disseminationRegressions,
+      previousAcks,
     )
 
   private def update(
@@ -118,6 +129,7 @@ sealed trait DisseminationStatus extends Product with Serializable {
       reviewedAcks: Set[AvailabilityAck],
       updatedRegressionsToSigning: Int,
       updatedDisseminationRegressions: Int,
+      previousAcks: Option[Set[AvailabilityAck]],
   ): DisseminationStatus =
     if (
       AvailabilityModule.hasDisseminationQuorum(newMembership.orderingTopology, reviewedAcks.size)
@@ -137,6 +149,7 @@ sealed trait DisseminationStatus extends Product with Serializable {
         },
         updatedRegressionsToSigning,
         disseminationRegressions, // No additional regressions if the dissemination is complete
+        previousAcks,
       )
     else
       InProgress(
@@ -149,6 +162,7 @@ sealed trait DisseminationStatus extends Product with Serializable {
         availabilityEnterInstant,
         updatedRegressionsToSigning,
         updatedDisseminationRegressions,
+        previousAcks,
       )
 
   def ackOf(nodeId: BftNodeId): Option[AvailabilityAck] =
@@ -173,6 +187,21 @@ sealed trait DisseminationStatus extends Product with Serializable {
 
   // Used by metrics emission
   def resetRegressions(): DisseminationStatus
+
+  override def pretty: Pretty[DisseminationStatus] =
+    prettyOfClass(
+      param("membership", _.membership),
+      param("batchId", _.tracedBatchId.value.toString.doubleQuoted),
+      param("acks", _.acks),
+      param("previousAcks", _.previousAcks),
+      param("epochNumber", _.epochNumber),
+      param("recipients", _.recipients.map(_.doubleQuoted)),
+      param("batchSentTo", _.batchSentTo.map(_.doubleQuoted)),
+      param("stats", _.stats),
+      param("availabilityEnterInstant", _.availabilityEnterInstant),
+      param("regressionsToSigning", _.regressionsToSigning),
+      param("disseminationRegressions", _.disseminationRegressions),
+    )
 }
 
 object DisseminationStatus {
@@ -188,6 +217,7 @@ object DisseminationStatus {
       override val availabilityEnterInstant: Option[Instant] = None,
       override val regressionsToSigning: Int = 0,
       override val disseminationRegressions: Int = 0,
+      override val previousAcks: Option[Set[AvailabilityAck]] = None,
   ) extends DisseminationStatus {
 
     // We allow dissemination progress with acks not in the topology to allow dissemination
@@ -195,7 +225,7 @@ object DisseminationStatus {
     //  produce valid PoAs.
 
     override lazy val sendBatchTo: Set[BftNodeId] =
-      computeSendTo(recipients, acks, batchSentTo)
+      computeSendTo(membership, acks, batchSentTo, previousAcks.getOrElse(acks))
 
     override def resetRegressions(): InProgress =
       copy(regressionsToSigning = 0, disseminationRegressions = 0)
@@ -221,6 +251,7 @@ object DisseminationStatus {
       readyForOrderingInstant: Option[Instant] = None,
       override val regressionsToSigning: Int = 0,
       override val disseminationRegressions: Int = 0,
+      override val previousAcks: Option[Set[AvailabilityAck]] = None,
   ) extends DisseminationStatus {
 
     override lazy val sendBatchTo: Set[BftNodeId] =
@@ -254,11 +285,18 @@ object DisseminationStatus {
     acks.find(_.from == nodeId)
 
   private def computeSendTo(
-      recipients: Set[BftNodeId],
+      membership: Membership,
       acks: Set[AvailabilityAck],
       batchSentTo: Set[BftNodeId],
-  ): Set[BftNodeId] =
-    recipients.diff(batchSentTo).diff(acks.map(_.from))
+      previousAcks: Set[AvailabilityAck] = Set.empty,
+  ): Set[BftNodeId] = {
+    val lostExternalAcksFrom =
+      previousAcks
+        .map(_.from)
+        .diff(acks.map(_.from))
+        .intersect(membership.otherNodes)
+    membership.otherNodes.diff(batchSentTo).diff(acks.map(_.from)) ++ lostExternalAcksFrom
+  }
 
   private def toOrderedAcksSeq(acks: Set[AvailabilityAck]) =
     acks.toSeq.sortBy(_.from)

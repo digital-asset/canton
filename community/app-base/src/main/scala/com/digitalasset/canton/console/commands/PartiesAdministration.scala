@@ -19,7 +19,11 @@ import com.digitalasset.canton.admin.api.client.data.{ListPartiesResult, PartyOn
 import com.digitalasset.canton.admin.participant.v30.ExportPartyAcsResponse
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeLong, PositiveInt}
 import com.digitalasset.canton.config.{ConsoleCommandTimeout, NonNegativeDuration}
-import com.digitalasset.canton.console.commands.TopologyTxFiltering.{AddedFilter, RevokedFilter}
+import com.digitalasset.canton.console.commands.TopologyTxFiltering.{
+  AddedFilter,
+  OnboardingFilter,
+  RevokedFilter,
+}
 import com.digitalasset.canton.console.{
   AdminCommandRunner,
   ConsoleCommandResult,
@@ -564,6 +568,7 @@ class ParticipantPartiesAdministrationGroup(
       |- partyId: The party to find activations for.
       |- participantId: The participant hosting the new party.
       |- synchronizerId: The synchronizer sequencing the activations.
+      |- onboarding: Whether to find the offset for an onboarding versus an added party.
       |- validFrom: The activation's effective time (default: None).
       |- beginOffsetExclusive: Starting ledger offset (default: 0).
       |- endOffsetInclusive: Ending ledger offset (default: None = trailing search).
@@ -575,6 +580,7 @@ class ParticipantPartiesAdministrationGroup(
       partyId: PartyId,
       participantId: ParticipantId,
       synchronizerId: SynchronizerId,
+      onboarding: Boolean,
       validFrom: Option[Instant] = None,
       beginOffsetExclusive: Long = 0L,
       endOffsetInclusive: Option[Long] = None,
@@ -586,7 +592,7 @@ class ParticipantPartiesAdministrationGroup(
       participantId,
       synchronizerId,
       validFrom,
-      AddedFilter,
+      if (onboarding) OnboardingFilter else AddedFilter,
     )(consoleEnvironment)
 
     findTopologyOffset(
@@ -1020,6 +1026,7 @@ private[canton] object PartiesAdministration {
 private object TopologyTxFiltering {
   sealed trait AuthorizationFilterKind
   case object AddedFilter extends AuthorizationFilterKind
+  case object OnboardingFilter extends AuthorizationFilterKind
   case object RevokedFilter extends AuthorizationFilterKind
 
   def getTopologyFilter(
@@ -1056,6 +1063,9 @@ private object TopologyTxFiltering {
               case AddedFilter =>
                 val added = tx.getParticipantAuthorizationAdded
                 added.partyId == partyId.toLf && added.participantId == participantId.toLf
+              case OnboardingFilter =>
+                val onboarding = tx.getParticipantAuthorizationOnboarding
+                onboarding.partyId == partyId.toLf && onboarding.participantId == participantId.toLf
               case RevokedFilter =>
                 val revoked = tx.getParticipantAuthorizationRevoked
                 revoked.partyId == partyId.toLf && revoked.participantId == participantId.toLf

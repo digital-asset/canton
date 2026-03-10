@@ -648,6 +648,9 @@ object JsUpdateServiceCodecs {
   implicit val jsTopologyParticipantAuthorizationRevokedRW
       : Codec[lapi.topology_transaction.ParticipantAuthorizationRevoked] =
     deriveRelaxedCodec
+  implicit val jsTopologyParticipantAuthorizationOnboardingRW
+      : Codec[lapi.topology_transaction.ParticipantAuthorizationOnboarding] =
+    deriveRelaxedCodec
   implicit val jsTopologyEventEventRW: Codec[lapi.topology_transaction.TopologyEvent.Event] =
     deriveConfiguredCodec
   implicit val jsTopologyEventParticipantAuthorizationAddedRW
@@ -658,6 +661,9 @@ object JsUpdateServiceCodecs {
     deriveRelaxedCodec
   implicit val jsParticipantAuthorizationRevokedRW
       : Codec[lapi.topology_transaction.TopologyEvent.Event.ParticipantAuthorizationRevoked] =
+    deriveRelaxedCodec
+  implicit val jsParticipantAuthorizationOnboardingRW
+      : Codec[lapi.topology_transaction.TopologyEvent.Event.ParticipantAuthorizationOnboarding] =
     deriveRelaxedCodec
 
   implicit val jsTopologyEventRW: Codec[lapi.topology_transaction.TopologyEvent] =

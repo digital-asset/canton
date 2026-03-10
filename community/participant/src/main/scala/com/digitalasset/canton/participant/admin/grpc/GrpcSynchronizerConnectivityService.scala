@@ -119,9 +119,19 @@ class GrpcSynchronizerConnectivityService(
       proto: Option[v30.SynchronizerConnectionConfig],
       name: String,
   ): Either[CantonBaseError, SynchronizerConnectionConfig] =
-    ProtoConverter
-      .parseRequired(SynchronizerConnectionConfig.fromProtoV30, name, proto)
-      .leftMap(ProtoDeserializationFailure.WrapNoLogging.apply)
+    for {
+      config <- ProtoConverter
+        .parseRequired(SynchronizerConnectionConfig.fromProtoV30, name, proto)
+        .leftMap(ProtoDeserializationFailure.WrapNoLogging.apply)
+      _ <- config.sequencerConnections.submissionRequestAmplification.validate.leftMap(message =>
+        ProtoDeserializationFailure.WrapNoLogging(
+          ProtoDeserializationError.ValueConversionError(
+            "SequencerConnections.SubmissionRequestAmplification",
+            message,
+          )
+        )
+      )
+    } yield config
 
   private def parseSequencerConnectionValidation(
       proto: sequencerV30.SequencerConnectionValidation

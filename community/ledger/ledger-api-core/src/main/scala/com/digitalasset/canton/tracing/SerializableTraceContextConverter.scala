@@ -12,13 +12,13 @@ object SerializableTraceContextConverter {
   implicit class SerializableTraceContextExtension(
       val serializableTraceContext: SerializableTraceContext
   ) extends AnyVal {
-    def toDamlProto: DamlTraceContext = {
-      val w3cTraceContext = serializableTraceContext.traceContext.asW3CTraceContext
-      DamlTraceContext(w3cTraceContext.map(_.parent), w3cTraceContext.flatMap(_.state))
-    }
+    def toDamlProto: Option[DamlTraceContext] =
+      Option.when(serializableTraceContext.traceContext != TraceContext.empty)(
+        toDamlTraceContext(serializableTraceContext.traceContext)
+      )
 
-    def toDamlProtoOpt: Option[DamlTraceContext] =
-      Option.when(serializableTraceContext.traceContext != TraceContext.empty)(toDamlProto)
+    def toSerializedDamlProto: Array[Byte] =
+      toDamlTraceContext(serializableTraceContext.traceContext).toByteArray
   }
 
   def fromDamlProtoSafeOpt(logger: Logger)(
@@ -36,4 +36,9 @@ object SerializableTraceContextConverter {
 
   def fromDamlProto(tc: DamlTraceContext): ParsingResult[SerializableTraceContext] =
     Right(SerializableTraceContext(W3CTraceContext.toTraceContext(tc.traceparent, tc.tracestate)))
+
+  private def toDamlTraceContext(traceContext: TraceContext): DamlTraceContext = {
+    val w3cTraceContext = traceContext.asW3CTraceContext
+    DamlTraceContext(w3cTraceContext.map(_.parent), w3cTraceContext.flatMap(_.state))
+  }
 }

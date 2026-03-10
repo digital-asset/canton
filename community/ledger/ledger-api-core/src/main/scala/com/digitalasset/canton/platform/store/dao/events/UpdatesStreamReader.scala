@@ -302,6 +302,7 @@ class UpdatesStreamReader(
           dbMetrics.updatesAcsDeltaStream.fetchEventActivateIdsStakeholderFilteredIds,
         queryRange = queryRange,
         idPageSizing = idPageSizing,
+        descendingOrder = false,
       )
     val idsDeactivate =
       fetchIdsSorted(
@@ -327,6 +328,7 @@ class UpdatesStreamReader(
           dbMetrics.updatesAcsDeltaStream.fetchEventDeactivateIdsStakeholderFilteredIds,
         queryRange = queryRange,
         idPageSizing = idPageSizing,
+        descendingOrder = false,
       )
 
     val payloadsActivate =
@@ -401,6 +403,7 @@ class UpdatesStreamReader(
             idPageSizing = idPageSizing,
             maxParallelIdQueriesLimiter = activateEventIdQueriesLimiter,
             metric = dbMetrics.updatesLedgerEffectsStream.fetchEventActivateIdsStakeholder,
+            descendingOrder = false,
           )
         )
         .++(
@@ -416,6 +419,7 @@ class UpdatesStreamReader(
                 dbMetrics.updatesLedgerEffectsStream.fetchEventActivateIdsStakeholderFilteredRange,
               metricFiltered =
                 dbMetrics.updatesLedgerEffectsStream.fetchEventActivateIdsStakeholderFilteredIds,
+              descendingOrder = false,
             )
           )
         )
@@ -432,6 +436,7 @@ class UpdatesStreamReader(
                 dbMetrics.updatesLedgerEffectsStream.fetchEventActivateIdsStakeholderFilteredRange,
               metricFiltered =
                 dbMetrics.updatesLedgerEffectsStream.fetchEventActivateIdsStakeholderFilteredIds,
+              descendingOrder = false,
             )
           )
         )
@@ -444,6 +449,7 @@ class UpdatesStreamReader(
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = activateEventIdQueriesLimiter,
               metric = dbMetrics.updatesLedgerEffectsStream.fetchEventActivateIdsWitness,
+              descendingOrder = false,
             )
           )
         )
@@ -456,6 +462,7 @@ class UpdatesStreamReader(
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = activateEventIdQueriesLimiter,
               metric = dbMetrics.updatesLedgerEffectsStream.fetchEventActivateIdsWitness,
+              descendingOrder = false,
             )
           )
         )
@@ -464,6 +471,7 @@ class UpdatesStreamReader(
           mergeSortAndBatch(
             maxOutputBatchSize = maxPayloadsPerPayloadsPage,
             maxOutputBatchCount = maxParallelPayloadActivateQueries + 1,
+            descendingOrder = false,
           )
         )
     val idsDeactivate =
@@ -476,6 +484,7 @@ class UpdatesStreamReader(
             idPageSizing = idPageSizing,
             maxParallelIdQueriesLimiter = deactivateEventIdQueriesLimiter,
             metric = dbMetrics.updatesLedgerEffectsStream.fetchEventDeactivateIdsStakeholder,
+            descendingOrder = false,
           )
         )
         .++(
@@ -491,6 +500,7 @@ class UpdatesStreamReader(
                 dbMetrics.updatesLedgerEffectsStream.fetchEventDeactivateIdsStakeholderFilteredRange,
               metricFiltered =
                 dbMetrics.updatesLedgerEffectsStream.fetchEventDeactivateIdsStakeholderFilteredIds,
+              descendingOrder = false,
             )
           )
         )
@@ -507,6 +517,7 @@ class UpdatesStreamReader(
                 dbMetrics.updatesLedgerEffectsStream.fetchEventDeactivateIdsStakeholderFilteredRange,
               metricFiltered =
                 dbMetrics.updatesLedgerEffectsStream.fetchEventDeactivateIdsStakeholderFilteredIds,
+              descendingOrder = false,
             )
           )
         )
@@ -519,6 +530,7 @@ class UpdatesStreamReader(
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = deactivateEventIdQueriesLimiter,
               metric = dbMetrics.updatesLedgerEffectsStream.fetchEventDeactivateIdsWitness,
+              descendingOrder = false,
             )
           )
         )
@@ -531,6 +543,7 @@ class UpdatesStreamReader(
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = deactivateEventIdQueriesLimiter,
               metric = dbMetrics.updatesLedgerEffectsStream.fetchEventDeactivateIdsWitness,
+              descendingOrder = false,
             )
           )
         )
@@ -539,6 +552,7 @@ class UpdatesStreamReader(
           mergeSortAndBatch(
             maxOutputBatchSize = maxPayloadsPerPayloadsPage,
             maxOutputBatchCount = maxParallelPayloadDeactivateQueries + 1,
+            descendingOrder = false,
           )
         )
     val idsVariousWitnessed =
@@ -551,6 +565,7 @@ class UpdatesStreamReader(
             idPageSizing = idPageSizing,
             maxParallelIdQueriesLimiter = variousWitnessedEventIdQueriesLimiter,
             metric = dbMetrics.updatesLedgerEffectsStream.fetchEventVariousIdsWitness,
+            descendingOrder = false,
           )
         )
         .++(
@@ -562,6 +577,7 @@ class UpdatesStreamReader(
               idPageSizing = idPageSizing,
               maxParallelIdQueriesLimiter = variousWitnessedEventIdQueriesLimiter,
               metric = dbMetrics.updatesLedgerEffectsStream.fetchEventVariousIdsWitness,
+              descendingOrder = false,
             )
           )
         )
@@ -570,6 +586,7 @@ class UpdatesStreamReader(
           mergeSortAndBatch(
             maxOutputBatchSize = maxPayloadsPerPayloadsPage,
             maxOutputBatchCount = maxParallelPayloadVariousWitnessedQueries + 1,
+            descendingOrder = false,
           )
         )
 
@@ -646,6 +663,7 @@ class UpdatesStreamReader(
       metricFilteredIds: DatabaseMetrics,
       queryRange: EventsRange,
       idPageSizing: IdPageSizing,
+      descendingOrder: Boolean,
   )(implicit loggingContextWithTrace: LoggingContextWithTrace): Source[Iterable[Long], NotUsed] =
     txDecomposedFilters
       .map {
@@ -657,6 +675,7 @@ class UpdatesStreamReader(
             idPageSizing = idPageSizing,
             maxParallelIdQueriesLimiter = maxParallelIdQueriesLimiter,
             metric = metricNonFiltered,
+            descendingOrder = descendingOrder,
           )
 
         case (filter, eventTypes) =>
@@ -669,6 +688,7 @@ class UpdatesStreamReader(
             maxParallelIdQueriesLimiter = maxParallelIdQueriesLimiter,
             metricForLast = metricFilteredLast,
             metricFiltered = metricFilteredIds,
+            descendingOrder = descendingOrder,
           )
 
       }
@@ -676,6 +696,7 @@ class UpdatesStreamReader(
         mergeSortAndBatch(
           maxOutputBatchSize = maxPayloadsPerPayloadsPage,
           maxOutputBatchCount = maxOutputBatchCount,
+          descendingOrder = descendingOrder,
         )
       )
 
@@ -686,6 +707,7 @@ class UpdatesStreamReader(
       idPageSizing: IdPageSizing,
       maxParallelIdQueriesLimiter: QueueBasedConcurrencyLimiter,
       metric: DatabaseMetrics,
+      descendingOrder: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[Long, NotUsed] =
@@ -695,6 +717,7 @@ class UpdatesStreamReader(
       idPageBufferSize = maxPagesPerIdPagesBuffer,
       initialFromIdExclusive = queryRange.startInclusiveEventSeqId,
       initialEndInclusive = queryRange.endInclusiveEventSeqId,
+      descendingOrder = descendingOrder,
     )(
       eventStorageBackend.updateStreamingQueries.fetchEventIds(
         target = target
@@ -721,6 +744,7 @@ class UpdatesStreamReader(
       maxParallelIdQueriesLimiter: QueueBasedConcurrencyLimiter,
       metricForLast: DatabaseMetrics,
       metricFiltered: DatabaseMetrics,
+      descendingOrder: Boolean,
   )(implicit
       loggingContext: LoggingContextWithTrace
   ): Source[Long, NotUsed] =
@@ -730,6 +754,7 @@ class UpdatesStreamReader(
       idPageBufferSize = maxPagesPerIdPagesBuffer,
       initialFromIdExclusive = queryRange.startInclusiveEventSeqId,
       initialEndInclusive = queryRange.endInclusiveEventSeqId,
+      descendingOrder = descendingOrder,
     )(
       eventStorageBackend.updateStreamingQueries.fetchEventIds(
         target = target
@@ -757,9 +782,10 @@ class UpdatesStreamReader(
   private def mergeSortAndBatch(
       maxOutputBatchSize: Int,
       maxOutputBatchCount: Int,
+      descendingOrder: Boolean,
   )(sourcesOfIds: Vector[Source[Long, NotUsed]]): Source[Iterable[Long], NotUsed] =
     EventIdsUtils
-      .sortAndDeduplicateIds(sourcesOfIds)
+      .sortAndDeduplicateIds(descendingOrder)(sourcesOfIds)
       .batchN(
         maxBatchSize = maxOutputBatchSize,
         maxBatchCount = maxOutputBatchCount,

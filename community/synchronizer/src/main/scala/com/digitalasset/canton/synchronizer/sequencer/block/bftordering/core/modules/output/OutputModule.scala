@@ -184,6 +184,7 @@ class OutputModule[E <: Env[E]](
     new SequencerSnapshotAdditionalInfoProvider[E](
       store,
       epochStoreReader,
+      orderingTopologyProvider,
       loggerFactory,
     )
 

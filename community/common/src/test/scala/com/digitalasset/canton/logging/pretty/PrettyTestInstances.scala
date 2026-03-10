@@ -14,6 +14,7 @@ import com.digitalasset.canton.protocol.{
   LfNodeRollback,
   LfVersionedTransaction,
 }
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 
 /** Pretty printing implicits for use by tests only. These enable showing readable multiline diffs
   * when expected and actual transactions differ unexpectedly.
@@ -79,7 +80,7 @@ trait PrettyTestInstances {
   )
 
   implicit lazy val prettyLfNodeLookupByKey: Pretty[LfNodeLookupByKey] = prettyOfClass(
-    param("result", _.result.showValueOrNone),
+    param("result", _.result.asCidOption.showValueOrNone),
     param("templateId", _.templateId),
     param("version", _.version),
     param("key", _.key),

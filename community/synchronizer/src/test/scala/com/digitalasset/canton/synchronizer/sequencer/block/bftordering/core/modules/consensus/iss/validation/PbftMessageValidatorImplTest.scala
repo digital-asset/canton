@@ -531,8 +531,7 @@ object PbftMessageValidatorImplTest {
       myId,
       nodesTopologyInfos = Map(
         myId -> NodeTopologyInfo(
-          activationTime = TestBootstrapTopologyActivationTime,
-          keyIds = Set.empty,
+          keyIds = Set.empty
         )
       ),
     )

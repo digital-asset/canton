@@ -7,13 +7,12 @@ import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Module.ModuleControl
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.ModuleName
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.simulation.future.SimulationFuture
 import com.digitalasset.canton.tracing.TraceContext
 
 import scala.collection.mutable
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.jdk.DurationConverters.ScalaDurationOps
-import scala.util.{Random, Try}
+import scala.util.Random
 
 import SimulationModuleSystem.SimulationEnv
 
@@ -114,29 +113,6 @@ class LocalSimulator(
       traceContext: TraceContext,
   ): Unit =
     agenda.addOne(ClientTick(node, tickCounter, msg, traceContext), duration)
-
-  def scheduleFuture[X, T](
-      node: BftNodeId,
-      to: ModuleName,
-      now: CantonTimestamp,
-      future: SimulationFuture[X],
-      fun: Try[X] => Option[T],
-      traceContext: TraceContext,
-  ): Unit = {
-    val runningFuture = future.schedule { () =>
-      now.add(settings.futureTimeDistribution.generateRandomDuration(random).toJava)
-    }
-
-    val timeToRun = runningFuture.minimumScheduledTime.getOrElse(
-      now // we can have a future that resolve directly e.g. sequenceFuture(Seq.empty)
-    )
-
-    agenda.addOne(
-      RunFuture(node, to, runningFuture, fun, traceContext),
-      timeToRun,
-      ScheduledCommand.DefaultPriority,
-    )
-  }
 
   def makeHealthy(): Unit =
     canUseFaults = false

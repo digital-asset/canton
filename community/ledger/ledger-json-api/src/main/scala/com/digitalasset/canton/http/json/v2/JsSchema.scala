@@ -263,6 +263,9 @@ object JsSchema {
     implicit val topologyTransactionParticipantAuthorizationRevokedSchema
         : Schema[lapi.topology_transaction.ParticipantAuthorizationRevoked] =
       Schema.derived
+    implicit val topologyTransactionParticipantAuthorizationOnboardingSchema
+        : Schema[lapi.topology_transaction.ParticipantAuthorizationOnboarding] =
+      Schema.derived
 
     @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
     implicit val topologyEventEventSchema: Schema[lapi.topology_transaction.TopologyEvent.Event] =

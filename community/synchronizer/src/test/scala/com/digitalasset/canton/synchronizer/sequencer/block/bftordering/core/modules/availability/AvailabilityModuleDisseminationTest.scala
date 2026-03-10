@@ -7,6 +7,7 @@ import com.digitalasset.canton.crypto.Signature
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.BftSequencerBaseTest.FakeSigner
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider.AuthenticatedMessageType
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.availability.data.AvailabilityStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.Bootstrap
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.OutputModuleTest
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.{
@@ -27,6 +28,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Availability.{
   LocalDissemination,
   RemoteDissemination,
+  RemoteOutputFetch,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Availability,
@@ -44,6 +46,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import org.slf4j.event.Level
 
 import java.util.concurrent.atomic.AtomicReference
+import scala.collection.mutable
 
 class AvailabilityModuleDisseminationTest
     extends AnyWordSpec
@@ -143,6 +146,7 @@ class AvailabilityModuleDisseminationTest
                         `epochNumber`,
                         _,
                         `stats`,
+                        _,
                         _,
                         _,
                         _,
@@ -553,6 +557,7 @@ class AvailabilityModuleDisseminationTest
           maxNonOrderedBatchesPerNode = disseminationQuotaSize.toShort,
           cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
           consensus = fakeIgnoringModule,
+          output = fakeIgnoringModule,
         )
 
       def canAcceptBatch(batchId: BatchId) =
@@ -569,6 +574,7 @@ class AvailabilityModuleDisseminationTest
           ABatchId,
           anEpochNumber,
           Node1,
+          addedToStore = true,
         )
       }
 
@@ -589,10 +595,20 @@ class AvailabilityModuleDisseminationTest
         },
       )
 
-      // request from output module to fetch block data with this batch id will free one spot in the quota for this node
+      // request from output module to fetch block data for batch id does not yet free spot in quota
       val block = OutputModuleTest.anOrderedBlockForOutput(batchIds = Seq(ABatchId))
       availability.receive(
         Availability.LocalOutputFetch.FetchBlockData(block)
+      )
+      canAcceptBatch(secondBatchId) shouldBe false
+
+      // once the batch data is retrieved (and ready to send to output module), the spot becomes available
+      val request = new BatchesRequest(block, mutable.SortedSet(ABatchId))
+      availability.receive(
+        Availability.LocalOutputFetch.FetchedBlockDataFromStorage(
+          request,
+          AvailabilityStore.AllBatches(Seq(ABatchId -> ABatch)),
+        )
       )
       canAcceptBatch(secondBatchId) shouldBe true
 
@@ -602,6 +618,7 @@ class AvailabilityModuleDisseminationTest
           secondBatchId,
           anEpochNumber,
           Node1,
+          addedToStore = true,
         )
       )
       canAcceptBatch(AnotherBatchId) shouldBe false
@@ -614,11 +631,68 @@ class AvailabilityModuleDisseminationTest
           .CreateProposal(
             BlockNumber.First,
             expiringEpochNumber,
-            OrderingTopologyNode0,
+            MembershipNode0,
             failingCryptoProvider,
           )
       )
       canAcceptBatch(AnotherBatchId) shouldBe true
+    }
+
+    "not count a batchId against the dissemination quota if it is a duplicate store request" in {
+      implicit val ctx: ProgrammableUnitTestContext[Availability.Message[ProgrammableUnitTestEnv]] =
+        new ProgrammableUnitTestContext()
+
+      val disseminationProtocolState = new DisseminationProtocolState()
+      val disseminationQuotas = disseminationProtocolState.disseminationQuotas
+      val disseminationQuotaSize = 1
+
+      val outputFetchProtocolState = new MainOutputFetchProtocolState()
+      outputFetchProtocolState.localOutputMissingBatches.addOne(
+        ABatchMissingBatchStatusNode1And2AcksWithNoAttemptsLeft
+      )
+
+      val availability = createAndStartAvailability[ProgrammableUnitTestEnv](
+        disseminationProtocolState = disseminationProtocolState,
+        outputFetchProtocolState = outputFetchProtocolState,
+        maxNonOrderedBatchesPerNode = disseminationQuotaSize.toShort,
+        cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+      )
+
+      def canAcceptBatch(batchId: BatchId) =
+        disseminationQuotas.canAcceptForNode(Node1, batchId, disseminationQuotaSize)
+
+      // initially we can take a batch
+      canAcceptBatch(ABatchId) shouldBe true
+
+      // simulate availability fetching (and storing) data from a peer before receiving the
+      // corresponding RemoteBatch from the original peer
+      availability.receive(
+        RemoteOutputFetch.RemoteBatchDataFetched.create(Node0, ABatchId, ABatch)
+      )
+      ctx.runPipedMessagesThenVerifyAndReceiveOnModule(availability) { message =>
+        message shouldBe Availability.LocalOutputFetch.FetchedBatchStored(ABatchId)
+      }
+      // since this batch is already ordered, availability does not count the (now)
+      // stored batch against the dissemination quota
+      canAcceptBatch(ABatchId) shouldBe true
+
+      // now, simulate receiving the RemoteBatch from the original peer
+      availability.receive(
+        RemoteDissemination.RemoteBatch.create(ABatchId, ABatch, from = Node1)
+      )
+      ctx.runPipedMessagesThenVerifyAndReceiveOnModule(availability) { message =>
+        message shouldBe Availability.LocalDissemination.RemoteBatchStored(
+          ABatchId,
+          anEpochNumber,
+          Node1,
+          addedToStore = false,
+        )
+      }
+      // since the RemoteBatch was already stored (from the FetchedBatchStored), the
+      // second attempt to store RemoteBatch does not end up affecting the DB, thus
+      // the addedToStore = false. In this case, availability does not count the
+      // batch against the dissemination quota (and can still receive other batches).
+      canAcceptBatch(ABatchId) shouldBe true
     }
 
     "evict batches that are being tracked of after some epochs" in {
@@ -641,6 +715,7 @@ class AvailabilityModuleDisseminationTest
           ABatchId,
           anEpochNumber,
           Node1,
+          addedToStore = true,
         )
       )
 
@@ -652,7 +727,7 @@ class AvailabilityModuleDisseminationTest
           .CreateProposal(
             BlockNumber.First,
             expiringEpochNumber,
-            OrderingTopologyNode0,
+            MembershipNode0,
             failingCryptoProvider,
           )
       )
@@ -666,7 +741,7 @@ class AvailabilityModuleDisseminationTest
           .CreateProposal(
             BlockNumber(1),
             evictionEpochNumber,
-            OrderingTopologyNode0,
+            MembershipNode0,
             failingCryptoProvider,
           )
       )
@@ -690,7 +765,12 @@ class AvailabilityModuleDisseminationTest
           cryptoProvider = cryptoProvider,
         )
       availability.receive(
-        LocalDissemination.RemoteBatchStored(ABatchId, anEpochNumber, from = Node1)
+        LocalDissemination.RemoteBatchStored(
+          ABatchId,
+          anEpochNumber,
+          from = Node1,
+          addedToStore = true,
+        )
       )
 
       disseminationProtocolState.disseminationProgress should be(empty)
@@ -807,6 +887,7 @@ class AvailabilityModuleDisseminationTest
                     _,
                     _,
                     _,
+                    _,
                   )
                 ) =>
           }
@@ -868,6 +949,7 @@ class AvailabilityModuleDisseminationTest
                       `epochNumber`,
                       _,
                       `stats`,
+                      _,
                       _,
                       _,
                       _,

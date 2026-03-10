@@ -22,7 +22,10 @@ import com.digitalasset.canton.platform.store.backend.EventStorageBackend.Sequen
   IdRange,
   Ids,
 }
-import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.PaginationInput
+import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
+  PaginationFromTo,
+  PaginationInput,
+}
 import com.digitalasset.canton.protocol.UpdateId
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.Ref
@@ -86,11 +89,11 @@ private[backend] trait StorageBackendTestsPartyToParticipant
         .authorizationEvent(dbDto.participant_authorization_event, dbDto.participant_permission),
       recordTime = Timestamp.assertFromLong(dbDto.record_time),
       synchronizerId = dbDto.synchronizer_id.toProtoPrimitive,
-      traceContext = Some(dbDto.trace_context),
+      traceContext = dbDto.trace_context,
     )
 
   private def sanitize: RawParticipantAuthorization => RawParticipantAuthorization =
-    _.copy(traceContext = None)
+    _.copy(traceContext = Array.emptyByteArray)
 
   it should "return correct index for a single party to participant mapping" in {
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
@@ -100,8 +103,10 @@ private[backend] trait StorageBackendTestsPartyToParticipant
         party = None
       )(_)(
         PaginationInput(
-          startExclusive = 0L,
-          endInclusive = 10L,
+          PaginationFromTo.ascending(
+            startExclusive = 0L,
+            endInclusive = 10L,
+          ),
           limit = 10,
         )
       )
@@ -114,8 +119,10 @@ private[backend] trait StorageBackendTestsPartyToParticipant
         party = Some(someParty)
       )(_)(
         PaginationInput(
-          startExclusive = 0L,
-          endInclusive = 10L,
+          PaginationFromTo.ascending(
+            startExclusive = 0L,
+            endInclusive = 10L,
+          ),
           limit = 10,
         )
       )
@@ -133,8 +140,10 @@ private[backend] trait StorageBackendTestsPartyToParticipant
         party = None
       )(_)(
         PaginationInput(
-          startExclusive = 0L,
-          endInclusive = 10L,
+          PaginationFromTo.ascending(
+            startExclusive = 0L,
+            endInclusive = 10L,
+          ),
           limit = 10,
         )
       )
@@ -147,8 +156,10 @@ private[backend] trait StorageBackendTestsPartyToParticipant
         party = Some(someParty)
       )(_)(
         PaginationInput(
-          startExclusive = 0L,
-          endInclusive = 10L,
+          PaginationFromTo.ascending(
+            startExclusive = 0L,
+            endInclusive = 10L,
+          ),
           limit = 10,
         )
       )

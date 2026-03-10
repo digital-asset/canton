@@ -75,6 +75,10 @@ message SubmissionRequestAmplification {
   // Determines how long the sequencer client waits for observing the sequencing before it sends the submission request again.
   // This value must be non-negative.
   google.protobuf.Duration patience = 2;
+
+  // If defined, these parameters are used specifically for confirmation responses and override the general parameters.
+  optional uint32 confirmation_response_factor = 3;
+  optional google.protobuf.Duration confirmation_response_patience = 4;
 }
 
 message SequencerConnectionPoolDelays {

@@ -1637,7 +1637,7 @@ class EngineTest(majorLanguageVersion: LanguageVersion.Major, contractIdVersion:
       val nodeSeedMap = HashMap(txMeta.nodeSeeds.toSeq: _*)
 
       val Some((nid, lookupNode)) = firstLookupNode(tx.transaction)
-      lookupNode.result shouldBe Some(lookedUpCid)
+      lookupNode.result shouldBe Vector(lookedUpCid)
 
       val Right((reinterpreted, _)) =
         contractKeyEngine
@@ -1679,7 +1679,7 @@ class EngineTest(majorLanguageVersion: LanguageVersion.Major, contractIdVersion:
       val nodeSeedMap = HashMap(txMeta.nodeSeeds.toSeq: _*)
 
       val Some((nid, lookupNode)) = firstLookupNode(tx.transaction)
-      lookupNode.result shouldBe None
+      lookupNode.result should be(empty)
 
       val Right((reinterpreted, _)) =
         contractKeyEngine

@@ -12,7 +12,10 @@ import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.ledger.participant.state.{RepairIndex, SynchronizerIndex}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.platform.store.backend.Conversions.offset
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.ACHSState
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
+  AchsLastPointers,
+  AchsState,
+}
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.platform.store.backend.{Conversions, ParameterStorageBackend}
 import com.digitalasset.canton.platform.store.interning.StringInterning
@@ -333,26 +336,34 @@ private[backend] class ParameterStorageBackendImpl(
       )(connection)
       .flatten
 
-  def fetchACHSState(connection: Connection): Option[ACHSState] =
+  def fetchACHSState(connection: Connection): Option[AchsState] =
     SQL"select valid_at, last_removed, last_populated from lapi_achs_state"
       .asSingleOpt(
         for {
           validAt <- long("valid_at")
           lastRemoved <- long("last_removed")
           lastPopulated <- long("last_populated")
-        } yield ACHSState(
+        } yield AchsState(
           validAt = validAt,
-          lastRemoved = lastRemoved,
-          lastPopulated = lastPopulated,
+          lastPointers = AchsLastPointers(
+            lastRemoved = lastRemoved,
+            lastPopulated = lastPopulated,
+          ),
         )
       )(connection)
 
-  def insertACHSState(achsState: ACHSState)(
+  def insertACHSState(achsState: AchsState)(
       connection: Connection
   ): Unit =
     discard(
-      SQL"insert into lapi_achs_state (valid_at, last_removed, last_populated) values (${achsState.validAt}, ${achsState.lastRemoved}, ${achsState.lastPopulated})"
-        .execute()(connection)
+      SQL"""
+          insert into lapi_achs_state (valid_at, last_removed, last_populated)
+          values (
+              ${achsState.validAt},
+              ${achsState.lastPointers.lastRemoved},
+              ${achsState.lastPointers.lastPopulated}
+          )
+          """.execute()(connection)
     )
 
   def updateACHSValidAt(validAt: Long)(
@@ -366,11 +377,11 @@ private[backend] class ParameterStorageBackendImpl(
     }
   }
 
-  def updateACHSLastPointers(lastRemoved: Long, lastPopulated: Long)(
+  def updateACHSLastPointers(pointers: AchsLastPointers)(
       connection: Connection
   ): Unit = {
     val updatedRows =
-      SQL"update lapi_achs_state set last_removed = $lastRemoved, last_populated = $lastPopulated"
+      SQL"update lapi_achs_state set last_removed = ${pointers.lastRemoved}, last_populated = ${pointers.lastPopulated}"
         .executeUpdate()(connection)
 
     if (updatedRows == 0) {

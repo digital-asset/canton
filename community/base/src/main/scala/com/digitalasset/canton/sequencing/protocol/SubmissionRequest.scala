@@ -146,14 +146,14 @@ final case class SubmissionRequest private (
     *     submission request
     *   - The [[isConfirmationRequest]] flag because it is irrelevant for delivery or aggregation
     */
-  def aggregationId(hashOps: HashOps): ParsingResult[Option[AggregationId]] = {
+  def aggregationId(hashOps: HashOps): ParsingResult[Option[(AggregationId, AggregationRule)]] = {
     // TODO(#12075) Use a deterministic serialization scheme for the recipients
     val recipientsSerializerE: ParsingResult[Recipients => ByteString] =
       SubmissionRequest.converterFor(representativeProtocolVersion).map(_.dependencySerializer)
 
     aggregationRule.traverse { rule =>
       recipientsSerializerE.flatMap { recipientsSerializer =>
-        aggregationIdInternal(hashOps, rule, recipientsSerializer)
+        aggregationIdInternal(hashOps, rule, recipientsSerializer).map((_, rule))
       }
     }
   }
@@ -197,7 +197,7 @@ object SubmissionRequest
       SubmissionRequest,
       MaxBytesToDecompress,
       // Recipients is a dependency because its versioning scheme needs to be aligned with this one
-      // such that SubmissionRequest and Recipiients can be versioned independently
+      // such that SubmissionRequest and Recipients can be versioned independently
       Recipients,
     ] {
 

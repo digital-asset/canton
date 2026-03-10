@@ -13,6 +13,7 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.metrics.Timed
 import com.daml.metrics.api.MetricsContext
+import com.daml.metrics.api.MetricsContext.withExtraMetricLabels
 import com.daml.nameof.NameOf.functionFullName
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
@@ -57,6 +58,7 @@ import com.digitalasset.canton.sequencing.SequencerSubscriptionPool.SequencerSub
 import com.digitalasset.canton.sequencing.client.PeriodicAcknowledgements.FetchCleanTimestamp
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.SendAsyncClientResponseError
 import com.digitalasset.canton.sequencing.client.SendCallback.CallbackFuture
+import com.digitalasset.canton.sequencing.client.SendTracker.{LatestAttempt, LatestAttemptRef}
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.PreviousTimestampMismatch
 import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
 import com.digitalasset.canton.sequencing.client.SequencerClientImpl.SequencerClientTimeSourcesPool
@@ -290,6 +292,7 @@ abstract class SequencerClientImpl(
       aggregationRule: Option[AggregationRule],
       callback: SendCallback,
       amplify: Boolean,
+      useConfirmationResponseAmplificationParameters: Boolean,
   )(implicit
       traceContext: TraceContext,
       metricsContext: MetricsContext,
@@ -302,6 +305,7 @@ abstract class SequencerClientImpl(
       aggregationRule,
       callback,
       amplify,
+      useConfirmationResponseAmplificationParameters,
       metricsContext,
     )
 
@@ -330,6 +334,7 @@ abstract class SequencerClientImpl(
       aggregationRule: Option[AggregationRule],
       callback: SendCallback,
       amplify: Boolean,
+      useConfirmationResponseAmplificationParameters: Boolean,
       metricsContext: MetricsContext,
   )(implicit
       traceContext: TraceContext
@@ -426,7 +431,7 @@ abstract class SequencerClientImpl(
           callback(result)
         }
 
-        def trackSend: Either[SendAsyncClientError, Unit] =
+        def trackSend: Either[SendAsyncClientError, LatestAttemptRef] =
           sendTracker
             .track(
               messageId,
@@ -472,13 +477,16 @@ abstract class SequencerClientImpl(
                   s"Unregistered recipients: $unregisteredRecipients, unregistered senders: $unregisteredSenders"
                 )
             }
-          _ <- EitherT.fromEither[FutureUnlessShutdown](trackSend)
+          latestAttemptRef <- EitherT.fromEither[FutureUnlessShutdown](trackSend)
           _ = recorderO.foreach(_.recordSubmission(request))
           res <- performSend(
             messageId,
             request,
             amplify = amplify,
+            useConfirmationResponseAmplificationParameters =
+              useConfirmationResponseAmplificationParameters,
             () => peekAtSendResult(),
+            latestAttemptRef,
             syncCryptoApi,
           ).value
         } yield res
@@ -491,11 +499,14 @@ abstract class SequencerClientImpl(
   private def getNextPoolConnection(
       requester: String,
       exclusions: Seq[SequencerId],
+      useConfirmationResponseAmplificationParameters: Boolean,
   )(implicit
       traceContext: TraceContext
   ): (Option[LinkDetails], Option[NonNegativeFiniteDuration]) = {
-    val SubmissionRequestAmplification(factor, patience) =
-      sequencersTransportState.getSubmissionRequestAmplification // TODO(i27260): centralize configuration
+    // TODO(i27260): centralize configuration
+    val (factor, patience) = sequencersTransportState.getSubmissionRequestAmplification.getActual(
+      useConfirmationResponseAmplificationParameters
+    )
     val patienceO = Option.when(exclusions.sizeIs < factor.value - 1)(patience)
 
     val linkDetailsO = connectionPool
@@ -509,7 +520,7 @@ abstract class SequencerClientImpl(
       )
       .map(connection =>
         LinkDetails(
-          SequencerAlias.tryCreate(connection.name),
+          SequencerAlias.tryCreate(connection.config.name),
           connection.attributes.sequencerId,
           Right(connection),
         )
@@ -521,11 +532,16 @@ abstract class SequencerClientImpl(
   private def getNextLink(
       requester: String,
       exclusions: Seq[SequencerId],
+      useConfirmationResponseAmplificationParameters: Boolean,
   )(implicit traceContext: TraceContext): (Option[LinkDetails], Option[NonNegativeFiniteDuration]) =
-    if (config.useNewConnectionPool) getNextPoolConnection(requester, exclusions)
+    if (config.useNewConnectionPool)
+      getNextPoolConnection(requester, exclusions, useConfirmationResponseAmplificationParameters)
     else {
       val (sequencerAlias, sequencerId, transport, patienceO) =
-        sequencersTransportState.nextAmplifiedTransport(exclusions)
+        sequencersTransportState.nextAmplifiedTransport(
+          exclusions,
+          useConfirmationResponseAmplificationParameters,
+        )
       (
         Some(LinkDetails(sequencerAlias, sequencerId, Left(transport))),
         patienceO,
@@ -538,14 +554,17 @@ abstract class SequencerClientImpl(
       messageId: MessageId,
       request: SubmissionRequest,
       amplify: Boolean,
+      useConfirmationResponseAmplificationParameters: Boolean,
       peekAtSendResult: () => Option[UnlessShutdown[SendResult]],
+      latestAttemptRef: LatestAttemptRef,
       topologySnapshot: SyncCryptoApi,
   )(implicit
       traceContext: TraceContext,
       metricsContext: MetricsContext,
   ): SendAsyncResult = {
     lazy val sendResult: SendAsyncResult = {
-      val (linkDetailsO, patienceO) = getNextLink(messageId.toString, Seq.empty)
+      val (linkDetailsO, patienceO) =
+        getNextLink(messageId.toString, Seq.empty, useConfirmationResponseAmplificationParameters)
 
       // Do not add an aggregation rule for amplifiable requests if amplification has not been configured
       val amplifiableRequest =
@@ -579,7 +598,9 @@ abstract class SequencerClientImpl(
             signedContent,
             linkDetailsO,
             if (amplify) patienceO else None,
+            useConfirmationResponseAmplificationParameters,
             peekAtSendResult,
+            latestAttemptRef,
           )
         }
 
@@ -619,7 +640,9 @@ abstract class SequencerClientImpl(
       signedRequest: SignedContent[SubmissionRequest],
       firstLinkDetailsO: Option[LinkDetails],
       firstPatienceO: Option[NonNegativeFiniteDuration],
+      useConfirmationResponseAmplificationParameters: Boolean,
       peekAtSendResult: () => Option[UnlessShutdown[SendResult]],
+      latestAttemptRef: LatestAttemptRef,
   )(implicit
       traceContext: TraceContext,
       metricsContext: MetricsContext,
@@ -632,18 +655,57 @@ abstract class SequencerClientImpl(
     def step(
         state: State
     ): FutureUnlessShutdown[Either[State, Either[SendAsyncClientError, Unit]]] = {
-      val State(previousSequencers, linkDetailsO, patienceO, isFirstStep) = state
+      val State(previousSequencers, linkDetailsO, patienceO, isFirstStep, sendInFlight) = state
 
-      def nextState: State = {
+      def nextState(sendInFlight: Boolean): State = {
         val sequencers = linkDetailsO.map(_.sequencerId).toList ++ previousSequencers
-        val (nextLinkDetailsO, nextPatienceO) = getNextLink(messageId.toString, sequencers)
-        State(sequencers, nextLinkDetailsO, nextPatienceO, isFirstStep = false)
+        val (nextLinkDetailsO, nextPatienceO) =
+          getNextLink(
+            messageId.toString,
+            sequencers,
+            useConfirmationResponseAmplificationParameters,
+          )
+        State(
+          sequencers,
+          nextLinkDetailsO,
+          nextPatienceO,
+          isFirstStep = false,
+          sendInFlight = sendInFlight,
+        )
+      }
+
+      def recordSyncError(
+          sequencerAlias: SequencerAlias,
+          error: SendAsyncClientResponseError,
+      ): Unit = {
+        val errorCodeAsString = error match {
+          case _: SendAsyncClientError.RequestFailed =>
+            // We currently do not have proper error codes for this type of error
+            "RequestFailed"
+
+          case SendAsyncClientError.RequestRefused(SendAsyncError.SendAsyncErrorGrpc(grpcError)) =>
+            grpcError.decodedCantonError.map(_.code.id).getOrElse("Unknown gRPC error")
+
+          case SendAsyncClientError.RequestRefused(_: SendAsyncError.SendAsyncErrorDirect) =>
+            // We currently do not have proper error codes for this type of error
+            "SendAsyncErrorDirect"
+        }
+
+        withExtraMetricLabels(
+          "sequencerAlias" -> sequencerAlias.toString,
+          "error" -> errorCodeAsString,
+        ) { metricsContext =>
+          metrics.submissions.attemptSyncErrors.mark()(metricsContext)
+        }
       }
 
       def handleSyncError(
           error: SendAsyncClientResponseError,
           sequencerId: SequencerId,
-      ): Either[State, Either[SendAsyncClientError, Unit]] =
+          sequencerAlias: SequencerAlias,
+      ): Either[State, Either[SendAsyncClientError, Unit]] = {
+        recordSyncError(sequencerAlias, error)
+
         error match {
           case _: SendAsyncClientError.RequestFailed =>
             // Immediately try the next sequencer because this was a problem talking to the chosen sequencer
@@ -653,7 +715,7 @@ abstract class SequencerClientImpl(
             Either.cond(
               patienceO.isEmpty,
               Left(error),
-              nextState,
+              nextState(sendInFlight = sendInFlight),
             )
 
           case SendAsyncClientError.RequestRefused(sendAsyncError)
@@ -665,7 +727,7 @@ abstract class SequencerClientImpl(
             Either.cond(
               patienceO.isEmpty,
               Left(error),
-              nextState,
+              nextState(sendInFlight = sendInFlight),
             )
 
           case _: SendAsyncClientError.RequestRefused =>
@@ -676,8 +738,11 @@ abstract class SequencerClientImpl(
             // TODO(#12377) Do not trust the sequencer and instead retry sensibly
             Right(Left(error))
         }
+      }
 
-      def maybeResendAfterPatience(): FutureUnlessShutdown[Either[SendAsyncClientError, Unit]] =
+      def maybeResendAfterPatience(
+          sendInFlight: Boolean
+      ): FutureUnlessShutdown[Either[SendAsyncClientError, Unit]] =
         peekAtSendResult() match {
           case Some(Outcome(result)) =>
             noTracingLogger.whenDebugEnabled {
@@ -701,7 +766,16 @@ abstract class SequencerClientImpl(
             }
             FutureUnlessShutdown.pure(Either.unit)
           case None =>
-            Monad[FutureUnlessShutdown].tailRecM(nextState)(step)
+            // We're about to send a new attempt -- record that the previous sequencer (if any; there can be none if no
+            // connection was available) hit amplification
+            linkDetailsO.foreach { case LinkDetails(lastSequencerAlias, _, _) =>
+              withExtraMetricLabels("sequencerAlias" -> lastSequencerAlias.toString) {
+                metricsContext =>
+                  metrics.submissions.amplifiedAttempts.mark()(metricsContext)
+              }
+            }
+
+            Monad[FutureUnlessShutdown].tailRecM(nextState(sendInFlight = sendInFlight))(step)
           case Some(AbortedDueToShutdown) =>
             logger.debug(
               s"Aborting amplification for message ID $messageId due to shutdown"
@@ -709,7 +783,10 @@ abstract class SequencerClientImpl(
             FutureUnlessShutdown.abortedDueToShutdown
         }
 
-      def scheduleAmplification(durationOfPreviousAttempt: FiniteDuration): Unit =
+      def scheduleAmplification(
+          durationOfPreviousAttempt: FiniteDuration,
+          sendInFlight: Boolean,
+      ): Unit =
         patienceO match {
           case Some(patience) =>
             val durationToWait = if (config.enableAmplificationImprovements) {
@@ -721,7 +798,12 @@ abstract class SequencerClientImpl(
                 else s"after ${LoggerUtil.roundDurationForHumans(durationToWait)}"}"
             )
             FutureUnlessShutdownUtil.doNotAwaitUnlessShutdown(
-              clock.scheduleAfter(_ => maybeResendAfterPatience(), durationToWait.toJava).flatten,
+              clock
+                .scheduleAfter(
+                  _ => maybeResendAfterPatience(sendInFlight = sendInFlight),
+                  durationToWait.toJava,
+                )
+                .flatten,
               s"Submission request amplification failed for message ID $messageId",
             )
           case None =>
@@ -749,6 +831,11 @@ abstract class SequencerClientImpl(
 
             val startTimeOfAttempt = clock.now
 
+            latestAttemptRef.set(
+              // If there is already a send in flight, we don't track the following attempt durations
+              Option.when(!sendInFlight)(LatestAttempt(sequencerAlias, System.nanoTime))
+            )
+
             val sendResultETUS = transportOrPoolConnection match {
               case Right(connection) => connection.sendAsync(signedRequest, timeout)
               case Left(transport) => transport.sendAsyncSigned(signedRequest, timeout)
@@ -773,10 +860,10 @@ abstract class SequencerClientImpl(
           }.map {
             case (durationOfAttempt, Right(())) =>
               // Do not await the patience. This would defeat the point of asynchronous send.
-              scheduleAmplification(durationOfAttempt)
+              scheduleAmplification(durationOfAttempt, sendInFlight = true)
               Right(Either.unit)
             case (_, Left(error)) =>
-              handleSyncError(error, sequencerId)
+              handleSyncError(error, sequencerId, sequencerAlias)
           }
 
         case None =>
@@ -786,8 +873,9 @@ abstract class SequencerClientImpl(
             Left(SendAsyncClientError.RequestFailed("No connection available"))
           } else {
             // Otherwise, skip this step and retry later
+            metrics.submissions.noConnectionAvailable.mark()
             logger.debug(s"No connection available -- skip sending message $messageId")
-            scheduleAmplification(Duration.Zero)
+            scheduleAmplification(Duration.Zero, sendInFlight = sendInFlight)
             Either.unit
           }
 
@@ -795,7 +883,8 @@ abstract class SequencerClientImpl(
       }
     }
 
-    val initialState = State(Seq.empty, firstLinkDetailsO, firstPatienceO, isFirstStep = true)
+    val initialState =
+      State(Seq.empty, firstLinkDetailsO, firstPatienceO, isFirstStep = true, sendInFlight = false)
 
     EitherT(
       Monad[FutureUnlessShutdown].tailRecM(initialState)(step)
@@ -1033,7 +1122,12 @@ abstract class SequencerClientImpl(
       val triedSequencers = triedSequencersRef.get
 
       // We ignore the amplification part
-      val (linkDetailsO, _) = getNextLink("download-snapshot", triedSequencers.toSeq)
+      val (linkDetailsO, _) =
+        getNextLink(
+          "download-snapshot",
+          triedSequencers.toSeq,
+          useConfirmationResponseAmplificationParameters = false,
+        )
 
       val resultET = linkDetailsO match {
         case Some(LinkDetails(_, sequencerId, transportOrPoolConnection)) =>
@@ -1103,11 +1197,18 @@ object SequencerClientImpl {
       transportOrPoolConnection: Either[SequencerClientTransportCommon, SequencerConnectionX],
   )
 
+  /** @param isFirstStep
+    *   Indicates this is the very first attempt to submit a request.
+    * @param sendInFlight
+    *   Indicates that there is a send attempt in flight, i.e. a request submitted to a sequencer
+    *   that has not returned a synchronous error.
+    */
   private final case class AmplifiedSendState(
       previousSequencers: Seq[SequencerId],
       nextLinkDetailsO: Option[LinkDetails],
       nextPatienceO: Option[NonNegativeFiniteDuration],
       isFirstStep: Boolean,
+      sendInFlight: Boolean,
   )
 
   private final class SequencerClientTimeSourcesPool(
@@ -1172,7 +1273,10 @@ object SequencerClientImpl {
           transportsAccum
         } else {
           val next @ (_, nextSequencerId, _, _) =
-            transportsState.nextAmplifiedTransport(excludeSequencerIds.toSeq)
+            transportsState.nextAmplifiedTransport(
+              excludeSequencerIds.toSeq,
+              useConfirmationResponseAmplificationParameters = false,
+            )
           if (
             transportsAccum.exists { case (_, sequencerId, _, _) => sequencerId == nextSequencerId }
           )

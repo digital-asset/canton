@@ -12,7 +12,10 @@ import com.digitalasset.canton.platform.store.backend.common.EventIdSource.{
   VariousWitnesses,
 }
 import com.digitalasset.canton.platform.store.backend.common.EventPayloadSourceForUpdatesLedgerEffects
-import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.PaginationInput
+import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
+  PaginationFromTo,
+  PaginationInput,
+}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -130,8 +133,10 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     )
 
     val paginationInput = PaginationInput(
-      startExclusive = 0L,
-      endInclusive = 1000L,
+      PaginationFromTo.ascending(
+        startExclusive = 0L,
+        endInclusive = 1000L,
+      ),
       limit = 1000,
     )
 

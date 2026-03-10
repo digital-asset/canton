@@ -46,4 +46,6 @@ package object transaction {
       _ <- ensuresNoUnknownFields(msg)
       a <- decode(msg)
     } yield a
+
+  type ErrOr[A] = Either[TransactionError, A]
 }

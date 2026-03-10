@@ -6,6 +6,12 @@ fileComments:
           comments: null
           fieldComments:
             state: ''
+            synchronizer_id: |-
+              Synchronizer-ID. May be optional if the transaction was not yet routed.
+              Optional
+            timings: |-
+              Timings for the individual stages
+              Optional
             completion: ''
             updates: ''
             completed: ''
@@ -63,6 +69,14 @@ fileComments:
             envelopes: ''
             request_size: ''
             recipients: ''
+      Timings:
+        message:
+          comments: null
+          fieldComments:
+            description: |-
+              Description of the timing stage (may be subject to change)
+              Required
+            duration_ms: Required
     oneOfs:
       CommandStatus: {}
       CommandUpdates: {}
@@ -70,6 +84,7 @@ fileComments:
       GetCommandStatusRequest: {}
       GetCommandStatusResponse: {}
       RequestStatistics: {}
+      Timings: {}
     services:
       CommandInspectionService:
       - name: GetCommandStatus
@@ -3433,6 +3448,13 @@ fileComments:
             party_id: Required
             participant_id: Required
             participant_permission: Required
+      ParticipantAuthorizationOnboarding:
+        message:
+          comments: null
+          fieldComments:
+            party_id: Required
+            participant_id: Required
+            participant_permission: Required
       ParticipantAuthorizationRevoked:
         message:
           comments: null
@@ -3446,6 +3468,7 @@ fileComments:
             participant_authorization_changed: ''
             participant_authorization_revoked: ''
             participant_authorization_added: ''
+            participant_authorization_onboarding: ''
       TopologyTransaction:
         message:
           comments: null
@@ -3482,6 +3505,7 @@ fileComments:
     oneOfs:
       ParticipantAuthorizationAdded: {}
       ParticipantAuthorizationChanged: {}
+      ParticipantAuthorizationOnboarding: {}
       ParticipantAuthorizationRevoked: {}
       TopologyEvent:
         event:
@@ -3491,6 +3515,7 @@ fileComments:
               participant_authorization_changed: ''
               participant_authorization_revoked: ''
               participant_authorization_added: ''
+              participant_authorization_onboarding: ''
       TopologyTransaction: {}
     services: {}
   trace_context.proto:

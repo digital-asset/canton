@@ -69,19 +69,34 @@ class DisseminationStatusTest
         disseminationInProgress.sendBatchTo shouldBe Set(Node1, Node2)
       }
 
-      "be the recipients minus the acks minus the nodes already sent to" in {
-        val membership = createMembership(Node0, (EightNodes - Node0).toSeq*)
-        val disseminationInProgress =
-          createDisseminationProgress(
-            ABatchId,
-            membership,
-            acks = Set(Node0),
-            AnEpochNumber,
-            SomeStats,
-          ).addSends(additionalSends = Set(Node1))
+      "be the recipients, minus" +
+        "ourselves, minus" +
+        "the acks, minus " +
+        "the nodes already sent to, plus " +
+        "the other nodes from which acks were lost that are still in the topology" in {
+          val membership = createMembership(Node0, (EightNodes - Node0).toSeq*)
+          val disseminationInProgress =
+            createDisseminationProgress(
+              ABatchId,
+              membership,
+              acks = Set(Node0, Node2),
+              AnEpochNumber,
+              SomeStats,
+            ).addSends(additionalSends = Set(Node1))
+              .asInProgress
+              .getOrElse(fail("should be in progress"))
 
-        disseminationInProgress.sendBatchTo shouldBe EightNodes.toSet.diff(Set(Node0, Node1))
-      }
+          disseminationInProgress.sendBatchTo shouldBe EightNodes.diff(Set(Node0, Node1, Node2))
+
+          disseminationInProgress
+            .copy(
+              acks = Set(AvailabilityAck(Node0, noSignature)),
+              previousAcks = Some(
+                Set(AvailabilityAck(Node2, noSignature), AvailabilityAck(node(300), noSignature))
+              ),
+            )
+            .sendBatchTo shouldBe EightNodes.diff(Set(Node0, Node1))
+        }
 
       "remember nodes already sent to across completion and regression" in {
         val membership = createMembership(Node0, (EightNodes - Node0).toSeq*)
@@ -94,7 +109,7 @@ class DisseminationStatusTest
             SomeStats,
           ).addSends(additionalSends = Set(Node3))
 
-        disseminationInProgress.sendBatchTo shouldBe EightNodes.toSet.diff(Set(Node0, Node3))
+        disseminationInProgress.sendBatchTo shouldBe EightNodes.diff(Set(Node0, Node3))
 
         val completed =
           disseminationInProgress
@@ -103,11 +118,11 @@ class DisseminationStatusTest
 
         completed shouldBe a[DisseminationStatus.Complete]
 
-        val newMembership = createMembership(Node0, EightNodes.toSet.diff(Set(Node0, Node1)).toSeq*)
+        val newMembership = createMembership(Node0, EightNodes.diff(Set(Node0, Node1)).toSeq*)
         val inProgress = completed.changeMembership(newMembership)
 
         inProgress shouldBe a[DisseminationStatus.InProgress]
-        inProgress.sendBatchTo shouldBe EightNodes.toSet.diff(Set(Node0, Node1, Node2, Node3))
+        inProgress.sendBatchTo shouldBe EightNodes.diff(Set(Node0, Node1, Node2, Node3))
       }
     }
   }
@@ -373,7 +388,7 @@ class DisseminationStatusTest
         val newMembership =
           Membership.forTesting(
             myId = Node0,
-            EightNodes.toSet.diff(Set(Node0, Node1)),
+            EightNodes.diff(Set(Node0, Node1)),
           )
 
         val updated = disseminationProgress.changeMembership(newMembership)
@@ -402,8 +417,7 @@ class DisseminationStatusTest
               membership.orderingTopology.nodesTopologyInfo.map { case (nodeId, nodeTopologyInfo) =>
                 nodeId -> (if (nodeId == Node2)
                              NodeTopologyInfo(
-                               AnActivationTime,
-                               Set(BftKeyId("newKey")),
+                               Set(BftKeyId("newKey"))
                              )
                            else nodeTopologyInfo)
               }
@@ -439,6 +453,7 @@ class DisseminationStatusTest
             epochNumber = AnEpochNumber,
             stats = SomeStats,
             disseminationRegressions = 1,
+            previousAcks = Some(disseminationProgress.acks),
           )
       }
     }
@@ -461,8 +476,7 @@ class DisseminationStatusTest
               membership.orderingTopology.nodesTopologyInfo.map { case (nodeId, nodeTopologyInfo) =>
                 nodeId -> (if (nodeId == Node1)
                              NodeTopologyInfo(
-                               AnActivationTime,
-                               Set(BftKeyId("newKey")),
+                               Set(BftKeyId("newKey"))
                              )
                            else nodeTopologyInfo)
               }
@@ -477,6 +491,7 @@ class DisseminationStatusTest
             epochNumber = AnEpochNumber,
             stats = SomeStats,
             disseminationRegressions = 1,
+            previousAcks = Some(disseminationProgress.acks),
           )
       }
     }
@@ -499,8 +514,7 @@ class DisseminationStatusTest
               membership.orderingTopology.nodesTopologyInfo.map { case (nodeId, nodeTopologyInfo) =>
                 nodeId -> (if (nodeId == Node0)
                              NodeTopologyInfo(
-                               AnActivationTime,
-                               Set(BftKeyId("newKey")),
+                               Set(BftKeyId("newKey"))
                              )
                            else nodeTopologyInfo)
               }
@@ -515,6 +529,7 @@ class DisseminationStatusTest
             epochNumber = AnEpochNumber,
             stats = SomeStats,
             regressionsToSigning = 1,
+            previousAcks = Some(disseminationProgress.acks),
           )
         disseminationProgress.changeMembership(newMembership) shouldBe expected
         expected.needsSigning shouldBe true
@@ -543,6 +558,7 @@ class DisseminationStatusTest
             tracedProofOfAvailability = disseminationCompletion.tracedProofOfAvailability.map(
               _.copy(acks = Seq(AvailabilityAck(Node0, noSignature)))
             ),
+            previousAcks = Some(disseminationCompletion.acks),
           )
       }
     }
@@ -564,8 +580,7 @@ class DisseminationStatusTest
             membership.orderingTopology.nodesTopologyInfo.map { case (nodeId, nodeTopologyInfo) =>
               nodeId -> (if (nodeId == Node1)
                            NodeTopologyInfo(
-                             AnActivationTime,
-                             Set(BftKeyId("newKey")),
+                             Set(BftKeyId("newKey"))
                            )
                          else nodeTopologyInfo)
             }
@@ -578,6 +593,7 @@ class DisseminationStatusTest
             tracedProofOfAvailability = disseminationCompletion.tracedProofOfAvailability.map(
               _.copy(acks = Seq(AvailabilityAck(Node0, noSignature)))
             ),
+            previousAcks = Some(disseminationCompletion.acks),
           )
       }
     }
@@ -604,6 +620,7 @@ class DisseminationStatusTest
             epochNumber = AnEpochNumber,
             stats = SomeStats,
             disseminationRegressions = 1,
+            previousAcks = Some(disseminationCompletion.acks),
           )
       }
     }
@@ -626,8 +643,7 @@ class DisseminationStatusTest
               membership.orderingTopology.nodesTopologyInfo.map { case (nodeId, nodeTopologyInfo) =>
                 nodeId -> (if (nodeId == Node1)
                              NodeTopologyInfo(
-                               AnActivationTime,
-                               Set(BftKeyId("newKey")),
+                               Set(BftKeyId("newKey"))
                              )
                            else nodeTopologyInfo)
               }
@@ -642,6 +658,7 @@ class DisseminationStatusTest
             epochNumber = AnEpochNumber,
             stats = SomeStats,
             disseminationRegressions = 1,
+            previousAcks = Some(disseminationCompletion.acks),
           )
       }
     }
@@ -664,8 +681,7 @@ class DisseminationStatusTest
               membership.orderingTopology.nodesTopologyInfo.map { case (nodeId, nodeTopologyInfo) =>
                 nodeId -> (if (nodeId == Node0)
                              NodeTopologyInfo(
-                               AnActivationTime,
-                               Set(BftKeyId("newKey")),
+                               Set(BftKeyId("newKey"))
                              )
                            else nodeTopologyInfo)
               }
@@ -680,6 +696,7 @@ class DisseminationStatusTest
             epochNumber = AnEpochNumber,
             stats = SomeStats,
             regressionsToSigning = 1,
+            previousAcks = Some(disseminationCompletion.acks),
           )
         disseminationCompletion.changeMembership(newMembership) shouldBe expected
         expected.needsSigning shouldBe true
@@ -739,8 +756,7 @@ object DisseminationStatusTest {
         nodesTopologyInfo = (myId +: nodeIds)
           .map(
             _ -> NodeTopologyInfo(
-              AnActivationTime,
-              Set(BftKeyId(noSignature.authorizingLongTermKey.toProtoPrimitive)),
+              Set(BftKeyId(noSignature.authorizingLongTermKey.toProtoPrimitive))
             )
           )
           .toMap,

@@ -10,6 +10,7 @@ import com.digitalasset.canton.admin.api.client.data.{
   SequencerConnections,
   SubmissionRequestAmplification,
 }
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.DbConfig
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.InstanceReference
@@ -251,6 +252,7 @@ sealed trait BftSequencerConnectionsIntegrationTest
   }
 }
 
+@UnstableTest // TODO(#27384)
 class BftSequencerConnectionsIntegrationTestDefault extends BftSequencerConnectionsIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseReferenceBlockSequencer[DbConfig.Postgres](loggerFactory))

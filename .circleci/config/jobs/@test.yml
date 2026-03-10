@@ -205,6 +205,7 @@ release_test:
         num_test_buckets: ""
         num_parallel_tasks: "1"
         do_checkout: false # we already did the checkout before restoring the KMS driver
+    - slack_red_main_with_volunteer
 
 protocol_continuity_test_all:
   executor: canton-xlarge-docker-with-postgres

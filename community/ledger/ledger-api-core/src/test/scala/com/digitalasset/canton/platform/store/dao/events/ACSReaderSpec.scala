@@ -5,7 +5,10 @@ package com.digitalasset.canton.platform.store.dao.events
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream
-import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.PaginationInput
+import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
+  PaginationFromTo,
+  PaginationInput,
+}
 import com.digitalasset.canton.platform.store.dao.events.EventIdsUtils.*
 import org.apache.pekko.actor.ActorSystem
 import org.apache.pekko.stream.Materializer
@@ -132,13 +135,13 @@ class ACSReaderSpec extends AsyncFlatSpec with BaseTest with BeforeAndAfterAll {
       Range(1, 70).map(_.toLong).toVector,
     ).map(
       _ shouldBe Vector(
-        PaginationInput(0, 69, 1),
-        PaginationInput(1, 69, 4),
-        PaginationInput(5, 69, 16),
-        PaginationInput(21, 69, 20),
-        PaginationInput(41, 69, 20),
-        PaginationInput(61, 69, 20),
-        PaginationInput(69, 69, 20),
+        PaginationInput(PaginationFromTo.ascending(0, 69), 1),
+        PaginationInput(PaginationFromTo.ascending(1, 69), 4),
+        PaginationInput(PaginationFromTo.ascending(5, 69), 16),
+        PaginationInput(PaginationFromTo.ascending(21, 69), 20),
+        PaginationInput(PaginationFromTo.ascending(41, 69), 20),
+        PaginationInput(PaginationFromTo.ascending(61, 69), 20),
+        PaginationInput(PaginationFromTo.ascending(69, 69), 20),
       )
     )
   }
@@ -152,11 +155,11 @@ class ACSReaderSpec extends AsyncFlatSpec with BaseTest with BeforeAndAfterAll {
       Range(1, 70).map(_.toLong).toVector,
     ).map(
       _ shouldBe Vector(
-        PaginationInput(0, 69, 20),
-        PaginationInput(20, 69, 20),
-        PaginationInput(40, 69, 20),
-        PaginationInput(60, 69, 20),
-        PaginationInput(69, 69, 20),
+        PaginationInput(PaginationFromTo.ascending(0, 69), 20),
+        PaginationInput(PaginationFromTo.ascending(20, 69), 20),
+        PaginationInput(PaginationFromTo.ascending(40, 69), 20),
+        PaginationInput(PaginationFromTo.ascending(60, 69), 20),
+        PaginationInput(PaginationFromTo.ascending(69, 69), 20),
       )
     )
   }
@@ -170,9 +173,9 @@ class ACSReaderSpec extends AsyncFlatSpec with BaseTest with BeforeAndAfterAll {
       Range(1, 6).map(_.toLong).toVector,
     ).map(
       _ shouldBe Vector(
-        PaginationInput(0, 5, 1),
-        PaginationInput(1, 5, 4),
-        PaginationInput(5, 5, 16),
+        PaginationInput(PaginationFromTo.ascending(0, 5), 1),
+        PaginationInput(PaginationFromTo.ascending(1, 5), 4),
+        PaginationInput(PaginationFromTo.ascending(5, 5), 16),
       )
     )
   }
@@ -186,7 +189,7 @@ class ACSReaderSpec extends AsyncFlatSpec with BaseTest with BeforeAndAfterAll {
       Vector.empty,
     ).map(
       _ shouldBe Vector(
-        PaginationInput(0, 0, 1)
+        PaginationInput(PaginationFromTo.ascending(0, 0), 1)
       )
     )
   }
@@ -308,11 +311,13 @@ class ACSReaderSpec extends AsyncFlatSpec with BaseTest with BeforeAndAfterAll {
         idPageBufferSize = 1,
         initialFromIdExclusive = 0L,
         initialEndInclusive = ids.lastOption.getOrElse(0),
+        descendingOrder = false,
       )(_ =>
         input => {
+          assert(!input.paginationFromTo.descending)
           queries.addOne(input)
           ids
-            .dropWhile(_ <= input.startExclusive)
+            .dropWhile(_ <= input.paginationFromTo.fromExclusive)
             .take(input.limit)
         }
       )(f => Future.successful(f(mock[Connection])))

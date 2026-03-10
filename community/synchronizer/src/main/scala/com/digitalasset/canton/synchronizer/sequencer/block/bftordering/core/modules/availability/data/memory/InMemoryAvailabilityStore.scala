@@ -28,10 +28,10 @@ abstract class GenericInMemoryAvailabilityStore[E <: Env[E]](
 
   override def addBatch(batchId: BatchId, batch: OrderingRequestBatch)(implicit
       traceContext: TraceContext
-  ): E#FutureUnlessShutdownT[Unit] =
+  ): E#FutureUnlessShutdownT[Boolean] =
     createFuture(addBatchActionName(batchId)) { () =>
       Try {
-        allKnownBatchesById.putIfAbsent(batchId, batch).discard
+        allKnownBatchesById.putIfAbsent(batchId, batch).isEmpty
       }
     }
 

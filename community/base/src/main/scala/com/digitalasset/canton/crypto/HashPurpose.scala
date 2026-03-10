@@ -109,6 +109,7 @@ object HashPurpose {
   val EncryptedSessionKey = HashPurpose(58, "EncryptedSessionKey")
   val ContractIdAbsolutization = HashPurpose(59, "ContractIdAbsolutization")
   val InitialTopologyStateConsistency = HashPurpose(60, "InitialTopologyStateConsistency")
+  val AcsContinuationToken = HashPurpose(61, "AcsContinuationToken")
 
   // Do not use for anything other than testing or "mock" hashes
   // Is not in a testing-only module because it used in traffic cost estimation that requires mock hashes

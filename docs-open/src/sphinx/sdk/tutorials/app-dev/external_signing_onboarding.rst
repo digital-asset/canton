@@ -286,7 +286,7 @@ Authorize PartyToParticipant Mapping
 
 The hosting participant must authorize the PartyToParticipant transaction explicitly.
 In this tutorial there's only one hosting participant, so its authorization is sufficient to complete the onboarding.
-If there were multiple hosting participants for the marty, each would have to authorize the transaction individually.
+If there were multiple hosting participants for the party, each would have to authorize the transaction individually.
 See :externalref:`party replication <party-replication>` for more details.
 
 .. literalinclude:: CANTON/community/app/src/pack/examples/08-interactive-submission/external_party_onboarding_admin_api.py
@@ -325,7 +325,7 @@ Onboard external party
 
 Create an external party on the ledger and write their private and public keys to local `der` files.
 By default the `synchronizer ID` and `participant ID` will be picked up from the files written by the canton bootstrap script in this directory.
-They can be overridden with ` --synchronizer-id synchronizer_id` and `--participant-id participant_id`.
+They can be overridden with `--synchronizer-id synchronizer_id` and `--participant-id participant_id`.
 
 .. code-block:: bash
 

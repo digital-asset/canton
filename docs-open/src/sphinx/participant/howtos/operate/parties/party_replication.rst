@@ -108,7 +108,7 @@ The following demonstrates these steps using two participants:
          mediators = Seq(mediator1),
          synchronizerOwners = Seq(sequencer1, mediator1),
          synchronizerThreshold = PositiveInt.one,
-         staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest, topologyChangeDelay = NonNegativeFiniteDuration.Zero)
+         staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer, topologyChangeDelay = NonNegativeFiniteDuration.Zero)
        )
     .. hidden:: sequencer1.topology.synchronizer_parameters
         .propose_update(
@@ -362,7 +362,7 @@ The ``source`` can be any participant already hosting the party.
          mediators = Seq(mediator1),
          synchronizerOwners = Seq(sequencer1, mediator1),
          synchronizerThreshold = PositiveInt.one,
-         staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest, topologyChangeDelay = NonNegativeFiniteDuration.Zero)
+         staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer, topologyChangeDelay = NonNegativeFiniteDuration.Zero)
        )
     .. hidden:: sequencer1.topology.synchronizer_parameters
         .propose_update(

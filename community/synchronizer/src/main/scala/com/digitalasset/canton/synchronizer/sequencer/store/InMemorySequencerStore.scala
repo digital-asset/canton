@@ -238,7 +238,7 @@ class InMemorySequencerStore(
                 }
               case other => other
             }
-            Sequenced(entry.getKey, event)
+            Sequenced(entry.getKey, event, fromStore = true)
           }
           .toList
 
@@ -249,8 +249,8 @@ class InMemorySequencerStore(
     }
   }
 
-  override def readPayloads(payloadIds: Seq[IdOrPayload], member: Member)(implicit
-      traceContext: TraceContext
+  override def readPayloads(payloadIds: Seq[IdOrPayload], member: Member, recentEvents: Boolean)(
+      implicit traceContext: TraceContext
   ): FutureUnlessShutdown[Map[PayloadId, Batch[ClosedEnvelope]]] =
     FutureUnlessShutdown.pure(
       payloadIds.flatMap {

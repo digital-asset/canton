@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests
 import better.files.*
 import cats.syntax.either.*
 import com.digitalasset.canton.BigDecimalImplicits.*
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.LocalNodeConfig
 import com.digitalasset.canton.crypto.provider.jce.JcePureCrypto
 import com.digitalasset.canton.crypto.{CryptoPureApi, CryptoSchemes}
@@ -275,6 +276,7 @@ sealed trait DumpIntegrationTest extends CommunityIntegrationTest with SharedEnv
   }
 }
 
+@UnstableTest // TODO(#29700)
 final class DumpIntegrationTestH2 extends DumpIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

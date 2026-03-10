@@ -107,6 +107,7 @@ import com.digitalasset.canton.{
   WorkflowId,
   checked,
 }
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.CreationTime
 import monocle.PLens
 
@@ -394,6 +395,7 @@ class TransactionProcessingSteps(
         val batchSize = batch.toProtoVersioned.serializedSize
         val numRecipients = batch.allRecipients.size
         val numEnvelopes = batch.envelopesCount
+
         tracker
           .findHandle(
             submitterInfoWithDedupPeriod.commandId,
@@ -401,7 +403,7 @@ class TransactionProcessingSteps(
             submitterInfoWithDedupPeriod.actAs,
             submitterInfoWithDedupPeriod.submissionId,
           )
-          .recordEnvelopeSizes(batchSize, numRecipients, numEnvelopes)
+          .recordEnvelopeSizes(request.rootHash, batchSize, numRecipients, numEnvelopes)
 
         metrics.protocolMessages.confirmationRequestSize.update(batchSize)(MetricsContext.Empty)
 
@@ -711,7 +713,6 @@ class TransactionProcessingSteps(
     TransactionProcessorError,
     StorePendingDataAndSendResponseAndCreateTimeout,
   ] = {
-
     val ParsedTransactionRequest(
       rc,
       requestTimestamp,
@@ -1541,7 +1542,7 @@ object TransactionProcessingSteps {
   def keyResolverFor(
       rootView: TransactionView
   )(implicit loggingContext: NamedLoggingContext): LfKeyResolver =
-    rootView.globalKeyInputs.fmap(_.unversioned.resolution)
+    rootView.globalKeyInputs.fmap(_.unversioned.resolution.asCidVector)
 
   /** @throws java.lang.IllegalArgumentException
     *   if `receivedViewTrees` contains views with different transaction root hashes

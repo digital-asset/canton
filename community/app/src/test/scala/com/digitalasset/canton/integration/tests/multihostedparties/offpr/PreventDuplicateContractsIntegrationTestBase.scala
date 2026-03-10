@@ -16,6 +16,7 @@ import com.digitalasset.canton.participant.sync.SyncServiceError.{
   SyncServiceSynchronizerDisconnect,
 }
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.jdk.CollectionConverters.CollectionHasAsScala
 
@@ -90,6 +91,7 @@ sealed trait PreventDuplicateContractsIntegrationTestBase
         synchronizerId = daId,
         beginOffsetExclusive = ledgerEndP1,
         completeAfter = PositiveInt.one,
+        onboarding = testedProtocolVersion >= ProtocolVersion.v35,
       )
     }
 

@@ -7,6 +7,7 @@ import cats.{Monad, Order}
 import com.digitalasset.canton.LfPartyId
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.daml.lf.data.*
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 
 import scala.annotation.nowarn
 
@@ -26,10 +27,10 @@ object LfTransactionUtil {
     case _: LfNodeLookupByKey => None
   }
 
-  def contractId(node: LfActionNode): Option[LfContractId] = node match {
-    case n: LfNodeCreate => Some(n.coid)
-    case n: LfNodeFetch => Some(n.coid)
-    case n: LfNodeExercises => Some(n.targetCoid)
+  def contractIds(node: LfActionNode): Vector[LfContractId] = node match {
+    case n: LfNodeCreate => Vector(n.coid)
+    case n: LfNodeFetch => Vector(n.coid)
+    case n: LfNodeExercises => Vector(n.targetCoid)
     case n: LfNodeLookupByKey => n.result
   }
 
@@ -37,7 +38,7 @@ object LfTransactionUtil {
     case _: LfNodeCreate => None
     case n: LfNodeFetch => Some(n.coid)
     case n: LfNodeExercises => Some(n.targetCoid)
-    case n: LfNodeLookupByKey => n.result
+    case n: LfNodeLookupByKey => n.result.asCidOption
   }
 
   /** Whether or not a node has a random seed */
@@ -139,11 +140,11 @@ object LfTransactionUtil {
     case n: LfNodeCreate => n.keyOpt.fold(n.stakeholders)(_.maintainers)
     case n: LfNodeFetch => n.stakeholders
     case n: LfNodeExercises => n.stakeholders
-    case n: LfNodeLookupByKey =>
-      n.result match {
-        case None => n.keyMaintainers
+    case LfNodeLookupByKey(_, _, key, result, _) =>
+      result match {
+        case None => key.maintainers
         // TODO(#3013) use signatories or stakeholders
-        case Some(_) => n.keyMaintainers
+        case Some(_) => key.maintainers
       }
   }
 

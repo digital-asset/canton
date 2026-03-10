@@ -6,7 +6,9 @@ package com.digitalasset.canton.platform
 import com.daml.ledger.resources.{Resource, ResourceContext, ResourceOwner}
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.config.{BatchingConfig, CachingConfigs, ProcessingTimeout}
-import com.digitalasset.canton.data.{CantonTimestamp, Offset}
+import com.digitalasset.canton.crypto.HashAlgorithm.Sha256
+import com.digitalasset.canton.crypto.{Hash, HashPurpose}
+import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries, Offset}
 import com.digitalasset.canton.ledger.participant.state.Update.TransactionAccepted.RepresentativePackageId.SameAsContractPackageId
 import com.digitalasset.canton.ledger.participant.state.Update.{
   ContractInfo,
@@ -17,7 +19,12 @@ import com.digitalasset.canton.ledger.participant.state.Update.{
   SequencedTransactionAccepted,
 }
 import com.digitalasset.canton.ledger.participant.state.index.IndexService
-import com.digitalasset.canton.ledger.participant.state.{Reassignment, Update}
+import com.digitalasset.canton.ledger.participant.state.{
+  Reassignment,
+  TestAcsChangeFactory,
+  TransactionMeta,
+  Update,
+}
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, HasCloseContext}
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.{CommonMockMetrics, LedgerApiServerMetrics}
@@ -40,22 +47,34 @@ import com.digitalasset.canton.platform.store.{
   LedgerApiContractStoreImpl,
   PruningOffsetService,
 }
-import com.digitalasset.canton.protocol.{ContractInstance, LfContractId}
+import com.digitalasset.canton.protocol.{
+  ContractInstance,
+  ExampleContractFactory,
+  LfContractId,
+  TestUpdateId,
+  UpdateId,
+}
 import com.digitalasset.canton.resource.DbStorageSingle
 import com.digitalasset.canton.store.db.DbStorageSetup.DbBasicConfig
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.time.{SimClock, WallClock}
+import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.{NoReportingTracerProvider, TraceContext}
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.util.PekkoUtil.{FutureQueue, IndexingFutureQueue}
-import com.digitalasset.canton.{BaseTest, HasExecutorService}
-import com.digitalasset.daml.lf.data.{Bytes, Ref}
+import com.digitalasset.canton.{BaseTest, HasExecutorService, platform}
+import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref}
 import com.digitalasset.daml.lf.engine.{Engine, EngineConfig}
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.{NodeIdTransactionBuilder, TestNodeBuilder}
+import com.digitalasset.daml.lf.transaction.{CommittedTransaction, Node}
+import com.digitalasset.daml.lf.value.Value
+import com.google.protobuf.ByteString
 import org.scalatest.Suite
+import org.scalatest.concurrent.PatienceConfiguration
 
 import java.util.concurrent.atomic.AtomicReference
+import scala.collection.mutable
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -79,7 +98,7 @@ trait IndexComponentTest
   protected val dbConfig: com.digitalasset.canton.config.DbConfig =
     DbBasicConfig(username = "", password = "", dbName = dbName, host = "", port = 0).toH2DbConfig
 
-  private def jdbcUrl: String = LedgerApiJdbcUrl.fromDbConfig(dbConfig).value.url
+  protected def jdbcUrl: String = LedgerApiJdbcUrl.fromDbConfig(dbConfig).value.url
 
   protected val indexerConfig: IndexerConfig = IndexerConfig()
 
@@ -102,7 +121,7 @@ trait IndexComponentTest
       .sequentialTraverse_(updates) { case (update, contracts) =>
         storeContracts(update, contracts).flatMap(testServices.indexer.offer)
       }
-      .futureValue
+      .futureValue(timeout = PatienceConfiguration.Timeout(60.seconds))
     val expectedOffset = Offset.tryFromLong(updates.size + ledgerEndLongBefore)
     eventually() {
       ledgerEndOffset shouldBe Some(expectedOffset)
@@ -282,7 +301,7 @@ trait IndexComponentTest
           loggerFactory = loggerFactory,
           dataSourceProperties = IndexerConfig.createDataSourcePropertiesForTesting(indexerConfig),
           highAvailability = HaConfig(),
-          indexSericeDbDispatcher = None,
+          indexServiceDbDispatcher = None,
           clock = clock,
           reassignmentOffsetPersistence = NoOpReassignmentOffsetPersistence,
           postProcessor = (_, _) => Future.unit,
@@ -362,6 +381,215 @@ trait IndexComponentTest
     def apply(): NodeIdTransactionBuilder & TestNodeBuilder = new NodeIdTransactionBuilder
       with TestNodeBuilder
   }
+
+  protected val synchronizer1: SynchronizerId = SynchronizerId.tryFromString("x::synchronizer1")
+  protected val synchronizer2: SynchronizerId = SynchronizerId.tryFromString("x::synchronizer2")
+  protected val packageName: Ref.PackageName = Ref.PackageName.assertFromString("-package-name-")
+  protected val dsoParty: Party = Ref.Party.assertFromString("dsoParty") // sees all
+  private lazy val parties =
+    (1 to 10000).view.map(index => Ref.Party.assertFromString(s"party$index")).toVector
+  protected lazy val templates: Seq[Ref.FullReference[PackageId]] =
+    (1 to 300).view.map(index => Ref.Identifier.assertFromString(s"P:M:T$index")).toVector
+
+  private val someLFHash = com.digitalasset.daml.lf.crypto.Hash
+    .assertFromString("01cf85cfeb36d628ca2e6f583fa2331be029b6b28e877e1008fb3f862306c086")
+
+  private val random = new scala.util.Random
+  private def randomString(length: Int) = {
+    val sb = new mutable.StringBuilder()
+    for (_ <- 1 to length) {
+      sb.append(random.alphanumeric.head)
+    }
+    sb.toString
+  }
+
+  private def randomTemplate = templates(random.nextInt(templates.size))
+  private def randomParty = parties(random.nextInt(parties.size))
+  private def randomHash: Hash = Hash.digest(
+    HashPurpose.PreparedSubmission,
+    ByteString.copyFromUtf8(s"${random.nextLong()}"),
+    Sha256,
+  )
+  protected def randomUpdateId: UpdateId = TestUpdateId(randomHash.toHexString)
+  private def randomLength(lengthFromToInclusive: (Int, Int)) = {
+    val (from, to) = lengthFromToInclusive
+    val randomDistance = to - from + 1
+    assert(randomDistance > 1)
+    from + random.nextInt(randomDistance)
+  }
+  private val builder = TxBuilder()
+  private val testAcsChangeFactory = TestAcsChangeFactory()
+
+  protected def createsAndArchives(
+      nextRecordTime: () => CantonTimestamp,
+      txSize: Int,
+      txsCreatedThenArchived: Int,
+      txsCreatedNotArchived: Int,
+      createPayloadLength: Int,
+      archiveArgumentPayloadLengthFromTo: (Int, Int),
+      archiveResultPayloadLengthFromTo: (Int, Int),
+  ): Vector[(Update.SequencedTransactionAccepted, Vector[ContractInstance])] = {
+    val (createTxs, contracts) =
+      (1 to txsCreatedThenArchived + txsCreatedNotArchived).iterator
+        .map(_ =>
+          creates(
+            recordTime = nextRecordTime,
+            payloadLength = createPayloadLength,
+          )(txSize)
+        )
+        .toVector
+        .unzip
+    val archivingTxs = contracts.iterator
+      .take(txsCreatedThenArchived)
+      .map(_.map(_.inst.toCreateNode))
+      .map(
+        archives(
+          recordTime = nextRecordTime,
+          argumentLength = randomLength(archiveArgumentPayloadLengthFromTo),
+          resultLength = randomLength(archiveResultPayloadLengthFromTo),
+        )
+      )
+      .toVector
+    createTxs.zip(contracts) ++ archivingTxs.map(_ -> Vector.empty)
+  }
+
+  protected def creates(recordTime: () => CantonTimestamp, payloadLength: Int)(
+      size: Int
+  ): (Update.SequencedTransactionAccepted, Vector[ContractInstance]) = {
+    val txBuilder = TxBuilder()
+    val contracts = (1 to size)
+      .map(_ =>
+        genContract(
+          argumentPayload = randomString(payloadLength),
+          template = randomTemplate,
+          signatories = Set(
+            dsoParty,
+            randomParty,
+            randomParty,
+            randomParty,
+          ),
+        )
+      )
+      .toVector
+    contracts.map(_.inst.toCreateNode).foreach(txBuilder.add)
+    val tx = txBuilder.buildCommitted()
+    val contractAuthenticationData = contracts
+      .map(
+        _.contractId -> Bytes.fromByteString(ByteString.copyFromUtf8(randomString(42)))
+      )
+      .toMap
+    transaction(
+      synchronizerId = synchronizer1,
+      recordTime = recordTime(),
+    )(tx, contractAuthenticationData) -> contracts
+  }
+
+  protected def archives(
+      recordTime: () => CantonTimestamp,
+      argumentLength: Int,
+      resultLength: Int,
+  )(
+      creates: Seq[Node.Create]
+  ): Update.SequencedTransactionAccepted = {
+    val txBuilder = TxBuilder()
+    val archives = creates.iterator
+      .map(create =>
+        archive(
+          create = create,
+          actingParties = Set(
+            randomParty,
+            randomParty,
+            randomParty,
+          ),
+          argumentPayload = randomString(argumentLength),
+          resultPayload = randomString(resultLength),
+        )
+      )
+      .toVector
+    archives.foreach(txBuilder.add)
+    val tx = txBuilder.buildCommitted()
+    transaction(
+      synchronizerId = synchronizer1,
+      recordTime = recordTime(),
+    )(tx)
+  }
+
+  def genContract(
+      argumentPayload: String,
+      template: Ref.Identifier,
+      signatories: Set[Party],
+  ): ContractInstance =
+    ExampleContractFactory
+      .build(
+        templateId = template,
+        argument = Value.ValueRecord(
+          tycon = None,
+          fields = ImmArray(None -> Value.ValueText(argumentPayload)),
+        ),
+        signatories = signatories,
+        stakeholders = signatories,
+        packageName = packageName,
+      )
+
+  private def archive(
+      create: Node.Create,
+      actingParties: Set[Ref.Party],
+      argumentPayload: String,
+      resultPayload: String,
+  ): platform.Exercise =
+    builder.exercise(
+      contract = create,
+      choice = Ref.Name.assertFromString("archivingarchivingarchivingarchivingarchivingarchiving"),
+      consuming = true,
+      actingParties = actingParties,
+      argument = Value.ValueRecord(
+        tycon = None,
+        fields = ImmArray(None -> Value.ValueText(argumentPayload)),
+      ),
+      byKey = false,
+      interfaceId = None,
+      result = Some(
+        Value.ValueRecord(
+          tycon = None,
+          fields = ImmArray(None -> Value.ValueText(resultPayload)),
+        )
+      ),
+    )
+
+  protected def transaction(
+      synchronizerId: SynchronizerId,
+      recordTime: CantonTimestamp,
+  )(
+      transaction: CommittedTransaction,
+      contractAuthenticationData: Map[ContractId, Bytes] = Map.empty,
+  ): Update.SequencedTransactionAccepted =
+    Update.SequencedTransactionAccepted(
+      completionInfoO = None,
+      transactionMeta = TransactionMeta(
+        ledgerEffectiveTime = recordTime.underlying,
+        workflowId = None,
+        preparationTime = recordTime.underlying,
+        submissionSeed = someLFHash,
+        timeBoundaries = LedgerTimeBoundaries.unconstrained,
+        optUsedPackages = None,
+        optNodeSeeds = None,
+        optByKeyNodes = None,
+      ),
+      transactionInfo = Update.TransactionAccepted.TransactionInfo(transaction),
+      updateId = randomUpdateId,
+      synchronizerId = synchronizerId,
+      recordTime = recordTime,
+      acsChangeFactory = testAcsChangeFactory,
+      externalTransactionHash = None,
+      contractInfos = contractAuthenticationData.map { case (cid, authData) =>
+        cid -> ContractInfo(
+          internalContractId = 0L,
+          contractAuthenticationData = authData,
+          representativePackageId = SameAsContractPackageId,
+        )
+      },
+    )
+
 }
 
 object IndexComponentTest {

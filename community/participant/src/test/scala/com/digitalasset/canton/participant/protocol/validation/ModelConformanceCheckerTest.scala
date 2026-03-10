@@ -13,6 +13,7 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{LoggingConfig, ProcessingTimeout}
 import com.digitalasset.canton.crypto.TestSalt
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCrypto
+import com.digitalasset.canton.damltests.modelconformance.v1.java.modelconformanceexamples.ExceptionTester
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.ActionDescription.ExerciseActionDescription
 import com.digitalasset.canton.examples.java.cycle.Cycle
@@ -41,18 +42,24 @@ import com.digitalasset.canton.participant.protocol.validation.ModelConformanceC
   Result,
   ViewReconstructionError,
 }
+import com.digitalasset.canton.participant.store.ContractAndKeyLookup
 import com.digitalasset.canton.participant.util.DAMLe
+import com.digitalasset.canton.participant.util.DAMLe.HasReinterpret
 import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.transaction.{ParticipantPermission, VettedPackage}
+import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.{ContractHasher, ContractValidator, RoseTree, TestEngine}
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{
   BaseTest,
   FailOnShutdown,
   HasExecutionContext,
+  LfCommand,
   LfKeyResolver,
   LfPackageId,
   LfPartyId,
@@ -60,26 +67,25 @@ import com.digitalasset.canton.{
   config,
 }
 import com.digitalasset.daml.lf
-import com.digitalasset.daml.lf.data.Ref.FullReference
-import com.digitalasset.daml.lf.data.{Bytes, Ref}
+import com.digitalasset.daml.lf.data.Ref.{FullReference, PackageId, PackageName}
+import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref}
 import com.digitalasset.daml.lf.engine.Error.Interpretation.DamlException
 import com.digitalasset.daml.lf.engine.{Error, Error as LfError}
 import com.digitalasset.daml.lf.interpretation.Error.ContractNotFound
-import com.digitalasset.daml.lf.transaction.{Node, SubmittedTransaction, Transaction}
+import com.digitalasset.daml.lf.transaction.{ContractStateMachine, *}
 import com.digitalasset.daml.lf.value.Value
 import monocle.macros.GenLens
 import monocle.{Lens, Traversal}
 import org.mockito.MockitoSugar
 import org.scalatest.LoneElement.convertToCollectionLoneElementWrapper
-import org.scalatest.wordspec.AsyncWordSpec
+import org.scalatest.wordspec.AnyWordSpecLike
 import org.scalatest.{Assertion, EitherValues, OptionValues}
 
-import java.lang.IllegalArgumentException
 import scala.collection.convert.AsJavaExtensions
 import scala.util.{Failure, Random, Success, Try}
 
 class ModelConformanceCheckerTest
-    extends AsyncWordSpec
+    extends AnyWordSpecLike
     with BaseTest
     with HasExecutionContext
     with MockitoSugar
@@ -98,7 +104,15 @@ class ModelConformanceCheckerTest
   private val modelConformanceExamplesPath: String = getResourcePath(
     "ModelConformanceExamples-1.0.0.dar"
   )
-  private val testEngine = new TestEngine(Seq(CantonExamplesPath, modelConformanceExamplesPath))
+  private val testEngine = new TestEngine(
+    packagePaths = Seq(CantonExamplesPath, modelConformanceExamplesPath),
+    contractStateMode = if (testedProtocolVersion >= ProtocolVersion.v35) {
+      ContractStateMachine.Mode.UCKWithoutRollback
+    } else {
+      ContractStateMachine.Mode.LegacyNUCK
+    },
+  )
+
   private val contractHasher =
     ContractHasher(testEngine.engine, testEngine.packageResolver)
   private val transactionTreeFactory: TransactionTreeFactory =
@@ -162,7 +176,8 @@ class ModelConformanceCheckerTest
   }
 
   private def buildUnderTest(
-      contractValidator: ContractValidator = ContractValidator.AllowAll
+      contractValidator: ContractValidator = ContractValidator.AllowAll,
+      flattenTx: Boolean = false,
   ): ModelConformanceChecker = {
 
     val damlE: DAMLe = new DAMLe(
@@ -173,9 +188,49 @@ class ModelConformanceCheckerTest
       participantId = participantId,
     )
 
+    val reinterpreter = if (flattenTx) {
+      new HasReinterpret {
+        override def reinterpret(
+            contracts: ContractAndKeyLookup,
+            contractAuthenticator: ContractAuthenticatorFn,
+            submitters: Set[LfPartyId],
+            command: LfCommand,
+            topologySnapshot: TopologySnapshot,
+            ledgerTime: CantonTimestamp,
+            preparationTime: CantonTimestamp,
+            rootSeed: Option[LfHash],
+            packageResolution: Map[PackageName, PackageId],
+            expectFailure: Boolean,
+            getEngineAbortStatus: GetEngineAbortStatus,
+        )(implicit traceContext: TraceContext): EitherT[
+          FutureUnlessShutdown,
+          DAMLe.ReinterpretationError,
+          DAMLe.ReInterpretationResult,
+        ] = damlE
+          .reinterpret(
+            contracts,
+            contractAuthenticator,
+            submitters,
+            command,
+            topologySnapshot,
+            ledgerTime,
+            preparationTime,
+            rootSeed,
+            packageResolution,
+            expectFailure,
+            getEngineAbortStatus,
+          )
+          .map { result =>
+            result.copy(
+              transaction = flattenRollback(result.transaction)
+            )
+          }
+      }
+    } else damlE
+
     ModelConformanceChecker(
       participantId = participantId,
-      damlE = damlE,
+      reinterpreter = reinterpreter,
       transactionTreeFactory = transactionTreeFactory,
       contractValidator = contractValidator,
       packageResolver = testEngine.packageResolver,
@@ -206,6 +261,40 @@ class ModelConformanceCheckerTest
 
     "pass multi create example" in {
       verifyExample(underTest, exampleFactory.multiReaderCreate())
+    }
+  }
+
+  // From protocol version 35 exceptions can only be caught if there have not been ledger modifications
+  // inside the try-catch block. This section tests allowable modifications (no choice execution, non consuming execution)
+  // and ones that are not allowed as part of PV35 (contract creation, consuming execution).
+  "When exceptions are thrown during submission" should {
+
+    val testWithFlattenedTx = testedProtocolVersion >= ProtocolVersion.v35
+
+    val underTest: ModelConformanceChecker = buildUnderTest(flattenTx = testWithFlattenedTx)
+
+    "exceptionTesterFail" in {
+      val base = exampleFactory.exceptionTesterFail()
+      val example = if (testWithFlattenedTx) base.flattened else base
+      verifyExample(underTest, example)
+    }
+
+    "exceptionTesterNonConsumingExec" in {
+      val base = exampleFactory.exceptionTesterNonConsumingExec()
+      val example = if (testWithFlattenedTx) base.flattened else base
+      verifyExample(underTest, example)
+    }
+
+    "exceptionTesterCreateFail" in {
+      if (testedProtocolVersion <= ProtocolVersion.v34) {
+        verifyExample(underTest, exampleFactory.exceptionTesterCreateFail())
+      }
+    }
+
+    "exceptionTesterConsumingExec" in {
+      if (testedProtocolVersion <= ProtocolVersion.v34) {
+        verifyExample(underTest, exampleFactory.exceptionTesterConsumingExec())
+      }
     }
 
     "pass with projected views" in {
@@ -877,7 +966,9 @@ object ModelConformanceCheckerTest extends OptionValues {
       metadata: Transaction.Metadata,
       ledgerTime: CantonTimestamp,
       contracts: Map[LfContractId, GenContractInstance],
-  )
+  ) {
+    def flattened: Example = copy(tx = SubmittedTransaction(flattenRollback(tx)))
+  }
 
   class ExampleFactory(testEngine: TestEngine) extends EitherValues with AsJavaExtensions {
 
@@ -1045,6 +1136,105 @@ object ModelConformanceCheckerTest extends OptionValues {
 
     }
 
+    private def exceptionTesterNContract(
+        n: Int,
+        exec: PartialFunction[List[ExceptionTester.ContractId], Command],
+    ): Example = {
+
+      val (contractsIds, contracts) = (0 until n).toList
+        .map({ id =>
+          createdContract(
+            new ExceptionTester(alice.toLf, id).create(),
+            alice,
+            s => new ExceptionTester.ContractId(s),
+          )
+        })
+        .unzip
+
+      val command = exec(contractsIds)
+      val (tx, txMeta) =
+        testEngine.submitAndConsume(command, alice.toLf, contracts = contracts.map(_.inst))
+
+      Example(
+        actAs = alice,
+        tx = tx,
+        metadata = txMeta,
+        ledgerTime = CantonTimestamp.now(),
+        contracts = contracts.map(c => c.contractId -> c).toMap,
+      )
+    }
+
+    private def exceptionTesterSingleContract(
+        exec: ExceptionTester.ContractId => Command
+    ): Example = exceptionTesterNContract(1, { case cid :: Nil => exec(cid) })
+
+    private def exceptionTesterTwoContract(
+        exec: (ExceptionTester.ContractId, ExceptionTester.ContractId) => Command
+    ): Example = exceptionTesterNContract(2, { case cid1 :: cid2 :: Nil => exec(cid1, cid2) })
+
+    def exceptionTesterGetId(): Example =
+      exceptionTesterSingleContract(_.exerciseET_GetId().commands().loneElement)
+
+    def exceptionTesterFail(): Example =
+      exceptionTesterTwoContract((c1, c2) => c1.exerciseET_CatchFail(c2).commands().loneElement)
+
+    def exceptionTesterNonConsumingExec(): Example =
+      exceptionTesterTwoContract((c1, c2) => c1.exerciseET_CatchGetFail(c2).commands().loneElement)
+
+    def exceptionTesterCreateFail(): Example =
+      exceptionTesterTwoContract((c1, c2) =>
+        c1.exerciseET_CatchCreateFail(c2).commands().loneElement
+      )
+
+    def exceptionTesterConsumingExec(): Example =
+      exceptionTesterNContract(
+        3,
+        { case c1 :: c2 :: c3 :: Nil => c1.exerciseET_CatchExecFail(c2, c3).commands().loneElement },
+      )
+
+  }
+
+  /** Flatten any rollback nodes.
+    *
+    * Transactions in PV35 will may contain exercises that did not complete but they will not
+    * contain any rollback nodes. This function strips out rollback nodes for test purposes and can
+    * be removed once the engine no longer produces them when running in mode
+    * ContractStateMachine.Mode.UCKWithoutRollback.
+    */
+
+  private def flattenRollback(tx: VersionedTransaction): VersionedTransaction = {
+
+    def flattenExercise(orig: List[NodeId]): List[NodeId] =
+      orig match {
+        case Nil => Nil
+        case nodeId :: rest =>
+          tx.nodes(nodeId) match {
+            case rollback: Node.Rollback =>
+              flattenExercise(rollback.children.toList) ++ flattenExercise(rest)
+            case _ =>
+              nodeId :: flattenExercise(rest)
+          }
+      }
+
+    def flattenNode(nodeId: NodeId, node: Node): Map[NodeId, Node] = node match {
+      case exercise: Node.Exercise =>
+        val children = flattenExercise(exercise.children.toList)
+        Map(nodeId -> exercise.copy(children = ImmArray.from(children))) ++ flattenNodes(children)
+      case _: Node.Rollback =>
+        throw new IllegalStateException("Did not expect rollback here!")
+      case other: Node =>
+        Map(nodeId -> other)
+    }
+
+    def flattenNodes(todo: List[NodeId]): Map[NodeId, Node] =
+      todo match {
+        case Nil => Map.empty
+        case nodeId :: rest =>
+          val node = tx.nodes(nodeId)
+          flattenNode(nodeId, node) ++ flattenNodes(rest)
+      }
+
+    VersionedTransaction(tx.version, flattenNodes(tx.roots.toList), tx.roots)
   }
 
 }

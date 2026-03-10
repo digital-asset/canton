@@ -211,16 +211,17 @@ class BlockUpdateGeneratorImpl(
 
     // We must start a new chunk whenever the chunk processing advances lastSequencerEventTimestamp,
     //  otherwise the logic for retrieving a topology snapshot or traffic state could deadlock.
-
-    val chunks = IterableUtil
+    val dataChunks = IterableUtil
       .splitAfter(blockEvents.events)(event => isAddressingSequencers(event.value))
       .zipWithIndex
       .map { case (events, index) =>
         NextChunk(blockHeight, index, events)
-      } ++ Seq(tick) ++ Seq(EndOfBlock(blockHeight))
+      }
+
+    val chunks = dataChunks ++ Seq(tick) ++ Seq(EndOfBlock(blockHeight))
 
     logger.debug(
-      s"Chunked block $blockHeight into ${chunks.size} data chunks and 1 topology tick chunk"
+      s"Chunked block $blockHeight into ${dataChunks.size} data chunks and 1 topology tick chunk"
     )
 
     chunks

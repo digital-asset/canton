@@ -29,6 +29,7 @@ trait LanguageVersionGenerated {
   // 2.3 staging changelog
   // 02/26 introduced rev 1
   // 02/26 added SECP256K1_VALIDATE_KEY to rev 1 (no breaking change, no new rev)
+  // 03/26 added QueryNByKey to rev 1 (no breaking change, no new rev)
   lazy val v2_3_1: LanguageVersion = explicitVersions("v2_3_1")
   lazy val v2_3: LanguageVersion = explicitVersions("v2_3")
   lazy val v2_dev: LanguageVersion = explicitVersions("v2_dev")

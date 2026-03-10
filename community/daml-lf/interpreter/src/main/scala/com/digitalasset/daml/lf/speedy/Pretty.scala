@@ -19,6 +19,7 @@ import com.digitalasset.daml.lf.transaction.{
   NodeId,
   SerializationVersion,
 }
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits._
 import com.digitalasset.daml.lf.speedy.SError._
 import com.digitalasset.daml.lf.speedy.SValue._
 import com.digitalasset.daml.lf.speedy.SBuiltinFun._
@@ -333,7 +334,7 @@ private[lf] object Pretty {
       case lbk: Node.LookupByKey =>
         text("lookup by key") & prettyIdentifier(lbk.templateId) /
           text("key") & prettyKeyWithMaintainers(lbk.key) /
-          (lbk.result match {
+          (lbk.result.asCidOption match {
             case None => text("not found")
             case Some(coid) => text("found") & prettyContractId(coid)
           })
@@ -446,7 +447,7 @@ private[lf] object Pretty {
       case lbk: Node.LookupByKey =>
         text("lookup by key") & prettyIdentifier(lbk.templateId) /
           text("key") & prettyKeyWithMaintainers(lbk.key) /
-          (lbk.result match {
+          (lbk.result.asCidOption match {
             case None => text("not found")
             case Some(coid) => text("found") & prettyContractId(coid)
           })

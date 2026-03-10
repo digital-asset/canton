@@ -10,8 +10,12 @@ import com.digitalasset.canton.platform.apiserver.execution.CommandProgressTrack
 import com.digitalasset.canton.platform.apiserver.services.admin.PartyAllocation
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
+  AchsLastPointers,
+  LedgerEnd,
+}
 import com.digitalasset.canton.platform.store.cache.{
+  AchsStateCache,
   ContractStateCaches,
   InMemoryFanoutBuffer,
   MutableLedgerEndCache,
@@ -72,7 +76,13 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
 
       for {
         // INITIALIZED THE STATE
-        _ <- inMemoryState.initializeTo(Some(initLedgerEnd))
+        _ <- inMemoryState.initializeTo(
+          Some(initLedgerEnd),
+          ParameterStorageBackend.AchsState(
+            validAt = 0,
+            AchsLastPointers(lastRemoved = 0, lastPopulated = 0),
+          ),
+        )
 
         _ = {
           // ASSERT STATE INITIALIZED
@@ -128,7 +138,13 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
         }
 
         // RE-INITIALIZE THE STATE
-        _ <- inMemoryState.initializeTo(Some(reInitLedgerEnd))
+        _ <- inMemoryState.initializeTo(
+          Some(reInitLedgerEnd),
+          ParameterStorageBackend.AchsState(
+            validAt = 0,
+            AchsLastPointers(lastRemoved = 0, lastPopulated = 0),
+          ),
+        )
 
         // ASSERT STATE RE-INITIALIZED
         _ = {
@@ -148,7 +164,13 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
         }
 
         // RE-INITIALIZE THE SAME STATE
-        _ <- inMemoryState.initializeTo(Some(reInitLedgerEnd))
+        _ <- inMemoryState.initializeTo(
+          Some(reInitLedgerEnd),
+          ParameterStorageBackend.AchsState(
+            validAt = 0,
+            AchsLastPointers(lastRemoved = 0, lastPopulated = 0),
+          ),
+        )
 
         // ASSERT STATE RE-INITIALIZED
         _ = inMemoryState.initialized shouldBe true
@@ -185,7 +207,13 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
       inMemoryState.cachesUpdatedUpto.get() shouldBe None
 
       for {
-        _ <- inMemoryState.initializeTo(None)
+        _ <- inMemoryState.initializeTo(
+          None,
+          ParameterStorageBackend.AchsState(
+            validAt = 0,
+            AchsLastPointers(lastRemoved = 0, lastPopulated = 0),
+          ),
+        )
 
         _ = {
           inOrder.verify(contractStateCaches).reset(None)
@@ -210,6 +238,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
       ) => Future[Assertion]
   ): Future[Assertion] = {
     val mutableLedgerEndCache = mock[MutableLedgerEndCache]
+    val achsStateCache = mock[AchsStateCache]
     val contractStateCaches = mock[ContractStateCaches]
     val offsetCheckpointCache = mock[OffsetCheckpointCache]
     val inMemoryFanoutBuffer = mock[InMemoryFanoutBuffer]
@@ -236,6 +265,7 @@ class InMemoryStateSpec extends AsyncFlatSpec with MockitoSugar with Matchers wi
     val inMemoryState = new InMemoryState(
       participantId = Ref.ParticipantId.assertFromString("participant1"),
       ledgerEndCache = mutableLedgerEndCache,
+      achsStateCache = achsStateCache,
       contractStateCaches = contractStateCaches,
       offsetCheckpointCache = offsetCheckpointCache,
       inMemoryFanoutBuffer = inMemoryFanoutBuffer,

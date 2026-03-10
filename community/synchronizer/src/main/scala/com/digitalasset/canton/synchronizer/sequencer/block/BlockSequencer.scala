@@ -1106,7 +1106,7 @@ class BlockSequencer(
         // - Traffic states have been persisted (the block completion is written last, after traffic)
         // TODO(##29986): When traffic accounting is made async, we need a different way to determine that
         //  it has become consistent (accounting reached the upgrade time)
-        store.readHead.map(_.map(_.latestBlock.lastTs))
+        store.readHeadBlockInfo().map(_.map(_.lastTs))
       )
       latestSequencerEventTimestamp = stateManager.getHeadState.block.latestSequencerEventTimestamp
         .orElse(

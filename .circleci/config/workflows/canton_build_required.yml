@@ -114,8 +114,8 @@ jobs:
       requires:
         - compile # optional dependency, introduced to save credits in case of compile errors
   - test:
-      name: test_protocol_version_35
-      protocol_version: "35"
+      name: test_protocol_version_34
+      protocol_version: "34"
       context:
         - datadog
         - artifactory
@@ -149,7 +149,7 @@ jobs:
         tags:
           only: /^v.*/
       requires:
-        - test_protocol_version_35
+        - test_protocol_version_34
   # TODO(#30913): Remove this job once the NUCK feature development is completed
   - temp_nuck_tests_pv_dev:
       name: temp_nuck_tests_pv_dev

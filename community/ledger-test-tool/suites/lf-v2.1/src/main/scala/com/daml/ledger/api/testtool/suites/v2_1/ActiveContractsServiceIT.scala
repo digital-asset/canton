@@ -80,6 +80,7 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
                 .update(_.filtersForAnyParty := Filters(Nil))
             ),
             activeAtOffset = end,
+            streamContinuationToken = None,
           )
         )
         .map(_.filter(_.offset > offsetAtTestStart))
@@ -824,6 +825,7 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
                   )
                 ),
                 activeAtOffset = end,
+                streamContinuationToken = None,
               )
             )
             .map(_.filter(_.offset > offsetAtTestStart))
@@ -902,6 +904,7 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
           GetActiveContractsRequest(
             eventFormat = eventFormat,
             activeAtOffset = offset1,
+            streamContinuationToken = None,
           )
         )
       _ = assertEquals("acs1", acs1.toSet, Set(c1))
@@ -911,6 +914,7 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
           GetActiveContractsRequest(
             eventFormat = eventFormat,
             activeAtOffset = offset2,
+            streamContinuationToken = None,
           )
         )
       _ = assertEquals("ACS at the second offset", acs2.toSet, Set(c1, c2))
@@ -946,6 +950,7 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
           GetActiveContractsRequest(
             eventFormat = eventFormat,
             activeAtOffset = anOffset,
+            streamContinuationToken = None,
           )
         )
       _ = assertEquals("acs valid_at at pruning offset", acs.toSet, Set(c1))
@@ -982,6 +987,7 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
           GetActiveContractsRequest(
             eventFormat = eventFormat,
             activeAtOffset = offset1,
+            streamContinuationToken = None,
           )
         )
         .mustFailWith(
@@ -1010,6 +1016,7 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
           GetActiveContractsRequest(
             eventFormat = eventFormat,
             activeAtOffset = -1L,
+            streamContinuationToken = None,
           )
         )
         .mustFailWith(
@@ -1040,6 +1047,7 @@ class ActiveContractsServiceIT extends LedgerTestSuite {
           GetActiveContractsRequest(
             eventFormat = eventFormat,
             activeAtOffset = offsetBeyondLedgerEnd,
+            streamContinuationToken = None,
           )
         )
         .mustFailWith(

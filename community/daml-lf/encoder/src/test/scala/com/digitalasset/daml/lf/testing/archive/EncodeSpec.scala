@@ -173,7 +173,7 @@ ${onlyIf(LanguageVersion.featureContractKeys.enabledIn(languageVersion))("""
            val anExercise: (ContractId Mod:Person) -> Update Unit = \(cId: ContractId Mod:Person) ->
              exercise @Mod:Person Sleep (Mod:identity @(ContractId Mod:Person) cId) ();
 
-${onlyIf(LanguageVersion.featureContractKeys.enabledIn(languageVersion))(s"""
+${onlyIf(LanguageVersion.featureUCKKeyBuiltins.enabledIn(languageVersion))(s"""
            val aFecthByKey: Party -> Update ($tuple2TyCon (ContractId Mod:Person) Mod:Person) = \\(party: Party) ->
              fetch_by_key @Mod:Person party;
            val aLookUpByKey: Party -> Update (Option (ContractId Mod:Person)) =\\(party: Party) ->
@@ -187,7 +187,7 @@ ${onlyIf(LanguageVersion.featureContractKeys.enabledIn(languageVersion))(s"""
              uembed_expr @a x;
            val isZero: Int64 -> Bool = EQUAL @Int64 0;
 
-${onlyIf(LanguageVersion.featureContractKeys.enabledIn(languageVersion))("""
+${onlyIf(LanguageVersion.featureUCKKeyBuiltins.enabledIn(languageVersion))("""
            val isOne: BigNumeric -> Bool = EQUAL @BigNumeric (NUMERIC_TO_BIGNUMERIC @10 1.0000000000);
            val defaultRounding: RoundingMode = ROUNDING_UP;
 """)}

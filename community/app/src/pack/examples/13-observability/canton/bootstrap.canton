@@ -16,7 +16,7 @@ bootstrap.synchronizer(
   mediators = mediators.all,
   synchronizerOwners = sequencers.all,
   synchronizerThreshold = 3, // > 50% of owners (i.e., of 4 sequencers) must approve topology changes
-  staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+  staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
 )
 
 // Connect participant to synchronizer if not already done

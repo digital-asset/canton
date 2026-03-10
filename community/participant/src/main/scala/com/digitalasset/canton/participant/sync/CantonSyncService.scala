@@ -99,6 +99,7 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.WithoutSuffixes
 import com.digitalasset.canton.replica.ReplicaState
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
 import com.digitalasset.canton.resource.Storage
+import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.sequencing.SequencerConnectionValidation
 import com.digitalasset.canton.store.PendingOperationStore
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
@@ -516,10 +517,11 @@ class CantonSyncService(
   override def prune(
       pruneUpToInclusive: Offset,
       submissionId: LedgerSubmissionId,
+      safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
   ): Future[PruningResult] =
     withNewTrace("CantonSyncService.prune") { implicit traceContext => span =>
       span.setAttribute("submission_id", submissionId)
-      pruneInternally(pruneUpToInclusive)
+      pruneInternally(pruneUpToInclusive, safeToPruneCommitmentState)
         .fold(
           err => PruningResult.NotPruned(err.asGrpcStatus),
           _ => PruningResult.ParticipantPruned,
@@ -530,9 +532,12 @@ class CantonSyncService(
     }
 
   def pruneInternally(
-      pruneUpToInclusive: Offset
+      pruneUpToInclusive: Offset,
+      safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, RpcError, Unit] =
-    pruningProcessor.pruneLedgerEvents(pruneUpToInclusive).transform(pruningErrorToCantonError)
+    pruningProcessor
+      .pruneLedgerEvents(pruneUpToInclusive, safeToPruneCommitmentState)
+      .transform(pruningErrorToCantonError)
 
   private def pruningErrorToCantonError(pruningResult: Either[LedgerPruningError, Unit])(implicit
       traceContext: TraceContext

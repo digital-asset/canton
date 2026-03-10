@@ -29,7 +29,7 @@ import com.digitalasset.canton.sequencing.protocol.MediatorGroupRecipient
 import com.digitalasset.canton.topology.ParticipantId
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.daml.lf.transaction.TransactionErrors.KeyInputError
+import com.digitalasset.daml.lf.transaction.TransactionError
 
 import java.util.UUID
 import scala.concurrent.ExecutionContext
@@ -146,7 +146,7 @@ object TransactionTreeFactory {
       prettyOfClass(unnamedParam(_.key))
   }
 
-  final case class ContractKeyResolutionError(error: KeyInputError)
+  final case class ContractKeyResolutionError(error: TransactionError)
       extends TransactionTreeConversionError {
     override protected def pretty: Pretty[ContractKeyResolutionError] = prettyOfClass(
       unnamedParam(_.error)

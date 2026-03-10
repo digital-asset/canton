@@ -98,7 +98,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
   }
 
   private val serializableTraceContext =
-    SerializableTraceContext(TraceContext.empty).toDamlProto.toByteArray
+    SerializableTraceContext(TraceContext.empty).toSerializedDamlProto
 
   private val externalTransactionHash =
     Hash

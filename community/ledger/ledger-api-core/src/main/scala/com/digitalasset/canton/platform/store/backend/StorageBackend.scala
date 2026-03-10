@@ -11,11 +11,15 @@ import com.digitalasset.canton.ledger.participant.state.SynchronizerIndex
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent
 import com.digitalasset.canton.ledger.participant.state.index.IndexerPartyDetails
 import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.indexer.parallel.PostPublishData
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.*
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
-  ACHSState,
+  AchsAddActivationsParams,
+  AchsLastPointers,
+  AchsRemoveDeactivatedParams,
+  AchsState,
   PruneUptoInclusiveAndLedgerEnd,
 }
 import com.digitalasset.canton.platform.store.backend.common.{
@@ -161,12 +165,12 @@ trait ParameterStorageBackend {
   /** Fetches the current state of the Active Contracts Head Snapshot (ACHS) from the database, or
     * None if it hasn't been initialized yet.
     */
-  def fetchACHSState(connection: Connection): Option[ACHSState]
+  def fetchACHSState(connection: Connection): Option[AchsState]
 
   /** Inserts the state of the Active Contracts Head Snapshot (ACHS) in the database. Assumes that
     * the ACHS state is not yet present.
     */
-  def insertACHSState(achsState: ACHSState)(connection: Connection): Unit
+  def insertACHSState(achsState: AchsState)(connection: Connection): Unit
 
   /** Updates the validAt of the state of the Active Contracts Head Snapshot (ACHS) in the database.
     * Throws an IllegalStateException if the update was not successful.
@@ -177,7 +181,7 @@ trait ParameterStorageBackend {
     * Snapshot (ACHS) in the database. Throws an IllegalStateException if the update was not
     * successful.
     */
-  def updateACHSLastPointers(lastRemoved: Long, lastPopulated: Long)(connection: Connection): Unit
+  def updateACHSLastPointers(pointers: AchsLastPointers)(connection: Connection): Unit
 
   def clearACHSState(connection: Connection): Unit
 }
@@ -215,10 +219,56 @@ object ParameterStorageBackend {
     * @param lastPopulated
     *   The last event sequential ID that was populated into the ACHS.
     */
-  final case class ACHSState(
+  final case class AchsState(
       validAt: Long,
+      lastPointers: AchsLastPointers,
+  ) extends PrettyPrinting {
+
+    override def pretty: Pretty[AchsState] = prettyOfClass(
+      param("validAt", _.validAt),
+      param("lastRemoved", _.lastPointers.lastRemoved),
+      param("lastPopulated", _.lastPointers.lastPopulated),
+    )
+  }
+
+  final case class AchsLastPointers(
       lastRemoved: Long,
       lastPopulated: Long,
+  ) extends PrettyPrinting {
+
+    override def pretty: Pretty[AchsLastPointers] = prettyOfClass(
+      param("lastRemoved", _.lastRemoved),
+      param("lastPopulated", _.lastPopulated),
+    )
+  }
+
+  /** The parameters for removing activations from the Active Contracts Head Snapshot (ACHS) that
+    * have been deactivated at a specified range of event sequential IDs.
+    *
+    * @param startExclusive
+    *   The starting event sequential ID (exclusive).
+    * @param endInclusive
+    *   The ending event sequential ID (inclusive).
+    */
+  final case class AchsRemoveDeactivatedParams(
+      startExclusive: Long,
+      endInclusive: Long,
+  )
+
+  /** The parameters for adding activations to the Active Contracts Head Snapshot (ACHS) for a
+    * specified range of event sequential IDs that are still active at a given event sequential ID.
+    *
+    * @param startExclusive
+    *   The starting event sequential ID (exclusive).
+    * @param endInclusive
+    *   The ending event sequential ID (inclusive).
+    * @param activeAt
+    *   The event sequential ID at which the contracts are still active.
+    */
+  final case class AchsAddActivationsParams(
+      startExclusive: Long,
+      endInclusive: Long,
+      activeAt: Long,
   )
 }
 
@@ -362,6 +412,11 @@ trait EventStorageBackend {
       beforeOrAtRecordTimeInclusive: Timestamp,
   )(connection: Connection)(implicit traceContext: TraceContext): Option[SynchronizerOffset]
 
+  def lastRecordTimeBeforeOrAtSynchronizerOffset(
+      synchronizerId: SynchronizerId,
+      beforeOrAtOffsetInclusive: Offset,
+  )(connection: Connection): Option[CantonTimestamp]
+
   /** The contracts which were archived or participant-divulged in the specified range. These are
     * the contracts in the ContractStore, which can be pruned in a single-synchronizer setup.
     */
@@ -397,34 +452,30 @@ trait EventStorageBackend {
   /** Adds activations to the Active Contracts Head Snapshot (ACHS) for a specified range of event
     * sequential IDs that are still active at a given event sequential ID.
     *
-    * @param startExclusive
-    *   The starting event sequential ID (exclusive).
-    * @param endInclusive
-    *   The ending event sequential ID (inclusive).
-    * @param activeAtEventSeqId
-    *   The event sequential ID at which the contracts are still active.
+    * @param params
+    *   The parameters for adding activations to the ACHS. It includes::
+    *   - startExclusive: The starting event sequential ID (exclusive).
+    *   - endInclusive: The ending event sequential ID (inclusive).
+    *   - activeAt: The event sequential ID at which the contracts are still active.
     * @param connection
     *   The database connection to be used for the operation.
     */
   def addActivationsToACHS(
-      startExclusive: Long,
-      endInclusive: Long,
-      activeAtEventSeqId: Long,
+      params: AchsAddActivationsParams
   )(connection: Connection): Unit
 
   /** Removes activations from the Active Contracts Head Snapshot (ACHS) looking at a specified
     * range of event sequential IDs in the deactivations table.
     *
-    * @param startExclusive
-    *   The starting event sequential ID (exclusive).
-    * @param endInclusive
-    *   The ending event sequential ID (inclusive).
+    * @param params
+    *   The parameters for removing activations from the ACHS. It includes:
+    *   - startExclusive: The starting event sequential ID (exclusive).
+    *   - endInclusive: The ending event sequential ID (inclusive).
     * @param connection
     *   The database connection to be used for the operation.
     */
   def removeDeactivatedFromACHS(
-      startExclusive: Long,
-      endInclusive: Long,
+      params: AchsRemoveDeactivatedParams
   )(connection: Connection): Unit
 }
 
@@ -698,7 +749,7 @@ object EventStorageBackend {
       authorizationEvent: AuthorizationEvent,
       recordTime: Timestamp,
       synchronizerId: String,
-      traceContext: Option[Array[Byte]],
+      traceContext: Array[Byte],
   )
 
   sealed trait SequentialIdBatch

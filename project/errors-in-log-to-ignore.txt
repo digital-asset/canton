@@ -35,4 +35,9 @@ WARN .*SingleParticipantTestContext - Failed to prune
 # Ignore expected SEVERE exceptions in HelloService
 ERROR .*Exception while executing runnable io.grpc.internal.ServerImpl\$JumpToApplicationThreadServerStreamListener\$1HalfClosed.*\n.*\n.*\n.*at com.daml.*HelloServiceReferenceImplementation.*
 
+# TODO (#30398): remove these log entries when we propagate rollback errors correctly
+# Ignore rollback errors from Speedy crashes
+ERROR c\.d\.d\.lf - LF internal error in com\.digitalasset\.daml\.lf\.speedy\.Speedy\.Machine\.run: exception: java\.lang\.IllegalStateException: Rollback of consuming exercise node is not supported
+ERROR c\.d\.d\.lf - root cause: SPEEDY CRASH \(com\.digitalasset\.daml\.lf\.speedy\.Speedy\.Machine\.run\): exception: java\.lang\.IllegalStateException: Rollback of consuming exercise node is not supported
+
 # Make sure to have a trailing newline

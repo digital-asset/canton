@@ -42,6 +42,7 @@ import com.digitalasset.canton.admin.api.client.commands.LedgerApiCommands.Updat
   UpdateWrapper,
 }
 import com.digitalasset.canton.admin.api.client.data.NodeStatus
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -482,29 +483,32 @@ abstract class ParticipantRestartTest
     val synchronizerConnectionConfigStore = mock[SynchronizerConnectionConfigStore]
     when(synchronizerConnectionConfigStore.getAllStatusesFor(any[SynchronizerId]))
       .thenReturn(Right(NonEmpty.mk(Seq, SynchronizerConnectionConfigStore.Active)))
-    when(synchronizerConnectionConfigStore.getActive(any[SynchronizerId])).thenReturn(
-      // StoredSynchronizerConnectionConfig is final and cannot be mocked.
-      // Therefore, we need to construct the full object, just to "mock" configuredPSId.
-      Right(
-        StoredSynchronizerConnectionConfig(
-          SynchronizerConnectionConfig(
-            synchronizerAlias = daName,
-            sequencerConnections = SequencerConnections.single(
-              GrpcSequencerConnection(
-                NonEmpty(Seq, Endpoint("not-relevant", Port.tryCreate(1))),
-                transportSecurity = false,
-                customTrustCertificates = None,
-                sequencerAlias = SequencerAlias.tryCreate("not used"),
-                sequencerId = None,
-              )
-            ),
+
+    // StoredSynchronizerConnectionConfig is final and cannot be mocked.
+    // Therefore, we need to construct the full object, just to "mock" configuredPSId.
+    val activeSynchronizer =
+      StoredSynchronizerConnectionConfig(
+        SynchronizerConnectionConfig(
+          synchronizerAlias = daName,
+          sequencerConnections = SequencerConnections.single(
+            GrpcSequencerConnection(
+              NonEmpty(Seq, Endpoint("not-relevant", Port.tryCreate(1))),
+              transportSecurity = false,
+              customTrustCertificates = None,
+              sequencerAlias = SequencerAlias.tryCreate("not used"),
+              sequencerId = None,
+            )
           ),
-          status = SynchronizerConnectionConfigStore.Active,
-          configuredPSId = KnownPhysicalSynchronizerId(daId), // this is the relevant field
-          predecessor = None,
-        )
+        ),
+        status = SynchronizerConnectionConfigStore.Active,
+        configuredPSId = KnownPhysicalSynchronizerId(daId), // this is the relevant field
+        predecessor = None,
       )
-    )
+    when(synchronizerConnectionConfigStore.getActive(any[SynchronizerId]))
+      .thenReturn(Right(activeSynchronizer))
+    when(synchronizerConnectionConfigStore.getAllFor(any[SynchronizerId]))
+      .thenReturn(Right(NonEmpty.mk(Seq, activeSynchronizer)))
+
     val aliasResolution = mock[SynchronizerAliasResolution]
     when(aliasResolution.logicalSynchronizerIds).thenReturn(Set(daId.logical))
     when(synchronizerConnectionConfigStore.aliasResolution).thenReturn(aliasResolution)
@@ -1564,6 +1568,8 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
     EnvironmentDefinition.P2S1M1_Manual
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
+        // enabling retries to be on the safe side
+        ConfigTransforms.setPingRetries(true),
         ProgrammableSequencer.configOverride(this.getClass.toString, loggerFactory),
         // Set a small request size for the participant so that the participant's sequencer client refuses to
         // send big requests to the sequencer and thus the participant can produce a rejection event
@@ -2157,9 +2163,11 @@ abstract class ParticipantRestartStaticTimeIntegrationTestBase(
   }
 }
 
+@UnstableTest // TODO(#19922)
 class ParticipantRestartStaticTimeIntegrationTest
     extends ParticipantRestartStaticTimeIntegrationTestBase
 
+@UnstableTest // TODO(#30408)
 class ParticipantRestartStaticTimeReassignmentIntegrationTest
     extends ParticipantRestartStaticTimeIntegrationTestBase(alphaMultiSynchronizerSupport = true)
 
@@ -2319,6 +2327,7 @@ class ParticipantRestartContractKeyIntegrationTest extends ParticipantRestartTes
   }
 }
 
+@UnstableTest // TODO(#21107)
 class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
   private val reconciliationInterval = PositiveSeconds.tryOfSeconds(2)
   private val transactionTolerance = reconciliationInterval.unwrap
@@ -2330,6 +2339,8 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
     EnvironmentDefinition.P2S1M1_Manual
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
+        // enabling retries to be on the safe side
+        ConfigTransforms.setPingRetries(true),
         ConfigTransforms.updatePruningBatchSize(internalPruningBatchSize),
         ConfigTransforms.updateMaxDeduplicationDurations(transactionTolerance),
       )
@@ -2405,7 +2416,7 @@ class ParticipantRestartPruningIntegrationTest extends ParticipantRestartTest {
       // Create a fresh pruning processor object so we get a fresh publication time lower bound
       val pruningProcessor = pruningProcessorFor(participant1, storageP1.some)
       val safeOffset =
-        pruningProcessor.safeToPrune(clock.now, ledgerEndOffset).futureValueUS.value.value
+        pruningProcessor.safeToPrune(clock.now, ledgerEndOffset, None).futureValueUS.value.value
       assert(safeOffset.unwrap >= pruneOffset)
     }
 

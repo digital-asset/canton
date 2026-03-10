@@ -5,12 +5,13 @@ package com.digitalasset.canton.platform.store.backend
 
 import anorm.*
 import anorm.Column.nonNull
-import com.daml.ledger.api.v2.trace_context.TraceContext as ProtoTraceContext
+import com.daml.ledger.api.v2.trace_context.TraceContext as DamlTraceContext
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.{
   Added,
   ChangedTo,
+  Onboarding,
   Revoked,
 }
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel.{
@@ -24,6 +25,7 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
 }
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.protocol.UpdateId
+import com.digitalasset.canton.tracing.SerializableTraceContextConverter.SerializableTraceContextExtension
 import com.digitalasset.canton.tracing.{SerializableTraceContextConverter, TraceContext}
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.{Bytes, Ref}
@@ -34,7 +36,7 @@ import com.typesafe.scalalogging.Logger
 import java.nio.ByteBuffer
 import java.sql.PreparedStatement
 
-private[backend] object Conversions {
+object Conversions {
 
   private def stringColumnToX[X](f: String => Either[String, X]): Column[X] =
     Column.nonNull((value: Any, meta) =>
@@ -127,16 +129,17 @@ private[backend] object Conversions {
   def hashFromHexString(name: String): RowParser[Hash] =
     SqlParser.get[String](name).map(Hash.assertFromString)
 
-  def traceContextOption(bytes: Option[Array[Byte]])(implicit logger: Logger): TraceContext =
-    bytes
-      .map(b =>
-        SerializableTraceContextConverter
-          .fromDamlProtoSafeOpt(logger)(
-            Some(ProtoTraceContext.parseFrom(b))
-          )
-          .traceContext
+  private def serializableTraceContextFrom(logger: Logger)(bytes: Array[Byte]) =
+    SerializableTraceContextConverter
+      .fromDamlProtoSafeOpt(logger)(
+        Some(DamlTraceContext.parseFrom(bytes))
       )
-      .getOrElse(TraceContext.empty)
+
+  def traceContextFrom(logger: Logger)(bytes: Array[Byte]): TraceContext =
+    serializableTraceContextFrom(logger)(bytes).traceContext
+
+  def protoTraceContextFrom(logger: Logger)(bytes: Array[Byte]): Option[DamlTraceContext] =
+    serializableTraceContextFrom(logger)(bytes).toDamlProto
 
   // UpdateId
 
@@ -187,12 +190,14 @@ private[backend] object Conversions {
     case Added(_) => 0
     case ChangedTo(_) => 1
     case Revoked => 2
+    case Onboarding(_) => 3
   }
 
   def authorizationEvent(t: Int, l: Int): AuthorizationEvent = t match {
     case 0 => Added(authorizationLevel(l))
     case 1 => ChangedTo(authorizationLevel(l))
     case 2 => Revoked
+    case 3 => Onboarding(authorizationLevel(l))
     case other =>
       throw new RuntimeException(
         s"Integer $other was not expected as an authorization event serialized value."

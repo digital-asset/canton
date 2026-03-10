@@ -275,9 +275,9 @@ manual_topology_chaos_test:
         requires:
           - print_tests
 
-manual_test_protocol_version_35:
+manual_test_protocol_version_34:
   when:
-    equal: [ test-protocol-version-35, << pipeline.parameters.manual_job >> ]
+    equal: [ test-protocol-version-34, << pipeline.parameters.manual_job >> ]
   jobs:
     - compile:
         context:
@@ -287,8 +287,8 @@ manual_test_protocol_version_35:
           - maven-mirror
           - da-images
     - test:
-        name: test_protocol_version_35
-        protocol_version: "35"
+        name: test_protocol_version_34
+        protocol_version: "34"
         context:
           - datadog
           - artifactory

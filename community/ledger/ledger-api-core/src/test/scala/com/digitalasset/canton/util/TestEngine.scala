@@ -54,6 +54,7 @@ class TestEngine(
     commandId: String = "TestCmdId",
     iterationsBetweenInterruptions: Long = 1000,
     cantonContractIdVersion: CantonContractIdV1Version = CantonContractIdVersion.maxV1,
+    contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoContractKey,
 ) extends EitherValues
     with OptionValues {
 
@@ -107,6 +108,7 @@ class TestEngine(
     EngineConfig(
       allowedLanguageVersions = LanguageVersion.allLfVersionsRange,
       iterationsBetweenInterruptions = iterationsBetweenInterruptions,
+      contractStateMode = contractStateMode,
     )
   )
 

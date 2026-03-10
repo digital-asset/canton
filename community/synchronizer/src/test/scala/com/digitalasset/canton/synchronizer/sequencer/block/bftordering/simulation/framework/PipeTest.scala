@@ -38,6 +38,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   ModuleName,
   P2PConnectionEventListener,
   P2PNetworkManager,
+  PureFun,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.simulation.framework.PipeTest.{
   Reporter,
@@ -67,6 +68,8 @@ object PipeTest {
     var `got response` = false
     var `got zip response` = false
     var `got sequence response` = false
+    var `got empty sequence response` = false
+    var `got map response` = false
   }
 
   class PipeNode[E <: Env[E]](
@@ -103,6 +106,18 @@ object PipeTest {
             abort("Something went wrong", exception)
           case Success(xs) => s"sequence(${xs.mkString(",")})"
         }
+        val future3 = context.mapFuture(pipeStore.load(30))(PureFun.Append("!"))
+        pipeToSelf(future3) {
+          case Failure(exception) =>
+            abort("Something went wrong", exception)
+          case Success(xs) => s"map($xs)"
+        }
+        val future4 = context.sequenceFuture(Seq.empty[E#FutureUnlessShutdownT[Seq[Int]]])
+        pipeToSelf(future4) {
+          case Failure(exception) =>
+            abort("Something went wrong", exception)
+          case Success(xs) => s"sequence(${xs.toList})"
+        }
 
       case "single-future(5)" =>
         reporter.`got response` = true
@@ -112,6 +127,12 @@ object PipeTest {
 
       case "sequence(0,1,2)" =>
         reporter.`got sequence response` = true
+
+      case "sequence(List())" =>
+        reporter.`got empty sequence response` = true
+
+      case "map(30!)" =>
+        reporter.`got map response` = true
 
       case other =>
         abort(s"Can't handle message: $other")
@@ -164,6 +185,7 @@ class PipeTest extends AnyFlatSpec with BaseTest {
     val simSettings = SimulationSettings(
       localSettings = LocalSettings(randomSeed = 4),
       networkSettings = NetworkSettings(randomSeed = 4),
+      futureSettings = FutureSettings(randomSeed = 4),
       durationOfFirstPhaseWithFaults = 2.minutes,
     )
 
@@ -196,5 +218,7 @@ class PipeTest extends AnyFlatSpec with BaseTest {
     reporter.`got response` shouldBe true
     reporter.`got zip response` shouldBe true
     reporter.`got sequence response` shouldBe true
+    reporter.`got empty sequence response` shouldBe true
+    reporter.`got map response` shouldBe true
   }
 }
