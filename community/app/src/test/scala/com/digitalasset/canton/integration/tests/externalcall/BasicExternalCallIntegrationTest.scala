@@ -215,6 +215,59 @@ sealed trait BasicExternalCallIntegrationTest
       // Note: With the mock DA.External, the result is the input (echo behavior).
       // Once BEExternalCall is implemented, the result would come from the HTTP call.
     }
+
+    "correctly replay two identical calls with different results via callIndex" in { implicit env =>
+      import env.*
+
+      // Mock returns different results for each call to the same function+input.
+      // This tests the callIndex-based replay fix: without it, both calls would
+      // get the first result because the lookup matched on (extensionId, functionId, input).
+      val callCounter = new java.util.concurrent.atomic.AtomicInteger(0)
+      mockServer.setHandler("inconsistent") { _ =>
+        val count = callCounter.getAndIncrement()
+        val result = if (count == 0) "aabbccdd" else "11223344"
+        ExternalCallResponse.ok(result.getBytes("UTF-8"))
+      }
+
+      val inputHex = toHex("same-input")
+
+      // Create multi-party contract via proposal/accept (SameCallTwice needs two signatories)
+      clue("Create MultiPartyExternalCall via proposal") {
+        val proposalTx = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          new E.MultiPartyProposal(
+            alice.toProtoPrimitive,
+            bob.toProtoPrimitive,
+            java.util.List.of(),
+          ).create.commands.asScala.toSeq,
+        )
+        val proposalId = JavaDecodeUtil
+          .decodeAllCreated(E.MultiPartyProposal.COMPANION)(proposalTx)
+          .loneElement.id
+
+        val acceptTx = participant2.ledger_api.javaapi.commands.submit(
+          Seq(bob),
+          proposalId.exerciseAccept().commands.asScala.toSeq,
+        )
+        val contractId = JavaDecodeUtil
+          .decodeAllCreated(E.MultiPartyExternalCall.COMPANION)(acceptTx)
+          .loneElement.id
+
+        // Exercise SameCallTwice — calls "inconsistent" with same input twice
+        val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice, bob),
+          contractId.exerciseSameCallTwice(inputHex).commands.asScala.toSeq,
+        )
+
+        // Transaction must succeed — both participants must agree.
+        // If callIndex replay is broken, participant2 would replay the wrong
+        // result for the second call and reject the transaction.
+        exerciseTx.getUpdateId should not be empty
+      }
+
+      // Verify mock was called exactly twice
+      verifyCallCount("inconsistent", 2)
+    }
   }
 }
 
