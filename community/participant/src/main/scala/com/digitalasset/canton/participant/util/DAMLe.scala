@@ -520,18 +520,18 @@ class DAMLe(
                   storedOutput match {
                     case Some(expected) if expected != output =>
                       logger.warn(
-                        s"External call result mismatch for extension=$extensionId, function=$functionId: " +
+                        s"External call result mismatch for extension=$extensionId, function=$functionId, callIndex=$currentCallIndex: " +
                           s"confirmer got '$output' but submitter recorded '$expected'"
                       )
-                      // Return error - results don't match, transaction should be rejected
                       FutureUnlessShutdown.pure(
                         Left(
                           EngineError(
                             Error.Interpretation(
                               Error.Interpretation.Internal(
                                 "reinterpretation",
-                                s"External call result mismatch: confirmer computed '$output' but submitter recorded '$expected'. " +
-                                  "The transaction is rejected because validators disagree on the external call result.",
+                                s"LOCAL_VERDICT_EXTERNAL_CALL_RESULT_MISMATCH: " +
+                                  s"confirmer computed '$output' but submitter recorded '$expected' " +
+                                  s"(extensionId=$extensionId, functionId=$functionId, callIndex=$currentCallIndex)",
                                 None,
                               ),
                               None,
@@ -550,7 +550,9 @@ class DAMLe(
                         Error.Interpretation(
                           Error.Interpretation.Internal(
                             "reinterpretation",
-                            s"External call failed during confirmation: ${error.message}",
+                            s"LOCAL_VERDICT_EXTERNAL_CALL_FAILED: ${error.message} " +
+                              s"(status=${error.statusCode}, extensionId=$extensionId, functionId=$functionId, callIndex=$currentCallIndex" +
+                              error.requestId.map(id => s", requestId=$id").getOrElse("") + ")",
                             None,
                           ),
                           None,
@@ -591,7 +593,8 @@ class DAMLe(
                       Error.Interpretation(
                         Error.Interpretation.Internal(
                           "reinterpretation",
-                          s"No stored external call result found for replay: extension=$extensionId, function=$functionId, input=$input. " +
+                          s"LOCAL_VERDICT_EXTERNAL_CALL_REPLAY_MISSING: " +
+                            s"no stored result for extensionId=$extensionId, functionId=$functionId, callIndex=$currentCallIndex. " +
                             "This may indicate transaction tampering or a mismatch between the transaction and its metadata.",
                           None,
                         ),
