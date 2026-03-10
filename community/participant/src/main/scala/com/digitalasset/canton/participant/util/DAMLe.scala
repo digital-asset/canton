@@ -358,6 +358,11 @@ class DAMLe(
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
+    // Track external call index for correct replay ordering.
+    // Speedy executes single-threaded, so call order is deterministic.
+    // This counter matches the callIndex recorded during submission.
+    val externalCallCounter = new java.util.concurrent.atomic.AtomicInteger(0)
+
     def handleResultInternal(contracts: ContractAndKeyLookup, result: Result[A])(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Either[ReinterpretationError, A]] = {
@@ -443,11 +448,12 @@ class DAMLe(
             ) =>
           // For confirmers (signatories), we re-execute external calls to independently verify.
           // For observers, we replay stored external call results.
+          val currentCallIndex = externalCallCounter.getAndIncrement()
           (isConfirmer, externalCallHandler) match {
             case (true, Some(handler)) =>
               // Confirming participant: execute the external call
               logger.debug(
-                s"Confirmer re-executing external call for extension=$extensionId, function=$functionId"
+                s"Confirmer re-executing external call for extension=$extensionId, function=$functionId, callIndex=$currentCallIndex"
               )
               handler
                 .handleExternalCall(extensionId, functionId, configHash, input, "validation")
@@ -456,13 +462,8 @@ class DAMLe(
                   // Verify result matches stored result if available
                   val storedOutput = storedResult.orElse {
                     storedExternalCallResults
-                      .collectFirst {
-                        case ((extId, funcId, _), (_, storedInput, storedOutputValue))
-                            if extId == extensionId &&
-                              funcId == functionId &&
-                              storedInput == input =>
-                          storedOutputValue
-                      }
+                      .get((extensionId, functionId, currentCallIndex))
+                      .map(_._3) // _3 is outputHex
                   }
                   storedOutput match {
                     case Some(expected) if expected != output =>
@@ -507,33 +508,20 @@ class DAMLe(
                   )
               }
             case _ =>
-              // Observer or no handler: replay stored external call results
-            // The storedResult may be passed directly from the interpreter, or we look it up
-            // from our stored results map.
-
-            // First try the directly provided stored result
-            val resultToReplay: Option[String] = storedResult.orElse {
-              // Look up from our stored results map using (extensionId, functionId, callIndex)
-              // Since the engine doesn't provide callIndex, we track it by matching on
-              // (extensionId, functionId, inputHex) - the same call with same input should
-              // produce the same result
-              storedExternalCallResults
-                .collectFirst {
-                  case ((extId, funcId, _), (storedConfigHash, storedInput, output))
-                      if extId == extensionId &&
-                        funcId == functionId &&
-                        storedInput == input =>
-                    // Optionally verify configHash matches
-                    if (storedConfigHash == configHash) {
-                      output
-                    } else {
+              // Observer or no handler: replay stored external call results.
+              // Use callIndex for correct ordering — the counter matches submission order.
+              val resultToReplay: Option[String] = storedResult.orElse {
+                storedExternalCallResults
+                  .get((extensionId, functionId, currentCallIndex))
+                  .map { case (storedConfigHash, _, output) =>
+                    if (storedConfigHash != configHash) {
                       logger.warn(
                         s"Config hash mismatch for external call replay: expected=$storedConfigHash, got=$configHash"
                       )
-                      output // Still use the stored result but log warning
                     }
-                }
-            }
+                    output
+                  }
+              }
 
             resultToReplay match {
               case Some(output) =>
