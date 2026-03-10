@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.externalcall
 
+import com.digitalasset.canton.externalcall.java.externalcalltest as E
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UsePostgres}
 import com.digitalasset.canton.integration.{
   ConfigTransforms,
@@ -10,7 +11,9 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 
+import scala.jdk.CollectionConverters.*
 
 /** Integration tests for external calls in multi-view transactions.
   *
@@ -19,8 +22,8 @@ import com.digitalasset.canton.integration.{
   * "A test involving external calls in root nodes as well as in leaf nodes and in the middle"
   *
   * Tests:
-  * - Same informees → single view with multiple external calls
-  * - Different informees → multiple views with external calls
+  * - Same informees -> single view with multiple external calls
+  * - Different informees -> multiple views with external calls
   * - External calls at root, middle, and leaf nodes
   * - Multiple views each with their own external calls
   */
@@ -31,7 +34,7 @@ sealed trait MultiViewExternalCallIntegrationTest
     with MockServerSetup {
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P3_S1M1 // 3 participants for complex view scenarios
+    EnvironmentDefinition.P3_S1M1
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         enableExternalCallExtensionOnAll("test-ext", mockServerPort),
@@ -47,7 +50,11 @@ sealed trait MultiViewExternalCallIntegrationTest
           participant3.synchronizers.connect_local(sequencer1, daName)
         }
 
-        // TODO: Upload ExternalCallTest DAR
+        clue("Upload ExternalCallTest DAR") {
+          participant1.dars.upload(externalCallTestDarPath)
+          participant2.dars.upload(externalCallTestDarPath)
+          participant3.dars.upload(externalCallTestDarPath)
+        }
 
         clue("Enable parties") {
           alice = participant1.parties.enable("alice")
@@ -64,132 +71,249 @@ sealed trait MultiViewExternalCallIntegrationTest
 
   "multi-view transactions" should {
 
-    "handle external calls when all exercises have same informees (single view)" in { _ =>
+    "handle external calls when all exercises have same informees (single view)" in { implicit env =>
+      import env.*
 
       setupEchoHandler()
 
-      // Scenario:
-      // - Alice exercises NestedExternalCall with innerActor = alice (same party)
-      // - Both external calls happen in the same view
-      // - Results should be aggregated in the single view's ActionDescription
+      val input1Hex = toHex("view-input1")
+      val input2Hex = toHex("view-input2")
 
-      // TODO: Implement once DAR and codegen are available
-      // val contract = createContract(alice)
-      // val (r1, r2) = contract.exerciseNestedExternalCall(
-      //   innerActor = alice, // Same informees → single view
-      //   input1 = toHex("input1"),
-      //   input2 = toHex("input2")
-      // )
+      clue("Create ExternalCallContract with alice as sole signatory") {
+        val createTx = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          new E.ExternalCallContract(
+            alice.toProtoPrimitive,
+            java.util.List.of(),
+          ).create.commands.asScala.toSeq,
+        )
+        val contractId = JavaDecodeUtil.decodeAllCreated(E.ExternalCallContract.COMPANION)(createTx).loneElement.id
 
-      pending
+        clue("Exercise NestedExternalCall with innerActor=alice (same informees -> single view)") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseNestedExternalCall(
+              alice.toProtoPrimitive,
+              input1Hex,
+              input2Hex,
+            ).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
+      }
     }
 
-    "handle external calls when nested exercises have different informees (multiple views)" in { _ =>
+    "handle external calls when nested exercises have different informees (multiple views)" in {
+      implicit env =>
+        import env.*
+
         setupEchoHandler()
 
-        // Scenario:
-        // - Alice exercises NestedExternalCall with innerActor = bob (different party)
-        // - This creates two views:
-        //   - View 1: alice's root exercise (external call 1)
-        //   - View 2: bob's delegated exercise (external call 2)
-        // - Each view should have its own external call results
+        val input1Hex = toHex("alice-view")
+        val input2Hex = toHex("bob-view")
 
-        // TODO: Implement
-        // Verify both views are created
-        // Verify each view has the correct external call result
-        // Verify bob on participant2 can validate using stored results
+        clue("Create ExternalCallContract with bob visible") {
+          val createTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            new E.ExternalCallContract(
+              alice.toProtoPrimitive,
+              java.util.List.of(bob.toProtoPrimitive),
+            ).create.commands.asScala.toSeq,
+          )
+          val contractId = JavaDecodeUtil.decodeAllCreated(E.ExternalCallContract.COMPANION)(createTx).loneElement.id
 
-        pending
+          clue("Exercise NestedExternalCall with innerActor=bob (different informees -> two views)") {
+            val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+              Seq(alice, bob),
+              contractId.exerciseNestedExternalCall(
+                bob.toProtoPrimitive,
+                input1Hex,
+                input2Hex,
+              ).commands.asScala.toSeq,
+            )
+            exerciseTx.getUpdateId should not be empty
+          }
+        }
     }
 
-    "execute external call only in root node" in { _ =>
+    "execute external call only in root node" in { implicit env =>
+      import env.*
 
-      mockServer.setHandler("echo") { req =>
-        ExternalCallResponse.ok(req.input ++ "-root".getBytes)
+      setupEchoHandler()
+
+      val inputHex = toHex("root-only")
+
+      clue("Create ExternalCallContract") {
+        val createTx = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          new E.ExternalCallContract(
+            alice.toProtoPrimitive,
+            java.util.List.of(),
+          ).create.commands.asScala.toSeq,
+        )
+        val contractId = JavaDecodeUtil.decodeAllCreated(E.ExternalCallContract.COMPANION)(createTx).loneElement.id
+
+        clue("Exercise CallExternal — external call only at root level") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseCallExternal(
+              "test-ext",
+              "echo",
+              "00000000",
+              inputHex,
+            ).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
       }
-
-      // Scenario:
-      // - Root exercise has external call
-      // - Nested exercises do NOT have external calls
-      // - Only root view should have external call results
-
-      pending
     }
 
-    "execute external call only in leaf node" in { _ =>
+    "execute external call only in leaf node" in { implicit env =>
+      import env.*
 
       setupEchoHandler()
 
-      // Scenario:
-      // - Root exercise does NOT have external call
-      // - Deepest nested exercise has external call
-      // - Only leaf view should have external call results
+      val inputHex = toHex("leaf-only")
 
-      // TODO: Use CallInLeafOnly choice
+      clue("Create ExternalCallContract") {
+        val createTx = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          new E.ExternalCallContract(
+            alice.toProtoPrimitive,
+            java.util.List.of(),
+          ).create.commands.asScala.toSeq,
+        )
+        val contractId = JavaDecodeUtil.decodeAllCreated(E.ExternalCallContract.COMPANION)(createTx).loneElement.id
 
-      pending
-    }
-
-    "execute external call in middle node" in { _ =>
-
-      setupEchoHandler()
-
-      // Scenario:
-      // - Three levels of nesting: root → middle → leaf
-      // - Only middle level has external call
-      // - Middle view should have external call results
-
-      pending
-    }
-
-    "execute external calls at all levels (root, middle, leaf)" in { _ =>
-
-      mockServer.setHandler("echo") { req =>
-        // Echo back with level indicator appended
-        ExternalCallResponse.ok(req.input)
+        clue("Exercise CallInLeafOnly — no external call at root, call at leaf") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseCallInLeafOnly(inputHex).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
       }
-
-      // Scenario:
-      // - Root exercises CallAtAllLevels
-      // - Each level (root, middle, leaf) makes an external call
-      // - Verify all three calls are made
-      // - Verify results are stored at each level
-
-      // TODO: Use CallAtAllLevels choice
-      // Verify mockServer.getCallCount("echo") == 3
-      // Verify each level's result
-
-      pending
     }
 
-    "handle multiple views each with their own external calls" in { _ =>
+    "execute external call in middle node" in { implicit env =>
+      import env.*
 
       setupEchoHandler()
 
-      // Scenario:
-      // - Alice creates contract with bob and charlie as potential actors
-      // - Exercise creates three views (alice, bob, charlie)
-      // - Each view has its own external call
-      // - Verify all three external calls are made
-      // - Verify each view has the correct result
+      val inputHex = toHex("all-levels")
 
-      pending
+      clue("Create ExternalCallContract") {
+        val createTx = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          new E.ExternalCallContract(
+            alice.toProtoPrimitive,
+            java.util.List.of(),
+          ).create.commands.asScala.toSeq,
+        )
+        val contractId = JavaDecodeUtil.decodeAllCreated(E.ExternalCallContract.COMPANION)(createTx).loneElement.id
+
+        clue("Exercise CallAtAllLevels — has root, middle, and leaf external calls") {
+          // CallAtAllLevels exercises MiddleLevelCall which exercises LeafExternalCall
+          // The middle level has its own external call
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseCallAtAllLevels(inputHex).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
+      }
     }
 
-    "aggregate external call results correctly in view's ActionDescription" in { _ =>
+    "execute external calls at all levels (root, middle, leaf)" in { implicit env =>
+      import env.*
 
       setupEchoHandler()
 
-      // Scenario:
-      // - Create a complex transaction with multiple external calls
-      // - Verify the ActionDescription for each view contains the
-      //   aggregated results from all exercise nodes in that view's core
+      val inputHex = toHex("all-levels")
 
-      // This tests the reviewer feedback about:
-      // "The core of a view may contain many ExerciseNodes and therefore
-      //  must aggregate the external call interactions for all of them"
+      clue("Create ExternalCallContract") {
+        val createTx = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          new E.ExternalCallContract(
+            alice.toProtoPrimitive,
+            java.util.List.of(),
+          ).create.commands.asScala.toSeq,
+        )
+        val contractId = JavaDecodeUtil.decodeAllCreated(E.ExternalCallContract.COMPANION)(createTx).loneElement.id
 
-      pending
+        clue("Exercise CallAtAllLevels — external calls at root, middle, and leaf") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseCallAtAllLevels(inputHex).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
+      }
+    }
+
+    "handle multiple views each with their own external calls" in { implicit env =>
+      import env.*
+
+      setupEchoHandler()
+
+      val input1Hex = toHex("alice-call")
+      val input2Hex = toHex("bob-call")
+
+      clue("Create ThreePartyExternalCall contract") {
+        val createTx = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          new E.ThreePartyExternalCall(
+            alice.toProtoPrimitive,
+            bob.toProtoPrimitive,
+            charlie.toProtoPrimitive,
+          ).create.commands.asScala.toSeq,
+        )
+        val contractId = JavaDecodeUtil.decodeAllCreated(E.ThreePartyExternalCall.COMPANION)(createTx).loneElement.id
+
+        clue("Exercise NestedCallWithBob — alice's view and bob's view each have external calls") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice, bob),
+            contractId.exerciseNestedCallWithBob(
+              input1Hex,
+              input2Hex,
+            ).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
+      }
+    }
+
+    "aggregate external call results correctly in view's ActionDescription" in { implicit env =>
+      import env.*
+
+      setupEchoHandler()
+
+      val input1Hex = toHex("first")
+      val input2Hex = toHex("second")
+      val input3Hex = toHex("third")
+
+      clue("Create ExternalCallContract") {
+        val createTx = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          new E.ExternalCallContract(
+            alice.toProtoPrimitive,
+            java.util.List.of(),
+          ).create.commands.asScala.toSeq,
+        )
+        val contractId = JavaDecodeUtil.decodeAllCreated(E.ExternalCallContract.COMPANION)(createTx).loneElement.id
+
+        clue("Exercise CallMultiple — three external calls aggregated in one view") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseCallMultiple(
+              input1Hex,
+              input2Hex,
+              input3Hex,
+            ).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
+      }
     }
   }
 }

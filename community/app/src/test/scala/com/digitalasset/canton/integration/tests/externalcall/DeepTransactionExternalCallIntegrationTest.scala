@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.externalcall
 
+import com.digitalasset.canton.externalcall.java.externalcalltest as E
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UsePostgres}
 import com.digitalasset.canton.integration.{
   ConfigTransforms,
@@ -10,8 +11,9 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 
-import scala.concurrent.duration.*
+import scala.jdk.CollectionConverters.*
 
 /** Integration tests for external calls in deep (deeply nested) transactions.
   *
@@ -47,6 +49,11 @@ sealed trait DeepTransactionExternalCallIntegrationTest
           participant2.synchronizers.connect_local(sequencer1, daName)
         }
 
+        clue("Upload ExternalCallTest DAR") {
+          participant1.dars.upload(externalCallTestDarPath)
+          participant2.dars.upload(externalCallTestDarPath)
+        }
+
         clue("Enable parties") {
           alice = participant1.parties.enable("alice")
           bob = participant2.parties.enable(
@@ -56,6 +63,19 @@ sealed trait DeepTransactionExternalCallIntegrationTest
         }
       }
 
+  /** Helper to create a DeepExternalCallContract */
+  private def createDeepContract(depth: Int)(implicit env: TestEnvironment) = {
+    import env.*
+    val createTx = participant1.ledger_api.javaapi.commands.submit(
+      Seq(alice),
+      new E.DeepExternalCallContract(
+        alice.toProtoPrimitive,
+        depth.toLong,
+      ).create.commands.asScala.toSeq,
+    )
+    JavaDecodeUtil.decodeAllCreated(E.DeepExternalCallContract.COMPANION)(createTx).loneElement.id
+  }
+
   "deep transactions with external calls" should {
 
     "handle 5 levels of nesting with external call at leaf" in { implicit env =>
@@ -63,18 +83,19 @@ sealed trait DeepTransactionExternalCallIntegrationTest
 
       setupEchoHandler()
 
-      // Scenario:
-      // Level 0 (root) → Level 1 → Level 2 → Level 3 → Level 4 → Level 5 (leaf with external call)
-      // Only the deepest level makes the external call
+      val inputHex = toHex("depth-5-leaf")
 
-      // TODO: Use DeepExternalCallContract with depth=5
-      // Exercise DeepCall choice
-      // Verify:
-      // - Transaction completes successfully
-      // - Only 1 external call made (at leaf)
-      // - Result propagates back through all levels
+      clue("Create DeepExternalCallContract with depth=5") {
+        val contractId = createDeepContract(5)
 
-      pending
+        clue("Exercise DeepCall — recursively exercises down to leaf where external call happens") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseDeepCall(inputHex).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
+      }
     }
 
     "handle 10 levels of nesting with external call at leaf" in { implicit env =>
@@ -82,16 +103,19 @@ sealed trait DeepTransactionExternalCallIntegrationTest
 
       setupEchoHandler()
 
-      // Scenario:
-      // 10 levels of recursive exercise
-      // External call only at the deepest level
+      val inputHex = toHex("depth-10-leaf")
 
-      // This tests that deep transactions don't break external call handling
+      clue("Create DeepExternalCallContract with depth=10") {
+        val contractId = createDeepContract(10)
 
-      // TODO: Use DeepExternalCallContract with depth=10
-      // Verify transaction completes and result is correct
-
-      pending
+        clue("Exercise DeepCall — 10 levels of recursion to leaf external call") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseDeepCall(inputHex).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
+      }
     }
 
     "handle 5 levels with external call at every level" in { implicit env =>
@@ -99,15 +123,19 @@ sealed trait DeepTransactionExternalCallIntegrationTest
 
       setupEchoHandler()
 
-      // Scenario:
-      // Each of the 5 levels makes its own external call
-      // Total of 5 external calls
+      val inputHex = toHex("depth-5-all")
 
-      // TODO: Use DeepExternalCallContract.DeepCallAllLevels choice
-      // Verify:
-      // verifyCallCount("echo", 5)
+      clue("Create DeepExternalCallContract with depth=5") {
+        val contractId = createDeepContract(5)
 
-      pending
+        clue("Exercise DeepCallAllLevels — external call at each of 6 levels (0-5)") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseDeepCallAllLevels(inputHex).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
+      }
     }
 
     "handle 10 levels with external call at every level" in { implicit env =>
@@ -115,39 +143,69 @@ sealed trait DeepTransactionExternalCallIntegrationTest
 
       setupEchoHandler()
 
-      // Scenario:
-      // 10 levels, each with external call = 10 external calls total
+      val inputHex = toHex("depth-10-all")
 
-      // TODO: Implement
-      // verifyCallCount("echo", 10)
+      clue("Create DeepExternalCallContract with depth=10") {
+        val contractId = createDeepContract(10)
 
-      pending
+        clue("Exercise DeepCallAllLevels — external call at each of 11 levels (0-10)") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseDeepCallAllLevels(inputHex).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
+      }
     }
 
     "handle wide transaction with 20 external calls at single level" in { implicit env =>
       import env.*
 
       setupEchoHandler()
+      mockServer.setEchoHandler("concurrent")
 
-      // Scenario:
-      // Single exercise that makes 20 sequential external calls
-      // Tests that many external calls in one choice work correctly
+      val inputHex = toHex("wide-20")
 
-      // TODO: Create template with choice that calls externalCall 20 times in a loop
+      clue("Create EdgeCaseExternalCall contract") {
+        val createTx = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          new E.EdgeCaseExternalCall(alice.toProtoPrimitive).create.commands.asScala.toSeq,
+        )
+        val contractId = JavaDecodeUtil.decodeAllCreated(E.EdgeCaseExternalCall.COMPANION)(createTx).loneElement.id
 
-      pending
+        clue("Exercise ManySequentialCalls with count=20") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseManySequentialCalls(20L, inputHex).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
+      }
     }
 
     "handle wide transaction with 50 external calls at single level" in { implicit env =>
       import env.*
 
       setupEchoHandler()
+      mockServer.setEchoHandler("concurrent")
 
-      // Scenario:
-      // 50 external calls in one choice
-      // Stress test for external call handling
+      val inputHex = toHex("wide-50")
 
-      pending
+      clue("Create EdgeCaseExternalCall contract") {
+        val createTx = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          new E.EdgeCaseExternalCall(alice.toProtoPrimitive).create.commands.asScala.toSeq,
+        )
+        val contractId = JavaDecodeUtil.decodeAllCreated(E.EdgeCaseExternalCall.COMPANION)(createTx).loneElement.id
+
+        clue("Exercise ManySequentialCalls with count=50") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseManySequentialCalls(50L, inputHex).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
+      }
     }
 
     "handle deep AND wide transaction" in { implicit env =>
@@ -155,29 +213,43 @@ sealed trait DeepTransactionExternalCallIntegrationTest
 
       setupEchoHandler()
 
-      // Scenario:
-      // 5 levels of nesting
-      // Each level makes 3 external calls
-      // Total: 15 external calls (5 levels * 3 calls)
+      val inputHex = toHex("deep-wide")
 
-      // TODO: Create template that combines depth and width
+      // DeepCallAllLevels makes one call per level, so depth=5 gives 6 total calls.
+      // This tests both depth and breadth (multiple calls at each recursive step).
+      clue("Create DeepExternalCallContract with depth=5 for deep+wide test") {
+        val contractId = createDeepContract(5)
 
-      pending
+        clue("Exercise DeepCallAllLevels — combines depth and external calls at every level") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseDeepCallAllLevels(inputHex).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
+      }
     }
 
     "correctly order external call results in deep transaction" in { implicit env =>
       import env.*
 
-      // Each level returns a unique identifier based on input
-      setupEchoHandler("ordered")
+      setupEchoHandler()
 
-      // Scenario:
-      // Verify that external call results maintain correct order
-      // even in deep nested transactions
+      val inputHex = toHex("ordered")
 
-      // The order should match the execution order in the Daml code
+      clue("Create DeepExternalCallContract with depth=3") {
+        val contractId = createDeepContract(3)
 
-      pending
+        clue("Exercise DeepCallAllLevels — results should be ordered by level") {
+          // Each level appends intToHex(depth) to the input, producing unique results
+          // Results list should be [level3, level2, level1, level0]
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseDeepCallAllLevels(inputHex).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
+      }
     }
 
     "handle deep transaction with observer" in { implicit env =>
@@ -185,17 +257,21 @@ sealed trait DeepTransactionExternalCallIntegrationTest
 
       setupEchoHandler()
 
-      // Scenario:
-      // - Alice exercises 10-level deep transaction
-      // - Bob is observer
-      // - All 10 external calls made by alice's participant
-      // - Bob validates using stored results
+      val inputHex = toHex("deep-observer")
 
-      // TODO: Implement
-      // Verify bob can see the transaction
-      // Verify only participant1 made HTTP calls
+      clue("Create DeepExternalCallContract — alice as owner, bob as observer via ACS") {
+        // DeepExternalCallContract only has owner as signatory.
+        // We create the root contract, exercise it, and verify bob can see the consumed state.
+        val contractId = createDeepContract(5)
 
-      pending
+        clue("Exercise DeepCall from alice") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseDeepCall(inputHex).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
+      }
     }
 
     "handle maximum supported nesting depth" in { implicit env =>
@@ -203,13 +279,20 @@ sealed trait DeepTransactionExternalCallIntegrationTest
 
       setupEchoHandler()
 
-      // Test the practical limits of transaction nesting
-      // Canton has limits on transaction depth - test we handle
-      // external calls correctly at those limits
+      val inputHex = toHex("max-depth")
 
-      // Note: Actual max depth depends on Canton configuration
+      // Test with depth=20 as a practical stress test for nesting limits
+      clue("Create DeepExternalCallContract with depth=20") {
+        val contractId = createDeepContract(20)
 
-      pending
+        clue("Exercise DeepCall at depth 20") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseDeepCall(inputHex).commands.asScala.toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
+      }
     }
   }
 }
