@@ -129,6 +129,8 @@ abstract class AbstractMessageProcessor(
             messageId = messageId.getOrElse(MessageId.randomMessageId()),
             callback = SendCallback.log(s"Response message for request [$requestId]", logger),
             amplify = true,
+            // We want to use a shorter patience for the confirmation responses
+            useConfirmationResponseAmplificationParameters = true,
           )
 
         /*

@@ -23,6 +23,8 @@ import com.digitalasset.canton.lifecycle.{
   PromiseUnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.participant.ParticipantNode
+import com.digitalasset.canton.protocol.StaticSynchronizerParameters
 import com.digitalasset.canton.protocol.messages.{
   ConfirmationResponses,
   SignedProtocolMessage,
@@ -51,8 +53,8 @@ import com.digitalasset.canton.synchronizer.sequencer.traffic.{
   SequencerTrafficStatus,
 }
 import com.digitalasset.canton.time.{Clock, SynchronizerTimeTracker}
-import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.topology.processing.EffectiveTime
+import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.*
@@ -477,6 +479,17 @@ trait HasProgrammableSequencer {
         )
       }
   }
+
+  def signModifiedSubmissionRequestForParticipant(
+      request: SubmissionRequest,
+      node: ParticipantNode,
+      psid: PhysicalSynchronizerId,
+      staticSynchronizerParameters: StaticSynchronizerParameters,
+  )(implicit executionContext: ExecutionContext): SignedContent[SubmissionRequest] =
+    signModifiedSubmissionRequest(
+      request,
+      node.sync.syncCrypto.tryForSynchronizer(psid, staticSynchronizerParameters),
+    )
 
   // Sign a (modified) submission request
   def signModifiedSubmissionRequest(

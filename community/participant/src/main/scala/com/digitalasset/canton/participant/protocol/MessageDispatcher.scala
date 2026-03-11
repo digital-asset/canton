@@ -8,6 +8,7 @@ import cats.syntax.alternative.*
 import cats.syntax.functorFilter.*
 import cats.{Foldable, Monoid}
 import com.daml.nonempty.NonEmpty
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.ViewType.{
   AssignmentViewType,
   TransactionViewType,
@@ -292,6 +293,7 @@ trait MessageDispatcher { this: NamedLogging =>
           sc = sc,
           ts = ts,
           isReceipt = isReceipt,
+          trafficCost = event.event.content.trafficCost,
         )
     }
   }
@@ -303,6 +305,7 @@ trait MessageDispatcher { this: NamedLogging =>
       sc: SequencerCounter,
       ts: CantonTimestamp,
       isReceipt: Boolean,
+      trafficCost: NonNegativeLong,
   )(implicit traceContext: TraceContext): ProcessingResult = {
     def withNewRequestCounter(
         body: RequestCounter => ProcessingResult
@@ -327,7 +330,7 @@ trait MessageDispatcher { this: NamedLogging =>
         doProcess(
           RequestKind(
             goodRequest.rootHashMessage.viewType,
-            () => processor.processRequest(ts, rc, sc, batch),
+            () => processor.processRequest(ts, rc, sc, batch, trafficCost),
           )
         )
       }

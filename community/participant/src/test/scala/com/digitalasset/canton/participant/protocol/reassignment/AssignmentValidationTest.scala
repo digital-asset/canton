@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.protocol.reassignment
 
 import com.digitalasset.canton.*
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.data.ReassignmentRef.ReassignmentIdRef
@@ -151,6 +152,7 @@ final class AssignmentValidationTest
       cryptoSnapshot,
       cryptoSnapshot.ipsSnapshot.findDynamicSynchronizerParameters().futureValueUS.value,
       view.reassignmentId,
+      NonNegativeLong.tryCreate(456),
     )
   }
 

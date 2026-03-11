@@ -198,6 +198,7 @@ object DbDto {
       message_uuid: Option[String],
       is_transaction: Boolean,
       trace_context: Array[Byte],
+      traffic_cost: Long,
   ) extends DbDto
 
   final case class StringInterningDto(

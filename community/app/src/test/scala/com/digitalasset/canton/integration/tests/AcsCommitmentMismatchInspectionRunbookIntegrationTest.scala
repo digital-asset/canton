@@ -98,7 +98,7 @@ trait AcsCommitmentMismatchInspectionRunbookIntegrationTest
         participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
         participants.all.foreach(_.dars.upload(CantonExamplesPath, synchronizerId = daId))
         participants.all.foreach(_.dars.upload(CantonExamplesPath, synchronizerId = acmeId))
-        passTopologyRegistrationTimeout(env)
+        passTopologyRegistrationTimeout()
       }
 
   "Commitment mismatch inspection runbook should work" in { implicit env =>

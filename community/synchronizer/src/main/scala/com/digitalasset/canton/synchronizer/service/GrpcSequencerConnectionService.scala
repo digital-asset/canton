@@ -105,13 +105,18 @@ class GrpcSequencerConnectionService(
       request: v30.SetConnectionRequest
   ): Either[StatusException, SequencerConnections] = {
     val v30.SetConnectionRequest(sequencerConnectionsPO, validation) = request
-    ProtoConverter
-      .parseRequired(
-        SequencerConnections.fromProtoV30,
-        "sequencerConnections",
-        sequencerConnectionsPO,
+    for {
+      result <- ProtoConverter
+        .parseRequired(
+          SequencerConnections.fromProtoV30,
+          "sequencerConnections",
+          sequencerConnectionsPO,
+        )
+        .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.message).asException())
+      _ <- result.submissionRequestAmplification.validate.leftMap(message =>
+        Status.INVALID_ARGUMENT.withDescription(message).asException()
       )
-      .leftMap(err => Status.INVALID_ARGUMENT.withDescription(err.message).asException())
+    } yield result
   }
 
   private def validateReplacement(

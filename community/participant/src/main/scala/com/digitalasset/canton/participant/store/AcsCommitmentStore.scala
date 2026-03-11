@@ -323,6 +323,9 @@ trait IncrementalCommitmentStore {
   def markReinitializationCompleted(timestamp: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Boolean]
+
+  /** Forget all the running commitments in the checkpoint */
+  def forgetCheckpoints()(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit]
 }
 
 /** Manages the buffer (priority queue) for incoming commitments.

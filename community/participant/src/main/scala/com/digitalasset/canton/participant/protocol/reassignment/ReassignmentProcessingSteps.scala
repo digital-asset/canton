@@ -11,6 +11,7 @@ import cats.syntax.parallel.*
 import cats.syntax.traverse.*
 import com.daml.nonempty.NonEmpty
 import com.daml.nonempty.catsinstances.*
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.{
   Signature,
   SyncCryptoError,
@@ -265,6 +266,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
       mediator: MediatorGroupRecipient,
       snapshot: SynchronizerSnapshotSyncCryptoApi,
       synchronizerParameters: DynamicSynchronizerParametersWithValidity,
+      trafficCost: NonNegativeLong,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[ParsedReassignmentRequest[FullView]] = {
@@ -299,6 +301,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
         snapshot,
         synchronizerParameters,
         reassignmentId(viewTree, ts),
+        trafficCost,
       )
     )
   }
@@ -331,6 +334,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
       rootHash: RootHash,
       freshOwnTimelyTx: Boolean,
       error: TransactionError,
+      trafficCost: NonNegativeLong,
   )(implicit
       traceContext: TraceContext
   ): (Option[SequencedUpdate], Option[PendingSubmissionId]) = {
@@ -343,6 +347,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
       commandId = submitterMetadata.commandId,
       optDeduplicationPeriod = None,
       submissionId = None,
+      paidTrafficCost = trafficCost,
     )
     val updateO = Option.when(isSubmittingParticipant)(
       Update.SequencedCommandRejected(
@@ -370,11 +375,13 @@ private[reassignment] trait ReassignmentProcessingSteps[
         commandId = pendingReassignment.submitterMetadata.commandId,
         optDeduplicationPeriod = None,
         submissionId = pendingReassignment.submitterMetadata.submissionId,
+        // TODO(i31036): support traffic cost for re-assignments
+        paidTrafficCost = NonNegativeLong.zero,
       )
     )
     errorDetails.logRejection(Map("requestId" -> pendingReassignment.requestId.toString))
     val rejection = Update.CommandRejected.FinalReason(errorDetails.reason)
-    val updateO = completionInfoO.map(info =>
+    val updateO: Option[SequencedUpdate] = completionInfoO.map(info =>
       Update.SequencedCommandRejected(
         info,
         rejection,
@@ -621,6 +628,7 @@ object ReassignmentProcessingSteps {
       override val snapshot: SynchronizerSnapshotSyncCryptoApi,
       override val synchronizerParameters: DynamicSynchronizerParametersWithValidity,
       reassignmentId: ReassignmentId,
+      override val trafficCost: NonNegativeLong,
   ) extends ParsedRequest[ReassignmentSubmitterMetadata] {
     override def rootHash: RootHash = fullViewTree.rootHash
   }

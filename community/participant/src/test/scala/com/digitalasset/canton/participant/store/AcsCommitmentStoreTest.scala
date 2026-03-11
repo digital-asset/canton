@@ -1202,6 +1202,36 @@ trait IncrementalCommitmentStoreTest extends CommitmentStoreBaseTest {
         reinit3 shouldBe ReinitializationStatus(Some(ts3), Some(ts2))
       }
     }
+
+    "truncateCheckpoints forgets all checkpointed commitments" in {
+      val snapshot = mk()
+      val snapAB10 = ByteString.copyFromUtf8("AB10")
+
+      for {
+        _ <- snapshot.update(
+          rt(1, 0),
+          updates = Map(
+            SortedSet(internalizedAlice, internalizedBob) -> snapAB10
+          ),
+          deletes = Set.empty,
+          Checkpoint,
+        )
+        res1 <- snapshot.get()
+        wm1 <- snapshot.watermark
+
+        _ <- snapshot.forgetCheckpoints()
+        res2 <- snapshot.get()
+        wm2 <- snapshot.watermark
+      } yield {
+        wm1 shouldBe rt(1, 0)
+        res1 shouldBe (rt(1, 0) -> Map(
+          SortedSet(internalizedAlice, internalizedBob) -> snapAB10
+        ))
+
+        wm2 shouldBe RecordTime.MinValue
+        res2 shouldBe (RecordTime.MinValue -> Map.empty)
+      }
+    }
   }
 }
 

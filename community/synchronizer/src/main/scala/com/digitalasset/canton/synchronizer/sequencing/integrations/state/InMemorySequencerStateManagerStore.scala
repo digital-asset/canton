@@ -88,12 +88,9 @@ class InMemorySequencerStateManagerStore(
   override def pruneExpiredInFlightAggregations(upToInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.pure {
-    pruneExpiredInFlightAggregationsInternal(upToInclusive).discard[InFlightAggregations]
+    state
+      .updateAndGet(_.pruneExpiredInFlightAggregations(upToInclusive))
+      .inFlightAggregations
+      .discard
   }
-
-  private[synchronizer] def pruneExpiredInFlightAggregationsInternal(
-      upToInclusive: CantonTimestamp
-  ): InFlightAggregations =
-    state.updateAndGet(_.pruneExpiredInFlightAggregations(upToInclusive)).inFlightAggregations
-
 }

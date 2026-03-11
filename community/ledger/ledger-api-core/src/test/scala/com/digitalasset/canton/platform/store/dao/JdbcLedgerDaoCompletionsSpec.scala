@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.store.dao
 
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.data.Offset.firstOffset
 import com.digitalasset.canton.ledger.participant.state
@@ -89,13 +90,14 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
   }
 
   it should "return the expected completion for a rejection" in {
+    val paidTrafficCost = NonNegativeLong.tryCreate(54354)
     val expectedCmdId = UUID.randomUUID.toString
     val rejection = new state.Update.CommandRejected.FinalReason(
       RpcStatus.of(Status.Code.ABORTED.value(), "Stop.", Seq.empty)
     )
     for {
       from <- ledgerDao.lookupLedgerEnd()
-      offset <- storeRejection(rejection, expectedCmdId)
+      offset <- storeRejection(rejection, expectedCmdId, paidTrafficCost = paidTrafficCost)
       to <- ledgerDao.lookupLedgerEnd()
       (_, response) <- ledgerDao.completions
         .getCommandCompletions(
@@ -113,6 +115,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       completion.updateId shouldBe empty
       completion.commandId shouldBe expectedCmdId
       completion.status shouldBe Some(rejection.status)
+      completion.paidTrafficCost shouldBe paidTrafficCost.value
     }
   }
 
@@ -265,6 +268,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
       reason: state.Update.CommandRejected.RejectionReasonTemplate,
       commandId: Ref.CommandId = UUID.randomUUID().toString,
       submissionId: Ref.SubmissionId = UUID.randomUUID().toString,
+      paidTrafficCost: NonNegativeLong = NonNegativeLong.zero,
   ): Future[Offset] = {
     val offset = nextOffset()
     ledgerDao
@@ -276,6 +280,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
             commandId = commandId,
             optDeduplicationPeriod = None,
             submissionId = Some(submissionId),
+            paidTrafficCost = paidTrafficCost,
           )
         ),
         recordTime = Timestamp.now(),
@@ -300,6 +305,7 @@ private[dao] trait JdbcLedgerDaoCompletionsSpec extends OptionValues with LoneEl
             commandId = commandId,
             optDeduplicationPeriod = None,
             submissionId = Some(submissionId),
+            paidTrafficCost = NonNegativeLong.zero,
           )
         ),
         recordTime = Timestamp.now(),

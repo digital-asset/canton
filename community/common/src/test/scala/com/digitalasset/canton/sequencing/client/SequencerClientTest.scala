@@ -1192,6 +1192,50 @@ final class SequencerClientTest
         env.client.close()
       }
 
+      "ignore the confirmation response amplification parameters if usage is not enabled" in {
+        val env = RichEnvFactory.create(
+          options = SequencerClientConfig(enableAmplificationImprovements = true),
+          amplificationConfig = amplificationConfig.copy(confirmationResponsePatienceO =
+            Some(config.NonNegativeFiniteDuration.ofSeconds(3))
+          ),
+          firstSendAsyncResponseO = Some(Right(_ => ())),
+        )
+
+        env
+          .sendAsync(
+            Batch.empty(testedProtocolVersion),
+            amplify = true,
+            useConfirmationResponseAmplificationParameters = false,
+          )
+          .futureValueUS shouldBe Right(())
+
+        checkTimeOfAmplification(env, CantonTimestamp.ofEpochSecond(10))
+
+        env.client.close()
+      }
+
+      "use the confirmation response  amplification parameters if usage is enabled" in {
+        val env = RichEnvFactory.create(
+          options = SequencerClientConfig(enableAmplificationImprovements = true),
+          amplificationConfig = amplificationConfig.copy(confirmationResponsePatienceO =
+            Some(config.NonNegativeFiniteDuration.ofSeconds(3))
+          ),
+          firstSendAsyncResponseO = Some(Right(_ => ())),
+        )
+
+        env
+          .sendAsync(
+            Batch.empty(testedProtocolVersion),
+            amplify = true,
+            useConfirmationResponseAmplificationParameters = true,
+          )
+          .futureValueUS shouldBe Right(())
+
+        checkTimeOfAmplification(env, CantonTimestamp.ofEpochSecond(3))
+
+        env.client.close()
+      }
+
       "be scheduled after the transport delay if it exceeds the patience and the flag is not set" in {
         val env = RichEnvFactory.create(
           options = SequencerClientConfig(enableAmplificationImprovements = false),
@@ -1507,11 +1551,18 @@ final class SequencerClientTest
         batch: Batch[DefaultOpenEnvelope],
         messageId: MessageId = client.generateMessageId,
         amplify: Boolean = false,
+        useConfirmationResponseAmplificationParameters: Boolean = false,
     )(implicit
         traceContext: TraceContext
     ): EitherT[FutureUnlessShutdown, SendAsyncClientError, Unit] = {
       implicit val metricsContext: MetricsContext = MetricsContext.Empty
-      client.send(batch, messageId = messageId, amplify = amplify)
+      client.send(
+        batch,
+        messageId = messageId,
+        amplify = amplify,
+        useConfirmationResponseAmplificationParameters =
+          useConfirmationResponseAmplificationParameters,
+      )
     }
 
     def logout(): EitherT[FutureUnlessShutdown, Status, Unit] = client.logout()

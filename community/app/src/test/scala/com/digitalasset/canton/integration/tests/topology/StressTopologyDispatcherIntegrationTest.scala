@@ -180,6 +180,8 @@ trait StressTopologyDispatcherIntegrationTest
               _.shouldBeCantonErrorCode(InvalidAcknowledgementSignature),
               _.shouldBeCantonErrorCode(InvalidSubmissionRequestSignature),
               _.errorMessage should include("periodic acknowledgement failed"),
+              _.warningMessage should include("PrePrepare validation failed"),
+              _.warningMessage should include("synchronizer outbox flusher failed"),
             ),
           ),
         )

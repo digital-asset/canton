@@ -6,6 +6,7 @@ package com.digitalasset.canton.sequencing.protocol
 import cats.Applicative
 import com.digitalasset.canton.*
 import com.digitalasset.canton.ProtoDeserializationError.OtherError
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.HashOps
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
@@ -44,6 +45,15 @@ sealed trait SequencedEvent[+Env <: Envelope[?]]
   @transient override protected lazy val companionObj: SequencedEvent.type = SequencedEvent
 
   protected def toProtoV30: v30.SequencedEvent
+
+  def trafficReceipt: Option[TrafficReceipt]
+
+  /** Traffic cost charged for the ordering of the event.
+    * @return
+    *   the associated cost if the traffic receipt is set, 0 otherwise
+    */
+  def trafficCost: NonNegativeLong =
+    trafficReceipt.map(_.consumedCost).getOrElse(NonNegativeLong.zero)
 
   /** The timestamp of the previous event in the member's subscription, or `None` if this event is
     * the first
@@ -215,15 +225,6 @@ sealed abstract case class DeliverError private[sequencing] (
     topologyTimestamp = None,
     trafficReceipt = trafficReceipt.map(_.toProtoV30),
   )
-
-  def updateTrafficReceipt(trafficReceipt: Option[TrafficReceipt]): DeliverError = new DeliverError(
-    previousTimestamp,
-    timestamp,
-    synchronizerId,
-    messageId,
-    reason,
-    trafficReceipt,
-  )(deserializedFrom) {}
 
   override protected def traverse[F[_], Env <: Envelope[?]](f: Nothing => F[Env])(implicit
       F: Applicative[F]

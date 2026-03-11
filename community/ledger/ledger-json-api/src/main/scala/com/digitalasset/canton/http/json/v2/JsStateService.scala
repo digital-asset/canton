@@ -171,6 +171,7 @@ class JsStateService(
 
 object JsStateService extends DocumentationEndpoints {
   import Endpoints.*
+  import JsSchema.JsServicesCommonCodecs.*
   import JsStateServiceCodecs.*
 
   private lazy val state = v2Endpoint.in(sttp.tapir.stringToPath("state"))
@@ -302,7 +303,8 @@ object JsStateServiceCodecs {
   // Schema mappings are added to align generated tapir docs with a circe mapping of ADTs
 
   @SuppressWarnings(Array("org.wartremover.warts.Product", "org.wartremover.warts.Serializable"))
-  implicit val jsContractEntrySchema: Schema[JsContractEntry] = Schema.oneOfWrapped
+  implicit val jsContractEntrySchema: Schema[JsContractEntry] =
+    Schema.oneOfWrapped[JsContractEntry].oneOfExtension()
 
   implicit val connectedSynchronizerSchema
       : Schema[state_service.GetConnectedSynchronizersResponse.ConnectedSynchronizer] =

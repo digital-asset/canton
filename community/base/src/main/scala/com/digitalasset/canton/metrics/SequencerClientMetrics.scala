@@ -5,7 +5,7 @@ package com.digitalasset.canton.metrics
 
 import cats.Eval
 import com.daml.metrics.api.HistogramInventory.Item
-import com.daml.metrics.api.MetricHandle.{Counter, Gauge, LabeledMetricsFactory, Timer}
+import com.daml.metrics.api.MetricHandle.{Counter, Gauge, LabeledMetricsFactory, Meter, Timer}
 import com.daml.metrics.api.{
   HistogramInventory,
   MetricInfo,
@@ -41,6 +41,17 @@ class SequencerClientHistograms(basePrefix: MetricName)(implicit
           |Note that this is just for the request to be made and not for the requested event to actually be sequenced.
           |""",
     qualification = MetricQualification.Debug,
+  )
+
+  private[metrics] val attemptSequencingTime: Item = Item(
+    submissionPrefix :+ "amplification",
+    summary = "Rate and timings of submission request attempts to a sequencer",
+    description =
+      """This timer is started when a submission request attempt is sent to the sequencer,
+        |and completed when it is observed as sequenced. If the attempt is not observed as
+        |sequenced before the amplification patience expires, no timing will be recorded for
+        |this and the following attempts.""".stripMargin,
+    qualification = MetricQualification.Latency,
   )
 
   private[metrics] val submissionSequencingTime: Item = Item(
@@ -249,6 +260,40 @@ class SequencerClientMetrics(
     val sends: Timer = metricsFactory.timer(histograms.submissionSends.info)
 
     val sequencingTime: Timer = metricsFactory.timer(histograms.submissionSequencingTime.info)
+
+    val attemptSequencingTime: Timer = metricsFactory.timer(histograms.attemptSequencingTime.info)
+
+    val attemptSyncErrors: Meter = metricsFactory.meter(
+      MetricInfo(
+        prefix :+ "attempt-sync-errors",
+        summary = "Count of send request attempts which receive a synchronous error",
+        description =
+          """Counter that is incremented if a send request attempt receives a synchronous error from the sequencer.""",
+        qualification = MetricQualification.Errors,
+      )
+    )
+
+    val amplifiedAttempts: Meter = metricsFactory.meter(
+      MetricInfo(
+        prefix :+ "amplified-attempts",
+        summary = "Count of send request attempts which are amplified",
+        description =
+          """Counter that is incremented if a send request attempt, which did not receive a synchronous
+            |error from the sequencer, is not observed as sequenced until the amplification patience
+            |expires and a new attempt is sent.""".stripMargin,
+        qualification = MetricQualification.Errors,
+      )
+    )
+
+    val noConnectionAvailable: Meter = metricsFactory.meter(
+      MetricInfo(
+        prefix :+ "no-connection-available",
+        summary = "Count of send attempts which are skipped because no connection is available",
+        description =
+          """Counter that is incremented if a send request attempt is skipped because there is no connection available.""".stripMargin,
+        qualification = MetricQualification.Errors,
+      )
+    )
 
     val overloaded: Counter = metricsFactory.counter(
       MetricInfo(

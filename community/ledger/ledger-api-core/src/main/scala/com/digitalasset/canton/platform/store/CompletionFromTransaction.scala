@@ -32,29 +32,30 @@ object CompletionFromTransaction {
       userId: String,
       synchronizerId: String,
       traceContext: TraceContext,
+      trafficCost: Long,
       optSubmissionId: Option[String] = None,
       optDeduplicationOffset: Option[Long] = None,
       optDeduplicationDurationSeconds: Option[Long] = None,
       optDeduplicationDurationNanos: Option[Int] = None,
-  ): CompletionStreamResponse =
-    CompletionStreamResponse.of(
-      completionResponse = CompletionResponse.Completion(
-        toApiCompletion(
-          submitters = submitters,
-          commandId = commandId,
-          updateId = updateId.toHexString,
-          userId = userId,
-          traceContext = traceContext,
-          optStatus = Some(OkStatus),
-          optSubmissionId = optSubmissionId,
-          optDeduplicationOffset = optDeduplicationOffset,
-          optDeduplicationDurationSeconds = optDeduplicationDurationSeconds,
-          optDeduplicationDurationNanos = optDeduplicationDurationNanos,
-          offset = offset.unwrap,
-          synchronizerTime = Some(toApiSynchronizerTime(synchronizerId, recordTime)),
-        )
+  ): CompletionStreamResponse = CompletionStreamResponse.of(
+    completionResponse = CompletionResponse.Completion(
+      toApiCompletion(
+        submitters = submitters,
+        commandId = commandId,
+        updateId = updateId.toHexString,
+        userId = userId,
+        traceContext = traceContext,
+        optStatus = Some(OkStatus),
+        optSubmissionId = optSubmissionId,
+        optDeduplicationOffset = optDeduplicationOffset,
+        optDeduplicationDurationSeconds = optDeduplicationDurationSeconds,
+        optDeduplicationDurationNanos = optDeduplicationDurationNanos,
+        offset = offset.unwrap,
+        synchronizerTime = Some(toApiSynchronizerTime(synchronizerId, recordTime)),
+        trafficCost = trafficCost,
       )
     )
+  )
 
   def rejectedCompletion(
       submitters: Set[String],
@@ -65,29 +66,30 @@ object CompletionFromTransaction {
       userId: String,
       synchronizerId: String,
       traceContext: TraceContext,
+      trafficCost: Long,
       optSubmissionId: Option[String] = None,
       optDeduplicationOffset: Option[Long] = None,
       optDeduplicationDurationSeconds: Option[Long] = None,
       optDeduplicationDurationNanos: Option[Int] = None,
-  ): CompletionStreamResponse =
-    CompletionStreamResponse.of(
-      completionResponse = CompletionResponse.Completion(
-        toApiCompletion(
-          submitters = submitters,
-          commandId = commandId,
-          updateId = RejectionUpdateId,
-          userId = userId,
-          traceContext = traceContext,
-          optStatus = Some(status),
-          optSubmissionId = optSubmissionId,
-          optDeduplicationOffset = optDeduplicationOffset,
-          optDeduplicationDurationSeconds = optDeduplicationDurationSeconds,
-          optDeduplicationDurationNanos = optDeduplicationDurationNanos,
-          offset = offset.unwrap,
-          synchronizerTime = Some(toApiSynchronizerTime(synchronizerId, recordTime)),
-        )
+  ): CompletionStreamResponse = CompletionStreamResponse.of(
+    completionResponse = CompletionResponse.Completion(
+      toApiCompletion(
+        submitters = submitters,
+        commandId = commandId,
+        updateId = RejectionUpdateId,
+        userId = userId,
+        traceContext = traceContext,
+        optStatus = Some(status),
+        optSubmissionId = optSubmissionId,
+        optDeduplicationOffset = optDeduplicationOffset,
+        optDeduplicationDurationSeconds = optDeduplicationDurationSeconds,
+        optDeduplicationDurationNanos = optDeduplicationDurationNanos,
+        offset = offset.unwrap,
+        synchronizerTime = Some(toApiSynchronizerTime(synchronizerId, recordTime)),
+        trafficCost = trafficCost,
       )
     )
+  )
 
   private def toApiSynchronizerTime(
       synchronizerId: String,
@@ -111,6 +113,7 @@ object CompletionFromTransaction {
       optDeduplicationDurationNanos: Option[Int],
       offset: Long,
       synchronizerTime: Option[SynchronizerTime],
+      trafficCost: Long,
   ): Completion = {
     val completionWithMandatoryFields = Completion(
       commandId = commandId,
@@ -123,6 +126,7 @@ object CompletionFromTransaction {
       traceContext = SerializableTraceContext(traceContext).toDamlProtoOpt,
       offset = offset,
       synchronizerTime = synchronizerTime,
+      paidTrafficCost = trafficCost,
     )
     val optDeduplicationPeriod = toApiDeduplicationPeriod(
       optDeduplicationOffset = optDeduplicationOffset,

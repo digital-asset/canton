@@ -3,19 +3,28 @@
 
 package com.digitalasset.canton.integration.tests.security
 
-import com.daml.nonempty.NonEmpty
+import cats.instances.list.*
+import com.daml.nonempty.NonEmptyUtil.instances.*
+import com.daml.nonempty.catsinstances.*
+import com.daml.nonempty.{NonEmpty, NonEmptyF}
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.crypto.{CryptoPureApi, SyncCryptoApi}
 import com.digitalasset.canton.data.*
 import com.digitalasset.canton.data.MerkleTree.VersionedMerkleTree
 import com.digitalasset.canton.protocol.messages.*
 import com.digitalasset.canton.sequencing.protocol.{
+  Batch,
   ClosedEnvelope,
+  MediatorGroupRecipient,
   OpenEnvelope,
+  Recipient,
   Recipients,
+  RecipientsTree,
   SubmissionRequest,
 }
-import monocle.macros.GenLens
+import com.digitalasset.canton.util.SetsUtil.instances.*
+import monocle.function.Each
+import monocle.macros.{GenLens, GenPrism}
 import monocle.{Lens, Traversal}
 import org.scalactic.source.Position
 
@@ -108,4 +117,17 @@ trait SecurityTestLensUtils {
           Recipients,
         ]
       )
+
+  def submissionRequestRecipients: Traversal[SubmissionRequest, Recipients] =
+    GenLens[SubmissionRequest](_.batch)
+      .andThen(GenLens[Batch[ClosedEnvelope]](_.envelopes))
+      .andThen(Traversal.fromTraverse[List, ClosedEnvelope])
+      .andThen(GenLens[ClosedEnvelope](_.recipients))
+
+  def mediatorGroupRecipient: Traversal[Recipients, MediatorGroupRecipient] =
+    GenLens[Recipients](_.trees).toNEF
+      .andThen(Traversal.fromTraverse[NonEmptyF[Seq, *], RecipientsTree])
+      .andThen(GenLens[RecipientsTree](_.recipientGroup))
+      .andThen(Each.each[NonEmpty[Set[Recipient]], Recipient])
+      .andThen(GenPrism[Recipient, MediatorGroupRecipient])
 }

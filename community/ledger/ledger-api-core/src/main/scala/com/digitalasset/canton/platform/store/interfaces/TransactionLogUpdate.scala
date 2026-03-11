@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.store.interfaces
 
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.Hash as CantonHash
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.TransactionShape
@@ -46,6 +47,10 @@ object TransactionLogUpdate {
     *   The successful submission's completion details.
     * @param recordTime
     *   The time at which the transaction was recorded.
+    * @param externalTransactionHash
+    *   Hash of the transaction (for externall signed transactions only)
+    * @param paidTrafficCost
+    *   Traffic cost paid by this node for the ordering of the corresponding confirmation request
     */
   final case class TransactionAccepted(
       updateId: String,
@@ -58,6 +63,7 @@ object TransactionLogUpdate {
       synchronizerId: String,
       recordTime: Timestamp,
       externalTransactionHash: Option[CantonHash],
+      paidTrafficCost: NonNegativeLong,
   )(implicit override val traceContext: TraceContext)
       extends TransactionLogUpdate
 

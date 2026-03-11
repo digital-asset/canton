@@ -12,7 +12,10 @@ import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
-import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceSynchronizerDisabledUs
+import com.digitalasset.canton.participant.sync.SyncServiceError.{
+  SyncServiceSynchronizerDisabledUs,
+  SyncServiceSynchronizerDisconnect,
+}
 import com.digitalasset.canton.participant.synchronizer.SynchronizerRegistryError.InitialOnboardingError
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import io.scalaland.chimney.dsl.*
@@ -178,6 +181,10 @@ sealed trait PermissionedSynchronizerTest
         mayContain = Seq(
           _.warningMessage should include("PERMISSION_DENIED/Authentication token refresh error"),
           _.warningMessage should include("Token refresh aborted due to shutdown"),
+          _.shouldBeCantonError(
+            SyncServiceSynchronizerDisconnect,
+            _ should include regex raw"Synchronizer '\S+' fatally disconnected because of Trust threshold \S+ is no longer reachable",
+          ),
         ),
       ),
     )

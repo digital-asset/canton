@@ -31,9 +31,10 @@ final case class IntervalDuration(interval: JDuration) extends AnyVal
 trait CommitmentTestUtil extends BaseTest with SortedReconciliationIntervalsHelpers {
   // advance the time sufficiently past the topology transaction registration timeout,
   // so that the ticks to detect a timeout for topology submissions does not seep into the following tests
-  protected def passTopologyRegistrationTimeout(
-      environment: TestConsoleEnvironment
-  )(implicit traceContext: TraceContext): Unit =
+  protected def passTopologyRegistrationTimeout()(implicit
+      environment: TestConsoleEnvironment,
+      traceContext: TraceContext,
+  ): Unit =
     environment.environment.simClock.value.advance(
       environment.participant1.config.topology.topologyTransactionRegistrationTimeout.asFiniteApproximation.toJava
     )

@@ -8,6 +8,7 @@ import cats.data.EitherT
 import cats.implicits.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.concurrent.FutureSupervisor
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.config.{
   DefaultProcessingTimeouts,
   SessionEncryptionKeyCacheConfig,
@@ -367,6 +368,7 @@ final class UnassignmentProcessingStepsTest
     cryptoSnapshot,
     cryptoSnapshot.ipsSnapshot.findDynamicSynchronizerParameters().futureValueUS.value,
     reassignmentId,
+    NonNegativeLong.tryCreate(789),
   )
 
   "UnassignmentRequest.validated" should {

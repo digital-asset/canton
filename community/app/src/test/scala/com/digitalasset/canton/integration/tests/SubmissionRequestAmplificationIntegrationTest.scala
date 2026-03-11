@@ -3,9 +3,9 @@
 
 package com.digitalasset.canton.integration.tests
 
+import com.daml.metrics.api.MetricsContext
 import com.daml.metrics.api.testing.MetricValues.*
 import com.digitalasset.canton.admin.api.client.data.TrafficControlParameters
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.{
   NonNegativeInt,
   NonNegativeLong,
@@ -13,7 +13,12 @@ import com.digitalasset.canton.config.RequireTypes.{
   PositiveInt,
 }
 import com.digitalasset.canton.config.{DbConfig, NonNegativeFiniteDuration}
-import com.digitalasset.canton.console.LocalSequencerReference
+import com.digitalasset.canton.console.{
+  LocalInstanceReference,
+  LocalMediatorReference,
+  LocalParticipantReference,
+  LocalSequencerReference,
+}
 import com.digitalasset.canton.integration.EnvironmentDefinition.S2M2
 import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.{
@@ -21,12 +26,14 @@ import com.digitalasset.canton.integration.plugins.{
   UseProgrammableSequencer,
   UseReferenceBlockSequencer,
 }
+import com.digitalasset.canton.integration.tests.SubmissionRequestAmplificationIntegrationTest.AmplificationMetrics
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   EnvironmentDefinition,
   SharedEnvironment,
   TestConsoleEnvironment,
 }
+import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.sequencing.protocol.{MessageId, TrafficState}
 import com.digitalasset.canton.sequencing.{SequencerConnections, SubmissionRequestAmplification}
 import com.digitalasset.canton.synchronizer.sequencer.{
@@ -36,7 +43,9 @@ import com.digitalasset.canton.synchronizer.sequencer.{
   SendPolicy,
 }
 import com.digitalasset.canton.topology.Member
+import com.digitalasset.canton.{SequencerAlias, config}
 import monocle.macros.syntax.lens.*
+import org.scalatest.Assertion
 
 import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.concurrent.duration.DurationInt
@@ -105,8 +114,8 @@ abstract class SubmissionRequestAmplificationIntegrationTest
         // TODO(#19911) Make this properly configurable
         sequencerTrustThreshold = PositiveInt.two,
         submissionRequestAmplification = SubmissionRequestAmplification(
-          PositiveInt.tryCreate(2),
-          config.NonNegativeFiniteDuration.Zero,
+          factor = PositiveInt.tryCreate(2),
+          patience = config.NonNegativeFiniteDuration.Zero,
         ),
       )
     )
@@ -311,6 +320,118 @@ abstract class SubmissionRequestAmplificationIntegrationTest
     sequencer.resetPolicy()
   }
 
+  private def getAmplificationMetrics(node: LocalInstanceReference)(implicit
+      env: TestConsoleEnvironment
+  ): AmplificationMetrics = {
+    import env.*
+
+    val sequencerClientMetrics = node match {
+      case p: LocalParticipantReference =>
+        p.underlying.value.metrics.connectedSynchronizerMetrics(daName).sequencerClient
+
+      case m: LocalMediatorReference =>
+        m.underlying.value.replicaManager.mediatorRuntime.value.mediator.metrics.sequencerClient
+
+      case s: LocalSequencerReference =>
+        s.underlying.value.sequencer.metrics.sequencerClient
+
+      case _ => fail("unexpected node")
+    }
+
+    val metrics = sequencerClientMetrics.submissions
+    AmplificationMetrics(
+      metrics.amplifiedAttempts.valuesWithContext,
+      metrics.attemptSyncErrors.valuesWithContext,
+      metrics.attemptSequencingTime.valuesWithContext.view.mapValues(_.size.toLong).toMap,
+      metrics.noConnectionAvailable.valuesWithContext,
+    )
+  }
+
+  private def assertAmplificationMetrics(
+      clue: String,
+      metricBefore: AmplificationMetrics,
+      metricAfter: AmplificationMetrics,
+      selector: AmplificationMetrics => Map[MetricsContext, Long],
+      assertion: (Long, Long) => Assertion,
+  )(implicit env: TestConsoleEnvironment): Assertion = {
+    import env.*
+
+    def aggregateValue(sequencerAlias: SequencerAlias, values: Map[MetricsContext, Long]): Long =
+      values.foldLeft(0L) { case (acc, (context, value)) =>
+        if (context.labels("sequencerAlias") == sequencerAlias.toString) acc + value else acc
+      }
+
+    // The connection pool adds a "-0" to the sequencer name to differentiate the HA connections
+    val sequencer1Alias = SequencerAlias.tryCreate(s"${sequencer1.name}-0")
+    val sequencer2Alias = SequencerAlias.tryCreate(s"${sequencer2.name}-0")
+    val forSequencer1 = (
+      aggregateValue(sequencer1Alias, selector(metricBefore)),
+      aggregateValue(sequencer1Alias, selector(metricAfter)),
+    )
+    val forSequencer2 = (
+      aggregateValue(sequencer2Alias, selector(metricBefore)),
+      aggregateValue(sequencer2Alias, selector(metricAfter)),
+    )
+
+    withClue(s"$clue, for sequencer1: $forSequencer1, for sequencer2: $forSequencer2")(
+      assertion(forSequencer1._2 - forSequencer1._1, forSequencer2._2 - forSequencer2._1)
+    )
+  }
+
+  "trigger sync-errors amplification metric when a sequencer rejects" in { implicit env =>
+    import env.*
+
+    val sequencer = getProgrammableSequencer(sequencer1.name)
+
+    sequencer.setPolicy_("reject everything but time proofs and ACS commitments")(
+      SendPolicy.processTimeProofs_ { submissionRequest =>
+        if (ProgrammableSequencerPolicies.isAcsCommitment(submissionRequest)) {
+          SendDecision.Process
+        } else {
+          SendDecision.Reject
+        }
+      }
+    )
+
+    val metricsBefore = nodes.local.map(getAmplificationMetrics)
+    loggerFactory.assertLoggedWarningsAndErrorsSeq(
+      participant1.health.ping(participant2.id),
+      logEntries => {
+        logEntries should not be empty
+        forAll(logEntries) { logEntry =>
+          logEntry.errorMessage should include("Message rejected by send policy")
+        }
+      },
+    )
+    sequencer.resetPolicy()
+
+    eventually() {
+      val metricsAfter = nodes.local.map(getAmplificationMetrics)
+
+      forEvery(nodes.local.zip(metricsBefore.zip(metricsAfter))) {
+        // Participants and mediators should have:
+        // - some sync errors on sequencer1
+        // - no sync error on sequencer2
+        case (node, (metricBefore, metricAfter)) =>
+          node match {
+            case _: LocalParticipantReference | _: LocalMediatorReference =>
+              assertAmplificationMetrics(
+                clue = s"$node: sync errors",
+                metricBefore = metricBefore,
+                metricAfter = metricAfter,
+                selector = _.attemptSyncErrors,
+                assertion = (forSequencer1, forSequencer2) => {
+                  forSequencer1 should be > 0L
+                  forSequencer2 shouldBe 0L
+                },
+              )
+
+            case _ =>
+          }
+      }
+    }
+  }
+
   def reconfigurePatience(
       newPatience: config.NonNegativeFiniteDuration
   )(implicit env: TestConsoleEnvironment): Unit = {
@@ -374,6 +495,7 @@ abstract class SubmissionRequestAmplificationIntegrationTest
       }
     }
 
+    val metricsBefore = nodes.local.map(getAmplificationMetrics)
     participant1.health.ping(participant2.id)
 
     val recordedMessageIds = messageIds.get()
@@ -383,6 +505,78 @@ abstract class SubmissionRequestAmplificationIntegrationTest
     sequencers.local.foreach(sequencerRef =>
       getProgrammableSequencer(sequencerRef.name).resetPolicy()
     )
+
+    eventually() {
+      val metricsAfter = nodes.local.map(getAmplificationMetrics)
+
+      forEvery(nodes.local.zip(metricsBefore.zip(metricsAfter))) {
+        // Participants and mediators should have:
+        // - some attempt durations on either sequencer
+        case (node, (metricBefore, metricAfter)) =>
+          node match {
+            case _: LocalParticipantReference | _: LocalMediatorReference =>
+              assertAmplificationMetrics(
+                clue = s"$node: durations",
+                metricBefore = metricBefore,
+                metricAfter = metricAfter,
+                selector = _.attemptSequencingTime,
+                assertion =
+                  (forSequencer1, forSequencer2) => (forSequencer1 + forSequencer2) should be > 0L,
+              )
+
+            case _ =>
+          }
+      }
+    }
+  }
+
+  "trigger no-connection-available amplification metric when all sequencers are down" in {
+    implicit env =>
+      import env.*
+
+      val metricsBefore = nodes.local.map(getAmplificationMetrics)
+      loggerFactory.assertLoggedWarningsAndErrorsSeq(
+        {
+          sequencers.local.foreach(_.stop())
+          participant1.health
+            .maybe_ping(
+              participant2.id,
+              timeout = config.NonNegativeDuration.tryFromDuration(1.seconds),
+            )
+          sequencers.local.foreach(_.start())
+          participant1.health.ping(participant2.id)
+        },
+        LogEntry.assertLogSeq(
+          mustContainWithClue = Seq.empty,
+          mayContain = Seq(
+            _.errorMessage should include("Timeout: We were unable to create the ping contract"),
+            _.warningMessage should include("Failed broadcasting topology transactions"),
+            _.warningMessage should include("failed the following topology transactions"),
+          ),
+        ),
+      )
+
+      eventually() {
+        val metricsAfter = nodes.local.map(getAmplificationMetrics)
+
+        forEvery(nodes.local.zip(metricsBefore.zip(metricsAfter))) {
+          // participant1 should have some "no connection" errors
+          case (node, (metricBefore, metricAfter)) =>
+            def aggregatedValue: Long = {
+              val before = metricBefore.noConnectionAvailable.values.foldLeft(0L)(_ + _)
+              val after = metricAfter.noConnectionAvailable.values.foldLeft(0L)(_ + _)
+              after - before
+            }
+
+            node match {
+              case `participant1` =>
+                aggregatedValue should be > 0L
+
+              case _ =>
+                aggregatedValue shouldBe 0L
+            }
+        }
+      }
   }
 
   "retry upon timeout" in { implicit env =>
@@ -414,6 +608,7 @@ abstract class SubmissionRequestAmplificationIntegrationTest
     }
 
     // Ping three times to get 27 submission requests in total
+    val metricsBefore = nodes.local.map(getAmplificationMetrics)
     participant1.health.ping(participant2.id)
     participant1.health.ping(participant2.id)
     participant1.health.ping(participant2.id)
@@ -430,8 +625,42 @@ abstract class SubmissionRequestAmplificationIntegrationTest
     seq1.resetPolicy()
     seq2.resetPolicy()
 
+    eventually() {
+      val metricsAfter = nodes.local.map(getAmplificationMetrics)
+
+      forEvery(nodes.local.zip(metricsBefore.zip(metricsAfter))) {
+        // Participants and mediators should have:
+        // - some amplified attempts on sequencer1
+        // - no amplified attempt on sequencer2
+        case (node, (metricBefore, metricAfter)) =>
+          node match {
+            case _: LocalParticipantReference | _: LocalMediatorReference =>
+              assertAmplificationMetrics(
+                clue = s"$node: amplified attempts",
+                metricBefore = metricBefore,
+                metricAfter = metricAfter,
+                selector = _.amplifiedAttempts,
+                assertion = (forSequencer1, forSequencer2) => {
+                  forSequencer1 should be > 0L
+                  forSequencer2 shouldBe 0L
+                },
+              )
+
+            case _ =>
+          }
+      }
+    }
   }
 
+}
+
+object SubmissionRequestAmplificationIntegrationTest {
+  private final case class AmplificationMetrics(
+      amplifiedAttempts: Map[MetricsContext, Long],
+      attemptSyncErrors: Map[MetricsContext, Long],
+      attemptSequencingTime: Map[MetricsContext, Long],
+      noConnectionAvailable: Map[MetricsContext, Long],
+  )
 }
 
 class SubmissionRequestAmplificationReferenceIntegrationTestPostgres

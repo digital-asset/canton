@@ -232,6 +232,7 @@ class ParallelIndexerSubscriptionSpec
     message_uuid = None,
     is_transaction = true,
     trace_context = serializableTraceContext,
+    traffic_cost = 0L,
   )
 
   private val offsetsAndUpdates =

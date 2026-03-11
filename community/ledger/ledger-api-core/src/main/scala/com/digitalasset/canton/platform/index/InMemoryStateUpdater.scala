@@ -7,6 +7,7 @@ import cats.data.NonEmptyVector
 import com.daml.executors.InstrumentedExecutors
 import com.daml.ledger.resources.ResourceOwner
 import com.daml.timer.FutureCheck.*
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.DeduplicationPeriod.{DeduplicationDuration, DeduplicationOffset}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -527,6 +528,7 @@ private[platform] object InMemoryStateUpdater {
           optDeduplicationDurationNanos = deduplicationDurationNanos,
           synchronizerId = txAccepted.synchronizerId.toProtoPrimitive,
           traceContext = txAccepted.traceContext,
+          trafficCost = completionInfo.paidTrafficCost.value,
         )
       }
 
@@ -541,6 +543,8 @@ private[platform] object InMemoryStateUpdater {
       synchronizerId = txAccepted.synchronizerId.toProtoPrimitive,
       recordTime = txAccepted.recordTime.toLf,
       externalTransactionHash = txAccepted.externalTransactionHash,
+      paidTrafficCost =
+        txAccepted.completionInfoO.map(_.paidTrafficCost).getOrElse(NonNegativeLong.zero),
     )(txAccepted.traceContext)
   }
 
@@ -566,6 +570,7 @@ private[platform] object InMemoryStateUpdater {
         optDeduplicationDurationNanos = deduplicationDurationNanos,
         synchronizerId = u.synchronizerId.toProtoPrimitive,
         traceContext = u.traceContext,
+        trafficCost = u.completionInfo.paidTrafficCost.value,
       ),
     )(u.traceContext)
   }
@@ -592,6 +597,8 @@ private[platform] object InMemoryStateUpdater {
           optDeduplicationDurationNanos = deduplicationDurationNanos,
           synchronizerId = u.synchronizerId.toProtoPrimitive,
           traceContext = u.traceContext,
+          // TODO(i31036): support traffic cost for re-assignments
+          trafficCost = 0L,
         )
       }
 

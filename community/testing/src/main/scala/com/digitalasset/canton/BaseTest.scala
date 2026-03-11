@@ -13,6 +13,7 @@ import com.digitalasset.canton.concurrent.{DirectExecutionContext, FutureSupervi
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.config.{DefaultProcessingTimeouts, ProcessingTimeout}
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicCryptoProvider
+import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLogging, SuppressingLogger}
 import com.digitalasset.canton.metrics.OpenTelemetryOnDemandMetricsReader
@@ -116,6 +117,13 @@ trait TestEssentials
     * deal with imports.
     */
   lazy val directExecutionContext: ExecutionContext = DirectExecutionContext(noTracingLogger)
+}
+
+trait TimestampHelpers { self: EitherValues =>
+  implicit def protoTimestampToCantonTimestamp(
+      proto: com.google.protobuf.timestamp.Timestamp
+  ): CantonTimestamp =
+    CantonTimestamp.fromProtoTimestamp(proto).value
 }
 
 trait FutureHelpers extends Assertions with ScalaFuturesWithPatience { self =>
@@ -303,6 +311,7 @@ trait BaseTest
     with OptionValues
     with TryValues
     with AppendedClues
+    with TimestampHelpers
     with FutureHelpers { self =>
 
   /** A metrics factory constructed from an OpenTelemetryOnDemandMetricsReader which allows to make

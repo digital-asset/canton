@@ -170,6 +170,11 @@ class ThrowOnWriteCommitmentStore()(override implicit val ec: ExecutionContext)
     override def markReinitializationCompleted(timestamp: CantonTimestamp)(implicit
         traceContext: TraceContext
     ): FutureUnlessShutdown[Boolean] = incrementCounterAndErr[Boolean]()
+
+    override def forgetCheckpoints()(implicit
+        traceContext: TraceContext
+    ): FutureUnlessShutdown[Unit] =
+      incrementCounterAndErr()
   }
 
   class ThrowOnWriteCommitmentQueue extends CommitmentQueue {
