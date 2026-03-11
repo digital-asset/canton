@@ -201,6 +201,15 @@ private[lf] object PartialTransaction {
     externalCallResults = HashMap.empty,
   )
 
+  @throws[SError.SErrorDamlException]
+  private def assertRightKey[X](context: => String, either: Either[TxErr, X]): X =
+    either match {
+      case Right(value) =>
+        value
+      case Left(err) =>
+        throw SError.SErrorDamlException(convTxError(context, err))
+    }
+
   type NodeSeeds = ImmArray[(NodeId, crypto.Hash)]
 }
 
@@ -228,15 +237,6 @@ private[speedy] case class PartialTransaction(
 ) {
 
   import PartialTransaction._
-
-  @throws[SError.SErrorDamlException]
-  private def assertRightKey[X](context: => String, either: Either[TxErr, X]): X =
-    either match {
-      case Right(value) =>
-        value
-      case Left(err) =>
-        throw SError.SErrorDamlException(convTxError(nodes, context, err))
-    }
 
   def consumedByOrInactive(cid: Value.ContractId): Option[Either[NodeId, Unit]] = {
     contractState.consumedByOrInactive(cid)
@@ -315,7 +315,15 @@ private[speedy] case class PartialTransaction(
       case _: RootContextInfo =>
         val roots = context.children.toImmArray
         val tx0 = Tx(nodes, roots)
-        val (tx, seeds) = NormalizeRollbacks.normalizeTx(tx0)
+        val (tx, seeds) = NormalizeRollbacks.normalizeTx(
+          tx0,
+          shouldDropRollbacks = contractState.mode match {
+            case ContractStateMachine.Mode.UCKWithoutRollback => true
+            case ContractStateMachine.Mode.NoContractKey => false
+            case ContractStateMachine.Mode.LegacyNUCK => false
+            case ContractStateMachine.Mode.UCKWithRollback => false
+          }
+        )
         val txResult = SubmittedTx(SerializationVersion.asVersionedTransaction(tx))
         Right((txResult, seeds))
 
@@ -385,13 +393,12 @@ private[speedy] case class PartialTransaction(
         ptx.contractState.visitCreate(
           cid,
           createNode.gkeyOpt,
-          nid,
         ) match {
           case Right(next) =>
             val nextPtx = ptx.copy(contractState = next)
             Right((cid, nextPtx))
           case Left(duplicate) =>
-            Left((ptx, convTxError(nodes, "Create", duplicate)))
+            Left((ptx, convTxError("Create", duplicate)))
         }
     }
   }
@@ -429,7 +436,7 @@ private[speedy] case class PartialTransaction(
           coid,
           contract.gkeyOpt,
           byKey,
-        ),
+        )
       )
       authorizationChecker.authorizeFetch(optLocation, node)(auth) match {
         case fa :: _ =>
@@ -459,10 +466,7 @@ private[speedy] case class PartialTransaction(
       // so the current state's global key inputs must resolve the key.
       val keyInput = contractState.globalKeyInputs(key.globalKey)
       val newContractState =
-        assertRightKey(
-          "Lookup",
-          contractState.visitQueryByKey(key.globalKey, keyInput.toKeyMapping, result.asCidVector),
-        )
+        assertRightKey("Lookup", contractState.visitQueryByKey(key.globalKey, keyInput.toKeyMapping, result.asCidVector))
       authorizationChecker.authorizeLookupByKey(optLocation, node)(auth) match {
         case fa :: _ =>
           Left(IErr.FailedAuthorization(nid, fa))
@@ -525,7 +529,7 @@ private[speedy] case class PartialTransaction(
           contract.gkeyOpt,
           byKey,
           consuming,
-        ),
+        )
       )
       authorizationChecker.authorizeExercise(optLocation, makeExNode(ec))(auth) match {
         case fa :: _ =>
@@ -610,8 +614,10 @@ private[speedy] case class PartialTransaction(
     )
   }
 
-  /** Record an external call result in the current exercise context.
-    * Returns None if not in an exercise context.
+  /** Record an external call result in the nearest enclosing exercise context.
+    * Walks up the context parent chain through try/catch scopes to find the
+    * enclosing exercise. Returns None if not within any exercise context
+    * (e.g., at the root/transaction level).
     */
   def recordExternalCallResult(
       extensionId: String,
@@ -620,8 +626,8 @@ private[speedy] case class PartialTransaction(
       inputHex: String,
       outputHex: String,
   ): Option[PartialTransaction] = {
-    context.info match {
-      case ec: ExercisesContextInfo =>
+    findEnclosingExercise(context.info) match {
+      case Some(ec) =>
         val nodeId = ec.nodeId
         val existing = externalCallResults.getOrElse(nodeId, BackStack.empty)
         val callIndex = existing.length
@@ -635,10 +641,22 @@ private[speedy] case class PartialTransaction(
         )
         val updated = existing :+ result
         Some(copy(externalCallResults = externalCallResults.updated(nodeId, updated)))
-      case _ =>
+      case None =>
         // External calls outside of exercise context are not stored
         // (they would be at the root level, which is not supported)
         None
+    }
+  }
+
+  /** Walk up the context parent chain to find the nearest enclosing exercise context.
+    * This allows external calls to work inside try/catch (rollback) scopes.
+    */
+  @scala.annotation.tailrec
+  private def findEnclosingExercise(info: ContextInfo): Option[ExercisesContextInfo] = {
+    info match {
+      case ec: ExercisesContextInfo => Some(ec)
+      case tc: TryContextInfo => findEnclosingExercise(tc.parent.info)
+      case _: RootContextInfo => None
     }
   }
 
@@ -678,24 +696,22 @@ private[speedy] case class PartialTransaction(
   /** Close a try context, by catching an exception,
     * i.e. a exception was thrown inside the context, and the catch associated to the try context did handle it.
     */
-  def rollbackTry(): Either[IErr.EffectfulRollback, PartialTransaction] = {
+  def rollbackTry(): PartialTransaction = {
     context.info match {
       case info: TryContextInfo =>
         // In the case of there being no children we could drop the entire rollback node.
         // But we do that in a later normalization phase, not here.
         val rollbackNode = Node.Rollback(context.children.toImmArray)
-        contractState.endRollback() match {
-          case Right(rolledBackState) =>
-            Right(
-              copy(
-                context = info.parent
-                  .addNonActionChild(info.nodeId, context.minChildVersion, context.nextActionChildIdx),
-                nodes = nodes.updated(info.nodeId, rollbackNode),
-                contractState = rolledBackState,
-              )
-            )
-          case Left(nodeIds) => Left(convEffectfulRollbackError(nodes, TxErr.EffectfulRollback(nodeIds)))
-        }
+        // Note: external call results are NOT discarded on rollback. The validator
+        // re-executes the code inside rollback scopes and needs the results at the
+        // same call indices. Rolled-back results are kept so submission and validation
+        // produce the same sequence of external call lookups.
+        copy(
+          context = info.parent
+            .addNonActionChild(info.nodeId, context.minChildVersion, context.nextActionChildIdx),
+          nodes = nodes.updated(info.nodeId, rollbackNode),
+          contractState = contractState.endRollback(),
+        )
       case _ =>
         InternalError.runtimeException(
           NameOf.qualifiedNameOfCurrentFunc,
