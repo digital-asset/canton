@@ -326,10 +326,53 @@ sealed trait MultiParticipantExternalCallIntegrationTest
       }
     }
 
-    "handle signatory on P1, observers on P2 and P3" in { _ =>
-      // Requires BEExternalCall engine primitive (not yet implemented).
-      // Currently DA.External uses echo stub that returns input without HTTP calls.
-      pending
+    "handle signatory on P1, observers on P2 and P3" in { implicit env =>
+      import env.*
+
+      setupEchoHandler()
+
+      val inputHex = toHex("three-participant-test")
+
+      clue("Create contract with alice as signatory, bob and charlie as observers") {
+        val createTx = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          new E.ExternalCallContract(
+            alice.toProtoPrimitive,
+            java.util.List.of(bob.toProtoPrimitive, charlie.toProtoPrimitive), // Both bob and charlie as observers
+          ).create.commands.asScala.toSeq,
+        )
+        val contractId = JavaDecodeUtil.decodeAllCreated(E.ExternalCallContract.COMPANION)(createTx).loneElement.id
+
+        clue("Exercise external call from alice (P1 signatory)") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseCallExternal(
+              "test-ext",
+              "echo",
+              "00000000",
+              inputHex,
+            ).commands.asScala.toSeq,
+          )
+
+          exerciseTx.getUpdateId should not be empty
+        }
+
+        clue("Verify bob on P2 received the transaction") {
+          eventually() {
+            val activeContracts = participant2.ledger_api.javaapi.state.acs
+              .filter(E.ExternalCallContract.COMPANION)(bob, _ => true, None)
+            activeContracts shouldBe empty // Contract was consumed
+          }
+        }
+
+        clue("Verify charlie on P3 received the transaction") {
+          eventually() {
+            val activeContracts = participant3.ledger_api.javaapi.state.acs
+              .filter(E.ExternalCallContract.COMPANION)(charlie, _ => true, None)
+            activeContracts shouldBe empty // Contract was consumed
+          }
+        }
+      }
     }
 
     "allow observer validation using stored results from transaction" in { implicit env =>

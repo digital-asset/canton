@@ -216,9 +216,29 @@ sealed trait BasicExternalCallIntegrationTest
       // Call count depends on number of confirming participants
     }
 
-    "correctly replay two identical calls with different results via callIndex" in { _ =>
-      // This test requires additional BEExternalCall engine features for call indexing.
-      pending
+    "correctly replay two identical calls with different results via callIndex" in { implicit env =>
+      import env.*
+
+      setupEchoHandler()
+
+      val input = toHex("identical")
+      
+      // Create contract
+      val createTx = participant1.ledger_api.javaapi.commands.submit(
+        Seq(alice),
+        new E.ExternalCallContract(
+          alice.toProtoPrimitive,
+          java.util.List.of(),
+        ).create.commands.asScala.toSeq,
+      )
+      val contractId = JavaDecodeUtil.decodeAllCreated(E.ExternalCallContract.COMPANION)(createTx).loneElement.id
+
+      val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+        Seq(alice),
+        contractId.exerciseCallMultiple(input, input, input).commands.asScala.toSeq,
+      )
+      
+      exerciseTx.getUpdateId should not be empty
     }
   }
 }
