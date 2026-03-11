@@ -58,12 +58,12 @@ template ExternalCallContract
         r2 <- exercise self (DelegatedExternalCall innerActor input2)
         pure (r1, r2)
 
-    -- Delegated choice for nested exercises
-    choice DelegatedExternalCall : BytesHex
+    -- Delegated choice for nested exercises (signatory-controlled for cross-participant compat)
+    nonconsuming choice DelegatedExternalCall : BytesHex
       with
         actor : Party
         input : BytesHex
-      controller actor
+      controller signatory_
       do
         externalCall "test-ext" "echo" "00000000" input
 
@@ -263,10 +263,10 @@ template ThreePartyExternalCall
         r2 <- exercise self (BobExternalCall input2)
         pure (r1, r2)
 
-    choice BobExternalCall : BytesHex
+    nonconsuming choice BobExternalCall : BytesHex
       with
         input : BytesHex
-      controller bob
+      controller alice
       do
         externalCall "test-ext" "echo" "00000000" input
 
@@ -395,6 +395,18 @@ data ExternalCallInterfaceView = ExternalCallInterfaceView
   with
     owner : Party
   deriving (Eq, Show)
+
+-- | Alternative template implementing ExternalCallInterface (for testing multiple implementations)
+template AlternativeExternalCallContract
+  with
+    owner : Party
+    label : Text
+  where
+    signatory owner
+
+    interface instance ExternalCallInterface for AlternativeExternalCallContract where
+      view = ExternalCallInterfaceView with owner
+      getSignatory = owner
 
 -- | Helper to convert Int to hex string (simple implementation)
 hexDigit : Int -> Text
