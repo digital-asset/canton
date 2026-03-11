@@ -176,6 +176,20 @@ object LocalSettings {
     PowerDistribution(1.second, 5.seconds)
 }
 
+final case class FutureSettings(
+    randomSeed: Long,
+    futureTimeDistribution: PowerDistribution = FutureSettings.defaultFutureTimeDistribution,
+    trivialFutureTimeDistribution: PowerDistribution =
+      FutureSettings.defaultTrivialFutureTimeDistribution,
+)
+
+object FutureSettings {
+  private val defaultFutureTimeDistribution: PowerDistribution =
+    PowerDistribution(1.millisecond, 20.milliseconds)
+  private val defaultTrivialFutureTimeDistribution: PowerDistribution =
+    PowerDistribution(1.nanosecond, 20.nanoseconds)
+}
+
 final case class ClientSettings(
     requestInterval: Option[FiniteDuration] = Some(1.second),
     requestApproximateByteSize: Option[PositiveInt] = Some(
@@ -187,6 +201,7 @@ final case class ClientSettings(
 final case class SimulationSettings(
     localSettings: LocalSettings,
     networkSettings: NetworkSettings,
+    futureSettings: FutureSettings,
     durationOfFirstPhaseWithFaults: FiniteDuration,
     durationOfSecondPhaseWithoutFaults: FiniteDuration = 30.seconds,
     clientSettings: ClientSettings = ClientSettings(),

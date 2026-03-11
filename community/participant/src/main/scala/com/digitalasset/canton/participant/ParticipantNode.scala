@@ -500,7 +500,12 @@ class ParticipantNodeBootstrap(
 
         commandProgressTracker =
           if (parameters.commandProgressTracking.enabled)
-            new CommandProgressTrackerImpl(parameters.commandProgressTracking, clock, loggerFactory)
+            new CommandProgressTrackerImpl(
+              parameters.commandProgressTracking,
+              clock,
+              metrics.phase,
+              loggerFactory,
+            )
           else CommandProgressTracker.NoOp
 
         connectedSynchronizersLookupContainer = new ConnectedSynchronizersLookupContainer
@@ -727,6 +732,7 @@ class ParticipantNodeBootstrap(
                 participantId = participantId.toLf,
                 participantNodePersistentState = persistentState,
                 sync = sync,
+                pruningConfig = parameters.stores,
                 tracerProvider = tracerProvider,
               )
             ),

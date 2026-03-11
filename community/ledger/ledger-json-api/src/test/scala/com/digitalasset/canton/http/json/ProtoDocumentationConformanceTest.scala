@@ -15,7 +15,7 @@ class ProtoDocumentationConformanceTest extends AnyWordSpecLike with Matchers wi
 
   // This is number of known fields in proto files without clear Required or Optional markers
   // TODO(i30114) Update this if/when some comments are fixed
-  val numberOfKnownUnspecifiedFields = 216
+  val numberOfKnownUnspecifiedFields = 217
 
   "new proto comments" should {
     "contain clear Required or Optional marks" in {

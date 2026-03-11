@@ -6,7 +6,10 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mo
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.{
+  OrderingTopologyProvider,
+  TopologyActivationTime,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.consensus.iss.data.EpochStoreReader
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.data.OutputMetadataStore
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.modules.output.leaders.{
@@ -23,7 +26,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   SequencerSnapshotAdditionalInfo,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology.NodeTopologyInfo
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Output,
   SequencerNode,
@@ -37,6 +39,7 @@ import scala.util.{Failure, Success}
 class SequencerSnapshotAdditionalInfoProvider[E <: Env[E]](
     outputMetadataStore: OutputMetadataStore[E],
     epochStoreReader: EpochStoreReader[E],
+    orderingTopologyProvider: OrderingTopologyProvider[E],
     override val loggerFactory: NamedLoggerFactory,
 )(implicit metricsContext: MetricsContext)
     extends NamedLogging {
@@ -51,14 +54,47 @@ class SequencerSnapshotAdditionalInfoProvider[E <: Env[E]](
       s"Providing additional info for sequencer snapshot at $snapshotTimestamp " +
         s"and ordering topology with activation time ${orderingTopology.activationTime}"
     )
+    actorContext.pipeToSelf(
+      orderingTopologyProvider.getFirstKnownAt(orderingTopology.activationTime)
+    ) {
+      case Failure(exception) =>
+        val errorMessage =
+          s"Failed to retrieve sequencers first known info for snapshot at $snapshotTimestamp"
+        logger.error(errorMessage, exception)
+        Some(Output.SequencerSnapshotMessage.AdditionalInfoRetrievalError(requester, errorMessage))
+      case Success(None) =>
+        val errorMessage =
+          s"Failed to retrieve sequencers first known info for snapshot at $snapshotTimestamp, topology provider provided None"
+        logger.error(errorMessage)
+        Some(Output.SequencerSnapshotMessage.AdditionalInfoRetrievalError(requester, errorMessage))
+      case Success(Some(nodesFirstKnown)) =>
+        provideWithFirstKnownInfo(
+          snapshotTimestamp,
+          nodesFirstKnown,
+          leaderSelectionPolicy,
+          requester,
+        )
+        None
+    }
+  }
+
+  private def provideWithFirstKnownInfo(
+      snapshotTimestamp: CantonTimestamp,
+      nodesFirstKnown: Map[BftNodeId, TopologyActivationTime],
+      leaderSelectionPolicy: LeaderSelectionPolicy[E],
+      requester: ModuleRef[SequencerNode.SnapshotMessage],
+  )(implicit
+      actorContext: E#ActorContextT[Output.Message[E]],
+      traceContext: TraceContext,
+  ): Unit = {
     // TODO(#23143) Consider returning an error if the `snapshotTimestamp` is too high, i.e., above the safe watermark.
     val relevantNodesTopologyInfo =
-      orderingTopology.nodesTopologyInfo.view.filter { case (_, nodeTopologyInfo) =>
-        nodeTopologyInfo.activationTime.value <= TopologyActivationTime
+      nodesFirstKnown.view.filter { case (_, activationTime) =>
+        activationTime.value <= TopologyActivationTime
           .fromEffectiveTime(EffectiveTime(snapshotTimestamp))
           .value
       }.toSeq
-    val activeAtBlockFutures = relevantNodesTopologyInfo.map { case (_, nodeTopologyInfo) =>
+    val activeAtBlockFutures = relevantNodesTopologyInfo.map { case (_, activationTime) =>
       // TODO(#25220) Get the first block with a timestamp greater or equal to `timestamp` instead.
       // The latest block up to `timestamp` is taken for easier simulation testing and simpler error handling.
       //  It can result however in transferring more data than needed (in particular, from before the onboarding) if:
@@ -67,7 +103,7 @@ class SequencerSnapshotAdditionalInfoProvider[E <: Env[E]](
       //      tests)
       //  Last but not least, if snapshots from different nodes are compared for byte-for-byte equality,
       //  the comparison might fail if there are nodes that are not caught up.
-      outputMetadataStore.getLatestBlockAtOrBefore(nodeTopologyInfo.activationTime.value)
+      outputMetadataStore.getLatestBlockAtOrBefore(activationTime.value)
     }
     val activeAtBlocksF = actorContext.sequenceFuture(
       activeAtBlockFutures,
@@ -97,7 +133,7 @@ class SequencerSnapshotAdditionalInfoProvider[E <: Env[E]](
 
   private def provideWithEpochBasedInfo(
       epochNumbers: Seq[Option[EpochNumber]],
-      nodesTopologyInfo: Seq[(BftNodeId, NodeTopologyInfo)],
+      nodesTopologyActivationTime: Seq[(BftNodeId, TopologyActivationTime)],
       leaderSelectionPolicy: LeaderSelectionPolicy[E],
       requester: ModuleRef[SequencerNode.SnapshotMessage],
   )(implicit actorContext: E#ActorContextT[Output.Message[E]], traceContext: TraceContext): Unit = {
@@ -218,7 +254,7 @@ class SequencerSnapshotAdditionalInfoProvider[E <: Env[E]](
             )
           ) =>
         val nodeIdsToActiveAt =
-          nodesTopologyInfo
+          nodesTopologyActivationTime
             .lazyZip(epochInfoObjects)
             .lazyZip(epochMetadataObjects)
             .lazyZip(firstBlocksInEpochs)
@@ -229,13 +265,18 @@ class SequencerSnapshotAdditionalInfoProvider[E <: Env[E]](
             .map {
               case (
                     // Too many zips result in more nesting
-                    ((node, nodeTopologyInfo), epochInfo, epochMetadata, firstBlockMetadata),
+                    (
+                      (node, nodeTopologyActivationTime),
+                      epochInfo,
+                      epochMetadata,
+                      firstBlockMetadata,
+                    ),
                     previousEpochLastBlockMetadata,
                     previousEpochInfo,
                     leaderSelectionPolicyState,
                   ) =>
                 node -> NodeActiveAt(
-                  nodeTopologyInfo.activationTime,
+                  nodeTopologyActivationTime,
                   epochInfo.map(_.number),
                   firstBlockMetadata.map(_.blockNumber),
                   epochInfo.map(_.topologyActivationTime),

@@ -76,6 +76,7 @@ class JsonStreamAsListPerformanceTests
                       verbose = false,
                     )
                   ),
+                  streamContinuationToken = None,
                 )
                 .asJson,
               headers,

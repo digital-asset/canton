@@ -6,28 +6,24 @@ package com.digitalasset.canton.integration.tests
 import com.daml.ledger.javaapi.data.Identifier
 import com.digitalasset.canton.ComparesLfTransactions.{TxTree, buildLfTransaction}
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
+import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.DamlRollbackTest.TbContext
 import com.digitalasset.canton.integration.util.EntitySyntax
-import com.digitalasset.canton.integration.{
-  CommunityIntegrationTest,
-  EnvironmentDefinition,
-  SharedEnvironment,
-  TestConsoleEnvironment,
-}
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.{Party, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ComparesLfTransactions, LfPackageName}
-import com.digitalasset.daml.lf.crypto
-import com.digitalasset.daml.lf.data.FrontStack
-import com.digitalasset.daml.lf.transaction.Node
+import com.digitalasset.daml.lf.crypto.SValueHash
+import com.digitalasset.daml.lf.data.{FrontStack, Ref}
+import com.digitalasset.daml.lf.speedy.SValue
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.{
   CreateKey,
   CreateSerializationVersion,
 }
 import com.digitalasset.daml.lf.transaction.test.{TestNodeBuilder, TransactionBuilder}
+import com.digitalasset.daml.lf.transaction.{ContractStateMachine, Node}
 import com.digitalasset.daml.lf.value.Value as LfValue
 import monocle.Monocle.toAppliedFocusOps
 
@@ -44,9 +40,20 @@ trait DamlRollbackTest
   def cantonTestsPath: String
 
   override def environmentDefinition: EnvironmentDefinition =
-    EnvironmentDefinition.P2_S1M1.updateTestingConfig(
-      _.focus(_.enableInMemoryTransactionStoreForParticipants).replace(true)
-    )
+    EnvironmentDefinition.P2_S1M1
+      .addConfigTransforms(
+        Seq(
+          ConfigTransforms.enableNonStandardConfig,
+          ConfigTransforms.updateAllParticipantConfigs_(
+            _.focus(_.parameters.engine.contractStateMode)
+              // NUCK needed for the "Able to roll back create in multi-level rollback at correct level" test case.
+              .replace(Some(ContractStateMachine.Mode.LegacyNUCK))
+          ),
+        )*
+      )
+      .updateTestingConfig(
+        _.focus(_.enableInMemoryTransactionStoreForParticipants).replace(true)
+      )
 
   @SuppressWarnings(Array("org.wartremover.warts.Var"))
   private var initialized = false
@@ -159,8 +166,8 @@ object DamlRollbackTest {
 }
 
 trait DamlRollbackTestStableLf extends DamlRollbackTest {
-  import com.digitalasset.canton.damltests.java.exceptionstester.ExceptionsTester
   import com.digitalasset.canton.damltests.java.exceptionstester
+  import com.digitalasset.canton.damltests.java.exceptionstester.ExceptionsTester
 
   override def cantonTestsPath: String = CantonTestsPath
 
@@ -691,6 +698,7 @@ trait DamlRollbackTestDevLf extends DamlRollbackTest {
   private def createWithKey[T](
       id: Int,
       template: Identifier,
+      packageName: String,
       party: Party,
       observers: Seq[PartyId] = Seq.empty,
   )(implicit tbCtx: TbContext): LfNodeCreate = {
@@ -709,7 +717,13 @@ trait DamlRollbackTestDevLf extends DamlRollbackTest {
       observers = Set(lfParty) ++ lfObservers,
       key = CreateKey.SignatoryMaintainerKey(
         LfValue.ValueParty(lfParty),
-        crypto.Hash.hashPrivateKey(lfParty),
+        SValueHash.assertHashContractKey(
+          Ref.PackageName.assertFromString(packageName),
+          Ref.QualifiedName.assertFromString(
+            s"${template.getModuleName}:${template.getEntityName}"
+          ),
+          SValue.SParty(lfParty),
+        ),
       ),
       version = tbCtx.txVersion,
       packageName = LfPackageName.assertFromString("CantonTestsDev"),
@@ -735,7 +749,12 @@ trait DamlRollbackTestDevLf extends DamlRollbackTest {
 
         txBuilderContextFrom(txActual) { implicit tbCtx =>
           val keyContractCreate =
-            createWithKey(1, simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID, party = alice)
+            createWithKey(
+              1,
+              simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
+              simplekeys.SimpleKey.PACKAGE_NAME,
+              party = alice,
+            )
           val txExpected = TxTree(
             exercise(
               contract = create(
@@ -784,7 +803,12 @@ trait DamlRollbackTestDevLf extends DamlRollbackTest {
 
         txBuilderContextFrom(txActual) { implicit tbCtx =>
           val keyContractCreate =
-            createWithKey(1, simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID, party = alice)
+            createWithKey(
+              1,
+              simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
+              simplekeys.SimpleKey.PACKAGE_NAME,
+              party = alice,
+            )
           val txExpected = TxTree(
             exercise(
               contract = create(
@@ -836,7 +860,12 @@ trait DamlRollbackTestDevLf extends DamlRollbackTest {
 
           txBuilderContextFrom(txActual) { implicit tbCtx =>
             val keyContractCreate =
-              createWithKey(1, simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID, party = alice)
+              createWithKey(
+                1,
+                simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
+                simplekeys.SimpleKey.PACKAGE_NAME,
+                party = alice,
+              )
             val keyContractExercise = exercise(
               contract = keyContractCreate,
               choice = "Archive",
@@ -897,6 +926,7 @@ trait DamlRollbackTestDevLf extends DamlRollbackTest {
                 createWithKey(
                   0,
                   simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
+                  simplekeys.SimpleKey.PACKAGE_NAME,
                   party = alice,
                   observers = Seq(carol),
                 )
@@ -904,6 +934,7 @@ trait DamlRollbackTestDevLf extends DamlRollbackTest {
                 createWithKey(
                   2,
                   simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
+                  simplekeys.SimpleKey.PACKAGE_NAME,
                   party = alice,
                   observers = Seq(),
                 )
@@ -911,6 +942,7 @@ trait DamlRollbackTestDevLf extends DamlRollbackTest {
                 createWithKey(
                   3,
                   simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
+                  simplekeys.SimpleKey.PACKAGE_NAME,
                   party = alice,
                   observers = Seq(carol),
                 )
@@ -1029,11 +1061,21 @@ trait DamlRollbackTestDevLf extends DamlRollbackTest {
               TxTree(
                 TestNodeBuilder.rollback(),
                 TxTree(
-                  createWithKey(1, simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID, party = alice)
+                  createWithKey(
+                    1,
+                    simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
+                    simplekeys.SimpleKey.PACKAGE_NAME,
+                    party = alice,
+                  )
                 ),
               ),
               TxTree(
-                createWithKey(2, simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID, party = alice)
+                createWithKey(
+                  2,
+                  simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
+                  simplekeys.SimpleKey.PACKAGE_NAME,
+                  party = alice,
+                )
               ),
             ).lfTransaction
 
@@ -1079,6 +1121,7 @@ trait DamlRollbackTestDevLf extends DamlRollbackTest {
                 createWithKey(
                   0,
                   simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
+                  simplekeys.SimpleKey.PACKAGE_NAME,
                   party = alice,
                   observers = Seq(carol),
                 )
@@ -1105,6 +1148,7 @@ trait DamlRollbackTestDevLf extends DamlRollbackTest {
                     createWithKey(
                       2,
                       simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
+                      simplekeys.SimpleKey.PACKAGE_NAME,
                       party = alice,
                       observers = Seq(carol),
                     )
@@ -1114,6 +1158,7 @@ trait DamlRollbackTestDevLf extends DamlRollbackTest {
                   createWithKey(
                     3,
                     simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
+                    simplekeys.SimpleKey.PACKAGE_NAME,
                     party = alice,
                     observers = Seq(carol),
                   )
@@ -1166,8 +1211,7 @@ class DamlRollbackBftOrderingIntegrationTestPostgresStableLf
     extends DamlRollbackTestStableLf
     with DamlRollbackBftSequencerPostgresTest
 
-// TODO(#30398) fix the test, and reactivate it by dropping the abstract key word
 @com.digitalasset.canton.annotations.NuckTest
-abstract class DamlRollbackBftOrderingIntegrationTestPostgresDevLf
+class DamlRollbackBftOrderingIntegrationTestPostgresDevLf
     extends DamlRollbackTestDevLf
     with DamlRollbackBftSequencerPostgresTest

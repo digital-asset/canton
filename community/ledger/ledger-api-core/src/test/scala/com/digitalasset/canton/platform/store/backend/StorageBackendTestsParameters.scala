@@ -6,7 +6,11 @@ package com.digitalasset.canton.platform.store.backend
 import anorm.SqlStringInterpolation
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.ledger.participant.state.{RepairIndex, SynchronizerIndex}
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{ACHSState, LedgerEnd}
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
+  AchsLastPointers,
+  AchsState,
+  LedgerEnd,
+}
 import com.digitalasset.canton.{HasExecutionContext, RepairCounter}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -222,13 +226,15 @@ private[backend] trait StorageBackendTestsParameters
     executeSql(backend.parameter.postProcessingEnd) shouldBe None
   }
 
-  it should "fetch and update ACHSState correctly" in {
+  it should "fetch and update AchsState correctly" in {
     executeSql(backend.parameter.fetchACHSState) shouldBe None
 
-    val achsState0 = ACHSState(
+    val achsState0 = AchsState(
       validAt = 1000L,
-      lastRemoved = 123L,
-      lastPopulated = 10L,
+      lastPointers = AchsLastPointers(
+        lastRemoved = 123L,
+        lastPopulated = 10L,
+      ),
     )
     // check insertion to empty state
     executeSql(backend.parameter.insertACHSState(achsState0))
@@ -240,8 +246,13 @@ private[backend] trait StorageBackendTestsParameters
     executeSql(backend.parameter.fetchACHSState) shouldBe Some(achsState1)
 
     // check updates of lastRemoved and lastPopulated
-    executeSql(backend.parameter.updateACHSLastPointers(lastRemoved = 200L, lastPopulated = 20L))
-    val achsState2 = achsState1.copy(lastRemoved = 200L, lastPopulated = 20L)
+    executeSql(
+      backend.parameter.updateACHSLastPointers(
+        AchsLastPointers(lastRemoved = 200L, lastPopulated = 20L)
+      )
+    )
+    val achsState2 =
+      achsState1.copy(lastPointers = AchsLastPointers(lastRemoved = 200L, lastPopulated = 20L))
     executeSql(backend.parameter.fetchACHSState) shouldBe Some(achsState2)
 
     // clear the state
@@ -255,7 +266,9 @@ private[backend] trait StorageBackendTestsParameters
 
     // updating a non-existing state with lastRemoved and lastPopulated fails
     an[IllegalStateException] should be thrownBy executeSql(
-      backend.parameter.updateACHSLastPointers(lastRemoved = 300L, lastPopulated = 30L)
+      backend.parameter.updateACHSLastPointers(
+        AchsLastPointers(lastRemoved = 300L, lastPopulated = 30L)
+      )
     )
   }
 

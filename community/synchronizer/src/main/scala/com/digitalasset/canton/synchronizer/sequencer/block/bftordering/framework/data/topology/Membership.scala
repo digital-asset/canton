@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology
 
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology.NodeTopologyInfo
 import com.google.common.annotations.VisibleForTesting
@@ -11,9 +12,16 @@ final case class Membership(
     myId: BftNodeId,
     orderingTopology: OrderingTopology,
     leaders: Seq[BftNodeId],
-) {
+) extends PrettyPrinting {
   val otherNodes: Set[BftNodeId] = orderingTopology.nodes - myId
   lazy val sortedNodes: Seq[BftNodeId] = orderingTopology.sortedNodes
+
+  override protected def pretty: Pretty[Membership.this.type] =
+    prettyOfClass(
+      param("myId", _.myId.doubleQuoted),
+      param("orderingTopology", _.orderingTopology),
+      param("leaders", _.leaders.map(_.doubleQuoted)),
+    )
 }
 
 object Membership {

@@ -7,7 +7,6 @@ import cats.data.EitherT
 import cats.syntax.either.*
 import com.daml.metrics.ExecutorServiceMetrics
 import com.daml.metrics.api.MetricsContext
-import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
@@ -524,13 +523,11 @@ final class BftBlockOrderer(
         CantonServerBuilder
           .forConfig(
             config = serverConfig,
-            adminTokenDispenser = None,
             executor = p2pServerGrpcExecutor,
             loggerFactory = loggerFactory,
             apiLoggingConfig = nodeParameters.loggingConfig.api,
             tracing = nodeParameters.tracing,
             grpcMetrics = metrics.grpcMetrics,
-            NoOpTelemetry,
           )
           .addService(
             ServerInterceptors.intercept(
@@ -545,7 +542,8 @@ final class BftBlockOrderer(
                 maybeServerAuthenticatingFilter,
                 maybeAuthenticationServices.map(_.authenticationServerInterceptor),
               ).flatten.asJava,
-            )
+            ),
+            withLogging = false,
           )
       config.standalone.foreach { _ =>
         val standaloneService =
@@ -556,7 +554,8 @@ final class BftBlockOrderer(
             StandaloneBftOrderingServiceGrpc.bindService(
               standaloneService,
               executionContext,
-            )
+            ),
+            withLogging = false,
           )
           .discard
       }

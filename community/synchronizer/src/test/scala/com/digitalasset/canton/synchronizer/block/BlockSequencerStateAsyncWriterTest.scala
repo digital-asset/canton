@@ -27,7 +27,7 @@ import com.digitalasset.canton.synchronizer.sequencer.{
 }
 import com.digitalasset.canton.synchronizer.sequencing.traffic.store.TrafficConsumedStore
 import com.digitalasset.canton.topology.{DefaultTestIdentities, Member}
-import com.digitalasset.canton.version.{HasTestCloseContext, ProtocolVersion}
+import com.digitalasset.canton.version.HasTestCloseContext
 import com.digitalasset.canton.{BaseTest, HasExecutionContext}
 import org.scalatest.wordspec.FixtureAsyncWordSpecLike
 import org.scalatest.{Assertion, FutureOutcome}
@@ -149,7 +149,7 @@ class BlockSequencerStateAsyncWriterTest
       AggregationRule(
         eligibleMembers = NonEmpty.mk(Seq, member): NonEmpty[Seq[Member]],
         threshold = PositiveInt.one,
-        protocolVersion = ProtocolVersion.latest,
+        protocolVersion = testedProtocolVersion,
       ),
     )
   private lazy val agg1 = InFlightAggregationUpdate(
@@ -191,7 +191,7 @@ class BlockSequencerStateAsyncWriterTest
           // check that writes have started
           trafficConsumed.get().written shouldBe Seq(Seq(tc1))
         }
-        _ <- EitherT.right(writer.finalizeBlockUpate(block1))
+        _ <- EitherT.right(writer.finalizeBlockUpdate(block1))
         _ = {
           // check that block update is not written yet (because aggregation write is in progress)
           blockInfos.get().written shouldBe empty

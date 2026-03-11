@@ -15,6 +15,7 @@ import com.digitalasset.canton.platform.store.backend.DbDto.{
   EventDeactivate,
   EventVariousWitnessed,
 }
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.AchsAddActivationsParams
 import com.digitalasset.canton.platform.store.backend.common.ComposableQuery.SqlStringInterpolation
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.daml.lf.data.Time.Timestamp
@@ -79,11 +80,15 @@ private[backend] trait StorageBackendTestsIntegrity extends Matchers with Storag
     executeSql(ingest(updates, _))
     executeSql(
       backend.event
-        .addActivationsToACHS(startExclusive = 0, endInclusive = 10, activeAtEventSeqId = 10)
+        .addActivationsToACHS(
+          AchsAddActivationsParams(startExclusive = 0, endInclusive = 10, activeAt = 10)
+        )
     )
     executeSql(
       backend.event
-        .addActivationsToACHS(startExclusive = 0, endInclusive = 10, activeAtEventSeqId = 10)
+        .addActivationsToACHS(
+          AchsAddActivationsParams(startExclusive = 0, endInclusive = 10, activeAt = 10)
+        )
     )
     executeSql(updateLedgerEnd(offset(10), 10L))
     val failure =

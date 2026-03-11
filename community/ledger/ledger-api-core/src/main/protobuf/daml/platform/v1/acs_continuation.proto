@@ -1,0 +1,23 @@
+// Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package daml.platform.v1;
+
+option java_package = "com.daml.platform.v1";
+
+message AcsContinuationTokenPointer {
+  // the sequential_id of event reported along with this token
+  int64 sequential_id = 1;
+  // if the corresponding response is generated from incomplete reassignments, this offset
+  // helps to filter the incomplete reassignments for continuation
+  optional int64 offset_for_incomplete_reassignments = 2;
+}
+
+message AcsContinuationTokenPayload {
+  // the pointer where the stream should continue from
+  AcsContinuationTokenPointer pointer = 1;
+  // checksum to validate the token
+  bytes checksum = 2;
+}

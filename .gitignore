@@ -10,6 +10,7 @@ log.txt
 /.sbt
 /.ivy2
 /test-reports
+/test-output
 /.ci_credentials
 *~
 tmp
@@ -35,6 +36,7 @@ classpath.txt
 /docs-open/src/replication/workdir
 canton_repo_paths
 embed_reference.json
+*.dummy
 
 # PerformanceRunnerRecorder
 /replay

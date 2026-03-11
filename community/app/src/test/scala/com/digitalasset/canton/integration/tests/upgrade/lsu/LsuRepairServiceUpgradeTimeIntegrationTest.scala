@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import better.files.File
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.data.CantonTimestamp
@@ -21,6 +22,7 @@ import java.time.Duration
 /** This test ensures that the repair service can be used at upgrade time. We test an ACS import:
   * replicate Alice from p1 to p2.
   */
+@UnstableTest // TODO(#31077)
 final class LsuRepairServiceUpgradeTimeIntegrationTest extends LsuBase {
 
   override protected def testName: String = "lsu-repair-service-upgrade-time"

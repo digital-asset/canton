@@ -151,6 +151,8 @@ final case class CachingConfigs(
       CachingConfigs.defaultFinalizedMediatorConfirmationRequestsCache,
     sequencerPayloadCache: CacheConfigWithMemoryBounds =
       CachingConfigs.defaultSequencerPayloadCache,
+    sequencerCatchupPayloadCache: CacheConfigWithMemoryBounds =
+      CachingConfigs.defaultSequencerPayloadCache,
     bftOrderingBatchCache: CacheConfigWithMemoryBounds = CachingConfigs.defaultBftOrderingBatchCache,
 )
 

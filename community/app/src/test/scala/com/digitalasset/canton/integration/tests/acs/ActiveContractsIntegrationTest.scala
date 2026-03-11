@@ -843,6 +843,7 @@ abstract class ActiveContractsIntegrationTestBase(alphaMultiSynchronizerSupport:
             proto.state_service.GetActiveContractsRequest(
               activeAtOffset = bigOffset,
               eventFormat = Some(getEventFormat(List(party1a.toLf))),
+              streamContinuationToken = None,
             )
           )
         )

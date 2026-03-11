@@ -8,11 +8,11 @@ import com.daml.ledger.api.v2.state_service.ParticipantPermission.*
 import com.daml.ledger.api.v2.topology_transaction.{
   ParticipantAuthorizationAdded,
   ParticipantAuthorizationChanged,
+  ParticipantAuthorizationOnboarding,
   ParticipantAuthorizationRevoked,
   TopologyEvent,
   TopologyTransaction,
 }
-import com.daml.ledger.api.v2.trace_context.TraceContext as DamlTraceContext
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.util.TimestampConversion
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel.*
@@ -20,7 +20,9 @@ import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransacti
   AuthorizationEvent,
   AuthorizationLevel,
 }
+import com.digitalasset.canton.platform.store.backend.Conversions
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.RawParticipantAuthorization
+import com.typesafe.scalalogging.Logger
 
 object EventsTable {
 
@@ -61,10 +63,18 @@ object EventsTable {
                 participantId = participantId,
               )
             )
+          case AuthorizationEvent.Onboarding(level) =>
+            TopologyEvent.Event.ParticipantAuthorizationOnboarding(
+              ParticipantAuthorizationOnboarding(
+                partyId = partyId,
+                participantId = participantId,
+                participantPermission = toParticipantPermission(level),
+              )
+            )
         }
       }
 
-    def toTopologyTransaction(
+    def toTopologyTransaction(logger: Logger)(
         events: Vector[RawParticipantAuthorization]
     ): Option[(Offset, TopologyTransaction)] =
       events.headOption.map { first =>
@@ -81,7 +91,7 @@ object EventsTable {
               ),
             offset = first.offset.unwrap,
             synchronizerId = first.synchronizerId,
-            traceContext = first.traceContext.map(DamlTraceContext.parseFrom),
+            traceContext = Conversions.protoTraceContextFrom(logger)(first.traceContext),
             recordTime = Some(TimestampConversion.fromLf(first.recordTime)),
           )
       }

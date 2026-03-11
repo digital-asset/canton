@@ -9,7 +9,13 @@ import com.digitalasset.canton.ledger.api.ParticipantId
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
+import com.digitalasset.canton.platform.indexer.parallel.AchsMaintenancePipe.AchsWorkDistance
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
+  AchsLastPointers,
+  AchsState,
+  LedgerEnd,
+}
 import com.digitalasset.canton.platform.store.backend.{
   CompletionStorageBackend,
   IngestionStorageBackend,
@@ -37,8 +43,9 @@ private[platform] final case class InitializeParallelIngestion(
 
   def apply(
       dbDispatcher: DbDispatcher,
-      initializeInMemoryState: Option[LedgerEnd] => Future[Unit],
-  ): Future[Option[LedgerEnd]] = {
+      initializeInMemoryState: (Option[LedgerEnd], AchsState) => Future[Unit],
+      achsConfig: Option[AchsConfig],
+  ): Future[(Option[LedgerEnd], AchsWorkDistance)] = {
     implicit val ec: ExecutionContext = DirectExecutionContext(logger)
     implicit val loggingContext: LoggingContextWithTrace =
       LoggingContextWithTrace.empty
@@ -58,6 +65,29 @@ private[platform] final case class InitializeParallelIngestion(
       _ <- dbDispatcher.executeSql(metrics.indexer.initialization)(
         ingestionStorageBackend.deletePartiallyIngestedData(ledgerEnd)
       )
+      (initialAchsState, initialAchsWork) <- achsConfig match {
+        case Some(config) =>
+          dbDispatcher.executeSql(metrics.indexer.initialization) { connection =>
+            // TODO(#30241) handle already existing ACHS state in the database, for now we assume that the table is empty
+            val achsState =
+              ParameterStorageBackend.AchsState(
+                validAt = 0,
+                lastPointers = AchsLastPointers(lastRemoved = 0, lastPopulated = 0),
+              )
+            parameterStorageBackend.insertACHSState(achsState)(connection)
+            val lastEventSeqId = ledgerEnd.map(_.lastEventSeqId).getOrElse(0L)
+            achsState -> AchsMaintenancePipe.initialWork(achsState, lastEventSeqId, config)
+          }
+        case None =>
+          Future.successful(
+            // they are not used when ACHS is disabled
+            AchsState(
+              validAt = 0L,
+              lastPointers = AchsLastPointers(lastRemoved = 0L, lastPopulated = 0L),
+            ) ->
+              AchsWorkDistance(populate = 0L, remove = 0L)
+          )
+      }
       _ <- updatingStringInterningView.update(ledgerEnd.map(_.lastStringInterningId)) {
         (fromExclusive, toInclusive) =>
           implicit val loggingContext: LoggingContextWithTrace =
@@ -90,7 +120,7 @@ private[platform] final case class InitializeParallelIngestion(
         parameterStorageBackend.updatePostProcessingEnd(ledgerEnd.map(_.lastOffset))
       )
       _ = logger.info(s"Indexer initialized at $ledgerEnd")
-      _ <- initializeInMemoryState(ledgerEnd)
-    } yield ledgerEnd
+      _ <- initializeInMemoryState(ledgerEnd, initialAchsState)
+    } yield (ledgerEnd, initialAchsWork)
   }
 }

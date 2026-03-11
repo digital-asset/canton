@@ -21,19 +21,14 @@ import com.digitalasset.daml.lf.speedy.SValue.{SValue => SV, _}
 import com.digitalasset.daml.lf.speedy.Speedy._
 import com.digitalasset.daml.lf.speedy.{SExpr => runTime}
 import com.digitalasset.daml.lf.speedy.compiler.{SExpr0 => compileTime}
-import com.digitalasset.daml.lf.transaction.TransactionErrors.{
-  AuthFailureDuringExecution,
-  DuplicateContractId,
-  DuplicateContractKey,
-}
 import com.digitalasset.daml.lf.transaction.{
   ContractStateMachine,
   FatContractInstance,
   GlobalKey,
   GlobalKeyWithMaintainers,
   SerializationVersion,
-  TransactionErrors => TxErr,
 }
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits._
 import com.digitalasset.daml.lf.value.{Value => V}
 
 import java.nio.charset.StandardCharsets
@@ -1409,7 +1404,7 @@ private[lf] object SBuiltinFun {
 
               case Left((newPtx, err)) =>
                 machine.ptx = newPtx // Seems wrong. But one test in ScriptService requires this.
-                Control.Error(convTxError(err))
+                Control.Error(err)
             }
         }
       }
@@ -1500,7 +1495,7 @@ private[lf] object SBuiltinFun {
             machine.metrics.incrCount[TxNodeCount]()
             Control.Value(SUnit)
           case Left(err) =>
-            Control.Error(convTxError(err))
+            Control.Error(err)
         }
       }
     }
@@ -2001,7 +1996,7 @@ private[lf] object SBuiltinFun {
               machine.metrics.incrCount[TxNodeCount]()
               Control.Value(templateArg)
             case Left(err) =>
-              Control.Error(convTxError(err))
+               Control.Error(err)
           }
         }
       }
@@ -2042,7 +2037,7 @@ private[lf] object SBuiltinFun {
           machine.metrics.incrCount[TxNodeCount]()
           Control.Value(SUnit)
         case Left(err) =>
-          Control.Error(convTxError(err))
+           Control.Error(err)
       }
     }
   }
@@ -2055,6 +2050,7 @@ private[lf] object SBuiltinFun {
     // We already saw this key, but it was undefined or was archived
     def handleKeyNotFound(gkey: GlobalKey): (Control[Nothing], Boolean)
 
+    @scala.annotation.nowarn("msg=match may not be exhaustive.")
     final def handleKnownInputKey(
         gkey: GlobalKey,
         keyMapping: ContractStateMachine.KeyMapping,
@@ -2062,7 +2058,7 @@ private[lf] object SBuiltinFun {
       keyMapping match {
         case ContractStateMachine.KeyActive(cid) =>
           handleKeyFound(cid)
-        case ContractStateMachine.KeyInactive =>
+        case ContractStateMachine.KeyInactive() =>
           val (control, _) = handleKeyNotFound(gkey)
           control
       }
@@ -2092,6 +2088,8 @@ private[lf] object SBuiltinFun {
       operation: KeyOperation
   ) extends UpdateBuiltin(1)
       with Product {
+
+    @scala.annotation.nowarn("msg=match may not be exhaustive.")
     override protected def executeUpdate(
         args: ArraySeq[SValue],
         machine: UpdateMachine,
@@ -2127,13 +2125,13 @@ private[lf] object SBuiltinFun {
                   )(_ => operation.handleKeyFound(coid))
                 }
 
-              case ContractStateMachine.KeyInactive =>
+              case ContractStateMachine.KeyInactive() =>
                 operation.handleKnownInputKey(gkey, keyMapping)
             }
 
           case Left(handle) =>
             def continue: Option[V.ContractId] => (Control[Question.Update], Boolean) = { result =>
-              val (keyMapping, next) = handle(result)
+              val (keyMapping, next) = handle(result.asCidVector)
               machine.ptx = machine.ptx.copy(contractState = next)
               keyMapping match {
                 case ContractStateMachine.KeyActive(coid) =>
@@ -2147,7 +2145,7 @@ private[lf] object SBuiltinFun {
                       )(_ => operation.handleKeyFound(coid))
                     }
                   (c, true)
-                case ContractStateMachine.KeyInactive =>
+                case ContractStateMachine.KeyInactive() =>
                   operation.handleKeyNotFound(gkey)
               }
             }
@@ -2519,17 +2517,6 @@ private[lf] object SBuiltinFun {
     ): Control[Question.Update] = {
       machine.lastCommand = Some(cmd)
       Control.Value(args(0))
-    }
-  }
-
-  private[speedy] def convTxError(err: TxErr.TransactionError): IE = {
-    err match {
-      case TxErr.AuthFailureDuringExecutionTxError(AuthFailureDuringExecution(nid, fa)) =>
-        IE.FailedAuthorization(nid, fa)
-      case TxErr.DuplicateContractIdTxError(DuplicateContractId(contractId)) =>
-        crash(s"Unexpected duplicate contract ID ${contractId}")
-      case TxErr.DuplicateContractKeyTxError(DuplicateContractKey(key)) =>
-        IE.DuplicateContractKey(key)
     }
   }
 

@@ -73,6 +73,7 @@ import com.digitalasset.canton.platform.config.{
   TopologyAwarePackageSelectionConfig,
 }
 import com.digitalasset.canton.pureconfigutils.SharedConfigReaders.catchConvertError
+import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.sequencing.authentication.{
   AuthenticationTokenManagerConfig,
   AuthenticationTokenManagerExponentialBackoffConfig,
@@ -1157,6 +1158,27 @@ object CantonConfig {
         } yield config
       }
 
+    lazy implicit final val asyncWriterConfigReader: ConfigReader[AsyncWriterConfig] = {
+      implicit val deprecatedFields: DeprecatedFieldsFor[AsyncWriterConfig] =
+        new DeprecatedFieldsFor[AsyncWriterConfig] {
+
+          override def deprecatePath: List[DeprecatedConfigPath[?]] =
+            List(
+              DeprecatedConfigPath(
+                "enabled",
+                since = "3.5.0",
+                valueFilter = Some(false),
+              )
+            )
+        }
+
+      deriveReader[AsyncWriterConfig].applyDeprecations
+    }
+
+    lazy implicit final val timeAdvancingTopologyConfigReader
+        : ConfigReader[TimeAdvancingTopologyConfig] =
+      deriveReader[TimeAdvancingTopologyConfig]
+
     lazy implicit final val sequencerNodeParametersConfigReader
         : ConfigReader[SequencerNodeParameterConfig] = {
       implicit val deprecatedFields: DeprecatedFieldsFor[SequencerNodeParameterConfig] =
@@ -1170,12 +1192,9 @@ object CantonConfig {
           )
         }
 
-      implicit val asyncWriterConfigReader: ConfigReader[AsyncWriterConfig] =
-        deriveReader[AsyncWriterConfig]
-      implicit val timeAdvancingTopologyConfigReader: ConfigReader[TimeAdvancingTopologyConfig] =
-        deriveReader[TimeAdvancingTopologyConfig]
       deriveReader[SequencerNodeParameterConfig].applyDeprecations
     }
+
     lazy implicit final val SequencerHealthConfigReader: ConfigReader[SequencerHealthConfig] =
       deriveReader[SequencerHealthConfig]
 
@@ -1367,6 +1386,9 @@ object CantonConfig {
       implicit val participantStoreConfigReader: ConfigReader[ParticipantStoreConfig] = {
         implicit val journalPruningConfigReader: ConfigReader[JournalPruningConfig] =
           deriveReader[JournalPruningConfig]
+        implicit val safeToPruneCommitmentStateConfigReader
+            : ConfigReader[SafeToPruneCommitmentState] =
+          SafeToPruneCommitmentState.reader
         deriveReader[ParticipantStoreConfig]
       }
       implicit val adminWorkflowConfigReader: ConfigReader[AdminWorkflowConfig] =
@@ -2045,6 +2067,9 @@ object CantonConfig {
       implicit val participantStoreConfigWriter: ConfigWriter[ParticipantStoreConfig] = {
         implicit val journalPruningConfigWriter: ConfigWriter[JournalPruningConfig] =
           deriveWriter[JournalPruningConfig]
+        implicit val safeToPruneCommitmentStateConfigWriter
+            : ConfigWriter[SafeToPruneCommitmentState] =
+          SafeToPruneCommitmentState.writer
         deriveWriter[ParticipantStoreConfig]
       }
       implicit val adminWorkflowConfigWriter: ConfigWriter[AdminWorkflowConfig] =

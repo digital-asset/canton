@@ -49,8 +49,13 @@ class Agenda(clock: SimClock, loggerFactory: NamedLoggerFactory) {
         case InternalTick(machine, _, _, _) if machine == node =>
           logger.info(s"Removing internal tick $scheduledCommand to simulate crash")
           false
-        case RunFuture(machine, _, future, _, _) if machine == node =>
-          logger.info(s"Removing future ${future.name} from $scheduledCommand to simulate crash")
+        case RunFuture(machine, runningFuture) if machine == node =>
+          logger.info(
+            s"Removing future ${runningFuture.futureId} from $scheduledCommand to simulate crash: ${runningFuture.future.debugName}"
+          )
+          false
+        case RunFutureContinuation(machine, to, _, _, _) if machine == node =>
+          logger.info(s"Removing future continuation on $machine:$to to simulate crash")
           false
         case _ => true
       }

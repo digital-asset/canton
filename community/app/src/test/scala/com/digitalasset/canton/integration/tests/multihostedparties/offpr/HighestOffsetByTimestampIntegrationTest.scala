@@ -11,6 +11,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax.testIou
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.participant.admin.party.PartyManagementServiceError.InvalidTimestamp
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
+import com.digitalasset.canton.version.ProtocolVersion
 
 import java.time.Duration
 import scala.jdk.CollectionConverters.CollectionHasAsScala
@@ -100,6 +101,7 @@ final class HighestOffsetByTimestampIntegrationTest
       alice,
       target,
       daId,
+      onboarding = testedProtocolVersion >= ProtocolVersion.v35,
       Some(effectiveTimestamp.toInstant),
       beginOffsetExclusive = sourceLedgerEnd,
       completeAfter = PositiveInt.one,

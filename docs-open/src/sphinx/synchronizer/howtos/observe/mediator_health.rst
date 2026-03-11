@@ -37,7 +37,7 @@ For a Mediator Node that has never been connected to a Synchronizer, the output 
           mediators = Seq(mediator1),
           synchronizerOwners = Seq(sequencer1),
           synchronizerThreshold = PositiveInt.one,
-          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
         )
 
 .. snippet:: mediator_health

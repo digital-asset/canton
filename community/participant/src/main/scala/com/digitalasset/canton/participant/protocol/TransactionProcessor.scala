@@ -151,16 +151,41 @@ class TransactionProcessor(
     TransactionProcessor.TransactionSubmissionError,
     FutureUnlessShutdown[TransactionSubmissionResult],
   ] =
-    this.submit(
-      TransactionProcessingSteps.SubmissionParam(
-        submitterInfo,
-        transactionMeta,
-        keyResolver,
-        transaction,
-        disclosedContracts,
-      ),
-      topologySnapshot,
-    )
+    this
+      .submit(
+        TransactionProcessingSteps.SubmissionParam(
+          submitterInfo,
+          transactionMeta,
+          keyResolver,
+          transaction,
+          disclosedContracts,
+        ),
+        topologySnapshot,
+      )
+      .map { futRes =>
+        val _ = futRes.map {
+          case TransactionProcessor.TransactionSubmitted =>
+            commandProgressTracker
+              .findHandle(
+                submitterInfo.commandId,
+                submitterInfo.userId,
+                submitterInfo.actAs,
+                submitterInfo.submissionId,
+              )
+              .transactionSequenced()
+          case _ => ()
+        }
+        futRes
+      }
+
+  override protected def phase3validationStarts(rootHash: RootHash): Unit =
+    commandProgressTracker.validationStarts(rootHash)
+  override protected def phase3validationCompleted(rootHash: RootHash): Unit =
+    commandProgressTracker.validationCompleted(rootHash)
+  override protected def phase4responseCompleted(rootHash: RootHash): Unit =
+    commandProgressTracker.validationResponseCompleted(rootHash)
+  override protected def phase7startsWithVerdict(rootHash: RootHash): Unit =
+    commandProgressTracker.validationVerdict(rootHash)
 }
 
 object TransactionProcessor {

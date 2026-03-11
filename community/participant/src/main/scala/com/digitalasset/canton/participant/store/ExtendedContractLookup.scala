@@ -13,6 +13,7 @@ import com.digitalasset.canton.protocol.{
   LfGlobalKey,
 }
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.CreationTime
 
 import scala.concurrent.ExecutionContext
@@ -26,7 +27,7 @@ import scala.concurrent.ExecutionContext
   */
 class ExtendedContractLookup(
     private val contracts: Map[LfContractId, GenContractInstance],
-    private val keys: Map[LfGlobalKey, Option[LfContractId]],
+    private val keys: Map[LfGlobalKey, Vector[LfContractId]],
 )(protected implicit val ec: ExecutionContext)
     extends ContractAndKeyLookup {
 
@@ -47,7 +48,7 @@ class ExtendedContractLookup(
   override def lookupKey(key: LfGlobalKey)(implicit
       traceContext: TraceContext
   ): OptionT[FutureUnlessShutdown, Option[LfContractId]] =
-    OptionT.fromOption[FutureUnlessShutdown](keys.get(key))
+    OptionT.fromOption[FutureUnlessShutdown](keys.get(key)).map(_.asCidOption)
 
   // This lookup is fairly inefficient in the additional stakeholders, but this function is currently not really
   // used anywhere

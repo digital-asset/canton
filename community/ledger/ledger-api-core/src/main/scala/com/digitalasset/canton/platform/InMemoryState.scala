@@ -14,8 +14,9 @@ import com.digitalasset.canton.platform.apiserver.services.tracking.{
   StreamTracker,
   SubmissionTracker,
 }
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{AchsState, LedgerEnd}
 import com.digitalasset.canton.platform.store.cache.{
+  AchsStateCache,
   ContractStateCaches,
   InMemoryFanoutBuffer,
   MutableLedgerEndCache,
@@ -36,6 +37,7 @@ class InMemoryState(
     val ledgerEndCache: MutableLedgerEndCache,
     val contractStateCaches: ContractStateCaches,
     val offsetCheckpointCache: OffsetCheckpointCache,
+    val achsStateCache: AchsStateCache, // TODO(#30241) take care of the initialization of the ACHS state cache
     val inMemoryFanoutBuffer: InMemoryFanoutBuffer,
     val stringInterningView: StringInterningView,
     val dispatcherState: DispatcherState,
@@ -57,12 +59,14 @@ class InMemoryState(
     * NOTE: This method is not thread-safe. Calling it concurrently leads to undefined behavior.
     */
   final def initializeTo(
-      ledgerEndO: Option[LedgerEnd]
+      ledgerEndO: Option[LedgerEnd],
+      achsState: AchsState,
   )(implicit traceContext: TraceContext): Future[Unit] = {
     def clearCaches(): Unit = {
       contractStateCaches.reset(ledgerEndO)
       inMemoryFanoutBuffer.flush()
       ledgerEndCache.set(ledgerEndO)
+      achsStateCache.set(achsState)
     }
     def resetInMemoryState(): Future[Unit] =
       for {
@@ -81,14 +85,17 @@ class InMemoryState(
         _ = dispatcherState.startDispatcher(ledgerEndO.map(_.lastOffset))
       } yield ()
 
+    // TODO(#30241) verify the initialization of the ACHS state cache and test it
     def inMemoryStateIsUptodate: Boolean =
       ledgerEndCache() == ledgerEndO &&
         dispatcherState.getDispatcher.getHead() == ledgerEndO.map(_.lastOffset) &&
-        cachesUpdatedUpto.get() == ledgerEndO.map(_.lastOffset)
+        cachesUpdatedUpto.get() == ledgerEndO.map(_.lastOffset) &&
+        achsStateCache.get() == achsState
 
     def ledgerEndComparisonLog: String =
-      s"inMemoryLedgerEnd:$ledgerEndCache} persistedLedgerEnd:$ledgerEndO dispatcher-head:${dispatcherState.getDispatcher
-          .getHead()} cachesAreUpdateUpto:${cachesUpdatedUpto.get()}"
+      s"inMemoryLedgerEnd:$ledgerEndCache persistedLedgerEnd:$ledgerEndO dispatcher-head:${dispatcherState.getDispatcher
+          .getHead()} cachesAreUpdateUpto:${cachesUpdatedUpto.get()} achsState:${achsStateCache
+          .get()} persistedAchsState:$achsState"
 
     if (!dispatcherState.isRunning) {
       logger.info(s"Initializing participant in-memory state to ledger end: $ledgerEndO")
@@ -157,6 +164,7 @@ object InMemoryState {
     } yield new InMemoryState(
       participantId = participantId,
       ledgerEndCache = mutableLedgerEndCache,
+      achsStateCache = new AchsStateCache(loggerFactory),
       dispatcherState = dispatcherState,
       contractStateCaches = ContractStateCaches.build(
         initialLedgerEnd.map(_.lastEventSeqId).getOrElse(0L),

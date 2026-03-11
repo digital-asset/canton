@@ -12,6 +12,7 @@ import com.digitalasset.daml.lf.interpretation.{Error => IError}
 import com.digitalasset.daml.lf.language.{Ast, LookupError}
 import com.digitalasset.daml.lf.speedy.SValue
 import com.digitalasset.daml.lf.transaction._
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits._
 import com.digitalasset.daml.lf.value.Value
 
 // Provide methods to add missing information in values (and value containers):
@@ -125,7 +126,7 @@ object Enricher {
           packageName = packageName,
           templateId = templateId,
           key = impoverish(key),
-          result = result,
+          result = result.asCidOption,
           version = version,
         )
       case exe: Node.Exercise =>

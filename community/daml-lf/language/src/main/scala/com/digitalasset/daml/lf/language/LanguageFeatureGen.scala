@@ -84,9 +84,29 @@ trait LanguageFeaturesGenerated extends LanguageVersionGenerated {
     versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
   )
 
+  val featureUCKKeyBuiltins: Feature = Feature(
+    name = "Old style (UCK) key builtins (fetchByKey, exerciseByKey, lookupByKey, ...)",
+    versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
+  )
+
+  val featureFetchBykey: Feature = Feature(
+    name = "Fetch by key",
+    versionRange = featureUCKKeyBuiltins.versionRange,
+  )
+
+  val featureExerciseBykey: Feature = Feature(
+    name = "Exercise by key",
+    versionRange = featureUCKKeyBuiltins.versionRange,
+  )
+
+  val featureLookupBykey: Feature = Feature(
+    name = "Lookup by key",
+    versionRange = featureUCKKeyBuiltins.versionRange,
+  )
+
   val featureContractKeys: Feature = Feature(
     name = "Contract Keys",
-    versionRange = VersionRange.Inclusive(v2_dev, v2_dev),
+    versionRange = VersionRange.From(v2_3_1),
   )
 
   val featureFlatArchive: Feature = Feature(
@@ -128,7 +148,7 @@ trait LanguageFeaturesGenerated extends LanguageVersionGenerated {
   // manually added since generation broken since shuffle
   val featureNUCK: Feature = Feature(
     name = "Non-unique contract keys",
-    versionRange = VersionRange.From(v2_dev), // dev whilst developing, then 2.3(-rcn)
+    versionRange = VersionRange.From(v2_3_1), // dev whilst developing, then 2.3(-rcn)
   )
 
   val featureExtendedCryptoPrimitives: Feature = Feature(
@@ -144,6 +164,10 @@ trait LanguageFeaturesGenerated extends LanguageVersionGenerated {
     featureExtendedInterfaces,
     featureChoiceFuncs,
     featureTemplateTypeRepToText,
+    featureUCKKeyBuiltins,
+    featureFetchBykey,
+    featureExerciseBykey,
+    featureLookupBykey,
     featureContractKeys,
     featureFlatArchive,
     featurePackageImports,

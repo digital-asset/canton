@@ -28,6 +28,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.ImmArray
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
   GlobalKey,
@@ -254,13 +255,13 @@ final class PreparedTransactionEncoder(
 
   // Transformer for global key mappings
   private implicit val commandExecutionResultGlobalKeyMappingTransformer
-      : PartialTransformer[Map[GlobalKey, Option[Value.ContractId]], Seq[
+      : PartialTransformer[Map[GlobalKey, Vector[Value.ContractId]], Seq[
         Metadata.GlobalKeyMappingEntry
       ]] = PartialTransformer {
     _.toList.traverse { case (key, maybeContractId) =>
       for {
         convertedKey <- key.transformIntoPartial[iscd.GlobalKey]
-        convertedValue <- maybeContractId
+        convertedValue <- maybeContractId.asCidOption
           .map[lf.value.Value](lf.value.Value.ValueContractId.apply)
           .traverse(_.transformIntoPartial[lapiValue.Value])
       } yield iss.Metadata.GlobalKeyMappingEntry(

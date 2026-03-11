@@ -58,6 +58,20 @@ class ParticipantHistograms(val parent: MetricName)(implicit
       MetricQualification.Debug,
     )
 
+  private[metrics] val phase: Item =
+    Item(
+      prefix :+ "phase",
+      summary =
+        "Phase metrics measuring the time for the various command submission processing stages",
+      description =
+        """Time from receipt of command to submission such as interpretation and view computation.""",
+      qualification = MetricQualification.Latency,
+      labelsWithDescription = Map(
+        "synchronizer" -> "synchronizer",
+        "phase" -> "phase",
+      ),
+    )
+
 }
 
 class ParticipantMetrics(
@@ -87,6 +101,7 @@ class ParticipantMetrics(
   override def healthMetrics: HealthMetrics = ledgerApiServer.health
   override def storageMetrics: DbStorageMetrics = dbStorage
   val dbStorage = new DbStorageMetrics(inventory.dbStorage, openTelemetryMetricsFactory)
+  val phase: Timer = openTelemetryMetricsFactory.timer(inventory.phase.info)
 
   // Private constructor to avoid being instantiated multiple times by accident
   final class ConsoleThroughputMetrics private[ParticipantMetrics] {

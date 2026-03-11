@@ -131,7 +131,7 @@ trait RequestJournalStore { this: NamedLogging =>
     */
   final def crashRecoveryPruningBoundInclusive(cleanSynchronizerIndexO: Option[SynchronizerIndex])(
       implicit traceContext: TraceContext
-  ): FutureUnlessShutdown[CantonTimestamp] =
+  ): FutureUnlessShutdown[Option[CantonTimestamp]] =
     // Crash recovery cleans up the store before replay starts,
     // however we may have used some of the deleted information to determine the starting points for the replay.
     // So if a crash occurs during crash recovery, we may start again and come up with an earlier processing starting point.
@@ -150,20 +150,21 @@ trait RequestJournalStore { this: NamedLogging =>
       requestReplayTs <- cleanRequestTimestamp match {
         case None =>
           // No request is known to be clean, nothing can be pruned
-          FutureUnlessShutdown.pure(CantonTimestamp.MinValue)
+          FutureUnlessShutdown.pure(None)
         case Some(timestamp) =>
           firstRequestWithCommitTimeAfter(timestamp).map { res =>
-            val ts = res.fold(timestamp)(_.requestTimestamp)
-            // If the only processed requests so far are repair requests, it can happen that `ts == CantonTimestamp.MinValue`.
-            // Taking the predecessor throws an exception.
-            if (ts == CantonTimestamp.MinValue) ts else ts.immediatePredecessor
+            res.map(_.requestTimestamp).orElse(Some(timestamp)).map { ts =>
+              // If the only processed requests so far are repair requests, it can happen that `ts == CantonTimestamp.MinValue`.
+              // Taking the predecessor throws an exception.
+              if (ts == CantonTimestamp.MinValue) ts else ts.immediatePredecessor
+            }
           }
       }
       // TODO(i21246): Note for unifying crashRecoveryPruningBoundInclusive and startingPoints: This minimum building is not needed anymore, as the request timestamp is also smaller than the sequencer timestamp.
       cleanSequencerIndexTs = cleanSynchronizerIndexO
         .flatMap(_.sequencerIndex)
-        .fold(CantonTimestamp.MinValue)(_.immediatePredecessor)
-    } yield requestReplayTs.min(cleanSequencerIndexTs)
+        .map(_.immediatePredecessor)
+    } yield Ordering[Option[CantonTimestamp]].min(requestReplayTs, cleanSequencerIndexTs)
 
 }
 

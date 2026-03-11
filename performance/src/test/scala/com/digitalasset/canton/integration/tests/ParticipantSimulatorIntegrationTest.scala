@@ -6,7 +6,6 @@ package com.digitalasset.canton.integration.tests
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.config.{DbConfig, PositiveDurationSeconds, StorageConfig}
 import com.digitalasset.canton.console.InstanceReference
-import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.plugins.{
   UseBftSequencer,
   UseH2,
@@ -146,7 +145,11 @@ sealed trait ParticipantSimulatorIntegrationTest
     // Future for observing the expected number of contracts for all allocated parties
     val receivedAllContracts = Future(
       participant1.ledger_api.updates
-        .transactions(partyIds.toSet, completeAfter = PositiveInt.tryCreate(numContracts))
+        .transactions(
+          partyIds.toSet,
+          completeAfter = PositiveInt.tryCreate(numContracts),
+          timeout = 10.minutes, // long timeout just to be sure
+        )
     )
 
     // create IOUs asynchronously. participant goes VROOOOOM
@@ -165,7 +168,7 @@ sealed trait ParticipantSimulatorIntegrationTest
       }
 
     // wait for all contracts to be fully processed
-    receivedAllContracts.futureValue.discard
+    receivedAllContracts.futureValue should have size numContracts.toLong
 
     closables.foreach(_.close())
   }

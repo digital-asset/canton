@@ -10,6 +10,7 @@ import com.daml.test.evidence.tag.Security.SecurityTest.Property.{Availability, 
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.SynchronizerAlias
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.console.ConsoleEnvironment.Implicits.*
 import com.digitalasset.canton.console.{
@@ -807,6 +808,7 @@ trait PackageRemovalIntegrationTest
 }
 
 // Do not run this test with in-memory storage, as it restarts participant nodes.
+@UnstableTest // TODO(#20859)
 class PackageRemovalIntegrationTestPostgres extends PackageRemovalIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(

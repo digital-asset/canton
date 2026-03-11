@@ -12,6 +12,7 @@ import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeProportion, PositiveInt}
 import com.digitalasset.canton.config.{CommitmentSendDelay, NonNegativeDuration}
 import com.digitalasset.canton.console.{LocalParticipantReference, LocalSequencerReference}
+import com.digitalasset.canton.crypto.LtHash16
 import com.digitalasset.canton.examples.java.iou.Iou
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UsePostgres}
@@ -27,16 +28,21 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.SuppressionRule
 import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.Errors.MismatchError.CommitmentsMismatch
-import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.ReceivedCmtState.Mismatch
+import com.digitalasset.canton.participant.pruning.AcsCommitmentProcessor.ReceivedCmtState.{
+  Match,
+  Mismatch,
+}
 import com.digitalasset.canton.participant.pruning.SortedReconciliationIntervalsHelpers
 import com.digitalasset.canton.participant.store.UpdateMode
+import com.digitalasset.canton.participant.store.db.DbIncrementalCommitmentStore
 import com.digitalasset.canton.protocol.messages.{AcsCommitment, CommitmentPeriod}
-import com.digitalasset.canton.topology.SynchronizerId
+import com.digitalasset.canton.topology.{PartyId, SynchronizerId}
 import monocle.Monocle.toAppliedFocusOps
 import org.slf4j.event.Level
 
 import java.time.Duration as JDuration
 import java.util.concurrent.atomic.AtomicReference
+import scala.collection.immutable.SortedSet
 import scala.concurrent.Future
 
 trait AcsCommitmentRepairIntegrationTest
@@ -52,6 +58,8 @@ trait AcsCommitmentRepairIntegrationTest
   private var alreadyDeployedContracts: Seq[Iou.Contract] = Seq.empty
 
   private lazy val maxDedupDuration = java.time.Duration.ofHours(1)
+
+  private var alice: PartyId = _
 
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P3_S1M1_S1M1
@@ -98,7 +106,8 @@ trait AcsCommitmentRepairIntegrationTest
           p.dars.upload(CantonExamplesPath, synchronizerId = daId)
           p.dars.upload(CantonExamplesPath, synchronizerId = acmeId)
         }
-        passTopologyRegistrationTimeout(env)
+        alice = participant1.parties.enable("Alice", synchronizer = Some(daName))
+        passTopologyRegistrationTimeout()
       }
 
   def createContractsAndCheck(sequencer: LocalSequencerReference, synchronizerId: SynchronizerId)(
@@ -207,26 +216,50 @@ trait AcsCommitmentRepairIntegrationTest
       forAll(reinitCmtsResult)(_.acsTimestamp.value shouldBe >=(ts))
       // exchange commitments again, all should be fine
       createContractsAndCheck(sequencer1, daId)
-      createContractsAndCheck(sequencer2, acmeId)
+      val (_, period2a, _) = createContractsAndCheck(sequencer2, acmeId)
 
-      // Corrupt P2's running commitments on da by emptying them in the DB. We do that while disconnecting P2 from da
-      // so upon reconnect P2 initializes its running commitments from the DB. We expect that commitment exchange results
-      // in mismatches, and we detect inconsistencies between the running commitments and the ACS
+      // Corrupt P2's running commitments on da by emptying them in the DB and adding a bogus entry to the DB.
+      // We do that while disconnecting P2 from da so upon reconnect P2 initializes its running commitments from the DB.
+      // We expect that commitment exchange results in mismatches, and we detect inconsistencies between the running
+      // commitments and the ACS
+
+      // Wait until p2 has updated its last-computed-and-sent watermark before disconnecting.
+      // Otherwise, crash recovery might reprocess the prior period with the modified running commitments and
+      // compute a different commitment for participant1 than it had persisted previously,
+      // which triggers an internal error.
+      eventually() {
+        participant2.commitments.lastComputedAndSent(daName) should contain(period2a.toInclusive)
+      }
       participant2.synchronizers.disconnect_all()
       eventually() {
         participant2.synchronizers.list_connected() shouldBe empty
       }
       // eventually running commitments are changed in the DB
-      val corruptRunningCommitments = participant2.underlying.value.sync.syncPersistentStateManager
-        .acsCommitmentStore(daId)
-        .map(_.runningCommitments)
-        .value
-      corruptRunningCommitments
+      val incrementalCommitmentStoreP2 =
+        participant2.underlying.value.sync.syncPersistentStateManager
+          .acsCommitmentStore(daId)
+          .value
+          .runningCommitments
+      val stringInterning = incrementalCommitmentStoreP2 match {
+        case dbStore: DbIncrementalCommitmentStore => dbStore.stringInterning
+        case _ => fail("This test requires a DB store")
+      }
+
+      // Include a bogus running commitment for a stakeholder group with an empty ACS
+      // to test that reinitialization removes those stray rows.
+      val bogusStakeholderGroup =
+        Seq(alice, participant1.adminParty, participant2.adminParty).map(_.toLf)
+      val internedBogusStakeholderGroup =
+        SortedSet.from(bogusStakeholderGroup.map(stringInterning.party.internalize(_)))
+      val bogusCommitment = LtHash16()
+      bogusCommitment.add(Array[Byte](0x80.toByte))
+
+      incrementalCommitmentStoreP2
         .get()
         .flatMap { case (recordTime, runningCmts) =>
-          corruptRunningCommitments.update(
+          incrementalCommitmentStoreP2.update(
             recordTime,
-            updates = Map.empty,
+            updates = Map(internedBogusStakeholderGroup -> bogusCommitment.getByteString()),
             deletes = runningCmts.keySet,
             UpdateMode.Checkpoint,
           )
@@ -287,8 +320,8 @@ trait AcsCommitmentRepairIntegrationTest
             daCmtsP2.size shouldBe (1)
           }
 
-          // Repair P2's commitments on da by reinitializing them based on the ACS. We expect that the running commitments
-          // are repaired, and there are no more inconsistencies or commitments mismatches
+          logger.debug(s"Repair P2's commitments on $daId by reinitializing them based on the ACS")
+          // We expect that the running commitments are repaired, and there are no more inconsistencies or commitments mismatches
           val reinitCmtsResult2 =
             participant2.commitments.reinitialize_commitments(
               Seq(daId),
@@ -313,30 +346,53 @@ trait AcsCommitmentRepairIntegrationTest
         },
       )
 
-      // the commitment should match the returned one
-      val (_, period4da, _) = createContractsAndCheck(sequencer1, daId)
-      eventually() {
-        val p1Received = participant1.commitments.lookup_received_acs_commitments(
-          synchronizerTimeRanges = Seq(
-            SynchronizerTimeRange(
-              daId,
-              Some(
-                TimeRange(
-                  period4da.fromExclusive.forgetRefinement,
-                  period4da.toInclusive.forgetRefinement,
-                )
-              ),
+      def checkMatch(period: CommitmentPeriod) = {
+        val timeRange = SynchronizerTimeRange(
+          daId,
+          Some(
+            TimeRange(
+              period.fromExclusive.forgetRefinement,
+              period.toInclusive.forgetRefinement,
             )
           ),
-          counterParticipants = Seq.empty,
-          commitmentState = Seq.empty,
-          verboseMode = false,
         )
+        Seq(participant1, participant2).foreach { participant =>
+          withClue(s"For participant ${participant.name} in period $period:") {
+            eventually() {
+              val received = participant.commitments.lookup_received_acs_commitments(
+                synchronizerTimeRanges = Seq(timeRange),
+                counterParticipants = Seq.empty,
+                commitmentState = Seq.empty,
+                verboseMode = false,
+              )
 
-        val daCmts = p1Received.get(daId).value
-
-        daCmts.size shouldBe 1
+              val daCmts = received.get(daId).value
+              daCmts.size shouldBe 1
+              daCmts(0).state shouldBe Match
+            }
+          }
+        }
       }
+
+      logger.debug("Check that the commitments match again")
+      val (_, period4da, _) = createContractsAndCheck(sequencer1, daId)
+      checkMatch(period4da)
+
+      logger.debug("Restart to verify that the repair survives a crash")
+      // The in-memory running commitments produced by the reinitialization could gloss over
+      // the bogus entry in the checkpoint table. We therefore restart the participant and
+      // check again.
+      participant2.stop()
+      participant2.start()
+      participant2.synchronizers.reconnect_all()
+      eventually() {
+        participant2.synchronizers
+          .list_connected()
+          .map(_.physicalSynchronizerId) should contain(daId)
+      }
+
+      val (_, period5da, _) = createContractsAndCheck(sequencer1, daId)
+      checkMatch(period5da)
     }
 
     def reinitCommitments(participant: LocalParticipantReference) =

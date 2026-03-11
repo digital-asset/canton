@@ -75,6 +75,7 @@ trait SequencerClientSend {
       aggregationRule: Option[AggregationRule] = None,
       callback: SendCallback = SendCallback.empty,
       amplify: Boolean = false,
+      useConfirmationResponseAmplificationParameters: Boolean = false,
   )(implicit
       traceContext: TraceContext,
       metricsContext: MetricsContext,
@@ -90,6 +91,7 @@ trait SequencerClientSend {
       aggregationRule: Option[AggregationRule] = None,
       callback: SendCallback = SendCallback.empty,
       amplify: Boolean = false,
+      useConfirmationResponseAmplificationParameters: Boolean = false,
   )(implicit
       traceContext: TraceContext,
       metricsContext: MetricsContext,
@@ -101,6 +103,7 @@ trait SequencerClientSend {
     aggregationRule = aggregationRule,
     callback = callback,
     amplify = amplify,
+    useConfirmationResponseAmplificationParameters = useConfirmationResponseAmplificationParameters,
   ).value.flatMap(identity)
 
   /** Provides a value for max-sequencing-time to use for `sendAsync` if no better application

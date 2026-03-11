@@ -1411,7 +1411,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
     }
 
     private[this] def decodeRetrieveByKey(value: PLF.Update.RetrieveByKey): Work[TypeConId] = {
-      assertVersionSupports(LV.featureContractKeys, "RetrieveByKey")
+      assertVersionSupports(LV.featureLookupBykey)
       Ret(decodeTypeConId(value.getTemplate))
     }
 
@@ -1482,7 +1482,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           }
 
         case PLF.Update.SumCase.EXERCISE_BY_KEY =>
-          assertVersionSupports(LV.featureContractKeys, "exercise_by_key")
+          assertVersionSupports(LV.featureExerciseBykey)
           val exerciseByKey = lfUpdate.getExerciseByKey
           val templateId = decodeTypeConId(exerciseByKey.getTemplate)
           val choice = getInternedName(exerciseByKey.getChoiceInternedStr)
@@ -1516,13 +1516,13 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           }
 
         case PLF.Update.SumCase.FETCH_BY_KEY =>
-          assertVersionSupports(LV.featureContractKeys, "fetch_by_key")
+          assertVersionSupports(LV.featureFetchBykey)
           Work.bind(decodeRetrieveByKey(lfUpdate.getFetchByKey)) { tmplId =>
             Ret(UpdateFetchByKey(tmplId))
           }
 
         case PLF.Update.SumCase.LOOKUP_BY_KEY =>
-          assertVersionSupports(LV.featureContractKeys, "lookup_by_key")
+          assertVersionSupports(LV.featureLookupBykey)
           Work.bind(decodeRetrieveByKey(lfUpdate.getLookupByKey)) { tmplId =>
             Ret(UpdateLookupByKey(tmplId))
           }

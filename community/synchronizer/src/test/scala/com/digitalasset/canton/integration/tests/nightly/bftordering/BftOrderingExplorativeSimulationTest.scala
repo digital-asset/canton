@@ -27,7 +27,7 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
 
   private val randomSourceToCreateSettings = new Random()
 
-  private val durationOfFirstPhaseWithFaults = 1.minute
+  private val durationOfFirstPhaseWithFaults = 5.minute
   private val durationOfSecondPhaseWithoutFaults = 30.seconds
 
   private val zeroProbability: Probability = Probability(0)
@@ -92,6 +92,9 @@ class BftOrderingExplorativeSimulationTest extends BftOrderingSimulationTest {
           unPartitionProbability =
             randomEquallyWeightedOneOf(generateProb(0.0, 0.2), generateProb(0.0, 0.5)),
           unPartitionStability = randomEquallyWeightedOneOf(2.seconds, 5.seconds, 10 seconds),
+        ),
+        FutureSettings(
+          randomSeed = randomSourceToCreateSettings.nextLong()
         ),
         durationOfFirstPhaseWithFaults,
         durationOfSecondPhaseWithoutFaults,

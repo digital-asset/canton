@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.topology
 
 import com.digitalasset.canton.admin.api.client.data.SequencerConnections
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
@@ -35,6 +36,7 @@ import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, blocking}
 import scala.jdk.DurationConverters.*
 
+@UnstableTest // TODO(#30856)
 class TopologyTicksIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment
@@ -60,7 +62,6 @@ class TopologyTicksIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2S2M1_Config
-      .addConfigTransform(ConfigTransforms.useStaticTime)
       .withNetworkBootstrap { implicit env =>
         new NetworkBootstrapper(
           // in tests using the sim clock, epsilon is by default set to 0, but for this test we want it to be
@@ -68,18 +69,25 @@ class TopologyTicksIntegrationTest
           S1M1.withTopologyChangeDelay(epsilon.toConfig)
         )
       }
+      .addConfigTransform(ConfigTransforms.useStaticTime)
       .addConfigTransforms(
-        (ConfigTransforms.updateAllSequencerConfigs_(
-          _.focus(_.parameters.producePostOrderingTopologyTicks) // turn on the feature being tested
-            .replace(true)
-        ) +: ConfigTransforms
+        ConfigTransforms
           // When submitting new topology transactions while advancing the sim clock, we might end up advancing
           // the clock more than the default topologyTransactionObservationTimeout value, before completing the operation.
           // So by having a higher value here we avoid unnecessary warnings in the test.
           .updateAllNodesTopologyConfig(
             _.focus(_.topologyTransactionObservationTimeout)
               .replace(config.NonNegativeFiniteDuration.ofDays(100))
-          ))*
+              // The same applies to the registration timeout
+              .focus(_.topologyTransactionRegistrationTimeout)
+              .replace(config.NonNegativeFiniteDuration.ofDays(100))
+          )*
+      )
+      .addConfigTransforms(
+        ConfigTransforms.updateAllSequencerConfigs_(
+          _.focus(_.parameters.producePostOrderingTopologyTicks) // turn on the feature being tested
+            .replace(true)
+        )
       )
 
   registerPlugin(new UsePostgres(loggerFactory))

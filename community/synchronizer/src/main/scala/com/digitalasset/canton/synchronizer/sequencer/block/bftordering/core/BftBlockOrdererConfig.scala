@@ -41,6 +41,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.Bft
   DefaultMaxRequestPayloadBytes,
   DefaultMaxRequestsInBatch,
   DefaultMinRequestsInBatch,
+  DefaultOutputFetchMinimumDelay,
   DefaultOutputFetchTimeout,
   DefaultOutputFetchTimeoutCap,
   LeaderSelectionPolicyConfig,
@@ -169,6 +170,7 @@ final case class BftBlockOrdererConfig(
     delayedInitQueueMaxSize: Int = DefaultDelayedInitQueueMaxSize,
     epochStateTransferRetryTimeout: FiniteDuration = DefaultEpochStateTransferTimeout,
     outputFetchTimeout: FiniteDuration = DefaultOutputFetchTimeout,
+    outputFetchMinimumDelay: FiniteDuration = DefaultOutputFetchMinimumDelay,
     outputFetchTimeoutCap: FiniteDuration = DefaultOutputFetchTimeoutCap,
     initialNetwork: Option[P2PNetworkConfig] = None,
     standalone: Option[BftBlockOrderingStandaloneNetworkConfig] = None,
@@ -210,7 +212,8 @@ object BftBlockOrdererConfig {
   val DefaultDelayedInitQueueMaxSize: Int = 1024
   val DefaultEpochStateTransferTimeout: FiniteDuration = 10.seconds
   val DefaultOutputFetchTimeout: FiniteDuration = 2.second
-  val DefaultOutputFetchTimeoutCap: FiniteDuration = 20.second
+  val DefaultOutputFetchMinimumDelay: FiniteDuration = 500.milliseconds
+  val DefaultOutputFetchTimeoutCap: FiniteDuration = 5.second
 
   val DefaultHowLongToBlackList: LeaderSelectionPolicyConfig.HowLongToBlacklist =
     LeaderSelectionPolicyConfig.HowLongToBlacklist.Linear

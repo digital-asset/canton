@@ -48,7 +48,6 @@ import monocle.macros.syntax.lens.*
 import org.scalactic.source.Position
 import org.scalatest.{Assertion, Tag}
 
-import java.time.Duration as JDuration
 import java.util.concurrent.atomic.AtomicInteger
 import scala.concurrent.Future
 import scala.concurrent.duration.*
@@ -581,8 +580,6 @@ abstract class SynchronizerChangeSimClockIntegrationTest
           val participants = Seq(P4, P5)
 
           val clock = env.environment.simClock.value
-          clock.advance(NonNegativeFiniteDuration.tryOfSeconds(1).unwrap)
-          participants.foreach(_.testing.fetch_synchronizer_times())
 
           val paintOfferId = createPaintOffer(alice, bank, painter, P5, participants)
 
@@ -615,13 +612,9 @@ abstract class SynchronizerChangeSimClockIntegrationTest
           val automaticAssignmentTime = exclusivityTimeout.unwrap
           val baseTime = clock.now
           clock.advance(automaticAssignmentTime)
-          participants.foreach(_.testing.fetch_synchronizer_times())
 
           // paintOffer is still in the IouSynchronizer
           assertInAcsSync(Seq(P4, P5), iouSynchronizerAlias, paintOfferId)
-
-          // sequence something to obtain an up-to-date synchronizer time
-          assertPingSucceeds(P4, P4)
 
           // Wait for the PaintSynchronizer to reach a time exceeding the exclusivity timeout P4
           P4.testing.await_synchronizer_time(
@@ -630,8 +623,8 @@ abstract class SynchronizerChangeSimClockIntegrationTest
             5.seconds,
           )
 
-          // TODO(i9502): Work out why this workaround is required, and remove it if possible
-          clock.advance(JDuration.ofSeconds(1))
+          // Fetch synchronizer times for all participants, because reassignments do not work, if
+          // the target topology is outdated.
           participants.foreach(_.testing.fetch_synchronizer_times())
 
           // Check that reassignments can still be completed

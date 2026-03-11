@@ -4,6 +4,7 @@
 package com.digitalasset.canton.crypto
 
 import com.digitalasset.canton.checked
+import com.digitalasset.canton.discard.Implicits.*
 import com.digitalasset.canton.protocol.LfHash
 import com.digitalasset.canton.protocol.hash.HashTracer
 import com.digitalasset.canton.protocol.hash.HashTracer.NoOp
@@ -80,6 +81,19 @@ trait HashBuilder {
   /** Shorthand for `addWithoutLengthPrefix(DeterministicEncoding.encodeInt(a))` */
   def addInt(a: Int): this.type =
     addWithoutLengthPrefixWithContext(DeterministicEncoding.encodeInt(a), s"$a (int)")
+
+  /** Adds all elements in the map in a deterministic order defined by the ordering on the key of
+    * the map
+    */
+  def addMap[K, V](m: Map[K, V])(
+      keyAdder: K => HashBuilder
+  )(valueAdder: V => HashBuilder)(implicit ord: Ordering[K]): this.type = {
+    m.toSeq.sortBy(_._1).foreach { case (k, v) =>
+      keyAdder(k).discard
+      valueAdder(v).discard
+    }
+    this
+  }
 
   /** Shorthand for `addWithoutLengthPrefix(DeterministicEncoding.encodeLong(a))` */
   def addLong(a: Long): this.type =

@@ -31,8 +31,8 @@ private[backend] trait StorageBackendTestsCompletions
     TraceContext.withNewTraceContext("test") { aTraceContext =>
       val party = someParty
       val userId = someUserId
-      val emptyTraceContext = SerializableTraceContext(TraceContext.empty).toDamlProto.toByteArray
-      val serializableTraceContext = SerializableTraceContext(aTraceContext).toDamlProto.toByteArray
+      val emptyTraceContext = SerializableTraceContext(TraceContext.empty).toSerializedDamlProto
+      val serializableTraceContext = SerializableTraceContext(aTraceContext).toSerializedDamlProto
 
       val dtos = Vector(
         dtoCompletion(offset(1), submitters = Set(party)),
@@ -83,11 +83,11 @@ private[backend] trait StorageBackendTestsCompletions
       completions0to9 should have length 3
 
       completions0to9.head.completionResponse.completion.map(_.traceContext) shouldBe Some(
-        Some(SerializableTraceContext(testTraceContext).toDamlProto)
+        SerializableTraceContext(testTraceContext).toDamlProto
       )
       completions0to9(1).completionResponse.completion.map(_.traceContext) shouldBe Some(None)
       completions0to9(2).completionResponse.completion.map(_.traceContext) shouldBe Some(
-        Some(SerializableTraceContext(aTraceContext).toDamlProto)
+        SerializableTraceContext(aTraceContext).toDamlProto
       )
     }
   }

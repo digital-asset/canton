@@ -90,7 +90,7 @@ sealed trait AcsCommitmentCatchupIntegrationTest
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
         participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
         participants.all.foreach(_.dars.upload(CantonExamplesPath, synchronizerId = daId))
-        passTopologyRegistrationTimeout(env)
+        passTopologyRegistrationTimeout()
       }
 
   "Commitment catch-up" should {

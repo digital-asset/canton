@@ -36,6 +36,7 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.collection.MapsUtil
 import com.digitalasset.canton.util.{ContractHasher, ErrorUtil, LfTransactionUtil, MonadUtil}
 import com.digitalasset.daml.lf.data.Ref.PackageId
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.ContractStateMachine.KeyInactive
 import com.digitalasset.daml.lf.transaction.Transaction.{
   KeyActive,
@@ -396,7 +397,7 @@ class TransactionTreeFactoryImpl(
                       if state.csmState.mode == ContractStateMachine.Mode.LegacyNUCK =>
                     val gkey = lookupByKey.key.globalKey
                     state.currentResolver.get(gkey).toRight(MissingContractKeyLookupError(gkey))
-                  case _ => Right(KeyInactive) // dummy value, as resolution is not used
+                  case _ => Right(KeyInactive()) // dummy value, as resolution is not used
                 }
                 nextState <- state.csmState
                   .handleNode((), suffixedNode, resolutionForModeOff)
@@ -812,7 +813,7 @@ class TransactionTreeFactoryImpl(
       transactionView: TransactionView,
       viewPosition: ViewPosition,
   )(implicit traceContext: TraceContext): Unit = {
-    val viewGki = transactionView.globalKeyInputs.fmap(_.unversioned.resolution)
+    val viewGki = transactionView.globalKeyInputs.fmap(_.unversioned.resolution.asCidVector)
     val stateGki = csmState.globalKeyInputs.fmap(_.toKeyMapping)
     ErrorUtil.requireState(
       viewGki == stateGki,

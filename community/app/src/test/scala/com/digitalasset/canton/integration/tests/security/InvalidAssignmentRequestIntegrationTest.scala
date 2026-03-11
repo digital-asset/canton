@@ -18,6 +18,7 @@ import com.digitalasset.canton.integration.{
 }
 import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.{ExampleContractFactory, LfContractId, ReassignmentId}
 import com.digitalasset.canton.sequencing.protocol.Recipients
 import com.digitalasset.canton.synchronizer.sequencer.{
@@ -239,8 +240,10 @@ final class InvalidAssignmentRequestIntegrationTest
 
       def errorMediatorApprovedLocalReject(participantName: String)(entry: LogEntry): Assertion = {
         entry.loggerName should include(s"participant=$participantName")
-        val errMsg = entry.throwable.fold(entry.errorMessage)(_.getMessage)
-        errMsg should include("Mediator approved a request that we have locally rejected")
+        entry.shouldBeCantonError(
+          SyncServiceAlarm,
+          _ shouldBe "Mediator approved a request that has been locally rejected.",
+        )
       }
 
       def oneOrMore(assertion: LogEntry => Assertion) = Seq(

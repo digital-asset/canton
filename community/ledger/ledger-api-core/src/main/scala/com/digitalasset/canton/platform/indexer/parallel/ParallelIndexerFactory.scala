@@ -12,6 +12,7 @@ import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.ResourceOwnerOps
 import com.digitalasset.canton.platform.config.ServerRole
 import com.digitalasset.canton.platform.indexer.Indexer
+import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.platform.indexer.ha.{
   HaConfig,
   HaCoordinator,
@@ -20,7 +21,7 @@ import com.digitalasset.canton.platform.indexer.ha.{
 }
 import com.digitalasset.canton.platform.indexer.parallel.AsyncSupport.*
 import com.digitalasset.canton.platform.store.DbSupport.DbConfig
-import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.LedgerEnd
+import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{AchsState, LedgerEnd}
 import com.digitalasset.canton.platform.store.backend.{
   DBLockStorageBackend,
   DataSourceStorageBackend,
@@ -50,9 +51,10 @@ object ParallelIndexerFactory {
       dataSourceStorageBackend: DataSourceStorageBackend,
       initializeParallelIngestion: InitializeParallelIngestion,
       parallelIndexerSubscription: ParallelIndexerSubscription[?],
+      achsConfigO: Option[AchsConfig],
       mat: Materializer,
       executionContext: ExecutionContext,
-      initializeInMemoryState: Option[LedgerEnd] => Future[Unit],
+      initializeInMemoryState: (Option[LedgerEnd], AchsState) => Future[Unit],
       loggerFactory: NamedLoggerFactory,
       indexerDbDispatcherOverride: Option[DbDispatcher],
       clock: Clock,
@@ -132,6 +134,8 @@ object ParallelIndexerFactory {
       implicit val rc: ResourceContext = ResourceContext(ec)
       val futureQueueConsumerFactoryPromise =
         Promise[Future[Done] => FutureQueueConsumer[Update]]()
+      // disable ACHS in repair mode, initialization of the parallel indexer should be responsible to maintain the ACHS after repair
+      val achsConfigEffective = Option.when(!repairMode)(achsConfigO).flatten
       val haProtectedExecutionHandle = haCoordinator
         .protectedExecution { connectionInitializer =>
           val indexingHandleF = initializeHandle(
@@ -159,9 +163,11 @@ object ParallelIndexerFactory {
             } yield dbDispatcher
           ) { dbDispatcher =>
             for {
-              initialLedgerEnd <- initializeParallelIngestion(
+              (initialLedgerEnd, initialAchsWork) <- initializeParallelIngestion(
                 dbDispatcher = dbDispatcher,
                 initializeInMemoryState = initializeInMemoryState,
+                // TODO(#30186) test that in repair mode ACHS is not maintained
+                achsConfig = achsConfigEffective,
               )
               (handle, futureQueueForCompletion) = parallelIndexerSubscription(
                 inputMapperExecutor = inputMapperExecutor,
@@ -169,8 +175,10 @@ object ParallelIndexerFactory {
                 dbDispatcher = dbDispatcher,
                 materializer = mat,
                 initialLedgerEnd = initialLedgerEnd,
+                initialAchsWork = initialAchsWork,
                 commit = commit,
                 clock = clock,
+                achsConfigO = achsConfigEffective,
                 repairMode = repairMode,
               )
             } yield {

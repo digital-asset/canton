@@ -159,6 +159,7 @@ class ACSReader(
         idPageBufferSize = config.maxPagesPerIdPagesBuffer,
         initialFromIdExclusive = 0L,
         initialEndInclusive = activeAtEventSeqId,
+        descendingOrder = false,
       )(
         eventStorageBackend.updateStreamingQueries.fetchActiveIds(
           stakeholderO = filter.party,
@@ -413,7 +414,7 @@ class ACSReader(
 
     decomposedFilters
       .map(fetchActiveIds)
-      .pipe(EventIdsUtils.sortAndDeduplicateIds)
+      .pipe(EventIdsUtils.sortAndDeduplicateIds(descendingOrder = false))
       .batchN(
         maxBatchSize = config.maxPayloadsPerPayloadsPage,
         maxBatchCount = config.maxParallelPayloadCreateQueries + 1,

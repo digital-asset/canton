@@ -93,10 +93,7 @@ private[update] final class SubmissionRequestValidator(
             inFlightAggregations,
             sequencingTimestamp,
             signedSubmissionRequest.content,
-          ).recover { errorSubmissionOutcome =>
-            // Use the traffic updated ephemeral state in the response even if the rest of the processing stopped
-            SubmissionRequestValidationResult(inFlightAggregations, errorSubmissionOutcome, None)
-          }.leftMap { errorSubmissionOutcome =>
+          ).leftMap { errorSubmissionOutcome =>
             SubmissionRequestValidationResult(inFlightAggregations, errorSubmissionOutcome, None)
           }.merge
         case Left(errorSubmissionOutcome) =>
@@ -557,51 +554,63 @@ private[update] final class SubmissionRequestValidator(
             SubmissionOutcome.Discard
           }
       )
+
       aggregationOutcome <-
         aggregationIdO
-          .traverse { aggregationId =>
+          .traverse { case (aggregationId, aggregationRule) =>
             val inFlightAggregation = inFlightAggregations.get(aggregationId)
-            validateAggregationRuleAndUpdateInFlightAggregation(
-              submissionRequest,
-              sequencingTimestamp,
-              aggregationId,
-              inFlightAggregation,
-            ).map(inFlightAggregationUpdate =>
-              (aggregationId, inFlightAggregationUpdate, inFlightAggregation)
-            )
+            EitherT
+              .fromEither[FutureUnlessShutdown](
+                submissionRequest.batch.toClosedUncompressedBatchResult
+                  .leftMap[SubmissionOutcome](_ => SubmissionOutcome.Discard)
+              )
+              .flatMap { uncompressedBatch =>
+                validateAggregationRuleAndUpdateInFlightAggregation(
+                  submissionRequest,
+                  uncompressedBatch,
+                  sequencingTimestamp,
+                  aggregationId,
+                  aggregationRule,
+                  inFlightAggregation,
+                ).map { case (updatedInFlightAggregation, inFlightAggregationUpdate) =>
+                  (
+                    aggregationId,
+                    updatedInFlightAggregation,
+                    inFlightAggregationUpdate,
+                    uncompressedBatch,
+                  )
+                }
+              }
           }
 
-      uncompressedBatch <- EitherT.fromEither[FutureUnlessShutdown](
-        submissionRequest.batch.toClosedUncompressedBatchResult.leftMap[SubmissionOutcome](_ =>
-          SubmissionOutcome.Discard
-        )
-      )
+    } yield {
 
-      aggregatedBatch = aggregationOutcome.fold(submissionRequest.batch) {
-        case (aggregationId, inFlightAggregationUpdate, inFlightAggregation) =>
-          val updatedInFlightAggregation = InFlightAggregation.tryApplyUpdate(
-            aggregationId,
-            inFlightAggregation,
-            inFlightAggregationUpdate,
-            ignoreInFlightAggregationErrors = false,
-          )
-          uncompressedBatch
+      val (requestOrAggregatedBatch, aggregationUpdateO) = aggregationOutcome match {
+        case None => (submissionRequest.batch, None)
+        case Some(
+              (
+                aggregationId,
+                updatedInFlightAggregation,
+                inFlightAggregationUpdate,
+                uncompressedBatch,
+              )
+            ) =>
+          val aggregatedBatch = uncompressedBatch
             .focus(_.envelopes)
             .modify(_.lazyZip(updatedInFlightAggregation.aggregatedSignatures).map {
               (envelope, signatures) =>
                 envelope.updateSignatures(signatures = signatures)
             })
+          (
+            aggregatedBatch,
+            Some((aggregationId, updatedInFlightAggregation, inFlightAggregationUpdate)),
+          )
       }
 
-      submissionRecipients =
+      val submissionRecipients =
         (submissionRequest.batch.allMembers + submissionRequest.sender).map(MemberRecipient.apply)
 
-      allRecipients = previouslyResolvedRecipients ++ submissionRecipients
-
-      aggregationUpdate = aggregationOutcome.map {
-        case (aggregationId, inFlightAggregationUpdate, _) =>
-          aggregationId -> inFlightAggregationUpdate
-      }
+      val allRecipients = previouslyResolvedRecipients ++ submissionRecipients
 
       // We need to know whether the group of sequencers was addressed in order to update `latestSequencerEventTimestamp`.
       // Simply checking whether this sequencer is within the resulting event recipients opens up
@@ -626,42 +635,47 @@ private[update] final class SubmissionRequestValidator(
       // `latestSequencerEventTimestamp` should be part of a "safe-to-prune" timestamp calculation.
       //
       // See https://github.com/DACH-NY/canton/pull/17676#discussion_r1515926774
-      sequencerEventTimestamp =
+      val sequencerEventTimestamp =
         Option.when(isThisSequencerAddressed(previouslyResolvedRecipients, submissionRequest))(
           sequencingTimestamp
         )
 
-    } yield SubmissionRequestValidationResult(
-      inFlightAggregations,
-      SubmissionOutcome.Deliver(
-        submissionRequest,
-        sequencingTimestamp,
-        allRecipients,
-        aggregatedBatch,
-        traceContext,
-        trafficReceiptO = None, // traffic receipt is updated at the end of the processing
-        inFlightAggregation = aggregationUpdate,
-      ),
-      sequencerEventTimestamp,
-    )
+      SubmissionRequestValidationResult(
+        inFlightAggregations,
+        SubmissionOutcome.Deliver(
+          submissionRequest,
+          sequencingTimestamp,
+          allRecipients,
+          requestOrAggregatedBatch,
+          traceContext,
+          trafficReceiptO = None, // traffic receipt is updated at the end of the processing
+          inFlightAggregation = aggregationUpdateO,
+        ),
+        sequencerEventTimestamp,
+      )
+    }
 
+  /** Validates the aggregation rule and computes the updated aggregation
+    */
   private def validateAggregationRuleAndUpdateInFlightAggregation(
       submissionRequest: SubmissionRequest,
+      uncompressedBatch: Batch[ClosedUncompressedEnvelope],
       sequencingTimestamp: CantonTimestamp,
       aggregationId: AggregationId,
+      rule: AggregationRule,
       inFlightAggregationO: Option[InFlightAggregation],
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
-  ): EitherT[FutureUnlessShutdown, SubmissionOutcome, InFlightAggregationUpdate] = {
-    val rule = submissionRequest.aggregationRule.getOrElse(
-      ErrorUtil.internalError(
-        new IllegalStateException(
-          "A submission request with an aggregation id must have an aggregation rule"
-        )
-      )
+  ): EitherT[
+    FutureUnlessShutdown,
+    SubmissionOutcome,
+    (InFlightAggregation, InFlightAggregationUpdate),
+  ] = {
+    ErrorUtil.requireState(
+      submissionRequest.aggregationRule.contains(rule),
+      s"Mismatch in aggregation rule $rule vs ${submissionRequest.aggregationRule}",
     )
-
     for {
       inFlightAggregationAndUpdate <- inFlightAggregationO match {
         case None =>
@@ -684,12 +698,6 @@ private[update] final class SubmissionRequestValidator(
       }
       (inFlightAggregation, inFlightAggregationUpdate) = inFlightAggregationAndUpdate
 
-      uncompressedBatch <- EitherT.fromEither[FutureUnlessShutdown](
-        submissionRequest.batch.toClosedUncompressedBatchResult.leftMap[SubmissionOutcome](_ =>
-          SubmissionOutcome.Discard
-        )
-      )
-
       aggregatedSender = AggregatedSender(
         submissionRequest.sender,
         AggregationBySender(
@@ -698,7 +706,7 @@ private[update] final class SubmissionRequestValidator(
         ),
       )
 
-      newAggregation <-
+      updatedAggregation <-
         EitherT.fromEither[FutureUnlessShutdown](
           inFlightAggregation
             .tryAggregate(aggregatedSender)
@@ -728,24 +736,26 @@ private[update] final class SubmissionRequestValidator(
       // If we're not delivering the request to all recipients right now, just send a receipt back to the sender
       _ <- EitherT
         .cond(
-          newAggregation.deliveredAt.nonEmpty,
+          updatedAggregation.deliveredAt.nonEmpty,
           logger.debug(
-            s"Aggregation ID $aggregationId has reached its threshold ${newAggregation.rule.threshold} and will be delivered at $sequencingTimestamp."
+            s"Aggregation ID $aggregationId has reached its threshold ${updatedAggregation.rule.threshold} and will be delivered at $sequencingTimestamp."
           ), {
             logger.debug(
-              s"Aggregation ID $aggregationId has now ${newAggregation.aggregatedSenders.size} senders aggregated. Threshold is ${newAggregation.rule.threshold.value}."
+              s"Aggregation ID $aggregationId has now ${updatedAggregation.aggregatedSenders.size} senders aggregated. Threshold is ${updatedAggregation.rule.threshold.value}."
             )
+            // we only return a receipt, as we are still collecting aggregation results
             SubmissionOutcome.DeliverReceipt(
               submissionRequest,
               sequencingTimestamp,
               traceContext,
               trafficReceiptO = None, // traffic receipt is updated at the end of the processing
-              inFlightAggregation = Some(aggregationId -> fullInFlightAggregationUpdate),
+              inFlightAggregation =
+                Some((aggregationId, updatedAggregation, fullInFlightAggregationUpdate)),
             ): SubmissionOutcome
           },
         )
         .mapK(FutureUnlessShutdown.outcomeK)
-    } yield fullInFlightAggregationUpdate
+    } yield (updatedAggregation, fullInFlightAggregationUpdate)
   }
 
   private def validateAggregationRule(

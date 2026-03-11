@@ -76,7 +76,7 @@ object CantonTesting {
           Seq(sequencer),
           PositiveInt.one,
           staticSynchronizerParameters =
-            StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+            StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
           mediatorThreshold = PositiveInt.one,
         )
         .discard

@@ -91,12 +91,6 @@ class CantonOrderingTopologyProviderTest
                 ).withLeft[String]
               )
             )
-          when(topologySnapshotMock.memberFirstKnownAt(any[SequencerId])(any[TraceContext]))
-            .thenReturn(
-              FutureUnlessShutdown.pure(
-                Some((SequencedTime(aTimestamp), EffectiveTime(aTimestamp)))
-              )
-            )
           when(topologySnapshotMock.findDynamicSequencingParameters()(any[TraceContext]))
             .thenReturn(FutureUnlessShutdown.pure(Right(someDynamicSequencingParameters)))
           when(
@@ -165,14 +159,61 @@ class CantonOrderingTopologyProviderTest
               orderingTopology.nodesTopologyInfo should contain theSameElementsAs someSequencerIds
                 .map(sequencerId =>
                   SequencerNodeId.toBftNodeId(sequencerId) -> NodeTopologyInfo(
-                    activationTime =
-                      TopologyActivationTime.fromEffectiveTime(EffectiveTime(aTimestamp)),
-                    keyIds = Set(FingerprintKeyId.toBftKeyId(pk.id)),
+                    keyIds = Set(FingerprintKeyId.toBftKeyId(pk.id))
                   )
                 )
               orderingTopology.maxBytesToDecompress shouldBe defaultMaxBytesToDecompress
             }
       }
+    }
+
+    "getting members first known" in {
+      val effectiveTimeForSequencers = Map(
+        fakeSequencerId("1") -> aTimestamp,
+        fakeSequencerId("2") -> aTimestamp.plusMillis(5),
+      )
+      val topologySnapshotMock = mock[TopologySnapshot]
+      when(topologySnapshotMock.timestamp).thenReturn(aTimestamp)
+      when(topologySnapshotMock.sequencerGroup())
+        .thenReturn(
+          FutureUnlessShutdown.pure(
+            Some(SequencerGroup(someSequencerIds, Seq.empty, PositiveInt.one))
+          )
+        )
+      effectiveTimeForSequencers.foreach { case (sequencer, effectiveTime) =>
+        when(topologySnapshotMock.memberFirstKnownAt(eqTo(sequencer))(any[TraceContext]))
+          .thenReturn(
+            FutureUnlessShutdown.pure(
+              Some(SequencedTime(aTimestamp) -> EffectiveTime(effectiveTime))
+            )
+          )
+      }
+      val synchronizerSnapshotSyncCryptoApiMock = mock[SynchronizerSnapshotSyncCryptoApi]
+      when(synchronizerSnapshotSyncCryptoApiMock.ipsSnapshot).thenReturn(topologySnapshotMock)
+      val cryptoApiMock = mock[SynchronizerCryptoClient]
+      when(cryptoApiMock.awaitSnapshot(any[CantonTimestamp])(any[TraceContext]))
+        .thenReturn(FutureUnlessShutdown.pure(synchronizerSnapshotSyncCryptoApiMock))
+      new CantonOrderingTopologyProvider(
+        cryptoApiMock,
+        loggerFactory,
+        SequencerMetrics.noop(getClass.getSimpleName).bftOrdering,
+      ).getFirstKnownAt(TopologyActivationTime(aTimestamp))
+        .futureUnlessShutdown()
+        .futureValueUS
+        .fold(fail("Did not return members first known")) { memberFirstKnown =>
+          verify(cryptoApiMock, times(1)).member
+          verify(cryptoApiMock, times(1)).awaitSnapshot(eqTo(aTimestamp))(
+            any[TraceContext]
+          )
+          verifyZeroInteractions(cryptoApiMock)
+          memberFirstKnown should contain theSameElementsAs someSequencerIds
+            .map(sequencerId =>
+              SequencerNodeId.toBftNodeId(sequencerId) ->
+                TopologyActivationTime
+                  .fromEffectiveTime(EffectiveTime(effectiveTimeForSequencers(sequencerId)))
+            )
+        }
+
     }
   }
 }

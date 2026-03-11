@@ -15,7 +15,7 @@ import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
   *   latency for an event to be delivered (storage, transmission, processing). If the current host
   *   time exceeds the next expected timestamp by this observation latency then we will request a
   *   time proof (unless we have received a recent event within the patience duration described
-  *   below).
+  *   below). This parameter will be ignored, if the underlying node uses a SimClock.
   * @param patienceDuration
   *   We will only request a time proof if this given duration has elapsed since we last received an
   *   event (measured using the host clock). This prevents requesting timestamps when we are

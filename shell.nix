@@ -67,6 +67,9 @@ pkgs.mkShell {
     #   'build configuration file' (conf.py) with that value, e.g. instead of 'Copyright 2023, Digital Asset.' we get
     #   'Copyright 1980, Digital Asset.' in the resulting documentation
     unset SOURCE_DATE_EPOCH
+
+    # exposes the z3 dynamic libraries to the dynamic linker
+    export LD_LIBRARY_PATH="target/z3''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export DYLD_LIBRARY_PATH="target/z3''${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
   '';
 }
-

@@ -607,6 +607,7 @@ final class SingleParticipantTestContext private[participant] (
     GetActiveContractsRequest(
       activeAtOffset = activeAtOffset,
       eventFormat = Some(eventFormat(verbose, parties, templateIds, interfaceFilters)),
+      streamContinuationToken = None,
     )
 
   override def activeContracts(

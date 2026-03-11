@@ -82,6 +82,7 @@ sealed trait AcsImportReassignmentCounterIntegrationTest
       synchronizerId = acmeId,
       beginOffsetExclusive = ledgerEndP1,
       completeAfter = PositiveInt.one,
+      onboarding = false,
     )
 
     val acsSnapshotPath = File.newTemporaryFile()

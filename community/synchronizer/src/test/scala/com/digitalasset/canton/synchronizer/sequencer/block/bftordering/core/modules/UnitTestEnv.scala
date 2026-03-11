@@ -451,7 +451,7 @@ final class ProgrammableUnitTestContext[MessageT](resolveAwaits: Boolean = false
     var shouldContinue = true
     while (shouldContinue) {
       val messages = runPipedMessages()
-      if (messages.isEmpty) {
+      if (messages.isEmpty && pipedQueue.isEmpty) {
         shouldContinue = false
       }
       messages.foreach(message => module.receive(message)(this, traceContext))

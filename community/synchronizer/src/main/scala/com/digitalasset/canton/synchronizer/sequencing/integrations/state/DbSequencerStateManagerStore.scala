@@ -82,7 +82,7 @@ class DbSequencerStateManagerStore(
   }
 
   /** Compute the state up until (inclusive) the given timestamp. */
-  def readInFlightAggregationsDBIO(
+  private def readInFlightAggregationsDBIO(
       timestamp: CantonTimestamp,
       sequencingTimeLowerBound: CantonTimestamp,
       sequencingTimeUpperBound: CantonTimestamp,

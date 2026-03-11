@@ -362,7 +362,7 @@ Subsequently, just run the boostrap command:
       mediators = mediators.all,
       synchronizerOwners = Seq(sequencer1),
       synchronizerThreshold = 1,
-      staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+      staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
     )
 
 Connect the Participant

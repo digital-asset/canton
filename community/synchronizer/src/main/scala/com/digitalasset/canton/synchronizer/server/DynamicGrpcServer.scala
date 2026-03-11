@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.synchronizer.server
 
-import com.daml.tracing.NoOpTelemetry
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.environment.HasGeneralCantonNodeParameters
 import com.digitalasset.canton.health.{
@@ -59,14 +58,12 @@ class DynamicGrpcServer(
   private val (grpcServer, registry) = {
     val serverBuilder = CantonServerBuilder
       .forConfig(
-        serverConfig,
-        None,
-        executionContext,
-        loggerFactory,
-        nodeParameters.loggingConfig.api,
-        nodeParameters.tracing,
-        grpcMetrics,
-        NoOpTelemetry,
+        config = serverConfig,
+        executor = executionContext,
+        loggerFactory = loggerFactory,
+        apiLoggingConfig = nodeParameters.loggingConfig.api,
+        tracing = nodeParameters.tracing,
+        grpcMetrics = grpcMetrics,
       )
       // Overriding the dummy setting from PublicServerConfig.
       // To avoid being locked out if the dynamic synchronizer parameter maxRequestSize is too small.

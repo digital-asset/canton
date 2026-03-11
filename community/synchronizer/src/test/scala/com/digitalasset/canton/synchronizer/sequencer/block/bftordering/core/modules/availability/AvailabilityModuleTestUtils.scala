@@ -47,7 +47,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Availability.RemoteDissemination
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.LocalAvailability.ProposalCreated
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.dependencies.AvailabilityModuleDependencies
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.TestBootstrapTopologyActivationTime
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.{
   BftSequencerBaseTest,
   failingCryptoProvider,
@@ -106,6 +105,7 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
   protected val ANonEmptyBatchId = BatchId.from(ANonEmptyBatch)
   protected val ABatchIdWithInvalidTags = BatchId.from(ABatchWithInvalidTags)
   protected val OrderingTopologyNode0 = OrderingTopology.forTesting(Set(Node0))
+  protected val MembershipNode0 = Membership.forTesting(Node0, OrderingTopologyNode0)
   protected val Node0Ack = AvailabilityAck(from = Node0, Signature.noSignature)
   protected val Node0Acks = Set(Node0Ack)
   protected val AnInProgressBatchMetadata =
@@ -175,6 +175,7 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
   )
   protected val ADisseminationProgressNode0WithNode0Vote = AnInProgressBatchMetadata
   protected val OrderingTopologyNodes0And1 = OrderingTopology.forTesting(Set(Node0, Node1))
+  protected val MembershipNodes0And1 = Membership.forTesting(Node0, OrderingTopologyNodes0And1)
 
   protected val ADisseminationProgressNode0And1WithNode0Vote =
     ADisseminationProgressNode0WithNode0Vote.copy(
@@ -186,8 +187,10 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
       acks = Node0And1Acks.toSet,
     )
   protected val OrderingTopologyNodes0To3 = OrderingTopology.forTesting(Node0To3)
+  protected val MembershipNodes0To3 = Membership.forTesting(Node0, Node0To3)
   protected val Node0To6 = (0 to 6).map(node).toSet
   protected val OrderingTopologyNodes0To6 = OrderingTopology.forTesting(Node0To6)
+  protected val MembershipNodes0To6 = Membership.forTesting(Node0, Node0To6)
   protected val ADisseminationProgressNode0To3WithNode0Vote =
     ADisseminationProgressNode0WithNode0Vote.copy(
       membership = Membership.forTesting(Node0, OrderingTopologyNodes0To3)
@@ -405,7 +408,7 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
           myId,
           otherNodes,
           nodesTopologyInfos = otherNodesCustomKeys.map { case (nodeId, keyId) =>
-            nodeId -> NodeTopologyInfo(TestBootstrapTopologyActivationTime, Set(keyId))
+            nodeId -> NodeTopologyInfo(Set(keyId))
           },
         )
       )

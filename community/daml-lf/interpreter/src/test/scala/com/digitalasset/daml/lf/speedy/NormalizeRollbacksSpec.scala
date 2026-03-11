@@ -26,29 +26,57 @@ class NormalizeRollbacksSpec extends AnyWordSpec with Matchers with Inside {
   // TODO:
   // We should test that the `meaning` of a transaction is preserved by normalization.
 
-  def test(name: String)(orig: Shape.Top, expected: Shape.Top): Unit = {
-    s"normalize: ($orig) -- $name" should {
-      val tx = Shape.toTransaction(orig)
-      val (txN, _) = NormalizeRollbacks.normalizeTx(tx) // code under test
-      val shapeN = Shape.ofTransaction(txN)
-      "be as expected" in {
-        assert(shapeN == expected)
-      }
-      "be a normal form" in {
-        assert(isNormalized(txN))
-      }
-      "have increasing node-ids when listed in pre-order" in {
-        assert(preOrderNidsOfTxIsIncreasingFromZero(txN))
+  def test(name: String)(orig: Shape.Top, expected: Shape.Top): Unit =
+    testEither(name)(orig, Right(expected), shouldDropRollbacks = false)
+
+  def testRollbackSucceeds(name: String)(orig: Shape.Top, expected: Shape.Top): Unit =
+    testEither(name)(orig, Right(expected), shouldDropRollbacks = true)
+
+  def testRollbackFails(name: String)(orig: Shape.Top, expectedErrorMessage: String): Unit =
+    testEither(name)(orig, Left(expectedErrorMessage), true)
+
+  def testEither(name: String)(orig: Shape.Top, expected: Either[String, Shape.Top], shouldDropRollbacks: Boolean = false): Unit = {
+    s"normalize (${if (shouldDropRollbacks) "without" else "with"} rollbacks): ($orig) -- $name" should {
+      expected match {
+        case Right(expected) => {
+          val tx = Shape.toTransaction(orig)
+          val (txN, _) = NormalizeRollbacks.normalizeTx(tx, shouldDropRollbacks) // code under test
+          val shapeN = Shape.ofTransaction(txN)
+          "be as expected" in {
+            assert(shapeN == expected)
+          }
+          "be a normal form" in {
+            assert(isNormalized(txN))
+          }
+          "have increasing node-ids when listed in pre-order" in {
+            assert(preOrderNidsOfTxIsIncreasingFromZero(txN))
+          }
+        }
+        case Left(expectedErrorMessage) => {
+          "throw exception with expected message" in {
+            try {
+              val tx = Shape.toTransaction(orig)
+              val (txN, _) = NormalizeRollbacks.normalizeTx(tx, shouldDropRollbacks) // code under test
+              fail(s"Should throw an exception with message $expectedErrorMessage, got a traction of the following shape instead: $txN")
+            } catch {
+              case actualError: RuntimeException => actualError.getMessage should include(expectedErrorMessage)
+            }
+          }
+        }
       }
     }
   }
 
   // multi arg construction for example convenience
   def Top(xs: Shape*) = Shape.Top(xs.toList)
-  def E(xs: Shape*) = Shape.Exercise(xs.toList)
+  def E(xs: Shape*) = Shape.Exercise(true, xs.toList)
+  def EN(xs: Shape*) = Shape.Exercise(false, xs.toList)
   def R(xs: Shape*) = Shape.Rollback(xs.toList)
 
   val List(c1, c2, c3, c4) = List[Long](1, 2, 3, 4).map(Shape.Create)
+  val List(f1, f2, f3, f4) = List[Long](1, 2, 3, 4).map(Shape.Fetch)
+  val List(ec1, ec2) = List(List(), List()).map(Shape.Exercise(true, _))
+  val List(en1, en2) = List(List(), List()).map(Shape.Exercise(false, _))
 
   // no normalization required
   test("empty tx")(
@@ -63,13 +91,21 @@ class NormalizeRollbacksSpec extends AnyWordSpec with Matchers with Inside {
     Top(c1, c2),
     Top(c1, c2),
   )
-  test("rollback create")(
+  test("rollback-create")(
     Top(R(c1)),
     Top(R(c1)),
   )
-  test("non empty rollback between creates")(
+  testRollbackFails("rollback-create")(
+    Top(R(c1)),
+    "Create node inside Rollback node cannot be removed.",
+  )
+  test("non empty rollback-create between creates")(
     Top(c1, R(c2), c3),
     Top(c1, R(c2), c3),
+  )
+  testRollbackFails("non empty rollback-create between creates")(
+    Top(c1, R(c2), c3),
+    "Create node inside Rollback node cannot be removed.",
   )
   test("empty exercise")(
     Top(E()),
@@ -166,6 +202,46 @@ class NormalizeRollbacksSpec extends AnyWordSpec with Matchers with Inside {
     Top(R(c1, c2), R(c3)),
   )
 
+  // drop rollback nodes
+  testRollbackFails("rollback-create")(
+    Top(R(R(c1), c2)),
+    "Create node inside Rollback node cannot be removed.",
+  )
+
+  testRollbackFails("rollback-consuming-exercise")(
+    Top(R(ec1)),
+    "Consuming exercise node inside Rollback node cannot be removed.",
+  )
+
+  testRollbackSucceeds("rollback-nonconsuming-exercise")(
+    Top(R(en1)),
+    Top(en1),
+  )
+
+  testRollbackSucceeds("rollback-fetch")(
+    Top(R(f1)),
+    Top(f1),
+  )
+
+  testRollbackSucceeds("rollback-no-side-effect")(
+    Top(R(f1, en1), c1, ec1),
+    Top(f1, en1, c1, ec1),
+  )
+
+  testRollbackFails("rollback-one-side-effect")(
+    Top(c1, R(f1, c1, en1), ec1),
+    "Create node inside Rollback node cannot be removed.",
+  )
+
+  testRollbackSucceeds("rollback-nested-no-side-effect")(
+    Top(c1, R(R(f1, en1), R(f2, en2, R(f3, f4))), ec1),
+    Top(c1, f1, en1, f2, en2, f3, f4, ec1),
+  )
+
+  testRollbackFails("rollback-nested-one-side-effect")(
+    Top(c1, R(R(f1, en1), R(f2, en2, R(f3, c1, f4))), ec1),
+    "Create node inside Rollback node cannot be removed.",
+  )
 }
 
 object NormalizeRollbackSpec {
@@ -245,7 +321,8 @@ object NormalizeRollbackSpec {
 
     final case class Top(xs: List[Shape])
     final case class Create(x: Long) extends Shape
-    final case class Exercise(x: List[Shape]) extends Shape
+    final case class Fetch(n: Long) extends Shape
+    final case class Exercise(consuming: Boolean, x: List[Shape]) extends Shape
     final case class Rollback(x: List[Shape]) extends Shape
 
     def toTransaction(top: Top): TX = {
@@ -259,9 +336,10 @@ object NormalizeRollbackSpec {
       def toNid(shape: Shape): NodeId = {
         shape match {
           case Create(n) => add(dummyCreateNode(n))
-          case Exercise(shapes) =>
+          case Fetch(n) => add(dummyFetchNode(n))
+          case Exercise(consuming, shapes) =>
             val children = shapes.map(toNid)
-            add(dummyExerciseNode(children.to(ImmArray)))
+            add(dummyExerciseNode(consuming, children.to(ImmArray)))
           case Rollback(shapes) =>
             val children = shapes.map(toNid)
             add(Node.Rollback(children = children.to(ImmArray)))
@@ -279,9 +357,11 @@ object NormalizeRollbackSpec {
               case V.ValueInt64(n) => Create(n)
               case _ => sys.error(s"unexpected create.arg: ${create.arg}")
             }
-          case leaf: Node.LeafOnlyAction =>
-            sys.error(s"Shape.ofTransaction, unexpected leaf: $leaf")
-          case node: Node.Exercise => Exercise(node.children.toList.map(ofNid))
+          case fetch: Node.Fetch => {
+            Fetch(fetch.packageName.toString.split("-")(2).toLong)
+            //sys.error(s"Shape.ofTransaction, unexpected leaf: $leaf")
+          }
+          case node: Node.Exercise => Exercise(node.consuming, node.children.toList.map(ofNid))
           case node: Node.Rollback => Rollback(node.children.toList.map(ofNid))
         }
       }
@@ -304,7 +384,22 @@ object NormalizeRollbackSpec {
       version = SerializationVersion.minVersion,
     )
 
+  private def dummyFetchNode(n: Long): Node.Fetch =
+    Node.Fetch(
+      coid = toCid("dummyTargetCoid"),
+      packageName = Ref.PackageName.assertFromString(s"-pkgName-$n"),
+      templateId = Ref.Identifier.assertFromString("-dummyPkg-:DummyModule:dummyName"),
+      actingParties = Set.empty,
+      signatories = Set.empty,
+      stakeholders = Set.empty,
+      keyOpt = None,
+      byKey = false,
+      interfaceId = None,
+      version = SerializationVersion.minVersion,
+    )
+
   private def dummyExerciseNode(
+      consuming: Boolean,
       children: ImmArray[NodeId]
   ): Node.Exercise =
     Node.Exercise(
@@ -316,7 +411,7 @@ object NormalizeRollbackSpec {
       ),
       interfaceId = None,
       choiceId = Ref.Name.assertFromString("dummyChoice"),
-      consuming = true,
+      consuming = consuming,
       actingParties = Set.empty,
       chosenValue = V.ValueUnit,
       stakeholders = Set.empty,

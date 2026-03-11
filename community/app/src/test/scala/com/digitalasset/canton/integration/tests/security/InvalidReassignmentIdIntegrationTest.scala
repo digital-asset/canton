@@ -25,7 +25,7 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.LogEntry
-import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
+import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
 import com.digitalasset.canton.protocol.messages.Verdict
 import com.digitalasset.canton.protocol.{LfContractId, ReassignmentId}
 import com.digitalasset.canton.synchronizer.sequencer.HasProgrammableSequencer
@@ -155,7 +155,7 @@ sealed trait InvalidReassignmentIdIntegrationTest
           mediator2,
           withMediatorVerdict(Verdict.Approve(testedProtocolVersion)),
         ) {
-          loggerFactory.assertLogsUnorderedOptional(
+          loggerFactory.assertLoggedWarningsAndErrorsSeq(
             {
               // Submit the second unassignment, but with the reassignment id of the first.
               maliciousP1
@@ -171,10 +171,26 @@ sealed trait InvalidReassignmentIdIntegrationTest
               // ping for synchronization.
               participant2.health.ping(participant3, synchronizerId = Some(targetId))
             },
-            LogEntryOptionality.Required -> logsReassignmentValidationFailed("participant1"),
-            LogEntryOptionality.Required -> logsReassignmentValidationFailed("participant2"),
-            LogEntryOptionality.Required -> logsReassignmentValidationFailed("participant3"),
-            LogEntryOptionality.OptionalMany -> logsDodgyMediatorError("participant1"),
+            LogEntry.assertLogSeq(
+              Seq(
+                (
+                  logsReassignmentValidationFailed("participant1"),
+                  "reassignment validation failed for participant1",
+                ),
+                (
+                  logsReassignmentValidationFailed("participant2"),
+                  "reassignment validation failed for participant2",
+                ),
+                (
+                  logsReassignmentValidationFailed("participant3"),
+                  "reassignment validation failed for participant3",
+                ),
+                (
+                  logsUnexpectedMediatorApproval("participant1"),
+                  "unexpected mediator approval",
+                ),
+              )
+            ),
           )
         }
 
@@ -214,12 +230,14 @@ sealed trait InvalidReassignmentIdIntegrationTest
       .futureValue
   }
 
-  private def logsDodgyMediatorError(participantName: String)(entry: LogEntry): Assertion = {
+  private def logsUnexpectedMediatorApproval(
+      participantName: String
+  )(entry: LogEntry): Assertion = {
     entry.loggerName should include regex s"participant=$participantName"
-    // We can get log lines where the error is hidden inside the message of an ApplicationHandlerException
-    // rather than as an explicit throwable field on the entry.
-    val errMsg = entry.throwable.fold(entry.errorMessage)(_.getMessage)
-    errMsg should include("Mediator approved a request that we have locally rejected")
+    entry.shouldBeCantonError(
+      SyncServiceAlarm,
+      _ shouldBe "Mediator approved a request that has been locally rejected.",
+    )
   }
 
   private def logsReassignmentValidationFailed(

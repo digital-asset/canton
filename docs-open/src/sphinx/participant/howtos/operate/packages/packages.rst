@@ -73,7 +73,7 @@ To display the Synchronizer/Participant Node vetting state for a specific packag
 
 .. Need to boot the Synchronizer to demonstate this
 .. snippet:: packages
-    .. hidden:: val mySynchronizer = bootstrap.synchronizer(synchronizerName = "da", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1, mediator1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest))
+    .. hidden:: val mySynchronizer = bootstrap.synchronizer(synchronizerName = "da", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1, mediator1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer))
     .. hidden:: participant1.synchronizers.connect_local(sequencer1, "mysynchronizer")
     .. hidden:: participant2.synchronizers.connect_local(sequencer1, "mysynchronizer")
 
@@ -228,7 +228,7 @@ Canton also supports removing individual packages, giving the user more fine-gra
 Attempting to remove a package that is required results in an ``FAILED_PRECONDITION/PACKAGE_OR_DAR_REMOVAL_ERROR`` error:
 
 .. snippet:: packages-force-removal
-    .. success:: val mySynchronizer = bootstrap.synchronizer(synchronizerName = "mysynchronizer", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1, mediator1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest))
+    .. success:: val mySynchronizer = bootstrap.synchronizer(synchronizerName = "mysynchronizer", sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1, mediator1), synchronizerThreshold = PositiveInt.one, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer))
     .. success:: participant1.synchronizers.connect_local(sequencer1, "mysynchronizer")
     .. success:: val mainPackageId = participant1.dars.upload("dars/CantonExamples.dar")
     .. hidden:: utils.retry_until_true(participant1.topology.vetted_packages.list(mySynchronizer, filterParticipant = participant1.id.filterString).exists(_.item.packages.exists(_.packageId == mainPackageId)))

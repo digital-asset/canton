@@ -5,8 +5,6 @@ package com.digitalasset.canton.networking.grpc
 
 import com.daml.tls.TlsServerConfig.logTlsProtocolsAndCipherSuites
 import com.daml.tls.{BaseServerTlsConfig, TlsConfig, TlsServerConfig}
-import com.daml.tracing.Telemetry
-import com.digitalasset.canton.auth.CantonAdminTokenDispenser
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -154,13 +152,11 @@ object CantonServerBuilder {
     */
   def forConfig(
       config: ServerConfig,
-      adminTokenDispenser: Option[CantonAdminTokenDispenser],
       executor: Executor,
       loggerFactory: NamedLoggerFactory,
       apiLoggingConfig: ApiLoggingConfig,
       tracing: TracingConfig,
       grpcMetrics: GrpcServerMetricsX,
-      telemetry: Telemetry,
       additionalInterceptors: Seq[ServerInterceptor] = Seq.empty,
   ): CantonServerBuilder = {
     val builder =
@@ -178,18 +174,12 @@ object CantonServerBuilder {
 
     new BaseBuilder(
       reifyBuilder(configureKeepAlive(config.keepAliveServer, builderWithSsl)),
-      config.instantiateServerInterceptors(
+      new CantonCommunityServerInterceptors(
         config.name,
         tracing,
         apiLoggingConfig,
         loggerFactory,
         grpcMetrics,
-        config.authServices,
-        adminTokenDispenser,
-        config.jwtTimestampLeeway,
-        config.adminTokenConfig,
-        config.jwksCacheConfig,
-        telemetry,
         additionalInterceptors,
         config.limits,
       ),

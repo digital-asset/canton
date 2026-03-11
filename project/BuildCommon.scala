@@ -29,7 +29,9 @@ import wartremover.WartRemover
 import wartremover.WartRemover.autoImport.*
 import DamlLfPlugin.autoImport.*
 
+import java.net.URL
 import java.nio.file.StandardOpenOption
+import java.util.zip.ZipFile
 import scala.collection.compat.toOptionCompanionExtension
 import scala.language.postfixOps
 import scala.util.control.NonFatal
@@ -131,7 +133,7 @@ object BuildCommon {
         libraryDependencySchemes += "io.circe" %% "circe-yaml" % VersionScheme.Always,
         versionScheme := Some("semver-spec"),
         PB.protocVersion := protobuf_version,
-      )
+      ) ++ Z3.buildSettings
     )
 
     import CommunityProjects._
@@ -682,6 +684,7 @@ object BuildCommon {
       `ledger-test-tool-2-1`,
       `ledger-test-tool-2-dev`,
       `upgrading-integration-tests`,
+      `model-based-testing`,
     )
 
     // Project for utilities that are also used outside of the Canton repo
@@ -2483,6 +2486,21 @@ object BuildCommon {
           ),
         ),
       )
+
+    lazy val `model-based-testing` = project
+      .in(file("community/model-based-testing"))
+      .dependsOn(
+        `community-base`,
+        `community-testing` % "test->test",
+      )
+      .settings(
+        sharedCantonCommunitySettings,
+        libraryDependencies ++= Seq(
+          scalatest % Test
+        ),
+        Compile / unmanagedJars += Z3.z3Install.value.jar,
+        Test / unmanagedJars ++= (Compile / unmanagedJars).value,
+      )
   }
 
   object DamlProjects {
@@ -3377,6 +3395,8 @@ object BuildCommon {
           google_common_protos % "protobuf",
           google_protobuf_java,
           google_protobuf_java % Test,
+          pureconfig_core,
+          pureconfig_generic,
           scalacheck % Test,
           scala_logging % Test,
           scalatestScalacheck % Test,

@@ -171,6 +171,7 @@ class JsonListLimitTest
       .GetActiveContractsRequest(
         activeAtOffset = endOffset,
         eventFormat = Some(partyTransactions(party)),
+        streamContinuationToken = None,
       )
       .asJson
 

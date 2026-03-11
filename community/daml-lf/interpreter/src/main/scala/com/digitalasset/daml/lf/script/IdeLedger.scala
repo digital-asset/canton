@@ -17,6 +17,7 @@ import com.digitalasset.daml.lf.transaction.{
   NodeId,
   Transaction => Tx,
 }
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits._
 import com.digitalasset.daml.lf.value.Value
 import Value._
 import com.daml.scalautil.Statement.discard
@@ -433,7 +434,7 @@ object IdeLedger {
           )
 
         case (ledgerData, (nodeId, lookupNode: Node.LookupByKey)) =>
-          lookupNode.result match {
+          lookupNode.result.asCidOption match {
             case None =>
               ledgerData
 

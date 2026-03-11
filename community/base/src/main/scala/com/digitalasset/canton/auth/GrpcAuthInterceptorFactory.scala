@@ -1,18 +1,10 @@
 // Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-package com.digitalasset.canton.networking.grpc
+package com.digitalasset.canton.auth
 
 import com.daml.jwt.JwtTimestampLeeway
 import com.daml.tracing.Telemetry
-import com.digitalasset.canton.auth.{
-  AuthInterceptor,
-  AuthServiceWildcard,
-  CantonAdminTokenAuthService,
-  CantonAdminTokenDispenser,
-  GrpcAuthInterceptor,
-  RequiringAdminClaimResolver,
-}
 import com.digitalasset.canton.concurrent.DirectExecutionContext
 import com.digitalasset.canton.config.{
   AdminTokenConfig,
@@ -21,27 +13,24 @@ import com.digitalasset.canton.config.{
   JwksCacheConfig,
 }
 import com.digitalasset.canton.logging.NamedLoggerFactory
-import io.grpc.ServerServiceDefinition
+import io.grpc.ServerInterceptor
 
-object CantonCommunityAuthInterceptorDefinition {
-  def addAuthInterceptor(
-      service: ServerServiceDefinition,
+object GrpcAuthInterceptorFactory {
+  def createInterceptor(
       loggerFactory: NamedLoggerFactory,
+      apiLoggingConfig: ApiLoggingConfig,
+      telemetry: Telemetry,
+      adminTokenDispenser: CantonAdminTokenDispenser,
       authServiceConfigs: Seq[AuthServiceConfig],
-      adminTokenDispenser: Option[CantonAdminTokenDispenser],
       jwtTimestampLeeway: Option[JwtTimestampLeeway],
       adminTokenConfig: AdminTokenConfig,
       jwksCacheConfig: JwksCacheConfig,
-      telemetry: Telemetry,
-      apiLoggingConfig: ApiLoggingConfig,
-  ): ServerServiceDefinition = {
+  ): ServerInterceptor = {
     val authServices =
       if (authServiceConfigs.isEmpty)
-        List(AuthServiceWildcard)
-      else {
-        adminTokenDispenser
-          .map(new CantonAdminTokenAuthService(_, None, adminTokenConfig))
-          .toList ++
+        Seq(AuthServiceWildcard)
+      else
+        Seq(new CantonAdminTokenAuthService(adminTokenDispenser, None, adminTokenConfig)) ++
           authServiceConfigs.map(
             _.create(
               jwksCacheConfig,
@@ -49,7 +38,6 @@ object CantonCommunityAuthInterceptorDefinition {
               loggerFactory,
             )
           )
-      }
     val genericInterceptor = new AuthInterceptor(
       authServices,
       loggerFactory,
@@ -58,7 +46,7 @@ object CantonCommunityAuthInterceptorDefinition {
       ),
       RequiringAdminClaimResolver,
     )
-    val interceptor = new GrpcAuthInterceptor(
+    new GrpcAuthInterceptor(
       genericInterceptor,
       telemetry,
       loggerFactory,
@@ -67,7 +55,6 @@ object CantonCommunityAuthInterceptorDefinition {
         loggerFactory.getLogger(AuthInterceptor.getClass)
       ),
     )
-    io.grpc.ServerInterceptors.intercept(service, interceptor)
   }
 
 }

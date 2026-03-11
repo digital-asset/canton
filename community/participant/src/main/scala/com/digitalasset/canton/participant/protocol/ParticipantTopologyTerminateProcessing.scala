@@ -37,7 +37,7 @@ object ParticipantTopologyTerminateProcessing {
   /** Event with indication of whether the participant needs to initiate party replication */
   private final case class EventInfo(
       event: Update.TopologyTransactionEffective,
-      requireLocalPartyReplication: Boolean,
+      onboardingLocallyHostedParty: Boolean,
   )
 }
 
@@ -155,7 +155,7 @@ class ParticipantTopologyTerminateProcessing(
       )
       _ <- EitherT(
         if (
-          pauseSynchronizerIndexingDuringPartyReplication && eventInfo.requireLocalPartyReplication
+          pauseSynchronizerIndexingDuringPartyReplication && eventInfo.onboardingLocallyHostedParty
         )
           recordOrderPublisher.scheduleEventBuffering(effectiveTime.value)
         else
@@ -322,7 +322,7 @@ class ParticipantTopologyTerminateProcessing(
       oldRelevantState = effectiveStateChange.before.signedTransactions,
       currentRelevantState = effectiveStateChange.after.signedTransactions,
       localParticipantId = participantId,
-    ).map { case TopologyTransactionDiff(events, updateId, requiresLocalPartyReplication) =>
+    ).map { case TopologyTransactionDiff(events, updateId, onboardingLocalParty) =>
       EventInfo(
         Update.TopologyTransactionEffective(
           updateId = updateId,
@@ -330,7 +330,7 @@ class ParticipantTopologyTerminateProcessing(
           synchronizerId = psid.logical,
           effectiveTime = effectiveStateChange.effectiveTime.value,
         ),
-        requiresLocalPartyReplication,
+        onboardingLocalParty,
       )
     }
 }

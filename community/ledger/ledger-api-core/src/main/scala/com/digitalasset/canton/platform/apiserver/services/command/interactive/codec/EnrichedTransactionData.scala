@@ -72,7 +72,7 @@ private[interactive] sealed trait EnrichedTransactionData {
   private[codec] def submitterInfo: state.SubmitterInfo
   private[codec] def transactionMeta: state.TransactionMeta
   private[codec] def transaction: SubmittedTransaction
-  private[codec] def globalKeyMapping: Map[GlobalKey, Option[Value.ContractId]]
+  private[codec] def globalKeyMapping: Map[GlobalKey, Vector[Value.ContractId]]
   private[codec] def inputContracts: Map[ContractId, ExternalInputContract]
   private[codec] def synchronizerId: SynchronizerId
   private[codec] def mediatorGroup: Int
@@ -116,7 +116,7 @@ final case class PrepareTransactionData(
     private[codec] val submitterInfo: state.SubmitterInfo,
     private[codec] val transactionMeta: state.TransactionMeta,
     private[codec] val transaction: SubmittedTransaction,
-    private[codec] val globalKeyMapping: Map[GlobalKey, Option[Value.ContractId]],
+    private[codec] val globalKeyMapping: Map[GlobalKey, Vector[Value.ContractId]],
     private[codec] val inputContracts: Map[ContractId, ExternalInputContract],
     private[codec] val synchronizerId: SynchronizerId,
     private[codec] val mediatorGroup: Int,
@@ -132,7 +132,7 @@ final case class ExecuteTransactionData(
     private[codec] val submitterInfo: state.SubmitterInfo,
     private[codec] val transactionMeta: state.TransactionMeta,
     private[codec] val transaction: SubmittedTransaction,
-    private[codec] val globalKeyMapping: Map[GlobalKey, Option[Value.ContractId]],
+    private[codec] val globalKeyMapping: Map[GlobalKey, Vector[Value.ContractId]],
     private[codec] val inputContracts: Map[ContractId, ExternalInputContract],
     private[codec] val synchronizerId: SynchronizerId,
     private val externallySignedSubmission: ExternallySignedSubmission,

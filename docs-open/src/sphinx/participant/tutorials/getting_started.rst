@@ -210,7 +210,7 @@ You can now bootstrap the synchronizer:
           mediators = Seq(mediator1),
           synchronizerOwners = Seq(sequencer1, mediator1),
           synchronizerThreshold = 2,
-          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
         )
 
 After the bootstrap, the sequencer is initialized:

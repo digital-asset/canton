@@ -479,9 +479,7 @@ class MediatorNodeBootstrap(
     new SequencerInfoLoader(
       timeouts = timeouts,
       traceContextPropagation = parameters.tracing.propagation,
-      clientProtocolVersions =
-        if (parameters.alphaVersionSupport) ProtocolVersion.supported
-        else ProtocolVersion.stable,
+      clientProtocolVersions = ProtocolVersionCompatibility.supportedProtocols(parameters),
       minimumProtocolVersion = Some(ProtocolVersion.minimum),
       dontWarnOnDeprecatedPV = parameters.dontWarnOnDeprecatedPV,
       loggerFactory = loggerFactory,

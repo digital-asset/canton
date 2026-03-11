@@ -42,7 +42,7 @@ object DamlLfPlugin extends AutoPlugin {
       "latestStableLfVersion" -> latestStableLfVersion,
     )
 
-    private[DamlLfPlugin] val allLfVersions = List(v2_1, v2_2, v2_3, v2_dev)
+    private[DamlLfPlugin] val allLfVersions = List(v2_1, v2_2, v2_3_1, v2_dev)
     private val stableLfVersions = List(v2_1, v2_2)
     // DEPRECATED langauge lists
     private val compilerLfVersions = allLfVersions

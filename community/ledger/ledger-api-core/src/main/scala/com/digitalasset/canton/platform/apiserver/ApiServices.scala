@@ -38,6 +38,7 @@ import com.digitalasset.canton.platform.apiserver.services.command.{
 import com.digitalasset.canton.platform.apiserver.services.tracking.SubmissionTracker
 import com.digitalasset.canton.platform.config.*
 import com.digitalasset.canton.platform.packages.DeduplicatingPackageLoader
+import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
@@ -124,6 +125,7 @@ object ApiServices {
       logger: TracedLogger,
       packagePreferenceBackend: PackagePreferenceBackend,
       apiContractService: ApiContractService,
+      safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
   )(implicit
       materializer: Materializer,
       esf: ExecutionSequencerFactory,
@@ -356,6 +358,7 @@ object ApiServices {
         syncService,
         metrics,
         telemetry,
+        safeToPruneCommitmentState,
         loggerFactory,
       )
 
@@ -415,6 +418,7 @@ object ApiServices {
           currentUtcTime = () => Instant.now,
           maxDeduplicationDuration = maxDeduplicationDuration.asJava,
           submissionIdGenerator = SubmissionIdGenerator.Random,
+          tracker = commandProgressTracker,
           metrics = metrics,
           telemetry = telemetry,
           loggerFactory = loggerFactory,

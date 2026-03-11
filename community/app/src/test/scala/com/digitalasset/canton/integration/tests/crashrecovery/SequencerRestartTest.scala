@@ -207,7 +207,7 @@ abstract class BaseSynchronizerRestartTest
     import storage.api.*
 
     val res = for {
-      headStateO <- blockStore.readHead
+      headStateO <- blockStore.readHeadUnbounded()
       headState = headStateO.value
       query =
         sqlu"""delete from seq_block_height where height = ${headState.latestBlock.height}"""

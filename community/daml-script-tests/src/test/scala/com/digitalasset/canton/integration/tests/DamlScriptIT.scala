@@ -17,6 +17,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentSetup,
   SharedEnvironment,
 }
+import com.digitalasset.canton.logging.LogEntry
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.ContractStateMachine
@@ -24,7 +25,7 @@ import io.circe.*
 import io.circe.parser.*
 import monocle.macros.syntax.lens.*
 import org.apache.commons.io.FileUtils
-import org.scalatest.{BeforeAndAfterAllConfigMap, ConfigMap}
+import org.scalatest.{Assertion, BeforeAndAfterAllConfigMap, ConfigMap}
 
 import java.nio.file.*
 import scala.collection.immutable.SortedMap
@@ -66,6 +67,7 @@ abstract class DamlScriptIT
     Option(getClass.getResource(s"/daml/$projectName")) match {
       case Some(in) =>
         damlProjectDir = Files.createTempDirectory(s"test_${getClass.getSimpleName}_")
+        if (debug) println(s"Saving daml project to $damlProjectDir")
         FileUtils.copyDirectory(Paths.get(in.toURI).toFile, damlProjectDir.toFile)
         // compile the project
         val _ = run(cmd = List("dpm", "build", "--output", projectName + ".dar"))
@@ -126,16 +128,17 @@ abstract class DamlScriptIT
       scriptError(cmd, stdout.result(), stderr.result(), s"exitCode = $exitCode")
   }
 
-  def runScript(
+  def runDamlScriptTests(
       host: String,
       port: Port,
       skippedTests: List[String],
+      testScriptId: Option[String] = None,
   ): Map[String, Either[String, Json]] = {
     val outputFile = Files.createTempFile(damlProjectDir, projectName, ".json")
     val cmd = List(
       List("dpm", "script"),
       List("--dar", projectName + ".dar"),
-      List("--all"),
+      testScriptId.fold(List("--all"))(scriptId => List("--script-name", scriptId)),
       skippedTests.flatMap(List("--skip-script-name", _)),
       List("--ledger-host", host),
       List("--ledger-port", port.unwrap.toString),
@@ -242,83 +245,153 @@ abstract class DamlScriptIT
         Some(s"script $scriptId was expected to fail but it was not found in the results")
     }
 
-  s"daml-script should produce expected results" onlyRunWithOrGreaterThan minimumProtocolVersion in {
-    env =>
-      import env.participant1
+  def assertDamlScriptTestResults(
+      actualResults: Map[String, Either[String, Json]],
+      skippedTests: Seq[String],
+  ): Assertion = {
+    //  In case you are missing expected results when adding new test file, you can uncomment the following code to
+    //  print the missing expected results based on the actual results.
+    //  Make sure to replace the placeholder string with the proper ExpectedResult (Success, Failure or Broken) and
+    //  its parameters.
+    //
+    //    println(
+    //      actualResults
+    //        .collect {
+    //          case (id, Right(_)) if !expectedResults.isDefinedAt(id) =>
+    //            s"\"$id\" -> Failure("replace me with proper ExpectedResult")"
+    //        }
+    //        .mkString("Map(\n", ",\n", ")")
+    //    )
 
-      val actualResults = runScript(
-        host = participant1.config.ledgerApi.address,
-        port = participant1.config.ledgerApi.port,
-        skippedTests = expectedResults.collect { case (id, ExpectedResult.Ignored) => id }.toList,
+    // Any daml-script that ran, but for which we have no expected result is unexpected
+    val unexpected = actualResults.keys.flatMap(scriptId =>
+      expectedResults.get(scriptId) match {
+        case Some(
+              _: ExpectedResult.Success | _: ExpectedResult.Failure | _: ExpectedResult.Broken
+            ) =>
+          List.empty
+        case _ if skippedTests.contains(scriptId) =>
+          List.empty
+        case _ =>
+          List(scriptId)
+      }
+    )
+
+    if (unexpected.nonEmpty)
+      fail(
+        s"the following script ids produced results, but we have no test assertions for them: ${unexpected
+            .mkString("\n  ", ",\n  ", ",")}"
       )
 
-      //  In case you are missing expected results when adding new test file, you can uncomment the following code to
-      //  print the missing expected results based on the actual results.
-      //  Make sure to replace the placeholder string with the proper ExpectedResult (Success, Failure or Broken) and
-      //  its parameters.
-      //
-      //    println(
-      //      actualResults
-      //        .collect {
-      //          case (id, Right(_)) if !expectedResults.isDefinedAt(id) =>
-      //            s"\"$id\" -> Failure("replace me with proper ExpectedResult")"
-      //        }
-      //        .mkString("Map(\n", ",\n", ")")
-      //    )
-
-      val unexpected = actualResults.keys.flatMap(scriptId =>
-        expectedResults.get(scriptId) match {
-          case Some(
-                _: ExpectedResult.Success | _: ExpectedResult.Failure | _: ExpectedResult.Broken
-              ) =>
-            List.empty
-          case _ =>
-            List(scriptId)
-        }
-      )
-
-      if (unexpected.nonEmpty)
-        fail(s"got results for unexpected script ids: ${unexpected.mkString("\n  ", ",\n  ", ",")}")
-
-      forEvery(expectedResults) { case (scriptId, expectedResult) =>
+    forEvery(expectedResults) {
+      case (scriptId, expectedResult) if !skippedTests.contains(scriptId) =>
         val actualResult = actualResults.get(scriptId)
         expectedResult match {
           case ExpectedResult.Ignored =>
             actualResult match {
               case None =>
-                if (debug) println("scriptId is ignored")
+                // Not able to distinguish between a non-existent and actual tests that are to be ignored
+                if (debug) println(s"script $scriptId was ignored")
                 succeed
               case Some(_) =>
                 fail(s"script $scriptId was expected to be skipped but it was executed")
             }
-          case ExpectedResult.Success(expectedValueOpt) =>
+          case ExpectedResult.Success(expectedValueOpt, _*) =>
             checkForSuccess(scriptId, expectedValueOpt, actualResult) match {
-              case Some(error) => fail(error)
+              case Some(error) if error.endsWith("was not found in the results") =>
+                if (debug) println(error)
+                fail(error)
+              case Some(error) =>
+                if (debug) println(s"script $scriptId failed, but was expected to succeed - $error")
+                fail(error)
               case None =>
-                if (debug) println(s"script $scriptId succeeds")
+                if (debug) println(s"script $scriptId succeeded")
                 succeed
             }
-          case ExpectedResult.Failure(errorMsgPattern) =>
+          case ExpectedResult.Failure(errorMsgPattern, _*) =>
             checkForFailure(scriptId, errorMsgPattern, actualResult) match {
-              case Some(error) => fail(error)
+              case Some(error) if error.endsWith("was not found in the results") =>
+                if (debug) println(error)
+                fail(error)
+              case Some(error) =>
+                if (debug) println(s"script $scriptId succeeded, but was expected to fail - $error")
+                fail(error)
               case None =>
-                if (debug) println(s"script $scriptId fails")
+                if (debug) println(s"script $scriptId failed")
                 succeed
             }
           case ExpectedResult.Broken(expected) =>
             val assessment = expected match {
-              case Left(ExpectedResult.Failure(errorMsgPattern)) =>
+              case Left(ExpectedResult.Failure(errorMsgPattern, _*)) =>
                 checkForFailure(scriptId, errorMsgPattern, actualResult)
-              case Right(ExpectedResult.Success(expectedValueOpt)) =>
+              case Right(ExpectedResult.Success(expectedValueOpt, _*)) =>
                 checkForSuccess(scriptId, expectedValueOpt, actualResult)
             }
             assessment match {
-              case Some(error) =>
+              case Some(error) if error.endsWith("was not found in the results") =>
+                if (debug) println(error)
+                fail(error)
+              case Some(_) =>
                 if (debug) println(s"script $scriptId is broken")
                 succeed
               case None =>
                 fail(s"script $scriptId was expected to be broken but it succeeded")
             }
+        }
+
+      case _ =>
+        succeed
+    }
+  }
+
+  s"daml-script tests should produce expected results" onlyRunWithOrGreaterThan minimumProtocolVersion in {
+    env =>
+      import env.participant1
+
+      val ignoredTests = expectedResults.collect { case (id, ExpectedResult.Ignored) =>
+        id
+      }.toList
+      val isolatedTests = expectedResults.collect {
+        case (id, ExpectedResult.Success(_, logAssertions*)) if logAssertions.nonEmpty => id
+        case (id, ExpectedResult.Failure(_, logAssertions*)) if logAssertions.nonEmpty => id
+      }.toList
+      val nonIsolatedTests = expectedResults.collect {
+        case (id, _) if !ignoredTests.contains(id) && !isolatedTests.contains(id) => id
+      }.toList
+
+//      val actualNonIsolatedTestResults = runDamlScriptTests(
+//        host = participant1.config.ledgerApi.address,
+//        port = participant1.config.ledgerApi.port,
+//        skippedTests = ignoredTests ++ isolatedTests,
+//      )
+      val actualIsolatedTestResults = isolatedTests.map { scriptId =>
+        scriptId -> loggerFactory.assertLogs(
+          within = {
+            runDamlScriptTests(
+              host = participant1.config.ledgerApi.address,
+              port = participant1.config.ledgerApi.port,
+              skippedTests = ignoredTests ++ nonIsolatedTests,
+            )
+          },
+          assertions = expectedResults
+            .get(scriptId)
+            .fold[Seq[LogEntry => Assertion]](Seq.empty)(_.logAssertions) *,
+        )
+      }.toMap
+
+//      clue("Non-isolated daml-script test cases") {
+//        assertDamlScriptTestResults(
+//          actualNonIsolatedTestResults,
+//          skippedTests = ignoredTests ++ isolatedTests,
+//        )
+//      }
+
+      for ((testScriptId, actualResults) <- actualIsolatedTestResults) {
+        clue(s"Isolated $testScriptId daml-script test case") {
+          assertDamlScriptTestResults(
+            actualResults,
+            skippedTests = ignoredTests ++ nonIsolatedTests,
+          )
         }
       }
   }
@@ -326,7 +399,7 @@ abstract class DamlScriptIT
 
 // TODO(#16458) This should be a stable protocol version
 //  Split the tests into a stable and a dev suite and run the dev suite only with the dev protocol version
-abstract class DamlScriptDevIT extends DamlScriptIT {
+abstract class DamlScriptDevIT(contractStateMode: ContractStateMachine.Mode) extends DamlScriptIT {
 
   import DamlScriptIT.withContractStateMode
   import DamlScriptIT.ExpectedResult.*
@@ -338,9 +411,9 @@ abstract class DamlScriptDevIT extends DamlScriptIT {
 
   override def environmentDefinition: EnvironmentDefinition =
     super.environmentDefinition
-      .addConfigTransforms(withContractStateMode(ContractStateMachine.Mode.LegacyNUCK)*)
+      .addConfigTransforms(withContractStateMode(contractStateMode)*)
 
-  override val expectedResults = SortedMap(
+  override def expectedResults = SortedMap(
     "ActionTest:testFilterA" -> Success(),
     "AuthEvalOrder:t1_create_success" -> Failure("t1 finished with no authorization failure"),
     "AuthEvalOrder:t2_create_badlyAuthorized" -> Failure(
@@ -360,9 +433,6 @@ abstract class DamlScriptDevIT extends DamlScriptIT {
     ),
     "AuthFailure:t3_FetchMissingAuthorization" -> Failure(
       "requires one of the stakeholders .* of the fetched contract to be an authorizer"
-    ),
-    "AuthFailure:t4_LookupByKeyMissingAuthorization" -> Failure(
-      "requires authorizers .* for lookup by key"
     ),
     "AuthFailure:t5_ExerciseMissingAuthorization" -> Failure(
       "requires authorizers .* but only .* were given"
@@ -389,6 +459,76 @@ abstract class DamlScriptDevIT extends DamlScriptIT {
     "CoerceContractId:test" -> Success(),
     "Conjunction:main" -> Success(),
     "ConjunctionChoices:demo" -> Success(),
+    "ConsumingTests:main" -> Success(),
+    "CreateAndExercise:main" -> Success(),
+    "DamlScriptTrySubmit:authorizationError" -> Success(),
+    "DamlScriptTrySubmit:devError" -> Success(),
+    "DamlScriptTrySubmit:failureStatusError" -> Success(),
+    "DamlScriptTrySubmit:wronglyTypedContract" -> Success(),
+    "EqContractId:main" -> Success(),
+    "ExceptionSemantics:divulgence" -> Success(),
+    "ExceptionSemantics:handledArithmeticError" -> Success(),
+    "ExceptionSemantics:handledUserException" -> Success(),
+    "ExceptionSemantics:uncaughtArithmeticError" -> Success(),
+    "ExceptionSemantics:uncaughtUserException" -> Success(),
+    "ExceptionSemantics:unhandledArithmeticError" -> Failure(
+      "UNHANDLED_EXCEPTION/DA.Exception.ArithmeticError:ArithmeticError"
+    ),
+    "ExceptionSemantics:unhandledUserException" -> Failure(
+      "UNHANDLED_EXCEPTION/ExceptionSemantics:E"
+    ),
+    "FailedFetch:fetchNonStakeholder" -> Failure("CONTRACT_NOT_FOUND"),
+    "Interface:main" -> Success(),
+    "InterfaceArchive:main" -> Success(),
+    "Iou12:main" -> Success(),
+    "LargeTransaction:largeListAsAChoiceArgTest" -> Success(),
+    "LargeTransaction:largeTransactionWithManyContractsTest" -> Success(),
+    "LargeTransaction:largeTransactionWithOneContractTest" -> Success(),
+    "LargeTransaction:listSizeTest" -> Success(),
+    "LargeTransaction:rangeOfIntsToListContainerTest" -> Success(),
+    "LargeTransaction:rangeOfIntsToListTest" -> Success(),
+    "LargeTransaction:rangeTest" -> Success(),
+    "LedgerTestException:test" -> Failure("ohno"),
+    "LfInterfaces:run" -> Success(),
+    "MoreChoiceObserverDivulgence:test" -> Success(),
+    "Self2:main" -> Success(),
+    "Self:main" -> Success(),
+    "TransientFailure:testBio" -> Failure("FAILED_PRECONDITION"),
+  )
+}
+
+@NuckTest
+class DamlScriptDevLegacyNUCKIT extends DamlScriptDevIT(ContractStateMachine.Mode.LegacyNUCK) {
+  import DamlScriptIT.contractIDsNotSupported
+  import DamlScriptIT.ExpectedResult.*
+
+  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+
+  override val expectedResults = super.expectedResults ++ SortedMap(
+    "AuthFailure:t4_LookupByKeyMissingAuthorization" -> Failure(
+      "requires authorizers .* for lookup by key"
+    ),
+    "DamlScriptTrySubmit:contractKeyNotFound" -> Success(),
+    "DamlScriptTrySubmit:contractNotActive" -> Failure("contractNotActive no additional info"),
+    "DamlScriptTrySubmit:truncatedError" -> Failure("EXPECTED_TRUNCATED_ERROR"),
+    "ExceptionSemantics:duplicateKey" -> Ignored,
+    "ExceptionSemantics:rollbackArchive" -> Success(),
+    "ExceptionSemantics:tryContext" -> Failure("Contract could not be found"),
+    "FetchByKey:failLedger" -> Failure("couldn't find key"),
+    "FetchByKey:failSpeedy" -> Failure("couldn't find key"),
+    "FetchByKey:mustFail" -> Success(),
+    "KeyNotVisibleStakeholders:blindFetch" -> Failure(
+      "requires authorizers .* but only .* were given"
+    ),
+    "KeyNotVisibleStakeholders:blindLookup" -> Failure(
+      "requires authorizers .* but only .* were given"
+    ),
+    "KeyNotVisibleStakeholders:divulgeeFetch" -> Failure(
+      "requires authorizers .* but only .* were given"
+    ),
+    "KeyNotVisibleStakeholders:divulgeeLookup" -> Failure(
+      "requires authorizers .* but only .* were given"
+    ),
     "ConsumedContractKey:testFetchFromConsumingChoice" -> Failure(
       "Update failed due to fetch of an inactive contract"
     ),
@@ -396,20 +536,15 @@ abstract class DamlScriptDevIT extends DamlScriptIT {
       "dependency error: couldn't find key"
     ),
     "ConsumedContractKey:testLookupKeyFromConsumingChoice" -> Success(),
-    "ConsumingTests:main" -> Success(),
-    "ContractIdInContractKeySkipCheck:createCmdCrashes" -> Failure(
-      "Contract IDs are not supported"
-    ),
-    "ContractIdInContractKeySkipCheck:createCrashes" -> Failure("Contract IDs are not supported"),
-    "ContractIdInContractKeySkipCheck:exerciseCmdCrashes" -> Failure(
-      "Contract IDs are not supported"
-    ),
-    "ContractIdInContractKeySkipCheck:exerciseCrashes" -> Failure("Contract IDs are not supported"),
-    "ContractIdInContractKeySkipCheck:fetchCrashes" -> Failure("Contract IDs are not supported"),
-    "ContractIdInContractKeySkipCheck:lookupCrashes" -> Failure("Contract IDs are not supported"),
+    "ContractIdInContractKeySkipCheck:createCmdCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:createCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:exerciseCmdCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:exerciseCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:fetchCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:lookupCrashes" -> contractIDsNotSupported,
     "ContractIdInContractKeySkipCheck:queryCrashes" ->
       // should have failed but it succeeds (tracked by https://github.com/digital-asset/daml/issues/17554)
-      Broken(Failure("Contract IDs are not supported")),
+      Broken(contractIDsNotSupported),
     "ContractKeyNotEffective:fetchByKeyMustFail" -> Failure(
       "Setting time backwards is not allowed"
     ),
@@ -423,17 +558,9 @@ abstract class DamlScriptDevIT extends DamlScriptIT {
     "ContractKeyNotVisible:localFetch" -> Success(),
     "ContractKeyNotVisible:localLookup" -> Success(),
     "ContractKeys:test" -> Success(),
-    "CreateAndExercise:main" -> Success(),
-    "DamlScriptTrySubmit:authorizationError" -> Success(),
-    "DamlScriptTrySubmit:contractKeyNotFound" -> Success(),
-    "DamlScriptTrySubmit:contractNotActive" -> Failure("contractNotActive no additional info"),
     "DamlScriptTrySubmit:createEmptyContractKeyMaintainers" -> Success(),
-    "DamlScriptTrySubmit:devError" -> Success(),
     "DamlScriptTrySubmit:duplicateContractKey" -> Success(),
-    "DamlScriptTrySubmit:failureStatusError" -> Success(),
     "DamlScriptTrySubmit:fetchEmptyContractKeyMaintainers" -> Success(),
-    "DamlScriptTrySubmit:truncatedError" -> Failure("EXPECTED_TRUNCATED_ERROR"),
-    "DamlScriptTrySubmit:wronglyTypedContract" -> Success(),
     "EmptyContractKeyMaintainers:createCmdNoMaintainer" -> Failure(
       "Update failed due to a contract key with an empty set of maintainers"
     ),
@@ -447,30 +574,35 @@ abstract class DamlScriptDevIT extends DamlScriptIT {
       "Update failed due to a contract key with an empty set of maintainers"
     ),
     "EmptyContractKeyMaintainers:queryNoMaintainer" -> Failure("Couldn't see contract with key"),
-    "EqContractId:main" -> Success(),
     "ExceptionAndContractKey:testCreate" -> Success(),
     "ExceptionAndContractKey:testLookup" -> Success(),
-    "ExceptionSemantics:divulgence" -> Success(),
+    "LFContractKeys:lookupTest" -> Ignored,
+    "LfStableContractKeyThroughExercises:run" -> Ignored,
+    "LfStableContractKeys:run" -> Ignored,
+  )
+}
+
+@NuckTest
+class DamlScriptDevUCKWithRollbackIT
+    extends DamlScriptDevIT(ContractStateMachine.Mode.UCKWithRollback) {
+  import DamlScriptIT.contractIDsNotSupported
+  import DamlScriptIT.ExpectedResult.*
+
+  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+
+  override val expectedResults = super.expectedResults ++ SortedMap(
+    "AuthFailure:t4_LookupByKeyMissingAuthorization" -> Failure(
+      "requires authorizers .* for lookup by key"
+    ),
+    "DamlScriptTrySubmit:contractKeyNotFound" -> Success(),
+    "DamlScriptTrySubmit:contractNotActive" -> Failure("contractNotActive no additional info"),
+    "DamlScriptTrySubmit:truncatedError" -> Failure("EXPECTED_TRUNCATED_ERROR"),
     "ExceptionSemantics:duplicateKey" -> Ignored,
-    "ExceptionSemantics:handledArithmeticError" -> Success(),
-    "ExceptionSemantics:handledUserException" -> Success(),
     "ExceptionSemantics:rollbackArchive" -> Success(),
     "ExceptionSemantics:tryContext" -> Failure("Contract could not be found"),
-    "ExceptionSemantics:uncaughtArithmeticError" -> Success(),
-    "ExceptionSemantics:uncaughtUserException" -> Success(),
-    "ExceptionSemantics:unhandledArithmeticError" -> Failure(
-      "UNHANDLED_EXCEPTION/DA.Exception.ArithmeticError:ArithmeticError"
-    ),
-    "ExceptionSemantics:unhandledUserException" -> Failure(
-      "UNHANDLED_EXCEPTION/ExceptionSemantics:E"
-    ),
-    "FailedFetch:fetchNonStakeholder" -> Failure("CONTRACT_NOT_FOUND"),
     "FetchByKey:failLedger" -> Failure("couldn't find key"),
     "FetchByKey:failSpeedy" -> Failure("couldn't find key"),
     "FetchByKey:mustFail" -> Success(),
-    "Interface:main" -> Success(),
-    "InterfaceArchive:main" -> Success(),
-    "Iou12:main" -> Success(),
     "KeyNotVisibleStakeholders:blindFetch" -> Failure(
       "requires authorizers .* but only .* were given"
     ),
@@ -483,38 +615,230 @@ abstract class DamlScriptDevIT extends DamlScriptIT {
     "KeyNotVisibleStakeholders:divulgeeLookup" -> Failure(
       "requires authorizers .* but only .* were given"
     ),
+    "ConsumedContractKey:testFetchFromConsumingChoice" -> Failure(
+      "Update failed due to fetch of an inactive contract"
+    ),
+    "ConsumedContractKey:testFetchKeyFromConsumingChoice" -> Failure(
+      "dependency error: couldn't find key"
+    ),
+    "ConsumedContractKey:testLookupKeyFromConsumingChoice" -> Success(),
+    "ContractIdInContractKeySkipCheck:createCmdCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:createCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:exerciseCmdCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:exerciseCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:fetchCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:lookupCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:queryCrashes" ->
+      // should have failed but it succeeds (tracked by https://github.com/digital-asset/daml/issues/17554)
+      Broken(contractIDsNotSupported),
+    "ContractKeyNotEffective:fetchByKeyMustFail" -> Failure(
+      "Setting time backwards is not allowed"
+    ),
+    "ContractKeyNotVisible:aScript" -> Failure("Couldn't see contract with key .*"),
+    "ContractKeyNotVisible:blindLookup" -> Broken(
+      Failure("expected unassigned key, which already exists")
+    ),
+    "ContractKeyNotVisible:divulgeeLookup" -> Broken(
+      Failure("expected unassigned key, which already exists")
+    ),
+    "ContractKeyNotVisible:localFetch" -> Success(),
+    "ContractKeyNotVisible:localLookup" -> Success(),
+    "ContractKeys:test" -> Success(),
+    "DamlScriptTrySubmit:createEmptyContractKeyMaintainers" -> Success(),
+    "DamlScriptTrySubmit:duplicateContractKey" -> Success(),
+    "DamlScriptTrySubmit:fetchEmptyContractKeyMaintainers" -> Success(),
+    "EmptyContractKeyMaintainers:createCmdNoMaintainer" -> Failure(
+      "Update failed due to a contract key with an empty set of maintainers"
+    ),
+    "EmptyContractKeyMaintainers:createNoMaintainer" -> Failure(
+      "Update failed due to a contract key with an empty set of maintainers"
+    ),
+    "EmptyContractKeyMaintainers:fetchNoMaintainer" -> Failure(
+      "Update failed due to a contract key with an empty set of maintainers"
+    ),
+    "EmptyContractKeyMaintainers:lookupNoMaintainer" -> Failure(
+      "Update failed due to a contract key with an empty set of maintainers"
+    ),
+    "EmptyContractKeyMaintainers:queryNoMaintainer" -> Failure("Couldn't see contract with key"),
+    "ExceptionAndContractKey:testCreate" -> Success(),
+    "ExceptionAndContractKey:testLookup" -> Success(),
     "LFContractKeys:lookupTest" -> Ignored,
-    "LargeTransaction:largeListAsAChoiceArgTest" -> Success(),
-    "LargeTransaction:largeTransactionWithManyContractsTest" -> Success(),
-    "LargeTransaction:largeTransactionWithOneContractTest" -> Success(),
-    "LargeTransaction:listSizeTest" -> Success(),
-    "LargeTransaction:rangeOfIntsToListContainerTest" -> Success(),
-    "LargeTransaction:rangeOfIntsToListTest" -> Success(),
-    "LargeTransaction:rangeTest" -> Success(),
-    "LedgerTestException:test" -> Failure("ohno"),
-    "LfInterfaces:run" -> Success(),
     "LfStableContractKeyThroughExercises:run" -> Ignored,
     "LfStableContractKeys:run" -> Ignored,
-    "MoreChoiceObserverDivulgence:test" -> Success(),
-    "Self2:main" -> Success(),
-    "Self:main" -> Success(),
-    "TransientFailure:testBio" -> Failure("FAILED_PRECONDITION"),
   )
 }
 
 @NuckTest
-class DamlScriptDevReferenceIT extends DamlScriptDevIT {
+class DamlScriptDevUCKWithoutRollbackIT
+    extends DamlScriptDevIT(ContractStateMachine.Mode.UCKWithoutRollback) {
+  import DamlScriptIT.contractIDsNotSupported
+  import DamlScriptIT.ExpectedResult.*
+
   registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+
+  override def expectedResults = super.expectedResults ++ SortedMap(
+    "AuthFailure:t4_LookupByKeyMissingAuthorization" -> Failure(
+      "requires authorizers .* for lookup by key"
+    ),
+    "DamlScriptTrySubmit:contractKeyNotFound" -> Success(),
+    "DamlScriptTrySubmit:contractNotActive" -> Failure("contractNotActive no additional info"),
+    "DamlScriptTrySubmit:truncatedError" -> Failure("EXPECTED_TRUNCATED_ERROR"),
+    "ExceptionSemantics:duplicateKey" -> Ignored,
+    "ExceptionSemantics:rollbackArchive" ->
+      Success(
+        logAssertions =
+          _.errorMessage should include("Rollback of consuming exercise node is not supported"),
+        _.errorMessage should include("Unhandled internal error"),
+        _.errorMessage should include("INTERNAL/An error occurred"),
+      ),
+    "ExceptionSemantics:tryContext" -> Failure("Contract could not be found"),
+    "FetchByKey:failLedger" -> Failure("couldn't find key"),
+    "FetchByKey:failSpeedy" -> Failure("couldn't find key"),
+    "FetchByKey:mustFail" -> Success(),
+    "KeyNotVisibleStakeholders:blindFetch" -> Failure(
+      "requires authorizers .* but only .* were given"
+    ),
+    "KeyNotVisibleStakeholders:blindLookup" -> Failure(
+      "requires authorizers .* but only .* were given"
+    ),
+    "KeyNotVisibleStakeholders:divulgeeFetch" -> Failure(
+      "requires authorizers .* but only .* were given"
+    ),
+    "KeyNotVisibleStakeholders:divulgeeLookup" -> Failure(
+      "requires authorizers .* but only .* were given"
+    ),
+    "ConsumedContractKey:testFetchFromConsumingChoice" -> Failure(
+      "Update failed due to fetch of an inactive contract"
+    ),
+    "ConsumedContractKey:testFetchKeyFromConsumingChoice" -> Failure(
+      "dependency error: couldn't find key"
+    ),
+    "ConsumedContractKey:testLookupKeyFromConsumingChoice" -> Success(),
+    "ContractIdInContractKeySkipCheck:createCmdCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:createCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:exerciseCmdCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:exerciseCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:fetchCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:lookupCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:queryCrashes" ->
+      // should have failed but it succeeds (tracked by https://github.com/digital-asset/daml/issues/17554)
+      Broken(contractIDsNotSupported),
+    "ContractKeyNotEffective:fetchByKeyMustFail" -> Failure(
+      "Setting time backwards is not allowed"
+    ),
+    "ContractKeyNotVisible:aScript" -> Failure("Couldn't see contract with key .*"),
+    "ContractKeyNotVisible:blindLookup" -> Broken(
+      Failure("expected unassigned key, which already exists")
+    ),
+    "ContractKeyNotVisible:divulgeeLookup" -> Broken(
+      Failure("expected unassigned key, which already exists")
+    ),
+    "ContractKeyNotVisible:localFetch" -> Success(),
+    "ContractKeyNotVisible:localLookup" -> Success(),
+    "ContractKeys:test" -> Success(),
+    "DamlScriptTrySubmit:createEmptyContractKeyMaintainers" -> Success(),
+    "DamlScriptTrySubmit:duplicateContractKey" -> Success(),
+    "DamlScriptTrySubmit:fetchEmptyContractKeyMaintainers" -> Success(),
+    "EmptyContractKeyMaintainers:createCmdNoMaintainer" -> Failure(
+      "Update failed due to a contract key with an empty set of maintainers"
+    ),
+    "EmptyContractKeyMaintainers:createNoMaintainer" -> Failure(
+      "Update failed due to a contract key with an empty set of maintainers"
+    ),
+    "EmptyContractKeyMaintainers:fetchNoMaintainer" -> Failure(
+      "Update failed due to a contract key with an empty set of maintainers"
+    ),
+    "EmptyContractKeyMaintainers:lookupNoMaintainer" -> Failure(
+      "Update failed due to a contract key with an empty set of maintainers"
+    ),
+    "EmptyContractKeyMaintainers:queryNoMaintainer" -> Failure("Couldn't see contract with key"),
+    "ExceptionAndContractKey:testCreate" -> Success(),
+    "ExceptionAndContractKey:testLookup" -> Success(),
+    "LFContractKeys:lookupTest" -> Ignored,
+    "LfStableContractKeyThroughExercises:run" -> Ignored,
+    "LfStableContractKeys:run" -> Ignored,
+  )
+}
+
+class DamlScriptDevNoContractKeyIT
+    extends DamlScriptDevIT(ContractStateMachine.Mode.NoContractKey) {
+  import DamlScriptIT.{contractIDsNotSupported, internalErrorOccurred}
+  import DamlScriptIT.ExpectedResult.Success
+
+  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+
+  override val expectedResults = super.expectedResults ++ SortedMap(
+    "AuthFailure:t4_LookupByKeyMissingAuthorization" -> internalErrorOccurred,
+    "DamlScriptTrySubmit:contractKeyNotFound" -> Success(),
+    "DamlScriptTrySubmit:contractNotActive" -> Success(),
+    "DamlScriptTrySubmit:truncatedError" -> Success(),
+    "ExceptionSemantics:duplicateKey" -> Success(),
+    "ExceptionSemantics:rollbackArchive" -> Success(),
+    "ExceptionSemantics:tryContext" -> Success(),
+    "FetchByKey:failLedger" -> Success(),
+    "FetchByKey:failSpeedy" -> Success(),
+    "FetchByKey:mustFail" -> Success(),
+    "KeyNotVisibleStakeholders:blindFetch" -> Success(),
+    "KeyNotVisibleStakeholders:blindLookup" -> Success(),
+    "KeyNotVisibleStakeholders:divulgeeFetch" -> Success(),
+    "KeyNotVisibleStakeholders:divulgeeLookup" -> Success(),
+    "ConsumedContractKey:testFetchFromConsumingChoice" -> internalErrorOccurred,
+    "ConsumedContractKey:testFetchKeyFromConsumingChoice" -> internalErrorOccurred,
+    "ConsumedContractKey:testLookupKeyFromConsumingChoice" -> internalErrorOccurred,
+    "ContractIdInContractKeySkipCheck:createCmdCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:createCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:exerciseCmdCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:exerciseCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:fetchCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:lookupCrashes" -> contractIDsNotSupported,
+    "ContractIdInContractKeySkipCheck:queryCrashes" -> Success(),
+    "ContractKeyNotEffective:fetchByKeyMustFail" -> internalErrorOccurred,
+    "ContractKeyNotVisible:aScript" -> internalErrorOccurred,
+    "ContractKeyNotVisible:blindLookup" -> internalErrorOccurred,
+    "ContractKeyNotVisible:divulgeeLookup" -> internalErrorOccurred,
+    "ContractKeyNotVisible:localFetch" -> internalErrorOccurred,
+    "ContractKeyNotVisible:localLookup" -> internalErrorOccurred,
+    "ContractKeys:test" -> Success(),
+    "DamlScriptTrySubmit:createEmptyContractKeyMaintainers" -> Success(),
+    "DamlScriptTrySubmit:duplicateContractKey" -> internalErrorOccurred,
+    "DamlScriptTrySubmit:fetchEmptyContractKeyMaintainers" -> Success(),
+    "EmptyContractKeyMaintainers:createCmdNoMaintainer" -> Success(),
+    "EmptyContractKeyMaintainers:createNoMaintainer" -> Success(),
+    "EmptyContractKeyMaintainers:fetchNoMaintainer" -> Success(),
+    "EmptyContractKeyMaintainers:lookupNoMaintainer" -> Success(),
+    "EmptyContractKeyMaintainers:queryNoMaintainer" -> Success(),
+    "ExceptionAndContractKey:testCreate" -> Success(),
+    "ExceptionAndContractKey:testLookup" -> Success(),
+    "LFContractKeys:lookupTest" -> Success(),
+    "LfStableContractKeyThroughExercises:run" -> Success(),
+    "LfStableContractKeys:run" -> Success(),
+  )
 }
 
 object DamlScriptIT {
 
-  sealed abstract class ExpectedResult extends Product with Serializable
+  sealed abstract class ExpectedResult extends Product with Serializable {
+    def logAssertions: Seq[LogEntry => Assertion] = Seq.empty
+  }
 
   object ExpectedResult {
-    final case class Success(value: Option[Json] = None) extends ExpectedResult
+    final case class Success(
+        value: Option[Json],
+        override val logAssertions: (LogEntry => Assertion)*
+    ) extends ExpectedResult
 
-    final case class Failure(errorMsgPattern: String) extends ExpectedResult
+    object Success {
+      def apply(logAssertions: (LogEntry => Assertion)*): Success =
+        new Success(None, logAssertions*)
+
+      def apply(value: Json, logAssertions: (LogEntry => Assertion)*): Success =
+        new Success(Some(value), logAssertions*)
+    }
+
+    final case class Failure(
+        errorMsgPattern: String,
+        override val logAssertions: (LogEntry => Assertion)*
+    ) extends ExpectedResult
 
     final case class Broken(result: Either[Failure, Success]) extends ExpectedResult
 
@@ -525,6 +849,14 @@ object DamlScriptIT {
 
     final case object Ignored extends ExpectedResult
   }
+
+  val contractIDsNotSupported: ExpectedResult.Failure = ExpectedResult.Failure(
+    "Contract IDs are not supported"
+  )
+
+  val internalErrorOccurred: ExpectedResult.Failure = ExpectedResult.Failure(
+    "INTERNAL: An error occurred"
+  )
 
   def withContractStateMode(contractStateMode: ContractStateMachine.Mode): Seq[ConfigTransform] =
     Seq(

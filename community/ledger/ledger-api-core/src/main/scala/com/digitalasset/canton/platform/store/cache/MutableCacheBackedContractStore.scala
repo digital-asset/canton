@@ -52,6 +52,7 @@ private[platform] class MutableCacheBackedContractStore(
             .map {
               case Some(persistedContract) => ContractState.Active(persistedContract.inst)
               case None =>
+                // TODO(i29574): potentially lower log level it this would become a possible cause
                 logger.error(
                   s"Contract $contractId marked as active in index (db or cache) but not found in participant's contract store"
                 )

@@ -343,9 +343,16 @@ object Presequenced {
 /** Wrapper to assign a timestamp to a event. Useful to structure this way as events are only
   * timestamped right before they are persisted (this is effectively the "sequencing" step). Before
   * this point the sequencer component is free to reorder incoming events.
+  *
+  * @param fromStore
+  *   flag to indicate whether the data item has been read from store (or whether it is coming from
+  *   the in memory ring buffer. used to optimize payload caching strategy).
   */
-final case class Sequenced[+P](timestamp: CantonTimestamp, event: StoreEvent[P])
-    extends HasTraceContext {
+final case class Sequenced[+P](
+    timestamp: CantonTimestamp,
+    event: StoreEvent[P],
+    fromStore: Boolean = false,
+) extends HasTraceContext {
   override def traceContext: TraceContext = event.traceContext
 
   def map[A](fn: P => A): Sequenced[A] = copy(event = event.map(fn))
@@ -693,6 +700,7 @@ trait SequencerStore
   def readPayloads(
       payloadIds: Seq[IdOrPayload],
       member: Member,
+      recentEvents: Boolean,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Map[PayloadId, Batch[ClosedEnvelope]]]

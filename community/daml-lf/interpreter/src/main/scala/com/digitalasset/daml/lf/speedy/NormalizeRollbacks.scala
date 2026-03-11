@@ -21,7 +21,7 @@ private[lf] object NormalizeRollbacks {
   // `Canonical` in the sense that only properly normalized nodes can be represented.
   // Although this doesn't ensure correctness, one class of bugs is avoided.
 
-  def normalizeTx(txOriginal: TX): (TX, ImmArray[NodeId]) = {
+  def normalizeTx(txOriginal: TX, shouldDropRollbacks: Boolean): (TX, ImmArray[NodeId]) = {
 
     // Here we traverse the original transaction structure.
     // During the transformation, an original `Node` is mapped into a List[Norm]
@@ -71,13 +71,16 @@ private[lf] object NormalizeRollbacks {
         // pass 1
         traverseNodeIds(rootsOriginal.toList) { norms =>
           // pass 2
-          pushNorms(initialState, norms.toList) { (finalState, roots) =>
-            Land(
-              (
-                Transaction(finalState.nodeMap, roots.to(ImmArray)),
-                finalState.seedIds.toImmArray,
+          dropRollbacks(norms.toList, shouldDropRollbacks) { mergedNorms =>
+            // pass 3
+            pushNorms(initialState, mergedNorms.toList) { (finalState, roots) =>
+              Land(
+                (
+                  Transaction(finalState.nodeMap, roots.to(ImmArray)),
+                  finalState.seedIds.toImmArray,
+                )
               )
-            )
+            }
           }
         }.bounce
     }
@@ -90,6 +93,7 @@ private[lf] object NormalizeRollbacks {
 
   //   rule #2/#3 overlap: ROLL [ ROLL [ xs… ] ] -> ROLL [ xs… ]
 
+  @scala.annotation.tailrec
   private[this] def makeRoll[R](
       norms: Vector[Norm]
   )(k: Vector[Norm] => Trampoline[R]): Trampoline[R] = {
@@ -233,6 +237,64 @@ private[lf] object NormalizeRollbacks {
             }
           }
       }
+    }
+  }
+
+  private[this] def dropRollbacks[R](ns: List[Norm], shouldDropRollbacks: Boolean)(
+    k: Vector[Norm] => Trampoline[R]
+  ): Trampoline[R] =
+    if (shouldDropRollbacks)
+      mergeUpRollbacks(ns, false)(k)
+    else
+      k(ns.toVector)
+
+  private[this] def mergeUpRollbacks[R](ns: List[Norm], insideRollback: Boolean)(
+    k: Vector[Norm] => Trampoline[R]
+  ): Trampoline[R] =
+    ns match {
+      case Nil => k(Vector())
+      case x :: xs  =>
+        mergeUpRollback(x, insideRollback) { mergedX =>
+          mergeUpRollbacks(xs, insideRollback) { mergedXs =>
+            Bounce { () =>
+              k(mergedX ++ mergedXs)
+            }
+          }
+        }
+    }
+
+  private[this] def mergeUpRollback[R](n: Norm, insideRollback: Boolean)(
+    k: Vector[Norm] => Trampoline[R]
+  ): Trampoline[R] = {
+    n match {
+      case Norm.Roll1(child) => mergeUpRollback(child, true)(k)
+      case Norm.Roll2(head, middle, tail) =>
+        mergeUpRollback(head, true) { mergedHead =>
+          mergeUpRollbacks(middle.toList, true) { mergedMiddle =>
+            mergeUpRollback(tail, true) { mergedTail =>
+              val all = mergedHead ++ mergedMiddle ++ mergedTail
+              Bounce { () =>
+                k(all)
+              }
+            }
+          }
+        }
+      case Norm.Leaf(_: Node.Create) =>
+        if (insideRollback)
+          throw new IllegalStateException("Create node inside Rollback node cannot be removed.")
+        else
+          k(Vector(n))
+      case Norm.Leaf(_: Node.Fetch) => k(Vector(n))
+      case Norm.Leaf(_: Node.LookupByKey) => k(Vector(n))
+      case Norm.Exe(node, children) =>
+        if (node.consuming && insideRollback)
+          throw new IllegalStateException("Consuming exercise node inside Rollback node cannot be removed.")
+        else
+          mergeUpRollbacks(children, insideRollback) { mergedChildren =>
+            Bounce { () =>
+              k(Vector(Norm.Exe(node, mergedChildren.toList)))
+            }
+          }
     }
   }
 

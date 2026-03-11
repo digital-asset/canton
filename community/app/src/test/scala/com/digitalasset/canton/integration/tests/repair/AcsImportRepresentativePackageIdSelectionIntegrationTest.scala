@@ -470,6 +470,7 @@ abstract class AcsImportRepresentativePackageIdSelectionIntegrationTest
       .GetActiveContractsRequest(
         activeAtOffset = ledgerEndOffset,
         eventFormat = Some(queryEventFormat),
+        streamContinuationToken = None,
       )
       .asJson
       .toString()

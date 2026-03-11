@@ -40,7 +40,7 @@ Now you can initialize the centralized Synchronizer as follows:
           mediators = Seq(mediator1),
           synchronizerOwners = Seq(sequencer1),
           synchronizerThreshold = 1,
-          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
         )
 
 .. snippet:: centralized_synchronizer_install
@@ -98,7 +98,7 @@ All Synchronizer owners must agree on the :externalref:`static Synchronizer para
 in advance. You can achieve that, for example, by exporting and sharing a file containing their definition:
 
 .. snippet:: decentralized_synchronizer_install_separate_consoles
-    .. success:: val synchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest)
+    .. success:: val synchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer)
     .. success:: synchronizerParameters.writeToFile("tmp/synchronizer-bootstrapping-files/params.proto")
 
 Now create temporary topology stores to bootstrap the Synchronizer's topology in both Sequencers' consoles:
@@ -295,7 +295,7 @@ All Synchronizer owners must agree on the :externalref:`static Synchronizer para
 in advance. You can achieve that, for example, by exporting and sharing a file containing their definition:
 
 .. snippet:: decentralized_synchronizer_install_subset_owners
-    .. success:: val synchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest)
+    .. success:: val synchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer)
     .. success:: synchronizerParameters.writeToFile("tmp/synchronizer-bootstrapping-files/params.proto")
 
 Now create temporary topology stores to bootstrap the Synchronizer's topology in all four Sequencer nodes' consoles:
@@ -516,7 +516,7 @@ First, let all Synchronizer owners set the ``onboardingRestriction``
 
 .. snippet:: permissioned_synchronizer
     .. hidden:: val synchronizerName = "mySynchronizer"
-    .. hidden:: bootstrap.synchronizer(synchronizerName = synchronizerName, sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1, mediator1), synchronizerThreshold = 2, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest))
+    .. hidden:: bootstrap.synchronizer(synchronizerName = synchronizerName, sequencers = Seq(sequencer1), mediators = Seq(mediator1), synchronizerOwners = Seq(sequencer1, mediator1), synchronizerThreshold = 2, staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer))
     .. success:: val synchronizerId = sequencer1.synchronizer_id
     .. success:: sequencer1.topology.synchronizer_parameters.propose_update(synchronizerId, _.update(onboardingRestriction = OnboardingRestriction.RestrictedOpen))
     .. success:: mediator1.topology.synchronizer_parameters.propose_update(synchronizerId, _.update(onboardingRestriction = OnboardingRestriction.RestrictedOpen))

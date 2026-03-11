@@ -43,8 +43,9 @@ object UpdateToDbDto {
       compressionStrategy: CompressionStrategy,
       metrics: LedgerApiServerMetrics,
   )(implicit mc: MetricsContext): Offset => Update => Iterator[DbDto] = { offset => tracedUpdate =>
-    val serializedTraceContext =
-      SerializableTraceContext(tracedUpdate.traceContext).toDamlProto.toByteArray
+    val serializedTraceContext = SerializableTraceContext(
+      tracedUpdate.traceContext
+    ).toSerializedDamlProto
     tracedUpdate match {
       case u: CommandRejected =>
         commandRejectedToDbDto(

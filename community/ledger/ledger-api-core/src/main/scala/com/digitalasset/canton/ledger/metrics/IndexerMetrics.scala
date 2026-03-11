@@ -153,6 +153,9 @@ class IndexerMetrics(
   val postProcessingEndIngestion =
     new DatabaseMetrics(prefix :+ "post_processing_end_ingestion", factory)
 
+  val achsProcessing =
+    new DatabaseMetrics(prefix :+ "achs_processing", factory)
+
   val indexerQueueBlocked: MetricHandle.Meter = factory.meter(
     MetricInfo(
       prefix :+ "indexer_queue_blocked",

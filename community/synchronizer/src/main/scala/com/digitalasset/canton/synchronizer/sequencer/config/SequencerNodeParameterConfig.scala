@@ -10,8 +10,6 @@ import io.scalaland.chimney.dsl.*
 
 /** Async block sequencer writer control parameters
   *
-  * @param enabled
-  *   if true (default) then the async writer is enabled
   * @param trafficBatchSize
   *   the maximum number of traffic events to batch in a single write
   * @param aggregationBatchSize
@@ -20,7 +18,6 @@ import io.scalaland.chimney.dsl.*
   *   the maximum number of block info updates to batch in a single write
   */
 final case class AsyncWriterConfig(
-    enabled: Boolean = true,
     trafficBatchSize: PositiveInt = PositiveInt.tryCreate(1000),
     aggregationBatchSize: PositiveInt = PositiveInt.tryCreate(1000),
     blockInfoBatchSize: PositiveInt = PositiveInt.tryCreate(1000),

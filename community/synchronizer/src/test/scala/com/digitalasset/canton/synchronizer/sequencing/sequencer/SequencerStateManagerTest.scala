@@ -427,13 +427,14 @@ class SequencerStateManagerTest
         ),
       )
 
+    val initialHeadO = store.readHeadUnbounded().futureValueUS
     val stateManager: BlockSequencerStateManager =
       BlockSequencerStateManager
         .create(
-          topologyTransactionFactory.synchronizerId1.toPhysical,
+          initialHeadO,
           store,
           trafficConsumedStore,
-          asyncWriterParameters = AsyncWriterParameters(enabled = true),
+          asyncWriterParameters = AsyncWriterParameters(),
           enableInvariantCheck = true,
           timeouts,
           futureSupervisor,
@@ -441,7 +442,6 @@ class SequencerStateManagerTest
           BlockSequencerStreamInstrumentationConfig(),
           SequencerTestMetrics.block,
         )(executorService, traceContext)
-        .onShutdown(fail("Shutting down"))
 
     private val processingTimestampWatermark =
       new AtomicReference[CantonTimestamp](CantonTimestamp.MinValue)

@@ -241,14 +241,22 @@ object SequencerConnectionValidation {
   *   How long the sequencer client should wait after an acknowledged submission to a sequencer to
   *   observe the receipt or error before it attempts to send the submission request again (possibly
   *   to a different sequencer).
+  * @param confirmationResponseFactorO
+  *   If defined, overrides [[factor]] when sending confirmation responses.
+  * @param confirmationResponsePatienceO
+  *   If defined, overrides [[patience]] when sending confirmation responses.
   */
 final case class SubmissionRequestAmplification(
     factor: PositiveInt,
     patience: config.NonNegativeFiniteDuration,
+    confirmationResponseFactorO: Option[PositiveInt] = None,
+    confirmationResponsePatienceO: Option[config.NonNegativeFiniteDuration] = None,
 ) extends PrettyPrinting {
   override protected def pretty: Pretty[SubmissionRequestAmplification] = prettyOfClass(
     param("factor", _.factor),
     param("patience", _.patience),
+    paramIfDefined("confirmationResponseFactor", _.confirmationResponseFactorO),
+    paramIfDefined("confirmationResponsePatience", _.confirmationResponsePatienceO),
   )
 
   private[canton] def toInternal: SubmissionRequestAmplificationInternal =

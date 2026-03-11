@@ -455,8 +455,11 @@ class GrpcPartyManagementService(
             .filter(_.synchronizerId == synchronizerId.toProtoPrimitive)
             .filter { topologyTransaction =>
               topologyTransaction.events.exists { event =>
-                event.event.isParticipantAuthorizationAdded &&
-                event.getParticipantAuthorizationAdded.participantId == targetParticipant.uid.toProtoPrimitive
+                // Search for onboarding or added event and let caller decide whether we found the right event
+                (event.event.isParticipantAuthorizationOnboarding &&
+                  event.getParticipantAuthorizationOnboarding.participantId == targetParticipant.uid.toProtoPrimitive)
+                || (event.event.isParticipantAuthorizationAdded &&
+                  event.getParticipantAuthorizationAdded.participantId == targetParticipant.uid.toProtoPrimitive)
               }
             }
             .take(1)

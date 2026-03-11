@@ -685,6 +685,7 @@ final class ParticipantMigrateSynchronizerCrashRecoveryIntegrationTest
       synchronizerId = daId,
       beginOffsetExclusive = ledgerEnd,
       completeAfter = PositiveInt.one,
+      onboarding = false,
     )
 
     val source =

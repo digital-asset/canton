@@ -474,4 +474,28 @@ object Dependencies {
 
   lazy val jol_core = "org.openjdk.jol" % "jol-core" % "0.17"
 
+  // Pre-built Z3 release with Java bindings, downloaded from GitHub.
+  object z3 {
+    val version = "4.16.0"
+
+    private val os = sys.props("os.name").toLowerCase
+    private val arch = sys.props("os.arch").toLowerCase
+
+    val (url, sha256, dirName) =
+      if (os.contains("linux"))
+        (
+          s"https://github.com/Z3Prover/z3/releases/download/z3-$version/z3-$version-x64-glibc-2.39.zip",
+          "7288c49a5bd6dbafd7b0b0d1f65956b91672da24b08f09242919af159be3418e",
+          s"z3-$version-x64-glibc-2.39",
+        )
+      else if (os.contains("mac") && (arch == "aarch64" || arch == "arm64"))
+        (
+          s"https://github.com/Z3Prover/z3/releases/download/z3-$version/z3-$version-arm64-osx-15.7.3.zip",
+          "41828fa07d5cb77bfaee326e8e6dac074f26329c09c633f9e66012bb917cf8ae",
+          s"z3-$version-arm64-osx-15.7.3",
+        )
+      else
+        throw new RuntimeException(s"Unsupported OS/arch for Z3: os.name=$os, os.arch=$arch")
+  }
+
 }

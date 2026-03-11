@@ -584,7 +584,7 @@ class AvailabilityModuleOutputFetchTest
                   Node0,
                 ),
                 Availability.LocalDissemination
-                  .RemoteBatchStored(ABatchId, anEpochNumber, Node0),
+                  .RemoteBatchStored(ABatchId, anEpochNumber, Node0, true),
               ),
               (
                 Availability.RemoteOutputFetch.RemoteBatchDataFetched.create(
@@ -640,7 +640,7 @@ class AvailabilityModuleOutputFetchTest
               ),
               (
                 Availability.LocalDissemination
-                  .RemoteBatchStored(ABatchId, anEpochNumber, Node0),
+                  .RemoteBatchStored(ABatchId, anEpochNumber, Node0, true),
                 Availability.LocalDissemination
                   .RemoteBatchStoredSigned(ABatchId, Node0, Signature.noSignature),
                 "availability-sign-remote-batchId",
@@ -671,7 +671,8 @@ class AvailabilityModuleOutputFetchTest
             forAll(
               Table[Msg](
                 "message",
-                Availability.LocalDissemination.RemoteBatchStored(ABatchId, anEpochNumber, Node0),
+                Availability.LocalDissemination
+                  .RemoteBatchStored(ABatchId, anEpochNumber, Node0, true),
                 Availability.LocalOutputFetch.FetchedBatchStored(ABatchId),
               )
             ) { message =>
@@ -721,7 +722,8 @@ class AvailabilityModuleOutputFetchTest
             forAll(
               Table[Msg](
                 "message",
-                Availability.LocalDissemination.RemoteBatchStored(ABatchId, anEpochNumber, Node0),
+                Availability.LocalDissemination
+                  .RemoteBatchStored(ABatchId, anEpochNumber, Node0, true),
                 Availability.LocalOutputFetch.FetchedBatchStored(ABatchId),
               )
             ) { message =>

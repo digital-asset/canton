@@ -67,7 +67,7 @@ trait SequencerBlockStoreTest
           _ <- allMembers.parTraverse(member =>
             sequencerStore.registerMember(member, CantonTimestamp.now())
           )
-          headO <- store.readHead
+          headO <- store.readHeadUnbounded()
         } yield headO shouldBe None
       }
 
@@ -119,7 +119,7 @@ trait SequencerBlockStoreTest
           )
           // In the unified sequencer, the watermark affects the head state (which block is considered cleanly processed)
           _ <- sequencerStore.saveWatermark(0, t3).valueOrFail("save watermark")
-          headO <- store.readHead
+          headO <- store.readHeadUnbounded()
         } yield {
           val head = headO.value
           head.latestBlock.height shouldBe 5
@@ -154,7 +154,7 @@ trait SequencerBlockStoreTest
           )
           // In the unified sequencer, the watermark affects the head state (which block is considered cleanly processed)
           _ <- sequencerStore.saveWatermark(0, t3).valueOrFail("save watermark")
-          headO <- store.readHead
+          headO <- store.readHeadUnbounded()
         } yield {
           val head = headO.value
           head.latestBlock shouldBe BlockInfo(1L, t2, Some(t1), Some(t1))
@@ -226,15 +226,15 @@ trait SequencerBlockStoreTest
             )
             .valueOrFail("read at t4")
           _ <- sequencerStore.saveWatermark(0, t1).valueOrFail("save watermark t1")
-          headAtWatermarkT1 <- store.readHead
+          headAtWatermarkT1 <- store.readHeadUnbounded()
           _ <- sequencerStore.saveWatermark(0, t2).valueOrFail("save watermark t2")
-          headAtWatermarkT2 <- store.readHead
+          headAtWatermarkT2 <- store.readHeadUnbounded()
           _ <- sequencerStore.saveWatermark(0, t3).valueOrFail("save watermark t3")
-          headAtWatermarkT3 <- store.readHead
+          headAtWatermarkT3 <- store.readHeadUnbounded()
           _ <- sequencerStore.saveWatermark(0, t4).valueOrFail("save watermark t4")
-          headAtWatermarkT4 <- store.readHead
+          headAtWatermarkT4 <- store.readHeadUnbounded()
           _ <- sequencerStore.saveWatermark(0, t5).valueOrFail("save watermark t5")
-          headAtWatermarkT5 <- store.readHead
+          headAtWatermarkT5 <- store.readHeadUnbounded()
           futureTimestamp = t4.plusSeconds(100)
           stateAtFuture <- store
             .readStateForBlockContainingTimestamp(
@@ -278,13 +278,13 @@ trait SequencerBlockStoreTest
         for {
           _ <- store.finalizeBlockUpdates(Seq(block1))
           _ <- seqStore.saveWatermark(0, t2).value
-          fetch1 <- store.readHead
+          fetch1 <- store.readHeadUnbounded()
           _ <- store.finalizeBlockUpdates(Seq(block1, block2))
           _ <- seqStore.saveWatermark(0, t3).value
-          fetch2 <- store.readHead
+          fetch2 <- store.readHeadUnbounded()
           _ <- store.finalizeBlockUpdates(Seq(block2, block3))
           _ <- seqStore.saveWatermark(0, t4).value
-          fetch3 <- store.readHead
+          fetch3 <- store.readHeadUnbounded()
         } yield {
           fetch1.valueOrFail("must exist").latestBlock shouldBe block1
           fetch2.valueOrFail("must exist").latestBlock shouldBe block2
@@ -384,7 +384,7 @@ trait SequencerBlockStoreTest
           _ <- store.setInitialState(initial)
           // In the unified sequencer, the watermark affects the head state (which block is considered cleanly processed)
           _ <- sequencerStore.saveWatermark(0, t3).valueOrFail("save watermark")
-          result <- store.readHead
+          result <- store.readHeadUnbounded()
         } yield result.value shouldBe BlockEphemeralState(
           BlockInfo(5, t3, None, None),
           Map(aggregationId1 -> agg1),

@@ -1077,8 +1077,7 @@ message Update {
     Fetch fetch = 5;
     Unit get_time = 6;
     RetrieveByKey lookup_by_key = 8;
-    // TODO(#30571): move nuck to staging
-    QueryNByKey query_n_by_key = 16; // from 2.dev
+    QueryNByKey query_n_by_key = 16; // from 2.3
     RetrieveByKey fetch_by_key = 9;
     EmbedExpr embed_expr = 7;
     TryCatch try_catch = 11;

@@ -98,7 +98,7 @@ private[store] object StorageBackendTestValues extends OptionValues {
 
   val testTraceContext = TraceContext.withNewTraceContext("test trace context")(identity)
   val serializableTraceContext: Array[Byte] =
-    SerializableTraceContext(testTraceContext).toDamlProto.toByteArray
+    SerializableTraceContext(testTraceContext).toSerializedDamlProto
   val someExternalTransactionHash: CantonHash =
     CantonHash
       .digest(HashPurpose.PreparedSubmission, ByteString.copyFromUtf8("mock_hash"), Sha256)

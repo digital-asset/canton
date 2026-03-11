@@ -269,8 +269,15 @@ object P2PGrpcConnectionState {
   private final class P2PNetworkRefEntry(
       private val createNetworkRef: () => P2PNetworkRef[BftOrderingMessage],
       val isOutgoingConnection: Boolean,
-  ) {
+  ) extends PrettyPrinting {
+
     lazy val networkRef: P2PNetworkRef[BftOrderingMessage] = createNetworkRef()
+
+    override protected def pretty: Pretty[P2PNetworkRefEntry] =
+      prettyOfClass(
+        param("networkRef", _.networkRef.toString.unquoted),
+        param("isOutgoingConnection", _.isOutgoingConnection),
+      )
   }
 
   private final case class State(
@@ -315,15 +322,10 @@ object P2PGrpcConnectionState {
         param(
           "bftNodeIdToNetworkRef",
           _.bftNodeIdToNetworkRef.map { case (bftNodeId, networkRefEntry) =>
-            bftNodeId.doubleQuoted -> objId(networkRefEntry.networkRef)
+            bftNodeId.doubleQuoted -> networkRefEntry
           },
         ),
-        param(
-          "p2pEndpointIdToNetworkRef",
-          _.p2pEndpointIdToNetworkRef.map { case (p2pEndpointId, networkRef) =>
-            p2pEndpointId -> networkRef.toString.unquoted
-          },
-        ),
+        param("p2pEndpointIdToNetworkRef", _.p2pEndpointIdToNetworkRef),
       )
 
     @SuppressWarnings(Array("org.wartremover.warts.Var"))

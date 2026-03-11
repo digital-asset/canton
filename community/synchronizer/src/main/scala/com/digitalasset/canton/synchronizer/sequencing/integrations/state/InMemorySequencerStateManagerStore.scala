@@ -7,14 +7,19 @@ import cats.syntax.functorFilter.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.sequencing.OrdinarySerializedEvent
+import com.digitalasset.canton.sequencing.protocol.AggregationId
 import com.digitalasset.canton.synchronizer.sequencer.{
+  FreshInFlightAggregation,
+  InFlightAggregation,
+  InFlightAggregationUpdate,
   InFlightAggregationUpdates,
   InFlightAggregations,
 }
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.ErrorUtil
 
 import java.util.concurrent.atomic.AtomicReference
 
@@ -64,14 +69,54 @@ class InMemorySequencerStateManagerStore(
     def addInFlightAggregationUpdates(
         updates: InFlightAggregationUpdates
     )(implicit traceContext: TraceContext): State =
-      this.copy(inFlightAggregations =
-        InFlightAggregations.tryApplyUpdates(
-          this.inFlightAggregations,
-          updates,
-          // Persistence must be idempotent and therefore cannot enforce the aggregation errors
-          ignoreInFlightAggregationErrors = true,
-        )
+      this.copy(inFlightAggregations = updates.foldLeft(inFlightAggregations) {
+        case (aggregations, (aggregationId, update)) =>
+          aggregations.updatedWith(aggregationId) { previousO =>
+            Some(
+              tryApplyUpdate(
+                aggregationId,
+                previousO,
+                update,
+              )
+            )
+          }
+      })
+
+    private def tryApplyUpdate(
+        aggregationId: AggregationId,
+        inFlightAggregationO: Option[InFlightAggregation],
+        update: InFlightAggregationUpdate,
+    )(implicit loggingContext: ErrorLoggingContext): InFlightAggregation = {
+      val InFlightAggregationUpdate(freshO, aggregatedSenders) = update
+      val inFlightAggregation = inFlightAggregationO match {
+        case None =>
+          val fresh = freshO.getOrElse(
+            ErrorUtil.internalError(
+              new IllegalArgumentException(
+                s"Missing in-flight aggregation information for ID $aggregationId"
+              )
+            )
+          )
+          InFlightAggregation.initial(fresh)
+        case Some(inFlightAggregation) =>
+          freshO.foreach { fresh =>
+            val existing = FreshInFlightAggregation(
+              inFlightAggregation.maxSequencingTimestamp,
+              inFlightAggregation.rule,
+            )
+            ErrorUtil.requireArgument(
+              fresh == existing,
+              s"Mismatch with existing in-flight aggregation: existing: $existing, new: $fresh",
+            )
+          }
+          inFlightAggregation
+      }
+      aggregatedSenders.foldLeft(inFlightAggregation)((inFlightAgg, senderAggregation) =>
+        inFlightAgg
+          .tryAggregate(senderAggregation)
+          .getOrElse(inFlightAgg)
       )
+    }
 
     def pruneExpiredInFlightAggregations(upToInclusive: CantonTimestamp): State =
       this.copy(inFlightAggregations = this.inFlightAggregations.filterNot {
@@ -88,12 +133,9 @@ class InMemorySequencerStateManagerStore(
   override def pruneExpiredInFlightAggregations(upToInclusive: CantonTimestamp)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = FutureUnlessShutdown.pure {
-    pruneExpiredInFlightAggregationsInternal(upToInclusive).discard[InFlightAggregations]
+    state
+      .updateAndGet(_.pruneExpiredInFlightAggregations(upToInclusive))
+      .inFlightAggregations
+      .discard
   }
-
-  private[synchronizer] def pruneExpiredInFlightAggregationsInternal(
-      upToInclusive: CantonTimestamp
-  ): InFlightAggregations =
-    state.updateAndGet(_.pruneExpiredInFlightAggregations(upToInclusive)).inFlightAggregations
-
 }

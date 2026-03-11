@@ -139,6 +139,7 @@ object Update {
       final case class Added(level: AuthorizationLevel) extends ActiveAuthorization
       final case class ChangedTo(level: AuthorizationLevel) extends ActiveAuthorization
       final case object Revoked extends AuthorizationEvent
+      final case class Onboarding(level: AuthorizationLevel) extends ActiveAuthorization
     }
 
     sealed trait TopologyEvent

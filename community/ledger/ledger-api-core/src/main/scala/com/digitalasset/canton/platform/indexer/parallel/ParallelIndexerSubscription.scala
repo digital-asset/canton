@@ -37,7 +37,9 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.InMemoryState
 import com.digitalasset.canton.platform.index.InMemoryStateUpdater
+import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.platform.indexer.ha.Handle
+import com.digitalasset.canton.platform.indexer.parallel.AchsMaintenancePipe.AchsWorkDistance
 import com.digitalasset.canton.platform.indexer.parallel.AsyncSupport.*
 import com.digitalasset.canton.platform.store.LedgerApiContractStore
 import com.digitalasset.canton.platform.store.backend.*
@@ -68,6 +70,7 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
     ingestionStorageBackend: IngestionStorageBackend[DB_BATCH],
     parameterStorageBackend: ParameterStorageBackend,
     contractStorageBackend: ContractStorageBackend,
+    eventStorageBackend: EventStorageBackend,
     participantId: Ref.ParticipantId,
     translation: LfValueTranslation,
     compressionStrategy: CompressionStrategy,
@@ -82,6 +85,9 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
     maxOutputBatchedBufferSize: Int,
     maxTailerBatchSize: Int,
     postProcessingParallelism: Int,
+    achsPopulationParallelism: Int,
+    achsRemovalParallelism: Int,
+    achsAggregationThreshold: Long,
     metrics: LedgerApiServerMetrics,
     inMemoryStateUpdaterFlow: InMemoryStateUpdater.UpdaterFlow,
     inMemoryState: InMemoryState,
@@ -108,8 +114,10 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
       dbDispatcher: DbDispatcher,
       materializer: Materializer,
       initialLedgerEnd: Option[LedgerEnd],
+      initialAchsWork: AchsWorkDistance,
       commit: Commit,
       clock: Clock,
+      achsConfigO: Option[AchsConfig],
       repairMode: Boolean,
   )(implicit
       traceContext: TraceContext
@@ -198,13 +206,13 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
           ),
           seqMapperZero = seqMapperZero(initialLedgerEnd),
           seqMapper = seqMapper(
-            dtos =>
+            internize = dtos =>
               inMemoryState.stringInterningView
                 .internize(DbDtoToStringsForInterning(dtos)),
-            metrics,
-            clock,
-            logger,
-            inMemoryState.ledgerEndCache,
+            metrics = metrics,
+            clock = clock,
+            logger = logger,
+            ledgerEndCache = inMemoryState.ledgerEndCache,
           ),
           dbPrepareParallelism = dbPrepareParallelism,
           dbPrepare = dbPrepare(
@@ -246,9 +254,9 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
               Future.successful(batchOfBatches)
             } else
               ingestTail[DB_BATCH](
-                storeLedgerEndF,
-                executionContext,
-                logger,
+                storeLedgerEnd = storeLedgerEndF,
+                executionContext = executionContext,
+                logger = logger,
               ),
         )
       )
@@ -275,9 +283,7 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
           )
         }
       )
-      .mapConcat(
-        _.map(batch => (batch.offsetsUpdates, batch.ledgerEnd, batch.batchTraceContext))
-      )
+      .mapConcat(identity)
       .buffered(
         counter = metrics.indexer.outputBatchedBufferLength,
         size = maxOutputBatchedBufferSize,
@@ -304,11 +310,34 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
           Flow.apply
         }
       )
-      .map { updates =>
-        updates.lastOption.foreach { case (offset, _) =>
+      .map { (batch: Batch[?]) =>
+        batch.offsetsUpdates.lastOption.foreach { case (offset, _) =>
           commit(offset.unwrap)
         }
+        batch
       }
+      .via(
+        achsConfigO match {
+          case Some(_) =>
+            AchsMaintenancePipe(
+              parameterStorageBackend = parameterStorageBackend,
+              eventStorageBackend = eventStorageBackend,
+              dbDispatcher = dbDispatcher,
+              inMemoryState = inMemoryState,
+              toAchsWorkDistance = (batch: Batch[?]) =>
+                AchsWorkDistance(populate = batch.eventCount, remove = batch.eventCount),
+              initialWork = initialAchsWork,
+              populationParallelism = achsPopulationParallelism,
+              removalParallelism = achsRemovalParallelism,
+              aggregationThreshold = achsAggregationThreshold,
+              metrics = metrics,
+              executionContext = executionContext,
+              logger = logger,
+            )
+          // ACHS not configured or repair mode
+          case _ => Flow.apply
+        }
+      )
       .viaMat(KillSwitches.single)(Keep.both)
       .toMat(Sink.ignore)(Keep.both)
       .run()(materializer)
@@ -347,6 +376,9 @@ object ParallelIndexerSubscription {
     *   where the lookup-results are stored as well.
     * @param batchTraceContext
     *   The TraceContext constructed for the whole batch.
+    * @param eventCount
+    *   The number of events (event sequential id delta) in this batch. Used by ACHS maintenance to
+    *   compute work distances.
     */
   final case class Batch[+T](
       ledgerEnd: LedgerEnd,
@@ -355,6 +387,7 @@ object ParallelIndexerSubscription {
       offsetsUpdates: Vector[(Offset, Update)],
       activeContracts: mutable.LinkedHashMap[SynCon, ActivationRef],
       missingDeactivatedActivations: Map[SynCon, Option[ActivationRef]],
+      eventCount: Long,
       batchTraceContext: TraceContext,
   )
 
@@ -534,6 +567,7 @@ object ParallelIndexerSubscription {
       offsetsUpdates = input.toVector,
       activeContracts = EmptyActiveContracts, // will be overridden later
       missingDeactivatedActivations = Map.empty, // will be filled later
+      eventCount = 0L, // will be filled later
       batchTraceContext = TraceContext.ofBatch("indexer_update_batch")(
         input.iterator.map(_._2)
       )(logger),
@@ -552,6 +586,7 @@ object ParallelIndexerSubscription {
         mutable.LinkedHashMap.empty, // this mutable will propagate forward in sequential mapping
       missingDeactivatedActivations = Map.empty, // will be populated later
       batchTraceContext = TraceContext.empty, // will be populated later
+      eventCount = 0L, // will be populated later
     )
 
   def seqMapper(
@@ -681,6 +716,7 @@ object ParallelIndexerSubscription {
           batch = dbDtosWithStringInterning,
           activeContracts = activeContracts,
           missingDeactivatedActivations = missingDeactivatedActivationsBuilder.result(),
+          eventCount = eventSeqId - previous.ledgerEnd.lastEventSeqId,
         )
       },
     )
@@ -818,14 +854,11 @@ object ParallelIndexerSubscription {
     LoggingContextWithTrace.withNewLoggingContext(
       "updateOffsets" -> batch.offsetsUpdates.map(_._1)
     ) { implicit loggingContext =>
-      val batchTraceContext: TraceContext = TraceContext.ofBatch("ingest_batch")(
-        batch.offsetsUpdates.iterator.map(_._2)
-      )(logger)
       reassignmentOffsetPersistence
         .persist(
           batch.offsetsUpdates,
           logger,
-        )(batchTraceContext)
+        )(batch.batchTraceContext)
         .flatMap(_ =>
           dbDispatcher.executeSql(metrics.indexer.ingestion) { connection =>
             metrics.indexer.updates.inc(batch.batchSize.toLong)(MetricsContext.Empty)
@@ -979,7 +1012,7 @@ object ParallelIndexerSubscription {
         }
     }
 
-  def commitRepair[DB_BATCH](
+  def commitRepair(
       storeLedgerEnd: (LedgerEnd, Map[SynchronizerId, SynchronizerIndex]) => Future[Unit],
       storePostProcessingEnd: Offset => Future[Unit],
       updateInMemoryState: LedgerEnd => Unit,
@@ -990,11 +1023,11 @@ object ParallelIndexerSubscription {
       logger: TracedLogger,
   )(implicit
       traceContext: TraceContext
-  ): Vector[(Offset, Update)] => Future[
-    Vector[(Offset, Update)]
-  ] = { offsetsAndUpdates =>
+  ): Batch[?] => Future[
+    Batch[?]
+  ] = { batch =>
     implicit val ec = executionContext
-    offsetsAndUpdates.lastOption match {
+    batch.offsetsUpdates.lastOption match {
       case Some((_, commitRepair: CommitRepair)) =>
         aggregatedLedgerEnd.get() match {
           case Some((ledgerEnd, synchronizerIndexes)) =>
@@ -1006,7 +1039,7 @@ object ParallelIndexerSubscription {
               _ = commitRepair.persisted.trySuccess(())
             } yield {
               logger.info("Repair committed, Ledger End stored and updated successfully.")
-              offsetsAndUpdates
+              batch
             }
           case None =>
             val message = "Unexpectedly the Repair committed did not update the Ledger End."
@@ -1015,7 +1048,7 @@ object ParallelIndexerSubscription {
         }
 
       case Some(_) =>
-        Future.successful(offsetsAndUpdates)
+        Future.successful(batch)
 
       case None =>
         val message = "Unexpectedly encountered a zero-sized batch in ingestTail"
@@ -1034,8 +1067,8 @@ object ParallelIndexerSubscription {
       missingDeactivatedActivations = Map.empty, // not used anymore
     )
 
-  val LightWeight = 1L;
-  val InsertWeight = 100L;
+  val LightWeight = 1L
+  val InsertWeight = 100L
 
   def updateWeightEstimator(input: (Offset, Update)): Long = input match {
     case (_, u: CommitRepair) => LightWeight

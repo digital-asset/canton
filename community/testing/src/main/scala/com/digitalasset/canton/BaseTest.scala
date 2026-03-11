@@ -627,6 +627,7 @@ object BaseTest {
   }
 
   lazy val testedProtocolVersion: ProtocolVersion = ProtocolVersion.forSynchronizer
+
   def testedPartiesKind(hashingSchemeVersion: HashingSchemeVersion): PartyKind = sys.env
     .get("CANTON_TEST_EXTERNAL_PARTIES")
     .filter(_ == "true")

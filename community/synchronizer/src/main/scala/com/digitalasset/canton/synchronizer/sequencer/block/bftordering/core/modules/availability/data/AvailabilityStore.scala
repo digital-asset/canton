@@ -24,7 +24,7 @@ import AvailabilityStore.FetchBatchesResult
 trait AvailabilityStore[E <: Env[E]] extends AutoCloseable {
   def addBatch(batchId: BatchId, batch: OrderingRequestBatch)(implicit
       traceContext: TraceContext
-  ): E#FutureUnlessShutdownT[Unit]
+  ): E#FutureUnlessShutdownT[Boolean]
   protected def addBatchActionName(batchId: BatchId): String = s"Add batch $batchId"
 
   def fetchBatches(batches: Seq[BatchId])(implicit

@@ -115,18 +115,20 @@ final class AvailabilityModule[E <: Env[E]](
 
   private var activeMembership = initialMembership
   private var activeCryptoProvider = initialCryptoProvider
+  private var topologyChangedSinceLastProposalRequest = false
+
+  private var waitingForBatchSince: Option[Instant] = None
+
+  private val spanManager = new AvailabilityModuleSpanManager()
+
+  disseminationProtocolState.lastProposalTime = Some(clock.now)
+
   @VisibleForTesting
   private[availability] def getActiveMembership = activeMembership
   @VisibleForTesting
   private[availability] def getActiveCryptoProvider = activeCryptoProvider
   @VisibleForTesting
   private[availability] def getMessageAuthorizer = messageAuthorizer
-
-  private var waitingForBatchSince: Option[Instant] = None
-
-  disseminationProtocolState.lastProposalTime = Some(clock.now)
-
-  private val spanManager = new AvailabilityModuleSpanManager()
 
   override def receiveInternal(
       message: Availability.Message[E]
@@ -293,12 +295,21 @@ final class AvailabilityModule[E <: Env[E]](
         )
         signLocalBatchesAndContinue(batches)
 
-      case Availability.LocalDissemination.RemoteBatchStored(batchId, epochNumber, from) =>
+      case Availability.LocalDissemination.RemoteBatchStored(
+            batchId,
+            epochNumber,
+            from,
+            addedToStore,
+          ) =>
         outputFetchProtocolState.pendingRemoteBatchIdsToStore.remove(batchId).discard
         outputFetchProtocolState.localOutputMissingBatches.remove(batchId).discard
         updateOutputFetchStatus(batchId)
-        logger.debug(s"$actingOnMessageType: local store persisted $batchId from $from, signing")
-        disseminationProtocolState.disseminationQuotas.addBatch(from, batchId, epochNumber)
+        logger.debug(
+          s"$actingOnMessageType: local store persisted $batchId from $from (actually added = $addedToStore), signing"
+        )
+        if (addedToStore) {
+          disseminationProtocolState.disseminationQuotas.addBatch(from, batchId, epochNumber)
+        }
         signRemoteBatchAndContinue(batchId, epochNumber, from)
 
       case LocalDissemination.LocalBatchesStoredSigned(batches) =>
@@ -407,8 +418,8 @@ final class AvailabilityModule[E <: Env[E]](
           // Batch first signed or re-signed
           val progress =
             disseminationProtocolState.disseminationProgress
-              .getOrElse(
-                batchId,
+              .get(batchId)
+              .fold[DisseminationStatus](
                 DisseminationStatus
                   .InProgress(
                     activeMembership,
@@ -419,10 +430,13 @@ final class AvailabilityModule[E <: Env[E]](
                     availabilityEnterInstant = disseminationProtocolState.beingFirstSaved
                       .remove(batchId)
                       .flatMap(_.availabilityEnterInstant),
-                  ),
+                  )
+              )(
+                // The local ack is missing if we check dissemination after re-signing, so we need to add it
+                _.addAck(AvailabilityAck(thisNode, signature))
               )
-              // When freshly (re-)signed, check if the progress is already complete; this happens
-              //  with F == 0, as the local node's AvailabilityAck constitutes a weak quorum (F + 1) already
+              // When freshly (re-)signed, we check if the progress is already complete; this happens with F == 0,
+              //  as the local node's AvailabilityAck already constitutes a weak quorum (F + 1) by itself
               .update()
           logger.debug(s"$actingOnMessageType: progress of stored and signed $batchId is $progress")
           setProgress(actingOnMessageType, batchId, progress)
@@ -487,9 +501,7 @@ final class AvailabilityModule[E <: Env[E]](
           .map(_._1)
 
       if (expiredBatchIds.nonEmpty) {
-        logger.warn(
-          s"$actingOnMessageType: Discarding the expired batches: $expiredBatchIds"
-        )
+        logger.warn(s"$actingOnMessageType: discarding expired batches: ${expiredBatchIds.toSeq}")
         disseminationProtocolState.disseminationProgress --= expiredBatchIds
       }
 
@@ -517,7 +529,7 @@ final class AvailabilityModule[E <: Env[E]](
       case Availability.Consensus.CreateProposal(
             forBlock,
             currentEpochNumber,
-            currentOrderingTopology,
+            currentMembership,
             currentCryptoProvider: CryptoProvider[E],
             ordered,
           ) =>
@@ -539,28 +551,28 @@ final class AvailabilityModule[E <: Env[E]](
         handleProposalRequest(
           messageType,
           forBlock,
-          currentOrderingTopology,
+          currentMembership,
           currentCryptoProvider,
           ordered,
         )
 
       case Availability.Consensus.UpdateTopologyDuringStateTransfer(
-            orderingTopology,
-            cryptoProvider: CryptoProvider[E],
+            currentMembership,
+            currentCryptoProvider: CryptoProvider[E],
           ) =>
         // During state transfer we only try to keep the topology up-to-date to increase the chance that
         //  the output module can fetch, but we don't trigger a review of the dissemination progress
         //  because we won't receive proposal requests until state transfer is complete, at which point
         //  we will update the topology again and review the dissemination progress.
         //  We also don't try to satisfy consensus requests because consensus is inactive during state transfer.
-        updateActiveTopology(messageType, orderingTopology, cryptoProvider).discard
+        updateActiveMembership(messageType, currentMembership, currentCryptoProvider)
     }
   }
 
   private def handleProposalRequest(
       actingOnMessageType: => String,
       forBlock: BlockNumber,
-      currentOrderingTopology: OrderingTopology,
+      currentMembership: Membership,
       currentCryptoProvider: CryptoProvider[E],
       orderedBatchIds: Seq[BatchId],
   )(implicit
@@ -596,38 +608,37 @@ final class AvailabilityModule[E <: Env[E]](
 
     removeOrderedBatchesAndPullFromMempool(actingOnMessageType, orderedBatchIds)
 
-    val previousMembership =
-      updateActiveTopology(actingOnMessageType, currentOrderingTopology, currentCryptoProvider)
+    updateActiveMembership(actingOnMessageType, currentMembership, currentCryptoProvider)
 
-    if (activeMembership != previousMembership) {
+    if (topologyChangedSinceLastProposalRequest) {
       updateAndAdvanceAllDisseminationProgressBasedOnActiveMembership(actingOnMessageType)
       emitDisseminationStateStats(metrics, disseminationProtocolState)
+      topologyChangedSinceLastProposalRequest = false
     }
 
     // When we receive a proposal request, we notify consensus if there is nothing to propose yet
     attemptSatisfyingProposalRequest(actingOnMessageType, notifyConsensusIfNoReadyBatches = true)
   }
 
-  private def updateActiveTopology(
+  private def updateActiveMembership(
       actingOnMessageType: => String,
-      orderingTopology: OrderingTopology,
-      cryptoProvider: CryptoProvider[E],
-  )(implicit traceContext: TraceContext): Membership = {
+      newMembership: Membership,
+      newCryptoProvider: CryptoProvider[E],
+  )(implicit traceContext: TraceContext): Unit = {
     val activeTopologyActivationTime = activeMembership.orderingTopology.activationTime.value
-    val newTopologyActivationTime = orderingTopology.activationTime.value
+    val newTopologyActivationTime = newMembership.orderingTopology.activationTime.value
     if (activeTopologyActivationTime > newTopologyActivationTime) {
       logger.warn(
         s"$actingOnMessageType: tried to overwrite topology with activation time $activeTopologyActivationTime " +
           s"using outdated topology with activation time $newTopologyActivationTime, dropping"
       )
-      activeMembership
     } else {
-      logger.debug(s"$actingOnMessageType: updating active ordering topology to $orderingTopology")
-      val previousActiveMembership = activeMembership
-      activeMembership = activeMembership.copy(orderingTopology = orderingTopology)
-      activeCryptoProvider = cryptoProvider
-      messageAuthorizer = orderingTopology
-      previousActiveMembership
+      logger.debug(s"$actingOnMessageType: updating active ordering topology to $newMembership")
+      if (newMembership.orderingTopology != activeMembership.orderingTopology)
+        topologyChangedSinceLastProposalRequest = true
+      activeMembership = newMembership
+      activeCryptoProvider = newCryptoProvider
+      messageAuthorizer = newMembership.orderingTopology
     }
   }
 
@@ -846,9 +857,9 @@ final class AvailabilityModule[E <: Env[E]](
               case Failure(exception) =>
                 abort(s"Failed to add batch $batchId", exception)
 
-              case Success(_) =>
+              case Success(addedToStore) =>
                 Availability.LocalDissemination
-                  .RemoteBatchStored(batchId, batch.epochNumber, from)
+                  .RemoteBatchStored(batchId, batch.epochNumber, from, addedToStore)
             }
           },
         )
@@ -914,7 +925,6 @@ final class AvailabilityModule[E <: Env[E]](
 
       case Availability.LocalOutputFetch.FetchBlockData(blockForOutput) =>
         val batchIdsToFind = blockForOutput.orderedBlock.batchRefs.map(_.batchId)
-        batchIdsToFind.foreach(disseminationProtocolState.disseminationQuotas.removeOrderedBatch)
         val request = new BatchesRequest(blockForOutput, mutable.SortedSet.from(batchIdsToFind))
         outputFetchProtocolState.pendingBatchesRequests.append(request)
         fetchBatchesForOutputRequest(request)
@@ -959,6 +969,9 @@ final class AvailabilityModule[E <: Env[E]](
             // We received all the batches that the output module requested
             // so we can send them to output module
             request.missingBatches.clear()
+            batches.foreach { case (batchId, _) =>
+              disseminationProtocolState.disseminationQuotas.removeOrderedBatch(batchId)
+            }
             dependencies.output.asyncSend(
               Output.BlockDataFetched(CompleteBlockData(request.blockForOutput, batches))
             )

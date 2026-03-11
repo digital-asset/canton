@@ -43,6 +43,7 @@ import com.digitalasset.canton.platform.config.{
   PartyManagementServiceConfig,
   UserManagementServiceConfig,
 }
+import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.daml.lf.data.Ref
@@ -112,6 +113,7 @@ object ApiServiceOwner {
       packagePreferenceBackend: PackagePreferenceBackend,
       apiLoggingConfig: ApiLoggingConfig,
       apiContractService: ApiContractService,
+      safeToPruneCommitmentState: Option[SafeToPruneCommitmentState],
   )(implicit
       actorSystem: ActorSystem,
       materializer: Materializer,
@@ -205,6 +207,7 @@ object ApiServiceOwner {
         interactiveSubmissionServiceConfig = interactiveSubmissionServiceConfig,
         interactiveSubmissionEnricher = interactiveSubmissionEnricher,
         packagePreferenceBackend = packagePreferenceBackend,
+        safeToPruneCommitmentState = safeToPruneCommitmentState,
         logger = loggerFactory.getTracedLogger(this.getClass),
         apiContractService = apiContractService,
       )(materializer, executionSequencerFactory, tracer).withServices(otherServices)

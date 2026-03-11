@@ -32,6 +32,10 @@ object PureFun {
     override def apply(v1: Unit): A = v
   }
 
+  final case class Append(ys: String) extends PureFun[String, String] {
+    override def apply(xs: String): String = xs ++ ys
+  }
+
   object Seq {
     final case class Flatten[A]() extends PureFun[Seq[Seq[A]], Seq[A]] {
       override def apply(v1: Seq[Seq[A]]): Seq[A] = v1.flatten

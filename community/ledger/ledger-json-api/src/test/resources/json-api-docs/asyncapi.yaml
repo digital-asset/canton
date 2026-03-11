@@ -1578,6 +1578,12 @@ components:
             $ref: '#/components/schemas/ParticipantAuthorizationChanged'
       - type: object
         required:
+        - ParticipantAuthorizationOnboarding
+        properties:
+          ParticipantAuthorizationOnboarding:
+            $ref: '#/components/schemas/ParticipantAuthorizationOnboarding'
+      - type: object
+        required:
         - ParticipantAuthorizationRevoked
         properties:
           ParticipantAuthorizationRevoked:
@@ -1625,6 +1631,36 @@ components:
           $ref: '#/components/schemas/ParticipantAuthorizationChanged1'
     ParticipantAuthorizationChanged1:
       title: ParticipantAuthorizationChanged
+      type: object
+      required:
+      - partyId
+      - participantId
+      - participantPermission
+      properties:
+        partyId:
+          description: Required
+          type: string
+        participantId:
+          description: Required
+          type: string
+        participantPermission:
+          description: Required
+          type: string
+          enum:
+          - PARTICIPANT_PERMISSION_UNSPECIFIED
+          - PARTICIPANT_PERMISSION_SUBMISSION
+          - PARTICIPANT_PERMISSION_CONFIRMATION
+          - PARTICIPANT_PERMISSION_OBSERVATION
+    ParticipantAuthorizationOnboarding:
+      title: ParticipantAuthorizationOnboarding
+      type: object
+      required:
+      - value
+      properties:
+        value:
+          $ref: '#/components/schemas/ParticipantAuthorizationOnboarding1'
+    ParticipantAuthorizationOnboarding1:
+      title: ParticipantAuthorizationOnboarding
       type: object
       required:
       - partyId

@@ -143,3 +143,33 @@ create table my_tbl (
   id bigint generated always as identity primary key,
   name varchar not null,
 );
+```
+
+# DB migrations
+
+Changes to the DB schema have to be done using DB migrations:
+
+- [Postgres stable](https://github.com/DACH-NY/canton/tree/main/community/common/src/main/resources/db/migration/canton/postgres/stable)
+  and [H2 stable](https://github.com/DACH-NY/canton/tree/main/community/common/src/main/resources/db/migration/canton/h2/stable)
+- [Postgres dev](https://github.com/DACH-NY/canton/tree/main/community/common/src/main/resources/db/migration/canton/postgres/dev)
+  and [H2 dev](https://github.com/DACH-NY/canton/tree/main/community/common/src/main/resources/db/migration/canton/h2/dev)
+
+  `dev` migrations applied only if the node has support for alpha protocol versions enabled.
+
+Each migration comes with a checksum file that can be generated using `community/common/src/main/resources/db/migration/canton/recompute-sha256sums.sh`.
+
+Postgres and H2 migrations have to be kept aligned., i.e.,
+when you create a new migration file for postgres you create the corresponding migration file for H2 too.
+
+## When can a migration be edited?
+Only the latest migration on main can be edited: migrations on release lines cannot be edited.
+
+## How-to name a new migration on a release-line?
+The name of a DB migration should be as follows: `Vx_y__description.sql`
+
+- x: an integer incremented at each minor version
+- y: an integer incremented for each migration of a given minor (starting at 0)
+- description: a short description of the changes
+
+An example is `V4_2__traffic_cost_on_lapi.sql`.
+

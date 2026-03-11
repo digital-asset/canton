@@ -45,6 +45,7 @@ class StateServiceClient(
         GetActiveContractsRequest(
           activeAtOffset = validAtOffset,
           eventFormat = Some(eventFormat),
+          streamContinuationToken = None,
         ),
         LedgerClient.stubWithTracing(service, token.orElse(getDefaultToken())).getActiveContracts,
       )

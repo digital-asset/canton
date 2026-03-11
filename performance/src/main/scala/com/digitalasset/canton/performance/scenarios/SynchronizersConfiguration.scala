@@ -74,7 +74,7 @@ class SynchronizerConfiguration(
         synchronizerOwners = sequencers.active,
         synchronizerThreshold = PositiveInt.tryCreate(sequencers.active.size),
         staticSynchronizerParameters =
-          StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+          StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
         mediatorThreshold = PositiveInt.tryCreate(mediatorsWithoutReplica.size),
       )
       .logical

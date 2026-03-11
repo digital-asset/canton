@@ -3,17 +3,8 @@
 
 package com.digitalasset.canton.networking.grpc
 
-import com.daml.jwt.JwtTimestampLeeway
 import com.daml.metrics.grpc.GrpcMetricsServerInterceptor
-import com.daml.tracing.Telemetry
-import com.digitalasset.canton.auth.CantonAdminTokenDispenser
-import com.digitalasset.canton.config.{
-  ActiveRequestLimitsConfig,
-  AdminTokenConfig,
-  ApiLoggingConfig,
-  AuthServiceConfig,
-  JwksCacheConfig,
-}
+import com.digitalasset.canton.config.{ActiveRequestLimitsConfig, ApiLoggingConfig}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics.GrpcServerMetricsX
 import com.digitalasset.canton.networking.grpc.ratelimiting.ActiveRequestCounterInterceptor
@@ -38,12 +29,6 @@ class CantonCommunityServerInterceptors(
     apiLoggingConfig: ApiLoggingConfig,
     loggerFactory: NamedLoggerFactory,
     grpcMetrics: GrpcServerMetricsX,
-    authServiceConfigs: Seq[AuthServiceConfig],
-    adminTokenDispenser: Option[CantonAdminTokenDispenser],
-    jwtTimestampLeeway: Option[JwtTimestampLeeway],
-    adminTokenConfig: AdminTokenConfig,
-    jwksCacheConfig: JwksCacheConfig,
-    telemetry: Telemetry,
     additionalInterceptors: Seq[ServerInterceptor] = Seq.empty,
     requestLimits: Option[ActiveRequestLimitsConfig],
 ) extends CantonServerInterceptors {
@@ -85,22 +70,6 @@ class CantonCommunityServerInterceptors(
   ): ServerServiceDefinition =
     intercept(service, new GrpcMetricsServerInterceptor(grpcMetrics._1))
 
-  private def addAuthInterceptor(
-      service: ServerServiceDefinition
-  ): ServerServiceDefinition =
-    CantonCommunityAuthInterceptorDefinition
-      .addAuthInterceptor(
-        service,
-        loggerFactory,
-        authServiceConfigs,
-        adminTokenDispenser,
-        jwtTimestampLeeway,
-        adminTokenConfig,
-        jwksCacheConfig,
-        telemetry,
-        apiLoggingConfig,
-      )
-
   private def addLimitInterceptor(service: ServerServiceDefinition): ServerServiceDefinition =
     activeRequestCounter.fold(service) { limits =>
       intercept(service, limits)
@@ -115,6 +84,5 @@ class CantonCommunityServerInterceptors(
       .pipe(addTraceContextInterceptor)
       .pipe(addMetricsInterceptor)
       .pipe(addLimitInterceptor)
-      .pipe(addAuthInterceptor)
       .pipe(s => additionalInterceptors.foldLeft(s)((acc, i) => intercept(acc, i)))
 }

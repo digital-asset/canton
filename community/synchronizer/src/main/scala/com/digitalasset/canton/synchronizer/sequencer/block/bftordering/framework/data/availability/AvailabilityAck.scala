@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewo
 
 import com.daml.metrics.api.MetricsContext
 import com.digitalasset.canton.crypto.{Hash, HashAlgorithm, HashPurpose, Signature, v30}
+import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.serialization.ProtoConverter.ParsingResult
 import com.digitalasset.canton.synchronizer.metrics.BftOrderingMetrics
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.bindings.canton.crypto.FingerprintKeyId
@@ -16,7 +17,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.AvailabilityAck as ProtoAvailabilityAck
 
-final case class AvailabilityAck(from: BftNodeId, signature: Signature) {
+final case class AvailabilityAck(from: BftNodeId, signature: Signature) extends PrettyPrinting {
 
   def validateIn(orderingTopology: OrderingTopology): Either[ValidationError, Unit] =
     for {
@@ -36,6 +37,12 @@ final case class AvailabilityAck(from: BftNodeId, signature: Signature) {
         ValidationError.KeyNotInTopology,
       )
     } yield ()
+
+  override protected def pretty: Pretty[AvailabilityAck.this.type] =
+    prettyOfClass(
+      param("from", _.from.doubleQuoted),
+      param("signature", _.signature),
+    )
 }
 
 object AvailabilityAck {

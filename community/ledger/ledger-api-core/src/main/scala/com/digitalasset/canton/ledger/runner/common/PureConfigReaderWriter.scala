@@ -22,6 +22,7 @@ import com.digitalasset.canton.platform.config.{
   UserManagementServiceConfig,
 }
 import com.digitalasset.canton.platform.indexer.IndexerConfig
+import com.digitalasset.canton.platform.indexer.IndexerConfig.AchsConfig
 import com.digitalasset.canton.platform.indexer.ha.HaConfig
 import com.digitalasset.canton.platform.store.DbSupport.{
   ConnectionPoolConfig,
@@ -170,7 +171,12 @@ class PureConfigReaderWriter(secure: Boolean = true) {
   implicit val indexServiceConfigHint: ProductHint[IndexServiceConfig] =
     ProductHint[IndexServiceConfig](allowUnknownKeys = false)
 
-  implicit val activecContractsServiceStreamsConfigConvert
+  implicit val achsConfigHint: ProductHint[AchsConfig] =
+    ProductHint[AchsConfig](allowUnknownKeys = false)
+
+  implicit val achsConfigConvert: ConfigConvert[AchsConfig] = deriveConvert[AchsConfig]
+
+  implicit val activeContractsServiceStreamsConfigConvert
       : ConfigConvert[ActiveContractsServiceStreamsConfig] =
     deriveConvert[ActiveContractsServiceStreamsConfig]
 

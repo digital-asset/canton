@@ -214,9 +214,10 @@ class IssSegmentModule[E <: Env[E]](
             // is blocking progress for other segments. Otherwise, it won't do anything for the moment.
             val logPrefix =
               s"$messageType: received message from local availability that no proposals are available yet"
-            maybeOriginalLeaderSegmentState.foreach { mySegmentState =>
-              if (mySegmentState.canReceiveProposals && mySegmentState.isProgressBlocked) {
-                orderBlock(OrderingBlock.empty, mySegmentState, logPrefix)
+            maybeOriginalLeaderSegmentState.foreach { segmentState =>
+              segmentState.receivedResponseFromAvailability()
+              if (segmentState.canReceiveProposals && segmentState.isProgressBlocked) {
+                orderBlock(OrderingBlock.empty, segmentState, logPrefix)
               } else {
                 logger.debug(
                   s"$logPrefix. Since we are not blocking progress, nothing to do at the moment."
@@ -231,7 +232,9 @@ class IssSegmentModule[E <: Env[E]](
               s"$messageType: received proposal for block $forBlock from local availability with batch IDs: " +
                 s"${orderingBlock.proofs.map(_.batchId)}"
 
-            maybeOriginalLeaderSegmentState.foreach { mySegmentState =>
+            maybeOriginalLeaderSegmentState.foreach { segmentState =>
+              if (segmentState.segmentIsInProgress && forBlock == segmentState.nextBlockToPropose)
+                segmentState.receivedResponseFromAvailability()
               // Depending on the timing of events, it is possible that Consensus has an outstanding
               // proposal request to Availability when a view change occurs. A completed view change often
               // leads to completed blocks, and even a completed epoch. As a result, Consensus may receive
@@ -245,20 +248,20 @@ class IssSegmentModule[E <: Env[E]](
               // The proposal will be in this case ignored, which means that Availability will never get an ack
               // for it, so when we start a new epoch and make a new proposal request, we should get the same
               // proposal again.
-              if (mySegmentState.canReceiveProposals) {
+              if (segmentState.canReceiveProposals) {
                 // An outstanding proposal, requested before a view change, could end up coming after the epoch changes.
                 // In that case we also want to discard it by detecting that this request was not made during the current epoch.
-                if (forBlock != mySegmentState.nextBlockToPropose) {
+                if (forBlock != segmentState.nextBlockToPropose) {
                   resetWaitingForProposal()
                   logger.info(
-                    s"$logPrefix. Ignoring it because it is for block number $forBlock but the next block to order is ${mySegmentState.nextBlockToPropose}."
+                    s"$logPrefix. Ignoring it because it is for block number $forBlock but the next block to order is ${segmentState.nextBlockToPropose}."
                   )
                 } else {
                   emitProposalWaitLatency()
                   logger.debug(
                     s"$logPrefix. Expected proposal for block number $forBlock. ordering a new block."
                   )
-                  orderBlock(orderingBlock, mySegmentState, logPrefix)
+                  orderBlock(orderingBlock, segmentState, logPrefix)
                 }
               } else {
                 resetWaitingForProposal()
@@ -693,6 +696,7 @@ class IssSegmentModule[E <: Env[E]](
       context: E#ActorContextT[ConsensusSegment.Message],
   ): Unit = {
     logger.debug(s"Consensus requesting a new proposal for block $forBlock from local availability")
+    maybeOriginalLeaderSegmentState.foreach(_.startWaitingForAvailabilityResponse())
     waitingForProposalSince = Some(Instant.now())
     blockStartTimeoutManager.scheduleTimeout(
       ConsensusSegment.Internal.BlockInactivityTimeout
@@ -701,7 +705,7 @@ class IssSegmentModule[E <: Env[E]](
       Availability.Consensus.CreateProposal(
         forBlock,
         epoch.info.number,
-        epoch.currentMembership.orderingTopology,
+        epoch.currentMembership,
         cryptoProvider,
         orderedBatchIds,
       )

@@ -16,17 +16,27 @@ import org.scalatest.wordspec.AnyWordSpec
   */
 class ConfigContinuityReaderTest extends AnyWordSpec with BaseTest with S3Synchronization {
 
-  private lazy val allTransforms: Map[(Int, Int, Int), Transforms] = Map.empty
+  private lazy val allTransforms: Map[(Int, Int, Int), Transforms] = Map(
+    (3, 5, 0) -> Transforms(
+      Seq(
+        // removed old code paths for async writer refactoring introduced via feature flag into 3.3
+        "canton.sequencers.sequencer1.parameters.async-writer.enabled"
+      )
+    )
+  )
 
   /** Make the config parsable by applying some transformations. It basically makes some breaking
     * changes legitimate.
     */
   private def makeParsable(parsedConfig: Config, sourceVersion: ReleaseVersion): Config = {
-    val transforms = allTransforms.getOrElse(
-      (sourceVersion.major, sourceVersion.minor, sourceVersion.patch),
-      Transforms.empty,
-    )
-
+    val transforms = allTransforms.foldLeft(Transforms.empty) {
+      case (acc, ((major, minor, patch), paths))
+          if sourceVersion.major < major ||
+            major == sourceVersion.major && minor > sourceVersion.minor ||
+            major == sourceVersion.major && minor == sourceVersion.minor && patch > sourceVersion.patch =>
+        Transforms(acc.removePaths ++ paths.removePaths)
+      case (acc, _) => acc
+    }
     transforms.removePaths.foldLeft(parsedConfig) { case (config, removedPath) =>
       config.withoutPath(removedPath)
     }

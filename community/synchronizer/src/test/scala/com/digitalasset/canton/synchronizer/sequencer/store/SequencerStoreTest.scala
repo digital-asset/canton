@@ -210,7 +210,11 @@ trait SequencerStoreTest
         for {
           (memberId, memberRegisteredFrom) <- lookupRegisteredMember(member)
           events <- store.readEvents(memberId, member, memberRegisteredFrom, fromTimestampO, limit)
-          payloads <- store.readPayloads(events.events.flatMap(_.event.payloadO).toList, member)
+          payloads <- store.readPayloads(
+            events.events.flatMap(_.event.payloadO).toList,
+            member,
+            recentEvents = false,
+          )
         } yield events.events.map {
           _.map {
             case id: PayloadId => BytesPayload(id, payloads(id).toByteString)
@@ -489,7 +493,7 @@ trait SequencerStoreTest
             traceContext,
             None,
           )
-          timestampedError: Sequenced[Nothing] = Sequenced(ts1, error)
+          timestampedError: Sequenced[Nothing] = Sequenced(ts1, error, fromStore = true)
           _ <- env.saveEventsAndBuffer(instanceIndex, NonEmpty(Seq, timestampedError))
           _ <- env.saveWatermark(timestampedError.timestamp).valueOrFail("saveWatermark")
           aliceEvents <- env.readEvents(alice)

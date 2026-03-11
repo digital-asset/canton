@@ -1198,7 +1198,9 @@ class ExampleTransactionFactory(
       mkMetadata(nodeSeed.fold(Map.empty[LfNodeId, LfHash])(seed => Map(nodeId -> seed)))
 
     override def keyResolver: LfKeyResolver =
-      node.gkeyOpt.fold(Map.empty: LfKeyResolver)(k => Map(k -> LfTransactionUtil.contractId(node)))
+      node.gkeyOpt.fold(Map.empty: LfKeyResolver)(k =>
+        Map(k -> LfTransactionUtil.contractIds(node))
+      )
 
     override lazy val versionedUnsuffixedTransaction: LfVersionedTransaction =
       transaction(Seq(0), lfNode)

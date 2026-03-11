@@ -22,7 +22,7 @@ The following sections explain how to manage such Sequencer connections for a Pa
           mediators = Seq(mediator1),
           synchronizerOwners = Seq(sequencer1, sequencer2, sequencer3),
           synchronizerThreshold = PositiveInt.one,
-          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+          staticSynchronizerParameters = StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.forSynchronizer),
         )
 
 Connect

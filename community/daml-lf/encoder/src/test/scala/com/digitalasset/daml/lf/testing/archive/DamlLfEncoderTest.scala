@@ -10,7 +10,7 @@ import com.digitalasset.daml.lf.data.Ref.DottedName
 import com.digitalasset.daml.lf.data.Ref.ModuleName
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.language.LanguageVersion
-import com.digitalasset.daml.lf.language.LanguageVersion.{v2_1, v2_2, v2_dev}
+import com.digitalasset.daml.lf.language.LanguageVersion.{v2_1, v2_2, v2_3, v2_dev}
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -54,6 +54,9 @@ class DamlLfEncoderTest
       )
       val modules_2_1 = sharedModules ++ Set[DottedName]("InterfaceUnsafeFromMod")
       val modules_2_2 = sharedModules
+      val modules_2_3 = sharedModules ++ Set[DottedName](
+        "TemplateWithKeyMod",
+      )
       val modules_2_dev = sharedModules ++ Set[DottedName](
         "BigNumericMod",
         "InterfaceExtMod",
@@ -95,6 +98,7 @@ class DamlLfEncoderTest
         "versions" -> "modules",
         v2_1 -> modules_2_1,
         v2_2 -> modules_2_2,
+        v2_3 -> modules_2_3,
         v2_dev -> modules_2_dev,
       )
 

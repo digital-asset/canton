@@ -36,6 +36,7 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.data.Ref.TypeConId
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits.*
 import com.digitalasset.daml.lf.transaction.{
   CreationTime,
   FatContractInstance,
@@ -313,7 +314,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
       errorLoggingContext: ErrorLoggingContext
   ): PartialTransformer[Seq[
     Metadata.GlobalKeyMappingEntry
-  ], Map[lf.transaction.GlobalKey, Option[lf.value.Value.ContractId]]] =
+  ], Map[lf.transaction.GlobalKey, Vector[lf.value.Value.ContractId]]] =
     PartialTransformer { result =>
       result
         .traverse { case Metadata.GlobalKeyMappingEntry(keyOpt, valueOpt) =>
@@ -329,7 +330,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
                   s"Value with key $convertedValue in global key mapping was not a contract id"
                 )
             }
-          } yield convertedKey -> contractId
+          } yield convertedKey -> contractId.asCidVector
         }
         .map(_.toMap)
     }
@@ -501,7 +502,7 @@ final class PreparedTransactionDecoder(override val loggerFactory: NamedLoggerFa
         .transformIntoPartial[lf.transaction.VersionedTransaction]
         .toFutureWithLoggedFailuresDecode("Failed to deserialize transaction", logger)
       globalKeyMapping <- metadataProto.globalKeyMapping
-        .transformIntoPartial[Map[lf.transaction.GlobalKey, Option[lf.value.Value.ContractId]]]
+        .transformIntoPartial[Map[lf.transaction.GlobalKey, Vector[lf.value.Value.ContractId]]]
         .toFutureWithLoggedFailuresDecode("Failed to deserialize global key mapping", logger)
       inputContracts <- metadataProto.inputContracts
         .traverse(_.transformIntoPartial[ExternalInputContract])

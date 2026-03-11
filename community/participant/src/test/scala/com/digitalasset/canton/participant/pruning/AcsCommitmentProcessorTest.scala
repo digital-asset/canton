@@ -69,6 +69,7 @@ import com.digitalasset.canton.pruning.{
   ConfigForSlowCounterParticipants,
   ConfigForSynchronizerThresholds,
 }
+import com.digitalasset.canton.scheduler.SafeToPruneCommitmentState
 import com.digitalasset.canton.sequencing.client.*
 import com.digitalasset.canton.sequencing.protocol.*
 import com.digitalasset.canton.store.memory.InMemoryIndexedStringStore
@@ -1451,7 +1452,8 @@ class AcsCommitmentProcessorTest
       val acsCommitmentStore = mock[AcsCommitmentStore]
       when(
         acsCommitmentStore.noOutstandingCommitments(
-          any[CantonTimestamp]
+          any[CantonTimestamp],
+          any[Option[SafeToPruneCommitmentState]],
         )(
           any[TraceContext]
         )
@@ -1485,7 +1487,8 @@ class AcsCommitmentProcessorTest
       val acsCommitmentStore = mock[AcsCommitmentStore]
       when(
         acsCommitmentStore.noOutstandingCommitments(
-          any[CantonTimestamp]
+          any[CantonTimestamp],
+          any[Option[SafeToPruneCommitmentState]],
         )(
           any[TraceContext]
         )
@@ -1530,7 +1533,8 @@ class AcsCommitmentProcessorTest
       val acsCommitmentStore = mock[AcsCommitmentStore]
       when(
         acsCommitmentStore.noOutstandingCommitments(
-          any[CantonTimestamp]
+          any[CantonTimestamp],
+          any[Option[SafeToPruneCommitmentState]],
         )(
           any[TraceContext]
         )
@@ -1626,7 +1630,8 @@ class AcsCommitmentProcessorTest
 
       when(
         acsCommitmentStore.noOutstandingCommitments(
-          any[CantonTimestamp]
+          any[CantonTimestamp],
+          any[Option[SafeToPruneCommitmentState]],
         )(
           any[TraceContext]
         )
@@ -1687,7 +1692,8 @@ class AcsCommitmentProcessorTest
       val acsCommitmentStore = mock[AcsCommitmentStore]
       when(
         acsCommitmentStore.noOutstandingCommitments(
-          any[CantonTimestamp]
+          any[CantonTimestamp],
+          any[Option[SafeToPruneCommitmentState]],
         )(
           any[TraceContext]
         )

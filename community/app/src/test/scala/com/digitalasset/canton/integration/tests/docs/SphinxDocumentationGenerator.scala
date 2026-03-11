@@ -35,7 +35,6 @@ import com.digitalasset.canton.lifecycle.CloseContext
 import com.digitalasset.canton.logging.{SuppressingLogger, TracedLogger}
 import com.digitalasset.canton.resource.{DbMigrations, DbStorage}
 import com.digitalasset.canton.tracing.TraceContext
-import com.digitalasset.canton.version.ProtocolVersion
 import io.circe.syntax.*
 import monocle.macros.syntax.lens.*
 import org.flywaydb.core.Flyway
@@ -209,7 +208,7 @@ abstract class SphinxDocumentationGenerator(
 
   "documentation snippets" should {
     fetchTestScenarios.foreach { scenario =>
-      scenario.name onlyRunWith ProtocolVersion.latest in { implicit env =>
+      scenario.name in { implicit env =>
         runAtScenarioStart(scenario.name)
         clue(s"Running scenario ${scenario.name}") {
           val result = Using(new HeadlessConsole(env, logger = logger)) { console =>
@@ -968,7 +967,7 @@ class OperateTrafficSnippetGeneratorTest
           synchronizerOwners = Seq(sequencer1),
           synchronizerThreshold = PositiveInt.one,
           staticSynchronizerParameters =
-            StaticSynchronizerParameters.defaultsWithoutKMS(ProtocolVersion.latest),
+            StaticSynchronizerParameters.defaultsWithoutKMS(testedProtocolVersion),
         )
         mediator1.health.wait_for_initialized()
         participant1.synchronizers.connect_local(sequencer1, daName)

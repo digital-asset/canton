@@ -145,7 +145,7 @@ class TestSubmissionService(
       commands: CommandsWithMetadata,
       transaction: SubmittedTransaction,
       nodeSeeds: ImmArray[(NodeId, crypto.Hash)],
-      globalKeyInputs: Map[LfGlobalKey, Option[LfContractId]],
+      globalKeyInputs: Map[LfGlobalKey, Vector[LfContractId]],
   )(implicit traceContext: TraceContext): Future[Completion] = {
     val submitterInfo = commands.submitterInfo(maxDeduplicationDuration.duration)
     val meta = commands.transactionMeta(transaction, nodeSeeds)
@@ -233,7 +233,7 @@ class TestSubmissionService(
       submitterInfo: SubmitterInfo,
       meta: TransactionMeta,
       transaction: SubmittedTransaction,
-      keyMapping: Map[LfGlobalKey, Option[LfContractId]],
+      keyMapping: Map[LfGlobalKey, Vector[LfContractId]],
   )(implicit traceContext: TraceContext): Future[Unit] =
     submitTransaction(submitterInfo, meta, transaction, keyMapping).map {
       case SubmissionResult.Acknowledged => ()
@@ -244,7 +244,7 @@ class TestSubmissionService(
       submitterInfo: SubmitterInfo,
       meta: TransactionMeta,
       transaction: SubmittedTransaction,
-      keyMapping: Map[LfGlobalKey, Option[LfContractId]],
+      keyMapping: Map[LfGlobalKey, Vector[LfContractId]],
   )(implicit traceContext: TraceContext): Future[SubmissionResult] =
     for {
       routingSynchronizerState <- syncService.getRoutingSynchronizerState

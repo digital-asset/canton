@@ -2191,6 +2191,7 @@ object LedgerApiCommands {
           GetActiveContractsRequest(
             activeAtOffset = activeAtOffset,
             eventFormat = Some(EventFormat(parties.map((_, filter)).toMap, None, verbose)),
+            streamContinuationToken = None,
           )
         )
       }

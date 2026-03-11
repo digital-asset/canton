@@ -5,6 +5,7 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.in
 
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.crypto.CryptoProvider
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.BftNodeId
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.topology.OrderingTopology
 import com.digitalasset.canton.tracing.TraceContext
 
@@ -31,4 +32,10 @@ trait OrderingTopologyProvider[E <: Env[E]] {
   )(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[Option[(OrderingTopology, CryptoProvider[E])]]
+
+  def getFirstKnownAt(
+      activationTime: TopologyActivationTime
+  )(implicit
+      traceContext: TraceContext
+  ): E#FutureUnlessShutdownT[Option[Map[BftNodeId, TopologyActivationTime]]]
 }

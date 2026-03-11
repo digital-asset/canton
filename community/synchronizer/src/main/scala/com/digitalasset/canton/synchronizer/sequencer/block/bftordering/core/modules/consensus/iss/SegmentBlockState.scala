@@ -108,9 +108,9 @@ class SegmentBlockState(
     if (isComplete) {
       discardedMessageCount += 1
       Seq.empty
-    } else if (views(currentViewNumber).processMessage(msg))
+    } else if (views(currentViewNumber).processMessage(msg)) {
       advance()
-    else {
+    } else {
       discardedMessageCount += 1
       Seq.empty
     }

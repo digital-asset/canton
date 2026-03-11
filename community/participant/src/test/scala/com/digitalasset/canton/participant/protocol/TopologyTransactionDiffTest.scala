@@ -7,6 +7,7 @@ import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationEvent.{
   Added,
   ChangedTo,
+  Onboarding,
   Revoked,
 }
 import com.digitalasset.canton.ledger.participant.state.Update.TopologyTransactionEffective.AuthorizationLevel.*
@@ -21,6 +22,7 @@ import com.digitalasset.canton.topology.{
   TestingOwnerWithKeys,
   UniqueIdentifier,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{BaseTest, HasExecutionContext, ProtocolVersionChecksAsyncWordSpec}
 import org.scalatest.wordspec.AsyncWordSpec
 
@@ -39,13 +41,19 @@ class TopologyTransactionDiffTest
   private def ptp(
       partyId: PartyId,
       participants: List[(ParticipantId, ParticipantPermission)],
+  ): SignedTopologyTransaction[Replace, PartyToParticipant] =
+    ptpOB(partyId, participants.map { case (pid, perm) => pid -> (perm, false) })
+
+  private def ptpOB(
+      partyId: PartyId,
+      participants: List[(ParticipantId, (ParticipantPermission, Boolean))],
   ): SignedTopologyTransaction[Replace, PartyToParticipant] = {
 
     val mapping = PartyToParticipant.tryCreate(
       partyId,
       PositiveInt.one,
-      participants.map { case (participant, permission) =>
-        HostingParticipant(participant, permission)
+      participants.map { case (participant, (permission, onboarding)) =>
+        HostingParticipant(participant, permission, onboarding)
       },
     )
 
@@ -74,10 +82,10 @@ class TopologyTransactionDiffTest
   }
 
   "TopologyTransactionDiff" should {
+    val p1 = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("da::participant1"))
+    val p2 = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("da::participant2"))
 
     "compute adds and removes" in {
-      val p1 = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("da::participant1"))
-      val p2 = ParticipantId(UniqueIdentifier.tryFromProtoPrimitive("da::participant2"))
 
       val alice = PartyId(UniqueIdentifier.tryFromProtoPrimitive("da::alice"))
       val bob = PartyId(UniqueIdentifier.tryFromProtoPrimitive("da::bob"))
@@ -195,5 +203,99 @@ class TopologyTransactionDiffTest
       )
     }
 
+    "compute adds and removes with onboarding flag" in {
+      val alice = PartyId(UniqueIdentifier.tryFromProtoPrimitive("da::alice"))
+      val Subm = (ParticipantPermission.Submission, false)
+      val SubmOB = (ParticipantPermission.Submission, true)
+
+      def diff(
+          beforeState: Seq[SignedTopologyTransaction[Replace, TopologyMapping]],
+          afterState: Seq[SignedTopologyTransaction[Replace, TopologyMapping]],
+          localParticipant: ParticipantId,
+      ) = TopologyTransactionDiff(
+        synchronizerId,
+        beforeState,
+        afterState,
+        localParticipant,
+      ).map(_.topologyEvents)
+
+      def authOnboarding(participantId: ParticipantId) = Set(
+        PartyToParticipantAuthorization(
+          alice.toLf,
+          participantId.toLf,
+          if (testedProtocolVersion == ProtocolVersion.v34) Added(Submission)
+          else Onboarding(Submission),
+        )
+      )
+
+      def authClearOnboarding(
+          participantId: ParticipantId
+      ): Option[Set[PartyToParticipantAuthorization]] =
+        Option.when(testedProtocolVersion > ProtocolVersion.v34)(
+          Set(PartyToParticipantAuthorization(alice.toLf, participantId.toLf, Added(Submission)))
+        )
+
+      // Non-local onboarding
+      diff(
+        List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
+        List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+        p1,
+      ).value.forgetNE should contain theSameElementsAs authOnboarding(p2)
+
+      // Non-local clearing of onboarding
+      diff(
+        List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+        List(ptpOB(alice, List(p1 -> Subm, p2 -> Subm))),
+        p1,
+      ) shouldBe authClearOnboarding(p2)
+
+      // Non-local onboarding removal considered removed
+      diff(
+        List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+        List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
+        p1,
+      ).value.forgetNE should contain theSameElementsAs Set(
+        PartyToParticipantAuthorization(alice.toLf, p2.toLf, Revoked)
+      )
+
+      // Non-local transition from not onboarding to onboarding considered no-op
+      // This is not an expected transition but tested for completeness.
+      diff(
+        List(ptpOB(alice, List(p1 -> Subm, p2 -> Subm))),
+        List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+        p1,
+      ) shouldBe None
+
+      // Local participant onboarding
+      diff(
+        List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
+        List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+        p2,
+      ).value.forgetNE should contain theSameElementsAs authOnboarding(p2)
+
+      // Local participant clearing of onboarding
+      diff(
+        List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+        List(ptpOB(alice, List(p1 -> Subm, p2 -> Subm))),
+        p2,
+      ) shouldBe authClearOnboarding(p2)
+
+      // Local participant onboarding removal considered removed
+      diff(
+        List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+        List(ptp(alice, List(p1 -> ParticipantPermission.Submission))),
+        p2,
+      ).value.forgetNE should contain theSameElementsAs Set(
+        PartyToParticipantAuthorization(alice.toLf, p2.toLf, Revoked)
+      )
+
+      // Local participant transition from not onboarding to onboarding considered no-op
+      // This is not an expected transition but tested for completeness.
+      diff(
+        List(ptpOB(alice, List(p1 -> Subm, p2 -> Subm))),
+        List(ptpOB(alice, List(p1 -> Subm, p2 -> SubmOB))),
+        p2,
+      ) shouldBe None
+    }
   }
 }

@@ -7,7 +7,6 @@ import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api
 import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.IdRange
-import com.digitalasset.canton.platform.store.backend.PersistentEventType
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.backend.common.{
   EventIdSource,
@@ -16,6 +15,7 @@ import com.digitalasset.canton.platform.store.backend.common.{
 }
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   IdFilterInput,
+  PaginationFromTo,
   PaginationInput,
 }
 import com.digitalasset.canton.protocol.UpdateId
@@ -367,8 +367,10 @@ private[backend] trait StorageBackendTestsInitializeIngestion
       )
     )(
       IdFilterInput(
-        startExclusive = 0,
-        endInclusive = 1000,
+        PaginationFromTo.ascending(
+          startExclusive = 0,
+          endInclusive = 1000,
+        )
       )
     )
 
@@ -382,8 +384,10 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         )
     )(
       IdFilterInput(
-        startExclusive = 0,
-        endInclusive = 1000,
+        PaginationFromTo.ascending(
+          startExclusive = 0,
+          endInclusive = 1000,
+        )
       )
     )
 
@@ -397,8 +401,10 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         )
     )(
       IdFilterInput(
-        startExclusive = 0,
-        endInclusive = 1000,
+        PaginationFromTo.ascending(
+          startExclusive = 0,
+          endInclusive = 1000,
+        )
       )
     )
 
@@ -412,8 +418,10 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         )
     )(
       IdFilterInput(
-        startExclusive = 0,
-        endInclusive = 1000,
+        PaginationFromTo.ascending(
+          startExclusive = 0,
+          endInclusive = 1000,
+        )
       )
     )
 
@@ -427,8 +435,10 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         )
     )(
       IdFilterInput(
-        startExclusive = 0,
-        endInclusive = 1000,
+        PaginationFromTo.ascending(
+          startExclusive = 0,
+          endInclusive = 1000,
+        )
       )
     )
 
@@ -442,8 +452,10 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         )
     )(
       IdFilterInput(
-        startExclusive = 0,
-        endInclusive = 1000,
+        PaginationFromTo.ascending(
+          startExclusive = 0,
+          endInclusive = 1000,
+        )
       )
     )
 
@@ -453,8 +465,10 @@ private[backend] trait StorageBackendTestsInitializeIngestion
         party = Some(someParty)
       )(_)(
         PaginationInput(
-          startExclusive = 0,
-          endInclusive = 1000,
+          PaginationFromTo.ascending(
+            startExclusive = 0,
+            endInclusive = 1000,
+          ),
           limit = 1000,
         )
       )

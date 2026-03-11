@@ -444,8 +444,10 @@ private[backend] trait StorageBackendTestsContracts
         activeAtEventSeqId = 1000,
       )(_)(
         PaginatingAsyncStream.IdFilterInput(
-          startExclusive = 0L,
-          endInclusive = 1000L,
+          PaginatingAsyncStream.PaginationFromTo.ascending(
+            startExclusive = 0L,
+            endInclusive = 1000L,
+          )
         )
       )
     )
@@ -552,8 +554,10 @@ private[backend] trait StorageBackendTestsContracts
         activeAtEventSeqId = 2L,
       )(_)(
         PaginatingAsyncStream.IdFilterInput(
-          startExclusive = 0L,
-          endInclusive = 2L,
+          PaginatingAsyncStream.PaginationFromTo.ascending(
+            startExclusive = 0L,
+            endInclusive = 2L,
+          )
         )
       )
     )
@@ -564,8 +568,10 @@ private[backend] trait StorageBackendTestsContracts
         activeAtEventSeqId = 4,
       )(_)(
         PaginatingAsyncStream.IdFilterInput(
-          startExclusive = 0L,
-          endInclusive = 4L,
+          PaginatingAsyncStream.PaginationFromTo.ascending(
+            startExclusive = 0L,
+            endInclusive = 4L,
+          )
         )
       )
     )

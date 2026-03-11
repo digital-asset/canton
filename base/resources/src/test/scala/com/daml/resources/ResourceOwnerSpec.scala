@@ -8,13 +8,13 @@ import com.daml.resources.FailingResourceOwner.{
   TriedToReleaseAFailedResource,
 }
 import com.daml.resources.Resource as AbstractResource
-import com.daml.timer.Delayed
 import org.scalatest.concurrent.Eventually
 import org.scalatest.matchers.should.Matchers
-import org.scalatest.time.{Second, Span}
+import org.scalatest.time.{Seconds, Span}
 import org.scalatest.wordspec.AsyncWordSpec
 
 import java.util.concurrent.CompletableFuture.completedFuture
+import java.util.concurrent.locks.ReentrantLock
 import java.util.concurrent.{
   CopyOnWriteArrayList,
   CopyOnWriteArraySet,
@@ -22,14 +22,14 @@ import java.util.concurrent.{
   RejectedExecutionException,
 }
 import java.util.{Timer, TimerTask}
+import scala.concurrent.*
 import scala.concurrent.duration.{Duration, DurationInt}
-import scala.concurrent.{Await, ExecutionContext, ExecutionContextExecutorService, Future, Promise}
 import scala.jdk.CollectionConverters.*
 import scala.util.{Failure, Success}
 
 final class ResourceOwnerSpec extends AsyncWordSpec with Matchers with Eventually {
 
-  override implicit def patienceConfig: PatienceConfig = PatienceConfig(scaled(Span(1, Second)))
+  override implicit def patienceConfig: PatienceConfig = PatienceConfig(scaled(Span(20, Seconds)))
 
   private type Resource[+T] = AbstractResource[TestContext, T]
   private val Resource = new ResourceFactories[TestContext]
@@ -734,6 +734,13 @@ final class ResourceOwnerSpec extends AsyncWordSpec with Matchers with Eventuall
     "wait at teardown for submitted task to finish for only gracefulAwaitTerminationMillis and then it should interrupt the threads, and wait for the thread to finish for only forcefulAwaitTerminationMillis" in {
       val interruptedPromise = Promise[Unit]()
       val testPromise = Promise[Unit]()
+      // test thread will own this lock and the task thread will block until the test thread triggers an interrupt by releasing the resource (and so the task thread can complete the interruptedPromise promise)
+      val taskLock = new ReentrantLock()
+      taskLock.lock()
+      // test thread will own this lock and uses it to stop (by blocking) the task thread from completing the testPromise promise
+      val cleanupLock = new ReentrantLock()
+      cleanupLock.lock()
+
       val resource = for {
         executor <- Factories
           .forExecutorService(
@@ -745,12 +752,14 @@ final class ResourceOwnerSpec extends AsyncWordSpec with Matchers with Eventuall
       } yield {
         executor.submit { () =>
           try {
-            Thread.sleep(100)
+            blocking(
+              taskLock.lockInterruptibly()
+            )
           } catch {
             case _: InterruptedException =>
               interruptedPromise.success(())
-              Thread.sleep(100)
           }
+          blocking(cleanupLock.lock())
           testPromise.success(())
         }
         executor
@@ -763,7 +772,12 @@ final class ResourceOwnerSpec extends AsyncWordSpec with Matchers with Eventuall
         _ <- resource.release()
       } yield {
         testPromise.isCompleted shouldBe false
-        interruptedPromise.isCompleted shouldBe true
+        eventually { // The task has already been interrupted. Wait until the InterruptedException has been processed.
+          interruptedPromise.isCompleted shouldBe true
+        }
+        taskLock.unlock()
+        cleanupLock.unlock()
+        succeed
       }
     }
 
@@ -911,13 +925,15 @@ final class ResourceOwnerSpec extends AsyncWordSpec with Matchers with Eventuall
         info("And scheduling a further task is still possible")
         finishLongTakingTask.success(())
         info("As completing the currently running timer task")
-        eventually {
-          an[IllegalStateException] should be thrownBy timer.schedule(
-            new TimerTask {
-              override def run(): Unit = ()
-            },
-            0,
-          )
+        blocking { // needed, as eventually can block internally
+          eventually {
+            an[IllegalStateException] should be thrownBy timer.schedule(
+              new TimerTask {
+                override def run(): Unit = ()
+              },
+              0,
+            )
+          }
         }
         info("Eventually scheduling new task on the released timer is not possible anymore")
         Thread.sleep(100)
@@ -1012,11 +1028,21 @@ final class ResourceOwnerSpec extends AsyncWordSpec with Matchers with Eventuall
       val owners = (4 to 1 by -1).map(value =>
         new AbstractResourceOwner[TestContext, Int] {
           override def acquire()(implicit context: TestContext): Resource[Int] =
-            Resource(Delayed.by((value * 200).milliseconds) {
+            Resource(Future {
+              blocking { // needed, as eventually can block internally
+                eventually {
+                  acquireOrder.size + 1 shouldBe >=(value)
+                }
+              }
               acquireOrder += value
               value
             }) { v =>
-              Delayed.by((v * 200).milliseconds) {
+              Future {
+                blocking { // needed, as eventually can block internally
+                  eventually {
+                    releaseOrder.size + 1 shouldBe >=(value)
+                  }
+                }
                 releaseOrder += v
                 ()
               }

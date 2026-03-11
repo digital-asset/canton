@@ -43,6 +43,8 @@ object ProtocolVersionCompatibility {
         s"Please review the supported protocol versions of release version $release in `ReleaseVersionToProtocolVersions.scala`."
       ),
     ) ++ unstableAndBeta
+    // TODO(i31167): When PV35 is stable, remove the following line
+      :+ ProtocolVersion.v35
 
     // If the release contains an unstable, alpha or beta protocol version, it is mentioned twice in the result
     supportedPVs.distinct
@@ -71,6 +73,8 @@ object ProtocolVersionCompatibility {
         s"Please review the supported protocol versions of release version $release in `ReleaseVersionToProtocolVersions.scala`."
       ),
     ) ++ beta ++ alpha
+    // TODO(i31167): When PV35 is stable, remove the following line
+      :+ ProtocolVersion.v35
 
     // If the release contains an unstable, alpha or beta protocol version, it is mentioned twice in the result
     supportedPVs.distinct
