@@ -79,19 +79,86 @@ sealed trait RetryExternalCallIntegrationTest
 
   "retry logic for external calls" should {
 
-    "succeed after one transient failure" in { _ =>
-      // Test requires mock server failure simulation infrastructure.
-      pending
+    "succeed after one transient failure" in { implicit env =>
+      import env.*
+
+      val callCount = new AtomicInteger(0)
+      mockServer.setHandler("transient-single") { req =>
+        if (callCount.incrementAndGet() == 1) {
+          ExternalCallResponse.error(503, "Service Unavailable")
+        } else {
+          ExternalCallResponse.ok(req.input)
+        }
+      }
+
+      val contractId = createExternalCallContract()
+      val inputHex = toHex("transient-single-test")
+
+      val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+        Seq(alice),
+        contractId.exerciseCallExternal(
+          "test-ext",
+          "transient-single",
+          "00000000",
+          inputHex,
+        ).commands.asScala.toSeq,
+      )
+      exerciseTx.getUpdateId should not be empty
+      callCount.get() should be >= 2
     }
 
-    "succeed after multiple transient failures" in { _ =>
-      // Test requires mock server failure simulation infrastructure.
-      pending
+    "succeed after multiple transient failures" in { implicit env =>
+      import env.*
+
+      val callCount = new AtomicInteger(0)
+      mockServer.setHandler("transient-multiple") { req =>
+        val count = callCount.incrementAndGet()
+        if (count <= 2) {
+          ExternalCallResponse.error(503, "Service Unavailable")
+        } else {
+          ExternalCallResponse.ok(req.input)
+        }
+      }
+
+      val contractId = createExternalCallContract()
+      val inputHex = toHex("transient-multiple-test")
+
+      val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+        Seq(alice),
+        contractId.exerciseCallExternal(
+          "test-ext",
+          "transient-multiple",
+          "00000000",
+          inputHex,
+        ).commands.asScala.toSeq,
+      )
+      exerciseTx.getUpdateId should not be empty
+      callCount.get() should be >= 3
     }
 
-    "fail when max retries exhausted" in { _ =>
-      // Test requires mock server failure simulation infrastructure.
-      pending
+    "fail when max retries exhausted" in { implicit env =>
+      import env.*
+
+      resetMockServer()
+      mockServer.setErrorHandler("always-fail", 503, "Always fails")
+
+      val contractId = createExternalCallContract()
+      val inputHex = toHex("max-retries-test")
+
+      intercept[CommandFailure] {
+        participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          contractId.exerciseCallExternal(
+            "test-ext",
+            "always-fail",
+            "00000000",
+            inputHex,
+          ).commands.asScala.toSeq,
+        )
+      }
+
+      // Should have retried multiple times before giving up
+      mockServer.getCallCount("always-fail") should be >= 3
     }
 
     "respect Retry-After header on 429 response" in { implicit env =>
