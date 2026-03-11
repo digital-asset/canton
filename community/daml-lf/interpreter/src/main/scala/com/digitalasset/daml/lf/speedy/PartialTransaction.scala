@@ -201,6 +201,15 @@ private[lf] object PartialTransaction {
     externalCallResults = HashMap.empty,
   )
 
+  @throws[SError.SErrorDamlException]
+  private def assertRightKey[X](context: => String, either: Either[TxErr, X]): X =
+    either match {
+      case Right(value) =>
+        value
+      case Left(err) =>
+        throw SError.SErrorDamlException(convTxError(context, err))
+    }
+
   type NodeSeeds = ImmArray[(NodeId, crypto.Hash)]
 }
 
@@ -228,15 +237,6 @@ private[speedy] case class PartialTransaction(
 ) {
 
   import PartialTransaction._
-
-  @throws[SError.SErrorDamlException]
-  private def assertRightKey[X](context: => String, either: Either[TxErr, X]): X =
-    either match {
-      case Right(value) =>
-        value
-      case Left(err) =>
-        throw SError.SErrorDamlException(convTxError(nodes, context, err))
-    }
 
   def consumedByOrInactive(cid: Value.ContractId): Option[Either[NodeId, Unit]] = {
     contractState.consumedByOrInactive(cid)
@@ -315,7 +315,15 @@ private[speedy] case class PartialTransaction(
       case _: RootContextInfo =>
         val roots = context.children.toImmArray
         val tx0 = Tx(nodes, roots)
-        val (tx, seeds) = NormalizeRollbacks.normalizeTx(tx0)
+        val (tx, seeds) = NormalizeRollbacks.normalizeTx(
+          tx0,
+          shouldDropRollbacks = contractState.mode match {
+            case ContractStateMachine.Mode.UCKWithoutRollback => true
+            case ContractStateMachine.Mode.NoContractKey => false
+            case ContractStateMachine.Mode.LegacyNUCK => false
+            case ContractStateMachine.Mode.UCKWithRollback => false
+          }
+        )
         val txResult = SubmittedTx(SerializationVersion.asVersionedTransaction(tx))
         Right((txResult, seeds))
 
@@ -435,7 +443,7 @@ private[speedy] case class PartialTransaction(
           coid,
           contract.gkeyOpt,
           byKey,
-        ),
+        )
       )
       authorizationChecker.authorizeFetch(optLocation, node.templateId, node.stakeholders)(
         auth
@@ -540,7 +548,7 @@ private[speedy] case class PartialTransaction(
           contract.gkeyOpt,
           byKey,
           consuming,
-        ),
+        )
       )
       authorizationChecker.authorizeExercise(
         optLocation,
@@ -661,7 +669,7 @@ private[speedy] case class PartialTransaction(
         )
         val updated = existing :+ result
         Some(copy(externalCallResults = externalCallResults.updated(nodeId, updated)))
-      case _ =>
+      case None =>
         // External calls outside of exercise context are not stored
         // (they would be at the root level, which is not supported)
         None
@@ -719,6 +727,10 @@ private[speedy] case class PartialTransaction(
         // In the case of there being no children we could drop the entire rollback node.
         // But we do that in a later normalization phase, not here.
         val rollbackNode = Node.Rollback(context.children.toImmArray)
+        // Note: external call results are NOT discarded on rollback. The validator
+        // re-executes the code inside rollback scopes and needs the results at the
+        // same call indices. Rolled-back results are kept so submission and validation
+        // produce the same sequence of external call lookups.
         contractState.endRollback match {
           case Right(newState) =>
             Right(
