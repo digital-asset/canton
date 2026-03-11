@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.externalcall
 
+import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.externalcall.java.externalcalltest as E
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UsePostgres}
 import com.digitalasset.canton.integration.{
@@ -139,12 +140,13 @@ sealed trait EdgeCaseExternalCallIntegrationTest
 
       val contractId = createEdgeCaseContract()
 
-      clue("Exercise CallWithConfigHash with empty config hash") {
-        val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
-          Seq(alice),
-          contractId.exerciseCallWithConfigHash("", toHex("test")).commands.asScala.toSeq,
-        )
-        exerciseTx.getUpdateId should not be empty
+      clue("Exercise CallWithConfigHash with empty config hash should fail") {
+        intercept[CommandFailure] {
+          participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId.exerciseCallWithConfigHash("", toHex("test")).commands.asScala.toSeq,
+          )
+        }
       }
     }
 
@@ -389,11 +391,10 @@ sealed trait EdgeCaseExternalCallIntegrationTest
     "handle concurrent external calls from same contract" in { implicit env =>
       import env.*
 
-      val callCount = new java.util.concurrent.atomic.AtomicInteger(0)
-      mockServer.setHandler("concurrent") { _ =>
-        val count = callCount.incrementAndGet()
-        Thread.sleep(50)
-        ExternalCallResponse.ok(s"call-$count".getBytes)
+      mockServer.setHandler("concurrent") { req =>
+        // Must return deterministic results — same input -> same output
+        // Otherwise confirmation will get different results than submission
+        ExternalCallResponse.ok(req.input)
       }
 
       val contractId = createEdgeCaseContract()
@@ -445,7 +446,7 @@ sealed trait EdgeCaseExternalCallIntegrationTest
       val contractId = createExternalCallContract()
 
       clue("Exercise with odd-length hex should fail validation") {
-        intercept[Exception] {
+        intercept[CommandFailure] {
           participant1.ledger_api.javaapi.commands.submit(
             Seq(alice),
             contractId.exerciseCallExternal(
@@ -467,7 +468,7 @@ sealed trait EdgeCaseExternalCallIntegrationTest
       val contractId = createExternalCallContract()
 
       clue("Exercise with non-hex characters should fail") {
-        intercept[Exception] {
+        intercept[CommandFailure] {
           participant1.ledger_api.javaapi.commands.submit(
             Seq(alice),
             contractId.exerciseCallExternal(

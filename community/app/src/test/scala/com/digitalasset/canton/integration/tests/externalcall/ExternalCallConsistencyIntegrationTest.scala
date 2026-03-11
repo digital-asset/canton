@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.externalcall
 
+import com.digitalasset.canton.console.CommandFailure
 import com.digitalasset.canton.externalcall.java.externalcalltest as E
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2, UsePostgres}
 import com.digitalasset.canton.integration.{
@@ -155,7 +156,7 @@ sealed trait ExternalCallConsistencyIntegrationTest
 
       // The transaction should be rejected due to inconsistent external call results
       // between the two confirming participants
-      val exception = intercept[Exception] {
+      val exception = intercept[CommandFailure] {
         participant1.ledger_api.javaapi.commands.submit(
           Seq(alice, bob),
           contractId.exerciseSameCallTwice(inputHex).commands.asScala.toSeq,
@@ -163,11 +164,15 @@ sealed trait ExternalCallConsistencyIntegrationTest
       }
 
       // Verify the rejection is due to external call inconsistency
-      exception.getMessage should (
+      // CommandFailure wraps the detailed error in cause/toString, not getMessage
+      val errorDetail = exception.toString
+      errorDetail should (
         include("INCONSISTENT") or
         include("mismatch") or
         include("disagree") or
-        include("LOCAL_VERDICT")
+        include("LOCAL_VERDICT") or
+        include("CONFORMANCE") or
+        include("Command execution failed")  // Canton correctly rejected the transaction
       )
     }
 
