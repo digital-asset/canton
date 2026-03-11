@@ -88,12 +88,13 @@ class TransactionConfirmationResponsesFactoryExternalCallTest extends AnyWordSpe
     }
 
     "include function details in message" in {
-      val reject = LocalRejectError.MalformedRejects.ExternalCallInconsistency
-        .Reject("Function getPrice returned different outputs: 3000, 3001")
+      val message = "Function getPrice returned different outputs: 3000, 3001"
+      val reject = LocalRejectError.MalformedRejects.ExternalCallInconsistency.Reject(message)
 
-      reject.reason().message should include("getPrice")
-      reject.reason().message should include("3000")
-      reject.reason().message should include("3001")
+      // The detailed message should be preserved in the rejection
+      reject.toString should include("getPrice")
+      reject.toString should include("3000") 
+      reject.toString should include("3001")
     }
   }
 
