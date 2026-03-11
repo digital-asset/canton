@@ -34,6 +34,7 @@ sealed trait EdgeCaseExternalCallIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
+      .addConfigTransforms(ConfigTransforms.setAlphaVersionSupport(true)*)
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         enableExternalCallExtension("test-ext", mockServerPort, "participant1"),
@@ -64,7 +65,7 @@ sealed trait EdgeCaseExternalCallIntegrationTest
       }
 
   /** Helper to create an EdgeCaseExternalCall contract */
-  private def createEdgeCaseContract()(implicit env: TestEnvironment) = {
+  private def createEdgeCaseContract()(implicit env: FixtureParam) = {
     import env.*
     val createTx = participant1.ledger_api.javaapi.commands.submit(
       Seq(alice),
@@ -74,7 +75,7 @@ sealed trait EdgeCaseExternalCallIntegrationTest
   }
 
   /** Helper to create a basic ExternalCallContract */
-  private def createExternalCallContract()(implicit env: TestEnvironment) = {
+  private def createExternalCallContract()(implicit env: FixtureParam) = {
     import env.*
     val createTx = participant1.ledger_api.javaapi.commands.submit(
       Seq(alice),
@@ -93,7 +94,7 @@ sealed trait EdgeCaseExternalCallIntegrationTest
     "handle empty input" in { implicit env =>
       import env.*
 
-      mockServer.setHandler("empty-input") { req =>
+      mockServer.setHandler("empty-input") { _ =>
         ExternalCallResponse.ok("received-empty".getBytes)
       }
 
@@ -152,7 +153,7 @@ sealed trait EdgeCaseExternalCallIntegrationTest
     "handle 100KB input" in { implicit env =>
       import env.*
 
-      mockServer.setHandler("large-input") { req =>
+      mockServer.setHandler("large-input") { _ =>
         ExternalCallResponse.ok("ok".getBytes)
       }
 
@@ -590,14 +591,14 @@ sealed trait EdgeCaseExternalCallIntegrationTest
 
     // === Timing Edge Cases ===
 
-    "handle external call that takes exactly timeout duration" in { implicit env =>
+    "handle external call that takes exactly timeout duration" in { _ =>
       // This is implementation-dependent and flaky by nature (race between
       // timeout and response). We verify the basic timeout behavior in
       // the error handling tests instead.
       pending
     }
 
-    "handle clock skew between participants" in { implicit env =>
+    "handle clock skew between participants" in { _ =>
       // With static time configured, clock skew is not applicable.
       // This would require sim-time or real-time testing infrastructure.
       pending

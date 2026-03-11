@@ -131,29 +131,34 @@ class MockExternalCallServer(
   private class MockHandler extends HttpHandler {
     override def handle(exchange: HttpExchange): Unit = {
       Try {
-        val path = exchange.getRequestURI.getPath
-        val pathParts = path.split("/").filter(_.nonEmpty)
+        // Canton sends all external calls to /api/v1/external-call with metadata in headers:
+        //   X-Daml-External-Function-Id: the function identifier
+        //   X-Daml-External-Config-Hash: the config hash
+        //   X-Daml-External-Mode: "submission" or "validation"
+        //   Body: hex-encoded input as text
 
-        // Expected path: /{extensionId}/{functionId}
-        if (pathParts.length < 2) {
-          sendResponse(exchange, 400, "Invalid path")
-        } else {
-          val extensionId = pathParts(0)
-          val functionId = pathParts(1)
+        // Extract headers
+        val headers = exchange.getRequestHeaders
+        val functionIdOpt = Option(headers.getFirst("X-Daml-External-Function-Id"))
+        val configHashOpt = Option(headers.getFirst("X-Daml-External-Config-Hash"))
+
+        functionIdOpt match {
+          case None =>
+            sendResponse(exchange, 400, "Missing X-Daml-External-Function-Id header")
+          case Some(functionId) =>
+          val extensionId = "test-ext" // Extension ID is determined by config, not sent in request
 
           // Read request body
           val inputStream = exchange.getRequestBody
           val input = inputStream.readAllBytes()
           inputStream.close()
 
-          // Extract headers
-          val headers = exchange.getRequestHeaders
-          val mode = Option(headers.getFirst("X-External-Call-Mode")).getOrElse("submission")
+          val mode = Option(headers.getFirst("X-Daml-External-Mode")).getOrElse("submission")
           val participantId = Option(headers.getFirst("X-Participant-Id"))
           val requestId = Option(headers.getFirst("X-Request-Id"))
 
-          // Parse config from query string (simplified)
-          val config = Array.emptyByteArray // Could parse from query if needed
+          // Config hash from header
+          val config = configHashOpt.map(_.getBytes(StandardCharsets.UTF_8)).getOrElse(Array.emptyByteArray)
 
           val request = ExternalCallRequest(
             extensionId = extensionId,

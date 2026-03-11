@@ -165,7 +165,10 @@ class ExternalCallConsistencyCheckerTest extends AnyWordSpec with BaseTest {
 
         result.results(alice) match {
           case Inconsistent(k, outputs, positions) =>
-            k shouldBe key("func1")
+            k.extensionId shouldBe "test-ext"
+            k.functionId shouldBe "func1"
+            k.configHash shouldBe "config1"
+            k.inputHex shouldBe "input1"
             outputs shouldBe Set("output1", "output2")
             positions shouldBe Set(viewPos0, viewPos1)
           case Consistent =>

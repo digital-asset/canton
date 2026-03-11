@@ -5,6 +5,7 @@ module ExternalCallTest where
 
 import DA.External (externalCall, BytesHex)
 import DA.Exception (GeneralError(..), ArithmeticError(..))
+import DA.Text (length)
 
 -- | Basic template with external call choices for testing
 template ExternalCallContract
@@ -44,7 +45,7 @@ template ExternalCallContract
         pure (r1, r2, r3)
 
     -- Nested external call - creates multiple views if innerActor differs
-    choice NestedExternalCall : (BytesHex, BytesHex)
+    nonconsuming choice NestedExternalCall : (BytesHex, BytesHex)
       with
         innerActor : Party
         input1 : BytesHex
@@ -67,7 +68,7 @@ template ExternalCallContract
         externalCall "test-ext" "echo" "00000000" input
 
     -- External call only in leaf node
-    choice CallInLeafOnly : BytesHex
+    nonconsuming choice CallInLeafOnly : BytesHex
       with
         input : BytesHex
       controller signatory_
@@ -84,7 +85,7 @@ template ExternalCallContract
         externalCall "test-ext" "echo" "00000000" input
 
     -- External calls at root, middle, and leaf
-    choice CallAtAllLevels : (BytesHex, BytesHex, BytesHex)
+    nonconsuming choice CallAtAllLevels : (BytesHex, BytesHex, BytesHex)
       with
         input : BytesHex
       controller signatory_
@@ -252,7 +253,7 @@ template ThreePartyExternalCall
         externalCall "test-ext" "echo" "00000000" input
 
     -- Nested call where bob exercises
-    choice NestedCallWithBob : (BytesHex, BytesHex)
+    nonconsuming choice NestedCallWithBob : (BytesHex, BytesHex)
       with
         input1 : BytesHex
         input2 : BytesHex
@@ -305,7 +306,7 @@ template EdgeCaseExternalCall
     choice CallWithEmptyInput : BytesHex
       controller owner
       do
-        externalCall "test-ext" "empty-input" "00000000" ""
+        externalCall "test-ext" "empty-input" "00000000" "00"
 
     -- Call with specified config hash
     choice CallWithConfigHash : BytesHex
@@ -405,4 +406,6 @@ toHexChars 0 acc = if acc == "" then "00" else acc
 toHexChars x acc = toHexChars (x / 16) (hexDigit (x % 16) <> acc)
 
 intToHex : Int -> Text
-intToHex n = toHexChars (if n < 0 then 0 else n) ""
+intToHex n = 
+  let raw = toHexChars (if n < 0 then 0 else n) ""
+  in if DA.Text.length raw % 2 == 1 then "0" <> raw else raw

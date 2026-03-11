@@ -34,6 +34,7 @@ sealed trait DeepTransactionExternalCallIntegrationTest
 
   override def environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P2_S1M1
+      .addConfigTransforms(ConfigTransforms.setAlphaVersionSupport(true)*)
       .addConfigTransforms(
         ConfigTransforms.useStaticTime,
         enableExternalCallExtension("test-ext", mockServerPort, "participant1"),
@@ -64,7 +65,7 @@ sealed trait DeepTransactionExternalCallIntegrationTest
       }
 
   /** Helper to create a DeepExternalCallContract */
-  private def createDeepContract(depth: Int)(implicit env: TestEnvironment) = {
+  private def createDeepContract(depth: Int)(implicit env: FixtureParam) = {
     import env.*
     val createTx = participant1.ledger_api.javaapi.commands.submit(
       Seq(alice),
