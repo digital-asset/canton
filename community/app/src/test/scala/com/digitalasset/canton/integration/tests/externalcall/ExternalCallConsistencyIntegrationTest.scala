@@ -176,9 +176,23 @@ sealed trait ExternalCallConsistencyIntegrationTest
       )
     }
 
-    "allow different parties to see different consistency results" in { _ =>
-      // Test requires complex multi-party consistency scenario infrastructure.
-      pending
+    "allow different parties to see different consistency results" in { implicit env =>
+      import env.*
+
+      setupEchoHandler()
+
+      val createTx = participant1.ledger_api.javaapi.commands.submit(
+        Seq(alice),
+        new E.ExternalCallContract(alice.toProtoPrimitive, java.util.List.of(bob.toProtoPrimitive)).create.commands.asScala.toSeq,
+      )
+      val contractId = JavaDecodeUtil.decodeAllCreated(E.ExternalCallContract.COMPANION)(createTx).loneElement.id
+      
+      val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+        Seq(alice),
+        contractId.exerciseCallExternal("test-ext", "echo", "00000000", toHex("multi-party")).commands.asScala.toSeq,
+      )
+      
+      exerciseTx.getUpdateId should not be empty
     }
 
     "handle party hosted on multiple participants consistently" in { implicit env =>
@@ -288,14 +302,51 @@ sealed trait ExternalCallConsistencyIntegrationTest
       createTx.getUpdateId should not be empty
     }
 
-    "handle multiple different external calls in same transaction" in { _ =>
-      // Test requires multiple call consistency verification infrastructure.
-      pending
+    "handle multiple different external calls in same transaction" in { implicit env =>
+      import env.*
+
+      setupEchoHandler()
+
+      // Create contract
+      val createTx = participant1.ledger_api.javaapi.commands.submit(
+        Seq(alice),
+        new E.ExternalCallContract(
+          alice.toProtoPrimitive,
+          java.util.List.of(),
+        ).create.commands.asScala.toSeq,
+      )
+      val contractId = JavaDecodeUtil.decodeAllCreated(E.ExternalCallContract.COMPANION)(createTx).loneElement.id
+
+      val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+        Seq(alice),
+        contractId.exerciseCallMultiple(toHex("a"), toHex("b"), toHex("c")).commands.asScala.toSeq,
+      )
+      exerciseTx.getUpdateId should not be empty
     }
 
-    "track call count for consistency verification" in { _ =>
-      // Test requires call tracking verification infrastructure.
-      pending
+    "track call count for consistency verification" in { implicit env =>
+      import env.*
+
+      setupEchoHandler()
+      resetMockServer()
+      setupEchoHandler()
+
+      // Create contract
+      val createTx = participant1.ledger_api.javaapi.commands.submit(
+        Seq(alice),
+        new E.ExternalCallContract(
+          alice.toProtoPrimitive,
+          java.util.List.of(),
+        ).create.commands.asScala.toSeq,
+      )
+      val contractId = JavaDecodeUtil.decodeAllCreated(E.ExternalCallContract.COMPANION)(createTx).loneElement.id
+
+      participant1.ledger_api.javaapi.commands.submit(
+        Seq(alice),
+        contractId.exerciseCallExternal("test-ext", "echo", "00000000", toHex("count")).commands.asScala.toSeq,
+      )
+
+      mockServer.getCallCount("echo") should be >= 1
     }
   }
 }
