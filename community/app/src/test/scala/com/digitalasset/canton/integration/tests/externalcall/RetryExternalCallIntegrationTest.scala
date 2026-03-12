@@ -230,16 +230,6 @@ sealed trait RetryExternalCallIntegrationTest
       callCount.get() should be >= 2
     }
 
-    "use exponential backoff" in { _ =>
-      // Permanently pending: timing-sensitive test that cannot reliably distinguish
-      // exponential backoff delays from confirmation calls. Canton's external call
-      // retry mechanism is invoked by both the submitting and confirming participants,
-      // making it impossible to accurately measure backoff intervals from the mock
-      // server's perspective.
-      pending
-    }
-
-
     "add jitter to backoff delays" in { implicit env =>
       // Jitter is an implementation detail of the retry mechanism.
       // We verify it indirectly: multiple retries should not all have
@@ -389,25 +379,6 @@ sealed trait RetryExternalCallIntegrationTest
       verifyCallCount("not-found", 1)
     }
 
-    "retry on connection reset" in { _ =>
-      // Permanently pending: simulating a TCP connection reset requires OS-level
-      // socket manipulation (e.g., RST packets) that cannot be done with the
-      // HTTP-level mock server. Connection-level failures are implicitly covered
-      // by the 502/503 retry tests, as Canton surfaces transport errors similarly.
-      pending
-    }
-
-    "handle retry with different result" in { _ =>
-      // Permanently pending: Canton's model conformance check correctly rejects
-      // transactions where a retry produces a different result than the original
-      // submission. This is expected behavior — external calls must be deterministic
-      // for the same input. The "reject transaction when confirming participant
-      // receives different result" test in ConsensusExternalCallIntegrationTest
-      // covers the mismatch rejection scenario.
-      pending
-    }
-
-
     "respect max total timeout across all retries" in { implicit env =>
       import env.*
 
@@ -437,14 +408,6 @@ sealed trait RetryExternalCallIntegrationTest
       mockServer.getCallCount("slow-fail") should be <= 3
     }
 
-    "maintain idempotency across retries" in { _ =>
-      // Permanently pending: Canton enforces idempotency by rejecting transactions
-      // where the confirming participant's external call result differs from the
-      // submitting participant's stored result. There is no separate "idempotency
-      // key" mechanism — determinism is enforced at the consensus layer. Testing
-      // this separately from the consensus mismatch tests adds no value.
-      pending
-    }
   }
 }
 
