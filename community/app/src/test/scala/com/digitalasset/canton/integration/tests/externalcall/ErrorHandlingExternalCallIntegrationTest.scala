@@ -15,7 +15,6 @@ import com.digitalasset.canton.integration.{
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 
 import scala.jdk.CollectionConverters.*
-import scala.annotation.nowarn
 
 /** Integration tests for error handling in external calls.
   *
@@ -201,16 +200,6 @@ sealed trait ErrorHandlingExternalCallIntegrationTest
           contractId.exerciseCallExternal("test-ext", "timeout-test", "00000000", toHex("test")).commands.asScala.toSeq,
         )
       }
-    }
-
-    "handle connection timeout" in { _ =>
-      // Permanently pending: connection timeout requires an extension pointing to a
-      // non-routable IP address (e.g., 10.255.255.1) to trigger TCP connect timeout.
-      // The environmentDefinition configures extensions at setup time, and adding a
-      // non-routable IP extension would cause the entire test suite to hang during
-      // setup. Connection-level error behavior is partially covered by the
-      // "connection refused" and request timeout tests.
-      pending
     }
 
     // === Service Unavailability ===

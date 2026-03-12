@@ -314,14 +314,6 @@ sealed trait InterfaceExternalCallIntegrationTest
       exerciseTx.getUpdateId should not be empty
     }
 
-    "work when interface is from different package than template" in { _ =>
-      // Permanently pending: requires an interface defined in a separate DAR package
-      // from the template that implements it. The current test infrastructure uses a
-      // single DAR (ExternalCallTest.dar) containing both the ExternalCallInterface
-      // and all templates. Testing cross-package interface exercises would require
-      // building and uploading a second DAR with only the interface definition.
-      pending
-    }
   }
 }
 
