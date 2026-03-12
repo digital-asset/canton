@@ -105,11 +105,45 @@ sealed trait MultiViewExternalCallIntegrationTest
     }
 
     "handle external calls when nested exercises have different informees (multiple views)" in {
-      _ =>
-        // DelegatedExternalCall has `controller actor` where actor=bob, but bob is hosted on
-        // participant2. Multi-party submission from participant1 can't authorize bob's choices.
-        // Requires either Daml contract redesign or multi-participant command submission.
-        pending
+      implicit env =>
+        import env.*
+
+        setupEchoHandler()
+
+        val input1Hex = toHex("nested-view-input1")
+        val input2Hex = toHex("nested-view-input2")
+
+        clue("Create ExternalCallContract with bob as observer") {
+          val createTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            new E.ExternalCallContract(
+              alice.toProtoPrimitive,
+              java.util.List.of(bob.toProtoPrimitive),
+            ).create.commands.asScala.toSeq,
+          )
+          val contractId = JavaDecodeUtil
+            .decodeAllCreated(E.ExternalCallContract.COMPANION)(createTx)
+            .loneElement
+            .id
+
+          clue(
+            "Exercise NestedExternalCall with innerActor=bob (DelegatedExternalCall uses controller signatory_)"
+          ) {
+            val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+              Seq(alice),
+              contractId
+                .exerciseNestedExternalCall(
+                  bob.toProtoPrimitive,
+                  input1Hex,
+                  input2Hex,
+                )
+                .commands
+                .asScala
+                .toSeq,
+            )
+            exerciseTx.getUpdateId should not be empty
+          }
+        }
     }
 
     "execute external call only in root node" in { implicit env =>
@@ -227,11 +261,40 @@ sealed trait MultiViewExternalCallIntegrationTest
       }
     }
 
-    "handle multiple views each with their own external calls" in { _ =>
-      // BobExternalCall has `controller bob`, but bob is hosted on participant2.
-      // Multi-party submission from participant1 can't authorize bob's choices.
-      // Requires either Daml contract redesign or multi-participant command submission.
-      pending
+    "handle multiple views each with their own external calls" in { implicit env =>
+      import env.*
+
+      setupEchoHandler()
+
+      val input1Hex = toHex("multi-view-alice")
+      val input2Hex = toHex("multi-view-bob")
+
+      clue("Create ThreePartyExternalCall with alice, bob, charlie") {
+        val createTx = participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          new E.ThreePartyExternalCall(
+            alice.toProtoPrimitive,
+            bob.toProtoPrimitive,
+            charlie.toProtoPrimitive,
+          ).create.commands.asScala.toSeq,
+        )
+        val contractId = JavaDecodeUtil
+          .decodeAllCreated(E.ThreePartyExternalCall.COMPANION)(createTx)
+          .loneElement
+          .id
+
+        clue("Exercise NestedCallWithBob — alice's view + BobExternalCall (controller alice)") {
+          val exerciseTx = participant1.ledger_api.javaapi.commands.submit(
+            Seq(alice),
+            contractId
+              .exerciseNestedCallWithBob(input1Hex, input2Hex)
+              .commands
+              .asScala
+              .toSeq,
+          )
+          exerciseTx.getUpdateId should not be empty
+        }
+      }
     }
 
     "aggregate external call results correctly in view's ActionDescription" in { implicit env =>
