@@ -211,7 +211,11 @@ sealed trait ConsensusExternalCallIntegrationTest
     }
 
     "handle partial mismatch in multi-view transaction" in { _ =>
-      // Test requires complex multi-view transaction infrastructure.
+      // Permanently pending: testing partial mismatch (one view's external call matches,
+      // another doesn't) requires a multi-view transaction where the mock server returns
+      // different results per-view per-participant. The current mock server infrastructure
+      // cannot distinguish which view is making the call, so it's impossible to create
+      // a scenario where only some views have mismatched results.
       pending
     }
 
@@ -271,9 +275,12 @@ sealed trait ConsensusExternalCallIntegrationTest
     }
 
     "reject when observer's local recomputation doesn't match stored result" in { _ =>
-      // Requires special test infrastructure to inject mismatched stored results.
-      // This would require modifying Canton's external call handling to allow 
-      // test injection of different stored vs computed results.
+      // Permanently pending: observers validate external call results against the
+      // stored results from the submitting participant's transaction. To test a
+      // mismatch, we'd need to inject tampered stored results into Canton's internal
+      // protocol messages, which requires modifying Canton's transaction processing
+      // internals. The "reject transaction when confirming participant receives
+      // different result" test covers the observable mismatch behavior instead.
       pending
     }
   }

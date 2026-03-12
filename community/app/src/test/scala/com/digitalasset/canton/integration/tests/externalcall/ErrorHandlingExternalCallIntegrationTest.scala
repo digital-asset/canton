@@ -41,6 +41,8 @@ sealed trait ErrorHandlingExternalCallIntegrationTest
         ConfigTransforms.useStaticTime,
         enableExternalCallExtension("test-ext", mockServerPort, "participant1"),
         enableExternalCallExtension("test-ext", mockServerPort, "participant2"),
+        enableExternalCallExtension("dead-ext", 1, "participant1"),
+        enableExternalCallExtension("dead-ext", 1, "participant2"),
       )
       .withSetup { implicit env =>
         import env.*
@@ -202,19 +204,34 @@ sealed trait ErrorHandlingExternalCallIntegrationTest
     }
 
     "handle connection timeout" in { _ =>
-      // This test requires an extension pointing to a non-routable IP.
-      // The current setup uses localhost, so we skip this specific scenario.
-      // Connection timeout behavior is covered by the "connection refused" test below.
+      // Permanently pending: connection timeout requires an extension pointing to a
+      // non-routable IP address (e.g., 10.255.255.1) to trigger TCP connect timeout.
+      // The environmentDefinition configures extensions at setup time, and adding a
+      // non-routable IP extension would cause the entire test suite to hang during
+      // setup. Connection-level error behavior is partially covered by the
+      // "connection refused" and request timeout tests.
       pending
     }
 
     // === Service Unavailability ===
 
-    "handle connection refused" in { _ =>
-      // Test requires mock server connection refusal infrastructure.
-      // This would require configuring the extension to point to a port that's not listening.
-      // This may require a different environmentDefinition.
-      pending
+    "handle connection refused" in { implicit env =>
+      import env.*
+
+      val contractId = createExternalCallContract()
+
+      // "dead-ext" is configured to point to port 1 (nothing listening)
+      intercept[CommandFailure] {
+        participant1.ledger_api.javaapi.commands.submit(
+          Seq(alice),
+          contractId.exerciseCallExternal(
+            "dead-ext",
+            "any-function",
+            "00000000",
+            toHex("connection-refused-test"),
+          ).commands.asScala.toSeq,
+        )
+      }
     }
 
     // === Configuration Errors ===

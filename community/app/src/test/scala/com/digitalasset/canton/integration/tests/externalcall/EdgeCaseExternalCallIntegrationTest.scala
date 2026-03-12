@@ -593,15 +593,20 @@ sealed trait EdgeCaseExternalCallIntegrationTest
     // === Timing Edge Cases ===
 
     "handle external call that takes exactly timeout duration" in { _ =>
-      // This is implementation-dependent and flaky by nature (race between
-      // timeout and response). We verify the basic timeout behavior in
-      // the error handling tests instead.
+      // Permanently pending: inherently racy — when response time equals the
+      // timeout duration, the outcome depends on scheduling and timer precision.
+      // The result is non-deterministic (success or timeout) and cannot be
+      // reliably asserted. Basic timeout behavior is covered by the request
+      // timeout test in ErrorHandlingExternalCallIntegrationTest.
       pending
     }
 
     "handle clock skew between participants" in { _ =>
-      // With static time configured, clock skew is not applicable.
-      // This would require sim-time or real-time testing infrastructure.
+      // Permanently pending: all integration tests use static time (via
+      // ConfigTransforms.useStaticTime), so clock skew between participants
+      // cannot occur. Testing clock skew would require real-time mode with
+      // independent clock sources per participant, which is not supported
+      // in the current test infrastructure.
       pending
     }
   }
