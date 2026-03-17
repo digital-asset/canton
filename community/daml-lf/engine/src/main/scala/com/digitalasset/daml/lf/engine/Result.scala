@@ -9,6 +9,7 @@ import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.{BackStack, FrontStack, ImmArray}
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
+import com.digitalasset.daml.lf.interpretation.NeedKeyContinuationToken
 import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
@@ -34,10 +35,8 @@ sealed trait Result[+A] extends Product with Serializable {
       ResultNeedContract(coid, response => resume(response).map(f))
     case ResultNeedPackage(pkgId, resume) =>
       ResultNeedPackage(pkgId, mbPkg => resume(mbPkg).map(f))
-    case ResultNeedKey(gk, resume) =>
-      ResultNeedKey(gk, mbAcoid => resume(mbAcoid).map(f))
-    case ResultNeedNKey(gk, limit, token, resume) =>
-      ResultNeedNKey(gk, limit, token, (cids, token) => resume(cids, token).map(f))
+    case ResultNeedKey(gk, limit, token, resume) =>
+      ResultNeedKey(gk, limit, token, (cids, token) => resume(cids, token).map(f))
     case ResultPrefetch(contractIds, keys, resume) =>
       ResultPrefetch(contractIds, keys, () => resume().map(f))
   }
@@ -51,10 +50,13 @@ sealed trait Result[+A] extends Product with Serializable {
       ResultNeedContract(coid, response => resume(response).flatMap(f))
     case ResultNeedPackage(pkgId, resume) =>
       ResultNeedPackage(pkgId, mbPkg => resume(mbPkg).flatMap(f))
-    case ResultNeedKey(gk, resume) =>
-      ResultNeedKey(gk, mbAcoid => resume(mbAcoid).flatMap(f))
-    case ResultNeedNKey(gk, limit, token, resume) =>
-      ResultNeedNKey(gk, limit, token, (mbAcoid, nextToken) => resume(mbAcoid, nextToken).flatMap(f))
+    case ResultNeedKey(gk, limit, token, resume) =>
+      ResultNeedKey(
+        gk,
+        limit,
+        token,
+        (mbAcoid, nextToken) => resume(mbAcoid, nextToken).flatMap(f),
+      )
     case ResultPrefetch(contractIds, keys, resume) =>
       ResultPrefetch(contractIds, keys, () => resume().flatMap(f))
   }
@@ -62,11 +64,14 @@ sealed trait Result[+A] extends Product with Serializable {
   private[lf] def consume(
       pcs: PartialFunction[ContractId, FatContractInstance] = PartialFunction.empty,
       pkgs: PartialFunction[PackageId, Package] = PartialFunction.empty,
-      keys: PartialFunction[GlobalKeyWithMaintainers, ContractId] = PartialFunction.empty,
-      nKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] = PartialFunction.empty,
+      keys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] =
+        PartialFunction.empty,
       hashingMethod: ContractId => Hash.HashingMethod = _ => Hash.HashingMethod.TypedNormalForm,
       idValidator: (ContractId, Hash) => Boolean = (_, _) => true,
   ): Either[Error, A] = {
+
+    case class ContinuationToken(rest: Vector[FatContractInstance]) extends NeedKeyContinuationToken
+
     @tailrec
     def go(res: Result[A]): Either[Error, A] =
       res match {
@@ -80,8 +85,14 @@ sealed trait Result[+A] extends Product with Serializable {
               Response.ContractFound(coInst, hashingMethod(acoid), idValidator(acoid, _))
           }))
         case ResultNeedPackage(pkgId, resume) => go(resume(pkgs.lift(pkgId)))
-        case ResultNeedKey(key, resume) => go(resume(keys.lift(key)))
-        case ResultNeedNKey(key, _, _, resume) => go(resume(nKeys.lift(key).getOrElse(Vector.empty), None))
+        case ResultNeedKey(key, n, mbToken, resume) =>
+          val contracts = mbToken match {
+            case Some(ContinuationToken(rest)) => rest
+            case None => keys.lift(key).getOrElse(Vector.empty)
+            case Some(_) => throw new IllegalStateException("unexpected continuation token")
+          }
+          val (result, rest) = contracts.splitAt(n)
+          go(resume(result, Option.when(rest.nonEmpty)(ContinuationToken(rest))))
         case ResultPrefetch(_, _, result) => go(result())
       }
     go(this)
@@ -153,7 +164,7 @@ object ResultNeedContract {
   }
 }
 
-/** Intermediate result indicating that a [[Package]] is required to complete the computation.
+/** Intermediate result indicating that a [[com.digitalasset.daml.lf.language.Ast.Package]] is required to complete the computation.
   * To resume the computation, the caller must invoke `resume` with the following argument:
   * <ul>
   * <li>`Some(package)`, if the caller can dereference `packageId` to `package`</li>
@@ -166,32 +177,25 @@ object ResultNeedContract {
 final case class ResultNeedPackage[A](packageId: PackageId, resume: Option[Package] => Result[A])
     extends Result[A]
 
-/** Intermediate result indicating that the contract id corresponding to a key is required to complete the computation.
-  * To resume the computation, the caller must invoke `resume` with the following argument:
+/** Intermediate result indicating that contracts matching a key are required to complete the computation.
+  * To resume the computation, the caller must invoke `resume` with the following arguments:
   * <ul>
-  * <li>`Some(contractId)`, if `key` is currently assigned to `contractId`</li>
-  * <li>`None`, if `key` is unassigned</li>
+  * <li>`contracts`: a vector of fat contract instances whose key matches `key`, up to `limit` entries.
+  *   If no contracts match, an empty vector should be provided.</li>
+  * <li>`continuationToken`: `Some(token)` if there are more results beyond `limit`, where `token`
+  *   can be passed back in a subsequent `ResultNeedKey` to fetch the next page.
+  *   `None` if all matching contracts have been returned.</li>
   * </ul>
   *
-  * The caller of `resume` has to ensure that any contract id passed to `resume` has previously been associated with
-  * a contract with `key` as a key.
-  * Other than that, the caller does not need to validate the data passed to `resume`. In particular, it may pass
-  * the id of an archived contract to `resume`.
-  * It may also provide `None` to `resume` when the `key` is actually assigned.
+  * When `continuationToken` is `Some(token)`, the caller should resume from where the previous query left off.
+  * When it is `None`, this is the initial query for the given key.
   */
 final case class ResultNeedKey[A](
     key: GlobalKeyWithMaintainers,
-    resume: Option[ContractId] => Result[A],
-) extends Result[A]
-
-final case class ResultNeedNKey[A](
-    key: GlobalKeyWithMaintainers,
     limit: Int,
-    continuationToken: Option[NKeyContinuationToken],
-    resume: (Vector[FatContractInstance], Option[NKeyContinuationToken]) => Result[A],
+    continuationToken: Option[NeedKeyContinuationToken],
+    resume: (Vector[FatContractInstance], Option[NeedKeyContinuationToken]) => Result[A],
 ) extends Result[A]
-
-trait NKeyContinuationToken
 
 /** Indicates that the interpretation will likely need to resolve the given contract keys.
   * The caller may resolve the keys in parallel to the interpretation, but does not have to.
@@ -271,18 +275,8 @@ object Result {
                       .map(otherResults => (okResults :+ x) :++ otherResults)
                   ),
               )
-            case ResultNeedKey(gk, resume) =>
+            case ResultNeedKey(gk, limit, token, resume) =>
               ResultNeedKey(
-                gk,
-                mbAcoid =>
-                  resume(mbAcoid).flatMap(x =>
-                    Result
-                      .sequence(results_)
-                      .map(otherResults => (okResults :+ x) :++ otherResults)
-                  ),
-              )
-            case ResultNeedNKey(gk, limit, token, resume) =>
-              ResultNeedNKey(
                 gk,
                 limit,
                 token,

@@ -419,7 +419,10 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
 
   private val testTxVersion: SerializationVersion = serializationVersion
 
-  private[this] def buildContract(observer: Party): FatContractInstance =
+  private[this] def buildContract(
+      observer: Party,
+      contractId: Value.ContractId,
+  ): FatContractInstance =
     TransactionBuilder.fatContractInstanceWithDummyDefaults(
       testTxVersion,
       packageName = pkg.pkgName,
@@ -447,10 +450,11 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ),
           Set(alice),
         )
-      )
+      ),
+      contractId = contractId,
     )
 
-  private[this] val visibleContract = buildContract(bob)
+  private[this] val visibleContract = buildContract(bob, cId)
 
   private[this] val helper = TransactionBuilder.fatContractInstanceWithDummyDefaults(
     testTxVersion,
@@ -461,6 +465,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
       ImmArray(None -> ValueParty(alice), None -> ValueParty(charlie)),
     ),
     signatories = List(alice),
+    contractId = helperCId,
   )
 
   private[this] val iface_contract = TransactionBuilder.fatContractInstanceWithDummyDefaults(
@@ -490,21 +495,22 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
         ),
         Set(alice),
       )
-    )
+    ),
+    contractId = cId,
   )
 
-  private[this] val getContract = Map(cId -> visibleContract)
-  private[this] val getIfaceContract = Map(cId -> iface_contract)
-  private[this] val getHelper = Map(helperCId -> helper)
+  private[this] val getContract = Map(visibleContract.contractId -> visibleContract)
+  private[this] val getIfaceContract = Map(iface_contract.contractId -> iface_contract)
+  private[this] val getHelper = Map(helper.contractId -> helper)
 
-  private[this] val getKey = Map(
+  private[this] val getKeys = Map(
     GlobalKeyWithMaintainers.assertBuild(
       T,
       keyValue,
       SValueHash.assertHashContractKey(pkg.pkgName, T.qualifiedName, keySValue),
       Set(alice),
       pkg.pkgName,
-    ) -> cId
+    ) -> Vector(cId)
   )
 
   private[this] val dummyContract = TransactionBuilder.fatContractInstanceWithDummyDefaults(
@@ -513,8 +519,9 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
     template = Dummy,
     arg = ValueRecord(None, ImmArray(None -> ValueParty(alice))),
     signatories = List(alice),
+    contractId = cId,
   )
-  private[this] val getWronglyTypedContract = Map(cId -> dummyContract)
+  private[this] val getWronglyTypedContract = Map(dummyContract.contractId -> dummyContract)
 
   private[this] val seed = crypto.Hash.hashPrivateKey("seed")
 
@@ -526,7 +533,8 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
       readAs: Set[Party] = Set.empty,
       packageResolution: Map[PackageName, PackageId] = packageNameMap,
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
-      getKey: PartialFunction[GlobalKeyWithMaintainers, Value.ContractId] = PartialFunction.empty,
+      getKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] =
+        PartialFunction.empty,
   ) = {
     val se = pkgs.compiler.unsafeCompile(e)
     val traceLog = new TestTraceLog()
@@ -538,7 +546,8 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
         parties,
         readAs,
         mode =
-          if (withKey) ContractStateMachine.Mode.UCKWithRollback else ContractStateMachine.Mode.NoContractKey,
+          if (withKey) ContractStateMachine.Mode.UCKWithRollback
+          else ContractStateMachine.Mode.NoContractKey,
         packageResolution = packageResolution,
         traceLog = traceLog,
       )
@@ -546,7 +555,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
       SpeedyTestLib.run(
         machine,
         getContract = traceLog.tracePF("queries contract", getContract),
-        getKey = traceLog.tracePF("queries key", getKey),
+        getKeys = traceLog.tracePF("queries key", getKeys),
       )
     )
     val msgs = traceLog.getMessages.dropWhile(_ != "starts test")
@@ -723,7 +732,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
       }
 
       // TEST_EVIDENCE: Integrity: Evaluation order of create with contract ID in contract key
-      if(withKey) "contract ID in contract key" in {
+      if (withKey) "contract ID in contract key" in {
         val (res, msgs) = evalUpdateApp(
           pkgs,
           e"""\(sig : Party) (obs : Party) (cid : ContractId Unit) ->
@@ -1107,7 +1116,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SParty(alice), SParty(charlie), SContractId(cId)),
             Set(alice, charlie),
             getContract = getContract,
-            getKey = PartialFunction.empty,
+            getKeys = PartialFunction.empty,
           )
 
           inside(res) { case Success(Left(SErrorDamlException(IE.InconsistentContractKey(_)))) =>
@@ -1457,7 +1466,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SParty(alice), SParty(alice)),
             Set(alice),
             getContract = getContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getContract),
           )
           inside(res) { case Success(Right(_)) =>
             msgs shouldBe buildLog(
@@ -1487,11 +1496,16 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SParty(alice), SParty(alice)),
             Set(alice),
             getContract = getWronglyTypedContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getWronglyTypedContract),
           )
           inside(res) {
             case Success(Left(SErrorDamlException(IE.WronglyTypedContract(_, T, Dummy)))) =>
-              msgs shouldBe buildLog("starts test", "maintainers", "queries key", "queries contract")
+              msgs shouldBe buildLog(
+                "starts test",
+                "maintainers",
+                "queries key",
+                "queries contract",
+              )
           }
         }
 
@@ -1503,7 +1517,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SParty(charlie), SParty(alice)),
             Set(alice, charlie),
             getContract = getContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getContract),
           )
 
           inside(res) {
@@ -1556,7 +1570,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SParty(alice), SParty(alice), SContractId(cId)),
             Set(alice),
             getContract = getContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getContract),
           )
           inside(res) { case Success(Right(_)) =>
             msgs shouldBe buildLog(
@@ -1582,7 +1596,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SParty(alice), SParty(alice), SContractId(cId)),
             Set(alice),
             getContract = getContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getContract),
           )
           inside(res) { case Success(Left(SErrorDamlException(IE.ContractKeyNotFound(gkey)))) =>
             gkey.templateId shouldBe T
@@ -1601,7 +1615,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SParty(alice), SContractId(cId), SParty(alice)),
             Set(alice),
             getContract = getWronglyTypedContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getWronglyTypedContract),
           )
           inside(res) {
             case Success(Left(SErrorDamlException(IE.WronglyTypedContract(_, T, Dummy)))) =>
@@ -1619,7 +1633,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SParty(charlie), SContractId(cId), SParty(alice)),
             Set(alice, charlie),
             getContract = getContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getContract),
           )
 
           inside(res) {
@@ -1765,7 +1779,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
           ArraySeq(SParty(alice), SParty(alice)),
           Set(alice),
           getContract = getContract,
-          getKey = getKey,
+          getKeys = mapKeys(getKeys, getContract),
         )
         inside(res) {
           case Success(
@@ -1796,7 +1810,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
           ArraySeq(SParty(alice), SParty(alice)),
           Set(alice),
           getContract = getContract,
-          getKey = getKey,
+          getKeys = mapKeys(getKeys, getContract),
         )
         inside(res) {
           case Success(
@@ -1860,7 +1874,6 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
 
       def buildLog(msgs: String*) = msgs.filterNot(msgsToIgnore_)
 
-
       testCase - {
 
         "a non-cached global contract" - {
@@ -1899,7 +1912,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
               ArraySeq(SParty(alice), SContractId(cId)),
               Set(alice),
               getContract = getWronglyTypedContract,
-              getKey = getKey,
+              getKeys = mapKeys(getKeys, getWronglyTypedContract),
             )
             inside(res) {
               case Success(
@@ -2302,7 +2315,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SParty(alice), SParty(charlie), SContractId(cId)),
             Set(alice, charlie),
             getContract = getContract,
-            getKey = PartialFunction.empty,
+            getKeys = PartialFunction.empty,
           )
 
           inside(res) { case Success(Left(SErrorDamlException(IE.InconsistentContractKey(_)))) =>
@@ -2543,7 +2556,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SParty(alice), SParty(alice)),
             Set(alice),
             getContract = getContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getContract),
           )
           inside(res) { case Success(Right(_)) =>
             msgs shouldBe buildLog(
@@ -2569,7 +2582,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SParty(alice), SParty(alice)),
             Set(alice),
             getContract = getWronglyTypedContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getWronglyTypedContract),
           )
           inside(res) {
             case Success(Left(SErrorDamlException(IE.WronglyTypedContract(_, T, Dummy)))) =>
@@ -2591,7 +2604,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             args = ArraySeq(SParty(charlie), SParty(alice)),
             parties = Set(alice, charlie),
             getContract = getContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getContract),
           )
           inside(res) {
             case Success(
@@ -2633,7 +2646,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SParty(alice), SParty(alice), SContractId(cId)),
             Set(alice),
             getContract = getContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getContract),
           )
           inside(res) { case Success(Right(_)) =>
             msgs shouldBe buildLog("starts test", "maintainers", "ends test")
@@ -2651,7 +2664,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SContractId(cId), SParty(alice), SParty(alice)),
             Set(alice),
             getContract = getContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getContract),
           )
           inside(res) { case Success(Left(SErrorDamlException(IE.ContractKeyNotFound(key)))) =>
             key.templateId shouldBe T
@@ -2665,11 +2678,11 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             pkgs,
             e"""\(fetchingParty:Party) (sig: Party) (cId: ContractId M:T) ->
            ubind x: M:T <- fetch_template @M:T cId
-           in Test:fetch_by_key fetchingParty (Test:someParty sig) Test:noCid 0""",
+            in Test:fetch_by_key fetchingParty (Test:someParty sig) Test:noCid 0""",
             ArraySeq(SParty(charlie), SParty(alice), SContractId(cId)),
             Set(alice, charlie),
             getContract = getContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getContract),
           )
           inside(res) {
             case Success(
@@ -2763,7 +2776,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
           ArraySeq(SParty(alice), SParty(alice)),
           Set(alice),
           getContract = getContract,
-          getKey = PartialFunction.empty,
+          getKeys = PartialFunction.empty,
         )
         inside(res) { case Success(Left(SErrorDamlException(IE.ContractKeyNotFound(key)))) =>
           key.templateId shouldBe T
@@ -3133,7 +3146,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SParty(alice), SParty(alice)),
             Set(alice),
             getContract = getContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getContract),
           )
           inside(res) { case Success(Right(_)) =>
             msgs shouldBe buildLog(
@@ -3159,7 +3172,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SParty(charlie), SParty(alice)),
             Set(alice, charlie),
             getContract = getContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getContract),
           )
           inside(res) {
             case Success(
@@ -3201,7 +3214,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SParty(alice), SParty(alice), SContractId(cId)),
             Set(alice),
             getContract = getContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getContract),
           )
           inside(res) { case Success(Right(_)) =>
             msgs shouldBe buildLog("starts test", "maintainers", "ends test")
@@ -3219,7 +3232,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SContractId(cId), SParty(alice), SParty(alice)),
             Set(alice),
             getContract = getContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getContract),
           )
           inside(res) { case Success(Right(_)) =>
             msgs shouldBe buildLog("starts test", "maintainers", "ends test")
@@ -3232,11 +3245,11 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             pkgs,
             e"""\(lookingParty:Party) (sig: Party) (cId: ContractId M:T) ->
            ubind x: M:T <- fetch_template @M:T cId
-           in Test:lookup_by_key lookingParty (Test:someParty sig) Test:noCid 0""",
+            in Test:lookup_by_key lookingParty (Test:someParty sig) Test:noCid 0""",
             ArraySeq(SParty(charlie), SParty(alice), SContractId(cId)),
             Set(alice, charlie),
             getContract = getContract,
-            getKey = getKey,
+            getKeys = mapKeys(getKeys, getContract),
           )
           inside(res) {
             case Success(
@@ -3329,7 +3342,7 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
             ArraySeq(SParty(alice), SParty(alice)),
             Set(alice),
             getContract = getContract,
-            getKey = PartialFunction.empty,
+            getKeys = PartialFunction.empty,
           )
           inside(res) { case Success(Right(_)) =>
             msgs shouldBe buildLog("starts test", "maintainers", "queries key", "ends test")
@@ -3383,5 +3396,9 @@ $ifKey         in Test:run @(Option (ContractId M:T)) (lookup_by_key @M:T key);
         }
       }
     }
+  }
+
+  def mapKeys[K, V, R](getKeys: Map[K, Vector[V]], getContract: V => R): Map[K, Vector[R]] = {
+    getKeys.view.mapValues(_.map(getContract)).toMap
   }
 }

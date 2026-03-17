@@ -37,7 +37,7 @@ import com.digitalasset.canton.version.ProtocolVersion
 import com.google.common.annotations.VisibleForTesting
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.*
-import org.apache.pekko.stream.scaladsl.{Flow, Keep, Source}
+import org.apache.pekko.stream.scaladsl.{Flow, Keep, Sink, Source}
 
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
@@ -865,15 +865,24 @@ object UpdateWatermarkFlow {
 }
 
 object NotifyEventSignallerFlow {
-  def apply(eventSignaller: EventSignaller)(implicit
-      executionContext: ExecutionContext
+  def apply(
+      eventSignaller: EventSignaller
   ): Flow[Traced[BatchWritten], Traced[BatchWritten], NotUsed] =
-    Flow[Traced[BatchWritten]]
-      .mapAsync(1)(_.withTraceContext { implicit traceContext => batchWritten =>
-        eventSignaller.notifyOfLocalWrite(batchWritten.notifies) map { _ =>
-          Traced(batchWritten)
-        }
-      })
+    Flow[Traced[BatchWritten]].alsoTo(
+      // `alsoTo` propagates backpressure coming from the sink, but backpressure shouldn't happen
+      // because of the async+conflate construction
+      Flow[Traced[BatchWritten]]
+        .map(_.value.notifies)
+        // combine multiple event signals
+        .conflate(_ union _)
+        // decouple the main sequencer writer flow from the event notification
+        .async
+        .addAttributes(Attributes.inputBuffer(1, 1))
+        // this could also be dispatched in parallel
+        .map(eventSignaller.notifyOfLocalWrite)
+        .to(Sink.ignore)
+    )
+
 }
 
 object RecordWatermarkDelayMetricFlow {

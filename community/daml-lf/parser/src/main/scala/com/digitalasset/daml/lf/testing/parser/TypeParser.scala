@@ -54,7 +54,7 @@ private[parser] class TypeParser[P](parameters: ParserParameters[P]) {
     )
 
   private lazy val tForall: Parser[Type] =
-    `forall` ~>! rep1(typeBinder) ~ `.` ~ typ ^^ { case bs ~ _ ~ t => (bs foldRight t)(TForall) }
+    `forall` ~>! rep1(typeBinder) ~ `.` ~ typ ^^ { case bs ~ _ ~ t => (bs foldRight t)(TForall.apply) }
 
   private lazy val fieldType: Parser[(FieldName, Type)] =
     id ~ `:` ~ typ ^^ { case name ~ _ ~ t => name -> t }
@@ -71,11 +71,11 @@ private[parser] class TypeParser[P](parameters: ParserParameters[P]) {
       tForall |
       tStruct |
       tTypeSynApp |
-      (id ^? builtinTypes) ^^ TBuiltin |
+      (id ^? builtinTypes) ^^ TBuiltin.apply |
       fullIdentifier ^^ TTyCon.apply |
       id ^^ TVar.apply
 
-  private lazy val typ1: Parser[Type] = rep1(typ0) ^^ (_.reduceLeft(TApp))
+  private lazy val typ1: Parser[Type] = rep1(typ0) ^^ (_.reduceLeft(TApp.apply))
 
   lazy val typ: Parser[Type] = rep1sep(typ1, `->`) ^^ (_.reduceRight(TFun))
 

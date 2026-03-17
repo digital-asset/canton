@@ -679,6 +679,7 @@ class AvailabilityModuleOutputFetchTest
               val singleBatchMissingRequest = new BatchesRequest(
                 AnOrderedBlockForOutput,
                 missingBatches = mutable.SortedSet(ABatchId),
+                traceContext,
               )
 
               val outputFetchProtocolState = new MainOutputFetchProtocolState()
@@ -730,6 +731,7 @@ class AvailabilityModuleOutputFetchTest
               val multipleBatchMissingRequest = new BatchesRequest(
                 AnotherOrderedBlockForOutput,
                 missingBatches = mutable.SortedSet(ABatchId, AnotherBatchId),
+                traceContext,
               )
 
               val outputFetchProtocolState = new MainOutputFetchProtocolState()
@@ -788,7 +790,8 @@ class AvailabilityModuleOutputFetchTest
           availabilityStore = availabilityStore,
           output = fakeCellModule(expectedOutputCell),
         )
-        val request = new BatchesRequest(AnOrderedBlockForOutput, mutable.SortedSet(ABatchId))
+        val request =
+          new BatchesRequest(AnOrderedBlockForOutput, mutable.SortedSet(ABatchId), traceContext)
 
         availability.receive(
           Availability.LocalOutputFetch.FetchedBlockDataFromStorage(
@@ -842,6 +845,7 @@ class AvailabilityModuleOutputFetchTest
               mode = blockMode,
             ),
             mutable.SortedSet(ABatchId),
+            traceContext,
           )
           outputFetchProtocolState.pendingBatchesRequests.addOne(request)
 
@@ -892,6 +896,7 @@ class AvailabilityModuleOutputFetchTest
         val singleBatchMissingRequest = new BatchesRequest(
           AnOrderedBlockForOutput,
           missingBatches = mutable.SortedSet(ABatchId),
+          traceContext,
         )
         assertLogs(
           availability.receive(

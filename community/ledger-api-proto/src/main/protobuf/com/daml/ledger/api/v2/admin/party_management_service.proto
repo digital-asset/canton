@@ -110,6 +110,8 @@ message GetParticipantIdRequest {}
 message GetParticipantIdResponse {
   // Identifier of the participant, which SHOULD be globally unique.
   // Must be a valid LedgerString (as describe in ``value.proto``).
+  //
+  // Required
   string participant_id = 1;
 }
 
@@ -117,18 +119,22 @@ message GetParticipantIdResponse {
 message GetPartiesRequest {
   // The stable, unique identifier of the Daml parties.
   // Must be valid PartyIdStrings (as described in ``value.proto``).
-  // Required
+  //
+  // Required: must be non-empty
   repeated string parties = 1;
 
   // The id of the ``Identity Provider`` whose parties should be retrieved.
-  // Optional, if not set, assume the party is managed by the default identity provider or party is not hosted by the participant.
+  // If not set, assume the party is managed by the default identity provider or party is not hosted by the participant.
+  //
+  // Optional
   string identity_provider_id = 2;
 }
 
 message GetPartiesResponse {
   // The details of the requested Daml parties by the participant, if known.
   // The party details may not be in the same order as requested.
-  // Required
+  //
+  // Required: must be non-empty
   repeated PartyDetails party_details = 1;
 }
 
@@ -139,6 +145,7 @@ message ListKnownPartiesRequest {
   // between calls chained by a series of page tokens. As a consequence, if new parties are being added and a page is
   // requested twice using the same token, more parties can be returned on the second call.
   // Leave empty to fetch the first page.
+  //
   // Optional
   string page_token = 2;
 
@@ -146,27 +153,34 @@ message ListKnownPartiesRequest {
   // but it might return fewer. If the page_size is 0, the server will decide the number of results to be returned.
   // If the page_size exceeds the maximum supported by the server, an error will be returned. To obtain the server's
   // maximum consult the PartyManagementFeature descriptor available in the VersionService.
+  //
   // Optional
   int32 page_size = 3;
 
   // The id of the ``Identity Provider`` whose parties should be retrieved.
-  // Optional, if not set, assume the party is managed by the default identity provider or party is not hosted by the participant.
+  // If not set, assume the party is managed by the default identity provider or party is not hosted by the participant.
+  //
+  // Optional
   string identity_provider_id = 1;
 
   // An optional filter for the party name, searching for all party names known to this node
   // starting with the given prefix. This can either be just a string or extend up to the full
   // identifier.
+  //
   // Optional
   string filter_party = 4;
 }
 
 message ListKnownPartiesResponse {
   // The details of all Daml parties known by the participant.
-  // Required
+  //
+  // Required: must be non-empty
   repeated PartyDetails party_details = 1;
 
   // Pagination token to retrieve the next page.
   // Empty, if there are no further results.
+  //
+  // Optional
   string next_page_token = 2;
 }
 
@@ -176,32 +190,41 @@ message AllocatePartyRequest {
   // A hint to the participant which party ID to allocate. It can be
   // ignored.
   // Must be a valid PartyIdString (as described in ``value.proto``).
+  //
   // Optional
   string party_id_hint = 1;
 
   reserved 2; // Formerly "display_name"
 
   // Participant-local metadata to be stored in the ``PartyDetails`` of this newly allocated party.
+  //
   // Optional
   ObjectMeta local_metadata = 3;
 
   // The id of the ``Identity Provider``
-  // Optional, if not set, assume the party is managed by the default identity provider or party is not hosted by the participant.
+  // If not set, assume the party is managed by the default identity provider or party is not hosted by the participant.
+  //
+  // Optional
   string identity_provider_id = 4;
 
   // The synchronizer, on which the party should be allocated.
   // For backwards compatibility, this field may be omitted, if the participant is connected to only one synchronizer.
   // Otherwise a synchronizer must be specified.
+  //
   // Optional
   string synchronizer_id = 5;
 
   // The user who will get the act_as rights to the newly allocated party.
   // If set to an empty string (the default), no user will get rights to the party.
+  //
   // Optional
   string user_id = 6;
 }
 
 message AllocatePartyResponse {
+  // The allocated party details
+  //
+  // Required
   PartyDetails party_details = 1;
 }
 
@@ -210,17 +233,23 @@ message AllocatePartyResponse {
 message AllocateExternalPartyRequest {
   message SignedTransaction {
     // The serialized TopologyTransaction
+    //
+    // Required: must be non-empty
     bytes transaction = 1;
     // Additional signatures for this transaction specifically
     // Use for transactions that require additional signatures beyond the namespace key signatures
     // e.g: PartyToKeyMapping must be signed by all registered keys
+    //
+    // Optional: can be empty
     repeated Signature signatures = 2;
   }
 
   // TODO(#27670) support synchronizer aliases
   // Synchronizer ID on which to onboard the party
+  //
   // Required
   string synchronizer = 1;
+
   // TopologyTransactions to onboard the external party
   // Can contain:
   // - A namespace for the party.
@@ -231,15 +260,19 @@ message AllocateExternalPartyRequest {
   // May be provided, if so it must be fully authorized by the signatures in this request combined with the existing topology state.
   // - A PartyToParticipant to register the hosting relationship of the party.
   // Must be provided.
-  // Required
+  //
+  // Required: must be non-empty
   repeated SignedTransaction onboarding_transactions = 2;
 
   // Optional signatures of the combined hash of all onboarding_transactions
   // This may be used instead of providing signatures on each individual transaction
+  //
+  // Optional: can be empty
   repeated Signature multi_hash_signatures = 3;
 
   // The id of the ``Identity Provider``
   // If not set, assume the party is managed by the default identity provider.
+  //
   // Optional
   string identity_provider_id = 4;
 
@@ -248,24 +281,30 @@ message AllocateExternalPartyRequest {
   // This is a best effort only as this synchronization is only possible for non decentralized parties (single hosting node).
   // For decentralized parties, this flag is ignored.
   // Defaults to true.
+  //
   // Optional
   optional bool wait_for_allocation = 5;
 
   // The user who will get the act_as rights to the newly allocated party.
   // If set to an empty string (the default), no user will get rights to the party.
+  //
   // Optional
   string user_id = 6;
 }
 
 message AllocateExternalPartyResponse {
+  // The allocated party id
+  //
+  // Required
   string party_id = 1;
 }
 
 // Required authorization: ``HasRight(ParticipantAdmin) OR IsAuthenticatedIdentityProviderAdmin(party_details.identity_provider_id)``
 message UpdatePartyDetailsRequest {
   // Party to be updated
-  // Required,
   // Modifiable
+  //
+  // Required
   PartyDetails party_details = 1;
 
   // An update mask specifies how and which properties of the ``PartyDetails`` message are to be updated.
@@ -288,28 +327,34 @@ message UpdatePartyDetailsRequest {
   // Examples of update paths: 'local_metadata.annotations', 'local_metadata'.
   // For additional information see the documentation for standard protobuf3's ``google.protobuf.FieldMask``.
   // For similar Ledger API see ``com.daml.ledger.api.v2.admin.UpdateUserRequest``.
+  //
   // Required
   google.protobuf.FieldMask update_mask = 2;
 }
 
 message UpdatePartyDetailsResponse {
   // Updated party details
+  //
+  // Required
   PartyDetails party_details = 1;
 }
 
 message PartyDetails {
   // The stable unique identifier of a Daml party.
   // Must be a valid PartyIdString (as described in ``value.proto``).
+  //
   // Required
   string party = 1;
 
   // true if party is hosted by the participant and the party shares the same identity provider as the user issuing the request.
+  //
   // Optional
   bool is_local = 3;
 
   // Participant-local metadata of this party.
-  // Optional,
   // Modifiable
+  //
+  // Optional
   ObjectMeta local_metadata = 4;
 
   // The id of the ``Identity Provider``
@@ -318,50 +363,89 @@ message PartyDetails {
   // 1. the party is managed by the default identity provider.
   // 2. party is not hosted by the participant.
   // 3. party is hosted by the participant, but is outside of the user's identity provider.
+  //
+  // Optional
   string identity_provider_id = 5;
 }
 
 // Required authorization: ``HasRight(ParticipantAdmin)``
 message UpdatePartyIdentityProviderIdRequest {
   // Party to update
+  //
+  // Required
   string party = 1;
   // Current identity provider id of the party
+  //
+  // Optional
   string source_identity_provider_id = 2;
   // Target identity provider id of the party
+  //
+  // Optional
   string target_identity_provider_id = 3;
 }
 
 message UpdatePartyIdentityProviderIdResponse {}
 
 message GenerateExternalPartyTopologyRequest {
+  // Synchronizer-id for which we are building this request.
   // TODO(#27670) support synchronizer aliases
-  // Required: synchronizer-id for which we are building this request.
+  //
+  // Required
   string synchronizer = 1;
-  // Required: the actual party id will be constructed from this hint and a fingerprint of the public key
+
+  // The actual party id will be constructed from this hint and a fingerprint of the public key
+  //
+  // Required
   string party_hint = 2;
-  // Required: public key
+
+  // Public key
+  //
+  // Required
   com.daml.ledger.api.v2.SigningPublicKey public_key = 3;
-  // Optional: if true, then the local participant will only be observing, not confirming. Default false.
+
+  // If true, then the local participant will only be observing, not confirming. Default false.
+  //
+  // Optional
   bool local_participant_observation_only = 4;
-  // Optional: other participant ids which should be confirming for this party
+
+  // Other participant ids which should be confirming for this party
+  //
+  // Optional: can be empty
   repeated string other_confirming_participant_uids = 5;
-  // Optional: Confirmation threshold >= 1 for the party. Defaults to all available confirmers (or if set to 0).
+
+  // Confirmation threshold >= 1 for the party. Defaults to all available confirmers (or if set to 0).
+  //
+  // Optional
   uint32 confirmation_threshold = 6;
-  // Optional: other observing participant ids for this party
+
+  // Other observing participant ids for this party
+  //
+  // Optional: can be empty
   repeated string observing_participant_uids = 7;
 }
 
 // Response message with topology transactions and the multi-hash to be signed.
 message GenerateExternalPartyTopologyResponse {
-  // the generated party id
+  // The generated party id
+  //
+  // Required
   string party_id = 1;
-  // the fingerprint of the supplied public key
+
+  // The fingerprint of the supplied public key
+  //
+  // Required
   string public_key_fingerprint = 2;
+
   // The serialized topology transactions which need to be signed and submitted as part of the allocate party process
   // Note that the serialization includes the versioning information. Therefore, the transaction here is serialized
   // as an `UntypedVersionedMessage` which in turn contains the serialized `TopologyTransaction` in the version
   // supported by the synchronizer.
+  //
+  // Required: must be non-empty
   repeated bytes topology_transactions = 3;
+
   // the multi-hash which may be signed instead of each individual transaction
+  //
+  // Required: must be non-empty
   bytes multi_hash = 4;
 }

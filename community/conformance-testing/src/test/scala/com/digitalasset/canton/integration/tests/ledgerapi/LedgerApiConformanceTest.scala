@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.ledgerapi
 
+import com.digitalasset.canton.annotations.{NuckTest, RollbackTest}
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.*
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
@@ -203,7 +204,6 @@ object LedgerApiConformanceBase {
     "InteractiveSubmissionServiceIT:ISSPrepareSubmissionRequestWithoutCostEstimation",
   )
   val excludedTests = Seq(
-    "ClosedWorldIT", // Canton errors with "Some(Disputed: unable to parse party id 'unallocated': FailedSimpleStringConversion(LfError(Invalid unique identifier missing namespace unallocated)))"
     // Exclude tests which are run separately below
     "ParticipantPruningIT",
     "TLSOnePointThreeIT",
@@ -248,11 +248,18 @@ abstract class LedgerApiShardedConformanceBase(shard: Int)
     }
   }
 }
+
+@RollbackTest
 class LedgerApiShard0ConformanceTestPostgres extends LedgerApiShardedConformanceBase(0)
+@RollbackTest
 class LedgerApiShard1ConformanceTestPostgres extends LedgerApiShardedConformanceBase(1)
+@RollbackTest
 class LedgerApiShard2ConformanceTestPostgres extends LedgerApiShardedConformanceBase(2)
+@RollbackTest
 class LedgerApiShard3ConformanceTestPostgres extends LedgerApiShardedConformanceBase(3)
+@RollbackTest
 class LedgerApiShard4ConformanceTestPostgres extends LedgerApiShardedConformanceBase(4)
+@RollbackTest
 class LedgerApiShard5ConformanceTestPostgres extends LedgerApiShardedConformanceBase(5)
 
 // Conformance test that need a suppressing rule on canton side
@@ -366,6 +373,8 @@ trait LedgerApiExperimentalConformanceTest extends SingleVersionLedgerApiConform
 
 // not testing in-memory/H2, as we have observed flaky h2 persistence problems in the indexer
 
+@NuckTest
+@RollbackTest
 class LedgerApiExperimentalConformanceTest_Postgres extends LedgerApiExperimentalConformanceTest {
   registerPlugin(new UsePostgres(loggerFactory))
   // On registerPlugin(new UseBftSequencer(loggerFactory)) PrefetchContractKeysIT fails with

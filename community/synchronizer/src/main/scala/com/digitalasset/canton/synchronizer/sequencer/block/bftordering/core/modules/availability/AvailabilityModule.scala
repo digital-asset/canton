@@ -19,7 +19,6 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
   HasDelayedInit,
   shortType,
 }
-import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.Env
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.{
   BftNodeId,
   BlockNumber,
@@ -57,6 +56,10 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   Output,
   P2PNetworkOut,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.{
+  CancellableEvent,
+  Env,
+}
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.BftNodeShuffler
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.time.Clock
@@ -68,7 +71,7 @@ import io.opentelemetry.api.trace.Tracer
 
 import java.time.Instant
 import scala.collection.mutable
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.*
 import scala.util.{Failure, Random, Success, Try}
 
 import AvailabilityModuleMetrics.{emitDisseminationStateStats, emitInvalidMessage}
@@ -121,6 +124,11 @@ final class AvailabilityModule[E <: Env[E]](
 
   private val spanManager = new AvailabilityModuleSpanManager()
 
+  // TODO(#27806): make this dynamic
+  private val proposalResponseInterval: FiniteDuration = 50.millis
+  @SuppressWarnings(Array("org.wartremover.warts.Var"))
+  private var proposeResponseCancellableEvent: Option[CancellableEvent] = None
+
   disseminationProtocolState.lastProposalTime = Some(clock.now)
 
   @VisibleForTesting
@@ -149,6 +157,9 @@ final class AvailabilityModule[E <: Env[E]](
 
           case message: Availability.LocalProtocolMessage[E] =>
             handleLocalProtocolMessage(message)
+
+          case Availability.DelayedProposalResponse =>
+            delayedProposalResponse(shortType(message))
 
           case message: Availability.RemoteProtocolMessage =>
             handleRemoteProtocolMessage(message)
@@ -339,7 +350,20 @@ final class AvailabilityModule[E <: Env[E]](
             progress.addAck(AvailabilityAck(from, signature)),
           )
         }
-        attemptSatisfyingProposalRequest(actingOnMessageType)
+
+        proposeResponseCancellableEvent match {
+          case None => attemptSatisfyingProposalRequest(actingOnMessageType)
+          case Some(cancellable) =>
+            val reachedMaxBatchesReady =
+              disseminationProtocolState.nextToBeProvidedToConsensus.maxBatchesPerProposal.exists(
+                _ <= disseminationProtocolState.disseminationCompleteView.size
+              )
+            if (reachedMaxBatchesReady) {
+              cancellable.cancel().discard
+              proposeResponseCancellableEvent = None
+              attemptSatisfyingProposalRequest(actingOnMessageType)
+            }
+        }
     }
   }
 
@@ -461,7 +485,8 @@ final class AvailabilityModule[E <: Env[E]](
             )
           }
         // Storing and signing a batch can make it ready for ordering if F == 0
-        attemptSatisfyingProposalRequest(actingOnMessageType)
+        if (proposeResponseCancellableEvent.isEmpty)
+          attemptSatisfyingProposalRequest(actingOnMessageType)
     }
   }
 
@@ -616,8 +641,28 @@ final class AvailabilityModule[E <: Env[E]](
       topologyChangedSinceLastProposalRequest = false
     }
 
+    // if we have enough batches ready to reach the max batches per proposal, we just respond
+    // otherwise we delay the response a bit to allow more batches to become ready
+    val numberOfAvailableBatches = disseminationProtocolState.disseminationCompleteView.size
+    if (
+      newNextToBeProvidedToConsensus.maxBatchesPerProposal.exists(_ <= numberOfAvailableBatches)
+    ) {
+      attemptSatisfyingProposalRequest(shortType(actingOnMessageType))
+    } else {
+      val cancellableEvent =
+        context.delayedEvent(proposalResponseInterval, Availability.DelayedProposalResponse)
+      proposeResponseCancellableEvent = Some(cancellableEvent)
+    }
+  }
+
+  private def delayedProposalResponse(message: String)(implicit
+      context: E#ActorContextT[Availability.Message[E]],
+      traceContext: TraceContext,
+  ): Unit = {
+    proposeResponseCancellableEvent.foreach(_.cancel())
+    proposeResponseCancellableEvent = None
     // When we receive a proposal request, we notify consensus if there is nothing to propose yet
-    attemptSatisfyingProposalRequest(actingOnMessageType, notifyConsensusIfNoReadyBatches = true)
+    attemptSatisfyingProposalRequest(message, notifyConsensusIfNoReadyBatches = true)
   }
 
   private def updateActiveMembership(
@@ -925,7 +970,8 @@ final class AvailabilityModule[E <: Env[E]](
 
       case Availability.LocalOutputFetch.FetchBlockData(blockForOutput) =>
         val batchIdsToFind = blockForOutput.orderedBlock.batchRefs.map(_.batchId)
-        val request = new BatchesRequest(blockForOutput, mutable.SortedSet.from(batchIdsToFind))
+        val request =
+          new BatchesRequest(blockForOutput, mutable.SortedSet.from(batchIdsToFind), traceContext)
         outputFetchProtocolState.pendingBatchesRequests.append(request)
         fetchBatchesForOutputRequest(request)
 
@@ -972,9 +1018,12 @@ final class AvailabilityModule[E <: Env[E]](
             batches.foreach { case (batchId, _) =>
               disseminationProtocolState.disseminationQuotas.removeOrderedBatch(batchId)
             }
-            dependencies.output.asyncSend(
-              Output.BlockDataFetched(CompleteBlockData(request.blockForOutput, batches))
-            )
+            locally {
+              implicit val traceContext: TraceContext = request.traceContext
+              dependencies.output.asyncSend(
+                Output.BlockDataFetched(CompleteBlockData(request.blockForOutput, batches))
+              )
+            }
         }
         outputFetchProtocolState.removeRequestsWithNoMissingBatches()
 

@@ -97,6 +97,7 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
   val withKeyContractInst: FatContractInstance =
     TransactionBuilder.fatContractInstanceWithDummyDefaults(
       version = version,
+      contractId = toContractId("BasicTests:WithKey:1"),
       packageName = basicTestsPkg.pkgName,
       template = TypeConId(basicTestsPkgId, withKeyTemplate),
       arg = ValueRecord(
@@ -136,8 +137,7 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
           ),
           signatories = List(alice),
         ),
-      toContractId("BasicTests:WithKey:1") ->
-        withKeyContractInst,
+      withKeyContractInst.contractId -> withKeyContractInst,
     )
 
   val defaultKey = {
@@ -158,11 +158,12 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
         ),
       )
         ->
-          toContractId("BasicTests:WithKey:1")
+          Vector(withKeyContractInst)
     )
   }
 
-  private[this] val lookupKey: PartialFunction[GlobalKeyWithMaintainers, ContractId] = {
+  private[this] val lookupKey
+      : PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] = {
     case GlobalKeyWithMaintainers(
           GlobalKey(
             BasicTests_WithKey,
@@ -170,7 +171,7 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
           ),
           _,
         ) =>
-      toContractId("BasicTests:WithKey:1")
+      Vector(withKeyContractInst)
   }
 
   "contract key" should {
@@ -215,6 +216,7 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
+          contractStateMode = ContractStateMachine.Mode.devDefault,
         )
         .consume(pkgs = allPackages, keys = lookupKey)
       result shouldBe a[Right[_, _]]
@@ -245,6 +247,7 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
+          contractStateMode = ContractStateMachine.Mode.devDefault,
         )
         .consume(pkgs = allPackages, keys = lookupKey)
       result shouldBe a[Left[_, _]]
@@ -278,6 +281,7 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
           preparationTime = now,
           seeding = InitialSeeding.TransactionSeed(txSeed),
           contractIdVersion = contractIdVersion,
+          contractStateMode = ContractStateMachine.Mode.devDefault,
         )
         .consume(pkgs = allPackages, keys = lookupKey)
 
@@ -293,17 +297,9 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
     // but can be changed freely.
     "multi keys" should {
       import com.digitalasset.daml.lf.language.{LanguageVersion => LV}
-      val nonUckEngine = new Engine(
+      val engine = new Engine(
         EngineConfig(
           allowedLanguageVersions = LV.allLfVersionsRange,
-          contractStateMode = ContractStateMachine.Mode.LegacyNUCK,
-          forbidLocalContractIds = true,
-        )
-      )
-      val uckEngine = new Engine(
-        EngineConfig(
-          allowedLanguageVersions = LV.allLfVersionsRange,
-          contractStateMode = ContractStateMachine.Mode.UCKWithRollback,
           forbidLocalContractIds = true,
         )
       )
@@ -318,8 +314,9 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
 
       val cid1 = toContractId("1")
       val cid2 = toContractId("2")
-      val keyedInst = TransactionBuilder.fatContractInstanceWithDummyDefaults(
+      def keyedInst(cid: ContractId) = TransactionBuilder.fatContractInstanceWithDummyDefaults(
         version = version,
+        contractId = cid,
         packageName = multiKeysPkg.pkgName,
         template = TypeConId(multiKeysPkgId, "MultiKeys:Keyed"),
         arg = ValueRecord(None, ImmArray((None, ValueParty(party)))),
@@ -340,12 +337,19 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
           )
         ),
       )
-      val contracts = Map(cid1 -> keyedInst, cid2 -> keyedInst)
-      val lookupKey: PartialFunction[GlobalKeyWithMaintainers, ContractId] = {
-        case GlobalKeyWithMaintainers(GlobalKey(`keyedId`, ValueParty(`party`)), _) => cid1
+      val contracts =
+        List(keyedInst(cid1), keyedInst(cid2)).map(inst => inst.contractId -> inst).toMap
+      val lookupKey: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] = {
+        case GlobalKeyWithMaintainers(GlobalKey(`keyedId`, ValueParty(`party`)), _) =>
+          Vector(keyedInst(cid1))
       }
 
-      def run(engine: Engine, choice: String, argument: Value) = {
+      def run(
+          engine: Engine,
+          choice: String,
+          argument: Value,
+          contractStateMode: ContractStateMachine.Mode,
+      ) = {
         val cmd = ApiCommand.CreateAndExercise(
           opsId.toRef,
           ValueRecord(None, ImmArray((None, ValueParty(party)))),
@@ -365,6 +369,7 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
             preparationTime = let,
             seeding = seeding,
             contractIdVersion = contractIdVersion,
+            contractStateMode = contractStateMode,
           )
           .consume(contracts, pkgs = allMultiKeysPkgs, keys = lookupKey)
       }
@@ -458,21 +463,23 @@ class ContractKeySpec(majorLanguageVersion: LanguageVersion.Major)
 
       // TEST_EVIDENCE: Integrity: contract key behaviour (non-unique mode)
       "non-uck mode" in {
+        val contractStateMode = ContractStateMachine.Mode.LegacyNUCK
         forEvery(allCases) { case (name, arg) =>
           if (nonUckFailures.contains(name)) {
-            run(nonUckEngine, name, arg) shouldBe a[Left[_, _]]
+            run(engine, name, arg, contractStateMode) shouldBe a[Left[_, _]]
           } else {
-            run(nonUckEngine, name, arg) shouldBe a[Right[_, _]]
+            run(engine, name, arg, contractStateMode) shouldBe a[Right[_, _]]
           }
         }
       }
       // TEST_EVIDENCE: Integrity: contract key behaviour (unique mode)
       "uck mode" in {
+        val contractStateMode = ContractStateMachine.Mode.UCKWithRollback
         forEvery(allCases) { case (name, arg) =>
           if (uckFailures.contains(name)) {
-            run(uckEngine, name, arg) shouldBe a[Left[_, _]]
+            run(engine, name, arg, contractStateMode) shouldBe a[Left[_, _]]
           } else {
-            run(uckEngine, name, arg) shouldBe a[Right[_, _]]
+            run(engine, name, arg, contractStateMode) shouldBe a[Right[_, _]]
           }
         }
       }

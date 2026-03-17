@@ -17,9 +17,13 @@ import com.digitalasset.canton.integration.plugins.{
 }
 import com.digitalasset.canton.integration.util.EntitySyntax
 import com.digitalasset.canton.logging.{LogEntry, SuppressionRule}
+import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.protocol.TransactionProcessor
-import com.digitalasset.canton.synchronizer.sequencer.{HasProgrammableSequencer, SequencerReader}
-import monocle.macros.syntax.lens.*
+import com.digitalasset.canton.synchronizer.sequencer.{
+  AnnouncedLsu,
+  HasProgrammableSequencer,
+  SequencerReader,
+}
 import org.slf4j.event.Level
 
 import scala.concurrent.Future
@@ -51,11 +55,6 @@ final class UpgradeTimeOldSynchronizerIntegrationTest
   override lazy val environmentDefinition: EnvironmentDefinition =
     EnvironmentDefinition.P1_S1M1
       .addConfigTransforms(ConfigTransforms.useStaticTime)
-      .addConfigTransform(
-        ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.parameters.automaticallyPerformLsu).replace(false)
-        )
-      )
 
   "Upgrade time on old synchronizer" should {
     "is respected by sequencers and participants" in { implicit env =>
@@ -122,7 +121,9 @@ final class UpgradeTimeOldSynchronizerIntegrationTest
 
       loggerFactory.assertEventuallyLogsSeq(
         (SuppressionRule.Level(Level.INFO) && SuppressionRule.forLogger[SequencerReader])
+          || (SuppressionRule.Level(Level.INFO) && SuppressionRule.forLogger[AnnouncedLsu])
           || (SuppressionRule.Level(Level.WARN) && SuppressionRule.forLogger[TransactionProcessor])
+          || (SuppressionRule.Level(Level.ERROR) && SuppressionRule.forLogger[RecordOrderPublisher])
       )(
         {
           // asynchronously launch a ping. unfortunately, the action passed to assertEventuallyLogsSeq must be a type other than
@@ -134,28 +135,43 @@ final class UpgradeTimeOldSynchronizerIntegrationTest
               .void
           )
         },
-        LogEntry.assertLogSeq(
-          Seq(
-            (
-              _.infoMessage should include(
-                s"Computed synchronizer upgrade time offset: 1m"
-              ),
-              "upgrade time offset computation",
-            ),
-            (
-              _.infoMessage should include(
-                "Delivering an empty event instead of the original, because it was sequenced at or after the upgrade time."
-              ),
-              "event after upgrade time warning",
-            ),
-            (
-              _.warningMessage should include(
-                "Submission timed out at 1970-01-01T00:02"
-              ),
-              "immediate timeout due to upgrade time offset",
-            ),
+        logs => {
+          // We expect exactly 1 attempt of automatic LSU
+          forExactly(1, logs)(
+            _.errorMessage should include(
+              "failed: No sequencer successor was found"
+            )
           )
-        ),
+
+          LogEntry.assertLogSeq(
+            Seq(
+              (
+                _.infoMessage should include(
+                  s"Computed synchronizer upgrade time offset: 1m"
+                ),
+                "upgrade time offset computation",
+              ),
+              (
+                _.infoMessage should include(
+                  "Delivering an empty event instead of the original, because it was sequenced at or after the upgrade time."
+                ),
+                "event after upgrade time warning",
+              ),
+              (
+                _.warningMessage should include(
+                  "Submission timed out at 1970-01-01T00:02"
+                ),
+                "immediate timeout due to upgrade time offset",
+              ),
+              (
+                _.errorMessage should include(
+                  "failed: No sequencer successor was found"
+                ),
+                "automatic upgrade error due to sequencer successor missing",
+              ),
+            )
+          )(logs)
+        },
       )
 
       pingF.futureValue shouldBe None

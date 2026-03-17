@@ -10,7 +10,7 @@ import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.{CostModel => _, _}
-import com.digitalasset.daml.lf.interpretation.{Error => IError}
+import com.digitalasset.daml.lf.interpretation.{NeedKeyContinuationToken, Error => IError}
 import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.language.PackageInterface
 import com.digitalasset.daml.lf.speedy.Compiler.{CompilationError, PackageNotFound}
@@ -331,35 +331,25 @@ private[lf] object Speedy {
         )
       )
 
-    final private[speedy] def needKey(
+    final private[speedy] def needKeys(
         location: => String,
         key: GlobalKeyWithMaintainers,
-        continue: Option[V.ContractId] => (Control[Question.Update], Boolean),
-    ): Control.Question[Question.Update] =
-      Control.Question(
-        Question.Update.NeedKey(
-          key,
-          committers,
-          { result =>
-            try {
-              val (control, bool) = continue(result)
-              setControl(control)
-              bool
-            } catch {
-              case NonFatal(e) =>
-                setControl(
-                  Control.Expression(
-                    SExpr.SEDelayedCrash(
-                      location = location,
-                      reason =
-                        s"unexpected exception $e when running continuation of question NeedKey",
-                    )
-                  )
-                )
-                false
-            }
-          },
-        )
+        n: Int,
+        continuationToken: Option[NeedKeyContinuationToken],
+    ): ContU[(Vector[FatContractInstance], Option[NeedKeyContinuationToken])] =
+      cats.data.ContT(
+        (k: (
+            (Vector[FatContractInstance], Option[NeedKeyContinuationToken])
+        ) => Control[Question.Update]) =>
+          Control.Question(
+            Question.Update.NeedKey(
+              key,
+              n,
+              continuationToken,
+              committers,
+              (result, tokenOpt) => safelyContinue(location, "NeedKey", k((result, tokenOpt))),
+            )
+          )
       )
 
     private[speedy] def lookupContract(coid: V.ContractId)(
@@ -556,7 +546,7 @@ private[lf] object Speedy {
         NameOf.qualifiedNameOfCurrentFunc,
         numInputContracts,
         limits.transactionInputContracts,
-        IError.Dev.Limit.TransactionInputContracts,
+        IError.Dev.Limit.TransactionInputContracts.apply,
       )
     }
 
@@ -679,27 +669,27 @@ private[lf] object Speedy {
 
     @throws[SErrorDamlException]
     def apply(
-               compiledPackages: CompiledPackages,
-               preparationTime: Time.Timestamp,
-               initialSeeding: InitialSeeding,
-               expr: SExpr,
-               committers: Set[Party],
-               readAs: Set[Party],
-               authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
-               iterationsBetweenInterruptions: Long = UpdateMachine.iterationsBetweenInterruptions,
-               packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
-               validating: Boolean = false,
-               traceLog: TraceLog = newTraceLog,
-               warningLog: WarningLog = newWarningLog,
-               contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoContractKey,
-               contractIdVersion: ContractIdVersion = ContractIdVersion.V1,
-               commitLocation: Option[Location] = None,
-               limits: interpretation.Limits = interpretation.Limits.Lenient,
-               costModel: CostModel = CostModel.Empty,
-               initialGasBudget: Option[CostModel.Cost] = None,
-               initialEnvSize: Int = 512,
-               initialKontStackSize: Int = 128,
-               metricPlugins: Seq[MetricPlugin] = Seq.empty,
+        compiledPackages: CompiledPackages,
+        preparationTime: Time.Timestamp,
+        initialSeeding: InitialSeeding,
+        expr: SExpr,
+        committers: Set[Party],
+        readAs: Set[Party],
+        authorizationChecker: AuthorizationChecker = DefaultAuthorizationChecker,
+        iterationsBetweenInterruptions: Long = UpdateMachine.iterationsBetweenInterruptions,
+        packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
+        validating: Boolean = false,
+        traceLog: TraceLog = newTraceLog,
+        warningLog: WarningLog = newWarningLog,
+        contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.NoContractKey,
+        contractIdVersion: ContractIdVersion = ContractIdVersion.V1,
+        commitLocation: Option[Location] = None,
+        limits: interpretation.Limits = interpretation.Limits.Lenient,
+        costModel: CostModel = CostModel.Empty,
+        initialGasBudget: Option[CostModel.Cost] = None,
+        initialEnvSize: Int = 512,
+        initialKontStackSize: Int = 128,
+        metricPlugins: Seq[MetricPlugin] = Seq.empty,
     )(implicit loggingContext: LoggingContext): UpdateMachine =
       new UpdateMachine(
         sexpr = expr,
@@ -912,7 +902,7 @@ private[lf] object Speedy {
     private[speedy] final val kontStack: Stack[Kont[Q]] = {
       updateGasBudget(_.KontStackIncrease.cost(initialKontStackSize))
       val kontStack = new Stack[Kont[Q]](initialKontStackSize)
-      kontStack.push(KPure(Control.Complete)) // stack is not full, no need to check
+      kontStack.push(KPure(Control.Complete.apply)) // stack is not full, no need to check
       kontStack
     }
     /* The last encountered location */
@@ -1091,7 +1081,7 @@ private[lf] object Speedy {
       setControl(Control.Expression(expr))
       clearEnv()
       clearKontStack()
-      kontStack.push(KPure(Control.Complete))
+      kontStack.push(KPure(Control.Complete.apply))
       envBase = 0
       interruptionCountDown = iterationsBetweenInterruptions
       track.reset()
@@ -1424,6 +1414,10 @@ private[lf] object Speedy {
     final case class Complete(res: SValue) extends Control[Nothing]
     final case class Error(err: interpretation.Error) extends Control[Nothing]
     final case object WeAreUnset extends Control[Nothing]
+
+    implicit object `Defer Control` extends cats.Defer[Control] {
+      override def defer[A](x: => Control[A]): Control[A] = x
+    }
   }
 
   /** Kont, or continuation. Describes the next step for the machine
@@ -1706,7 +1700,7 @@ private[lf] object Speedy {
     * not executed.  When a throw is executed, the kont-stack is unwound to the nearest
     * enclosing KTryCatchV1Handler (if there is one), and the code for the handler executed.
     */
-  private[speedy] final case class KTryCatchV1Handler private(
+  private[speedy] final case class KTryCatchV1Handler private (
       machine: UpdateMachine,
       savedBase: Int,
       frame: Frame,
@@ -1818,6 +1812,29 @@ private[lf] object Speedy {
       machine.updateGasBudget(_.KConvertingException.cost)
       Control.Value(v)
     }
+  }
+
+  import cats.data.ContT
+
+  type Cont[Q, X] = ContT[Control, Q, X]
+  type ContU[X] = Cont[Question.Update, X]
+
+  object ContU {
+    def pure[A](a: A): Cont[Question.Update, A] = ContT.pure(a)
+
+    def wrap0(f: (() => Control[Question.Update]) => Control[Question.Update]): ContU[Unit] =
+      ContT(k => f(() => k(())))
+
+    def wrap1[A](f: (A => Control[Question.Update]) => Control[Question.Update]): ContU[A] = ContT(
+      f
+    )
+
+    def wrap2[A, B](
+        f: ((A, B) => Control[Question.Update]) => Control[Question.Update]
+    ): ContU[(A, B)] = ContT(k => f((a, b) => k((a, b))))
+
+    def throwError[A](err: interpretation.Error): ContU[A] =
+      wrap1[A](_ => Control.Error(err))
   }
 
 }

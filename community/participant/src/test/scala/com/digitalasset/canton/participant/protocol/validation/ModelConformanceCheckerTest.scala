@@ -183,6 +183,7 @@ class ModelConformanceCheckerTest
     val damlE: DAMLe = new DAMLe(
       resolvePackage = testEngine.packageResolver,
       engine = testEngine.engine,
+      contractStateMode = ContractStateMachine.Mode.default,
       engineLoggingConfig = EngineLoggingConfig(),
       loggerFactory = loggerFactory,
       participantId = participantId,

@@ -180,7 +180,7 @@ object CreationTime {
 
   def decode(encoded: Long): Either[String, CreationTime] =
     if (encoded == Long.MinValue) Right(Now)
-    else Time.Timestamp.fromLong(encoded).map(CreatedAt)
+    else Time.Timestamp.fromLong(encoded).map(CreatedAt.apply)
 
   def assertDecode(encoded: Long): CreationTime =
     data.assertRight(decode(encoded))

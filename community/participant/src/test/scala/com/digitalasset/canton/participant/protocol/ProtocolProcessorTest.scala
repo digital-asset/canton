@@ -53,8 +53,8 @@ import com.digitalasset.canton.participant.protocol.submission.*
 import com.digitalasset.canton.participant.protocol.submission.InFlightSubmissionTracker.UnsequencedSubmissionMap
 import com.digitalasset.canton.participant.store.memory.*
 import com.digitalasset.canton.participant.store.{SyncPersistentState, *}
-import com.digitalasset.canton.participant.sync.SyncEphemeralState
 import com.digitalasset.canton.participant.sync.SyncServiceError.SyncServiceAlarm
+import com.digitalasset.canton.participant.sync.{SyncEphemeralState, SynchronizerConnectionsManager}
 import com.digitalasset.canton.participant.{
   DefaultParticipantStateValues,
   ParticipantNodeParameters,
@@ -318,6 +318,7 @@ class ProtocolProcessorTest
       loggerFactory = loggerFactory,
       futureSupervisor = futureSupervisor,
       clock = clock,
+      performLsu = SynchronizerConnectionsManager.NoAutomaticLsuHandler(logger),
     )
     val unseqeuncedSubmissionMap = new UnsequencedSubmissionMap[SubmissionTrackingData](
       psid,

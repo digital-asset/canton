@@ -667,8 +667,8 @@ final class BftBlockOrderer(
       // Shutdown the server-authenticating server-side filter early (as it's also a client of the auth service),
       //  if authentication is enabled.
       (maybeServerAuthenticatingFilter.map(_.closeAsync()).getOrElse(Seq.empty) ++
+        blockSubscription.closeAsync() ++
         Seq[AsyncOrSyncCloseable](
-          SyncCloseable("blockSubscription.close()", blockSubscription.close()),
           SyncCloseable("epochStore.close()", epochStore.close()),
           SyncCloseable("outputStore.close()", outputStore.close()),
           SyncCloseable("availabilityStore.close()", availabilityStore.close()),

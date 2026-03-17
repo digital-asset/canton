@@ -8,8 +8,7 @@ import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.language.Ast.Package
 import com.digitalasset.daml.lf.speedy.{Compiler, SDefinition, SExpr}
 
-/** Trait that extends [[CompiledPackages]] with the ability to
-  * add new packages.
+/** Trait that extends CompiledPackages with the ability to add new packages.
   */
 abstract class MutableCompiledPackages(compilerConfig: Compiler.Config)
     extends CompiledPackages(compilerConfig) {

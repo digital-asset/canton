@@ -219,6 +219,14 @@ private[availability] trait AvailabilityModuleTestUtils { self: BftSequencerBase
     )
   protected val ABatchDisseminationProgressNode0And1WithNode0Vote =
     ABatchId -> ADisseminationProgressNode0And1WithNode0Vote
+  protected val ANonEmptyBatchIdDisseminationProgressNode0And1WithNode0Vote =
+    ANonEmptyBatchId -> DisseminationStatus.InProgress(
+      membership = Membership.forTesting(Node0, OrderingTopologyNodes0And1),
+      Traced(ANonEmptyBatchId),
+      acks = Node0Acks,
+      epochNumber = anEpochNumber,
+      stats = ANonEmptyBatch.stats,
+    )
   protected val ABatchDisseminationProgressNode0To3WithNode0Vote =
     ABatchId -> ADisseminationProgressNode0To3WithNode0Vote
   protected val ABatchDisseminationProgressNode0To6WithNode0Vote =

@@ -147,9 +147,15 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
 
       forEvery(testCases) { (i, succeed) =>
         val (signatories, observers) = committers.splitAt(i)
-        val contract = mkContract(signatories, observers)
+        val contract = mkContract(aCid, signatories, observers)
         val result =
-          eval(limits, Map(aCid -> contract), signatories, e, SValue.SContractId(aCid))
+          eval(
+            limits,
+            Map(contract.contractId -> contract),
+            signatories,
+            e,
+            SValue.SContractId(aCid),
+          )
         if (succeed)
           result shouldBe a[Right[_, _]]
         else
@@ -185,10 +191,10 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
 
       forEvery(testCases) { (i, succeed) =>
         val (signatories, observers) = committers.splitAt(i)
-        val contract = mkContract(signatories, observers)
+        val contract = mkContract(aCid, signatories, observers)
         val result = eval(
           limits,
-          Map(aCid -> contract),
+          Map(contract.contractId -> contract),
           signatories,
           e,
           SValue.SContractId(aCid),
@@ -269,9 +275,15 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
 
       forEvery(testCases) { (i, succeed) =>
         val (observers, signatories) = committers.splitAt(i)
-        val contract = mkContract(signatories, observers)
+        val contract = mkContract(aCid, signatories, observers)
         val result =
-          eval(limits, Map(aCid -> contract), signatories, e, SValue.SContractId(aCid))
+          eval(
+            limits,
+            Map(contract.contractId -> contract),
+            signatories,
+            e,
+            SValue.SContractId(aCid),
+          )
 
         if (succeed)
           result shouldBe a[Right[_, _]]
@@ -302,10 +314,10 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
 
       forEvery(testCases) { (i, succeed) =>
         val (observers, signatories) = committers.splitAt(i)
-        val contract = mkContract(signatories, observers)
+        val contract = mkContract(aCid, signatories, observers)
         val result = eval(
           limits,
-          Map(aCid -> contract),
+          Map(contract.contractId -> contract),
           signatories,
           e,
           SValue.SContractId(aCid),
@@ -497,13 +509,18 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
       val limits = interpretation.Limits.Lenient.copy(transactionInputContracts = limit)
 
       val signatories = committers.take(1)
-      val contract = mkContract(signatories, Set.empty)
       val cids =
         (1 to 99).map(i => Value.ContractId.V1(crypto.Hash.hashPrivateKey(s"contract$i")))
       val e = e"Mod:fetches"
 
       forEvery(testCases) { (i, succeed) =>
-        val result = eval(limits, _ => contract, committers, e, asSCids(cids.take(i)))
+        val result = eval(
+          limits,
+          { case cid => mkContract(cid, signatories, Set.empty) },
+          committers,
+          e,
+          asSCids(cids.take(i)),
+        )
         if (succeed)
           result shouldBe a[Right[_, _]]
         else
@@ -534,13 +551,18 @@ class LimitsSpec extends AnyFreeSpec with Matchers with Inside with TableDrivenP
   private[this] val T = { val Ast.TTyCon(t) = t"Mod:T"; t }
 
   private[this] val aCid = Value.ContractId.V1(crypto.Hash.hashPrivateKey("a contract ID"))
-  private[this] def mkContract(signatories: Iterable[Ref.Party], observers: Iterable[Ref.Party]) = {
+  private[this] def mkContract(
+      cid: Value.ContractId,
+      signatories: Iterable[Ref.Party],
+      observers: Iterable[Ref.Party],
+  ) = {
 
     TransactionBuilder.fatContractInstanceWithDummyDefaults(
-      SerializationVersion.StableVersions.max,
-      pkg.pkgName,
-      T,
-      Value.ValueRecord(
+      version = SerializationVersion.StableVersions.max,
+      contractId = cid,
+      packageName = pkg.pkgName,
+      template = T,
+      arg = Value.ValueRecord(
         None,
         ImmArray(
           None -> Value.ValueList(signatories.view.map(Value.ValueParty).to(FrontStack)),

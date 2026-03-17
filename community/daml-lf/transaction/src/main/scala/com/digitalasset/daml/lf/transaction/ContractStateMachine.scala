@@ -16,7 +16,7 @@ import com.google.common.annotations.VisibleForTesting
 
 /** Implements a state machine for contracts and their keys while interpreting a Daml-LF command or
   * iterating over a [[com.digitalasset.daml.lf.transaction.HasTxNodes]] in execution order. The
-  * contract state machine keeps track of the updates to the [[ActiveLedgerState]] since the
+  * contract state machine keeps track of the updates to the ActiveLedgerState since the
   * beginning of the interpretation or iteration. Given a [[State]] `s`, a client can compute the
   * next state for a given action node `n`, by calling `s.handleNode(..., n, ...)`. For a rollback
   * node `nr`, a client must call `beginRollback` before processing the first child of `nr` and
@@ -28,7 +28,7 @@ import com.google.common.annotations.VisibleForTesting
   *
   * @see
   *   com.digitalasset.daml.lf.transaction.HasTxNodes.contractKeyInputs for an iteration in mode
-  *   [[Model.UCK]] and [[Mode.LegacyNuck]]
+  *   [[Mode.UCKWithRollback]], [[Mode.UCKWithoutRollback]], and [[Mode.LegacyNUCK]]
   * @see
   *   ContractStateMachineSpec.visitSubtree for iteration in all modes
   */
@@ -135,6 +135,11 @@ object ContractStateMachine {
       */
     def endRollback(): State[Nid]
 
+    /** To be called if interpretation notices that a try block did not lead to a Rollback node Must
+      * be matched by a [[beginRollback]].
+      */
+    def dropRollback(): State[Nid]
+
     /** Let `this` state be the result of iterating over a transaction `tx` until just before a node
       * `n`. Let `substate` be the state obtained after fully iterating over the subtree rooted at
       * `n` starting from [[State.empty]]. Then, `advance(resolver, substate)` equals the state
@@ -151,7 +156,7 @@ object ContractStateMachine {
       *   used as resolver.
       * @param substate
       *   The state obtained after fully iterating over the subtree `n` starting from
-      *   [[State.empty]]. Consumed contracts ([[activeState.consumedBy]]) in `this` and `substate`
+      *   [[State.empty]]. Consumed contracts (activeState) in `this` and `substate`
       *   must be disjoint.
       * @see
       *   com.digitalasset.daml.lf.transaction.HasTxNodes.contractKeyInputs for an iteration in
@@ -169,7 +174,7 @@ object ContractStateMachine {
         contractId: ContractId,
         mbKey: Option[GlobalKey],
     ): ErrOr[State[Nid]]
-    
+
     /** Omits the key lookup that is done in
       * [[com.digitalasset.daml.lf.speedy.Compiler.compileChoiceByKey]] for by-key nodes, which
       * translates to a [[resolveKey]] below. Use [[handleExercise]] when visiting an exercise node
@@ -210,11 +215,6 @@ object ContractStateMachine {
         mbKey: Option[GlobalKey],
         byKey: Boolean,
     ): ErrOr[State[Nid]]
-
-    /** To be called if interpretation notices that a try block did not lead to a Rollback node Must
-      * be matched by a [[beginRollback]].
-      */
-    private[lf] def dropRollback(): State[Nid]
 
     @VisibleForTesting
     // ideally should be restricted to ContractStateMachine object
@@ -503,7 +503,7 @@ object ContractStateMachine {
           Either.cond(keyMapping == KeyActive(cid), next, InconsistentContractKey(gk))
       }
 
-    override private[lf] def dropRollback(): State[Nid] = rollbackStack match {
+    override def dropRollback(): State[Nid] = rollbackStack match {
       case Nil => throw new IllegalStateException("Not inside a rollback scope")
       case _ :: tailStack => this.copy(rollbackStack = tailStack)
     }
@@ -805,7 +805,7 @@ object ContractStateMachine {
           Either.cond(keyMapping == KeyActive(cid), next, InconsistentContractKey(gk))
       }
 
-    override private[lf] def dropRollback(): State[Nid] = rollbackStack match {
+    override def dropRollback(): State[Nid] = rollbackStack match {
       case Nil => throw new IllegalStateException("Not inside a rollback scope")
       case _ :: tailStack => this.copy(rollbackStack = tailStack)
     }
@@ -1132,7 +1132,7 @@ object ContractStateMachine {
           Either.cond(keyMapping == KeyActive(cid), next, InconsistentContractKey(gk))
       }
 
-    override private[lf] def dropRollback(): State[Nid] = rollbackStack match {
+    override def dropRollback(): State[Nid] = rollbackStack match {
       case Nil => throw new IllegalStateException("Not inside a rollback scope")
       case _ :: tailStack => this.copy(rollbackStack = tailStack)
     }
@@ -1330,7 +1330,7 @@ object ContractStateMachine {
       if (locallyCreated.contains(contractId)) this
       else this.copy(inputContractIds = inputContractIds + contractId)
 
-    override private[lf] def dropRollback(): State[Nid] = rollbackStack match {
+    override def dropRollback(): State[Nid] = rollbackStack match {
       case Nil => throw new IllegalStateException("Not inside a rollback scope")
       case _ :: tailStack => this.copy(rollbackStack = tailStack)
     }

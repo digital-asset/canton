@@ -16,7 +16,7 @@ import com.digitalasset.canton.data.{
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.LifeCycleContainer
-import com.digitalasset.canton.participant.admin.data.ManualLsuRequest
+import com.digitalasset.canton.participant.admin.data.LateLsuRequest
 import com.digitalasset.canton.participant.ledger.api.LedgerApiIndexer
 import com.digitalasset.canton.participant.store.SynchronizerConnectionConfigStore.UnknownPSId
 import com.digitalasset.canton.participant.store.{
@@ -723,12 +723,16 @@ private object AutomaticLogicalSynchronizerUpgrade {
   }
 }
 
-/** This class implements manual LSU. It should be called for participants that are upgrading
+/** This class implements late manual LSU. It should be called for participants that are upgrading
   * manually:
   *   - because automatic LSU failed, or
   *   - because the node is upgrading after the old synchronizer has been decommissioned.
+  *
+  * The use cases imply that the class should be used only when:
+  *   - Upgrade time has been reached.
+  *   - The node has processed everything it could process on the old synchronizer.
   */
-class ManualLogicalSynchronizerUpgrade(
+class LateLogicalSynchronizerUpgrade(
     synchronizerConnectionConfigStore: SynchronizerConnectionConfigStore,
     executionQueue: SimpleExecutionQueue,
     connectedSynchronizersLookup: ConnectedSynchronizersLookup,
@@ -750,10 +754,10 @@ class ManualLogicalSynchronizerUpgrade(
       loggerFactory,
     ) {
 
-  override def kind: String = "manual"
+  override def kind: String = "late"
 
   def upgrade(
-      request: ManualLsuRequest
+      request: LateLsuRequest
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
     val currentPSId = request.currentPSId
     val successorPSId = request.successorPSId
@@ -835,7 +839,7 @@ class ManualLogicalSynchronizerUpgrade(
             )
             .leftMap(err => s"Unable to mark successor synchronizer $successorPSId as active: $err")
       }
-    } yield logger.info("Manual upgrade was successful")
+    } yield logger.info("Late upgrade was successful")
   }
 }
 

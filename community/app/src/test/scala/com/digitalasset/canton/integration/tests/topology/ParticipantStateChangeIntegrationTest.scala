@@ -321,7 +321,7 @@ trait ParticipantStateChangeIntegrationTest
   }
 }
 
-@UnstableTest // TODO(#19022)
+@UnstableTest // TODO(#30006)
 class ParticipantStateChangeIntegrationTestPostgres extends ParticipantStateChangeIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

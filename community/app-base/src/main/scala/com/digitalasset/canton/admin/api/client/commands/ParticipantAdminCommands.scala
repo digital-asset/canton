@@ -1327,15 +1327,15 @@ object ParticipantAdminCommands {
       ): Either[String, Unit] = Either.unit
     }
 
-    final case class PerformManualLsu(
+    final case class PerformLateLsu(
         currentPSId: PhysicalSynchronizerId,
         successorPSId: PhysicalSynchronizerId,
         upgradeTime: CantonTimestamp,
         successorConfig: SynchronizerConnectionConfig,
         sequencerConnectionValidation: SequencerConnectionValidation,
     ) extends GrpcAdminCommand[
-          v30.PerformManualLsuRequest,
-          v30.PerformManualLsuResponse,
+          v30.PerformLateLsuRequest,
+          v30.PerformLateLsuResponse,
           Unit,
         ] {
       override type Svc = ParticipantRepairServiceStub
@@ -1343,11 +1343,11 @@ object ParticipantAdminCommands {
       override def createService(channel: ManagedChannel): ParticipantRepairServiceStub =
         v30.ParticipantRepairServiceGrpc.stub(channel)
 
-      override protected def createRequest(): Either[String, v30.PerformManualLsuRequest] =
+      override protected def createRequest(): Either[String, v30.PerformLateLsuRequest] =
         Right(
-          v30.PerformManualLsuRequest(
+          v30.PerformLateLsuRequest(
             physicalSynchronizerId = currentPSId.toProtoPrimitive,
-            successor = v30.PerformManualLsuRequest
+            successor = v30.PerformLateLsuRequest
               .Successor(
                 physicalSynchronizerId = successorPSId.toProtoPrimitive,
                 announcedUpgradeTime = upgradeTime.toProtoTimestamp.some,
@@ -1360,12 +1360,12 @@ object ParticipantAdminCommands {
 
       override protected def submitRequest(
           service: ParticipantRepairServiceStub,
-          request: v30.PerformManualLsuRequest,
-      ): Future[v30.PerformManualLsuResponse] =
-        service.performManualLsu(request)
+          request: v30.PerformLateLsuRequest,
+      ): Future[v30.PerformLateLsuResponse] =
+        service.performLateLsu(request)
 
       override protected def handleResponse(
-          response: v30.PerformManualLsuResponse
+          response: v30.PerformLateLsuResponse
       ): Either[String, Unit] = Either.unit
     }
   }

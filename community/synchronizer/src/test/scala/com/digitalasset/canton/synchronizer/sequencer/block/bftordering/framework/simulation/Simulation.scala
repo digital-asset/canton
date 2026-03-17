@@ -403,6 +403,7 @@ class Simulation[OnboardingDataT, SystemNetworkMessageT, SystemInputMessageT, Cl
           logger.info(s"Restarting '$node' at ${whatToDo.at}")(TraceContext.empty)
           restartNode(node)
         case MakeSystemHealthy =>
+          logger.info("Healing system")(TraceContext.empty)
           local.makeHealthy()
           network.makeHealthy()
           topology.activeNodes.foreach { node =>

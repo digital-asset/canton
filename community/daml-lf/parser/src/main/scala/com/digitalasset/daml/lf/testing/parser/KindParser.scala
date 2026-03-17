@@ -14,6 +14,6 @@ private[daml] object KindParser {
       Id("nat") ^^ (_ => KNat) |
       (`(` ~> kind <~ `)`)
 
-  lazy val kind: Parser[Kind] = rep1sep(kind0, `->`) ^^ (_.reduceRight(KArrow))
+  lazy val kind: Parser[Kind] = rep1sep(kind0, `->`) ^^ (_.reduceRight(KArrow.apply))
 
 }

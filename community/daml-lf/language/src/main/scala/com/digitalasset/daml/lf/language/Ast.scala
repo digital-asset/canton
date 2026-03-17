@@ -15,7 +15,7 @@ object Ast {
   /** Fully applied type constructor. */
   final case class TypeConApp(tycon: TypeConId, args: ImmArray[Type]) {
     def pretty: String = this.toType.pretty
-    def toType: Type = args.foldLeft[Type](TTyCon(tycon))(TApp)
+    def toType: Type = args.foldLeft[Type](TTyCon(tycon))(TApp.apply)
   }
 
   /* Expression variable name. */
@@ -44,11 +44,11 @@ object Ast {
 
     /** Infix alias for repeated [[EApp]] application. */
     @inline final def eApp(arg: Expr, args: Expr*): EApp =
-      (args foldLeft EApp(this, arg))(EApp)
+      (args foldLeft EApp(this, arg))(EApp.apply)
 
     /** Infix alias for repeated [[ETyApp]] application. */
     @inline final def eTyApp(typ: Type, typs: Type*): ETyApp =
-      (typs foldLeft ETyApp(this, typ))(ETyApp)
+      (typs foldLeft ETyApp(this, typ))(ETyApp.apply)
   }
 
   // We use this type to reduce depth of pattern matching

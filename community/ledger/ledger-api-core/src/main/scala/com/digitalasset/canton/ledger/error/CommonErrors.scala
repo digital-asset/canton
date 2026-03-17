@@ -21,25 +21,6 @@ import scala.concurrent.duration.Duration
 object CommonErrors extends CommonErrorGroup {
 
   @Explanation(
-    """This error category is used to signal that an unimplemented code-path has been triggered by a client or participant operator request."""
-  )
-  @Resolution(
-    """This error is caused by a participant node misconfiguration or by an implementation bug.
-      |Resolution requires participant operator intervention."""
-  )
-  object UnsupportedOperation
-      extends ErrorCode(
-        id = "UNSUPPORTED_OPERATION",
-        ErrorCategory.InternalUnsupportedOperation,
-      ) {
-
-    final case class Reject(message: String)(implicit errorLogger: ErrorLoggingContext)
-        extends DamlErrorWithDefiniteAnswer(
-          cause = s"The request exercised an unsupported operation: $message"
-        )
-  }
-
-  @Explanation(
     "Another request with the same id is already being processed."
   )
   @Resolution(

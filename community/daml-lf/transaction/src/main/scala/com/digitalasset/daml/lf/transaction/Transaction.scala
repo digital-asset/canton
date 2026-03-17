@@ -13,7 +13,7 @@ import com.digitalasset.daml.lf.transaction.ContractStateMachine.KeyMapping
 import scala.annotation.tailrec
 import scala.collection.immutable.HashMap
 
-final case class VersionedTransaction private[lf] (
+final case class VersionedTransaction private[digitalasset] (
     version: SerializationVersion,
     nodes: Map[NodeId, Node],
     override val roots: ImmArray[NodeId],
@@ -676,7 +676,7 @@ object Transaction {
     *                         is done by first by establishing all the packages directly associated with action nodes
     *                         in the transaction (by calling [[Node.Action.packageIds]]). The [[usedPackages]] will then
     *                         be this set of packages combined with all packages on which there is a transitive
-    *                         dependency (for details see [[com.digitalasset.daml.lf.engine.Engine.deps]]).
+    *                         dependency (for details see deps in [[com.digitalasset.daml.lf.engine.Engine]]).
     * @param timeBoundery     Indicates that the transaction computation is valid for ledger times within these bounds.
     * @param nodeSeeds        An association list that maps the node-id of create and exercise
     *                         nodes to their seed.

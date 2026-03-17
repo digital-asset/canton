@@ -370,6 +370,7 @@ class SequencerStateManagerTest
       defaultRateLimiter,
       orderingTimeFixMode = OrderingTimeFixMode.MakeStrictlyIncreasing,
       sequencingTimeLowerBoundExclusive = None,
+      getAnnouncedLsu = None,
       producePostOrderingTopologyTicks = false,
       SequencerTestMetrics,
       BatchingConfig(),

@@ -23,7 +23,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   PreparesStored,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 
 import scala.collection.mutable
 
@@ -53,11 +53,13 @@ class SegmentBlockState(
   def blockCommitMessages: Seq[SignedMessage[Commit]] =
     commitCertificate.toList.flatMap(_.commits)
 
-  def completeBlock(cc: CommitCertificate): Seq[ProcessResult] =
+  def completeBlock(
+      cc: CommitCertificate
+  )(implicit traceContext: TraceContext): Seq[ProcessResult] =
     if (isComplete || unconfirmedStorageCommitCertificate.isDefined) Seq.empty
     else {
       unconfirmedStorageCommitCertificate = Some(cc)
-      Seq(CompletedBlock(cc))
+      Seq(CompletedBlock(cc, traceContext))
     }
 
   def confirmCompleteBlockStored(): Unit = unconfirmedStorageCommitCertificate match {
@@ -115,9 +117,7 @@ class SegmentBlockState(
       Seq.empty
     }
 
-  def processMessagesStored(pbftMessagesStored: PbftMessagesStored)(implicit
-      traceContext: TraceContext
-  ): Seq[ProcessResult] =
+  def processMessagesStored(pbftMessagesStored: PbftMessagesStored): Seq[ProcessResult] =
     if (!isComplete && pbftMessagesStored.viewNumber == currentViewNumber) {
       val block = views(currentViewNumber)
       pbftMessagesStored match {
@@ -136,12 +136,12 @@ class SegmentBlockState(
       }
     } else Seq.empty
 
-  private def advance()(implicit traceContext: TraceContext): Seq[ProcessResult] = {
+  private def advance(): Seq[ProcessResult] = {
     val blockState = views(currentViewNumber)
     val results = blockState.advance()
     blockState.commitCertificate match {
-      case Some(commitCertificate: CommitCertificate) =>
-        results ++ completeBlock(commitCertificate)
+      case Some(commitCertificate: Traced[CommitCertificate]) =>
+        results ++ completeBlock(commitCertificate.value)(commitCertificate.traceContext)
       case None => results
     }
   }

@@ -177,7 +177,7 @@ private[lf] final class PhaseOne(
       }
     }
 
-    loop(CompileExp(env, exp, Return))
+    loop(CompileExp(env, exp, Return.apply))
   }
 
   private[this] def compileExp(env: Env, exp: Expr)(cont: SExpr => Work): Work = {
@@ -331,7 +331,7 @@ private[lf] final class PhaseOne(
           Return(SBCallInterface(iface, methodName)(exp))
         }
       case EToRequiredInterface(requiredIfaceId @ _, requiringIfaceId @ _, exp) =>
-        compileExp(env, exp)(Return)
+        compileExp(env, exp)(Return.apply)
       case EFromRequiredInterface(requiredIfaceId @ _, requiringIfaceId, exp) =>
         compileExp(env, exp) { exp =>
           Return(SBFromRequiredInterface(requiringIfaceId)(exp))

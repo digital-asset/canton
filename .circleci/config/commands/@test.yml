@@ -41,6 +41,21 @@ persist_jvm_crash_files:
         name: Upload JVM crash files (if any) as an artifact
         path: jvm_crash
 
+persist_classpath_files:
+  description: |
+    Try to save classpath.txt and test.classpath.txt as artifacts, which can be helpful for debugging classpath issues
+  steps:
+    - run:
+        name: Copy classpath files
+        when: always
+        command: |
+          mkdir -p classpath_files
+          cp classpath.txt classpath_files 2>/dev/null || echo "no classpath.txt file found"
+          cp test.classpath.txt classpath_files 2>/dev/null || echo "no test.classpath.txt file found"
+    - store_artifacts:
+        name: Upload classpath files (if any) as an artifact
+        path: classpath_files
+
 check_number_of_successes:
   description: |
     Fail the build, if the number of files matching "success_status/<<job_name>>_success.*" is lower than min_successes
@@ -286,6 +301,7 @@ run_tests:
         extra_parameters: "-J-Xlog:gc=info,safepoint=info:file=track/GC.log:time"
     - persist_failure_status
     - persist_jvm_crash_files
+    - persist_classpath_files
     - unless:
         condition: << parameters.skip_cleanup >>
         steps:
@@ -336,6 +352,7 @@ run_ordinary_tests:
              -e com\\.digitalasset\\.canton\\.integration\\.tests\\.benchmarks \
              -e com\\.digitalasset\\.canton\\.integration\\.tests\\.continuity \
              -e com\\.digitalasset\\.canton\\.integration\\.tests\\.variations \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.modelbased \
              -e com\\.digitalasset\\.canton\\.integration\\.tests\\.upgrade\\.MajorUpgrade.\\*Writer.\\* \
           "
           # Tests excluded here are covered by
@@ -343,6 +360,7 @@ run_ordinary_tests:
           # - *crash_recovery_test
           # - nightly_test
           # - toxiproxy_test*
+          # - model_based_test
           # - release_test
           # - benchmark
           # - protocol_continuity_test
@@ -487,13 +505,33 @@ run_variations_tests:
 
 # TODO(#30913): Remove this command once the NUCK feature development is complete
 run_temp_nuck_tests:
+  parameters:
+    exclude_unstable_tests:
+      type: boolean
+      default: true
+    num_parallel_tasks:
+      type: string
+      default: "4"
   steps:
     - run_tests:
-        # Disable transcode tests as they use the ZioTest framework and do not respect the NuckTest annotation for ScalaTest
-        command: "dumpClassPath \"set \\`transcode-schema\\` / Test / testOnly := {};set \\`transcode-daml-lf\\` / Test / testOnly := {};set \\`transcode-codec-json\\` / Test / testOnly := {};set \\`transcode-codec-proto-java\\` / Test / testOnly := {};set \\`transcode-codec-proto-scala\\` / Test / testOnly := {};set \\`transcode-daml-examples\\` / Test / testOnly := {};set \\`transcode-test-conformance\\` / Test / testOnly := {};set \\`transcode-test-utils\\` / Test / testOnly := {};testOnly * -- -n com.digitalasset.canton.annotations.NuckTest\""
-        filter: "cat" # cat acts as identity filter
-        num_test_buckets: ""
-        num_parallel_tasks: "1"
+        command:
+          # Disable transcode tests as they use the ZioTest framework and do not respect the NuckTest annotation for ScalaTest
+            "dumpClassPath \"set \\`transcode-schema\\` / Test / testOnly := {};set \\`transcode-daml-lf\\` / Test / testOnly := {};set \\`transcode-codec-json\\` / Test / testOnly := {};set \\`transcode-codec-proto-java\\` / Test / testOnly := {};set \\`transcode-codec-proto-scala\\` / Test / testOnly := {};set \\`transcode-daml-examples\\` / Test / testOnly := {};set \\`transcode-test-conformance\\` / Test / testOnly := {};set \\`transcode-test-utils\\` / Test / testOnly := {};$RUN_SPLITTED_TESTS_CMD<<# parameters.exclude_unstable_tests >> -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest<</ parameters.exclude_unstable_tests >> -n com.digitalasset.canton.annotations.NuckTest -n com.digitalasset.canton.annotations.RollbackTest\""
+        filter:
+          "grep -v -E \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.manual \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.crashrecovery \
+             -e com\\.digitalasset\\.canton\\.nightly \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.toxiproxy \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.release \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.benchmarks \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.continuity \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.variations \
+             -e com\\.digitalasset\\.canton\\.integration\\.tests\\.upgrade\\.MajorUpgrade.\\*Writer.\\* \
+          "
+        num_test_buckets: "$CIRCLE_NODE_TOTAL"
+        num_parallel_tasks: << parameters.num_parallel_tasks >>
         succeed_on_error: false
         fail_on_error_in_output: true
 

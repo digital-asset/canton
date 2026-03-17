@@ -84,7 +84,7 @@ trait TelemetryContext {
     * complete traces.
     *
     * @see
-    *   [[com.daml.tracing.Telemetry.contextFromMetadata(java.util.Map)]]
+    *   [[com.daml.tracing.Telemetry.contextFromMetadata]]
     */
   def encodeMetadata(): jMap[String, String]
 

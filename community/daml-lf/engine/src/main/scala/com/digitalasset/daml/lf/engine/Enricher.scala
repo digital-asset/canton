@@ -187,7 +187,7 @@ final class Enricher(
       forbidLocalContractIds: Boolean = true,
   ) =
     this(
-      engine.compiledPackages(),
+      engine.compiledPackages,
       engine.loadPackage,
       addTypeInfo = addTypeInfo,
       addFieldNames = addFieldNames,

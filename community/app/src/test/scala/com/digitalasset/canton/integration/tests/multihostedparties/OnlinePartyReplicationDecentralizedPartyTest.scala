@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.multihostedparties
 
 import com.digitalasset.canton.BaseTest.CantonLfV21
+import com.digitalasset.canton.annotations.RollbackTest
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.LocalInstanceReference
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -252,11 +253,13 @@ sealed trait OnlinePartyReplicationDecentralizedPartyTest
   }
 }
 
+@RollbackTest
 class OnlinePartyReplicationDecentralizedPartyTestH2
     extends OnlinePartyReplicationDecentralizedPartyTest {
   registerPlugin(new UseH2(loggerFactory))
 }
 
+@RollbackTest
 class OnlinePartyReplicationDecentralizedPartyTestPostgres
     extends OnlinePartyReplicationDecentralizedPartyTest {
   registerPlugin(new UsePostgres(loggerFactory))

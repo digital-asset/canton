@@ -363,6 +363,7 @@ abstract class ReplayingSendsSequencerClientTransportCommon(
       }
     }
 
+    @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
     private def checkIfIdle(): Unit = {
       val stateSnapshot = stateRef.get()
       val lastEventTime = stateSnapshot.lastEventAt.getOrElse(stateSnapshot.startedAt).toInstant

@@ -21,8 +21,8 @@ import com.digitalasset.canton.crypto.{
 import com.digitalasset.canton.http.JsonApiConfig
 import com.digitalasset.canton.integration.ConfigTransforms
 import com.digitalasset.canton.participant.config.{
+  CantonEngineConfig,
   LedgerApiServerConfig,
-  ParticipantFeaturesConfig,
   ParticipantNodeConfig,
   ParticipantNodeParameterConfig,
 }
@@ -422,8 +422,9 @@ class CommunityConfigValidationsTest extends BaseTestWordSpec {
         parameters = CantonParameters(nonStandardConfig = false),
         participants = Map(
           InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
-            features =
-              ParticipantFeaturesConfig(profileDir = Some(Files.createTempDirectory("testing")))
+            parameters = ParticipantNodeParameterConfig(engine =
+              CantonEngineConfig(profileDir = Some(Files.createTempDirectory("testing")))
+            )
           )
         ),
       )
@@ -435,8 +436,9 @@ class CommunityConfigValidationsTest extends BaseTestWordSpec {
         parameters = CantonParameters(nonStandardConfig = true),
         participants = Map(
           InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
-            features =
-              ParticipantFeaturesConfig(profileDir = Some(Files.createTempDirectory("testing")))
+            parameters = ParticipantNodeParameterConfig(engine =
+              CantonEngineConfig(profileDir = Some(Files.createTempDirectory("testing")))
+            )
           )
         ),
       )
@@ -448,8 +450,9 @@ class CommunityConfigValidationsTest extends BaseTestWordSpec {
         parameters = CantonParameters(nonStandardConfig = false),
         participants = Map(
           InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
-            features =
-              ParticipantFeaturesConfig(snapshotDir = Some(Files.createTempDirectory("testing")))
+            parameters = ParticipantNodeParameterConfig(engine =
+              CantonEngineConfig(snapshotDir = Some(Files.createTempDirectory("testing")))
+            )
           )
         ),
       )
@@ -464,8 +467,9 @@ class CommunityConfigValidationsTest extends BaseTestWordSpec {
         parameters = CantonParameters(nonStandardConfig = true),
         participants = Map(
           InstanceName.tryCreate("p1") -> ParticipantNodeConfig(
-            features =
-              ParticipantFeaturesConfig(snapshotDir = Some(Files.createTempDirectory("testing")))
+            parameters = ParticipantNodeParameterConfig(engine =
+              CantonEngineConfig(snapshotDir = Some(Files.createTempDirectory("testing")))
+            )
           )
         ),
       )

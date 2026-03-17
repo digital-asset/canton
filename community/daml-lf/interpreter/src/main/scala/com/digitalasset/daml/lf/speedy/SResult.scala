@@ -7,6 +7,7 @@ package speedy
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.Time
+import com.digitalasset.daml.lf.interpretation.NeedKeyContinuationToken
 import com.digitalasset.daml.lf.speedy.SError._
 import com.digitalasset.daml.lf.transaction.{FatContractInstance, GlobalKeyWithMaintainers}
 import com.digitalasset.daml.lf.value.Value.ContractId
@@ -38,13 +39,12 @@ object Question {
 
     final case class NeedKey(
         key: GlobalKeyWithMaintainers,
+        limit: Int,
+        continuationToken: Option[NeedKeyContinuationToken],
         committers: Set[Party],
-        // Callback.
-        // In case of failure, the callback sets machine control to an SErrorDamlException and return false
-        callback: Option[ContractId] => Boolean,
+        callback: (Vector[FatContractInstance], Option[NeedKeyContinuationToken]) => Unit,
     ) extends Update
   }
-
 }
 
 /** The result from small-step evaluation.

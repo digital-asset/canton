@@ -4,13 +4,6 @@
 package com.digitalasset.canton.platform.store.backend
 
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.IdRange
-import com.digitalasset.canton.platform.store.backend.common.EventIdSource.{
-  ActivateStakeholder,
-  ActivateWitnesses,
-  DeactivateStakeholder,
-  DeactivateWitnesses,
-  VariousWitnesses,
-}
 import com.digitalasset.canton.platform.store.backend.common.EventPayloadSourceForUpdatesLedgerEffects
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
   PaginationFromTo,
@@ -141,43 +134,53 @@ private[backend] trait StorageBackendTestsReset extends Matchers with StorageBac
     )
 
     def activateStakeholderIds = executeSql(
-      backend.event.updateStreamingQueries.fetchEventIds(ActivateStakeholder)(
-        witnessO = None,
-        templateIdO = None,
-        eventTypes = Set.empty,
-      )(_)(paginationInput)
+      backend.event.updateStreamingQueries
+        .activateStakeholderIds(
+          witnessO = None,
+          templateIdO = None,
+        )
+        .fetchPage(_)(paginationInput)
+        .ids
     )
 
     def activateWitnessesIds = executeSql(
-      backend.event.updateStreamingQueries.fetchEventIds(ActivateWitnesses)(
-        witnessO = None,
-        templateIdO = None,
-        eventTypes = Set.empty,
-      )(_)(paginationInput)
+      backend.event.updateStreamingQueries
+        .activateWitnessesIds(
+          witnessO = None,
+          templateIdO = None,
+        )
+        .fetchPage(_)(paginationInput)
+        .ids
     )
 
     def deactivateStakeholderIds = executeSql(
-      backend.event.updateStreamingQueries.fetchEventIds(DeactivateStakeholder)(
-        witnessO = None,
-        templateIdO = None,
-        eventTypes = Set.empty,
-      )(_)(paginationInput)
+      backend.event.updateStreamingQueries
+        .deactivateStakeholderIds(
+          witnessO = None,
+          templateIdO = None,
+        )
+        .fetchPage(_)(paginationInput)
+        .ids
     )
 
     def deactivateWitnessesIds = executeSql(
-      backend.event.updateStreamingQueries.fetchEventIds(DeactivateWitnesses)(
-        witnessO = None,
-        templateIdO = None,
-        eventTypes = Set.empty,
-      )(_)(paginationInput)
+      backend.event.updateStreamingQueries
+        .deactivateWitnessesIds(
+          witnessO = None,
+          templateIdO = None,
+        )
+        .fetchPage(_)(paginationInput)
+        .ids
     )
 
     def variousWitnessesIds = executeSql(
-      backend.event.updateStreamingQueries.fetchEventIds(VariousWitnesses)(
-        witnessO = None,
-        templateIdO = None,
-        eventTypes = Set.empty,
-      )(_)(paginationInput)
+      backend.event.updateStreamingQueries
+        .variousWitnessIds(
+          witnessO = None,
+          templateIdO = None,
+        )
+        .fetchPage(_)(paginationInput)
+        .ids
     )
 
     // verify queries indeed return something

@@ -543,6 +543,8 @@ object BuildCommon {
       Compile / compile / wartremoverErrors += Wart.custom(s"${prefix}RequireBlocking"),
       // In tests, we often serialize protos directly
       Compile / compile / wartremoverErrors += Wart.custom(s"${prefix}ProtobufToByteString"),
+      // In tests it's fine to use the inefficient size method.
+      Compile / compile / wartremoverErrors += Wart.custom(s"${prefix}ConcurrentMapSize"),
       wartremoverErrors += Wart.custom(s"${prefix}SynchronizedFuture"),
       wartremoverErrors += Wart.custom(s"${prefix}TryFailed"),
     ).flatMap(_.settings)
@@ -684,7 +686,9 @@ object BuildCommon {
       `ledger-test-tool-2-1`,
       `ledger-test-tool-2-dev`,
       `upgrading-integration-tests`,
-      `model-based-testing`,
+      `model-based-testing-generators`,
+      `model-based-testing-drivers`,
+      `model-based-testing-integration-tests`,
     )
 
     // Project for utilities that are also used outside of the Canton repo
@@ -2487,19 +2491,72 @@ object BuildCommon {
         ),
       )
 
-    lazy val `model-based-testing` = project
-      .in(file("community/model-based-testing"))
+    lazy val `model-based-testing-integration-tests` = project
+      .in(file("community/model-based-testing-integration-tests"))
       .dependsOn(
+        `community-app` % "test->test",
+        `model-based-testing-drivers`,
+      )
+      .settings(
+        sharedCantonCommunitySettings,
+        excludeTranscodeConflictingDependencies,
+        libraryDependencies ++= Seq(
+          scalatest % Test,
+          scalacheck % Test,
+          scalatestScalacheck % Test,
+        ),
+        Compile / unmanagedJars += Z3.z3Install.value.jar,
+        Test / unmanagedJars ++= (Compile / unmanagedJars).value,
+      )
+
+    lazy val `model-based-testing-generators` = project
+      .in(file("community/model-based-testing-generators"))
+      .dependsOn(
+        DamlProjects.`daml-lf-language`
+      )
+      .settings(
+        sharedCommunitySettings,
+        libraryDependencies ++= Seq(
+          cats,
+          scalacheck,
+          scala_lang_modules_scala_parser_combinators,
+          scalatest % Test,
+          scalatestScalacheck % Test,
+        ),
+        Compile / unmanagedJars += Z3.z3Install.value.jar,
+        Test / unmanagedJars ++= (Compile / unmanagedJars).value,
+      )
+
+    lazy val `model-based-testing-drivers` = project
+      .in(file("community/model-based-testing-drivers"))
+      .enablePlugins(DamlPlugin)
+      .dependsOn(
+        `model-based-testing-generators`,
+        DamlProjects.`bindings-java`,
+        DamlProjects.`daml-lf-engine`,
+        DamlProjects.`daml-lf-ide-ledger`,
+        DamlProjects.`daml-lf-interpreter`,
+        `community-app-base`,
         `community-base`,
+        `ledger-api-core`,
         `community-testing` % "test->test",
       )
       .settings(
         sharedCantonCommunitySettings,
+        excludeTranscodeConflictingDependencies,
         libraryDependencies ++= Seq(
-          scalatest % Test
+          cats,
+          scalatest % Test,
         ),
         Compile / unmanagedJars += Z3.z3Install.value.jar,
         Test / unmanagedJars ++= (Compile / unmanagedJars).value,
+        Compile / damlJavaCodegen := Seq(
+          (
+            (Compile / sourceDirectory).value / "daml" / "universal",
+            (Compile / damlDarOutput).value / "universal.dar",
+            "com.digitalasset.canton.testing.modelbased.universal",
+          )
+        ),
       )
   }
 
@@ -3503,6 +3560,7 @@ object BuildCommon {
         `nonempty` % Test,
         `daml-lf-transaction` % Test,
         `daml-lf-transaction-test-lib` % Test,
+        CommunityProjects.`model-based-testing-generators` % Test,
       )
 
     lazy val `daml-lf-archive` = project

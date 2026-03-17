@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.examples
 
 import better.files.File
 import com.daml.ledger.api.v2.interactive.interactive_submission_service.PreparedTransaction
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.integration.plugins.UseH2
 import com.digitalasset.canton.integration.tests.examples.ExampleIntegrationTest.interactiveSubmissionFolder
 import com.digitalasset.canton.integration.{CommunityIntegrationTest, ConfigTransform}
@@ -335,6 +336,7 @@ sealed abstract class InteractiveSubmissionDemoExampleIntegrationTest
 
 }
 
+@UnstableTest // TODO(#25746)
 final class InteractiveSubmissionDemoExampleIntegrationTestH2
     extends InteractiveSubmissionDemoExampleIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))

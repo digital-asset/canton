@@ -244,7 +244,7 @@ class ParticipantNodeBootstrap(
           currentlyVettedPackages,
           nextPackageIds,
           packageMetadataView,
-          dryRunSnapshot,
+          dryRunSnapshot.getOrElse(PackageMetadata()),
           forceFlags,
           disableUpgradeValidation = parameters.disableUpgradeValidation,
         )

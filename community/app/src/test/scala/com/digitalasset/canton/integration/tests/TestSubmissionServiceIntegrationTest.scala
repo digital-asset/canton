@@ -9,6 +9,7 @@ import com.daml.ledger.api.v2.transaction.Transaction.toJavaProto
 import com.daml.ledger.api.v2.value.Value
 import com.daml.ledger.api.v2.value.Value.Sum
 import com.daml.ledger.javaapi.data.Transaction
+import com.digitalasset.canton.annotations.{NuckTest, RollbackTest}
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.damltestsdev.java.basickeys.{BasicKey, KeyOps}
 import com.digitalasset.canton.examples.java.cycle.Cycle
@@ -293,6 +294,8 @@ class ReferenceTestSubmissionServiceIntegrationTestPostgresStableLf
     extends TestSubmissionServiceIntegrationTestStableLf
     with TestSubmissionServiceReferenceSequencerPostgresTest
 
+@NuckTest
+@RollbackTest
 class ReferenceTestSubmissionServiceIntegrationTestPostgresDevLf
     extends TestSubmissionServiceIntegrationTestDevLf
     with TestSubmissionServiceReferenceSequencerPostgresTest

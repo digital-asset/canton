@@ -130,7 +130,7 @@ abstract class SphinxDocumentationGenerator(
         ConfigTransforms.uniqueH2DatabaseNames,
         ConfigTransforms.globallyUniquePorts,
       )
-      .addConfigTransforms(ConfigTransforms.optSetProtocolVersion*)
+      .addConfigTransforms(ConfigTransforms.protocolVersionTransforms*)
       .focus(_.testingConfig.participantsWithoutLapiVerification)
       /* Participant nodes run as part of the documentation tests have testing flag disabled.
       As a result, the verification is done over the store and not via the state inspection.
@@ -1029,3 +1029,13 @@ class PartyManagmentSnippetGeneratorTest
 
   registerPlugin(new UsePostgres(loggerFactory))
 }
+
+class ExportKeysSnippetGeneratorTest
+    extends SnippetGenerator(
+      File(
+        "docs-open/src/sphinx/participant/howtos/secure/kms/migration/external_key_storage_migration_export_keys.rst"
+      ),
+      File(
+        "community/app/src/test/resources/examples/01-simple-topology/simple-topology.conf"
+      ),
+    )

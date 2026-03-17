@@ -7,20 +7,12 @@ package testing.snapshot
 import com.digitalasset.daml.lf.archive.{ArchiveDecoder, DarDecoder}
 import com.digitalasset.daml.lf.data.{Bytes, Ref, Time}
 import com.digitalasset.daml.lf.engine.{Engine, EngineConfig, Error}
-import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, Util => AstUtil}
+import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, Util as AstUtil}
 import com.digitalasset.daml.lf.speedy.metrics.{StepCount, TxNodeCount}
 import com.digitalasset.daml.lf.speedy.Speedy
 import com.digitalasset.daml.lf.testing.snapshot.Snapshot.SubmissionEntry.EntryCase
 import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
-import com.digitalasset.daml.lf.transaction.{
-  CreationTime,
-  FatContractInstance,
-  GlobalKeyWithMaintainers,
-  Node,
-  SubmittedTransaction => SubmittedTx,
-  TransactionCoder => TxCoder,
-  TransactionOuterClass => TxOuterClass,
-}
+import com.digitalasset.daml.lf.transaction.{ContractStateMachine, CreationTime, FatContractInstance, GlobalKeyWithMaintainers, Node, SubmittedTransaction as SubmittedTx, TransactionCoder as TxCoder, TransactionOuterClass as TxOuterClass}
 import com.digitalasset.daml.lf.value.Value.ContractId
 import com.daml.logging.LoggingContext
 import com.digitalasset.daml.lf.value.ContractIdVersion
@@ -28,7 +20,7 @@ import com.google.protobuf.ByteString
 
 import java.io.BufferedInputStream
 import java.nio.file.{Files, Path}
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 final case class TransactionSnapshot(
     transaction: SubmittedTx,
@@ -38,7 +30,7 @@ final case class TransactionSnapshot(
     preparationTime: Time.Timestamp,
     submissionSeed: crypto.Hash,
     contracts: Map[ContractId, FatContractInstance],
-    contractKeys: Map[GlobalKeyWithMaintainers, ContractId],
+    contractKeys: Map[GlobalKeyWithMaintainers, Vector[FatContractInstance]],
     pkgs: Map[Ref.PackageId, Ast.Package],
     profileDir: Option[Path],
     contractIdVersion: ContractIdVersion,
@@ -63,6 +55,7 @@ final case class TransactionSnapshot(
         preparationTime,
         submissionSeed,
         contractIdVersion,
+        contractStateMode = ContractStateMachine.Mode.default,
         metricPlugins = metricPlugins,
       )
       .consume(contracts, pkgs, contractKeys)
@@ -78,6 +71,7 @@ final case class TransactionSnapshot(
         preparationTime,
         submissionSeed,
         contractIdVersion,
+        contractStateMode = ContractStateMachine.Mode.default,
         metricPlugins = metricPlugins,
       )
       .consume(contracts, pkgs, contractKeys)
@@ -253,9 +247,14 @@ private[snapshot] object TransactionSnapshot {
           Bytes.Empty,
         )
       }.toMap
-      val contractKeys = relevantCreateNodes.view.flatMap { case (cid, create) =>
-        create.keyOpt.map(_ -> cid).toList
-      }.toMap
+      val contractKeys = contracts.values.foldLeft(Map.empty[GlobalKeyWithMaintainers, Vector[FatContractInstance]]){
+        case (acc, contract) =>
+          contract.contractKeyWithMaintainers match {
+            case Some(key) =>
+              acc.updated(key, contract +: acc.getOrElse(key, Vector.empty))
+            case None => acc
+          }
+      }
       new TransactionSnapshot(
         transaction = tx,
         participantId = Ref.ParticipantId.assertFromString(txEntry.getParticipantId),

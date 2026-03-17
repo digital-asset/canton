@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.pkgdars
 
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.admin.api.client.data.TemplateId.templateIdsFromJava
+import com.digitalasset.canton.annotations.RollbackTest
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.{
@@ -16,6 +17,7 @@ import com.digitalasset.canton.ledger.error.groups.CommandExecutionErrors
 import com.digitalasset.canton.lfdev.java as M
 import com.digitalasset.canton.version.ProtocolVersion
 
+@RollbackTest
 class PackageUploadVersionIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment

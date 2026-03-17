@@ -354,6 +354,7 @@ object BlockSequencerThroughputCap {
     private def aboveThrottledRate(key: ThroughputCapKey): Either[String, Unit] =
       if (currentThresholdLevel > 0) Right(())
       else {
+        @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
         val vActive = memberUsage.size
 
         val usageByMember = memberUsage.getOrElse(key, ThroughputCapValue(0, 0)) // N_i
@@ -471,6 +472,7 @@ object BlockSequencerThroughputCap {
           calculateAndSetThresholdLevel()
           val (mode, newThrottledCountForMember, newThrottledBytesForMember) = if (strict) {
             // in strict mode, we give every member the same share of the rate
+            @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
             val vActive = memberUsage.size
             (
               "strict",

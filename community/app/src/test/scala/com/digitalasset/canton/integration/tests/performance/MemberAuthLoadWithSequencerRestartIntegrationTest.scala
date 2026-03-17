@@ -11,9 +11,11 @@ import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.integration.{ConfigTransforms, EnvironmentDefinition}
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
 import com.digitalasset.canton.performance.elements.DriverStatus
 import com.digitalasset.canton.performance.{PerformanceRunner, RateSettings}
+import com.digitalasset.canton.util.Thereafter.syntax.ThereafterOps
 import monocle.macros.syntax.lens.*
 
 import scala.concurrent.Future
@@ -123,8 +125,16 @@ abstract class MemberAuthLoadWithSequencerRestartIntegrationTest
           sequencer.start()
           Threading.sleep(4000)
         }
-        val cf = Future.sequence(Seq(runnerP1, runnerP2).map(_.closeF()))
-        cf.futureValue
+        val cf =
+          FutureUnlessShutdown.outcomeF(Future.sequence(Seq(runnerP1, runnerP2).map(_.closeF())))
+        cf.thereafter { _ =>
+          logger.info("Performance runners stopped")
+          // Ensure that the participants are stopped before the end of the test, otherwise they may
+          //  still log warnings because of timeouts triggering after the test case is over
+          participant1.stop()
+          participant2.stop()
+          logger.info("Participants stopped")
+        }.futureValueUS
       },
       forEvery(_)(
         acceptableLogMessageExt(
@@ -133,17 +143,16 @@ abstract class MemberAuthLoadWithSequencerRestartIntegrationTest
             "Is the server running? Did you configure the server",
             // some topology transactions must be retried
             "failed the following topology transaction",
+            // can happen if a connection in the pool is in a stopped state, which can occur during sequencer restarts
+            "Connection is not started",
           ),
           Seq(),
         )
       ),
     )
   }
-
 }
 
-// TODO(#30285)
-// TODO(#30770)
 @UnstableTest
 class MemberAuthLoadWithSequencerRestartIntegrationTestPostgres
     extends MemberAuthLoadWithSequencerRestartIntegrationTest {

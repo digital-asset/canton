@@ -70,7 +70,7 @@ The following command rotates a single key of ``myNode``:
 .. todo:: <https://github.com/DACH-NY/canton/issues/27699>
    Update the commands and docs so that one can actually pause in between and take a backup.
 
-.. _deleting-canton-keys:
+.. _generate-activate-new-keys:
 
 Generate and activate keys
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -99,7 +99,7 @@ Likewise, the following commands generate and activate a new encryption key:
 
 Refer to the page on :ref:`key restrictions<key-restrictions>` for further information on ``SigningKeyUsage``.
 Keys are generated according to specific cryptographic key formats. Please refer to the
-following :ref:`tables <canton_supported_key_formats>` for more information on the expected key formats in Canton.
+following :externalref:`tables <canton_supported_key_formats>` for more information on the expected key formats in Canton.
 
 Deactivate keys
 ~~~~~~~~~~~~~~~
@@ -111,6 +111,8 @@ To deactivate a key on all Synchronizers run the following command:
 
 Node operators normally do not need to deactivate keys, as a node deactivates old keys when rolling keys.
 When changing to a different scheme, it may be necessary that an operator explicitly deactivates a key.
+
+.. _deleting-canton-keys:
 
 Delete keys
 ~~~~~~~~~~~

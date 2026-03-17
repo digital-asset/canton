@@ -75,6 +75,7 @@ class InMemorySubmissionTrackerStore(
     FutureUnlessShutdown.unit
   }
 
+  @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
   override def size(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Int] =

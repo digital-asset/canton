@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.integration.tests
 
-import com.digitalasset.canton.annotations.NuckTest
+import com.digitalasset.canton.annotations.{NuckTest, RollbackTest}
 import com.digitalasset.canton.buildinfo.BuildInfo
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.DbConfig
@@ -211,7 +211,7 @@ abstract class DamlScriptIT
       actualResultOpt: Option[Either[String, Json]],
   ): Option[String] =
     actualResultOpt match {
-      case Some(actualValue) =>
+      case Some(Right(actualValue)) =>
         expectedValueOpt match {
           case Some(expectedValue) if expectedValue != actualValue =>
             Some(
@@ -220,6 +220,10 @@ abstract class DamlScriptIT
           case _ =>
             None
         }
+      case Some(Left(err)) =>
+        Some(
+          s"script $scriptId was expected to succeed but it fails with message: $err}"
+        )
       case None =>
         Some(s"script $scriptId was expected to succeed but it was not found in the results")
     }
@@ -359,11 +363,11 @@ abstract class DamlScriptIT
         case (id, _) if !ignoredTests.contains(id) && !isolatedTests.contains(id) => id
       }.toList
 
-//      val actualNonIsolatedTestResults = runDamlScriptTests(
-//        host = participant1.config.ledgerApi.address,
-//        port = participant1.config.ledgerApi.port,
-//        skippedTests = ignoredTests ++ isolatedTests,
-//      )
+      val actualNonIsolatedTestResults = runDamlScriptTests(
+        host = participant1.config.ledgerApi.address,
+        port = participant1.config.ledgerApi.port,
+        skippedTests = ignoredTests ++ isolatedTests,
+      )
       val actualIsolatedTestResults = isolatedTests.map { scriptId =>
         scriptId -> loggerFactory.assertLogs(
           within = {
@@ -379,12 +383,12 @@ abstract class DamlScriptIT
         )
       }.toMap
 
-//      clue("Non-isolated daml-script test cases") {
-//        assertDamlScriptTestResults(
-//          actualNonIsolatedTestResults,
-//          skippedTests = ignoredTests ++ isolatedTests,
-//        )
-//      }
+      clue("Non-isolated daml-script test cases") {
+        assertDamlScriptTestResults(
+          actualNonIsolatedTestResults,
+          skippedTests = ignoredTests ++ isolatedTests,
+        )
+      }
 
       for ((testScriptId, actualResults) <- actualIsolatedTestResults) {
         clue(s"Isolated $testScriptId daml-script test case") {
@@ -498,13 +502,14 @@ abstract class DamlScriptDevIT(contractStateMode: ContractStateMachine.Mode) ext
 }
 
 @NuckTest
+@RollbackTest
 class DamlScriptDevLegacyNUCKIT extends DamlScriptDevIT(ContractStateMachine.Mode.LegacyNUCK) {
   import DamlScriptIT.contractIDsNotSupported
   import DamlScriptIT.ExpectedResult.*
 
   registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
 
-  override val expectedResults = super.expectedResults ++ SortedMap(
+  override val expectedResults = super.expectedResults ++ List(
     "AuthFailure:t4_LookupByKeyMissingAuthorization" -> Failure(
       "requires authorizers .* for lookup by key"
     ),
@@ -559,7 +564,7 @@ class DamlScriptDevLegacyNUCKIT extends DamlScriptDevIT(ContractStateMachine.Mod
     "ContractKeyNotVisible:localLookup" -> Success(),
     "ContractKeys:test" -> Success(),
     "DamlScriptTrySubmit:createEmptyContractKeyMaintainers" -> Success(),
-    "DamlScriptTrySubmit:duplicateContractKey" -> Success(),
+    "DamlScriptTrySubmit:duplicateContractKey" -> Failure("incorrectly succeeded"),
     "DamlScriptTrySubmit:fetchEmptyContractKeyMaintainers" -> Success(),
     "EmptyContractKeyMaintainers:createCmdNoMaintainer" -> Failure(
       "Update failed due to a contract key with an empty set of maintainers"
@@ -583,6 +588,7 @@ class DamlScriptDevLegacyNUCKIT extends DamlScriptDevIT(ContractStateMachine.Mod
 }
 
 @NuckTest
+@RollbackTest
 class DamlScriptDevUCKWithRollbackIT
     extends DamlScriptDevIT(ContractStateMachine.Mode.UCKWithRollback) {
   import DamlScriptIT.contractIDsNotSupported
@@ -590,7 +596,7 @@ class DamlScriptDevUCKWithRollbackIT
 
   registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
 
-  override val expectedResults = super.expectedResults ++ SortedMap(
+  override val expectedResults = super.expectedResults ++ List(
     "AuthFailure:t4_LookupByKeyMissingAuthorization" -> Failure(
       "requires authorizers .* for lookup by key"
     ),
@@ -645,7 +651,7 @@ class DamlScriptDevUCKWithRollbackIT
     "ContractKeyNotVisible:localLookup" -> Success(),
     "ContractKeys:test" -> Success(),
     "DamlScriptTrySubmit:createEmptyContractKeyMaintainers" -> Success(),
-    "DamlScriptTrySubmit:duplicateContractKey" -> Success(),
+    "DamlScriptTrySubmit:duplicateContractKey" -> Failure("incorrectly succeeded"),
     "DamlScriptTrySubmit:fetchEmptyContractKeyMaintainers" -> Success(),
     "EmptyContractKeyMaintainers:createCmdNoMaintainer" -> Failure(
       "Update failed due to a contract key with an empty set of maintainers"
@@ -669,14 +675,15 @@ class DamlScriptDevUCKWithRollbackIT
 }
 
 @NuckTest
+@RollbackTest
 class DamlScriptDevUCKWithoutRollbackIT
     extends DamlScriptDevIT(ContractStateMachine.Mode.UCKWithoutRollback) {
-  import DamlScriptIT.contractIDsNotSupported
+  import DamlScriptIT.{contractIDsNotSupported, internalErrorOccurred}
   import DamlScriptIT.ExpectedResult.*
 
   registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
 
-  override def expectedResults = super.expectedResults ++ SortedMap(
+  override def expectedResults = super.expectedResults ++ List(
     "AuthFailure:t4_LookupByKeyMissingAuthorization" -> Failure(
       "requires authorizers .* for lookup by key"
     ),
@@ -684,13 +691,11 @@ class DamlScriptDevUCKWithoutRollbackIT
     "DamlScriptTrySubmit:contractNotActive" -> Failure("contractNotActive no additional info"),
     "DamlScriptTrySubmit:truncatedError" -> Failure("EXPECTED_TRUNCATED_ERROR"),
     "ExceptionSemantics:duplicateKey" -> Ignored,
-    "ExceptionSemantics:rollbackArchive" ->
-      Success(
-        logAssertions =
-          _.errorMessage should include("Rollback of consuming exercise node is not supported"),
-        _.errorMessage should include("Unhandled internal error"),
-        _.errorMessage should include("INTERNAL/An error occurred"),
-      ),
+    "ExceptionSemantics:rollbackArchive" -> internalErrorOccurred.withLogAssertions(
+      _.errorMessage should include("Rollback of consuming exercise node is not supported"),
+      _.errorMessage should include("Unhandled internal error"),
+      _.errorMessage should include("INTERNAL/An error occurred"),
+    ),
     "ExceptionSemantics:tryContext" -> Failure("Contract could not be found"),
     "FetchByKey:failLedger" -> Failure("couldn't find key"),
     "FetchByKey:failSpeedy" -> Failure("couldn't find key"),
@@ -737,7 +742,7 @@ class DamlScriptDevUCKWithoutRollbackIT
     "ContractKeyNotVisible:localLookup" -> Success(),
     "ContractKeys:test" -> Success(),
     "DamlScriptTrySubmit:createEmptyContractKeyMaintainers" -> Success(),
-    "DamlScriptTrySubmit:duplicateContractKey" -> Success(),
+    "DamlScriptTrySubmit:duplicateContractKey" -> Failure("incorrectly succeeded"),
     "DamlScriptTrySubmit:fetchEmptyContractKeyMaintainers" -> Success(),
     "EmptyContractKeyMaintainers:createCmdNoMaintainer" -> Failure(
       "Update failed due to a contract key with an empty set of maintainers"
@@ -760,60 +765,63 @@ class DamlScriptDevUCKWithoutRollbackIT
   )
 }
 
-class DamlScriptDevNoContractKeyIT
-    extends DamlScriptDevIT(ContractStateMachine.Mode.NoContractKey) {
-  import DamlScriptIT.{contractIDsNotSupported, internalErrorOccurred}
-  import DamlScriptIT.ExpectedResult.Success
-
-  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
-
-  override val expectedResults = super.expectedResults ++ SortedMap(
-    "AuthFailure:t4_LookupByKeyMissingAuthorization" -> internalErrorOccurred,
-    "DamlScriptTrySubmit:contractKeyNotFound" -> Success(),
-    "DamlScriptTrySubmit:contractNotActive" -> Success(),
-    "DamlScriptTrySubmit:truncatedError" -> Success(),
-    "ExceptionSemantics:duplicateKey" -> Success(),
-    "ExceptionSemantics:rollbackArchive" -> Success(),
-    "ExceptionSemantics:tryContext" -> Success(),
-    "FetchByKey:failLedger" -> Success(),
-    "FetchByKey:failSpeedy" -> Success(),
-    "FetchByKey:mustFail" -> Success(),
-    "KeyNotVisibleStakeholders:blindFetch" -> Success(),
-    "KeyNotVisibleStakeholders:blindLookup" -> Success(),
-    "KeyNotVisibleStakeholders:divulgeeFetch" -> Success(),
-    "KeyNotVisibleStakeholders:divulgeeLookup" -> Success(),
-    "ConsumedContractKey:testFetchFromConsumingChoice" -> internalErrorOccurred,
-    "ConsumedContractKey:testFetchKeyFromConsumingChoice" -> internalErrorOccurred,
-    "ConsumedContractKey:testLookupKeyFromConsumingChoice" -> internalErrorOccurred,
-    "ContractIdInContractKeySkipCheck:createCmdCrashes" -> contractIDsNotSupported,
-    "ContractIdInContractKeySkipCheck:createCrashes" -> contractIDsNotSupported,
-    "ContractIdInContractKeySkipCheck:exerciseCmdCrashes" -> contractIDsNotSupported,
-    "ContractIdInContractKeySkipCheck:exerciseCrashes" -> contractIDsNotSupported,
-    "ContractIdInContractKeySkipCheck:fetchCrashes" -> contractIDsNotSupported,
-    "ContractIdInContractKeySkipCheck:lookupCrashes" -> contractIDsNotSupported,
-    "ContractIdInContractKeySkipCheck:queryCrashes" -> Success(),
-    "ContractKeyNotEffective:fetchByKeyMustFail" -> internalErrorOccurred,
-    "ContractKeyNotVisible:aScript" -> internalErrorOccurred,
-    "ContractKeyNotVisible:blindLookup" -> internalErrorOccurred,
-    "ContractKeyNotVisible:divulgeeLookup" -> internalErrorOccurred,
-    "ContractKeyNotVisible:localFetch" -> internalErrorOccurred,
-    "ContractKeyNotVisible:localLookup" -> internalErrorOccurred,
-    "ContractKeys:test" -> Success(),
-    "DamlScriptTrySubmit:createEmptyContractKeyMaintainers" -> Success(),
-    "DamlScriptTrySubmit:duplicateContractKey" -> internalErrorOccurred,
-    "DamlScriptTrySubmit:fetchEmptyContractKeyMaintainers" -> Success(),
-    "EmptyContractKeyMaintainers:createCmdNoMaintainer" -> Success(),
-    "EmptyContractKeyMaintainers:createNoMaintainer" -> Success(),
-    "EmptyContractKeyMaintainers:fetchNoMaintainer" -> Success(),
-    "EmptyContractKeyMaintainers:lookupNoMaintainer" -> Success(),
-    "EmptyContractKeyMaintainers:queryNoMaintainer" -> Success(),
-    "ExceptionAndContractKey:testCreate" -> Success(),
-    "ExceptionAndContractKey:testLookup" -> Success(),
-    "LFContractKeys:lookupTest" -> Success(),
-    "LfStableContractKeyThroughExercises:run" -> Success(),
-    "LfStableContractKeys:run" -> Success(),
-  )
-}
+// TOOD (#31392): uncomment test once log suppression and ignoring has been figured out
+//@NuckTest
+//@RollbackTest
+//class DamlScriptDevNoContractKeyIT
+//    extends DamlScriptDevIT(ContractStateMachine.Mode.NoContractKey) {
+//  import DamlScriptIT.{contractIDsNotSupported, internalErrorOccurred}
+//  import DamlScriptIT.ExpectedResult.Success
+//
+//  registerPlugin(new UseReferenceBlockSequencer[DbConfig.H2](loggerFactory))
+//
+//  override val expectedResults = super.expectedResults ++ SortedMap(
+//    "AuthFailure:t4_LookupByKeyMissingAuthorization" -> internalErrorOccurred,
+//    "DamlScriptTrySubmit:contractKeyNotFound" -> Success(),
+//    "DamlScriptTrySubmit:contractNotActive" -> Success(),
+//    "DamlScriptTrySubmit:truncatedError" -> Success(),
+//    "ExceptionSemantics:duplicateKey" -> Success(),
+//    "ExceptionSemantics:rollbackArchive" -> Success(),
+//    "ExceptionSemantics:tryContext" -> Success(),
+//    "FetchByKey:failLedger" -> Success(),
+//    "FetchByKey:failSpeedy" -> Success(),
+//    "FetchByKey:mustFail" -> Success(),
+//    "KeyNotVisibleStakeholders:blindFetch" -> Success(),
+//    "KeyNotVisibleStakeholders:blindLookup" -> Success(),
+//    "KeyNotVisibleStakeholders:divulgeeFetch" -> Success(),
+//    "KeyNotVisibleStakeholders:divulgeeLookup" -> Success(),
+//    "ConsumedContractKey:testFetchFromConsumingChoice" -> internalErrorOccurred,
+//    "ConsumedContractKey:testFetchKeyFromConsumingChoice" -> internalErrorOccurred,
+//    "ConsumedContractKey:testLookupKeyFromConsumingChoice" -> internalErrorOccurred,
+//    "ContractIdInContractKeySkipCheck:createCmdCrashes" -> contractIDsNotSupported,
+//    "ContractIdInContractKeySkipCheck:createCrashes" -> contractIDsNotSupported,
+//    "ContractIdInContractKeySkipCheck:exerciseCmdCrashes" -> contractIDsNotSupported,
+//    "ContractIdInContractKeySkipCheck:exerciseCrashes" -> contractIDsNotSupported,
+//    "ContractIdInContractKeySkipCheck:fetchCrashes" -> contractIDsNotSupported,
+//    "ContractIdInContractKeySkipCheck:lookupCrashes" -> contractIDsNotSupported,
+//    "ContractIdInContractKeySkipCheck:queryCrashes" -> Success(),
+//    "ContractKeyNotEffective:fetchByKeyMustFail" -> internalErrorOccurred,
+//    "ContractKeyNotVisible:aScript" -> internalErrorOccurred,
+//    "ContractKeyNotVisible:blindLookup" -> internalErrorOccurred,
+//    "ContractKeyNotVisible:divulgeeLookup" -> internalErrorOccurred,
+//    "ContractKeyNotVisible:localFetch" -> internalErrorOccurred,
+//    "ContractKeyNotVisible:localLookup" -> internalErrorOccurred,
+//    "ContractKeys:test" -> Success(),
+//    "DamlScriptTrySubmit:createEmptyContractKeyMaintainers" -> Success(),
+//    "DamlScriptTrySubmit:duplicateContractKey" -> internalErrorOccurred,
+//    "DamlScriptTrySubmit:fetchEmptyContractKeyMaintainers" -> Success(),
+//    "EmptyContractKeyMaintainers:createCmdNoMaintainer" -> Success(),
+//    "EmptyContractKeyMaintainers:createNoMaintainer" -> Success(),
+//    "EmptyContractKeyMaintainers:fetchNoMaintainer" -> Success(),
+//    "EmptyContractKeyMaintainers:lookupNoMaintainer" -> Success(),
+//    "EmptyContractKeyMaintainers:queryNoMaintainer" -> Success(),
+//    "ExceptionAndContractKey:testCreate" -> Success(),
+//    "ExceptionAndContractKey:testLookup" -> Success(),
+//    "LFContractKeys:lookupTest" -> Success(),
+//    "LfStableContractKeyThroughExercises:run" -> Success(),
+//    "LfStableContractKeys:run" -> Success(),
+//  )
+//}
 
 object DamlScriptIT {
 
@@ -838,7 +846,10 @@ object DamlScriptIT {
     final case class Failure(
         errorMsgPattern: String,
         override val logAssertions: (LogEntry => Assertion)*
-    ) extends ExpectedResult
+    ) extends ExpectedResult {
+      def withLogAssertions(additionalLogAsstions: (LogEntry => Assertion)*): Failure =
+        Failure(errorMsgPattern, logAssertions ++ additionalLogAsstions: _*)
+    }
 
     final case class Broken(result: Either[Failure, Success]) extends ExpectedResult
 
@@ -862,7 +873,7 @@ object DamlScriptIT {
     Seq(
       ConfigTransforms.enableNonStandardConfig,
       ConfigTransforms.updateAllParticipantConfigs_(
-        _.focus(_.parameters.engine.contractStateMode).replace(Some(contractStateMode))
+        _.focus(_.parameters.engine.contractStateMode).replace(contractStateMode)
       ),
     )
 

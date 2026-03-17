@@ -66,11 +66,13 @@ abstract class GenericInMemoryAvailabilityStore[E <: Env[E]](
   private[data] def isEmpty: Boolean = allKnownBatchesById.isEmpty
 
   @VisibleForTesting
+  @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
   private[data] def size: Int = allKnownBatchesById.size
 
   @VisibleForTesting
   private[data] def keys: Iterable[BatchId] = allKnownBatchesById.keys
 
+  @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
   override def loadNumberOfRecords(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[AvailabilityStore.NumberOfRecords] =

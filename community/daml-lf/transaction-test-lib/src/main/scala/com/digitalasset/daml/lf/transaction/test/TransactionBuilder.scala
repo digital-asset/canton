@@ -152,22 +152,23 @@ object TransactionBuilder {
   private[this] val DummyCid = Value.ContractId.V1.assertFromString("00" + "00" * 32)
   private[this] val DummyParties = List(Ref.Party.assertFromString("DummyParty"))
 
-  /** Creates a FatContractInstance with dummy contract ID, signatories, observers, creation time and authentication
-    * data. The signatories and observers may be overridden with non-dummy values if necessary. For testing purposes
-    * only.
+  /** Creates a FatContractInstance with dummy signatories, observers, creation time and authentication
+    * data. The contract ID, signatories and observers may be overridden with non-dummy values if necessary.
+    * For testing purposes only.
     */
   def fatContractInstanceWithDummyDefaults(
       version: SerializationVersion,
       packageName: Ref.PackageName,
       template: Ref.Identifier,
       arg: Value,
+      contractId: Value.ContractId = DummyCid,
       signatories: Iterable[Ref.Party] = DummyParties,
       observers: Iterable[Ref.Party] = List.empty,
       contractKeyWithMaintainers: Option[GlobalKeyWithMaintainers] = None,
   ): FatContractInstance =
     FatContractInstanceImpl(
       version = version,
-      contractId = DummyCid,
+      contractId = contractId,
       packageName = packageName,
       templateId = template,
       createArg = arg,

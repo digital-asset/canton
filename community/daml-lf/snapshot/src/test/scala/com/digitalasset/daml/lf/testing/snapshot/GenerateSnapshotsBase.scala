@@ -77,7 +77,7 @@ abstract class GenerateSnapshotsBase
       .addConfigTransforms(
         ConfigTransforms.enableNonStandardConfig,
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.features.snapshotDir).replace(Some(snapshotDir))
+          _.focus(_.parameters.engine.snapshotDir).replace(Some(snapshotDir))
         ),
       )
       .withSetup { implicit env =>

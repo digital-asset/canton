@@ -111,7 +111,8 @@ Canton documentation
   participant/howtos/secure/kms/mode/external_key_storage
   participant/howtos/secure/kms/migration/kms_migration
   participant/howtos/secure/kms/migration/encrypted_key_storage_migration
-  participant/howtos/secure/kms/migration/external_key_storage_migration
+  participant/howtos/secure/kms/migration/external_key_storage_migration_export_keys
+  participant/howtos/secure/kms/migration/external_key_storage_migration_transfer_assets
   participant/howtos/secure/kms/key_rotation/kms_key_rotation
   participant/howtos/secure/kms/key_rotation/rotate_wrapper_key
   participant/howtos/secure/kms/key_rotation/rotate_external_keys

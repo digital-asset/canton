@@ -43,6 +43,7 @@ class ThrottleFilterEvaluator extends EvaluatorFilter[ILoggingEvent] {
 
     @throws[NullPointerException]
     @throws[EvaluationException]
+    @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
     override def evaluate(event: ILoggingEvent): Boolean = {
       val now = Instant.now.toEpochMilli
 

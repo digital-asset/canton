@@ -10,6 +10,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   ProofOfAvailability,
 }
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.ordering.OrderedBlockForOutput
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.retry.Jitter
 
 import scala.collection.mutable
@@ -82,4 +83,5 @@ final class MainOutputFetchProtocolState {
 final class BatchesRequest(
     val blockForOutput: OrderedBlockForOutput,
     val missingBatches: mutable.SortedSet[BatchId],
+    val traceContext: TraceContext,
 )

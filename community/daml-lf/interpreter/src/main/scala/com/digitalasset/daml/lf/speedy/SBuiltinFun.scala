@@ -28,7 +28,6 @@ import com.digitalasset.daml.lf.transaction.{
   GlobalKeyWithMaintainers,
   SerializationVersion,
 }
-import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits._
 import com.digitalasset.daml.lf.value.{Value => V}
 
 import java.nio.charset.StandardCharsets
@@ -120,6 +119,9 @@ private[speedy] sealed abstract class UpdateBuiltin(arity: Int)
 }
 
 private[lf] object SBuiltinFun {
+
+  def executeExpressionK(machine: UpdateMachine, expr: SExpr): ContU[SValue] =
+    ContU.wrap1(executeExpression(machine, expr))
 
   def executeExpression[Q](machine: Machine[Q], expr: SExpr)(
       f: SValue => Control[Q]
@@ -356,7 +358,7 @@ private[lf] object SBuiltinFun {
   sealed abstract class SBBinaryOpInt64(name: String, op: (Long, Long) => Option[Long])
       extends SBuiltinArithmetic(name, 2) {
     override private[speedy] def compute(args: ArraySeq[SValue]): Option[SValue] =
-      op(getSInt64(args, 0), getSInt64(args, 1)).map(SInt64)
+      op(getSInt64(args, 0), getSInt64(args, 1)).map(SInt64.apply)
   }
 
   final case object SBAddInt64 extends SBBinaryOpInt64("ADD_INT64", add)
@@ -451,7 +453,7 @@ private[lf] object SBuiltinFun {
 
       machine.updateGasBudget(_.BExplodeText.cost(arg0))
 
-      SList(FrontStack.from(Utf8.explode(arg0).map(SText)))
+      SList(FrontStack.from(Utf8.explode(arg0).map(SText.apply)))
     }
   }
 
@@ -630,7 +632,7 @@ private[lf] object SBuiltinFun {
       machine.updateGasBudget(_.BTextToCodePoints.cost(string))
 
       val codePoints = Utf8.unpack(string)
-      SList(FrontStack.from(codePoints.map(SInt64)))
+      SList(FrontStack.from(codePoints.map(SInt64.apply)))
     }
   }
 
@@ -755,7 +757,7 @@ private[lf] object SBuiltinFun {
           SBool(crypto.MessageSignature.verify(signature, message, publicKey))
         }
 
-        result.fold(Control.Error, Control.Value)
+        result.fold(Control.Error.apply, Control.Value.apply)
       } catch {
         case _: IllegalArgumentException =>
           Control.Error(
@@ -824,7 +826,7 @@ private[lf] object SBuiltinFun {
           SBool(crypto.MessageSignature.validateKey(publicKey))
         }
 
-        result.fold(Control.Error, Control.Value)
+        result.fold(Control.Error.apply, Control.Value.apply)
       } catch {
         case _: IllegalArgumentException =>
           Control.Error(
@@ -1049,7 +1051,7 @@ private[lf] object SBuiltinFun {
   final case object SBNumericToInt64 extends SBuiltinArithmetic("NUMERIC_TO_INT64", 1) {
     override private[speedy] def compute(args: ArraySeq[SValue]): Option[SInt64] = {
       val x = getSNumeric(args, 0)
-      Numeric.toLong(x).toOption.map(SInt64)
+      Numeric.toLong(x).toOption.map(SInt64.apply)
     }
   }
 
@@ -1069,7 +1071,7 @@ private[lf] object SBuiltinFun {
   final case object SBUnixDaysToDate extends SBuiltinArithmetic("UNIX_DAYS_TO_DATE", 1) {
     override private[speedy] def compute(args: ArraySeq[SValue]): Option[SDate] = {
       val days = getSInt64(args, 0)
-      Time.Date.asInt(days).flatMap(Time.Date.fromDaysSinceEpoch).toOption.map(SDate)
+      Time.Date.asInt(days).flatMap(Time.Date.fromDaysSinceEpoch).toOption.map(SDate.apply)
     }
   }
 
@@ -1090,7 +1092,7 @@ private[lf] object SBuiltinFun {
       extends SBuiltinArithmetic("UNIX_MICROSECONDS_TO_TIMESTAMP", 1) {
     override private[speedy] def compute(args: ArraySeq[SValue]): Option[STimestamp] = {
       val micros = getSInt64(args, 0)
-      Time.Timestamp.fromLong(micros).toOption.map(STimestamp)
+      Time.Timestamp.fromLong(micros).toOption.map(STimestamp.apply)
     }
   }
 
@@ -1556,7 +1558,7 @@ private[lf] object SBuiltinFun {
         machine: UpdateMachine,
     ): Control[Question.Update] = {
       val coid = getSContractId(args, 0)
-      fetchInterface(machine, coid, interfaceId)(Control.Value)
+      fetchInterface(machine, coid, interfaceId)(Control.Value.apply)
     }
   }
 
@@ -1697,7 +1699,7 @@ private[lf] object SBuiltinFun {
         machine: UpdateMachine,
     ): Control[Question.Update] = {
       val coid = getSContractId(args, 0)
-      fetchTemplate(machine, templateId, coid)(Control.Value)
+      fetchTemplate(machine, templateId, coid)(Control.Value.apply)
     }
   }
 
@@ -1781,12 +1783,13 @@ private[lf] object SBuiltinFun {
     }
   }
 
-  final case object SBResolveCreate extends SBResolveVirtual(CreateDefRef)
+  final case object SBResolveCreate extends SBResolveVirtual(CreateDefRef.apply)
 
   final case class SBSignatoryInterface(ifaceId: TypeConId)
-      extends SBResolveVirtual(SignatoriesDefRef)
+      extends SBResolveVirtual(SignatoriesDefRef.apply)
 
-  final case class SBObserverInterface(ifaceId: TypeConId) extends SBResolveVirtual(ObserversDefRef)
+  final case class SBObserverInterface(ifaceId: TypeConId)
+      extends SBResolveVirtual(ObserversDefRef.apply)
 
   // This wraps a contract record into an SAny where the type argument corresponds to
   // the record's templateId.
@@ -1996,7 +1999,7 @@ private[lf] object SBuiltinFun {
               machine.metrics.incrCount[TxNodeCount]()
               Control.Value(templateArg)
             case Left(err) =>
-               Control.Error(err)
+              Control.Error(err)
           }
         }
       }
@@ -2037,7 +2040,7 @@ private[lf] object SBuiltinFun {
           machine.metrics.incrCount[TxNodeCount]()
           Control.Value(SUnit)
         case Left(err) =>
-           Control.Error(err)
+          Control.Error(err)
       }
     }
   }
@@ -2045,42 +2048,40 @@ private[lf] object SBuiltinFun {
   private[this] abstract class KeyOperation {
     val templateId: TypeConId
 
-    // Callback from the engine returned NotFound
-    def handleKeyFound(cid: V.ContractId): Control.Value
-    // We already saw this key, but it was undefined or was archived
-    def handleKeyNotFound(gkey: GlobalKey): (Control[Nothing], Boolean)
-
-    @scala.annotation.nowarn("msg=match may not be exhaustive.")
-    final def handleKnownInputKey(
+    def handleKnownInputKey(
         gkey: GlobalKey,
         keyMapping: ContractStateMachine.KeyMapping,
-    ): Control[Nothing] =
-      keyMapping match {
-        case ContractStateMachine.KeyActive(cid) =>
-          handleKeyFound(cid)
-        case ContractStateMachine.KeyInactive() =>
-          val (control, _) = handleKeyNotFound(gkey)
-          control
-      }
+    ): Control[Nothing]
   }
 
   private[this] object KeyOperation {
     final class Fetch(override val templateId: TypeConId) extends KeyOperation {
-      override def handleKeyFound(cid: V.ContractId): Control.Value = {
-        Control.Value(SContractId(cid))
-      }
-      override def handleKeyNotFound(gkey: GlobalKey): (Control[Nothing], Boolean) = {
-        (Control.Error(IE.ContractKeyNotFound(gkey)), false)
-      }
+
+      @scala.annotation.nowarn("msg=match may not be exhaustive.")
+      override final def handleKnownInputKey(
+          gkey: GlobalKey,
+          keyMapping: Vector[V.ContractId],
+      ): Control[Nothing] =
+        keyMapping match {
+          case ContractStateMachine.KeyActive(coid) =>
+            Control.Value(SContractId(coid))
+          case ContractStateMachine.KeyInactive() =>
+            Control.Error(IE.ContractKeyNotFound(gkey))
+        }
     }
 
     final class Lookup(override val templateId: TypeConId) extends KeyOperation {
-      override def handleKeyFound(cid: V.ContractId): Control.Value = {
-        Control.Value(SOptional(Some(SContractId(cid))))
-      }
-      override def handleKeyNotFound(key: GlobalKey): (Control[Nothing], Boolean) = {
-        (Control.Value(SValue.SValue.None), true)
-      }
+      @scala.annotation.nowarn("msg=match may not be exhaustive.")
+      override final def handleKnownInputKey(
+          gkey: GlobalKey,
+          keyMapping: Vector[V.ContractId],
+      ): Control[Nothing] =
+        keyMapping match {
+          case ContractStateMachine.KeyActive(coid) =>
+            Control.Value(SOptional(Some(SContractId(coid))))
+          case ContractStateMachine.KeyInactive() =>
+            Control.Value(SOptional(None))
+        }
     }
   }
 
@@ -2089,11 +2090,12 @@ private[lf] object SBuiltinFun {
   ) extends UpdateBuiltin(1)
       with Product {
 
-    @scala.annotation.nowarn("msg=match may not be exhaustive.")
     override protected def executeUpdate(
         args: ArraySeq[SValue],
         machine: UpdateMachine,
     ): Control[Question.Update] = {
+
+      import cats.implicits._
 
       val templateId = operation.templateId
 
@@ -2111,51 +2113,27 @@ private[lf] object SBuiltinFun {
         )
       } else {
         val gkey = cachedKey.globalKey
-        machine.ptx.contractState.resolveKey(gkey) match {
-          case Right((keyMapping, next)) =>
-            machine.ptx = machine.ptx.copy(contractState = next)
-            keyMapping match {
-              case ContractStateMachine.KeyActive(coid) =>
-                fetchTemplate(machine, templateId, coid) { templateArg =>
-                  getContractInfo(
-                    machine,
-                    coid,
-                    templateId,
-                    templateArg,
-                  )(_ => operation.handleKeyFound(coid))
-                }
+        val keyMapping = for {
+          entry <- machine.ptx.contractState.resolveKey(gkey) match {
+            case Left(handle) =>
+              for {
+                result <- machine.needKeys(
+                  NameOf.qualifiedNameOfCurrentFunc,
+                  GlobalKeyWithMaintainers(gkey, cachedKey.maintainers),
+                  1,
+                  None,
+                )
+                (contracts, _) = result
+              } yield handle(contracts.map(_.contractId))
+            case Right(entry) =>
+              ContU.pure(entry)
+          }
+          (keyMapping, next) = entry
+          _ = machine.ptx = machine.ptx.copy(contractState = next)
+          _ <- keyMapping.toList.traverse(fetchTemplateK(machine, templateId, _))
+        } yield keyMapping
 
-              case ContractStateMachine.KeyInactive() =>
-                operation.handleKnownInputKey(gkey, keyMapping)
-            }
-
-          case Left(handle) =>
-            def continue: Option[V.ContractId] => (Control[Question.Update], Boolean) = { result =>
-              val (keyMapping, next) = handle(result.asCidVector)
-              machine.ptx = machine.ptx.copy(contractState = next)
-              keyMapping match {
-                case ContractStateMachine.KeyActive(coid) =>
-                  val c =
-                    fetchTemplate(machine, templateId, coid) { templateArg =>
-                      getContractInfo(
-                        machine,
-                        coid,
-                        templateId,
-                        templateArg,
-                      )(_ => operation.handleKeyFound(coid))
-                    }
-                  (c, true)
-                case ContractStateMachine.KeyInactive() =>
-                  operation.handleKeyNotFound(gkey)
-              }
-            }
-
-            machine.needKey(
-              NameOf.qualifiedNameOfCurrentFunc,
-              GlobalKeyWithMaintainers(gkey, cachedKey.maintainers),
-              continue,
-            )
-        }
+        keyMapping.run(operation.handleKnownInputKey(gkey, _))
       }
     }
   }
@@ -2472,9 +2450,9 @@ private[lf] object SBuiltinFun {
 
   final case object SQueryNByKey extends SBuiltinFun(2) {
     override private[speedy] def execute[Q](
-                                             args: ArraySeq[SValue],
-                                             machine: Machine[Q],
-                                           ): Control[Nothing] = {
+        args: ArraySeq[SValue],
+        machine: Machine[Q],
+    ): Control[Nothing] = {
       val nrOfResults = getSInt64(args, 0)
       val key = args(1)
 
@@ -2483,7 +2461,6 @@ private[lf] object SBuiltinFun {
       crash(s"SQueryNByKey not implemented ${nrOfResults} ${key}")
     }
   }
-
 
   object SBExperimental {
 
@@ -2628,6 +2605,13 @@ private[lf] object SBuiltinFun {
         throw SErrorCrash(NameOf.qualifiedNameOfCurrentFunc, s"Invalid contract info struct: $v")
     }
   }
+
+  private def fetchTemplateK(
+      machine: UpdateMachine,
+      dstTmplId: TypeConId,
+      coid: V.ContractId,
+  ): Cont[Question.Update, SValue] =
+    ContU.wrap1(fetchTemplate(machine, dstTmplId, coid))
 
   /** Fetches the requested contract ID and:
     *  - authenticates the contract against its contract ID if the contract ID uses a legacy hashing method
@@ -3041,4 +3025,5 @@ private[lf] object SBuiltinFun {
         body
     }
   }
+
 }

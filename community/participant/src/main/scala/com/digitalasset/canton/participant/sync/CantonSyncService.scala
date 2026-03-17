@@ -53,7 +53,7 @@ import com.digitalasset.canton.networking.grpc.CantonGrpcUtil.GrpcErrors
 import com.digitalasset.canton.participant.*
 import com.digitalasset.canton.participant.Pruning.*
 import com.digitalasset.canton.participant.admin.*
-import com.digitalasset.canton.participant.admin.data.{ManualLsuRequest, UploadDarData}
+import com.digitalasset.canton.participant.admin.data.{LateLsuRequest, UploadDarData}
 import com.digitalasset.canton.participant.admin.grpc.PruningServiceError
 import com.digitalasset.canton.participant.admin.inspection.{
   JournalGarbageCollectorControl,
@@ -1309,7 +1309,7 @@ class CantonSyncService(
     connectionsManager.disconnectSynchronizer(synchronizerAlias)
 
   def manuallyUpgradeSynchronizerTo(
-      request: ManualLsuRequest
+      request: LateLsuRequest
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
     connectionsManager.manuallyUpgradeSynchronizerTo(request)
 

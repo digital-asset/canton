@@ -90,7 +90,7 @@ final class Authorizer(
         case None =>
           Left(
             AuthorizationError.InternalAuthorizationError(
-              "unexpectedly the user-id is not set in the authenticated claims",
+              "User-id is not set in the authenticated claims",
               new RuntimeException(),
             )
           )

@@ -160,8 +160,10 @@ final class StateTransferBehavior[E <: Env[E]](
       case _: Consensus.Init =>
         val epochNumber = initialState.epochState.epoch.info.number
         // Note that for onboarding, segments are created but not started
-        logger.info(s"$messageType: cancelling segment modules for epoch $epochNumber")
-        initialState.epochState.notifyEpochCancellationToSegments(epochNumber)
+        context.withNewTraceContext { implicit traceContext =>
+          logger.info(s"$messageType: cancelling segment modules for epoch $epochNumber")
+          initialState.epochState.notifyEpochCancellationToSegments(epochNumber)
+        }
 
       case Consensus.SegmentCancelledEpoch =>
         cancelledSegments += 1

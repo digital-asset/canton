@@ -17,7 +17,6 @@ import com.digitalasset.canton.lifecycle.{FutureUnlessShutdown, UnlessShutdown}
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.event.RecordOrderPublisher
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing.EventInfo
-import com.digitalasset.canton.participant.sync.LsuCallback
 import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor
 import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
 import com.digitalasset.canton.topology.ParticipantId
@@ -48,7 +47,6 @@ class ParticipantTopologyTerminateProcessing(
     participantId: ParticipantId,
     pauseSynchronizerIndexingDuringPartyReplication: Boolean,
     synchronizerPredecessor: Option[SynchronizerPredecessor],
-    lsuCallback: LsuCallback,
     pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore,
     retrieveAndStoreMissingSequencerIds: TraceContext => EitherT[
       FutureUnlessShutdown,
@@ -113,7 +111,6 @@ class ParticipantTopologyTerminateProcessing(
       s"Node is notified about the upgrade of $psid to ${successor.psid} scheduled at ${successor.upgradeTime}"
     )
 
-    lsuCallback.registerCallback(successor)
     recordOrderPublisher.setSuccessor(Some(successor))
 
     EitherTUtil.doNotAwaitUS(
@@ -130,7 +127,6 @@ class ParticipantTopologyTerminateProcessing(
       s"Node is notified about the cancellation of upgrade"
     )
 
-    lsuCallback.unregisterCallback()
     recordOrderPublisher.setSuccessor(None)
 
     pendingHandshakesWithSuccessorsStore.delete(

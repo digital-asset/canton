@@ -23,6 +23,7 @@ import com.digitalasset.canton.performance.util.ParticipantSimulator
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.topology.transaction.ParticipantPermission.{Observation, Submission}
 import monocle.macros.syntax.lens.*
+import org.scalatest.concurrent.PatienceConfiguration
 
 import scala.concurrent.Future
 import scala.concurrent.duration.*
@@ -168,7 +169,9 @@ sealed trait ParticipantSimulatorIntegrationTest
       }
 
     // wait for all contracts to be fully processed
-    receivedAllContracts.futureValue should have size numContracts.toLong
+    receivedAllContracts.futureValue(timeout =
+      PatienceConfiguration.Timeout(1.minute)
+    ) should have size numContracts.toLong
 
     closables.foreach(_.close())
   }

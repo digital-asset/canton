@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.ledger.api.benchtool.submission
 
 import com.daml.ledger.javaapi.data.Party
+import com.digitalasset.canton.annotations.{NuckTest, RollbackTest}
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UseH2}
 import com.digitalasset.canton.integration.tests.ledgerapi.NoAuthPlugin
 import com.digitalasset.canton.ledger.api.benchtool.config.WorkflowConfig
@@ -19,6 +20,8 @@ import org.scalatest.AppendedClues
 
 import scala.concurrent.{ExecutionContext, Future}
 
+@NuckTest
+@RollbackTest
 class InterfaceSubscriptionITSpec extends BenchtoolSandboxFixture with AppendedClues {
   registerPlugin(NoAuthPlugin(loggerFactory))
   registerPlugin(new UseH2(loggerFactory))

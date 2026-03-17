@@ -28,7 +28,11 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 
 import scala.collection.immutable.ArraySeq
 
-abstract class UpgradeTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks with Inside {
+abstract class UpgradeTest
+    extends AnyFreeSpec
+    with Matchers
+    with TableDrivenPropertyChecks
+    with Inside {
 
   implicit val pkgId: Ref.PackageId = Ref.PackageId.assertFromString("-no-pkg-")
 
@@ -472,21 +476,22 @@ abstract class UpgradeTest extends AnyFreeSpec with Matchers with TableDrivenPro
     val seed = crypto.Hash.hashPrivateKey("seed")
     val machine = Speedy.Machine.fromUpdateSExpr(pkgs, seed, sexprToEval, Set(alice, bob))
 
+    val contract = TransactionBuilder
+      .fatContractInstanceWithDummyDefaults(
+        version = VDev,
+        contractId = theCid,
+        packageName = globalContractPackageName,
+        template = globalContractTemplateId,
+        arg = globalContractArg,
+        signatories = globalContractSignatories,
+        observers = globalContractObservers,
+        contractKeyWithMaintainers = globalContractKeyWithMaintainers,
+      )
+
     SpeedyTestLib
       .run(
         machine,
-        getContract = Map(
-          theCid -> TransactionBuilder
-            .fatContractInstanceWithDummyDefaults(
-              VDev,
-              globalContractPackageName,
-              globalContractTemplateId,
-              globalContractArg,
-              globalContractSignatories,
-              globalContractObservers,
-              globalContractKeyWithMaintainers,
-            )
-        ),
+        getContract = Map(contract.contractId -> contract),
         hashingMethod = hashingMethod,
       )
       .map(sv => (sv, sv.toNormalizedValue))

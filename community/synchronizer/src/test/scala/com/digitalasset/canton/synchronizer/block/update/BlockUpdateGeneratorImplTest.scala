@@ -109,6 +109,7 @@ class BlockUpdateGeneratorImplTest
             rateLimitManagerMock,
             OrderingTimeFixMode.ValidateOnly,
             sequencingTimeLowerBoundExclusive = Some(sequencingTimeLowerBoundExclusive),
+            getAnnouncedLsu = None,
             producePostOrderingTopologyTicks = false,
             SequencerTestMetrics,
             BatchingConfig(),
@@ -224,6 +225,7 @@ class BlockUpdateGeneratorImplTest
             rateLimitManagerMock,
             OrderingTimeFixMode.ValidateOnly,
             sequencingTimeLowerBoundExclusive = None,
+            getAnnouncedLsu = None,
             producePostOrderingTopologyTicks = false,
             SequencerTestMetrics,
             BatchingConfig(),
@@ -277,6 +279,7 @@ class BlockUpdateGeneratorImplTest
             mock[SequencerRateLimitManager],
             OrderingTimeFixMode.ValidateOnly,
             sequencingTimeLowerBoundExclusive = None,
+            getAnnouncedLsu = None,
             producePostOrderingTopologyTicks = false,
             SequencerTestMetrics,
             BatchingConfig(),
@@ -364,6 +367,7 @@ class BlockUpdateGeneratorImplTest
               mock[SequencerRateLimitManager],
               OrderingTimeFixMode.ValidateOnly,
               sequencingTimeLowerBoundExclusive = None,
+              getAnnouncedLsu = None,
               producePostOrderingTopologyTicks = true,
               SequencerTestMetrics,
               BatchingConfig(),
@@ -435,6 +439,7 @@ class BlockUpdateGeneratorImplTest
               mock[SequencerRateLimitManager],
               OrderingTimeFixMode.ValidateOnly,
               sequencingTimeLowerBoundExclusive = None,
+              getAnnouncedLsu = None,
               producePostOrderingTopologyTicks = true,
               SequencerTestMetrics,
               BatchingConfig(),
@@ -474,6 +479,20 @@ class BlockUpdateGeneratorImplTest
               state.copy(latestPendingTopologyTransactionTimestamp = Some(t2)),
               MaybeTopologyTickChunk(1L, t3, None),
             )
+
+            result5 <- blockUpdateGenerator.processBlockChunk(
+              state.copy(latestPendingTopologyTransactionTimestamp = Some(t1)),
+              MaybeTopologyTickChunk(
+                1L,
+                aTimestamp,
+                Some(
+                  TickTopology(
+                    aTimestamp.immediateSuccessor.immediateSuccessor,
+                    Right(SequencersOfSynchronizer),
+                  )
+                ),
+              ),
+            )
           } yield {
             // no pending topology transaction timestamps, so nothing to do
             noOpResult shouldBe (state, ChunkUpdate.noop)
@@ -507,6 +526,19 @@ class BlockUpdateGeneratorImplTest
               // the tick is created
               case c: ChunkUpdate if c.submissionsOutcomes.sizeIs == 1 =>
             }
+
+            // in this case, DABFT is requesting a later tick and this later timestamp wins over t1
+            result5._1 shouldBe state.copy(
+              lastChunkTs = aTimestamp.immediateSuccessor.immediateSuccessor,
+              latestSequencerEventTimestamp =
+                Some(aTimestamp.immediateSuccessor.immediateSuccessor),
+              latestPendingTopologyTransactionTimestamp = None,
+            )
+            result5._2 should matchPattern {
+              // the tick is created
+              case c: ChunkUpdate if c.submissionsOutcomes.sizeIs == 1 =>
+            }
+
           }
         }.failOnShutdown
       }

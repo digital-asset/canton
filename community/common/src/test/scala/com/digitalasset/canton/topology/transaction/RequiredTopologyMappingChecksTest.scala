@@ -186,6 +186,7 @@ class RequiredTopologyMappingChecksTest
     RequiredTopologyMappingChecks(
       Some(defaultStaticSynchronizerParameters),
       new TopologyStateLookup {
+        override def makeCopy(): TopologyStateLookup = ???
         override def lookupHistoryForUid(
             asOf: EffectiveTime,
             asOfInclusive: Boolean,
@@ -271,6 +272,8 @@ class RequiredTopologyMappingChecksTest
               .map(_.result.groupBy(_.mapping.namespace))(executionContext)
 
         }
+
+        override def cacheCleanAsOf: Option[EffectiveTime] = ???
 
       },
       loggerFactory,

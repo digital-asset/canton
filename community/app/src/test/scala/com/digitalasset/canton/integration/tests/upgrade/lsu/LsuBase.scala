@@ -53,14 +53,16 @@ private[lsu] trait LsuBase
 
   protected def upgradeTime: CantonTimestamp
 
+  protected val useStaticTime: Boolean = true
+
   protected def configTransforms: Seq[ConfigTransform] = List(
-    ConfigTransforms.disableAutoInit(newOldNodesResolution.keySet),
-    ConfigTransforms.useStaticTime,
+    ConfigTransforms.disableAutoInit(newOldNodesResolution.keySet)
   ) ++ ConfigTransforms.enableAlphaVersionSupport
     ++ ConfigTransforms.setTopologyTransactionRegistrationTimeout(
       // As we advance the clock quite a bit, we need to bump this parameter to avoid sequencing timeouts.
       config.NonNegativeFiniteDuration.ofHours(1)
-    )
+    ) ++
+    (if (useStaticTime) Seq(ConfigTransforms.useStaticTime) else Seq.empty)
 
   /** Prepare the environment for LSU with default values.
     *   - Connect `participants.all` (except if override is used) to synchronizer and upload dar

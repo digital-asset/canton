@@ -14,6 +14,7 @@ import com.google.common.util.concurrent.ThreadFactoryBuilder
 import com.typesafe.scalalogging.Logger
 
 import java.util.concurrent.*
+import java.util.concurrent.ForkJoinPool.ForkJoinWorkerThreadFactory
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.{ExecutionContextExecutor, blocking}
 import scala.util.chaining.*
@@ -21,6 +22,45 @@ import scala.util.chaining.*
 /** Factories and utilities for dealing with threading.
   */
 object Threading {
+
+  // A reflection-based wrapper for (private) `scala.concurrent.impl.ExecutionContextImpl$DefaultThreadFactory`
+  //  that allows to customize threads created by it, such as specifying the threads' context classloader.
+  private final class CantonForkJoinWorkerThreadFactory(
+      maxExtraThreads: PositiveInt,
+      name: String,
+      uncaughtExceptionHandler: Thread.UncaughtExceptionHandler,
+  ) extends ForkJoinWorkerThreadFactory {
+
+    private val threadFactoryConstructor =
+      Class
+        .forName("scala.concurrent.impl.ExecutionContextImpl$DefaultThreadFactory")
+        .getDeclaredConstructor(
+          classOf[Boolean],
+          classOf[Int],
+          classOf[String],
+          classOf[Thread.UncaughtExceptionHandler],
+        )
+    threadFactoryConstructor.setAccessible(true)
+
+    @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))
+    private val factoryDelegate =
+      threadFactoryConstructor
+        .newInstance(
+          Boolean.box(true),
+          Int.box(maxExtraThreads.value),
+          name,
+          uncaughtExceptionHandler,
+        )
+        .asInstanceOf[ForkJoinPool.ForkJoinWorkerThreadFactory]
+
+    override def newThread(pool: ForkJoinPool): ForkJoinWorkerThread = {
+      val thread = factoryDelegate.newThread(pool)
+      // Ensure the threads' context classloader is always set to the application classloader to avoid
+      //  class / resource access issues.
+      thread.setContextClassLoader(this.getClass.getClassLoader)
+      thread
+    }
+  }
 
   /** Creates a singled threaded scheduled executor.
     * @param name
@@ -152,7 +192,6 @@ object Threading {
     *   terminate the JVM on fatal errors. Enable this in production to prevent data corruption by
     *   termination of specific threads.
     */
-  @SuppressWarnings(Array("org.wartremover.warts.Null", "org.wartremover.warts.AsInstanceOf"))
   def newExecutionContext(
       name: String,
       logger: Logger,
@@ -165,28 +204,21 @@ object Threading {
       minRunnable: Option[PositiveInt] = None,
       exitOnFatal: Boolean = true,
   ): ExecutionContextIdlenessExecutorService = {
-    val reporter = createReporter(name, logger, exitOnFatal)(_)
-    val handler = ((_, cause) => reporter(cause)): Thread.UncaughtExceptionHandler
+    val uncaughtExceptionReporter =
+      createReporter(name, logger, exitOnFatal)(_)
 
-    val threadFactoryConstructor = Class
-      .forName("scala.concurrent.impl.ExecutionContextImpl$DefaultThreadFactory")
-      .getDeclaredConstructor(
-        classOf[Boolean],
-        classOf[Int],
-        classOf[String],
-        classOf[Thread.UncaughtExceptionHandler],
-      )
-    threadFactoryConstructor.setAccessible(true)
-    val threadFactory = threadFactoryConstructor
-      .newInstance(Boolean.box(true), Int.box(maxExtraThreads.value), name, handler)
-      .asInstanceOf[ForkJoinPool.ForkJoinWorkerThreadFactory]
+    val uncaughtExceptionHandler =
+      ((_, cause) => uncaughtExceptionReporter(cause)): Thread.UncaughtExceptionHandler
+
+    val threadFactory =
+      new CantonForkJoinWorkerThreadFactory(maxExtraThreads, name, uncaughtExceptionHandler)
 
     val forkJoinPool =
       createForkJoinPool(
         parallelism,
         keepAliveMillis,
         threadFactory,
-        handler,
+        uncaughtExceptionHandler,
         logger,
         corePoolSize,
         maxPoolSize,
@@ -195,7 +227,12 @@ object Threading {
 
     val monitoredPool = executorServiceMetrics.monitorExecutorService(name, forkJoinPool)
 
-    new ForkJoinIdlenessExecutorService(forkJoinPool, monitoredPool, reporter, name)
+    new ForkJoinIdlenessExecutorService(
+      forkJoinPool,
+      monitoredPool,
+      uncaughtExceptionReporter,
+      name,
+    )
   }
 
   /** Minimum parallelism of ForkJoinPool. Currently greater than one to work around a bug that

@@ -304,10 +304,8 @@ object SequencerError extends SequencerErrorGroup {
     """This error indicates that the sequencer has already been initialized and cannot be used for a synchronizer upgrade."""
   )
   @Resolution(
-    """Verify that the sequencer has been properly configured with logical upgrade predecessor information for the new sequencer.
-    | Currently it is expected that a config option `canton.sequencers.<sequencer>.parameters.sequencing-time-lower-bound-exclusive`
-    | has been specified and is set to the announced LSU upgrade time.
-    | It may be necessary to start with a fresh sequencer node for the upgrade to succeed."""
+    """Verify that the sequencer has been properly initialized with the topology state export from the predecessor
+      | and the node's configuration contains `<node>.init.auto-init = false` for the new sequencer."""
   )
   object SequencerPastUpgradeTime
       extends ErrorCode(
@@ -321,6 +319,25 @@ object SequencerError extends SequencerErrorGroup {
     ) extends CantonBaseError.Impl(
           cause =
             s"Synchronizer $synchronizerId is currently at $currentTime which is past the upgrade time $upgradeTime"
+        )
+        with LsuSequencerError
+  }
+
+  @Explanation(
+    """This error indicates that the payload of the traffic control state doesn't match the current synchronizer upgrade."""
+  )
+  @Resolution(
+    """Verify that the correct traffic control state is being used. See the error message for details."""
+  )
+  object InvalidTrafficState
+      extends ErrorCode(
+        "SEQUENCER_LSU_INVALID_TRAFFIC_STATE",
+        ErrorCategory.InvalidIndependentOfSystemState,
+      ) {
+    final case class Error(
+        errorMessage: String
+    ) extends CantonBaseError.Impl(
+          cause = s"Invalid traffic control state: $errorMessage"
         )
         with LsuSequencerError
   }

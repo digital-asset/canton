@@ -30,7 +30,7 @@ import com.digitalasset.canton.platform.store.backend.common.{
   UpdateStreamingQueries,
 }
 import com.digitalasset.canton.platform.store.backend.postgresql.PostgresDataSourceConfig
-import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.PaginationInput
+import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.IdPageQuery
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.tracing.TraceContext
@@ -424,9 +424,7 @@ trait EventStorageBackend {
       connection: Connection
   ): Set[Long]
 
-  def fetchTopologyPartyEventIds(party: Option[Party])(
-      connection: Connection
-  ): PaginationInput => Vector[Long]
+  def fetchTopologyPartyEventIds(party: Option[Party]): IdPageQuery
 
   def topologyPartyEventBatch(
       eventSequentialIds: SequentialIdBatch

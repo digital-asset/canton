@@ -9,7 +9,6 @@ import com.daml.scalautil.Statement.discard
 import com.digitalasset.canton.BigDecimalImplicits.DoubleToBigDecimal
 import com.digitalasset.canton.SynchronizerAlias
 import com.digitalasset.canton.admin.api.client.data.TemplateId
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.console.{CommandFailure, LocalParticipantReference}
 import com.digitalasset.canton.examples.java.iou.{Amount, Iou}
 import com.digitalasset.canton.integration.*
@@ -258,7 +257,6 @@ trait ConsoleCommandIntegrationTest
   }
 }
 
-@UnstableTest // TODO(#30820)
 class ConsoleCommandIntegrationTestDefault extends ConsoleCommandIntegrationTest {
   registerPlugin(new UseH2(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.LocalParticipantReference
@@ -37,7 +36,6 @@ LSU:
 - (s2, m2) upgrade
 - p2 and p3 automatically connect to the new synchronizer
  */
-@UnstableTest // TODO(#30850)
 final class LsuLateSequencerUpgradeIntegrationTest extends LsuBase {
   override protected def testName: String = "lsu-late-sequencer"
 

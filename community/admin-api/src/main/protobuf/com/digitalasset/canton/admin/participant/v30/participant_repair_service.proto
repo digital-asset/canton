@@ -67,7 +67,7 @@ service ParticipantRepairService {
   rpc RepairCommitmentsUsingAcs(RepairCommitmentsUsingAcsRequest) returns (RepairCommitmentsUsingAcsResponse);
 
   /**
-     Perform a logical synchronizer upgrade
+     Perform a late logical synchronizer upgrade
      This endpoint should ONLY be used when the following two conditions are met:
      - The participant node missed the upgrade on the old synchronizer, and
      - The old synchronizer has been decommissioned in the meantime.
@@ -75,7 +75,7 @@ service ParticipantRepairService {
      After the upgrade has been done, other repair operations might need to be done.
      This includes manually repairing the ACS to account for missed activity on both the old and new synchronizer.
   */
-  rpc PerformManualLsu(PerformManualLsuRequest) returns (PerformManualLsuResponse);
+  rpc PerformLateLsu(PerformLateLsuRequest) returns (PerformLateLsuResponse);
 }
 
 message PurgeContractsRequest {
@@ -409,7 +409,7 @@ message RepairCommitmentsStatus {
   }
 }
 
-message PerformManualLsuRequest {
+message PerformLateLsuRequest {
   message Successor {
     string physical_synchronizer_id = 1;
 
@@ -425,4 +425,4 @@ message PerformManualLsuRequest {
   Successor successor = 2;
 }
 
-message PerformManualLsuResponse {}
+message PerformLateLsuResponse {}

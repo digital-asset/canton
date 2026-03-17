@@ -33,6 +33,7 @@ import com.digitalasset.canton.{
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party}
 import com.digitalasset.daml.lf.engine
 import com.digitalasset.daml.lf.language.Ast
+import com.digitalasset.daml.lf.transaction.ContractStateMachine
 import org.scalatest.wordspec.AsyncWordSpec
 
 class DAMLeTest
@@ -67,6 +68,7 @@ class DAMLeTest
         iterationsBetweenInterruptions = 10,
         paranoidMode = false,
       ),
+      contractStateMode = ContractStateMachine.Mode.default,
       EngineLoggingConfig(),
       loggerFactory,
     )

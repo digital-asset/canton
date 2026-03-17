@@ -673,7 +673,7 @@ final class RepairServiceContractsImporter(
         representativePackageId = DedicatedRepresentativePackageId(c.representativePackageId),
       )
     }.toMap
-    val nodeIds = LazyList.from(0).map(LfNodeId)
+    val nodeIds = LazyList.from(0).map(LfNodeId.apply)
     val txNodes = nodeIds.zip(contractsAdded.map(_._1.contract.toLf)).toMap
     Update.RepairTransactionAccepted(
       transactionMeta = TransactionMeta(

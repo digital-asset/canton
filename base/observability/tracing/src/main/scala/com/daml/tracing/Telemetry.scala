@@ -28,7 +28,7 @@ abstract class Telemetry(protected val tracer: Tracer) {
     * metadata across boundaries, and to create complete traces.
     *
     * @see
-    *   [[com.daml.tracing.TelemetryContext.encodeMetadata()]]
+    *   [[com.daml.tracing.TelemetryContext.encodeMetadata]]
     */
   def contextFromMetadata(metadata: Option[jMap[String, String]]): TelemetryContext
 

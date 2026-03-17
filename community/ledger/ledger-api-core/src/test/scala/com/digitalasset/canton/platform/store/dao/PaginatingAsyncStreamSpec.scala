@@ -6,11 +6,12 @@ package com.digitalasset.canton.platform.store.dao
 import com.daml.testing.utils.PekkoBeforeAndAfterAll
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
-  IdFilterInput,
-  IdFilterPaginationInput,
+  IdFilterPageQuery,
+  IdPage,
+  IdPageBounds,
+  IdPageQuery,
   PaginationFromTo,
   PaginationInput,
-  PaginationLastOnlyInput,
 }
 import com.digitalasset.canton.platform.store.dao.events.IdPageSizing
 import com.digitalasset.canton.tracing.TraceContext
@@ -222,26 +223,33 @@ class PaginatingAsyncStreamSpec
         initialFromIdExclusive = initialFromIdExclusive,
         initialEndInclusive = initialEndInclusive,
         descendingOrder = descendingOrder,
-      )(_ => {
-        case input: PaginationInput if descendingOrder != input.paginationFromTo.descending =>
-          throw new IllegalArgumentException(
-            s"Got PaginationInput request with different descending setting (${input.paginationFromTo.descending}) then the test's ($descendingOrder"
-          )
-        case input: PaginationInput if !descendingOrder =>
-          queries.addOne(input)
-          ids
-            .filter(id =>
-              id > input.paginationFromTo.fromExclusive && id <= input.paginationFromTo.toInclusive
+      )(new IdPageQuery {
+        override def fetchPage(
+            connection: Connection
+        )(input: PaginationInput): PaginatingAsyncStream.IdPage = {
+          if (descendingOrder != input.fromTo.descending) {
+            throw new IllegalArgumentException(
+              s"Got PaginationInput request with different descending setting (${input.fromTo.descending}) then the test's ($descendingOrder"
             )
-            .take(input.limit)
-        case input: PaginationInput =>
+          }
           queries.addOne(input)
-          ids
-            .filter(id =>
-              id < input.paginationFromTo.fromExclusive && id >= input.paginationFromTo.toInclusive
-            ) // In backward query end is exclusive!
-            .reverse
-            .take(input.limit)
+          val resultIdsPlusOne = if (descendingOrder) {
+            ids
+              .filter(id =>
+                id < input.fromTo.fromExclusive && id >= input.fromTo.toInclusive
+              ) // In backward query end is exclusive!
+              .reverse
+              .take(input.limit + 1)
+          } else {
+            ids
+              .filter(id => id > input.fromTo.fromExclusive && id <= input.fromTo.toInclusive)
+              .take(input.limit + 1)
+          }
+          IdPage(
+            ids = resultIdsPlusOne.take(input.limit),
+            lastPage = resultIdsPlusOne.sizeIs < input.limit + 1,
+          )
+        }
       })(f => Future.successful(f(mock[Connection])))
       .runWith(Sink.seq[Long])
       .map(result => (result.toVector, queries.result()))
@@ -270,18 +278,21 @@ class PaginatingAsyncStreamSpec
       50L,
       ids,
       descendingOrder = false,
-    ).map { case (result, queries) =>
+    ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe ids
-      val lastOnlyQueries = queries.collect { case q: PaginationLastOnlyInput =>
-        q
-      }
-      lastOnlyQueries shouldBe Vector(
-        PaginationLastOnlyInput(PaginationFromTo.ascending(0, 50), 1),
-        PaginationLastOnlyInput(PaginationFromTo.ascending(1, 50), 4),
-        PaginationLastOnlyInput(PaginationFromTo.ascending(5, 50), 16),
-        PaginationLastOnlyInput(PaginationFromTo.ascending(21, 50), 20),
-        PaginationLastOnlyInput(PaginationFromTo.ascending(41, 50), 20),
-        PaginationLastOnlyInput(PaginationFromTo.ascending(50, 50), 20),
+      boundQueries shouldBe Vector(
+        PaginationInput(PaginationFromTo.ascending(0, 50), 1),
+        PaginationInput(PaginationFromTo.ascending(1, 50), 4),
+        PaginationInput(PaginationFromTo.ascending(5, 50), 16),
+        PaginationInput(PaginationFromTo.ascending(21, 50), 20),
+        PaginationInput(PaginationFromTo.ascending(41, 50), 20),
+      )
+      pageQueries shouldBe Vector(
+        PaginationFromTo.ascending(0, 1),
+        PaginationFromTo.ascending(1, 5),
+        PaginationFromTo.ascending(5, 21),
+        PaginationFromTo.ascending(21, 41),
+        PaginationFromTo.ascending(41, 50),
       )
     }
   }
@@ -294,16 +305,17 @@ class PaginatingAsyncStreamSpec
       50L,
       ids,
       descendingOrder = false,
-    ).map { case (result, queries) =>
+    ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe ids
-      val lastOnlyQueries = queries.collect { case q: PaginationLastOnlyInput =>
-        q
-      }
-      lastOnlyQueries shouldBe Vector(
-        PaginationLastOnlyInput(PaginationFromTo.ascending(0, 50), 20),
-        PaginationLastOnlyInput(PaginationFromTo.ascending(20, 50), 20),
-        PaginationLastOnlyInput(PaginationFromTo.ascending(40, 50), 20),
-        PaginationLastOnlyInput(PaginationFromTo.ascending(50, 50), 20),
+      boundQueries shouldBe Vector(
+        PaginationInput(PaginationFromTo.ascending(0, 50), 20),
+        PaginationInput(PaginationFromTo.ascending(20, 50), 20),
+        PaginationInput(PaginationFromTo.ascending(40, 50), 20),
+      )
+      pageQueries shouldBe Vector(
+        PaginationFromTo.ascending(0, 20),
+        PaginationFromTo.ascending(20, 40),
+        PaginationFromTo.ascending(40, 50),
       )
     }
   }
@@ -315,9 +327,12 @@ class PaginatingAsyncStreamSpec
       0L,
       Vector.empty,
       descendingOrder = false,
-    ).map { case (result, queries) =>
+    ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe Vector.empty
-      queries shouldBe Vector(PaginationLastOnlyInput(PaginationFromTo.ascending(0, 0), 1))
+      boundQueries shouldBe Vector(
+        PaginationInput(PaginationFromTo.ascending(0, 0), 1)
+      )
+      pageQueries shouldBe Vector()
     }
   }
 
@@ -328,14 +343,13 @@ class PaginatingAsyncStreamSpec
       1L,
       Vector(1L),
       descendingOrder = false,
-    ).map { case (result, queries) =>
+    ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe Vector(1L)
-      val lastOnlyQueries = queries.collect { case q: PaginationLastOnlyInput =>
-        q
-      }
-      lastOnlyQueries shouldBe Vector(
-        PaginationLastOnlyInput(PaginationFromTo.ascending(0, 1), 2),
-        PaginationLastOnlyInput(PaginationFromTo.ascending(1, 1), 8),
+      boundQueries shouldBe Vector(
+        PaginationInput(PaginationFromTo.ascending(0, 1), 2)
+      )
+      pageQueries shouldBe Vector(
+        PaginationFromTo.ascending(0, 1)
       )
     }
   }
@@ -348,8 +362,16 @@ class PaginatingAsyncStreamSpec
       30L,
       ids,
       descendingOrder = false,
-    ).map { case (result, _) =>
+    ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe ids
+      boundQueries shouldBe Vector(
+        PaginationInput(PaginationFromTo.ascending(0, 30L), 3),
+        PaginationInput(PaginationFromTo.ascending(7, 30L), 10),
+      )
+      pageQueries shouldBe Vector(
+        PaginationFromTo.ascending(0, 7),
+        PaginationFromTo.ascending(7, 30),
+      )
     }
   }
 
@@ -361,8 +383,20 @@ class PaginatingAsyncStreamSpec
       20L,
       ids,
       descendingOrder = false,
-    ).map { case (result, _) =>
+    ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe (6 to 20)
+      boundQueries shouldBe Vector(
+        PaginationInput(PaginationFromTo.ascending(5L, 20L), 3),
+        PaginationInput(PaginationFromTo.ascending(8L, 20L), 5),
+        PaginationInput(PaginationFromTo.ascending(13L, 20L), 5),
+        PaginationInput(PaginationFromTo.ascending(18L, 20L), 5),
+      )
+      pageQueries shouldBe Vector(
+        PaginationFromTo.ascending(5L, 8L),
+        PaginationFromTo.ascending(8L, 13L),
+        PaginationFromTo.ascending(13L, 18L),
+        PaginationFromTo.ascending(18L, 20L),
+      )
     }
   }
 
@@ -374,8 +408,26 @@ class PaginatingAsyncStreamSpec
       100L,
       ids,
       descendingOrder = true,
-    ).map { case (result, _) =>
+    ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe ids.reverse
+      boundQueries shouldBe Vector(
+        PaginationInput(PaginationFromTo.descending(0L, 100L), 1),
+        PaginationInput(PaginationFromTo.descending(0L, 99L), 4),
+        PaginationInput(PaginationFromTo.descending(0L, 95L), 16),
+        PaginationInput(PaginationFromTo.descending(0L, 79L), 20),
+        PaginationInput(PaginationFromTo.descending(0L, 59L), 20),
+        PaginationInput(PaginationFromTo.descending(0L, 39L), 20),
+        PaginationInput(PaginationFromTo.descending(0L, 19L), 20),
+      )
+      pageQueries shouldBe Vector(
+        PaginationFromTo.descending(99L, 100L),
+        PaginationFromTo.descending(95L, 99L),
+        PaginationFromTo.descending(79L, 95L),
+        PaginationFromTo.descending(59L, 79L),
+        PaginationFromTo.descending(39L, 59L),
+        PaginationFromTo.descending(19L, 39L),
+        PaginationFromTo.descending(0L, 19L),
+      )
     }
   }
 
@@ -387,8 +439,20 @@ class PaginatingAsyncStreamSpec
       100L,
       ids,
       descendingOrder = true,
-    ).map { case (result, _) =>
+    ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe ids.reverse
+      boundQueries shouldBe Vector(
+        PaginationInput(PaginationFromTo.descending(0L, 100L), 1),
+        PaginationInput(PaginationFromTo.descending(0L, 49L), 4),
+        PaginationInput(PaginationFromTo.descending(0L, 45L), 16),
+        PaginationInput(PaginationFromTo.descending(0L, 29L), 20),
+      )
+      pageQueries shouldBe Vector(
+        PaginationFromTo.descending(49L, 100L),
+        PaginationFromTo.descending(45L, 49L),
+        PaginationFromTo.descending(29L, 45L),
+        PaginationFromTo.descending(0L, 29L),
+      )
     }
   }
 
@@ -399,9 +463,10 @@ class PaginatingAsyncStreamSpec
       0L,
       (1L to 10L).toVector,
       descendingOrder = true,
-    ).map { case (result, queries) =>
+    ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe Vector.empty
-      queries shouldBe Vector(PaginationLastOnlyInput(PaginationFromTo.descending(0, 0), 1))
+      boundQueries shouldBe Vector(PaginationInput(PaginationFromTo.descending(0, 0), 1))
+      pageQueries shouldBe Vector.empty
     }
   }
 
@@ -412,8 +477,10 @@ class PaginatingAsyncStreamSpec
       100L,
       Vector.empty,
       descendingOrder = true,
-    ).map { case (result, _) =>
+    ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe Vector.empty
+      boundQueries shouldBe Vector(PaginationInput(PaginationFromTo.descending(1, 100), 1))
+      pageQueries shouldBe Vector.empty
     }
   }
 
@@ -425,7 +492,7 @@ class PaginatingAsyncStreamSpec
       30L,
       ids,
       descendingOrder = true,
-    ).map { case (result, _) =>
+    ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe ids.reverse
     }
   }
@@ -438,7 +505,7 @@ class PaginatingAsyncStreamSpec
       20L,
       ids,
       descendingOrder = true,
-    ).map { case (result, _) =>
+    ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe (6 to 20).reverse
     }
   }
@@ -451,7 +518,7 @@ class PaginatingAsyncStreamSpec
       4L,
       ids,
       descendingOrder = true,
-    ).map { case (result, _) =>
+    ).map { case (result, boundQueries, pageQueries) =>
       result shouldBe Vector(4, 3)
     }
   }
@@ -463,8 +530,9 @@ class PaginatingAsyncStreamSpec
       ids: Vector[Long],
       descendingOrder: Boolean,
       idFilterQueryParallelism: Int = 1,
-  ): Future[(Vector[Long], Vector[IdFilterPaginationInput])] = {
-    val queries = Vector.newBuilder[IdFilterPaginationInput]
+  ): Future[(Vector[Long], Vector[PaginationInput], Vector[PaginationFromTo])] = {
+    val boundQueries = Vector.newBuilder[PaginationInput]
+    val pageQueries = Vector.newBuilder[PaginationFromTo]
     paginatingAsyncStream
       .streamIdsFromSeekPaginationWithIdFilter(
         idStreamName = "test-stream",
@@ -473,53 +541,64 @@ class PaginatingAsyncStreamSpec
         initialFromIdExclusive = initialFromIdExclusive,
         initialEndInclusive = initialEndInclusive,
         descendingOrder = descendingOrder,
-      )(_ => {
-        case input: PaginationLastOnlyInput if !descendingOrder =>
-          queries.addOne(input)
-          ids
-            .filter(id =>
-              id > input.paginationFromTo.fromExclusive && id <= input.paginationFromTo.toInclusive
+      )(new IdFilterPageQuery {
+        override def fetchPageBounds(
+            connection: Connection
+        )(input: PaginationInput): Option[PaginatingAsyncStream.IdPageBounds] = {
+          boundQueries.addOne(input)
+          if (descendingOrder) {
+            val unfilteredIds = ids
+              .filter(id => id < input.fromTo.fromExclusive && id >= input.fromTo.toInclusive)
+              .reverse
+              .take(input.limit + 1)
+            val lastPage = unfilteredIds.sizeIs < input.limit + 1
+            unfilteredIds.lastOption.map(last =>
+              IdPageBounds(
+                fromTo =
+                  if (lastPage) input.fromTo
+                  else
+                    input.fromTo.copy(
+                      toInclusive = last + 1
+                    ),
+                lastPage = lastPage,
+              )
             )
-            .take(input.limit)
-            .lastOption
-            .toList
-            .toVector
-        case input: PaginationLastOnlyInput if descendingOrder =>
-          queries.addOne(input)
-          ids
-            .filter(id =>
-              id < input.paginationFromTo.fromExclusive && id >= input.paginationFromTo.toInclusive
+          } else {
+            val unfilteredIds = ids
+              .filter(id => id > input.fromTo.fromExclusive && id <= input.fromTo.toInclusive)
+              .take(input.limit + 1)
+            val lastPage = unfilteredIds.sizeIs < input.limit + 1
+            unfilteredIds.lastOption.map(last =>
+              IdPageBounds(
+                fromTo =
+                  if (lastPage) input.fromTo
+                  else
+                    input.fromTo.copy(
+                      toInclusive = last - 1
+                    ),
+                lastPage = lastPage,
+              )
             )
-            .reverse
-            .view
-            .take(input.limit)
-            .lastOption
-            .toList
-            .toVector
-        case input: IdFilterInput =>
-          queries.addOne(input)
+          }
+        }
+
+        override def fetchPage(connection: Connection)(fromTo: PaginationFromTo): Vector[Long] = {
+          pageQueries.addOne(fromTo)
           val filtered = ids.filter(id =>
-            if (input.paginationFromTo.descending)
-              id < input.paginationFromTo.fromExclusive && id >= input.paginationFromTo.toInclusive
+            if (fromTo.descending)
+              id < fromTo.fromExclusive && id >= fromTo.toInclusive
             else
-              id > input.paginationFromTo.fromExclusive && id <= input.paginationFromTo.toInclusive
+              id > fromTo.fromExclusive && id <= fromTo.toInclusive
           )
-          if (input.paginationFromTo.descending) filtered.reverse else filtered
-        case _: PaginationLastOnlyInput =>
-          throw new NotImplementedError(
-            "Descending test should not receive PaginationLastOnlyInput"
-          )
-        case _: PaginationInput =>
-          throw new IllegalArgumentException(
-            "PaginationInput should not happen in this test"
-          )
+          if (fromTo.descending) filtered.reverse else filtered
+        }
       })(
-        executeLastIdQuery = f => Future.successful(f(mock[Connection])),
+        executeFetchBounds = f => Future.successful(f(mock[Connection])),
         idFilterQueryParallelism = idFilterQueryParallelism,
-        executeIdFilterQuery = f => Future.successful(f(mock[Connection])),
+        executeFetchPage = f => Future.successful(f(mock[Connection])),
       )(TraceContext.empty)
       .runWith(Sink.seq[Long])
-      .map(result => (result.toVector, queries.result()))
+      .map(result => (result.toVector, boundQueries.result(), pageQueries.result()))
   }
 
 }

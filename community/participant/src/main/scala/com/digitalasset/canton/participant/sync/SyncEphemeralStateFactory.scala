@@ -23,6 +23,7 @@ import com.digitalasset.canton.participant.store.{
   RequestJournalStore,
   SyncPersistentState,
 }
+import com.digitalasset.canton.participant.sync.SynchronizerConnectionsManager.PerformLsuHandler
 import com.digitalasset.canton.participant.util.TimeOfChange
 import com.digitalasset.canton.store.*
 import com.digitalasset.canton.store.SequencedEventStore.ByTimestamp
@@ -50,6 +51,7 @@ trait SyncEphemeralStateFactory {
       onboardingClearanceScheduler: OnboardingClearanceScheduler,
       participantId: ParticipantId,
       synchronizerLoggerFactory: NamedLoggerFactory,
+      performLsu: PerformLsuHandler,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[SyncEphemeralState]
@@ -79,6 +81,7 @@ class SyncEphemeralStateFactoryImpl(
       onboardingClearanceScheduler: OnboardingClearanceScheduler,
       participantId: ParticipantId,
       synchronizerLoggerFactory: NamedLoggerFactory,
+      performLsu: PerformLsuHandler,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[SyncEphemeralState] =
@@ -120,6 +123,7 @@ class SyncEphemeralStateFactoryImpl(
         synchronizerLoggerFactory,
         futureSupervisor,
         clock,
+        performLsu,
       )
 
       // the time tracker, note, must be shutdown in synchronizer as it is using the sequencer client to

@@ -1,13 +1,5 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
-echo "Checking AzCopy is installed"
-
-if [ "$(azcopy)" ]; then
-  echo "azcopy already installed"
-else
-  echo "AZcopy is not in path or is not installed. If using nix AzCopy must be in PATH. Exiting..."
-  exit 1
-fi
 checksum()
 {
 	md5sum "${1}" | cut -f 1 -d ' '

@@ -13,8 +13,13 @@ option java_package = "com.daml.ledger.api.v2.interactive";
 
 message GlobalKey {
   // The identifier uses the package-id reference format.
+  //
+  // Required
   Identifier template_id = 1;
+  // Required
   string package_name = 2;
+  // Required
   Value key = 3;
+  // Required: must be non-empty
   bytes hash = 4;
 }

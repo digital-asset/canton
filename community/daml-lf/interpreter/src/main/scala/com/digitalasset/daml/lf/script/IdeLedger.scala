@@ -20,7 +20,6 @@ import com.digitalasset.daml.lf.transaction.{
 import com.digitalasset.daml.lf.transaction.BackwardsCompatibilityImplicits._
 import com.digitalasset.daml.lf.value.Value
 import Value._
-import com.daml.scalautil.Statement.discard
 
 import scala.collection.immutable
 
@@ -312,7 +311,7 @@ object IdeLedger {
         case ValueList(vs) =>
           vs.foreach(collect)
         case ValueContractId(coid) =>
-          discard(coids += coid)
+          val _ = coids += coid
         case _: ValueCidLessAtom => ()
         case ValueOptional(mbV) => mbV.foreach(collect)
         case ValueTextMap(map) => map.values.foreach(collect)

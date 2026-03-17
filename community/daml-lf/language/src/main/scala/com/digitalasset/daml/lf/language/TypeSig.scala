@@ -134,7 +134,7 @@ object TypeSig {
   ) = {
 
     def toSerializableType(typ: Ast.Type, args: List[Ast.Type]): SerializableType = {
-      def nonSerializable = nonSerializableType(args.foldLeft(typ)(Ast.TApp))
+      def nonSerializable = nonSerializableType(args.foldLeft(typ)(Ast.TApp.apply))
 
       typ match {
         case Ast.TVar(name) => SerializableType.Var(name)

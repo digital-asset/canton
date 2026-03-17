@@ -82,7 +82,7 @@ private[parser] object Lexer extends RegexParsers {
       "||" ^^^ `||` |
       "|" ^^^ `|` |
       """[a-zA-Z_\$][\w\$]*""".r ^^ (s => keywords.getOrElse(s, Id(s))) |
-      """#\w+""".r ^^ ContractId |
+      """#\w+""".r ^^ ContractId.apply |
       """\'([^\\\']|\\\'|\\\\)+\'""".r >> toSimpleString |
       """\"([^\\\"]|\\n|\\r|\\\"|\\\'|\\\\)*\"""".r >> toText |
       """\d+-\d+-\d+T\d+:\d+:\d+(\.\d+)?Z""".r >> toTimestamp |

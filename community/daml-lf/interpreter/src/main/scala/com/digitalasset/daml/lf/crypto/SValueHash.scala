@@ -35,7 +35,7 @@ object SValueHash {
 
   // --- public interface ---
 
-  /** Hashes a contract key modulo trailing Nones. Throws [[HashingError]] if [key] contains non-serializable values. */
+  /** Hashes a contract key modulo trailing Nones. Throws [[com.digitalasset.daml.lf.crypto.Hash.HashingError]] if [key] contains non-serializable values. */
   @throws[HashingError]
   def assertHashContractKey(
       packageName: Ref.PackageName,
@@ -57,7 +57,7 @@ object SValueHash {
   ): Either[HashingError, Hash] =
     Hash.handleError(assertHashContractKey(packageName, templateName, key))
 
-  /** Hashes a contract modulo trailing Nones. Throws [[HashingError]] if [arg] contains non-serializable values. */
+  /** Hashes a contract modulo trailing Nones. Throws [[com.digitalasset.daml.lf.crypto.Hash.HashingError]] if [arg] contains non-serializable values. */
   @throws[HashingError]
   def assertHashContractInstance(
       packageName: Ref.PackageName,

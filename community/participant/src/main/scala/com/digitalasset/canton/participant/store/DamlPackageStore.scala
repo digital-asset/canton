@@ -78,6 +78,13 @@ trait DamlPackageStore extends AutoCloseable { this: NamedLogging =>
       traceContext: TraceContext
   ): FutureUnlessShutdown[Option[DamlLf.Archive]]
 
+  /** @return
+    *   those ids in `packageIds` that correspond to a package in the store
+    */
+  def filterExisting(packageIds: Set[PackageId])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Set[PackageId]]
+
   def getPackageDescription(packageId: PackageId)(implicit
       traceContext: TraceContext
   ): OptionT[FutureUnlessShutdown, PackageDescription]

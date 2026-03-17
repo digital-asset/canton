@@ -5,6 +5,7 @@ package com.digitalasset.canton.integration.tests.security
 
 import com.daml.ledger.api.v2.commands.Command
 import com.daml.ledger.javaapi.data
+import com.digitalasset.canton.annotations.NuckTest
 import com.digitalasset.canton.crypto.CryptoPureApi
 import com.digitalasset.canton.damltests.java.refs.Refs
 import com.digitalasset.canton.damltestsdev.java.basickeys.{BasicKey, KeyOps}
@@ -240,6 +241,7 @@ trait ModelConformanceIntegrationTest
 
 }
 
+@NuckTest
 class ModelConformanceIntegrationTestPostgres extends ModelConformanceIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

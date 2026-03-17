@@ -438,18 +438,18 @@ private[backend] trait StorageBackendTestsContracts
       )
     )
     val activeIds = executeSql(
-      backend.event.updateStreamingQueries.fetchActiveIds(
-        stakeholderO = Some(signatory),
-        templateIdO = None,
-        activeAtEventSeqId = 1000,
-      )(_)(
-        PaginatingAsyncStream.IdFilterInput(
+      backend.event.updateStreamingQueries
+        .fetchActiveIds(
+          stakeholderO = Some(signatory),
+          templateIdO = None,
+          activeAtEventSeqId = 1000,
+        )
+        .fetchPage(_)(
           PaginatingAsyncStream.PaginationFromTo.ascending(
             startExclusive = 0L,
             endInclusive = 1000L,
           )
         )
-      )
     )
     val lastActivations = executeSql(
       backend.contract.lastActivations(
@@ -548,32 +548,32 @@ private[backend] trait StorageBackendTestsContracts
       )
     )
     val activeIds2 = executeSql(
-      backend.event.updateStreamingQueries.fetchActiveIds(
-        stakeholderO = Some(signatory),
-        templateIdO = None,
-        activeAtEventSeqId = 2L,
-      )(_)(
-        PaginatingAsyncStream.IdFilterInput(
+      backend.event.updateStreamingQueries
+        .fetchActiveIds(
+          stakeholderO = Some(signatory),
+          templateIdO = None,
+          activeAtEventSeqId = 2L,
+        )
+        .fetchPage(_)(
           PaginatingAsyncStream.PaginationFromTo.ascending(
             startExclusive = 0L,
             endInclusive = 2L,
           )
         )
-      )
     )
     val activeIds4 = executeSql(
-      backend.event.updateStreamingQueries.fetchActiveIds(
-        stakeholderO = Some(signatory),
-        templateIdO = None,
-        activeAtEventSeqId = 4,
-      )(_)(
-        PaginatingAsyncStream.IdFilterInput(
+      backend.event.updateStreamingQueries
+        .fetchActiveIds(
+          stakeholderO = Some(signatory),
+          templateIdO = None,
+          activeAtEventSeqId = 4,
+        )
+        .fetchPage(_)(
           PaginatingAsyncStream.PaginationFromTo.ascending(
             startExclusive = 0L,
             endInclusive = 4L,
           )
         )
-      )
     )
     val lastActivations = executeSql(
       backend.contract.lastActivations(

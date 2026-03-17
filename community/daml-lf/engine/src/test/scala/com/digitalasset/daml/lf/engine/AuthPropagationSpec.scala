@@ -7,32 +7,12 @@ package engine
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.{ApiCommand, ApiCommands}
 import com.digitalasset.daml.lf.data.{Bytes, FrontStack, ImmArray, Time}
-import com.digitalasset.daml.lf.data.Ref.{
-  Identifier,
-  Name,
-  PackageId,
-  ParticipantId,
-  Party,
-  QualifiedName,
-}
+import com.digitalasset.daml.lf.data.Ref.{Identifier, Name, PackageId, ParticipantId, Party, QualifiedName}
 import com.digitalasset.daml.lf.language.Ast.Package
-import com.digitalasset.daml.lf.ledger.FailedAuthorization.{
-  CreateMissingAuthorization,
-  ExerciseMissingAuthorization,
-}
-import com.digitalasset.daml.lf.transaction.{
-  FatContractInstance,
-  SerializationVersion,
-  SubmittedTransaction,
-}
+import com.digitalasset.daml.lf.ledger.FailedAuthorization.{CreateMissingAuthorization, ExerciseMissingAuthorization}
+import com.digitalasset.daml.lf.transaction.{ContractStateMachine, FatContractInstance, SerializationVersion, SubmittedTransaction}
 import com.digitalasset.daml.lf.transaction.Transaction.Metadata
-import com.digitalasset.daml.lf.value.Value.{
-  ContractId,
-  ValueContractId,
-  ValueList,
-  ValueParty,
-  ValueRecord,
-}
+import com.digitalasset.daml.lf.value.Value.{ContractId, ValueContractId, ValueList, ValueParty, ValueRecord}
 import com.daml.logging.LoggingContext
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
@@ -114,6 +94,7 @@ class AuthPropagationSpec(majorLanguageVersion: LanguageVersion.Major)
   private val participant: ParticipantId = ParticipantId.assertFromString("participant")
   private val submissionSeed: crypto.Hash = crypto.Hash.hashPrivateKey("submissionSeed")
   private val contractIdVersion = ContractIdVersion.V1
+  private val contractStateMode = ContractStateMachine.Mode.devDefault
 
   private val testEngine: Engine =
     Engine.DevEngine
@@ -132,6 +113,7 @@ class AuthPropagationSpec(majorLanguageVersion: LanguageVersion.Major)
           participantId = participant,
           submissionSeed = submissionSeed,
           contractIdVersion = contractIdVersion,
+          contractStateMode = contractStateMode,
           prefetchKeys = Seq.empty,
         )
         .consume(pcs = defaultContracts, pkgs = allPackages)

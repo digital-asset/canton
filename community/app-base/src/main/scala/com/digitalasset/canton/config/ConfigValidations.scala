@@ -20,6 +20,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.version.HandshakeErrors.DeprecatedProtocolVersion
 import com.digitalasset.canton.version.ProtocolVersion
+import com.digitalasset.daml.lf.transaction.ContractStateMachine
 
 import java.net.URI
 
@@ -269,7 +270,7 @@ object ConfigValidations extends NamedLogging {
     val errors = config.allLocalNodes.toSeq.mapFilter {
       case (name, nodeConfig: ParticipantNodeConfig) =>
         val nonStandardConfig = config.parameters.nonStandardConfig
-        val snapshotSupportEnabled = nodeConfig.features.snapshotDir.nonEmpty
+        val snapshotSupportEnabled = nodeConfig.parameters.engine.snapshotDir.nonEmpty
         Option.when(!nonStandardConfig && snapshotSupportEnabled)(
           s"Setting snapshot-dir for ${nodeConfig.nodeTypeName} ${name.unwrap} requires you to explicitly set canton.parameters.non-standard-config = yes"
         )
@@ -360,10 +361,11 @@ object ConfigValidations extends NamedLogging {
       config: CantonConfig
   ): Validated[NonEmpty[Seq[String]], Unit] = {
     val errors = config.participants.toSeq.mapFilter { case (name, participantConfig) =>
+      val mode = participantConfig.parameters.engine.contractStateMode
       Option.when(
-        participantConfig.parameters.engine.contractStateMode.isDefined && !config.parameters.nonStandardConfig
+        mode != ContractStateMachine.Mode.default && !config.parameters.nonStandardConfig
       )(
-        s"Changing the default contract state machine mode on the Daml Engine for participant ${name.unwrap} requires to explicitly set canton.parameters.non-standard-config = true"
+        s"Changing the contract state machine mode to $mode on the Daml Engine for participant ${name.unwrap} requires to explicitly set canton.parameters.non-standard-config = true"
       )
     }
     toValidated(errors)

@@ -6,6 +6,8 @@ package com.digitalasset.canton.participant.config
 import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
 import com.digitalasset.daml.lf.transaction.ContractStateMachine
 
+import java.nio.file.Path
+
 /** Configure the behaviour of the Daml Engine
   *
   * @param enableEngineStackTraces
@@ -25,6 +27,10 @@ import com.digitalasset.daml.lf.transaction.ContractStateMachine
   * @param contractStateMode
   *   Contract state machine is configured to use this mode for validating transactions. To modify
   *   the default value requires canton.parameters.non-standard-config = true
+  * @param profileDir
+  *   path to the directory used for Daml profiling
+  * @param snapshotDir
+  *   path to the directory used for saving transaction tree snapshots
   */
 final case class CantonEngineConfig(
     enableEngineStackTraces: Boolean = false,
@@ -33,5 +39,7 @@ final case class CantonEngineConfig(
     submissionPhaseLogging: EngineLoggingConfig = EngineLoggingConfig(enabled = true),
     validationPhaseLogging: EngineLoggingConfig = EngineLoggingConfig(enabled = false),
     enableAdditionalConsistencyChecks: Boolean = false,
-    contractStateMode: Option[ContractStateMachine.Mode] = None,
+    contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.default,
+    profileDir: Option[Path] = None,
+    snapshotDir: Option[Path] = None,
 )

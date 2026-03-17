@@ -115,7 +115,7 @@ import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.*
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
-import com.digitalasset.canton.version.ParticipantProtocolFeatureFlags
+import com.digitalasset.canton.version.{EngineMode, ParticipantProtocolFeatureFlags}
 import com.digitalasset.daml.lf.engine.Engine
 import io.grpc.Status
 import io.opentelemetry.api.trace.Tracer
@@ -257,6 +257,7 @@ class ConnectedSynchronizer(
       participantId,
       packageResolver,
       engine,
+      EngineMode.forProtocolVersion(staticSynchronizerParameters.protocolVersion),
       parameters.engine.validationPhaseLogging,
       loggerFactory,
     )

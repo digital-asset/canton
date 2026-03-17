@@ -355,6 +355,20 @@ commands:
             - persist_to_workspace:
                 paths: << parameters.location >>
                 root: .
+    persist_classpath_files:
+        description: |
+            Try to save classpath.txt and test.classpath.txt as artifacts, which can be helpful for debugging classpath issues
+        steps:
+            - run:
+                command: |
+                    mkdir -p classpath_files
+                    cp classpath.txt classpath_files 2>/dev/null || echo "no classpath.txt file found"
+                    cp test.classpath.txt classpath_files 2>/dev/null || echo "no test.classpath.txt file found"
+                name: Copy classpath files
+                when: always
+            - store_artifacts:
+                name: Upload classpath files (if any) as an artifact
+                path: classpath_files
     persist_failure_status:
         description: |
             On failure, publish the status variable to the workspace and as an artifact
@@ -535,7 +549,7 @@ commands:
                 type: string
         steps:
             - run:
-                command: ./scripts/ci/azure/restore-from-azure.sh
+                command: .ci/nix-exec scripts/ci/azure/restore-from-azure.sh
                 environment:
                     ORB_CONTAINER: <<parameters.CONTAINER>>
                     ORB_KEY: << parameters.key >>
@@ -651,7 +665,7 @@ commands:
                 collect_postgres_query_stats: << parameters.collect_postgres_query_stats >>
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD<<# parameters.exclude_unstable_tests >> -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest<</ parameters.exclude_unstable_tests >>" checkErrors
                 execution_context_size: << parameters.execution_context_size >>
-                filter: 'grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.manual -e com\.digitalasset\.canton\.integration\.tests\.crashrecovery -e com\.digitalasset\.canton\.nightly -e com\.digitalasset\.canton\.integration\.tests\.nightly -e com\.digitalasset\.canton\.integration\.tests\.toxiproxy -e com\.digitalasset\.canton\.integration\.tests\.release -e com\.digitalasset\.canton\.integration\.tests\.benchmarks -e com\.digitalasset\.canton\.integration\.tests\.continuity -e com\.digitalasset\.canton\.integration\.tests\.variations -e com\.digitalasset\.canton\.integration\.tests\.upgrade\.MajorUpgrade.\*Writer.\* '
+                filter: 'grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.manual -e com\.digitalasset\.canton\.integration\.tests\.crashrecovery -e com\.digitalasset\.canton\.nightly -e com\.digitalasset\.canton\.integration\.tests\.nightly -e com\.digitalasset\.canton\.integration\.tests\.toxiproxy -e com\.digitalasset\.canton\.integration\.tests\.release -e com\.digitalasset\.canton\.integration\.tests\.benchmarks -e com\.digitalasset\.canton\.integration\.tests\.continuity -e com\.digitalasset\.canton\.integration\.tests\.variations -e com\.digitalasset\.canton\.integration\.tests\.modelbased -e com\.digitalasset\.canton\.integration\.tests\.upgrade\.MajorUpgrade.\*Writer.\* '
                 num_parallel_tasks: << parameters.num_parallel_tasks >>
                 num_test_buckets: << parameters.num_test_buckets >>
                 override_java_version_for_tests: << parameters.override_java_version_for_tests >>
@@ -697,27 +711,34 @@ commands:
                       --env CANTON_PROTOCOL_VERSION \
                       --security-opt seccomp=unconfined \
                       << parameters.additional_docker_args >> \
-                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1bf294a74dcb \
+                      digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50 \
                       nix-shell \
                       -I nixpkgs=./nix/nixpkgs.nix \
                       --run 'python3 -c "print (\"r\n\"*1000)" | sbt << parameters.sbt_options >> << parameters.command >> '
                 name: Run tests
                 no_output_timeout: << parameters.no_output_timeout >>
     run_temp_nuck_tests:
+        parameters:
+            exclude_unstable_tests:
+                default: true
+                type: boolean
+            num_parallel_tasks:
+                default: "4"
+                type: string
         steps:
             - run_tests:
-                command: dumpClassPath "set \`transcode-schema\` / Test / testOnly := {};set \`transcode-daml-lf\` / Test / testOnly := {};set \`transcode-codec-json\` / Test / testOnly := {};set \`transcode-codec-proto-java\` / Test / testOnly := {};set \`transcode-codec-proto-scala\` / Test / testOnly := {};set \`transcode-daml-examples\` / Test / testOnly := {};set \`transcode-test-conformance\` / Test / testOnly := {};set \`transcode-test-utils\` / Test / testOnly := {};testOnly * -- -n com.digitalasset.canton.annotations.NuckTest"
+                command: dumpClassPath "set \`transcode-schema\` / Test / testOnly := {};set \`transcode-daml-lf\` / Test / testOnly := {};set \`transcode-codec-json\` / Test / testOnly := {};set \`transcode-codec-proto-java\` / Test / testOnly := {};set \`transcode-codec-proto-scala\` / Test / testOnly := {};set \`transcode-daml-examples\` / Test / testOnly := {};set \`transcode-test-conformance\` / Test / testOnly := {};set \`transcode-test-utils\` / Test / testOnly := {};$RUN_SPLITTED_TESTS_CMD<<# parameters.exclude_unstable_tests >> -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest<</ parameters.exclude_unstable_tests >> -n com.digitalasset.canton.annotations.NuckTest -n com.digitalasset.canton.annotations.RollbackTest"
                 fail_on_error_in_output: true
-                filter: cat
-                num_parallel_tasks: "1"
-                num_test_buckets: ""
+                filter: 'grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.manual -e com\.digitalasset\.canton\.integration\.tests\.crashrecovery -e com\.digitalasset\.canton\.nightly -e com\.digitalasset\.canton\.integration\.tests\.nightly -e com\.digitalasset\.canton\.integration\.tests\.toxiproxy -e com\.digitalasset\.canton\.integration\.tests\.release -e com\.digitalasset\.canton\.integration\.tests\.benchmarks -e com\.digitalasset\.canton\.integration\.tests\.continuity -e com\.digitalasset\.canton\.integration\.tests\.variations -e com\.digitalasset\.canton\.integration\.tests\.upgrade\.MajorUpgrade.\*Writer.\* '
+                num_parallel_tasks: << parameters.num_parallel_tasks >>
+                num_test_buckets: $CIRCLE_NODE_TOTAL
                 succeed_on_error: false
     run_test_coverage_test:
         parameters:
             command:
                 type: string
             filter:
-                default: 'grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.manual -e com\.digitalasset\.canton\.integration\.tests\.crashrecovery -e com\.digitalasset\.canton\.nightly -e com\.digitalasset\.canton\.integration\.tests\.nightly -e com\.digitalasset\.canton\.integration\.tests\.toxiproxy -e com\.digitalasset\.canton\.integration\.tests\.release -e com\.digitalasset\.canton\.integration\.tests\.benchmarks -e com\.digitalasset\.canton\.integration\.tests\.continuity -e com\.digitalasset\.canton\.integration\.tests\.variations -e com\.digitalasset\.canton\.integration\.tests\.upgrade\.MajorUpgrade.\*Writer.\* '
+                default: 'grep -v -E -e com\.digitalasset\.canton\.integration\.tests\.manual -e com\.digitalasset\.canton\.integration\.tests\.crashrecovery -e com\.digitalasset\.canton\.nightly -e com\.digitalasset\.canton\.integration\.tests\.nightly -e com\.digitalasset\.canton\.integration\.tests\.toxiproxy -e com\.digitalasset\.canton\.integration\.tests\.release -e com\.digitalasset\.canton\.integration\.tests\.benchmarks -e com\.digitalasset\.canton\.integration\.tests\.continuity -e com\.digitalasset\.canton\.integration\.tests\.variations -e com\.digitalasset\.canton\.integration\.tests\.modelbased -e com\.digitalasset\.canton\.integration\.tests\.upgrade\.MajorUpgrade.\*Writer.\* '
                 type: string
             num_test_buckets:
                 default: $CIRCLE_NODE_TOTAL
@@ -827,6 +848,7 @@ commands:
                 timeout: << parameters.timeout >>
             - persist_failure_status
             - persist_jvm_crash_files
+            - persist_classpath_files
             - unless:
                 condition: << parameters.skip_cleanup >>
                 steps:
@@ -924,7 +946,7 @@ commands:
                 type: string
         steps:
             - run:
-                command: ./scripts/ci/azure/save-to-azure.sh
+                command: .ci/nix-exec scripts/ci/azure/save-to-azure.sh
                 environment:
                     ORB_CONTAINER: <<parameters.CONTAINER>>
                     ORB_KEY: << parameters.key >>
@@ -1886,6 +1908,15 @@ jobs:
                 name: Upload data continuity dumps to S3
             - cleanup_test_job
             - slack_red_main_with_volunteer
+    model_based_test:
+        executor: canton-xlarge-docker-with-postgres
+        steps:
+            - run_tests:
+                command: dumpClassPath "testOnly com.digitalasset.canton.integration.tests.modelbased.* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
+                filter: cat
+                num_parallel_tasks: "1"
+                num_test_buckets: ""
+                timeout: 60m
     nightly_integration_test:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
         steps:
@@ -1897,6 +1928,10 @@ jobs:
     nightly_integration_test_bftordering_only:
         executor: canton-xlarge-docker
         steps:
+            - run:
+                command: |
+                    echo "export LOG_LEVEL_CANTON=WARN" >> $BASH_ENV
+                name: Set Canton log level to WARN
             - run_tests:
                 command: dumpClassPath "$RUN_SPLITTED_TESTS_CMD -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest" checkErrors
                 filter: grep -E -e com\.digitalasset\.canton\.integration\.tests\.nightly\.bftordering
@@ -2308,6 +2343,9 @@ jobs:
                 command: scripts/ci/check_sql_definitions.sh
                 name: Check SQL table definitions
             - run:
+                command: scripts/ci/check-protobuf-required-optional.sh
+                name: Check Protobuf Required/Optional requirements
+            - run:
                 command: |
                     echo "checking that the containers shell.nix matches the one in the repository".
                     echo "if this fails, you need to update our build image. have a look at .ci/README.md"
@@ -2336,7 +2374,7 @@ jobs:
             - slack_red_main_with_volunteer
     temp_nuck_tests_pv_dev:
         executor: canton-xlarge-docker-with-postgres
-        parallelism: 1
+        parallelism: 4
         parameters:
             override_java_version_for_tests:
                 default: ""
@@ -2525,6 +2563,7 @@ jobs:
                 num_test_buckets: ""
                 release_path: community/app/target/release
                 succeed_on_error: true
+                timeout: 60m
     unstable_test_slow:
         executor: canton-xlarge-docker-with-postgres-toxiproxy
         steps:
@@ -2535,6 +2574,7 @@ jobs:
                 num_parallel_tasks: "1"
                 num_test_buckets: ""
                 succeed_on_error: true
+                timeout: 60m
     update_canton_build_docker_image:
         docker:
             - image: nixos/nix:2.31.2
@@ -2836,6 +2876,7 @@ workflows:
                         ignore:
                             - main
                             - /^release-line.*/
+                            - /^gh-readonly-queue\/main\/.*/
                 name: temp_nuck_tests_pv_dev
                 requires:
                     - compile
@@ -3161,6 +3202,33 @@ workflows:
             equal:
                 - generate-data-continuity-dumps
                 - << pipeline.parameters.manual_job >>
+    manual_model_based_test:
+        jobs:
+            - compile:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+            - model_based_test:
+                context:
+                    - datadog
+                    - artifactory
+                    - azure-self-cache
+                    - maven-mirror
+                    - da-images
+                requires:
+                    - compile
+        when:
+            and:
+                - equal:
+                    - model-based-test
+                    - << pipeline.parameters.manual_job >>
+                - not:
+                    equal:
+                        - main
+                        - << pipeline.git.branch >>
     manual_nightly_integration_tests:
         jobs:
             - compile:

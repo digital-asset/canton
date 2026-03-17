@@ -8,6 +8,7 @@ import com.daml.ledger.api.v2.event.CreatedEvent
 import com.daml.test.evidence.scalatest.ScalaTestSupport.TagContainer
 import com.daml.test.evidence.tag.EvidenceTag
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
+import com.digitalasset.canton.annotations.NuckTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{CommandFailure, FeatureFlag}
@@ -937,6 +938,7 @@ class RepairServiceIntegrationTestPostgresStableLf
     extends RepairServiceIntegrationTestStableLf
     with RepairServiceBftSequencerPostgresTest
 
+@NuckTest
 class RepairServiceIntegrationTestPostgresDevLf
     extends RepairServiceIntegrationTestDevLf
     with RepairServiceBftSequencerPostgresTest

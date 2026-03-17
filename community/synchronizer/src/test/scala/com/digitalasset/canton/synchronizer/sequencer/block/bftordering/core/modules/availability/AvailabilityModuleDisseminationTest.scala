@@ -603,7 +603,7 @@ class AvailabilityModuleDisseminationTest
       canAcceptBatch(secondBatchId) shouldBe false
 
       // once the batch data is retrieved (and ready to send to output module), the spot becomes available
-      val request = new BatchesRequest(block, mutable.SortedSet(ABatchId))
+      val request = new BatchesRequest(block, mutable.SortedSet(ABatchId), traceContext)
       availability.receive(
         Availability.LocalOutputFetch.FetchedBlockDataFromStorage(
           request,

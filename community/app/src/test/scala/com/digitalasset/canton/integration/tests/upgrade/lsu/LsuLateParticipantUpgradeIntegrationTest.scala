@@ -200,7 +200,7 @@ final class LsuLateParticipantUpgradeIntegrationTest extends LsuBase {
       val newSynchronizerConnectionConfig =
         participant1.synchronizers.config(fixture.newPSId).value
 
-      def manualLsu(p: ParticipantReference): Unit = p.repair.perform_manual_lsu(
+      def manualLsu(p: ParticipantReference): Unit = p.repair.perform_late_lsu(
         currentPhysicalSynchronizerId = daId,
         successorPhysicalSynchronizerId = fixture.newPSId,
         announcedUpgradeTime = fixture.upgradeTime,

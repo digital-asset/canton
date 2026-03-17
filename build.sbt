@@ -227,7 +227,7 @@ lazy val root = (project in file("."))
       (
         Seq(CommunityProjects.`performance-driver`)
           ++ testLibraries
-          ++ DamlProjects.allProjects
+          ++ Seq(DamlProjects.`bindings-java`)
           ++ ledgerTestToolLibaries
           ++ transcodeLibraries // Cannot run scaladoc 2.13 on transcode because written in Scala 3
       ).map(_.project): _*
@@ -469,7 +469,12 @@ lazy val `ledger-test-tool-2-dev` = CommunityProjects.`ledger-test-tool-2-dev`
 lazy val `conformance-testing` = CommunityProjects.`conformance-testing`
 lazy val `upgrading-integration-tests` =
   CommunityProjects.`upgrading-integration-tests`
-lazy val `model-based-testing` = CommunityProjects.`model-based-testing`
+lazy val `model-based-testing-generators` =
+  CommunityProjects.`model-based-testing-generators`
+lazy val `model-based-testing-drivers` =
+  CommunityProjects.`model-based-testing-drivers`
+lazy val `model-based-testing-integration-tests` =
+  CommunityProjects.`model-based-testing-integration-tests`
 
 lazy val `scalatest-utils` = DamlProjects.`scalatest-utils`
 lazy val `scala-utils` = DamlProjects.`scala-utils`

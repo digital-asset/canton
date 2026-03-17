@@ -37,6 +37,7 @@ service CommandService {
 // These commands are executed as a single atomic transaction.
 message SubmitAndWaitRequest {
   // The commands to be submitted.
+  //
   // Required
   Commands commands = 1;
 }
@@ -44,12 +45,14 @@ message SubmitAndWaitRequest {
 // These commands are executed as a single atomic transaction.
 message SubmitAndWaitForTransactionRequest {
   // The commands to be submitted.
+  //
   // Required
   Commands commands = 1;
 
   // If no ``transaction_format`` is provided, a default will be used where ``transaction_shape`` is set to
   // TRANSACTION_SHAPE_ACS_DELTA, ``event_format`` is defined with ``filters_by_party`` containing wildcard-template
   // filter for all original ``act_as`` and ``read_as`` parties and the ``verbose`` flag is set.
+  //
   // Optional
   TransactionFormat transaction_format = 2;
 }
@@ -57,10 +60,12 @@ message SubmitAndWaitForTransactionRequest {
 message SubmitAndWaitResponse {
   // The id of the transaction that resulted from the submitted command.
   // Must be a valid LedgerString (as described in ``value.proto``).
+  //
   // Required
   string update_id = 1;
 
   // The details of the offset field are described in ``community/ledger-api/README.md``.
+  //
   // Required
   int64 completion_offset = 2;
 }
@@ -68,6 +73,7 @@ message SubmitAndWaitResponse {
 message SubmitAndWaitForTransactionResponse {
   // The transaction that resulted from the submitted command.
   // The transaction might contain no events (request conditions result in filtering out all of them).
+  //
   // Required
   Transaction transaction = 1;
 }
@@ -75,18 +81,21 @@ message SubmitAndWaitForTransactionResponse {
 // This reassignment is executed as a single atomic update.
 message SubmitAndWaitForReassignmentRequest {
   // The reassignment commands to be submitted.
+  //
   // Required
   ReassignmentCommands reassignment_commands = 1;
 
-  // Optional
   // If no event_format provided, the result will contain no events.
   // The events in the result, will take shape TRANSACTION_SHAPE_ACS_DELTA.
+  //
+  // Optional
   EventFormat event_format = 2;
 }
 
 message SubmitAndWaitForReassignmentResponse {
   // The reassignment that resulted from the submitted reassignment command.
   // The reassignment might contain no events (request conditions result in filtering out all of them).
+  //
   // Required
   Reassignment reassignment = 1;
 }

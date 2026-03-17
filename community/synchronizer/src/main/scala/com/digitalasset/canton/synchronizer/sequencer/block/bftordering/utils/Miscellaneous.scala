@@ -5,16 +5,36 @@ package com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils
 
 import cats.data.OptionT
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.{CloseContext, FutureUnlessShutdown}
 import com.digitalasset.canton.logging.TracedLogger
+import com.digitalasset.canton.resource.DbStorage
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.integration.canton.topology.TopologyActivationTime
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.util.retry
 import org.slf4j.event.Level
+import slick.dbio.{DBIOAction, Effect, NoStream}
 
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 
 private[bftordering] object Miscellaneous {
+
+  // The Canton storage implementations will only retry retriable errors anyway, such as the executor being
+  //  overloaded and rejecting a task, which must be retried indefinitely until the task is accepted.
+  //  This retry value is the one also used in higher-level operations implemented by `DbStorage`, such as
+  //  `query` or `update`.
+  private val StorageRetries: Int = retry.Forever
+
+  // Better name for `storage.queryAndUpdate` for our use case; we cannot use `update` because it assumes
+  //  the operation is transactional, but bulk updates are not always transactional
+  //  (even though they are in our use case) so the types don't work out.
+  def updateBulk[A](
+      storage: DbStorage,
+      action: DBIOAction[A, NoStream, Effect.All],
+      operationName: String,
+      maxRetries: Int = StorageRetries,
+  )(implicit traceContext: TraceContext, closeContext: CloseContext): FutureUnlessShutdown[A] =
+    storage.runWrite(action, operationName, maxRetries)
 
   val TestBootstrapTopologyActivationTime: TopologyActivationTime =
     TopologyActivationTime(CantonTimestamp.MinValue)

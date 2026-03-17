@@ -15,6 +15,7 @@ option java_package = "com.daml.ledger.api.v2";
 
 // A command can either create a new contract or exercise a choice on an existing contract.
 message Command {
+  // Required
   oneof command {
     CreateCommand create = 1;
     ExerciseCommand exercise = 2;
@@ -33,6 +34,7 @@ message CreateCommand {
   Identifier template_id = 1;
 
   // The arguments required for creating a contract from this template.
+  //
   // Required
   Record create_arguments = 2;
 }
@@ -49,15 +51,18 @@ message ExerciseCommand {
 
   // The ID of the contract the client wants to exercise upon.
   // Must be a valid LedgerString (as described in ``value.proto``).
+  //
   // Required
   string contract_id = 2;
 
   // The name of the choice the client wants to exercise.
   // Must be a valid NameString (as described in ``value.proto``)
+  //
   // Required
   string choice = 3;
 
   // The argument for this choice.
+  //
   // Required
   Value choice_argument = 4;
 }
@@ -72,15 +77,18 @@ message ExerciseByKeyCommand {
   Identifier template_id = 1;
 
   // The key of the contract the client wants to exercise upon.
+  //
   // Required
   Value contract_key = 2;
 
   // The name of the choice the client wants to exercise.
   // Must be a valid NameString (as described in ``value.proto``)
+  //
   // Required
   string choice = 3;
 
   // The argument for this choice.
+  //
   // Required
   Value choice_argument = 4;
 }
@@ -95,15 +103,18 @@ message CreateAndExerciseCommand {
   Identifier template_id = 1;
 
   // The arguments required for creating a contract from this template.
+  //
   // Required
   Record create_arguments = 2;
 
   // The name of the choice the client wants to exercise.
   // Must be a valid NameString (as described in ``value.proto``).
+  //
   // Required
   string choice = 3;
 
   // The argument for this choice.
+  //
   // Required
   Value choice_argument = 4;
 }
@@ -115,21 +126,25 @@ message DisclosedContract {
   // The identifier uses the package-id reference format.
   //
   // If provided, used to validate the template id of the contract serialized in the created_event_blob.
+  //
   // Optional
   Identifier template_id = 1;
 
   // The contract id
   //
   // If provided, used to validate the contract id of the contract serialized in the created_event_blob.
+  //
   // Optional
   string contract_id = 2;
 
   // Opaque byte string containing the complete payload required by the Daml engine
   // to reconstruct a contract not known to the receiving participant.
-  // Required
+  //
+  // Required: must be non-empty
   bytes created_event_blob = 3;
 
   // The ID of the synchronizer where the contract is currently assigned
+  //
   // Optional
   string synchronizer_id = 4;
 }
@@ -138,6 +153,7 @@ message DisclosedContract {
 message Commands {
   // Identifier of the on-ledger workflow that this command is a part of.
   // Must be a valid LedgerString (as described in ``value.proto``).
+  //
   // Optional
   string workflow_id = 1;
 
@@ -145,6 +161,8 @@ message Commands {
   // Must be a valid UserIdString (as described in ``value.proto``).
   // Required unless authentication is used with a user token.
   // In that case, the token's user-id will be used for the request's user_id.
+  //
+  // Optional
   string user_id = 2;
 
   // Uniquely identifies the command.
@@ -152,15 +170,19 @@ message Commands {
   // where act_as is interpreted as a set of party names.
   // The change ID can be used for matching the intended ledger changes with all their completions.
   // Must be a valid LedgerString (as described in ``value.proto``).
+  //
   // Required
   string command_id = 3;
 
   // Individual elements of this atomic command. Must be non-empty.
-  // Required
+  //
+  // Required: must be non-empty
   repeated Command commands = 4;
 
   // Specifies the deduplication period for the change ID.
   // If omitted, the participant will assume the configured maximum deduplication time.
+  //
+  // Optional
   oneof deduplication_period {
     // Specifies the length of the deduplication period.
     // It is interpreted relative to the local clock at some point during the submission's processing.
@@ -177,11 +199,13 @@ message Commands {
   // Use this property if you expect that command interpretation will take a considerate amount of time, such that by
   // the time the resulting transaction is sequenced, its assigned ledger time is not valid anymore.
   // Must not be set at the same time as min_ledger_time_rel.
+  //
   // Optional
   google.protobuf.Timestamp min_ledger_time_abs = 7;
 
   // Same as min_ledger_time_abs, but specified as a duration, starting from the time the command is received by the server.
   // Must not be set at the same time as min_ledger_time_abs.
+  //
   // Optional
   google.protobuf.Duration min_ledger_time_rel = 8;
 
@@ -189,7 +213,8 @@ message Commands {
   // If ledger API authorization is enabled, then the authorization metadata must authorize the sender of the request
   // to act on behalf of each of the given parties.
   // Each element must be a valid PartyIdString (as described in ``value.proto``).
-  // Required, must be non-empty.
+  //
+  // Required: must be non-empty
   repeated string act_as = 9;
 
   // Set of parties on whose behalf (in addition to all parties listed in ``act_as``) contracts can be retrieved.
@@ -200,7 +225,8 @@ message Commands {
   // rules for fetch operations.
   // If ledger API authorization is enabled, then the authorization metadata must authorize the sender of the request
   // to read contract data on behalf of each of the given parties.
-  // Optional
+  //
+  // Optional: can be empty
   repeated string read_as = 10;
 
   // A unique identifier to distinguish completions for different submissions with the same change ID.
@@ -209,26 +235,31 @@ message Commands {
   // Must be a valid LedgerString (as described in ``value.proto``).
   //
   // If omitted, the participant or the committer may set a value of their choice.
+  //
   // Optional
   string submission_id = 11;
 
   // Additional contracts used to resolve contract & contract key lookups.
-  // Optional
+  //
+  // Optional: can be empty
   repeated DisclosedContract disclosed_contracts = 12;
 
   // Must be a valid synchronizer id
+  //
   // Optional
   string synchronizer_id = 13;
 
   // The package-id selection preference of the client for resolving
   // package names and interface instances in command submission and interpretation
+  //
+  // Optional: can be empty
   repeated string package_id_selection_preference = 14;
 
   // Fetches the contract keys into the caches to speed up the command processing.
   // Should only contain contract keys that are expected to be resolved during interpretation of the commands.
   // Keys of disclosed contracts do not need prefetching.
   //
-  // Optional
+  // Optional: can be empty
   repeated PrefetchContractKey prefetch_contract_keys = 15;
 }
 
@@ -242,6 +273,7 @@ message PrefetchContractKey {
   Identifier template_id = 1;
 
   // The key of the contract the client wants to prefetch.
+  //
   // Required
   Value contract_key = 2;
 }

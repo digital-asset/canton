@@ -587,6 +587,7 @@ object TopologyTransactionProcessor {
       synchronizerUpgradeTime,
       NoPackageDependencies,
       parameters.cachingConfigs,
+      parameters.enableAdditionalConsistencyChecks,
       topologyConfig,
       parameters.processingTimeouts,
       futureSupervisor,

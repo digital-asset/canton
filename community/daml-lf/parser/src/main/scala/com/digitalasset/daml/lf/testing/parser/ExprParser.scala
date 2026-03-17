@@ -23,10 +23,10 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
       eRecProj |
       eRecUpd |
       eVariantOrEnumCon |
-      fullIdentifier ^^ EVal |
-      literal ^^ EBuiltinLit |
-      primCon ^^ EBuiltinCon |
-      update ^^ EUpdate |
+      fullIdentifier ^^ EVal.apply |
+      literal ^^ EBuiltinLit.apply |
+      primCon ^^ EBuiltinCon.apply |
+      update ^^ EUpdate.apply |
       eList |
       eOption |
       eStructCon |
@@ -54,10 +54,10 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
       eViewInterface |
       eChoiceController |
       eChoiceObserver |
-      (id ^? builtinFunctions) ^^ EBuiltinFun |
+      (id ^? builtinFunctions) ^^ EBuiltinFun.apply |
       experimental |
       caseOf |
-      id ^^ EVar |
+      id ^^ EVar.apply |
       (`(` ~> expr <~ `)`)
 
   lazy val exprs: Parser[List[Expr]] = rep(expr0)
@@ -88,8 +88,8 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
       acceptMatch("Text", { case Text(s) => BLText(s) }) |
       acceptMatch("Timestamp", { case Timestamp(l) => BLTimestamp(l) }) |
       acceptMatch("Date", { case Date(l) => BLDate(l) }) |
-      (id ^? roundingModes) ^^ BLRoundingMode |
-      (id ^? failureCategories) ^^ BLFailureCategory
+      (id ^? roundingModes) ^^ BLRoundingMode.apply |
+      (id ^? failureCategories) ^^ BLFailureCategory.apply
 
   private lazy val primCon =
     Id("True") ^^^ BCTrue |
@@ -97,8 +97,8 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
       (`(` ~ `)` ^^^ BCUnit)
 
   private lazy val eAppAgr: Parser[EAppAgr] =
-    argTyp ^^ EAppTypArg |
-      expr0 ^^ EAppExprArg
+    argTyp ^^ EAppTypArg.apply |
+      expr0 ^^ EAppExprArg.apply
 
   lazy val expr: Parser[Expr] = {
     expr0 ~ rep(eAppAgr) ^^ { case e0 ~ args =>
@@ -125,7 +125,7 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
 
   private lazy val eList = eNil | eCons
 
-  private lazy val eNil = `nil` ~>! argTyp ^^ ENil
+  private lazy val eNil = `nil` ~>! argTyp ^^ ENil.apply
 
   private lazy val eCons = `cons` ~>! argTyp ~ (`[` ~> repsep(expr, `,`) <~ `]`) ~ expr0 ^^ {
     case t ~ front ~ tail => ECons(t, front.to(ImmArray), tail)
@@ -133,7 +133,7 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
 
   private lazy val eOption = eNone | eSome
 
-  private lazy val eNone = `none` ~>! argTyp ^^ ENone
+  private lazy val eNone = `none` ~>! argTyp ^^ ENone.apply
 
   private lazy val eSome = `some` ~>! argTyp ~ expr0 ^^ { case t ~ e =>
     ESome(t, e)
@@ -172,7 +172,7 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
   }
 
   private lazy val eStructCon: Parser[Expr] =
-    `<` ~> fieldInits <~ `>` ^^ EStructCon
+    `<` ~> fieldInits <~ `>` ^^ EStructCon.apply
 
   private lazy val eStructProj: Parser[Expr] =
     (`(` ~> expr <~ `)` ~ `.`) ~! id ^^ { case struct ~ fName =>
@@ -194,7 +194,7 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
 
   private lazy val eTyAbs: Parser[Expr] =
     `/\\` ~>! rep1(typeBinder) ~ (`.` ~> expr) ^^ { case binders ~ body =>
-      (binders foldRight body)(ETyAbs)
+      (binders foldRight body)(ETyAbs.apply)
     }
 
   private lazy val bindings: Parser[ImmArray[Binding]] =
@@ -239,7 +239,7 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
     }
 
   private lazy val eToTextTypeConId: Parser[Expr] =
-    `type_rep` ~>! argTyp ^^ ETypeRep
+    `type_rep` ~>! argTyp ^^ ETypeRep.apply
 
   private lazy val eToInterface: Parser[Expr] =
     `to_interface` ~! `@` ~> fullIdentifier ~ `@` ~ fullIdentifier ~ expr0 ^^ {
@@ -311,11 +311,11 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
 
   private lazy val pattern: Parser[CasePat] =
     Id("_") ^^^ CPDefault |
-      primCon ^^ CPBuiltinCon |
+      primCon ^^ CPBuiltinCon.apply |
       (`nil` ^^^ CPNil) |
       (`cons` ~>! id ~ id ^^ { case x1 ~ x2 => CPCons(x1, x2) }) |
       (`none` ^^^ CPNone) |
-      (`some` ~>! id ^^ CPSome) |
+      (`some` ~>! id ^^ CPSome.apply) |
       (fullIdentifier <~ `:`) ~ id ~ opt(id) ^^ {
         case tyCon ~ vName ~ Some(x) =>
           CPVariant(tyCon, vName, x)
@@ -486,13 +486,13 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
     }
 
   private lazy val updateFetchByKey =
-    Id("fetch_by_key") ~! `@` ~> fullIdentifier ^^ UpdateFetchByKey
+    Id("fetch_by_key") ~! `@` ~> fullIdentifier ^^ UpdateFetchByKey.apply
 
   private lazy val updateLookupByKey =
-    Id("lookup_by_key") ~! `@` ~> fullIdentifier ^^ UpdateLookupByKey
+    Id("lookup_by_key") ~! `@` ~> fullIdentifier ^^ UpdateLookupByKey.apply
 
   private lazy val updateQueryNByKey =
-    Id("query_n_by_key") ~! `@` ~> fullIdentifier ^^ UpdateQueryNByKey
+    Id("query_n_by_key") ~! `@` ~> fullIdentifier ^^ UpdateQueryNByKey.apply
 
   private lazy val updateGetTime =
     Id("uget_time") ^^^ UpdateGetTime

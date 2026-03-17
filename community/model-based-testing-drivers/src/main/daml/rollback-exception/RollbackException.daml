@@ -1,0 +1,7 @@
+module RollbackException where
+
+exception RollbackException
+  with
+  where
+    message "rollback"
+

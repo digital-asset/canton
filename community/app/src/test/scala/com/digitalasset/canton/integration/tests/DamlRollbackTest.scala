@@ -4,7 +4,7 @@
 package com.digitalasset.canton.integration.tests
 
 import com.daml.ledger.javaapi.data.Identifier
-import com.digitalasset.canton.ComparesLfTransactions.{TxTree, buildLfTransaction}
+import com.digitalasset.canton.ComparesLfTransactions.TxTree
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
@@ -15,9 +15,6 @@ import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.{Party, PartyId}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{ComparesLfTransactions, LfPackageName}
-import com.digitalasset.daml.lf.crypto.SValueHash
-import com.digitalasset.daml.lf.data.{FrontStack, Ref}
-import com.digitalasset.daml.lf.speedy.SValue
 import com.digitalasset.daml.lf.transaction.test.TestNodeBuilder.{
   CreateKey,
   CreateSerializationVersion,
@@ -47,7 +44,7 @@ trait DamlRollbackTest
           ConfigTransforms.updateAllParticipantConfigs_(
             _.focus(_.parameters.engine.contractStateMode)
               // NUCK needed for the "Able to roll back create in multi-level rollback at correct level" test case.
-              .replace(Some(ContractStateMachine.Mode.LegacyNUCK))
+              .replace(ContractStateMachine.Mode.LegacyNUCK)
           ),
         )*
       )
@@ -226,7 +223,7 @@ trait DamlRollbackTestStableLf extends DamlRollbackTest {
       .id
   }
 
-  private def create[T](
+  private def create(
       id: Int,
       template: Identifier,
       sig: Seq[Party],
@@ -261,67 +258,31 @@ trait DamlRollbackTestStableLf extends DamlRollbackTest {
     )
   }
 
-  "Able to submit command with simple create rollback" in { implicit env =>
-    withParticipantInitialized { (alice, _, _) =>
-      import env.*
+  "Able to submit command with simple create rollback" onlyRunWithOrLessThan ProtocolVersion.v34 in {
+    implicit env =>
+      withParticipantInitialized { (alice, _, _) =>
+        import env.*
 
-      val et = createExceptionsTester(alice, participant1)
+        val et = createExceptionsTester(alice, participant1)
 
-      val txActual = lookUpTransactionById(
-        participant1.ledger_api.javaapi.commands
-          .submit(
-            Seq(alice),
-            et.exerciseSimpleRollbackCreate().commands.asScala.toSeq,
-          )
-          .getUpdateId
-      )(participant1)
+        val txActual = lookUpTransactionById(
+          participant1.ledger_api.javaapi.commands
+            .submit(
+              Seq(alice),
+              et.exerciseSimpleRollbackCreate().commands.asScala.toSeq,
+            )
+            .getUpdateId
+        )(participant1)
 
-      txBuilderContextFrom(txActual) { implicit tbCtx =>
-        val txExpected = TxTree(
-          exercise(
-            contract = create(
-              0,
-              exceptionstester.ExceptionsTester.TEMPLATE_ID_WITH_PACKAGE_ID,
-              sig = Seq(alice),
-            ),
-            choice = "SimpleRollbackCreate",
-            actors = Set(alice),
-          ),
-          TxTree(
-            TestNodeBuilder.rollback(),
-            TxTree(
-              create(1, exceptionstester.Informees.TEMPLATE_ID_WITH_PACKAGE_ID, sig = Seq(alice))
-            ),
-          ),
-        ).lfTransaction
-
-        assertTransactionsMatch(txExpected, txActual)
-      }
-    }
-  }
-
-  "Able to submit command with exception hierarchy" in { implicit env =>
-    withParticipantInitialized { (alice, _, _) =>
-      import env.*
-
-      val et = createExceptionsTester(alice, participant1)
-
-      val txActual = lookUpTransactionById(
-        participant1.ledger_api.javaapi.commands
-          .submit(Seq(alice), et.exerciseRollbackCreate().commands.asScala.toSeq)
-          .getUpdateId
-      )(participant1)
-
-      txBuilderContextFrom(txActual) { implicit tbCtx =>
-        val txExpected =
-          TxTree(
+        txBuilderContextFrom(txActual) { implicit tbCtx =>
+          val txExpected = TxTree(
             exercise(
               contract = create(
                 0,
                 exceptionstester.ExceptionsTester.TEMPLATE_ID_WITH_PACKAGE_ID,
                 sig = Seq(alice),
               ),
-              choice = "RollbackCreate",
+              choice = "SimpleRollbackCreate",
               actors = Set(alice),
             ),
             TxTree(
@@ -330,33 +291,83 @@ trait DamlRollbackTestStableLf extends DamlRollbackTest {
                 create(1, exceptionstester.Informees.TEMPLATE_ID_WITH_PACKAGE_ID, sig = Seq(alice))
               ),
             ),
+          ).lfTransaction
+
+          assertTransactionsMatch(txExpected, txActual)
+        }
+      }
+  }
+
+  "Able to submit command with exception hierarchy" onlyRunWithOrLessThan ProtocolVersion.v34 in {
+    implicit env =>
+      withParticipantInitialized { (alice, _, _) =>
+        import env.*
+
+        val et = createExceptionsTester(alice, participant1)
+
+        val txActual = lookUpTransactionById(
+          participant1.ledger_api.javaapi.commands
+            .submit(Seq(alice), et.exerciseRollbackCreate().commands.asScala.toSeq)
+            .getUpdateId
+        )(participant1)
+
+        txBuilderContextFrom(txActual) { implicit tbCtx =>
+          val txExpected =
             TxTree(
-              TestNodeBuilder.rollback(),
-              TxTree(
-                create(2, exceptionstester.Informees.TEMPLATE_ID_WITH_PACKAGE_ID, sig = Seq(alice))
+              exercise(
+                contract = create(
+                  0,
+                  exceptionstester.ExceptionsTester.TEMPLATE_ID_WITH_PACKAGE_ID,
+                  sig = Seq(alice),
+                ),
+                choice = "RollbackCreate",
+                actors = Set(alice),
               ),
               TxTree(
                 TestNodeBuilder.rollback(),
                 TxTree(
                   create(
-                    3,
+                    1,
                     exceptionstester.Informees.TEMPLATE_ID_WITH_PACKAGE_ID,
                     sig = Seq(alice),
                   )
                 ),
               ),
               TxTree(
-                create(4, exceptionstester.Informees.TEMPLATE_ID_WITH_PACKAGE_ID, sig = Seq(alice))
+                TestNodeBuilder.rollback(),
+                TxTree(
+                  create(
+                    2,
+                    exceptionstester.Informees.TEMPLATE_ID_WITH_PACKAGE_ID,
+                    sig = Seq(alice),
+                  )
+                ),
+                TxTree(
+                  TestNodeBuilder.rollback(),
+                  TxTree(
+                    create(
+                      3,
+                      exceptionstester.Informees.TEMPLATE_ID_WITH_PACKAGE_ID,
+                      sig = Seq(alice),
+                    )
+                  ),
+                ),
+                TxTree(
+                  create(
+                    4,
+                    exceptionstester.Informees.TEMPLATE_ID_WITH_PACKAGE_ID,
+                    sig = Seq(alice),
+                  )
+                ),
               ),
-            ),
-          ).lfTransaction
+            ).lfTransaction
 
-        assertTransactionsMatch(txExpected, txActual)
+          assertTransactionsMatch(txExpected, txActual)
+        }
       }
-    }
   }
 
-  "Able to submit command with new view under rollback node with all parties local" in {
+  "Able to submit command with new view under rollback node with all parties local" onlyRunWithOrLessThan ProtocolVersion.v34 in {
     implicit env =>
       withParticipantInitialized { (alice, bob, _) =>
         import env.*
@@ -436,105 +447,106 @@ trait DamlRollbackTestStableLf extends DamlRollbackTest {
       }
   }
 
-  "Able to submit command with new view under rollback node with remote party" in { implicit env =>
-    withParticipantInitialized { (alice, _, carol) =>
-      import env.*
+  "Able to submit command with new view under rollback node with remote party" onlyRunWithOrLessThan ProtocolVersion.v34 in {
+    implicit env =>
+      withParticipantInitialized { (alice, _, carol) =>
+        import env.*
 
-      val informees = createInformeesContract(List(alice), List(carol), participant1)
-      val informeesSignedOn = signOn(informees, carol, participant2)
+        val informees = createInformeesContract(List(alice), List(carol), participant1)
+        val informeesSignedOn = signOn(informees, carol, participant2)
 
-      val et = createExceptionsTester(alice, participant1)
+        val et = createExceptionsTester(alice, participant1)
 
-      val txId = participant1.ledger_api.javaapi.commands
-        .submit(
-          Seq(alice),
-          et.exerciseRollbackExercise(informeesSignedOn).commands.asScala.toSeq,
-        )
-        .getUpdateId
+        val txId = participant1.ledger_api.javaapi.commands
+          .submit(
+            Seq(alice),
+            et.exerciseRollbackExercise(informeesSignedOn).commands.asScala.toSeq,
+          )
+          .getUpdateId
 
-      val txActualP1 = lookUpTransactionById(txId)(participant1)
-      val txActualP2 = lookUpTransactionById(txId)(participant2)
+        val txActualP1 = lookUpTransactionById(txId)(participant1)
+        val txActualP2 = lookUpTransactionById(txId)(participant2)
 
-      val txExpectedP2Nested = txBuilderContextFrom(txActualP2) { implicit tbCtx =>
-        val txExpectedP2Nested = TxTree(
-          TestNodeBuilder.rollback(),
-          TxTree(
-            TestNodeBuilder
-              .fetch(
+        val txExpectedP2Nested = txBuilderContextFrom(txActualP2) { implicit tbCtx =>
+          val txExpectedP2Nested = TxTree(
+            TestNodeBuilder.rollback(),
+            TxTree(
+              TestNodeBuilder
+                .fetch(
+                  contract = create(
+                    0,
+                    exceptionstester.Informees.TEMPLATE_ID_WITH_PACKAGE_ID,
+                    sig = Seq(alice, carol),
+                  ),
+                  byKey = false,
+                )
+                .copy(actingParties = Set(alice.toLf))
+            ),
+            TxTree(
+              exercise(
                 contract = create(
                   0,
                   exceptionstester.Informees.TEMPLATE_ID_WITH_PACKAGE_ID,
                   sig = Seq(alice, carol),
                 ),
-                byKey = false,
+                choice = "Close",
+                actors = Set(alice),
+                arg = args(LfValue.ValueParty(alice.toLf)),
+                consuming = true,
               )
-              .copy(actingParties = Set(alice.toLf))
-          ),
-          TxTree(
-            exercise(
-              contract = create(
-                0,
-                exceptionstester.Informees.TEMPLATE_ID_WITH_PACKAGE_ID,
-                sig = Seq(alice, carol),
-              ),
-              choice = "Close",
-              actors = Set(alice),
-              arg = args(LfValue.ValueParty(alice.toLf)),
-              consuming = true,
-            )
-          ),
-          TxTree(
-            create(
-              1,
-              exceptionstester.Informees.TEMPLATE_ID_WITH_PACKAGE_ID,
-              sig = Seq(alice),
-              obs = Seq(carol),
-            )
-          ),
-          TxTree(
-            exercise(
-              contract = create(
+            ),
+            TxTree(
+              create(
                 1,
                 exceptionstester.Informees.TEMPLATE_ID_WITH_PACKAGE_ID,
                 sig = Seq(alice),
                 obs = Seq(carol),
-              ),
-              choice = "Close",
-              actors = Set(alice),
-              arg = args(LfValue.ValueParty(alice.toLf)),
-              consuming = true,
-            )
-          ),
-        )
-
-        assertTransactionsMatch(txExpectedP2Nested.lfTransaction, txActualP2)
-
-        txExpectedP2Nested // Return the portion of the transaction shared among P1 and P2
-      }
-
-      // Participant1 sees the top-level exercise as well in addition to the entire transaction seen by participant2
-      txBuilderContextFrom(txActualP1) { implicit tbCtx =>
-        val txExpectedP1 = TxTree(
-          exercise(
-            contract = create(
-              0,
-              exceptionstester.ExceptionsTester.TEMPLATE_ID_WITH_PACKAGE_ID,
-              sig = Seq(alice),
+              )
             ),
-            choice = "RollbackExercise",
-            actors = Set(alice),
-            arg = args(LfValue.ValueContractId(tbCtx.contractIds(1))),
-          ),
-          txExpectedP2Nested,
-        ).lfTransaction
+            TxTree(
+              exercise(
+                contract = create(
+                  1,
+                  exceptionstester.Informees.TEMPLATE_ID_WITH_PACKAGE_ID,
+                  sig = Seq(alice),
+                  obs = Seq(carol),
+                ),
+                choice = "Close",
+                actors = Set(alice),
+                arg = args(LfValue.ValueParty(alice.toLf)),
+                consuming = true,
+              )
+            ),
+          )
 
-        assertTransactionsMatch(txExpectedP1, txActualP1)
+          assertTransactionsMatch(txExpectedP2Nested.lfTransaction, txActualP2)
+
+          txExpectedP2Nested // Return the portion of the transaction shared among P1 and P2
+        }
+
+        // Participant1 sees the top-level exercise as well in addition to the entire transaction seen by participant2
+        txBuilderContextFrom(txActualP1) { implicit tbCtx =>
+          val txExpectedP1 = TxTree(
+            exercise(
+              contract = create(
+                0,
+                exceptionstester.ExceptionsTester.TEMPLATE_ID_WITH_PACKAGE_ID,
+                sig = Seq(alice),
+              ),
+              choice = "RollbackExercise",
+              actors = Set(alice),
+              arg = args(LfValue.ValueContractId(tbCtx.contractIds(1))),
+            ),
+            txExpectedP2Nested,
+          ).lfTransaction
+
+          assertTransactionsMatch(txExpectedP1, txActualP1)
+        }
       }
-    }
 
   }
 
-  "Able to submit command with new view under rollback node with remote party and nested throw" in {
+  "Able to submit command with new view under rollback node with remote party and nested throw" onlyRunWithOrLessThan ProtocolVersion.v34 in {
     implicit env =>
       withParticipantInitialized { (alice, _, carol) =>
         import env.*
@@ -634,573 +646,6 @@ trait DamlRollbackTestStableLf extends DamlRollbackTest {
   }
 }
 
-trait DamlRollbackTestDevLf extends DamlRollbackTest {
-  import com.digitalasset.canton.damltestsdev.java.exceptionstester.ExceptionsTester
-  import com.digitalasset.canton.damltestsdev.java.{exceptionstester, simplekeys}
-
-  override def cantonTestsPath: String = CantonTestsDevPath
-
-  private def createExceptionsTester(
-      signatory: Party,
-      participant: ParticipantReference,
-  ): ExceptionsTester.ContractId = {
-    val createCmd =
-      new exceptionstester.ExceptionsTester(signatory.toProtoPrimitive).create
-        .commands()
-        .asScala
-        .toSeq
-
-    val createTx = participant.ledger_api.javaapi.commands.submit(
-      Seq(signatory),
-      createCmd,
-    )
-    JavaDecodeUtil
-      .decodeAllCreated(exceptionstester.ExceptionsTester.COMPANION)(createTx)
-      .loneElement
-      .id
-  }
-
-  private def create[T](
-      id: Int,
-      template: Identifier,
-      sig: Seq[Party],
-      obs: Seq[Party] = Seq.empty, // additional observers in addition to signatories
-      arg: LfValue = notUsed,
-  )(implicit tbCtx: TbContext): LfNodeCreate = {
-    val signatories = sig.map(_.toLf)
-    val observers = signatories ++ obs.map(_.toLf)
-
-    val templateId = templateIdFromIdentifier(template)
-
-    TestNodeBuilder.create(
-      id = tbCtx.contractIds(id),
-      templateId = templateId,
-      argument = template match {
-        case exceptionstester.Informees.TEMPLATE_ID_WITH_PACKAGE_ID =>
-          require(
-            arg == notUsed,
-            "For informees, this function figures out the sig and obs parameters by itself",
-          )
-          args(
-            seq(signatories.map(LfValue.ValueParty.apply)*),
-            seq(observers.map(LfValue.ValueParty.apply)*),
-          )
-        case _ => arg
-      },
-      signatories = signatories.toSet,
-      observers = observers.toSet,
-      key = CreateKey.NoKey,
-      version = tbCtx.txVersion,
-      packageName = LfPackageName.assertFromString("CantonTestsDev"),
-    )
-  }
-
-  private def createWithKey[T](
-      id: Int,
-      template: Identifier,
-      packageName: String,
-      party: Party,
-      observers: Seq[PartyId] = Seq.empty,
-  )(implicit tbCtx: TbContext): LfNodeCreate = {
-    val lfParty = party.toLf
-    val lfObservers = observers.map(_.toLf)
-    val templateId = templateIdFromIdentifier(template)
-
-    TestNodeBuilder.create(
-      id = tbCtx.contractIds(id),
-      templateId = templateId,
-      argument = args(
-        LfValue.ValueParty(lfParty),
-        LfValue.ValueList(FrontStack.from(lfObservers.map(LfValue.ValueParty.apply))),
-      ),
-      signatories = Set(lfParty),
-      observers = Set(lfParty) ++ lfObservers,
-      key = CreateKey.SignatoryMaintainerKey(
-        LfValue.ValueParty(lfParty),
-        SValueHash.assertHashContractKey(
-          Ref.PackageName.assertFromString(packageName),
-          Ref.QualifiedName.assertFromString(
-            s"${template.getModuleName}:${template.getEntityName}"
-          ),
-          SValue.SParty(lfParty),
-        ),
-      ),
-      version = tbCtx.txVersion,
-      packageName = LfPackageName.assertFromString("CantonTestsDev"),
-    )
-  }
-
-  if (testedProtocolVersion == ProtocolVersion.dev) {
-
-    "Able to fetch a contract after a rolled back archival" in { implicit env =>
-      withParticipantInitialized { (alice, _, _) =>
-        import env.*
-
-        val et = createExceptionsTester(alice, participant1)
-
-        val txActual = lookUpTransactionById(
-          participant1.ledger_api.javaapi.commands
-            .submit(
-              Seq(alice),
-              et.exerciseTestArchivalUnderRollbackKeepsContractActive().commands.asScala.toSeq,
-            )
-            .getUpdateId
-        )(participant1)
-
-        txBuilderContextFrom(txActual) { implicit tbCtx =>
-          val keyContractCreate =
-            createWithKey(
-              1,
-              simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
-              simplekeys.SimpleKey.PACKAGE_NAME,
-              party = alice,
-            )
-          val txExpected = TxTree(
-            exercise(
-              contract = create(
-                0,
-                exceptionstester.ExceptionsTester.TEMPLATE_ID_WITH_PACKAGE_ID,
-                sig = Seq(alice),
-              ),
-              choice = "TestArchivalUnderRollbackKeepsContractActive",
-              actors = Set(alice),
-            ),
-            TxTree(keyContractCreate),
-            TxTree(
-              TestNodeBuilder.rollback(),
-              TxTree(
-                exercise(
-                  contract = keyContractCreate,
-                  choice = "Archive",
-                  actors = Set(alice),
-                  consuming = true,
-                  byKey = true,
-                )
-              ),
-            ),
-            TxTree(TestNodeBuilder.fetch(contract = keyContractCreate, byKey = true)),
-          ).lfTransaction
-
-          assertTransactionsMatch(txExpected, txActual)
-        }
-      }
-    }
-
-    "Able to create and exercise a contract with key within the same rollback" in { implicit env =>
-      withParticipantInitialized { (alice, _, _) =>
-        import env.*
-
-        val et = createExceptionsTester(alice, participant1)
-
-        val txActual = lookUpTransactionById(
-          participant1.ledger_api.javaapi.commands
-            .submit(
-              Seq(alice),
-              et.exerciseTestRollbackCreateAndExerciseByKey().commands.asScala.toSeq,
-            )
-            .getUpdateId
-        )(participant1)
-
-        txBuilderContextFrom(txActual) { implicit tbCtx =>
-          val keyContractCreate =
-            createWithKey(
-              1,
-              simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
-              simplekeys.SimpleKey.PACKAGE_NAME,
-              party = alice,
-            )
-          val txExpected = TxTree(
-            exercise(
-              contract = create(
-                0,
-                exceptionstester.ExceptionsTester.TEMPLATE_ID_WITH_PACKAGE_ID,
-                sig = Seq(alice),
-              ),
-              choice = "TestRollbackCreateAndExerciseByKey",
-              actors = Set(alice),
-            ),
-            TxTree(
-              TestNodeBuilder.rollback(),
-              TxTree(keyContractCreate),
-              TxTree(
-                exercise(
-                  contract = keyContractCreate,
-                  choice = "Archive",
-                  actors = Set(alice),
-                  consuming = true,
-                  byKey = true,
-                )
-              ),
-            ),
-          ).lfTransaction
-
-          assertTransactionsMatch(txExpected, txActual)
-        }
-      }
-    }
-
-    "Able to create and exercise a contract with key within rollback and nested rollback archival" in {
-      implicit env =>
-        withParticipantInitialized { (alice, _, _) =>
-          import env.*
-
-          val et = createExceptionsTester(alice, participant1)
-
-          val txActual = lookUpTransactionById(
-            participant1.ledger_api.javaapi.commands
-              .submit(
-                Seq(alice),
-                et.exerciseTestRollbackCreateNestedRolledBackedArchivalAndExerciseByKey(
-                ).commands
-                  .asScala
-                  .toSeq,
-              )
-              .getUpdateId
-          )(participant1)
-
-          txBuilderContextFrom(txActual) { implicit tbCtx =>
-            val keyContractCreate =
-              createWithKey(
-                1,
-                simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
-                simplekeys.SimpleKey.PACKAGE_NAME,
-                party = alice,
-              )
-            val keyContractExercise = exercise(
-              contract = keyContractCreate,
-              choice = "Archive",
-              actors = Set(alice),
-              consuming = true,
-              byKey = true,
-            )
-            val txExpected = TxTree(
-              exercise(
-                contract = create(
-                  0,
-                  exceptionstester.ExceptionsTester.TEMPLATE_ID_WITH_PACKAGE_ID,
-                  sig = Seq(alice),
-                ),
-                choice = "TestRollbackCreateNestedRolledBackedArchivalAndExerciseByKey",
-                actors = Set(alice),
-              ),
-              TxTree(
-                TestNodeBuilder.rollback(),
-                TxTree(keyContractCreate),
-                TxTree(
-                  TestNodeBuilder.rollback(),
-                  TxTree(keyContractExercise),
-                ),
-                TxTree(keyContractExercise),
-              ),
-            ).lfTransaction
-
-            assertTransactionsMatch(txExpected, txActual)
-          }
-        }
-    }
-
-    "Able to roll back nested exercise with action nodes both in same and different view" in {
-      implicit env =>
-        withParticipantInitialized { (alice, _, carol) =>
-          import env.*
-
-          val et = createExceptionsTester(alice, participant1)
-
-          val txId = participant1.ledger_api.javaapi.commands
-            .submit(
-              Seq(alice),
-              et.exerciseTestMultiLevelRollbackMultipleViewsOuter(
-                carol.toProtoPrimitive
-              ).commands
-                .asScala
-                .toSeq,
-            )
-            .getUpdateId
-
-          val txActualP1 = lookUpTransactionById(txId)(participant1)
-          val txActualP2 = lookUpTransactionById(txId)(participant2)
-
-          val (subTxTree1, subTxTree2, subTxTree3) = txBuilderContextFrom(txActualP2) {
-            implicit tbCtx =>
-              val outerKey =
-                createWithKey(
-                  0,
-                  simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
-                  simplekeys.SimpleKey.PACKAGE_NAME,
-                  party = alice,
-                  observers = Seq(carol),
-                )
-              val innerKeyFirst =
-                createWithKey(
-                  2,
-                  simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
-                  simplekeys.SimpleKey.PACKAGE_NAME,
-                  party = alice,
-                  observers = Seq(),
-                )
-              val innerKeySecond =
-                createWithKey(
-                  3,
-                  simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
-                  simplekeys.SimpleKey.PACKAGE_NAME,
-                  party = alice,
-                  observers = Seq(carol),
-                )
-
-              val subTxTree1 = TxTree(outerKey)
-              val subTxTree2 = TxTree(
-                TestNodeBuilder.rollback(),
-                TxTree(
-                  exercise(
-                    contract = create(
-                      1, // Note that participant2 sees ExceptionsTester after outerKey; hence index is 1 not 0
-                      exceptionstester.ExceptionsTester.TEMPLATE_ID_WITH_PACKAGE_ID,
-                      sig = Seq(alice),
-                    ),
-                    choice = "TestMultiLevelRollbackMultipleViewsInner",
-                    actors = Set(alice),
-                    failed = true,
-                    choiceObservers = Set(carol),
-                    arg = args(LfValue.ValueParty(carol.toLf)),
-                  ),
-                  TxTree(
-                    exercise(
-                      contract = outerKey,
-                      choice = "Archive",
-                      actors = Set(alice),
-                      consuming = true,
-                      byKey = true,
-                    )
-                  ),
-                  TxTree(
-                    TestNodeBuilder.rollback(),
-                    TxTree(innerKeyFirst),
-                    TxTree(
-                      exercise(
-                        contract = innerKeyFirst,
-                        choice = "FetchWithObservers",
-                        actors = Set(alice),
-                        choiceObservers = Set(carol),
-                        arg = args(LfValue.ValueParty(carol.toLf)),
-                        result =
-                          args(LfValue.ValueParty(alice.toLf), LfValue.ValueList(FrontStack.empty)),
-                        byKey = true,
-                      )
-                    ),
-                  ),
-                  TxTree(innerKeySecond),
-                  TxTree(TestNodeBuilder.fetch(contract = innerKeySecond, byKey = true)),
-                ),
-              )
-              val subTxTree3 = TxTree(
-                exercise(
-                  contract = outerKey,
-                  choice = "Archive",
-                  actors = Set(alice),
-                  consuming = true,
-                )
-              )
-
-              val txExpectedP2 = buildLfTransaction(subTxTree1, subTxTree2, subTxTree3)
-
-              // If this test fails and the diff is truncated, temporarily increase Pretty.DefaultHeight to 200.
-              assertTransactionsMatch(txExpectedP2, txActualP2)
-
-              // Return sub-transaction-trees for reuse
-              (subTxTree1, subTxTree2, subTxTree3)
-          }
-          txBuilderContextFrom(txActualP1) { implicit tbCtx =>
-            val txExpectedP1 = TxTree(
-              exercise(
-                contract = create(
-                  0,
-                  exceptionstester.ExceptionsTester.TEMPLATE_ID_WITH_PACKAGE_ID,
-                  sig = Seq(alice),
-                ),
-                choice = "TestMultiLevelRollbackMultipleViewsOuter",
-                actors = Set(alice),
-                arg = args(LfValue.ValueParty(carol.toLf)),
-              ),
-              subTxTree1,
-              subTxTree2,
-              subTxTree3,
-            ).lfTransaction
-
-            assertTransactionsMatch(txExpectedP1, txActualP1)
-          }
-        }
-    }
-
-    "Able to create a contract key after a rolled back same contract key create" in {
-      implicit env =>
-        withParticipantInitialized { (alice, _, _) =>
-          import env.*
-
-          val et = createExceptionsTester(alice, participant1)
-
-          val txActual = lookUpTransactionById(
-            participant1.ledger_api.javaapi.commands
-              .submit(
-                Seq(alice),
-                et.exerciseTestCreateKeyUnderRollbackAllowsKeyRecreate().commands.asScala.toSeq,
-              )
-              .getUpdateId
-          )(participant1)
-
-          txBuilderContextFrom(txActual) { implicit tbCtx =>
-            val txExpected = TxTree(
-              exercise(
-                contract = create(
-                  0,
-                  exceptionstester.ExceptionsTester.TEMPLATE_ID_WITH_PACKAGE_ID,
-                  sig = Seq(alice),
-                ),
-                choice = "TestCreateKeyUnderRollbackAllowsKeyRecreate",
-                actors = Set(alice),
-              ),
-              TxTree(
-                TestNodeBuilder.rollback(),
-                TxTree(
-                  createWithKey(
-                    1,
-                    simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
-                    simplekeys.SimpleKey.PACKAGE_NAME,
-                    party = alice,
-                  )
-                ),
-              ),
-              TxTree(
-                createWithKey(
-                  2,
-                  simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
-                  simplekeys.SimpleKey.PACKAGE_NAME,
-                  party = alice,
-                )
-              ),
-            ).lfTransaction
-
-            assertTransactionsMatch(txExpected, txActual)
-          }
-        }
-    }
-
-    "Able to roll back create in multi-level rollback at correct level" in { implicit env =>
-      withParticipantInitialized { (alice, _, carol) =>
-        import env.*
-
-        val et = createExceptionsTester(alice, participant1)
-
-        val txId = participant1.ledger_api.javaapi.commands
-          .submit(
-            Seq(alice),
-            // Add a separate create node with both stakeholders that does not get rolled back. This ensures
-            // that LedgerApiAdministration.involvedParticipants (that only sees ledger api events and thus does not
-            // include waiting for participants only involved via rolled-back activity) also waits for Carol's participant2
-            // thus avoiding flaky test failures.
-            new simplekeys.SimpleKey(
-              alice.toProtoPrimitive,
-              List(carol.toProtoPrimitive).asJava,
-            ).create.commands().asScala.toSeq
-              ++ et
-                .exerciseTestMultiLevelRollbackCreateSingleInformee(
-                  carol.toProtoPrimitive
-                )
-                .commands()
-                .asScala
-                .toSeq,
-          )
-          .getUpdateId
-
-        val txActualP1 = lookUpTransactionById(txId)(participant1)
-        val txActualP2 = lookUpTransactionById(txId)(participant2)
-
-        val (command1TxTree, command2TxSubTree) = txBuilderContextFrom(txActualP2) {
-          implicit tbCtx =>
-            val command1TxTree =
-              TxTree(
-                createWithKey(
-                  0,
-                  simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
-                  simplekeys.SimpleKey.PACKAGE_NAME,
-                  party = alice,
-                  observers = Seq(carol),
-                )
-              )
-
-            val command2TxTree = TxTree(
-              TestNodeBuilder.rollback(),
-              TxTree(
-                exercise(
-                  contract = create(
-                    1,
-                    exceptionstester.ExceptionsTester.TEMPLATE_ID_WITH_PACKAGE_ID,
-                    sig = Seq(alice),
-                  ),
-                  choice = "TestMultiLevelRollbackCreateMultiInformees",
-                  actors = Set(alice),
-                  failed = true,
-                  choiceObservers = Set(carol),
-                  arg = args(LfValue.ValueParty(carol.toLf)),
-                ),
-                TxTree(
-                  TestNodeBuilder.rollback(),
-                  TxTree(
-                    createWithKey(
-                      2,
-                      simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
-                      simplekeys.SimpleKey.PACKAGE_NAME,
-                      party = alice,
-                      observers = Seq(carol),
-                    )
-                  ),
-                ),
-                TxTree(
-                  createWithKey(
-                    3,
-                    simplekeys.SimpleKey.TEMPLATE_ID_WITH_PACKAGE_ID,
-                    simplekeys.SimpleKey.PACKAGE_NAME,
-                    party = alice,
-                    observers = Seq(carol),
-                  )
-                ),
-              ),
-            )
-
-            val txExpectedP2 = buildLfTransaction(command1TxTree, command2TxTree)
-
-            assertTransactionsMatch(txExpectedP2, txActualP2)
-
-            // returns transaction trees for reuse verifying participant1
-            (command1TxTree, command2TxTree)
-        }
-
-        txBuilderContextFrom(txActualP1) { implicit tbCtx =>
-          val exerciseSubTree = TxTree(
-            exercise(
-              contract = create(
-                1,
-                exceptionstester.ExceptionsTester.TEMPLATE_ID_WITH_PACKAGE_ID,
-                sig = Seq(alice),
-              ),
-              choice = "TestMultiLevelRollbackCreateSingleInformee",
-              actors = Set(alice),
-              arg = args(LfValue.ValueParty(carol.toLf)),
-            ),
-            command2TxSubTree,
-          )
-
-          val txExpectedP1 = buildLfTransaction(command1TxTree, exerciseSubTree)
-
-          assertTransactionsMatch(txExpectedP1, txActualP1)
-
-          (command1TxTree, command2TxSubTree)
-        }
-
-      }
-    }
-  }
-}
-
 trait DamlRollbackBftSequencerPostgresTest {
   self: SharedEnvironment =>
   registerPlugin(new UsePostgres(loggerFactory))
@@ -1209,9 +654,4 @@ trait DamlRollbackBftSequencerPostgresTest {
 
 class DamlRollbackBftOrderingIntegrationTestPostgresStableLf
     extends DamlRollbackTestStableLf
-    with DamlRollbackBftSequencerPostgresTest
-
-@com.digitalasset.canton.annotations.NuckTest
-class DamlRollbackBftOrderingIntegrationTestPostgresDevLf
-    extends DamlRollbackTestDevLf
     with DamlRollbackBftSequencerPostgresTest

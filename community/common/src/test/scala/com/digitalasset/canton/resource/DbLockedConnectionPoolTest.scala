@@ -4,6 +4,7 @@
 package com.digitalasset.canton.resource
 
 import cats.syntax.either.*
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.config.{DbLockedConnectionPoolConfig, DefaultProcessingTimeouts}
@@ -305,6 +306,7 @@ trait DbLockedConnectionPoolTest
   }
 }
 
+@UnstableTest // TODO(#17216)
 class DbLockedConnectionPoolTestPostgres extends DbLockedConnectionPoolTest {
 
   override protected lazy val setup: PostgresDbStorageSetup =

@@ -100,10 +100,8 @@ class SequencerWriterSourceTest
 
     override def notifyOfLocalWrite(
         notification: WriteNotification
-    )(implicit traceContext: TraceContext): Future[Unit] =
-      Future.successful {
-        listenerRef.get().foreach(listener => listener(notification))
-      }
+    ): Unit =
+      listenerRef.get().foreach(listener => listener(notification))
 
     override def readSignalsForMember(
         member: Member,
@@ -656,7 +654,7 @@ class SequencerWriterSourceTest
       combinedNotificationsF map { notification =>
         forAll(members) { member =>
           withClue(s"expecting notification for $member") {
-            notification.isBroadcastOrIncludes(member) shouldBe true
+            (notification.isBroadcast || notification.memberIds(member)) shouldBe true
           }
         }
 

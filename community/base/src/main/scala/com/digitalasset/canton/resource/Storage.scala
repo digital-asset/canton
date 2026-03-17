@@ -542,7 +542,7 @@ object DbStorage {
       Chain.one(item)
     )
     def apply(items: Iterable[SQLActionBuilder]): SQLActionBuilderChain = new SQLActionBuilderChain(
-      Chain.fromIterableOnce(items)
+      Chain.fromSeq(items.toSeq)
     )
   }
 

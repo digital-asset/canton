@@ -37,19 +37,20 @@ private sealed trait PekkoP2PGrpcConnectionManagerActorMessage
 /** Asks the connection-managing actor to initialize the connection without performing a Send; used
   * to create a connection eagerly rather than the first time a message is sent.
   */
-private final case class Initialize() extends PekkoP2PGrpcConnectionManagerActorMessage
+private case object Initialize extends PekkoP2PGrpcConnectionManagerActorMessage
 
 private final case class SendMessage(
     createMessage: Option[Instant] => BftOrderingMessage,
     metricsContext: MetricsContext,
     attemptNumber: Int,
+    traceContext: TraceContext,
     sendInstant: Instant = Instant.now,
     maybeDelay: Option[FiniteDuration] = None,
 ) extends PekkoP2PGrpcConnectionManagerActorMessage
 
 /** Closes the connection-managing actor. Sent as part of disconnecting an endpoint.
   */
-private final case class Close() extends PekkoP2PGrpcConnectionManagerActorMessage
+private case object Close extends PekkoP2PGrpcConnectionManagerActorMessage
 
 final class PekkoP2PNetworkRef(
     connectionManagingActorRef: ActorRef[PekkoP2PGrpcConnectionManagerActorMessage],
@@ -60,7 +61,7 @@ final class PekkoP2PNetworkRef(
 ) extends P2PNetworkRef[BftOrderingMessage]
     with NamedLogging {
 
-  connectionManagingActorRef ! Initialize()
+  connectionManagingActorRef ! Initialize
 
   override def toString: String = this.getClass.getSimpleName + s"($actorName)"
 
@@ -73,6 +74,7 @@ final class PekkoP2PNetworkRef(
         createMessage,
         metricsContext,
         attemptNumber = 1,
+        traceContext,
       )
     }.discard
   }
@@ -80,7 +82,7 @@ final class PekkoP2PNetworkRef(
   override def onClosed(): Unit = {
     implicit val traceContext: TraceContext = TraceContext.empty
     logger.debug(s"Sending Close message to connection managing actor for ref $this")
-    connectionManagingActorRef ! Close()
+    connectionManagingActorRef ! Close
   }
 }
 
@@ -134,9 +136,7 @@ object PekkoP2PGrpcNetworking {
             createGrpcP2PConnectionManagerPekkoBehavior(
               p2pAddress,
               actorName,
-              connectionManager,
               outstandingMessages,
-              loggerFactory,
               metrics,
             ),
             actorName,
@@ -163,187 +163,200 @@ object PekkoP2PGrpcNetworking {
         clearNetworkRefAssociations = true,
         closeNetworkRefs = true,
       )
-  }
 
-  private def createGrpcP2PConnectionManagerPekkoBehavior(
-      p2pAddress: P2PAddress,
-      actorName: String,
-      connectionManager: P2PGrpcConnectionManager,
-      outstandingMessages: AtomicInteger,
-      loggerFactory: NamedLoggerFactory,
-      metrics: BftOrderingMetrics,
-  ): Behavior[PekkoP2PGrpcConnectionManagerActorMessage] = {
-    implicit val traceContext: TraceContext = TraceContext.empty
-    val logger = loggerFactory.getTracedLogger(this.getClass)
+    private def createGrpcP2PConnectionManagerPekkoBehavior(
+        p2pAddress: P2PAddress,
+        actorName: String,
+        outstandingMessages: AtomicInteger,
+        metrics: BftOrderingMetrics,
+    )(implicit traceContext: TraceContext): Behavior[PekkoP2PGrpcConnectionManagerActorMessage] = {
 
-    // Reschedules an Initialize or Send if the connection is not available yet
-    def scheduleMessageIfNotConnectedBehavior(
-        message: PekkoP2PGrpcConnectionManagerActorMessage
-    )(whenConnected: StreamObserver[BftOrderingMessage] => Unit)(implicit
-        context: ActorContext[
-          PekkoP2PGrpcConnectionManagerActorMessage
-        ]
-    ): Unit = {
+      // Reschedules an Initialize or Send if the connection is not available yet
+      def scheduleMessageIfNotConnectedBehavior(
+          message: PekkoP2PGrpcConnectionManagerActorMessage
+      )(whenConnected: StreamObserver[BftOrderingMessage] => Unit)(implicit
+          context: ActorContext[
+            PekkoP2PGrpcConnectionManagerActorMessage
+          ]
+      ): Unit = {
 
-      def emitModuleQueueStats(): Unit =
-        // Emit actor queue latency for the message
-        message match {
-          case SendMessage(_, metricsContext, _, sendInstant, maybeDelay) =>
-            // Emit actor queue metrics
-            metrics.performance.orderingStageLatency.emitModuleQueueLatency(
-              "PekkoP2PGrpcConnectionManagingActor",
-              sendInstant,
-              maybeDelay,
-            )(metricsContext)
-            metrics.performance.orderingStageLatency.emitModuleQueueSize(
-              "PekkoP2PGrpcConnectionManagingActor",
-              outstandingMessages.decrementAndGet(),
-            )(metricsContext)
-          case _: Initialize =>
-            logger.debug(s"Connection-managing actor $actorName received Initialize")
-          case _ =>
-        }
-
-      emitModuleQueueStats()
-
-      connectionManager.getPeerSenderOrStartConnection(p2pAddress) match {
-        case Some(peerSender) =>
-          logger.debug(s"Connection-managing actor $actorName found connection available for Send")
-          whenConnected(peerSender)
-        case _ =>
+        def emitModuleQueueStats(): Unit =
+          // Emit actor queue latency for the message
           message match {
-            case SendMessage(grpcMessage, metricsContext, attemptNumber, _, _) =>
-              val newAttemptNumber = attemptNumber + 1
-              if (newAttemptNumber <= MaxAttempts) {
+
+            case SendMessage(_, metricsContext, _, _, sendInstant, maybeDelay) =>
+              // Emit actor queue metrics
+              metrics.performance.orderingStageLatency.emitModuleQueueLatency(
+                "PekkoP2PGrpcConnectionManagingActor",
+                sendInstant,
+                maybeDelay,
+              )(metricsContext)
+              metrics.performance.orderingStageLatency.emitModuleQueueSize(
+                "PekkoP2PGrpcConnectionManagingActor",
+                outstandingMessages.decrementAndGet(),
+              )(metricsContext)
+
+            case Initialize =>
+              logger.debug(s"Connection-managing actor $actorName received Initialize")
+
+            case _ =>
+          }
+
+        emitModuleQueueStats()
+
+        connectionManager.getPeerSenderOrStartConnection(p2pAddress) match {
+
+          case Some(peerSender) =>
+            logger.debug(
+              s"Connection-managing actor $actorName found connection available for Send"
+            )
+            whenConnected(peerSender)
+
+          case _ =>
+            message match {
+              case SendMessage(grpcMessage, metricsContext, attemptNumber, tc, _, _) =>
+                implicit val traceContext: TraceContext = tc
+                val newAttemptNumber = attemptNumber + 1
+                if (newAttemptNumber <= MaxAttempts) {
+                  logger.info(
+                    s"Connection-managing actor $actorName " +
+                      s"couldn't yet obtain connection for Send, retrying it in $SendRetryDelay, " +
+                      s"attempt $newAttemptNumber out of $MaxAttempts"
+                  )
+                  // Retrying after a delay due to not being connected:
+                  //  record the send instant and delay to emit the actor queue latency when processing the message
+                  val delayedMessage = SendMessage(
+                    grpcMessage,
+                    metricsContext,
+                    newAttemptNumber,
+                    traceContext,
+                    sendInstant = Instant.now,
+                    maybeDelay = Some(SendRetryDelay),
+                  )
+                  context
+                    .scheduleOnce(SendRetryDelay, target = context.self, delayedMessage)
+                    .discard
+                  metrics.p2p.send.sendsRetried.inc()(metricsContext)
+                } else
+                  logger.info(
+                    s"Connection-managing actor $actorName " +
+                      s"couldn't yet obtain connection yet for Send, no more retries left"
+                  )
+
+              case Initialize =>
+                // Initialize must always be retried, since there are modules that wait for a quorum of
+                // connections to be established before being initialized. So if we stopped retrying too soon,
+                // some nodes could get stuck, which could easily happen in a network where nodes are starting
+                // up simultaneously and are not immediately reachable to one another.
                 logger.info(
                   s"Connection-managing actor $actorName " +
-                    s"couldn't yet obtain connection for Send, retrying it in $SendRetryDelay, " +
-                    s"attempt $newAttemptNumber out of $MaxAttempts"
+                    s"couldn't yet obtain connection for Initialize, retrying it in $SendRetryDelay"
                 )
-                // Retrying after a delay due to not being connected:
-                //  record the send instant and delay to emit the actor queue latency when processing the message
-                val delayedMessage = SendMessage(
-                  grpcMessage,
-                  metricsContext,
-                  newAttemptNumber,
-                  sendInstant = Instant.now,
-                  maybeDelay = Some(SendRetryDelay),
+                context.scheduleOnce(SendRetryDelay, target = context.self, message).discard
+                metrics.p2p.send.sendsRetried.inc()(MetricsContext.Empty)
+
+              case Close =>
+                abort(
+                  logger,
+                  s"Connection-managing actor $actorName is unexpectedly processing " +
+                    "Close messages with retries",
                 )
-                context.scheduleOnce(SendRetryDelay, target = context.self, delayedMessage).discard
-                metrics.p2p.send.sendsRetried.inc()(metricsContext)
-              } else
-                logger.info(
-                  s"Connection-managing actor $actorName " +
-                    s"couldn't yet obtain connection yet for Send, no more retries left"
-                )
-            case Initialize() =>
-              // Initialize must always be retried, since there are modules that wait for a quorum of
-              // connections to be established before being initialized. So if we stopped retrying too soon,
-              // some nodes could get stuck, which could easily happen in a network where nodes are starting
-              // up simultaneously and are not immediately reachable to one another.
+            }
+        }
+      }
+
+      def closeBehavior(): Behavior[PekkoP2PGrpcConnectionManagerActorMessage] = {
+        logger.info(s"Closing connection-managing actor $actorName")
+        connectionManager.shutdownConnection(
+          p2pAddress.id,
+          clearNetworkRefAssociations = true,
+          closeNetworkRefs = false, // Because we're already closing the actor
+        )
+        Behaviors.stopped
+      }
+
+      Behaviors.setup { implicit pekkoActorContext =>
+        Behaviors
+          .receiveMessage[PekkoP2PGrpcConnectionManagerActorMessage] {
+
+            case Initialize =>
+              logger.info(s"Connection-managing actor $actorName initializing")
+              scheduleMessageIfNotConnectedBehavior(Initialize)(_ => ())
+              Behaviors.same
+
+            case sendMsg: SendMessage =>
+              implicit val traceContext: TraceContext = sendMsg.traceContext
+              scheduleMessageIfNotConnectedBehavior(sendMsg) { peerSender =>
+                val now = Instant.now
+                val msg = sendMsg.createMessage(Some(now))
+                try {
+                  logger.debug(
+                    s"Connection-managing actor $actorName sending message to sender $peerSender"
+                  )
+                  peerSender.onNext(msg)
+                  // Network send succeeded (but it may still be lost)
+                  updateTimer(
+                    metrics.p2p.send.networkWriteLatency,
+                    Duration.between(sendMsg.sendInstant, now),
+                  )(sendMsg.metricsContext)
+                } catch {
+                  case exception: Exception =>
+                    logger.debug(
+                      s"Connection-managing actor $actorName failed sending message $msg to sender $peerSender",
+                      exception,
+                    )
+                    // Failing the stream in case of an exception when sending is required by the gRPC streaming API
+                    failGrpcStreamObserver(peerSender, exception, logger)
+                    // gRPC requires onError to be the last event, so the connection must be invalidated even though
+                    //  the send operation will be retried.
+                    connectionManager.shutdownConnection(
+                      p2pAddress.id,
+                      clearNetworkRefAssociations = false,
+                      closeNetworkRefs = false,
+                    )
+                    // Retrying after a delay due to an exception:
+                    //  record the send instant and delay to emit the actor queue latency when processing the message
+                    val newAttemptNumber = sendMsg.attemptNumber + 1
+                    if (newAttemptNumber <= MaxAttempts) {
+                      logger.info(
+                        s"Connection-managing actor $actorName couldn't send a message to sender $peerSender, " +
+                          s"invalidating the connection and retrying in $SendRetryDelay, " +
+                          s"attempt $newAttemptNumber out of $MaxAttempts",
+                        exception,
+                      )
+                      pekkoActorContext
+                        .scheduleOnce(
+                          SendRetryDelay,
+                          target = pekkoActorContext.self,
+                          sendMsg.copy(
+                            attemptNumber = newAttemptNumber,
+                            sendInstant = Instant.now,
+                            maybeDelay = Some(SendRetryDelay),
+                          ),
+                        )
+                        .discard
+                      metrics.p2p.send.sendsRetried.inc()(sendMsg.metricsContext)
+                    } else
+                      logger.info(
+                        s"Connection-managing actor $actorName couldn't send $msg, " +
+                          s"invalidating the connection. No more retries left.",
+                        exception,
+                      )
+                }
+              }
+              Behaviors.same
+
+            case Close =>
               logger.info(
-                s"Connection-managing actor $actorName " +
-                  s"couldn't yet obtain connection for Initialize, retrying it in $SendRetryDelay"
+                s"Connection-managing actor $actorName is stopping, closing"
               )
-              context.scheduleOnce(SendRetryDelay, target = context.self, message).discard
-              metrics.p2p.send.sendsRetried.inc()(MetricsContext.Empty)
-            case Close() =>
-              abort(
-                logger,
-                s"Connection-managing actor $actorName is unexpectedly processing " +
-                  "Close messages with retries",
-              )
+              closeBehavior()
+          }
+          .receiveSignal { case (_, PostStop) =>
+            logger.info(s"Connection-managing actor $actorName stopped, closing")
+            closeBehavior()
           }
       }
-    }
-
-    def closeBehavior(): Behavior[PekkoP2PGrpcConnectionManagerActorMessage] = {
-      logger.info(s"Closing connection-managing actor $actorName")
-      connectionManager.shutdownConnection(
-        p2pAddress.id,
-        clearNetworkRefAssociations = true,
-        closeNetworkRefs = false, // Because we're already closing the actor
-      )
-      Behaviors.stopped
-    }
-
-    Behaviors.setup { implicit pekkoActorContext =>
-      Behaviors
-        .receiveMessage[PekkoP2PGrpcConnectionManagerActorMessage] {
-          case initMsg: Initialize =>
-            logger.info(s"Connection-managing actor $actorName initializing")
-            scheduleMessageIfNotConnectedBehavior(initMsg)(_ => ())
-            Behaviors.same
-          case sendMsg: SendMessage =>
-            scheduleMessageIfNotConnectedBehavior(sendMsg) { peerSender =>
-              val now = Instant.now
-              val msg = sendMsg.createMessage(Some(now))
-              try {
-                logger.debug(
-                  s"Connection-managing actor $actorName sending message to sender $peerSender"
-                )
-                peerSender.onNext(msg)
-                // Network send succeeded (but it may still be lost)
-                updateTimer(
-                  metrics.p2p.send.networkWriteLatency,
-                  Duration.between(sendMsg.sendInstant, now),
-                )(sendMsg.metricsContext)
-              } catch {
-                case exception: Exception =>
-                  logger.debug(
-                    s"Connection-managing actor $actorName failed sending message $msg to sender $peerSender",
-                    exception,
-                  )
-                  // Failing the stream in case of an exception when sending is required by the gRPC streaming API
-                  failGrpcStreamObserver(peerSender, exception, logger)
-                  // gRPC requires onError to be the last event, so the connection must be invalidated even though
-                  //  the send operation will be retried.
-                  connectionManager.shutdownConnection(
-                    p2pAddress.id,
-                    clearNetworkRefAssociations = false,
-                    closeNetworkRefs = false,
-                  )
-                  // Retrying after a delay due to an exception:
-                  //  record the send instant and delay to emit the actor queue latency when processing the message
-                  val newAttemptNumber = sendMsg.attemptNumber + 1
-                  if (newAttemptNumber <= MaxAttempts) {
-                    logger.info(
-                      s"Connection-managing actor $actorName couldn't send a message to sender $peerSender, " +
-                        s"invalidating the connection and retrying in $SendRetryDelay, " +
-                        s"attempt $newAttemptNumber out of $MaxAttempts",
-                      exception,
-                    )
-                    pekkoActorContext
-                      .scheduleOnce(
-                        SendRetryDelay,
-                        target = pekkoActorContext.self,
-                        sendMsg.copy(
-                          attemptNumber = newAttemptNumber,
-                          sendInstant = Instant.now,
-                          maybeDelay = Some(SendRetryDelay),
-                        ),
-                      )
-                      .discard
-                    metrics.p2p.send.sendsRetried.inc()(sendMsg.metricsContext)
-                  } else
-                    logger.info(
-                      s"Connection-managing actor $actorName couldn't send $msg, " +
-                        s"invalidating the connection. No more retries left.",
-                      exception,
-                    )
-              }
-            }
-            Behaviors.same
-          case Close() =>
-            logger.info(
-              s"Connection-managing actor $actorName is stopping, closing"
-            )
-            closeBehavior()
-        }
-        .receiveSignal { case (_, PostStop) =>
-          logger.info(s"Connection-managing actor $actorName stopped, closing")
-          closeBehavior()
-        }
     }
   }
 }

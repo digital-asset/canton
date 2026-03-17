@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.topology
 
 import com.digitalasset.canton.admin.api.client.data.SequencerConnections
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
@@ -36,7 +35,6 @@ import scala.concurrent.duration.*
 import scala.concurrent.{ExecutionContext, Future, blocking}
 import scala.jdk.DurationConverters.*
 
-@UnstableTest // TODO(#30856)
 class TopologyTicksIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment

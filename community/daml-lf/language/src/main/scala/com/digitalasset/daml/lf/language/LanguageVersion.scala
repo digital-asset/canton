@@ -7,7 +7,7 @@ package language
 import scala.math.Ordered.orderingToOrdered
 
 
-final case class LanguageVersion private(
+final case class LanguageVersion private[lf] (
                                           major: LanguageVersion.Major,
                                           minor: LanguageVersion.Minor,
                                         ) extends Ordered[LanguageVersion] {

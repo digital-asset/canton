@@ -10,13 +10,7 @@ import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.{Bytes, FrontStack, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.script.IdeLedger
-import com.digitalasset.daml.lf.transaction.{
-  CommittedTransaction,
-  FatContractInstance,
-  Node,
-  SubmittedTransaction,
-  VersionedTransaction,
-}
+import com.digitalasset.daml.lf.transaction.{CommittedTransaction, ContractStateMachine, FatContractInstance, Node, SubmittedTransaction, VersionedTransaction}
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import com.digitalasset.daml.lf.value.Value._
 import com.digitalasset.daml.lf.command._
@@ -308,6 +302,7 @@ class LargeTransactionTest(
         participantId = participant,
         submissionSeed = seed,
         contractIdVersion = contractIdVersion,
+        contractStateMode = ContractStateMachine.Mode.devDefault,
         prefetchKeys = Seq.empty,
       )
       .consume(

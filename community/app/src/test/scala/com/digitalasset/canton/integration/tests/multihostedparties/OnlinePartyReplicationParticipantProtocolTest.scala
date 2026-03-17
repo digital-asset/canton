@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.multihostedparties
 
 import cats.syntax.parallel.*
+import com.digitalasset.canton.annotations.RollbackTest
 import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.ConsoleCommandTimeout
@@ -424,6 +425,7 @@ sealed trait OnlinePartyReplicationParticipantProtocolTest
 //   registerPlugin(new UseH2(loggerFactory))
 // }
 
+@RollbackTest
 final class OnlinePartyReplicationParticipantProtocolTestPostgres
     extends OnlinePartyReplicationParticipantProtocolTest {
   registerPlugin(new UsePostgres(loggerFactory))

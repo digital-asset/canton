@@ -169,6 +169,7 @@ jobs:
           ignore:
             - main
             - /^release-line.*/
+            - /^gh-readonly-queue\/main\/.*/ # Do not run check on GH merge queue branches to speed up merge queue jobs
   - unstable_test:
       context:
         - datadog

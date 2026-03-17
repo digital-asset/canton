@@ -27,16 +27,16 @@ trait ErrorLoggingContext extends BaseErrorLogger {
   def traceId: Option[String]
   def traceContext: TraceContext
 
-  def trace(message: String): Unit
-  def trace(message: String, throwable: Throwable): Unit
-  def debug(message: String): Unit
-  def debug(message: String, throwable: Throwable): Unit
-  def info(message: String): Unit
-  def info(message: String, throwable: Throwable): Unit
-  def warn(message: String): Unit
-  def warn(message: String, throwable: Throwable): Unit
-  def error(message: String): Unit
-  def error(message: String, throwable: Throwable): Unit
+  def trace(message: => String): Unit
+  def trace(message: => String, throwable: Throwable): Unit
+  def debug(message: => String): Unit
+  def debug(message: => String, throwable: Throwable): Unit
+  def info(message: => String): Unit
+  def info(message: => String, throwable: Throwable): Unit
+  def warn(message: => String): Unit
+  def warn(message: => String, throwable: Throwable): Unit
+  def error(message: => String): Unit
+  def error(message: => String, throwable: Throwable): Unit
   def withContext[A](context: Map[String, String])(body: => A): A
   def noTracingLogger: Logger
   def logger: TracedLogger
@@ -80,21 +80,21 @@ abstract class AbstractErrorLoggingContext(
     }
   }
 
-  override def info(message: String): Unit = logger.info(message)(traceContext)
-  override def info(message: String, throwable: Throwable): Unit =
+  override def info(message: => String): Unit = logger.info(message)(traceContext)
+  override def info(message: => String, throwable: Throwable): Unit =
     logger.info(message, throwable)(traceContext)
-  override def warn(message: String): Unit = logger.warn(message)(traceContext)
-  override def warn(message: String, throwable: Throwable): Unit =
+  override def warn(message: => String): Unit = logger.warn(message)(traceContext)
+  override def warn(message: => String, throwable: Throwable): Unit =
     logger.warn(message, throwable)(traceContext)
-  override def error(message: String): Unit = logger.error(message)(traceContext)
-  override def error(message: String, throwable: Throwable): Unit =
+  override def error(message: => String): Unit = logger.error(message)(traceContext)
+  override def error(message: => String, throwable: Throwable): Unit =
     logger.error(message, throwable)(traceContext)
 
-  override def debug(message: String): Unit = logger.debug(message)(traceContext)
-  override def debug(message: String, throwable: Throwable): Unit =
+  override def debug(message: => String): Unit = logger.debug(message)(traceContext)
+  override def debug(message: => String, throwable: Throwable): Unit =
     logger.debug(message, throwable)(traceContext)
-  override def trace(message: String): Unit = logger.trace(message)(traceContext)
-  override def trace(message: String, throwable: Throwable): Unit =
+  override def trace(message: => String): Unit = logger.trace(message)(traceContext)
+  override def trace(message: => String, throwable: Throwable): Unit =
     logger.trace(message, throwable)(traceContext)
 
   def withContext[A](context: Map[String, String])(body: => A): A = {
@@ -206,16 +206,16 @@ class NoLogging(
   private val underlying: slf4j.Logger = NOPLogger.NOP_LOGGER
 
   override def logError(err: BaseError, extra: Map[String, String]): Unit = ()
-  override def trace(message: String): Unit = ()
-  override def trace(message: String, throwable: Throwable): Unit = ()
-  override def debug(message: String): Unit = ()
-  override def debug(message: String, throwable: Throwable): Unit = ()
-  override def info(message: String): Unit = ()
-  override def info(message: String, throwable: Throwable): Unit = ()
-  override def warn(message: String): Unit = ()
-  override def warn(message: String, throwable: Throwable): Unit = ()
-  override def error(message: String): Unit = ()
-  override def error(message: String, throwable: Throwable): Unit = ()
+  override def trace(message: => String): Unit = ()
+  override def trace(message: => String, throwable: Throwable): Unit = ()
+  override def debug(message: => String): Unit = ()
+  override def debug(message: => String, throwable: Throwable): Unit = ()
+  override def info(message: => String): Unit = ()
+  override def info(message: => String, throwable: Throwable): Unit = ()
+  override def warn(message: => String): Unit = ()
+  override def warn(message: => String, throwable: Throwable): Unit = ()
+  override def error(message: => String): Unit = ()
+  override def error(message: => String, throwable: Throwable): Unit = ()
   override def withContext[A](context: Map[String, String])(body: => A): A = body
   override def traceContext: TraceContext = TraceContext.empty
   override def noTracingLogger: Logger = Logger(underlying)

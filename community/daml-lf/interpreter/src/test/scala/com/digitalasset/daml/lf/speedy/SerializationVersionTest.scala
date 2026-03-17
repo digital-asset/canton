@@ -69,7 +69,7 @@ class SerializationVersionTest(majorLanguageVersion: LanguageVersion.Major)
           contractId,
           committers = Set(contractParty),
           controllers = Set(contractParty),
-          getContract = Map(contractId -> contract),
+          getContract = Map(contract.contractId -> contract),
         )
 
         inside(result) { case Right(transaction) =>
@@ -96,7 +96,7 @@ class SerializationVersionTest(majorLanguageVersion: LanguageVersion.Major)
           contractId,
           committers = Set(contractParty),
           controllers = Set(contractParty),
-          getContract = Map(contractId -> contract),
+          getContract = Map(contract.contractId -> contract),
         )
 
         inside(result) { case Right(transaction) =>
@@ -227,6 +227,7 @@ private[lf] class SerializationVersionTestHelpers {
         ),
       ),
       signatories = List(contractParty),
+      contractId = contractId,
     )
 
   val testData = Seq(

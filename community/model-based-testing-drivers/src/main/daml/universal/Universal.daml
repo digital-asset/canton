@@ -1,0 +1,229 @@
+-- Copyright (c) 2025 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+-- SPDX-License-Identifier: Apache-2.0
+
+module Universal where
+
+import RollbackException
+import qualified DA.Map as M
+import DA.Exception (ActionThrow(throw))
+import DA.Optional (isSome)
+import DA.ContractKeys (queryNByKey)
+
+data Kind = Consuming | NonConsuming
+  deriving (Eq, Show)
+
+data TxAction
+    = Create
+        { contractId : Int
+        , signatories : [Party]
+        , observers : [Party]
+        }
+    | Exercise
+        { kind : Kind
+        , contractId : Int
+        , controllers : [Party]
+        , choiceObservers : [Party]
+        , subTransaction : Transaction
+        -- The expected contract ID is not strictly necessary, but the KConsumingChoice and KNonConsumingChoice choices
+        -- assert that the exercised contract ID is the expected one, which we use as a sanity check for ExerciseByKey
+        -- operations. So we need it here to be able to pass it to these choices when they happen to be exercised by
+        -- contract ID to.
+        , expectedContractId : Int
+        }
+    | CreateWithKey
+        { contractId : Int
+        , keyId : Int
+        , maintainers: [Party]
+        , signatories : [Party]
+        , observers : [Party]
+        }
+    | ExerciseByKey
+        { kind : Kind
+        , keyId: Int
+        , maintainers: [Party]
+        , controllers : [Party]
+        , choiceObservers : [Party]
+        , subTransaction : Transaction
+        -- The expected contract ID is not strictly necessary, but it is used to assert that exercises by key exercise
+        -- the expected contract.
+        , expectedContractId : Int
+        }
+    | LookupByKey
+        { keyId : Int
+        , maintainers : [Party]
+        -- The expected success is not necessary but we assert it as a sanity check.
+        , expectedSuccess : Bool
+        }
+    | QueryByKey
+        { keyId : Int
+        , maintainers : [Party]
+        , exhaustive : Bool
+        , expectedContractIds : [Int]
+        }
+    | FetchByKey
+        { keyId: Int
+        , maintainers: [Party]
+        -- The expected result is not necessary but we assert it as a sanity check.
+        , expectedContractId : Int
+        }
+    | Fetch
+        { contractId : Int
+        }
+    | Rollback
+        { subTransaction : Transaction
+        }
+  deriving (Eq, Show)
+
+type Transaction = [TxAction]
+
+data LCommands = LCommands
+    { lActAs : [Party]
+    , lActions : [TxAction]
+    }
+
+type Ledger = [LCommands]
+
+data SomeContractId
+  = UniversalContractId (ContractId Universal)
+  | UniversalWithKeyContractId (ContractId UniversalWithKey)
+  deriving (Show, Eq)
+
+type Env = M.Map Int SomeContractId
+
+template Universal
+  with
+    signatories : [Party]
+    observers : [Party]
+  where
+    signatory signatories
+    observer observers
+
+    nonconsuming choice NonConsumingChoice: Env
+      with
+        env: Env
+        controllers: [Party]
+        choiceObservers: [Party]
+        subTransaction: Transaction
+      observer choiceObservers
+      controller controllers
+      do
+        interpretTransaction env subTransaction
+
+    choice ConsumingChoice: Env
+      with
+        env: Env
+        controllers: [Party]
+        choiceObservers: [Party]
+        subTransaction: Transaction
+      observer choiceObservers
+      controller controllers
+      do
+        interpretTransaction env subTransaction
+
+template UniversalWithKey
+  with
+    signatories : [Party]
+    observers : [Party]
+    -- The contract ID is not strictly necessary, but it is used to assert that
+    -- fetches by key return the expected contract.
+    contractId : Int
+    keyId: Int
+    maintainers: [Party]
+  where
+    signatory signatories
+    observer observers
+    key (keyId, maintainers) : (Int, [Party])
+    maintainer key._2
+
+    nonconsuming choice KNonConsumingChoice: Env
+      with
+        env: Env
+        controllers: [Party]
+        choiceObservers: [Party]
+        subTransaction: Transaction
+        expectedContractId : Int
+      observer choiceObservers
+      controller controllers
+      do
+        assert (this.contractId == expectedContractId)
+        interpretTransaction env subTransaction
+
+    choice KConsumingChoice: Env
+      with
+        env: Env
+        controllers: [Party]
+        choiceObservers: [Party]
+        subTransaction: Transaction
+        expectedContractId : Int
+      observer choiceObservers
+      controller controllers
+      do
+        assert (this.contractId == expectedContractId)
+        interpretTransaction env subTransaction
+
+(!) : (Ord k, Show k) => M.Map k v -> k -> v
+m ! k =
+  case M.lookup k m of
+    Some v -> v
+    None -> error (show k <> " not found")
+
+interpretTxAction : Env -> TxAction -> Update Env
+interpretTxAction env action =
+  case action of
+    (Create contractId signatories observers) -> do
+       actualContractId <- create Universal {..}
+       return (M.insert contractId (UniversalContractId actualContractId) env)
+    (CreateWithKey contractId keyId maintainers signatories observers) -> do
+       actualContractId <- create UniversalWithKey {..}
+       return (M.insert contractId (UniversalWithKeyContractId actualContractId) env)
+    (Exercise kind contractId controllers choiceObservers subTransaction expectedContractId) ->
+      case kind of
+        Consuming ->
+          case env ! contractId of
+            UniversalContractId cid -> exercise cid ConsumingChoice {..}
+            UniversalWithKeyContractId cid -> exercise cid KConsumingChoice {..}
+        NonConsuming ->
+          case env ! contractId of
+            UniversalContractId cid -> exercise cid NonConsumingChoice {..}
+            UniversalWithKeyContractId cid -> exercise cid KNonConsumingChoice {..}
+    (ExerciseByKey kind keyId maintainers controllers choiceObservers subTransaction expectedContractId) ->
+      case kind of
+        Consuming -> exerciseByKey @UniversalWithKey (keyId, maintainers) KConsumingChoice {..}
+        NonConsuming -> exerciseByKey @UniversalWithKey (keyId, maintainers) KNonConsumingChoice {..}
+    (Fetch contractId) -> do
+      case env ! contractId of
+        UniversalContractId cid -> do
+          fetch cid
+          return env
+        UniversalWithKeyContractId cid -> do
+          fetch cid
+          return env
+    (LookupByKey keyId maintainers expectedSuccess) -> do
+      result <- lookupByKey @UniversalWithKey (keyId, maintainers)
+      assert (isSome result == expectedSuccess)
+      return env
+    (QueryByKey keyId maintainers exhaustive expectedContractIds) -> do
+      result <- queryNByKey @UniversalWithKey
+                  (length expectedContractIds + if exhaustive then 1 else 0)
+                  (keyId, maintainers)
+      assert (map (UniversalWithKeyContractId . fst) result == [(env ! cid) | cid <- expectedContractIds])
+      return env
+    (FetchByKey keyId maintainers expectedContractId) -> do
+      (_, result) <- fetchByKey @UniversalWithKey (keyId, maintainers)
+      assert (result.contractId == expectedContractId)
+      return env
+    (Rollback subTransaction) -> do
+      try do
+        interpretTransaction env subTransaction
+        throw RollbackException
+      catch
+        RollbackException ->
+          return env
+
+interpretTransaction : Env -> Transaction -> Update Env
+interpretTransaction env tx =
+  case tx of
+    [] -> return env
+    (a::as) -> do
+      env' <- interpretTxAction env a
+      interpretTransaction env' as

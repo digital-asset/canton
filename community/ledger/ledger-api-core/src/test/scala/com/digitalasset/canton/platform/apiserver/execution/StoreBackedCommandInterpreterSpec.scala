@@ -28,7 +28,12 @@ import com.digitalasset.daml.lf.data.Ref.Identifier
 import com.digitalasset.daml.lf.data.{Bytes, ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.*
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
-import com.digitalasset.daml.lf.transaction.{CreationTime, FatContractInstance, Node as LfNode}
+import com.digitalasset.daml.lf.transaction.{
+  ContractStateMachine,
+  CreationTime,
+  FatContractInstance,
+  Node as LfNode,
+}
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.{crypto, engine}
 import com.google.protobuf.ByteString
@@ -123,6 +128,7 @@ class StoreBackedCommandInterpreterSpec
   ) =
     new StoreBackedCommandInterpreter(
       engine = engine,
+      contractStateMode = ContractStateMachine.Mode.default,
       participant = Ref.ParticipantId.assertFromString("anId"),
       packageResolver = testEngine.packageResolver,
       contractStore = contractStore,

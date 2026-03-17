@@ -60,7 +60,7 @@ temp_nuck_tests_pv_dev:
       type: string
       default: ""
   executor: canton-xlarge-docker-with-postgres
-  parallelism: 1
+  parallelism: 4
   steps:
     - set_canton_protocol_version:
         protocol_version: "DEV"
@@ -251,11 +251,25 @@ nightly_integration_test_sequencer_only:
 nightly_integration_test_bftordering_only:
   executor: canton-xlarge-docker
   steps:
+    - run:
+        name: Set Canton log level to WARN
+        command: |
+          echo "export LOG_LEVEL_CANTON=WARN" >> $BASH_ENV
     - run_tests:
         command: *default_test_command
         filter: "grep -E -e com\\.digitalasset\\.canton\\.integration\\.tests\\.nightly\\.bftordering"
         num_test_buckets: "2"
         num_parallel_tasks: "1"
+
+model_based_test:
+  executor: canton-xlarge-docker-with-postgres
+  steps:
+    - run_tests:
+        command: "dumpClassPath \"testOnly com.digitalasset.canton.integration.tests.modelbased.* -- -l UnstableTest -l com.digitalasset.canton.annotations.UnstableTest\" checkErrors"
+        filter: "cat" # cat acts as identity filter
+        num_test_buckets: ""
+        num_parallel_tasks: "1"
+        timeout: "60m"
 
 toxiproxy_test_fast:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
@@ -291,6 +305,7 @@ unstable_test:
         num_parallel_tasks: "1"
         succeed_on_error: true
         fail_on_error_in_output: false # We won't fail anyway, but this also skips checking of stdout
+        timeout: 60m
 
 unstable_test_slow:
   executor: canton-xlarge-docker-with-postgres-toxiproxy
@@ -302,6 +317,7 @@ unstable_test_slow:
         num_parallel_tasks: "1"
         succeed_on_error: true
         fail_on_error_in_output: false # We won't fail anyway, but this also skips checking of stdout
+        timeout: 60m
 
 unit_test_coverage:
   executor: canton-xlarge-docker-with-postgres-toxiproxy

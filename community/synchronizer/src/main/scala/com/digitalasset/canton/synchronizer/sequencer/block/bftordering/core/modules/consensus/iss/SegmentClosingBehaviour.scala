@@ -30,6 +30,7 @@ final class SegmentClosingBehaviour[E <: Env[E]](
     private val waitingForFutureIds: mutable.Set[FutureId],
     actionName: String,
     parent: ModuleRef[Consensus.Message[E]],
+    traceContextOfParent: TraceContext,
     firstBlockNumber: BlockNumber,
     epochNumber: EpochNumber,
     messageToSendParent: Consensus.Message[E],
@@ -81,18 +82,17 @@ final class SegmentClosingBehaviour[E <: Env[E]](
     )
 
   private def stopIfWeShould()(implicit
-      context: E#ActorContextT[ConsensusSegment.Message],
-      traceContext: TraceContext,
+      context: E#ActorContextT[ConsensusSegment.Message]
   ): Unit =
     if (waitingForFutureIds.isEmpty && haveReceivedStartModuleClosingBehaviourMessage) {
       stop()
     }
 
   private def stop()(implicit
-      context: E#ActorContextT[ConsensusSegment.Message],
-      traceContext: TraceContext,
+      context: E#ActorContextT[ConsensusSegment.Message]
   ): Unit =
     context.stop { () =>
+      implicit val traceContext: TraceContext = traceContextOfParent
       logger.info(
         s"Segment module $firstBlockNumber $actionName epoch $epochNumber"
       )

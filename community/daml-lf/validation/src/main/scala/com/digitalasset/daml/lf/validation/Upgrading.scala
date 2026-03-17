@@ -462,7 +462,7 @@ case class TypecheckUpgrades(
     val exceptionDts = Upgrading(past = pastExceptionDts, present = presentExceptionDts)
     val unownedDts = Upgrading(past = pastUnownedDts, present = presentUnownedDts)
 
-    val moduleWithMetadata = module.map(ModuleWithMetadata)
+    val moduleWithMetadata = module.map(ModuleWithMetadata.apply)
     for {
       (existingTemplates, _) <- checkDeleted(
         module.map(_.templates),

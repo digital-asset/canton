@@ -32,7 +32,7 @@ import com.digitalasset.canton.synchronizer.sequencer.SequencerConfig.{
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeConfig
 import com.digitalasset.canton.synchronizer.sequencer.{BlockSequencerConfig, SequencerConfig}
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, PositiveFiniteDuration}
-import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVersion}
+import com.digitalasset.canton.version.{EngineMode, ParticipantProtocolVersion, ProtocolVersion}
 import com.digitalasset.canton.{BaseTest, UniquePortGenerator, config}
 import com.typesafe.config.ConfigValueFactory
 import monocle.macros.syntax.lens.*
@@ -74,6 +74,15 @@ object ConfigTransforms {
     val enableAlpha = configTransformsWhen(pv.isAlpha)(enableAlphaVersionSupport)
     val enableBeta = configTransformsWhen(pv.isBeta)(setBetaSupport(true))
 
+    val setContractStateMode: Seq[ConfigTransform] = configTransformsWhen(!pv.isStable)(
+      Seq(
+        updateAllParticipantConfigs_(
+          _.focus(_.parameters.engine.contractStateMode)
+            .replace(EngineMode.forProtocolVersion(pv))
+        )
+      )
+    )
+
     val deprecatedPVWarning = if (pv.isDeprecated) dontWarnOnDeprecatedPV else Seq()
 
     val updateParticipants = Seq(
@@ -85,10 +94,10 @@ object ConfigTransforms {
 
     val updateInitialProtocolVersion = updateAllInitialProtocolVersion(pv)
 
-    updateParticipants ++ enableAlpha ++ enableBeta ++ deprecatedPVWarning :+ updateInitialProtocolVersion
+    updateParticipants ++ enableAlpha ++ enableBeta ++ deprecatedPVWarning ++ setContractStateMode :+ updateInitialProtocolVersion
   }
 
-  val optSetProtocolVersion: Seq[ConfigTransform] = setProtocolVersion(
+  val protocolVersionTransforms: Seq[ConfigTransform] = setProtocolVersion(
     BaseTest.testedProtocolVersion
   )
 
@@ -97,11 +106,40 @@ object ConfigTransforms {
       _.focus(_.ledgerApi.rateLimit).replace(Some(RateLimitingConfig.Default))
     )
 
+  val useFeaturesWithFeatureFlags =
+    Seq(
+      ConfigTransforms.updateAllMediatorConfigs_(
+        _.focus(_.topology.useNewProcessor)
+          .replace(true)
+          .focus(_.topology.useNewClient)
+          .replace(true)
+          .focus(_.sequencerClient.useNewConnectionPool)
+          .replace(true)
+      ),
+      ConfigTransforms.updateAllSequencerConfigs_(
+        _.focus(_.topology.useNewProcessor)
+          .replace(true)
+          .focus(_.topology.useNewClient)
+          .replace(true)
+          .focus(_.sequencerClient.useNewConnectionPool)
+          .replace(true)
+      ),
+      ConfigTransforms.updateAllParticipantConfigs_(
+        _.focus(_.topology.useNewProcessor)
+          .replace(true)
+          .focus(_.topology.useNewClient)
+          .replace(true)
+          .focus(_.sequencerClient.useNewConnectionPool)
+          .replace(true)
+      ),
+    )
+
   /** Config transforms to apply to heavy-weight tests using an [[EnvironmentDefinition]]. For
     * example, these transforms should be applied to toxiproxy tests.
     */
-  val heavyTestDefaults: Seq[ConfigTransform] = optSetProtocolVersion ++
+  val heavyTestDefaults: Seq[ConfigTransform] = protocolVersionTransforms ++
     setBetaSupport(BaseTest.testedProtocolVersion.isBeta) ++
+    useFeaturesWithFeatureFlags ++
     Seq(
       ConfigTransforms.uniqueH2DatabaseNames,
       ConfigTransforms.globallyUniquePorts,

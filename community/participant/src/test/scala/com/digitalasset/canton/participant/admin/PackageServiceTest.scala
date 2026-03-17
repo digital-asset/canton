@@ -465,7 +465,7 @@ abstract class BasePackageServiceTest(enableStrictDarValidation: Boolean)
     "requested by PackageService.removeDar" should {
       "reject the request with an error" in withEnv(
         rejectOnMissingDar(
-          _.removeDar(unknownDarId, psids = Set.empty),
+          _.removeDar(unknownDarId, connectedSynchronizers = Set.empty),
           unknownDarId,
           "DAR archive removal",
         )

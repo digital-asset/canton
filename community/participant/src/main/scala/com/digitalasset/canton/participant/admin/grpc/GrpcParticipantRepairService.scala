@@ -21,7 +21,7 @@ import com.digitalasset.canton.participant.admin.data.ActiveContractOld.loadFrom
 import com.digitalasset.canton.participant.admin.data.{
   ActiveContract,
   ContractImportMode,
-  ManualLsuRequest,
+  LateLsuRequest,
   RepairContract,
   RepresentativePackageIdOverride,
 }
@@ -955,13 +955,13 @@ final class GrpcParticipantRepairService(
     CantonGrpcUtil.mapErrNewEUS(result)
   }
 
-  override def performManualLsu(
-      request: PerformManualLsuRequest
-  ): Future[PerformManualLsuResponse] = {
+  override def performLateLsu(
+      request: PerformLateLsuRequest
+  ): Future[PerformLateLsuResponse] = {
     implicit val traceContext: TraceContext = TraceContextGrpc.fromGrpcContext
 
     val res = for {
-      validatedRequest <- CantonGrpcUtil.wrapErrUS(ManualLsuRequest.fromProtoV30(request))
+      validatedRequest <- CantonGrpcUtil.wrapErrUS(LateLsuRequest.fromProtoV30(request))
       _ <- CantonGrpcUtil.wrapErrUS(
         validatedRequest.successorConfig.sequencerConnections.submissionRequestAmplification.validate
           .leftMap(
@@ -977,7 +977,7 @@ final class GrpcParticipantRepairService(
         .leftMap[RpcError](
           RepairServiceError.SynchronizerUpgradeError.Error(validatedRequest.successorPSId, _)
         )
-    } yield PerformManualLsuResponse()
+    } yield PerformLateLsuResponse()
 
     CantonGrpcUtil.mapErrNewEUS(res)
   }

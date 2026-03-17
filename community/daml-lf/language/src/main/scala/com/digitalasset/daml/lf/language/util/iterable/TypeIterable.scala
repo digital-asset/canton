@@ -10,7 +10,7 @@ private[lf] object TypeIterable {
   that =>
 
   private def toType(tyCon: TypeConApp): Type =
-    (tyCon.args.iterator foldLeft (TTyCon(tyCon.tycon): Type))(TApp)
+    (tyCon.args.iterator foldLeft (TTyCon(tyCon.tycon): Type))(TApp.apply)
 
   private def iterator(typ: Type): Iterator[Type] =
     typ match {
@@ -255,7 +255,7 @@ private[lf] object TypeIterable {
   private def iterator(interface: DefInterface): Iterator[Type] =
     interface match {
       case DefInterface(requires, _, choices, methods, view, coImplements) =>
-        requires.iterator.map(TTyCon) ++
+        requires.iterator.map(TTyCon.apply) ++
           choices.values.iterator.flatMap(iterator) ++
           methods.values.iterator.flatMap(iterator) ++
           iterator(view) ++

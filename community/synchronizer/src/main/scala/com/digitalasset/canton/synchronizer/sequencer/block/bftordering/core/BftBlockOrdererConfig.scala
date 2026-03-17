@@ -211,7 +211,7 @@ object BftBlockOrdererConfig {
   val DefaultConsensusEmptyBlockCreationTimeout: FiniteDuration = 5.seconds
   val DefaultDelayedInitQueueMaxSize: Int = 1024
   val DefaultEpochStateTransferTimeout: FiniteDuration = 10.seconds
-  val DefaultOutputFetchTimeout: FiniteDuration = 2.second
+  val DefaultOutputFetchTimeout: FiniteDuration = 500.milliseconds
   val DefaultOutputFetchMinimumDelay: FiniteDuration = 500.milliseconds
   val DefaultOutputFetchTimeoutCap: FiniteDuration = 5.second
 

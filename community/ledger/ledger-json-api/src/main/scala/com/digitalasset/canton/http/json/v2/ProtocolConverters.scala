@@ -1256,7 +1256,12 @@ class ProtocolConverters(
       Future.successful(
         obj
           .into[JsPrepareSubmissionResponse]
-          .withFieldConst(_.preparedTransaction, obj.preparedTransaction.map(_.toByteString))
+          .withFieldConst(
+            _.preparedTransaction,
+            obj.preparedTransaction
+              .map(_.toByteString)
+              .getOrElse(jsFail("preparedTransaction is required")),
+          )
           .transform
       )
 
@@ -1268,7 +1273,7 @@ class ProtocolConverters(
           .into[PrepareSubmissionResponse]
           .withFieldConst(
             _.preparedTransaction,
-            jsObj.preparedTransaction.map(_.toByteArray).map(PreparedTransaction.parseFrom),
+            Some(PreparedTransaction.parseFrom(jsObj.preparedTransaction.toByteArray)),
           )
           .transform
       )

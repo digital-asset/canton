@@ -165,7 +165,7 @@ abstract class BaseTopologySnapshot(
       for {
         storedTx <- collectLatestTransaction(
           TopologyMapping.Code.SynchronizerParametersState,
-          transactions
+          transactions.asSnapshotAtMaxEffectiveTime
             .collectOfMapping[SynchronizerParametersState]
             .result,
         ).toRight(s"Unable to fetch synchronizer parameters at $timestamp")
@@ -191,7 +191,7 @@ abstract class BaseTopologySnapshot(
       for {
         storedTx <- collectLatestTransaction(
           TopologyMapping.Code.SequencingDynamicParametersState,
-          transactions
+          transactions.asSnapshotAtMaxEffectiveTime
             .collectOfMapping[DynamicSequencingParametersState]
             .result,
         ).toRight(s"Unable to fetch sequencing parameters at $timestamp")

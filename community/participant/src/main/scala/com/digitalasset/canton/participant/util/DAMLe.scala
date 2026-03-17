@@ -8,6 +8,7 @@ import cats.syntax.either.*
 import com.digitalasset.canton.data.{CantonTimestamp, LedgerTimeBoundaries}
 import com.digitalasset.canton.interactive.InteractiveSubmissionEnricher
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
+import com.digitalasset.canton.lifecycle.FutureUnlessShutdownImpl.*
 import com.digitalasset.canton.logging.pretty.{Pretty, PrettyPrinting}
 import com.digitalasset.canton.logging.{LoggingContextUtil, NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.participant.protocol.EngineController.GetEngineAbortStatus
@@ -21,10 +22,10 @@ import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.ContractValidator.ContractAuthenticatorFn
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.{LfCommand, LfCreateCommand, LfKeyResolver, LfPackageId, LfPartyId}
+import com.digitalasset.canton.{LfCommand, LfKeyResolver, LfPackageId, LfPartyId}
 import com.digitalasset.daml.lf.VersionRange
 import com.digitalasset.daml.lf.data.Ref.{PackageId, PackageName}
-import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
 import com.digitalasset.daml.lf.engine.{Enricher as _, *}
 import com.digitalasset.daml.lf.interpretation.Error as LfInterpretationError
@@ -56,7 +57,6 @@ object DAMLe {
       iterationsBetweenInterruptions: Long =
         10000, // 10000 is the default value in the engine configuration,
       paranoidMode: Boolean,
-      contractStateMode: Option[ContractStateMachine.Mode] = None,
   ): Engine =
     new Engine(
       EngineConfig(
@@ -70,10 +70,6 @@ object DAMLe {
         profileDir = profileDir,
         snapshotDir = snapshotDir,
         forbidLocalContractIds = true,
-        contractStateMode = contractStateMode.getOrElse(
-          if (enableLfDev) ContractStateMachine.Mode.devDefault
-          else ContractStateMachine.Mode.default
-        ),
         iterationsBetweenInterruptions = iterationsBetweenInterruptions,
         paranoid = paranoidMode,
       )
@@ -112,9 +108,6 @@ object DAMLe {
     override protected def pretty: Pretty[EnrichmentError] = adHocPrettyInstance
   }
 
-  private val zeroSeed: LfHash =
-    LfHash.assertFromByteArray(new Array[Byte](LfHash.underlyingHashLength))
-
   trait HasReinterpret {
     def reinterpret(
         contracts: ContractAndKeyLookup,
@@ -150,6 +143,7 @@ class DAMLe(
     participantId: ParticipantId,
     resolvePackage: PackageResolver,
     engine: Engine,
+    contractStateMode: ContractStateMachine.Mode,
     engineLoggingConfig: EngineLoggingConfig,
     protected val loggerFactory: NamedLoggerFactory,
 )(implicit ec: ExecutionContext)
@@ -272,6 +266,7 @@ class DAMLe(
         engineLogger =
           engineLoggingConfig.toEngineLogger(loggerFactory.append("phase", "validation")),
         contractIdVersion = ContractIdVersion.V1,
+        contractStateMode = contractStateMode,
       )
     }
 
@@ -299,49 +294,6 @@ class DAMLe(
       LedgerTimeBoundaries(metadata.timeBoundaries),
     )
   }
-
-  def replayCreate(
-      submitters: Set[LfPartyId],
-      command: LfCreateCommand,
-      topologySnapshot: TopologySnapshot,
-      ledgerTime: CantonTimestamp,
-      getEngineAbortStatus: GetEngineAbortStatus,
-  )(implicit
-      traceContext: TraceContext
-  ): EitherT[FutureUnlessShutdown, ReinterpretationError, LfNodeCreate] =
-    LoggingContextUtil.createLoggingContext(loggerFactory) { implicit loggingContext =>
-      val result = engine.reinterpret(
-        submitters = submitters,
-        command = command,
-        nodeSeed = Some(DAMLe.zeroSeed),
-        preparationTime = Time.Timestamp.Epoch, // Only used to compute contract ids
-        // Only used in Updates, but a create command does not go through Updates.
-        ledgerEffectiveTime = Time.Timestamp.Epoch,
-        packageResolution = Map.empty,
-        contractIdVersion = ContractIdVersion.V1,
-      )
-      for {
-        txWithMetadata <- EitherT(
-          handleResult(
-            topologySnapshot,
-            ledgerTime,
-            ContractAndKeyLookup.noContracts(loggerFactory),
-            (_, _) => Left("Unexpected contract authenticator when replaying a create command"),
-            result,
-            getEngineAbortStatus,
-          )
-        )
-        (tx, _) = txWithMetadata
-        singleCreate = tx.nodes.values.toList match {
-          case (create: LfNodeCreate) :: Nil => create
-          case _ =>
-            throw new RuntimeException(
-              s"DAMLe failed to replay a create $command submitted by $submitters"
-            )
-        }
-        create <- EitherT.pure[FutureUnlessShutdown, ReinterpretationError](singleCreate)
-      } yield create
-    }
 
   private[this] def handleResult[A](
       topologySnapshot: TopologySnapshot,
@@ -387,7 +339,8 @@ class DAMLe(
                 FutureUnlessShutdown.failed(ex)
             }
         case ResultDone(completedResult) => FutureUnlessShutdown.pure(Right(completedResult))
-        case ResultNeedKey(key, resume) =>
+        case ResultNeedKey(key, _, _, resume) =>
+          // TODO(#30398) review this code once engine really supports NUCK
           val gk = key.globalKey
           contracts
             .lookupKey(gk)
@@ -397,13 +350,22 @@ class DAMLe(
                   Error.Interpretation.DamlException(LfInterpretationError.ContractKeyNotFound(gk)),
                   None,
                 )
-              )
+              ): ReinterpretationError
             )
-            .flatMap(optCid => EitherT(handleResultInternal(contracts, resume(optCid))))
+            .flatMap {
+              case Some(cid) =>
+                EitherT(
+                  contracts.lookupFatContract(cid).value.flatMap {
+                    case Some(fatContract) =>
+                      handleResultInternal(contracts, resume(Vector(fatContract), None))
+                    case None =>
+                      handleResultInternal(contracts, resume(Vector.empty, None))
+                  }
+                )
+              case None =>
+                EitherT(handleResultInternal(contracts, resume(Vector.empty, None)))
+            }
             .value
-        case ResultNeedNKey(_, _, _, _) =>
-          // TODO(#30398): add support
-          throw new UnsupportedOperationException("Not supported yet")
         case ResultNeedContract(acoid, resume) =>
           (CantonContractIdVersion.extractCantonContractIdVersion(acoid) match {
             case Right(version) =>

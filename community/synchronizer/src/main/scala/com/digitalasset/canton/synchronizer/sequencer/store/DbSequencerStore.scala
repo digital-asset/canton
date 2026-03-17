@@ -457,6 +457,16 @@ class DbSequencerStore(
       case None => FutureUnlessShutdown.pure(Map.empty)
     }
 
+  override def allRegisteredMembers(registeredAtBeforeInclusive: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Set[Member]] =
+    storage.query(
+      sql"""select member from sequencer_members where registered_ts <= $registeredAtBeforeInclusive"""
+        .as[Member]
+        .map(_.toSet),
+      functionFullName,
+    )
+
   /** In unified sequencer payload ids are deterministic (these are sequencing times from the block
     * sequencer), so we can somewhat safely ignore conflicts arising from sequencer restarts, crash
     * recovery, ha lock loses, unlike the complicate `savePayloads` method below

@@ -29,17 +29,15 @@ import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend.{
 }
 import com.digitalasset.canton.platform.store.backend.StorageBackendTestsEvents.PaginationFromToOps
 import com.digitalasset.canton.platform.store.backend.common.{
-  EventIdSource,
   EventPayloadSourceForUpdatesAcsDelta,
   EventPayloadSourceForUpdatesLedgerEffects,
 }
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
-  IdFilterInput,
-  IdFilterPaginationInput,
+  IdPage,
+  IdPageBounds,
   PaginationFromTo,
   PaginationInput,
-  PaginationLastOnlyInput,
 }
 import com.digitalasset.canton.protocol.TestUpdateId
 import com.digitalasset.canton.topology.SynchronizerId
@@ -69,33 +67,37 @@ private[backend] trait StorageBackendTestsEvents
     with StorageBackendSpec {
   this: AnyFlatSpec =>
 
-  private def testBidirectional(caseClue: String)(
-      input: IdFilterPaginationInput,
-      query: Connection => IdFilterPaginationInput => Vector[Long],
-      ascendingExpected: Seq[Long],
-      descendingExpected: Seq[Long],
+  private def testBidirectionalFetchPage(caseClue: String)(
+      input: PaginationInput,
+      query: Connection => PaginationInput => IdPage,
+      ascendingExpected: IdPage,
+      descendingExpected: IdPage,
   ): Unit = {
-    require(!input.paginationFromTo.descending)
+    require(!input.fromTo.descending)
+    executeSql(query(_)(input)) shouldBe ascendingExpected
+    executeSql(query(_)(input.copy(fromTo = input.fromTo.reverse))) shouldBe descendingExpected
+  }.withClue(caseClue)
 
-    val ascendingInput = input
-    val descendingInput: IdFilterPaginationInput = input match {
-      case PaginationInput(paginationFromTo, limit) =>
-        PaginationInput(paginationFromTo.reverse, limit)
-      case IdFilterInput(paginationFromTo) => IdFilterInput(paginationFromTo.reverse)
-      case PaginationLastOnlyInput(paginationFromTo, limit) =>
-        PaginationLastOnlyInput(paginationFromTo.reverse, limit)
-    }
+  private def testBidirectionalFetchPageFiltered(caseClue: String)(
+      input: PaginationFromTo,
+      query: Connection => PaginationFromTo => Vector[Long],
+      ascendingExpected: Vector[Long],
+      descendingExpected: Vector[Long],
+  ): Unit = {
+    require(!input.descending)
+    executeSql(query(_)(input)) shouldBe ascendingExpected
+    executeSql(query(_)(input.reverse)) shouldBe descendingExpected
+  }.withClue(caseClue)
 
-    val ascendingResult = executeSql(query(_)(ascendingInput))
-    val descendingResult = executeSql(query(_)(descendingInput))
-
-    (ascendingResult should contain theSameElementsInOrderAs ascendingExpected).withClue(
-      "ascending"
-    )
-
-    (descendingResult should contain theSameElementsInOrderAs descendingExpected).withClue(
-      "descending"
-    )
+  private def testBidirectionalFetchBounds(caseClue: String)(
+      input: PaginationInput,
+      query: Connection => PaginationInput => Option[IdPageBounds],
+      ascendingExpected: Option[IdPageBounds],
+      descendingExpected: Option[IdPageBounds],
+  ): Unit = {
+    require(!input.fromTo.descending)
+    executeSql(query(_)(input)) shouldBe ascendingExpected
+    executeSql(query(_)(input.copy(fromTo = input.fromTo.reverse))) shouldBe descendingExpected
   }.withClue(caseClue)
 
   behavior of "StorageBackend (events)"
@@ -128,49 +130,49 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
-    testBidirectional("signatory")(
+    testBidirectionalFetchPage("signatory")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 10),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partySignatory),
           templateIdO = None,
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector(1L, 2L),
-      descendingExpected = Vector(2L, 1L),
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(1L, 2L), lastPage = true),
+      descendingExpected = IdPage(Vector(2L, 1L), lastPage = true),
     )
-    testBidirectional("observer1")(
+    testBidirectionalFetchPage("observer1")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 10),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partyObserver1),
           templateIdO = None,
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector(1L),
-      descendingExpected = Vector(1L),
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(1L), lastPage = true),
+      descendingExpected = IdPage(Vector(1L), lastPage = true),
     )
-    testBidirectional("observer2")(
+    testBidirectionalFetchPage("observer2")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 10),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partyObserver2),
           templateIdO = None,
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector(2L),
-      descendingExpected = Vector(2L),
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(2L), lastPage = true),
+      descendingExpected = IdPage(Vector(2L), lastPage = true),
     )
-    testBidirectional("super reader")(
+    testBidirectionalFetchPage("super reader")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 10),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = None,
           templateIdO = None,
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector(1L, 2L),
-      descendingExpected = Vector(2L, 1L),
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(1L, 2L), lastPage = true),
+      descendingExpected = IdPage(Vector(2L, 1L), lastPage = true),
     )
   }
 
@@ -188,8 +190,8 @@ private[backend] trait StorageBackendTestsEvents
         stakeholders = Set(partySignatory, partyObserver1)
       ),
       dtosAssign(
-        event_offset = 2,
-        event_sequential_id = 2L,
+        event_offset = 5,
+        event_sequential_id = 5L,
         notPersistedContractId = hashCid("#2"),
       )(
         stakeholders = Set(partySignatory, partyObserver2)
@@ -198,65 +200,69 @@ private[backend] trait StorageBackendTestsEvents
 
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
-    executeSql(updateLedgerEnd(offset(2), 2L))
-    testBidirectional("signatory Create")(
-      input = IdFilterInput(PaginationFromTo.ascending(0L, 10L)),
+    executeSql(updateLedgerEnd(offset(6), 6L))
+    testBidirectionalFetchPageFiltered("signatory Create")(
+      input = PaginationFromTo.ascending(0L, 10L),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partySignatory),
           templateIdO = None,
-          eventTypes = Set(PersistentEventType.Create),
-        ),
+        )
+        .filteredForEventTypes(Set(PersistentEventType.Create))
+        .fetchPage,
       ascendingExpected = Vector(1L),
       descendingExpected = Vector(1L),
     )
-    testBidirectional("signatory Assign")(
-      input = IdFilterInput(PaginationFromTo.ascending(0L, 10L)),
+    testBidirectionalFetchPageFiltered("signatory Assign")(
+      input = PaginationFromTo.ascending(0L, 10L),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partySignatory),
           templateIdO = None,
-          eventTypes = Set(PersistentEventType.Assign),
-        ),
-      ascendingExpected = Vector(2L),
-      descendingExpected = Vector(2L),
+        )
+        .filteredForEventTypes(Set(PersistentEventType.Assign))
+        .fetchPage,
+      ascendingExpected = Vector(5L),
+      descendingExpected = Vector(5L),
     )
-    testBidirectional("signatory Create and Assign")(
-      input = IdFilterInput(PaginationFromTo.ascending(0L, 10L)),
+    testBidirectionalFetchPageFiltered("signatory Create and Assign")(
+      input = PaginationFromTo.ascending(0L, 10L),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partySignatory),
           templateIdO = None,
-          eventTypes = Set(PersistentEventType.Assign, PersistentEventType.Create),
-        ),
-      ascendingExpected = Vector(1L, 2L),
-      descendingExpected = Vector(2L, 1L),
+        )
+        .filteredForEventTypes(Set(PersistentEventType.Assign, PersistentEventType.Create))
+        .fetchPage,
+      ascendingExpected = Vector(1L, 5L),
+      descendingExpected = Vector(5L, 1L),
     )
-    testBidirectional("signatory WitnessedCreate")(
-      input = IdFilterInput(PaginationFromTo.ascending(0L, 10L)),
+    testBidirectionalFetchPageFiltered("signatory WitnessedCreate")(
+      input = PaginationFromTo.ascending(0L, 10L),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partySignatory),
           templateIdO = None,
-          eventTypes = Set(PersistentEventType.WitnessedCreate),
-        ),
+        )
+        .filteredForEventTypes(Set(PersistentEventType.WitnessedCreate))
+        .fetchPage,
       ascendingExpected = Vector.empty,
       descendingExpected = Vector.empty,
     )
-    testBidirectional("foreign PaginationInput")(
+    testBidirectionalFetchPage("foreign PaginationInput")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 100),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partySignatory),
           templateIdO = None,
-          eventTypes = Set(PersistentEventType.WitnessedCreate),
-        ),
-      ascendingExpected = Vector(1L, 2L),
-      descendingExpected = Vector(2L, 1L),
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(1L, 5L), lastPage = true),
+      descendingExpected = IdPage(Vector(5L, 1L), lastPage = true),
     )
 
-    testBidirectional("last only assign and create")(
-      input = PaginationLastOnlyInput(
+    testBidirectionalFetchBounds("bounds assign and create")(
+      input = PaginationInput(
         PaginationFromTo.ascending(
           startExclusive = 0L,
           endInclusive = 10L,
@@ -264,16 +270,17 @@ private[backend] trait StorageBackendTestsEvents
         limit = 100,
       ),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partySignatory),
           templateIdO = None,
-          eventTypes = Set(PersistentEventType.Assign, PersistentEventType.Create),
-        ),
-      ascendingExpected = Vector(2L),
-      descendingExpected = Vector(1L),
+        )
+        .filteredForEventTypes(Set(PersistentEventType.Assign, PersistentEventType.Create))
+        .fetchPageBounds,
+      ascendingExpected = Some(IdPageBounds(PaginationFromTo.ascending(0L, 10L), lastPage = true)),
+      descendingExpected = Some(IdPageBounds(PaginationFromTo.descending(0L, 10L), lastPage = true)),
     )
-    testBidirectional("last only create")(
-      input = PaginationLastOnlyInput(
+    testBidirectionalFetchBounds("bounds only create")(
+      input = PaginationInput(
         PaginationFromTo.ascending(
           startExclusive = 0L,
           endInclusive = 10L,
@@ -281,13 +288,53 @@ private[backend] trait StorageBackendTestsEvents
         limit = 100,
       ),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partySignatory),
           templateIdO = None,
-          eventTypes = Set(PersistentEventType.Create),
+        )
+        .filteredForEventTypes(Set(PersistentEventType.Create))
+        .fetchPageBounds,
+      ascendingExpected = Some(IdPageBounds(PaginationFromTo.ascending(0L, 10L), lastPage = true)),
+      descendingExpected = Some(IdPageBounds(PaginationFromTo.descending(0L, 10L), lastPage = true)),
+    )
+    testBidirectionalFetchBounds(
+      "bounds only create, bounds pushed forward to right before the next element"
+    )(
+      input = PaginationInput(
+        PaginationFromTo.ascending(
+          startExclusive = 0L,
+          endInclusive = 10L,
         ),
-      ascendingExpected = Vector(2L),
-      descendingExpected = Vector(1L),
+        limit = 1,
+      ),
+      query = backend.event.updateStreamingQueries
+        .activateStakeholderIds(
+          witnessO = Some(partySignatory),
+          templateIdO = None,
+        )
+        .filteredForEventTypes(Set(PersistentEventType.Create))
+        .fetchPageBounds,
+      ascendingExpected = Some(IdPageBounds(PaginationFromTo.ascending(0L, 4L), lastPage = false)),
+      descendingExpected =
+        Some(IdPageBounds(PaginationFromTo.descending(1L, 10L), lastPage = false)),
+    )
+    testBidirectionalFetchBounds("bounds only create, last page detected with right on the limit")(
+      input = PaginationInput(
+        PaginationFromTo.ascending(
+          startExclusive = 0L,
+          endInclusive = 10L,
+        ),
+        limit = 2,
+      ),
+      query = backend.event.updateStreamingQueries
+        .activateStakeholderIds(
+          witnessO = Some(partySignatory),
+          templateIdO = None,
+        )
+        .filteredForEventTypes(Set(PersistentEventType.Create))
+        .fetchPageBounds,
+      ascendingExpected = Some(IdPageBounds(PaginationFromTo.ascending(0L, 10L), lastPage = true)),
+      descendingExpected = Some(IdPageBounds(PaginationFromTo.descending(0L, 10L), lastPage = true)),
     )
   }
 
@@ -318,49 +365,49 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
-    testBidirectional("signatory with template")(
+    testBidirectionalFetchPage("signatory with template")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 10),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partySignatory),
           templateIdO = Some(someTemplateId),
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector(1L, 2L),
-      descendingExpected = Vector(2L, 1L),
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(1L, 2L), lastPage = true),
+      descendingExpected = IdPage(Vector(2L, 1L), lastPage = true),
     )
-    testBidirectional("observer1 with template")(
+    testBidirectionalFetchPage("observer1 with template")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 10),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partyObserver1),
           templateIdO = Some(someTemplateId),
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector(1L),
-      descendingExpected = Vector(1L),
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(1L), lastPage = true),
+      descendingExpected = IdPage(Vector(1L), lastPage = true),
     )
-    testBidirectional("observer2 with template")(
+    testBidirectionalFetchPage("observer2 with template")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 10),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partyObserver2),
           templateIdO = Some(someTemplateId),
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector(2L),
-      descendingExpected = Vector(2L),
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(2L), lastPage = true),
+      descendingExpected = IdPage(Vector(2L), lastPage = true),
     )
-    testBidirectional("super reader with template")(
+    testBidirectionalFetchPage("super reader with template")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 10),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = None,
           templateIdO = Some(someTemplateId),
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector(1L, 2L),
-      descendingExpected = Vector(2L, 1L),
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(1L, 2L), lastPage = true),
+      descendingExpected = IdPage(Vector(2L, 1L), lastPage = true),
     )
   }
 
@@ -390,49 +437,49 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
-    testBidirectional("signatory other template")(
+    testBidirectionalFetchPage("signatory other template")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 10),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partySignatory),
           templateIdO = Some(otherTemplate),
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector.empty,
-      descendingExpected = Vector.empty,
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(), lastPage = true),
+      descendingExpected = IdPage(Vector(), lastPage = true),
     )
-    testBidirectional("observer1 other template")(
+    testBidirectionalFetchPage("observer1 other template")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 10),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partyObserver1),
           templateIdO = Some(otherTemplate),
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector.empty,
-      descendingExpected = Vector.empty,
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(), lastPage = true),
+      descendingExpected = IdPage(Vector(), lastPage = true),
     )
-    testBidirectional("observer2 other template")(
+    testBidirectionalFetchPage("observer2 other template")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 10),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partyObserver2),
           templateIdO = Some(otherTemplate),
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector.empty,
-      descendingExpected = Vector.empty,
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(), lastPage = true),
+      descendingExpected = IdPage(Vector(), lastPage = true),
     )
-    testBidirectional("super reader other template")(
+    testBidirectionalFetchPage("super reader other template")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 10),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = None,
           templateIdO = Some(otherTemplate),
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector.empty,
-      descendingExpected = Vector.empty,
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(), lastPage = true),
+      descendingExpected = IdPage(Vector(), lastPage = true),
     )
   }
 
@@ -455,49 +502,49 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(1), 1L))
-    testBidirectional("unknown party")(
+    testBidirectionalFetchPage("unknown party")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 10),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partyUnknown),
           templateIdO = None,
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector.empty,
-      descendingExpected = Vector.empty,
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(), lastPage = true),
+      descendingExpected = IdPage(Vector(), lastPage = true),
     )
-    testBidirectional("unknown template")(
+    testBidirectionalFetchPage("unknown template")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 10),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partySignatory),
           templateIdO = Some(unknownTemplate),
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector.empty,
-      descendingExpected = Vector.empty,
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(), lastPage = true),
+      descendingExpected = IdPage(Vector(), lastPage = true),
     )
-    testBidirectional("unknown party and template")(
+    testBidirectionalFetchPage("unknown party and template")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 10),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partyUnknown),
           templateIdO = Some(unknownTemplate),
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector.empty,
-      descendingExpected = Vector.empty,
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(), lastPage = true),
+      descendingExpected = IdPage(Vector(), lastPage = true),
     )
-    testBidirectional("unknown template super reader")(
+    testBidirectionalFetchPage("unknown template super reader")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 10L), 10),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = None,
           templateIdO = Some(unknownTemplate),
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector.empty,
-      descendingExpected = Vector.empty,
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(), lastPage = true),
+      descendingExpected = IdPage(Vector(), lastPage = true),
     )
   }
 
@@ -526,49 +573,49 @@ private[backend] trait StorageBackendTestsEvents
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(updateLedgerEnd(offset(2), 2L))
-    testBidirectional("range [0,1] limit 2")(
+    testBidirectionalFetchPage("range [0,1] limit 2")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 1L), 2),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partySignatory),
           templateIdO = None,
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector(1L),
-      descendingExpected = Vector(1L),
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(1L), lastPage = true),
+      descendingExpected = IdPage(Vector(1L), lastPage = true),
     )
-    testBidirectional("range [1,2] limit 2")(
+    testBidirectionalFetchPage("range [1,2] limit 2")(
       input = PaginationInput(PaginationFromTo.ascending(1L, 2L), 2),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partySignatory),
           templateIdO = None,
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector(2L),
-      descendingExpected = Vector(2L),
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(2L), lastPage = true),
+      descendingExpected = IdPage(Vector(2L), lastPage = true),
     )
-    testBidirectional("range [0,2] limit 1")(
+    testBidirectionalFetchPage("range [0,2] limit 1")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 2L), 1),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partySignatory),
           templateIdO = None,
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector(1L),
-      descendingExpected = Vector(2L),
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(1L), lastPage = false),
+      descendingExpected = IdPage(Vector(2L), lastPage = false),
     )
-    testBidirectional("range [0,2] limit 2")(
+    testBidirectionalFetchPage("range [0,2] limit 2")(
       input = PaginationInput(PaginationFromTo.ascending(0L, 2L), 2),
       query = backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(partySignatory),
           templateIdO = None,
-          eventTypes = Set.empty,
-        ),
-      ascendingExpected = Vector(1L, 2L),
-      descendingExpected = Vector(2L, 1L),
+        )
+        .fetchPage,
+      ascendingExpected = IdPage(Vector(1L, 2L), lastPage = true),
+      descendingExpected = IdPage(Vector(2L, 1L), lastPage = true),
     )
   }
 
@@ -3019,13 +3066,15 @@ private[backend] trait StorageBackendTestsEvents
 
     val achs = executeSql(
       backend.event.updateStreamingQueries
-        .fetchACHSIds(stakeholderO = Some(signatory), templateIdO = None)(_)(
-          PaginatingAsyncStream.PaginationInput(
-            PaginatingAsyncStream.PaginationFromTo.ascending(
-              startExclusive = 0L,
-              endInclusive = 1000L,
-            ),
-            limit = 1000,
+        .fetchACHSIds(
+          stakeholderO = Some(signatory),
+          templateIdO = None,
+          activeAtEventSeqId = 1000L,
+        )
+        .fetchPage(_)(
+          PaginatingAsyncStream.PaginationFromTo.ascending(
+            startExclusive = 0L,
+            endInclusive = 1000L,
           )
         )
     )
@@ -3066,7 +3115,6 @@ private[backend] trait StorageBackendTestsEvents
   ).flatten
 
   it should "correctly handle deactivated contracts (when activeAt is at ledger end)" in {
-
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(dtos, _))
     executeSql(
@@ -3081,13 +3129,15 @@ private[backend] trait StorageBackendTestsEvents
 
     val achsActiveAt2 = executeSql(
       backend.event.updateStreamingQueries
-        .fetchACHSIds(stakeholderO = Some(signatory), templateIdO = None)(_)(
-          PaginatingAsyncStream.PaginationInput(
-            PaginationFromTo.ascending(
-              startExclusive = 0L,
-              endInclusive = 1000L,
-            ),
-            limit = 1000,
+        .fetchACHSIds(
+          stakeholderO = Some(signatory),
+          templateIdO = None,
+          activeAtEventSeqId = 0L, // disable inactive filtration to see the complete ACHS
+        )
+        .fetchPage(_)(
+          PaginatingAsyncStream.PaginationFromTo.ascending(
+            startExclusive = 0L,
+            endInclusive = 1000L,
           )
         )
     )
@@ -3109,13 +3159,15 @@ private[backend] trait StorageBackendTestsEvents
 
     val achsActiveAt3 = executeSql(
       backend.event.updateStreamingQueries
-        .fetchACHSIds(stakeholderO = Some(signatory), templateIdO = None)(_)(
-          PaginatingAsyncStream.PaginationInput(
-            PaginatingAsyncStream.PaginationFromTo.ascending(
-              startExclusive = 0L,
-              endInclusive = 1000L,
-            ),
-            limit = 1000,
+        .fetchACHSIds(
+          stakeholderO = Some(signatory),
+          templateIdO = None,
+          activeAtEventSeqId = 0L, // disable inactive filtration to see the complete ACHS
+        )
+        .fetchPage(_)(
+          PaginatingAsyncStream.PaginationFromTo.ascending(
+            startExclusive = 0L,
+            endInclusive = 1000L,
           )
         )
     )
@@ -3139,13 +3191,15 @@ private[backend] trait StorageBackendTestsEvents
 
     val achsActiveAt4 = executeSql(
       backend.event.updateStreamingQueries
-        .fetchACHSIds(stakeholderO = Some(signatory), templateIdO = None)(_)(
-          PaginatingAsyncStream.PaginationInput(
-            PaginatingAsyncStream.PaginationFromTo.ascending(
-              startExclusive = 0L,
-              endInclusive = 1000L,
-            ),
-            limit = 1000,
+        .fetchACHSIds(
+          stakeholderO = Some(signatory),
+          templateIdO = None,
+          activeAtEventSeqId = 0L, // disable inactive filtration to see the complete ACHS
+        )
+        .fetchPage(_)(
+          PaginatingAsyncStream.PaginationFromTo.ascending(
+            startExclusive = 0L,
+            endInclusive = 1000L,
           )
         )
     )
@@ -3193,13 +3247,15 @@ private[backend] trait StorageBackendTestsEvents
 
     val achs = executeSql(
       backend.event.updateStreamingQueries
-        .fetchACHSIds(stakeholderO = Some(signatory), templateIdO = None)(_)(
-          PaginatingAsyncStream.PaginationInput(
-            PaginatingAsyncStream.PaginationFromTo.ascending(
-              startExclusive = 0L,
-              endInclusive = 1000L,
-            ),
-            limit = 1000,
+        .fetchACHSIds(
+          stakeholderO = Some(signatory),
+          templateIdO = None,
+          activeAtEventSeqId = 0L, // disable inactive filtration to see the complete ACHS
+        )
+        .fetchPage(_)(
+          PaginatingAsyncStream.PaginationFromTo.ascending(
+            startExclusive = 0L,
+            endInclusive = 1000L,
           )
         )
     )
@@ -3214,13 +3270,15 @@ private[backend] trait StorageBackendTestsEvents
     )
     val achsAfter = executeSql(
       backend.event.updateStreamingQueries
-        .fetchACHSIds(stakeholderO = Some(signatory), templateIdO = None)(_)(
-          PaginatingAsyncStream.PaginationInput(
-            PaginatingAsyncStream.PaginationFromTo.ascending(
-              startExclusive = 0L,
-              endInclusive = 1000L,
-            ),
-            limit = 1000,
+        .fetchACHSIds(
+          stakeholderO = Some(signatory),
+          templateIdO = None,
+          activeAtEventSeqId = 0L, // disable inactive filtration to see the complete ACHS
+        )
+        .fetchPage(_)(
+          PaginatingAsyncStream.PaginationFromTo.ascending(
+            startExclusive = 0L,
+            endInclusive = 1000L,
           )
         )
     )

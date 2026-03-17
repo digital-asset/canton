@@ -174,6 +174,7 @@ abstract class GenericInMemoryOutputMetadataStore[E <: Env[E]] extends OutputMet
       )
     }
 
+  @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
   override def loadNumberOfRecords(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[OutputMetadataStore.NumberOfRecords] =
