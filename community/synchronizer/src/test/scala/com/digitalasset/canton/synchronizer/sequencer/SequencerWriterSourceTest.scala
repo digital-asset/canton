@@ -47,7 +47,7 @@ import com.digitalasset.canton.synchronizer.sequencer.store.{
 }
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, SimClock}
 import com.digitalasset.canton.topology.{Member, ParticipantId, SequencerId, UniqueIdentifier}
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PekkoUtil
 import com.digitalasset.canton.{
   BaseTest,
@@ -101,15 +101,13 @@ class SequencerWriterSourceTest
 
     override def notifyOfLocalWrite(
         notification: WriteNotification
-    )(implicit traceContext: TraceContext): Future[Unit] =
-      Future.successful {
-        listenerRef.get().foreach(listener => listener(notification))
-      }
+    ): Unit =
+      listenerRef.get().foreach(listener => listener(notification))
 
     override def readSignalsForMember(
         member: Member,
         memberId: SequencerMemberId,
-    )(implicit traceContext: TraceContext): Source[Traced[ReadSignal], NotUsed] =
+    )(implicit traceContext: TraceContext): Source[ReadSignal, NotUsed] =
       fail("shouldn't be used")
 
     override def close(): Unit = ()
@@ -642,7 +640,7 @@ class SequencerWriterSourceTest
       combinedNotificationsF map { notification =>
         forAll(members) { member =>
           withClue(s"expecting notification for $member") {
-            notification.isBroadcastOrIncludes(member) shouldBe true
+            (notification.isBroadcast || notification.memberIds(member)) shouldBe true
           }
         }
 

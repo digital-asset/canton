@@ -179,7 +179,7 @@ final case class ReceiptStoreEvent(
     override val traceContext: TraceContext,
     override val trafficReceiptO: Option[TrafficReceipt],
 ) extends StoreEvent[Nothing] {
-  override val notifies: WriteNotification = WriteNotification.Members(SortedSet(sender))
+  override val notifies: WriteNotification = WriteNotification.Members(Set(sender))
 
   override val description: String = show"receipt[message-id:$messageId]"
 
@@ -254,7 +254,7 @@ final case class DeliverErrorStoreEvent(
     override val traceContext: TraceContext,
     override val trafficReceiptO: Option[TrafficReceipt],
 ) extends StoreEvent[Nothing] {
-  override val notifies: WriteNotification = WriteNotification.Members(SortedSet(sender))
+  override val notifies: WriteNotification = WriteNotification.Members(Set(sender))
   override val description: String = show"deliver-error[message-id:$messageId]"
   override val members: NonEmpty[Set[SequencerMemberId]] = NonEmpty(Set, sender)
   override def map[P](f: Nothing => P): StoreEvent[P] = this

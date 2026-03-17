@@ -18,10 +18,10 @@ import com.digitalasset.canton.lifecycle.{
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.resource.DbStorage.PassiveInstanceException
-import com.digitalasset.canton.resource.Storage
+import com.digitalasset.canton.resource.{PassiveInstanceExceptionRetryPolicy, Storage}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.Thereafter.syntax.*
-import com.digitalasset.canton.util.retry.{NoExceptionRetryPolicy, Success}
+import com.digitalasset.canton.util.retry.Success
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, SimpleExecutionQueue, retry}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
@@ -207,7 +207,7 @@ abstract class BootstrapStageWithStorage[
             )
             // on shutdown, the retry loop will return the last value so if
             // we get None back, we know that the retry loop was aborted due to a shutdown
-            .unlessShutdown(attemptAndStore().value, NoExceptionRetryPolicy)(
+            .unlessShutdown(attemptAndStore().value, PassiveInstanceExceptionRetryPolicy)(
               success,
               executionContext,
               traceContext,

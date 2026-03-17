@@ -4,6 +4,11 @@ Canton CANTON_VERSION has been released on RELEASE_DATE.
 
 INFO: Note that the "## Until YYYY-MM-DD" headers below should all be Wednesdays until 2pm CET to align with the weekly release schedule, i.e. if you add an entry effective at or after the first header, prepend the new date header that corresponds to the Wednesday after your change.
 
+## Until 2026-03-18
+### Minor Improvements
+- Internal: Removed the usage of BroadcastHub for the sequencer's internal mechanism, with which it signals new events to subscribers,
+  and replaced it with an implementation with better runtime characteristics.
+
 ## Until 2026-03-11
 ### Minor Improvements
 - JSON API: Synthetic `value` fields in oneOf wrapper types (e.g., `AssignCommand`, `UnassignCommand`, `Completion`) are now marked as required in the OpenAPI and AsyncAPI specifications, matching the actual API logic where these fields must always be present.
@@ -57,6 +62,9 @@ It provides an RPC that allows to query for traffic summaries of sequenced event
 Refer to the [traffic documentation](https://docs.digitalasset.com/subnet/3.4/howtos/operate/traffic.html) for more details.
 
 ### Minor Improvements
+- A new field `paid_traffic_cost` exposes the traffic cost paid by the node on completion events and update events
+  - On completions, the field contains the cost paid by the node for the submission of the transaction. May be 0 for failed transactions that did not incur any traffic cost.
+  - On updates, the field contains the cost paid by the node for the submission of the transaction, if available on this node and to the querying parties. In particular, the cost is only available on the submitting node and when querying with a filter that includes submitting parties. The cost is available for Daml transactions and re-assignments. Not for topology transactions.
 - The `sequencer-client.enable-amplification-improvements` flag now defaults to `true`.
 - New connection pool:
   - The connections gRPC channels are now correctly using the defined client keep-alive configuration.

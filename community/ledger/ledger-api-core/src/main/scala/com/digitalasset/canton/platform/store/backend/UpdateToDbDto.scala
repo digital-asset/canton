@@ -365,6 +365,7 @@ object UpdateToDbDto {
         trace_context = serializedTraceContext,
         external_transaction_hash =
           transactionAccepted.externalTransactionHash.map(_.unwrap.toByteArray),
+        traffic_cost = transactionAccepted.paidTrafficCost.map(_.value),
         event_sequential_id = 0, // this is filled later
         node_id = nodeId.index,
         additional_witnesses = additional_witnesses,
@@ -388,6 +389,7 @@ object UpdateToDbDto {
         trace_context = serializedTraceContext,
         external_transaction_hash =
           transactionAccepted.externalTransactionHash.map(_.unwrap.toByteArray),
+        traffic_cost = transactionAccepted.paidTrafficCost.map(_.value),
         event_sequential_id = 0, // this is filled later
         node_id = nodeId.index,
         additional_witnesses = witnesses,
@@ -426,6 +428,7 @@ object UpdateToDbDto {
         trace_context = serializedTraceContext,
         external_transaction_hash =
           transactionAccepted.externalTransactionHash.map(_.unwrap.toByteArray),
+        traffic_cost = transactionAccepted.paidTrafficCost.map(_.value),
         event_sequential_id = 0, // this is filled later
         node_id = nodeId.index,
         deactivated_event_sequential_id = None, // this is filled later
@@ -473,6 +476,7 @@ object UpdateToDbDto {
         trace_context = serializedTraceContext,
         external_transaction_hash =
           transactionAccepted.externalTransactionHash.map(_.unwrap.toByteArray),
+        traffic_cost = transactionAccepted.paidTrafficCost.map(_.value),
         event_sequential_id = 0, // this is filled later
         node_id = nodeId.index,
         additional_witnesses = witnesses,
@@ -577,6 +581,7 @@ object UpdateToDbDto {
       record_time = reassignmentAccepted.recordTime.toMicros,
       synchronizer_id = reassignmentAccepted.reassignmentInfo.sourceSynchronizer.unwrap,
       trace_context = serializedTraceContext,
+      traffic_cost = reassignmentAccepted.paidTrafficCost.map(_.value),
       event_sequential_id = 0L, // this is filled later
       node_id = unassign.nodeId,
       deactivated_event_sequential_id = None, // this is filled later
@@ -609,6 +614,7 @@ object UpdateToDbDto {
       record_time = reassignmentAccepted.recordTime.toMicros,
       synchronizer_id = reassignmentAccepted.reassignmentInfo.targetSynchronizer.unwrap,
       trace_context = serializedTraceContext,
+      traffic_cost = reassignmentAccepted.paidTrafficCost.map(_.value),
       event_sequential_id = 0L, // this is filled later
       node_id = assign.nodeId,
       source_synchronizer_id = reassignmentAccepted.reassignmentInfo.sourceSynchronizer.unwrap,

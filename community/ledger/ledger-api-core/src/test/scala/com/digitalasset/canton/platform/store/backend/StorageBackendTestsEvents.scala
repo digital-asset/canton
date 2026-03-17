@@ -1618,7 +1618,7 @@ private[backend] trait StorageBackendTestsEvents
         requestingPartiesForTx =
           Some(Set("witness1", "stakeholder1", "submitter1", "actor1").map(Party.assertFromString)),
         requestingPartiesForReassignment =
-          Some(Set("witness2", "stakeholder2", "submitter2", "actor2").map(Party.assertFromString)),
+          Some(Set("witness2", "stakeholder2", "submitter1", "actor2").map(Party.assertFromString)),
       )
     ).toList should contain theSameElementsInOrderAs List(
       RawThinCreatedEvent(
@@ -1635,6 +1635,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -1658,9 +1659,10 @@ private[backend] trait StorageBackendTestsEvents
           ),
           commonUpdateProperties = CommonUpdateProperties(
             updateId = TestUpdateId("update").toHexString,
-            commandId = None,
+            commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           reassignmentId = "0012345678",
           submitter = Some("submitter1"),
@@ -1670,7 +1672,7 @@ private[backend] trait StorageBackendTestsEvents
           representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
           filteredAdditionalWitnessParties = Set.empty,
           internalContractId = 10L,
-          requestingParties = Some(Set("witness2", "stakeholder2", "submitter2", "actor2")),
+          requestingParties = Some(Set("witness2", "stakeholder2", "submitter1", "actor2")),
           reassignmentCounter = 345,
           acsDeltaForParticipant = true,
         ),
@@ -1683,7 +1685,7 @@ private[backend] trait StorageBackendTestsEvents
         requestingPartiesForTx =
           Some(Set("witness1", "stakeholder1", "submitter1", "actor1").map(Party.assertFromString)),
         requestingPartiesForReassignment =
-          Some(Set("witness2", "stakeholder2", "submitter2", "actor2").map(Party.assertFromString)),
+          Some(Set("witness2", "stakeholder2", "submitter1", "actor2").map(Party.assertFromString)),
       )
     ).toList should contain theSameElementsInOrderAs List(
       RawArchivedEvent(
@@ -1700,6 +1702,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -1722,9 +1725,10 @@ private[backend] trait StorageBackendTestsEvents
           ),
           commonUpdateProperties = CommonUpdateProperties(
             updateId = TestUpdateId("update").toHexString,
-            commandId = None,
+            commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           reassignmentId = "0012345678",
           submitter = Some("submitter1"),
@@ -1749,7 +1753,7 @@ private[backend] trait StorageBackendTestsEvents
         requestingPartiesForTx =
           Some(Set("witness1", "stakeholder1", "submitter1", "actor1").map(Party.assertFromString)),
         requestingPartiesForReassignment =
-          Some(Set("witness2", "stakeholder2", "submitter2", "actor2").map(Party.assertFromString)),
+          Some(Set("witness2", "stakeholder2", "submitter1", "actor2").map(Party.assertFromString)),
       )
     ).toList should contain theSameElementsInOrderAs List(
       RawThinCreatedEvent(
@@ -1766,6 +1770,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -1789,9 +1794,10 @@ private[backend] trait StorageBackendTestsEvents
           ),
           commonUpdateProperties = CommonUpdateProperties(
             updateId = TestUpdateId("update").toHexString,
-            commandId = None,
+            commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           reassignmentId = "0012345678",
           submitter = Some("submitter1"),
@@ -1801,7 +1807,7 @@ private[backend] trait StorageBackendTestsEvents
           representativePackageId = Ref.PackageId.assertFromString("representativepackage"),
           filteredAdditionalWitnessParties = Set.empty,
           internalContractId = 10L,
-          requestingParties = Some(Set("witness2", "stakeholder2", "submitter2", "actor2")),
+          requestingParties = Some(Set("witness2", "stakeholder2", "submitter1", "actor2")),
           reassignmentCounter = 345,
           acsDeltaForParticipant = true,
         ),
@@ -1822,6 +1828,7 @@ private[backend] trait StorageBackendTestsEvents
           commandId = Some("command-id"),
           traceContext = serializableTraceContext,
           recordTime = Timestamp.assertFromLong(100L),
+          trafficCost = Some(8465L),
         ),
         externalTransactionHash = Some(someExternalTransactionHashBinary),
       ),
@@ -1879,7 +1886,7 @@ private[backend] trait StorageBackendTestsEvents
         requestingPartiesForTx =
           Some(Set("witness1", "stakeholder1", "submitter1", "actor1").map(Party.assertFromString)),
         requestingPartiesForReassignment =
-          Some(Set("witness2", "stakeholder2", "submitter2", "actor2").map(Party.assertFromString)),
+          Some(Set("witness2", "stakeholder2", "submitter1", "actor2").map(Party.assertFromString)),
       )
     ).toList should contain theSameElementsInOrderAs List(
       RawExercisedEvent(
@@ -1896,6 +1903,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -1929,9 +1937,10 @@ private[backend] trait StorageBackendTestsEvents
           ),
           commonUpdateProperties = CommonUpdateProperties(
             updateId = TestUpdateId("update").toHexString,
-            commandId = None,
+            commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           reassignmentId = "0012345678",
           submitter = Some("submitter1"),
@@ -1955,7 +1964,7 @@ private[backend] trait StorageBackendTestsEvents
         requestingPartiesForTx =
           Some(Set("witness1", "submitter1", "actor1").map(Party.assertFromString)),
         requestingPartiesForReassignment =
-          Some(Set("witness2", "stakeholder2", "submitter2", "actor2").map(Party.assertFromString)),
+          Some(Set("witness2", "stakeholder2", "submitter1", "actor2").map(Party.assertFromString)),
       )
     ).toList should contain theSameElementsInOrderAs List(
       RawExercisedEvent(
@@ -1972,6 +1981,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2005,9 +2015,10 @@ private[backend] trait StorageBackendTestsEvents
           ),
           commonUpdateProperties = CommonUpdateProperties(
             updateId = TestUpdateId("update").toHexString,
-            commandId = None,
+            commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           reassignmentId = "0012345678",
           submitter = Some("submitter1"),
@@ -2048,6 +2059,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2074,6 +2086,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2110,6 +2123,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2206,6 +2220,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2244,6 +2259,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2272,6 +2288,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2308,6 +2325,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2336,6 +2354,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = Some("command-id"),
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = Some(8465L),
           ),
           externalTransactionHash = Some(someExternalTransactionHashBinary),
         ),
@@ -2449,12 +2468,14 @@ private[backend] trait StorageBackendTestsEvents
         submitters = None,
         external_transaction_hash = None,
         create_key_hash = None,
+        traffic_cost = None,
       )(),
       dtosAssign(
         event_sequential_id = 2L,
         workflow_id = None,
         command_id = None,
         submitter = None,
+        traffic_cost = None,
       )(),
       dtosConsumingExercise(
         event_sequential_id = 3L,
@@ -2468,6 +2489,7 @@ private[backend] trait StorageBackendTestsEvents
         exercise_argument_compression = None,
         exercise_result_compression = None,
         internal_contract_id = Some(10), // internal contract id should NOT be empty
+        traffic_cost = None,
       ),
       dtosUnassign(
         event_sequential_id = 4L,
@@ -2477,6 +2499,7 @@ private[backend] trait StorageBackendTestsEvents
         deactivated_event_sequential_id = None,
         assignment_exclusivity = None,
         internal_contract_id = Some(10), // internal contract id should NOT be empty
+        traffic_cost = None,
       ),
       dtosWitnessedCreate(
         event_sequential_id = 5L,
@@ -2484,6 +2507,7 @@ private[backend] trait StorageBackendTestsEvents
         command_id = None,
         submitters = None,
         external_transaction_hash = None,
+        traffic_cost = None,
       )(),
       dtosWitnessedExercised(
         event_sequential_id = 6L,
@@ -2496,6 +2520,7 @@ private[backend] trait StorageBackendTestsEvents
         exercise_argument_compression = None,
         exercise_result_compression = None,
         internal_contract_id = None,
+        traffic_cost = None,
       ),
     ).flatten
 
@@ -2527,6 +2552,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           externalTransactionHash = None,
         ),
@@ -2553,6 +2579,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           reassignmentId = "0012345678",
           submitter = None,
@@ -2591,6 +2618,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           externalTransactionHash = None,
         ),
@@ -2616,6 +2644,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           reassignmentId = "0012345678",
           submitter = None,
@@ -2656,6 +2685,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           externalTransactionHash = None,
         ),
@@ -2682,6 +2712,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           reassignmentId = "0012345678",
           submitter = None,
@@ -2722,6 +2753,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           externalTransactionHash = None,
         ),
@@ -2758,6 +2790,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           reassignmentId = "0012345678",
           submitter = None,
@@ -2797,6 +2830,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           externalTransactionHash = None,
         ),
@@ -2823,6 +2857,7 @@ private[backend] trait StorageBackendTestsEvents
             commandId = None,
             traceContext = serializableTraceContext,
             recordTime = Timestamp.assertFromLong(100L),
+            trafficCost = None,
           ),
           externalTransactionHash = None,
         ),

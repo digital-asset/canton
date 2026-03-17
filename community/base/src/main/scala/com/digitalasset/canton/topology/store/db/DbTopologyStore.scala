@@ -1009,13 +1009,19 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
       asOfInclusive: Boolean,
       isProposal: Boolean,
       types: Set[TopologyMapping.Code],
-      filterUid: Option[NonEmpty[Seq[UniqueIdentifier]]],
-      filterNamespace: Option[NonEmpty[Seq[Namespace]]],
+      filterUidIn: Option[NonEmpty[Seq[UniqueIdentifier]]],
+      filterNamespaceIn: Option[NonEmpty[Seq[Namespace]]],
       filterOp: Option[TopologyChangeOp],
       pagination: Option[(Option[UniqueIdentifier], Int)] = None,
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[GenericStoredTopologyTransactions] = {
+
+    // we need to use distinct here as otherwise, due to the chunking, we could end up
+    // in separate batches which then again could cause the same tx being picked up multiple times
+    val filterUid = filterUidIn.map(_.distinct)
+    val filterNamespace = filterNamespaceIn.map(_.distinct)
+
     def forwardBatch(
         filterUidsNew: Option[NonEmpty[Seq[UniqueIdentifier]]],
         filterNamespaceNew: Option[NonEmpty[Seq[Namespace]]],
@@ -1034,7 +1040,9 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
     // Optimization: remove uid-filters made redundant by namespace filters
     val explicitUidFilters = filterUid
       .flatMap(uids =>
-        NonEmpty.from(uids.filterNot(uid => filterNamespace.exists(_.contains(uid.namespace))))
+        NonEmpty.from(
+          uids.distinct.filterNot(uid => filterNamespaceIn.exists(_.contains(uid.namespace)))
+        )
       )
 
     // if both filters are empty, we can simply run a single batch
@@ -1074,7 +1082,9 @@ class DbTopologyStore[+StoreId <: TopologyStoreId](
             batchedNamespaceFilters,
           ).map(_.result)
         }
-        .map(chunkedResult => StoredTopologyTransactions(chunkedResult.flatten))
+        .map { chunkedResult =>
+          StoredTopologyTransactions(chunkedResult.flatten)
+        }
     }
   }
 

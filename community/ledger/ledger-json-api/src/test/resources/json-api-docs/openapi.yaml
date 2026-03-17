@@ -2676,7 +2676,7 @@ components:
             traffic cost on the Ledger API, this field will be set to zero.
             Additionally, the total cost incurred by the submitting node for the submission of the transaction may be greater
             than the reported cost, for example if retries were issued due to failed submissions to the synchronizer.
-            The cost reported here is the one linked to the successfully ordered confirmation request.
+            The cost reported here is the one paid for ordering the confirmation request.
 
             Optional
           type: integer
@@ -5514,6 +5514,19 @@ components:
 
             Required
           type: string
+        paidTrafficCost:
+          description: |-
+            The traffic cost that this participant node paid for the corresponding (un)assignment request.
+
+            Not set for transactions that were
+            - initiated by another participant
+            - initiated offline via the repair service
+            - processed before the participant started serving traffic cost on the Ledger API
+            - returned as part of a query filtering for a non submitting party
+
+            Optional: can be empty
+          type: integer
+          format: int64
     JsReassignmentEvent:
       title: JsReassignmentEvent
       oneOf:
@@ -5757,6 +5770,20 @@ components:
 
             Optional: can be empty
           type: string
+        paidTrafficCost:
+          description: |-
+            The traffic cost that this participant node paid for the confirmation
+            request for this transaction.
+
+            Not set for transactions that were
+            - initiated by another participant
+            - initiated offline via the repair service
+            - processed before the participant started serving traffic cost on the Ledger API
+            - returned as part of a query filtering for a non submitting party
+
+            Optional: can be empty
+          type: integer
+          format: int64
     JsTransactionTree:
       title: JsTransactionTree
       description: |-

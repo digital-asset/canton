@@ -42,6 +42,8 @@ public final class Transaction {
 
   @NonNull private final ByteString externalTransactionHash;
 
+  @NonNull private final Long paidTrafficCost;
+
   public static class Node {
     private final Integer nodeId;
     private final Integer lastDescendantNodeId;
@@ -96,7 +98,8 @@ public final class Transaction {
       @NonNull String synchronizerId,
       TraceContextOuterClass.@NonNull TraceContext traceContext,
       @NonNull Instant recordTime,
-      @NonNull ByteString externalTransactionHash) {
+      @NonNull ByteString externalTransactionHash,
+      @NonNull Long paidTrafficCost) {
     // Check if events are sorted by nodeId
     for (int i = 1; i < events.size(); i++) {
       if (events.get(i - 1).getNodeId() > events.get(i).getNodeId()) {
@@ -132,6 +135,7 @@ public final class Transaction {
 
     this.rootNodeIds = rootNodes.stream().map(node -> node.nodeId).toList();
     this.externalTransactionHash = externalTransactionHash;
+    this.paidTrafficCost = paidTrafficCost;
   }
 
   @Deprecated
@@ -155,7 +159,13 @@ public final class Transaction {
         synchronizerId,
         traceContext,
         recordTime,
-        ByteString.EMPTY);
+        ByteString.EMPTY,
+        0L);
+  }
+
+  @NonNull
+  public Long getPaidTrafficCost() {
+    return paidTrafficCost;
   }
 
   @NonNull
@@ -344,7 +354,8 @@ public final class Transaction {
         transaction.getSynchronizerId(),
         transaction.getTraceContext(),
         Utils.instantFromProto(transaction.getRecordTime()),
-        transaction.getExternalTransactionHash());
+        transaction.getExternalTransactionHash(),
+        transaction.getPaidTrafficCost());
   }
 
   public TransactionOuterClass.Transaction toProto() {

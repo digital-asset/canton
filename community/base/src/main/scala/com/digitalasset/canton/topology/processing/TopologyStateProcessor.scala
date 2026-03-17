@@ -107,6 +107,7 @@ class TopologyStateProcessorImpl private[processing] (
   )(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[(Seq[GenericValidatedTopologyTransaction], AsyncResult[Unit])] = {
+
     // if transactions aren't persisted in the store but rather enqueued in the synchronizer outbox queue,
     // the processing should abort on errors, because we don't want to enqueue rejected transactions.
     val abortOnError = outboxQueue.nonEmpty

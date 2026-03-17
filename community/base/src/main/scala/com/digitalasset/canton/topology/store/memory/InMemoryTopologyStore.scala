@@ -220,17 +220,19 @@ class InMemoryTopologyStore[+StoreId <: TopologyStoreId](
         .view
         .mapValues(_.min1)
         .toMap
-    val found = topologyTransactionStore
-      .filter { entry =>
-        itemsMap.get(entry.indexKey).exists { validUntil =>
-          entry.rejected.isEmpty
-          && entry.until.forall(ts => ts >= validUntil)
+    val found = lock.exclusive {
+      topologyTransactionStore
+        .filter { entry =>
+          itemsMap.get(entry.indexKey).exists { validUntil =>
+            entry.rejected.isEmpty
+            && entry.until.forall(ts => ts >= validUntil)
+          }
         }
-      }
-      .sortBy(c => (c.until.map(_.value).getOrElse(CantonTimestamp.MaxValue), c.batchIdx))
-      .reverse
-      .map(_.toStoredTransaction)
-      .toSeq
+        .sortBy(c => (c.until.map(_.value).getOrElse(CantonTimestamp.MaxValue), c.batchIdx))
+        .reverse
+        .map(_.toStoredTransaction)
+        .toSeq
+    }
     FutureUnlessShutdown.pure(StoredTopologyTransactions(found))
   }
 

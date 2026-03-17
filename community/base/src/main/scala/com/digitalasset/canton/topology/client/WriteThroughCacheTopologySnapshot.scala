@@ -89,7 +89,7 @@ class WriteThroughCacheTopologySnapshot(
         stateLookup
           .lookupHistoryForUid(
             EffectiveTime(timestamp),
-            asOfInclusive = false,
+            asOfInclusive = true,
             uid,
             TopologyMapping.Code.SynchronizerTrustCertificate,
           )
@@ -100,7 +100,7 @@ class WriteThroughCacheTopologySnapshot(
         stateLookup
           .lookupHistoryForUid(
             EffectiveTime(timestamp),
-            asOfInclusive = false,
+            asOfInclusive = true,
             psid.uid,
             TopologyMapping.Code.MediatorSynchronizerState,
           )
@@ -115,7 +115,7 @@ class WriteThroughCacheTopologySnapshot(
         stateLookup
           .lookupHistoryForUid(
             EffectiveTime(timestamp),
-            asOfInclusive = false,
+            asOfInclusive = true,
             psid.uid,
             TopologyMapping.Code.SequencerSynchronizerState,
           )
@@ -138,19 +138,23 @@ class WriteThroughCacheTopologySnapshot(
   ): FutureUnlessShutdown[Seq[DynamicSynchronizerParametersWithValidity]] =
     stateLookup
       .lookupHistoryForUid(
-        EffectiveTime(timestamp),
-        asOfInclusive = false,
+        EffectiveTime(timestamp), // validFrom <= timestamp
+        asOfInclusive = true,
         psid.uid,
         TopologyMapping.Code.SynchronizerParametersState,
       )
-      .map(_.flatMap(_.selectMapping[SynchronizerParametersState]).map { storedTx =>
-        val dps = storedTx.mapping
-        DynamicSynchronizerParametersWithValidity(
-          dps.parameters,
-          storedTx.validFrom.value,
-          storedTx.validUntil.map(_.value),
-        )
-      })
+      .map { txs =>
+        StoredTopologyTransactions(
+          txs.flatMap(_.selectMapping[SynchronizerParametersState])
+        ).asSnapshotAtMaxEffectiveTime.result.map { storedTx =>
+          val dps = storedTx.mapping
+          DynamicSynchronizerParametersWithValidity(
+            dps.parameters,
+            storedTx.validFrom.value,
+            storedTx.validUntil.map(_.value),
+          )
+        }
+      }
 
   @deprecated(
     message =

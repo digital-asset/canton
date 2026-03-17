@@ -375,8 +375,7 @@ private[reassignment] trait ReassignmentProcessingSteps[
         commandId = pendingReassignment.submitterMetadata.commandId,
         optDeduplicationPeriod = None,
         submissionId = pendingReassignment.submitterMetadata.submissionId,
-        // TODO(i31036): support traffic cost for re-assignments
-        paidTrafficCost = NonNegativeLong.zero,
+        paidTrafficCost = pendingReassignment.trafficCost,
       )
     )
     errorDetails.logRejection(Map("requestId" -> pendingReassignment.requestId.toString))
@@ -641,6 +640,10 @@ object ReassignmentProcessingSteps {
     def requestSequencerCounter: SequencerCounter
 
     def submitterMetadata: ReassignmentSubmitterMetadata
+
+    /** Traffic cost of the (un)assignment event
+      */
+    def trafficCost: NonNegativeLong
 
     override def isCleanReplay: Boolean = false
   }

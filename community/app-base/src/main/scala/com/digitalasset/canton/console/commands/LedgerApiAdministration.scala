@@ -784,6 +784,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           deduplicationPeriod: Option[DeduplicationPeriod] = None,
           minLedgerTimeAbs: Option[Instant] = None,
           includeCreatedEventBlob: Boolean = false,
+          customEventFormat: Option[EventFormat] = None,
       ): ApiTransaction =
         consoleEnvironment.run {
           ledgerApiCommand(
@@ -797,6 +798,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               hashingSchemeVersion = hashingSchemeVersion,
               transactionShape = transactionShape,
               includeCreatedEventBlob = includeCreatedEventBlob,
+              customEventFormat = customEventFormat,
             )
           )
         }.getTransaction
@@ -909,6 +911,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
           userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
           transactionShape: TransactionShape = TRANSACTION_SHAPE_ACS_DELTA,
           includeCreatedEventBlob: Boolean = false,
+          customEventFormat: Option[EventFormat] = None,
       ): ApiTransaction = {
         val externalParties = actAs.collect { case externalParty: ExternalParty => externalParty }
 
@@ -939,6 +942,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               does not host the party.
                */
               transactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
+              customEventFormat = customEventFormat,
             )
 
           case _ =>
@@ -959,6 +963,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                   userPackageSelectionPreference,
                   transactionShape,
                   includeCreatedEventBlob = includeCreatedEventBlob,
+                  customEventFormat = customEventFormat,
                 )
               )
             }
@@ -1294,6 +1299,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             includeCreatedEventBlob: Boolean = false,
             // External party specifics
             verboseHashing: Boolean = false,
+            customEventFormat: Option[EventFormat] = None,
         ): ApiTransaction = {
 
           val prepared = ledger_api.interactive_submission.prepare(
@@ -1320,6 +1326,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             userId = userId,
             transactionShape = transactionShape,
             includeCreatedEventBlob = includeCreatedEventBlob,
+            customEventFormat = customEventFormat,
           )
         }
 
@@ -1333,6 +1340,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             userId: String = userId,
             transactionShape: TransactionShape = TRANSACTION_SHAPE_LEDGER_EFFECTS,
             includeCreatedEventBlob: Boolean = false,
+            customEventFormat: Option[EventFormat] = None,
         ): ApiTransaction = {
 
           val prepared = preparedTransaction.preparedTransaction.getOrElse(
@@ -1355,6 +1363,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               deduplicationPeriod = deduplicationPeriod,
               minLedgerTimeAbs = minLedgerTimeAbs,
               includeCreatedEventBlob = includeCreatedEventBlob,
+              customEventFormat = customEventFormat,
             )
 
           optionallyAwait(tx, tx.updateId, tx.synchronizerId, optTimeout)
@@ -2553,6 +2562,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
             userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
             transactionShape: TransactionShape = TRANSACTION_SHAPE_ACS_DELTA,
             includeCreatedEventBlob: Boolean = false,
+            customEventFormat: Option[EventFormat] = None,
         ): Transaction = {
           val externalParties = actAs.collect { case externalParty: ExternalParty => externalParty }
 
@@ -2578,6 +2588,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                 userId,
                 userPackageSelectionPreference,
                 includeCreatedEventBlob = includeCreatedEventBlob,
+                customEventFormat = customEventFormat,
               )
 
             case _ =>
@@ -2598,6 +2609,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
                     userPackageSelectionPreference,
                     transactionShape,
                     includeCreatedEventBlob = includeCreatedEventBlob,
+                    customEventFormat = customEventFormat,
                   )
                 )
               }
@@ -2733,6 +2745,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               userId: String = userId,
               userPackageSelectionPreference: Seq[LfPackageId] = Seq.empty,
               includeCreatedEventBlob: Boolean = false,
+              customEventFormat: Option[EventFormat] = None,
           ): Transaction = {
             val protoCommands = commands.map(_.toProtoCommand).map(Command.fromJavaProto)
             val protoDisclosedContracts =
@@ -2752,6 +2765,7 @@ trait BaseLedgerApiAdministration extends NoTracing with StreamingCommandHelper 
               userId = userId,
               userPackageSelectionPreference = userPackageSelectionPreference,
               includeCreatedEventBlob = includeCreatedEventBlob,
+              customEventFormat = customEventFormat,
             )
 
             javab.data.Transaction.fromProto(ApiTransaction.toJavaProto(tx))

@@ -179,6 +179,20 @@ class StoreBasedTopologyStateLookupByNamespace(store: TopologyStore[TopologyStor
 
 trait TopologyStateLookup extends TopologyStateLookupByNamespace {
 
+  /** Last seen flush timestamp
+    *
+    * In the topology client, if this timestamp is beyond the original init timestamp we start to
+    * read from the processor cache. Otherwise, we just use a copy of the cache. We need to do this
+    * as otherwise we read from the cache when it is rewound.
+    */
+  def cacheCleanAsOf: Option[EffectiveTime]
+
+  /** Create a copy of this cache infrastructure
+    *
+    * We use this in the topology client to ensure we don't have dirty reads during crash recovery.
+    */
+  def makeCopy(): TopologyStateLookup
+
   /** Lookup state (excludes proposals) for the given uid */
   def lookupForUid(
       asOf: EffectiveTime,
@@ -252,6 +266,18 @@ class TopologyStateWriteThroughCache(
     with FlagCloseable
     with HasCloseContext {
 
+  def makeCopy(): TopologyStateLookup = new TopologyStateWriteThroughCache(
+    store,
+    aggregatorConfig,
+    cacheEvictionThreshold,
+    maxCacheSize,
+    enableConsistencyChecks,
+    new CacheMetrics("noop", NoOpMetricsFactory),
+    supervisor,
+    timeouts,
+    loggerFactory,
+  )
+
   private implicit val mc: MetricsContext = {
     val name = store.storeId match {
       case TopologyStoreId.SynchronizerStore(psid) =>
@@ -264,7 +290,7 @@ class TopologyStateWriteThroughCache(
   private val historyMC = mc.withExtraLabels("segment" -> "history")
 
   // maintain last successfully processed timestamp
-  private val asOf = new AtomicReference[EffectiveTime](EffectiveTime.MinValue)
+  private val asOf = new AtomicReference[Option[EffectiveTime]](None)
   private val lock = new Mutex()
   // double ended queue with cached items. oldest items are at the beginning, newest items are at the end
   private val cachedKeys = mutable.Queue[StateKey]()
@@ -341,6 +367,8 @@ class TopologyStateWriteThroughCache(
     },
     aggregatorConfig,
   )
+
+  override def cacheCleanAsOf: Option[EffectiveTime] = asOf.get()
 
   private def fetchHistory(key: StateKey)(
       validUntilCutOff: EffectiveTime
@@ -475,7 +503,7 @@ class TopologyStateWriteThroughCache(
   def flush(sequenced: SequencedTime, effective: EffectiveTime)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[Unit] = {
-    asOf.set(effective)
+
     val toAdd = pendingAdd.getAndSet(List.empty)
     val toRemove = pendingRemove.getAndSet(Set.empty)
     // TODO (#29400) we can change this to pointwise queries as we really now know which transaction needs
@@ -521,6 +549,8 @@ class TopologyStateWriteThroughCache(
               loaded.transferArchivedToTail(enableConsistencyChecks)
           }
         )
+        // this marks the topology cache to be up to date and usable for the topology client
+        asOf.set(Some(effective))
       }
   }
 
@@ -1259,6 +1289,9 @@ object TopologyStateWriteThroughCache {
             && !tx.transaction.isProposal && op == tx.transaction.operation
         )
         .toSeq
+        .sortBy(c =>
+          (c.validFrom, c.validUntil, c.transaction.serial, c.transaction.signatures.size)
+        )
     }
 
     def filterState(

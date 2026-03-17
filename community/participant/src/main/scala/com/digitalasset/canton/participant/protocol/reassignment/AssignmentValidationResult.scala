@@ -69,6 +69,7 @@ final case class AssignmentValidationResult private[reassignment] (
       targetSynchronizer: Target[SynchronizerId],
       participantId: ParticipantId,
       recordTime: CantonTimestamp,
+      trafficCost: NonNegativeLong,
   )(implicit
       traceContext: TraceContext
   ): AcsChangeFactory => InternalContractIds => SequencedUpdate = {
@@ -102,8 +103,7 @@ final case class AssignmentValidationResult private[reassignment] (
           commandId = submitterMetadata.commandId,
           optDeduplicationPeriod = None,
           submissionId = submitterMetadata.submissionId,
-          // TODO(i31036): support traffic cost for re-assignments
-          paidTrafficCost = NonNegativeLong.zero,
+          paidTrafficCost = trafficCost,
         )
       )
     (acsChangeFactory: AcsChangeFactory) =>

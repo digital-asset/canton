@@ -25,6 +25,7 @@ object DbDto {
       synchronizer_id: SynchronizerId,
       trace_context: Array[Byte],
       external_transaction_hash: Option[Array[Byte]],
+      traffic_cost: Option[Long],
 
       // event related columns
       event_type: Int,
@@ -55,6 +56,7 @@ object DbDto {
       synchronizer_id: SynchronizerId,
       trace_context: Array[Byte],
       external_transaction_hash: Option[Array[Byte]],
+      traffic_cost: Option[Long],
 
       // event related columns
       event_type: Int,
@@ -97,6 +99,7 @@ object DbDto {
       synchronizer_id: SynchronizerId,
       trace_context: Array[Byte],
       external_transaction_hash: Option[Array[Byte]],
+      traffic_cost: Option[Long],
 
       // event related columns
       event_type: Int,
@@ -234,6 +237,7 @@ object DbDto {
       synchronizer_id: SynchronizerId,
       trace_context: Array[Byte],
       external_transaction_hash: Option[Array[Byte]],
+      traffic_cost: Option[Long],
 
       // event related columns
       event_sequential_id: Long,
@@ -258,6 +262,7 @@ object DbDto {
         synchronizer_id = synchronizer_id,
         trace_context = trace_context,
         external_transaction_hash = external_transaction_hash,
+        traffic_cost = traffic_cost,
         // event related columns
         event_type = PersistentEventType.Create.asInt,
         event_sequential_id = event_sequential_id,
@@ -292,6 +297,7 @@ object DbDto {
       record_time: Long,
       synchronizer_id: SynchronizerId,
       trace_context: Array[Byte],
+      traffic_cost: Option[Long],
 
       // event related columns
       event_sequential_id: Long,
@@ -318,6 +324,7 @@ object DbDto {
         trace_context = trace_context,
         external_transaction_hash = None,
         event_type = PersistentEventType.Assign.asInt,
+        traffic_cost = traffic_cost,
         // event related columns
         event_sequential_id = event_sequential_id,
         node_id = node_id,
@@ -348,6 +355,7 @@ object DbDto {
       synchronizer_id: SynchronizerId,
       trace_context: Array[Byte],
       external_transaction_hash: Option[Array[Byte]],
+      traffic_cost: Option[Long],
 
       // event related columns
       event_sequential_id: Long,
@@ -383,6 +391,7 @@ object DbDto {
         synchronizer_id = synchronizer_id,
         trace_context = trace_context,
         external_transaction_hash = external_transaction_hash,
+        traffic_cost = traffic_cost,
         // event related columns
         event_type = PersistentEventType.ConsumingExercise.asInt,
         event_sequential_id = event_sequential_id,
@@ -429,6 +438,7 @@ object DbDto {
       record_time: Long,
       synchronizer_id: SynchronizerId,
       trace_context: Array[Byte],
+      traffic_cost: Option[Long],
 
       // event related columns
       event_sequential_id: Long,
@@ -458,6 +468,7 @@ object DbDto {
         synchronizer_id = synchronizer_id,
         trace_context = trace_context,
         external_transaction_hash = None,
+        traffic_cost = traffic_cost,
         // event related columns
         event_type = PersistentEventType.Unassign.asInt,
         event_sequential_id = event_sequential_id,
@@ -501,6 +512,7 @@ object DbDto {
       synchronizer_id: SynchronizerId,
       trace_context: Array[Byte],
       external_transaction_hash: Option[Array[Byte]],
+      traffic_cost: Option[Long],
 
       // event related columns
       event_sequential_id: Long,
@@ -523,6 +535,7 @@ object DbDto {
         synchronizer_id = synchronizer_id,
         trace_context = trace_context,
         external_transaction_hash = external_transaction_hash,
+        traffic_cost = traffic_cost,
 
         // event related columns
         event_type = PersistentEventType.WitnessedCreate.asInt,
@@ -564,6 +577,7 @@ object DbDto {
       synchronizer_id: SynchronizerId,
       trace_context: Array[Byte],
       external_transaction_hash: Option[Array[Byte]],
+      traffic_cost: Option[Long],
 
       // event related columns
       event_sequential_id: Long,
@@ -598,6 +612,7 @@ object DbDto {
         synchronizer_id = synchronizer_id,
         trace_context = trace_context,
         external_transaction_hash = external_transaction_hash,
+        traffic_cost = traffic_cost,
 
         // event related columns
         event_type =

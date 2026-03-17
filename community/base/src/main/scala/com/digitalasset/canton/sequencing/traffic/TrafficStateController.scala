@@ -40,6 +40,10 @@ class TrafficStateController(
     metrics: TrafficConsumptionMetrics,
     synchronizerId: PhysicalSynchronizerId,
 ) extends NamedLogging {
+  logger.debug(
+    s"Initializing TrafficStateController for member $member with initial traffic state: $initialTrafficState"
+  )(TraceContext.empty)
+
   private val currentTrafficPurchased =
     new AtomicReference[Option[TrafficPurchased]](initialTrafficState.toTrafficPurchased(member))
   private val trafficConsumedManager = new TrafficConsumedManager(

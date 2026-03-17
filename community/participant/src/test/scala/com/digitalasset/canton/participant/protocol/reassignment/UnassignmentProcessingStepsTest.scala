@@ -974,6 +974,7 @@ final class UnassignmentProcessingStepsTest
       abortEngine = _ => (),
       engineAbortStatusF = FutureUnlessShutdown.pure(EngineAbortStatus.notAborted),
       DummyTickRequest,
+      trafficCost = NonNegativeLong.tryCreate(123L),
     )
 
     "succeed without errors" in {

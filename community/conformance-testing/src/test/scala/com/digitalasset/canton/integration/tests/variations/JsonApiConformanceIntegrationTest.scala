@@ -132,6 +132,7 @@ sealed trait JsonApiConformanceBase
         import env.*
         participants.all.synchronizers.connect_local(sequencer1_, alias = daName)
       }
+      .withTrafficControl()
 
   "Ledger JSON API" should {
     testCaseName in { implicit env =>
@@ -204,6 +205,7 @@ sealed abstract class JsonApiConformanceIntegrationShardedTest(
         participants.all.synchronizers.connect_local(sequencer1, alias = daName)
         participants.all.synchronizers.connect_local(sequencer2, alias = acmeName)
       }
+      .withTrafficControl()
 
   protected def inclusions: TestInclusions = TestInclusions.AllIncluded
   override protected def exclusions: Set[String] = LedgerApiConformanceBase.excludedTests.toSet ++

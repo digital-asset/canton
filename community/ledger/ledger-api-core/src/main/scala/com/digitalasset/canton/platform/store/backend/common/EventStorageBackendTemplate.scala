@@ -81,6 +81,14 @@ object EventStorageBackendTemplate {
       column("record_time", timestampFromMicros)
     val externalTransactionHash: RowDef[Option[Array[Byte]]] =
       column("external_transaction_hash", byteArray(_).?)
+    def trafficCost(
+        stringInterning: StringInterning,
+        allQueryingPartiesO: Option[Set[Party]],
+    ): RowDef[Option[Long]] =
+      combine(
+        column("traffic_cost", long(_).?),
+        column("submitters", parties(stringInterning)(_).?),
+      )(filteredTrafficCost(_, _, allQueryingPartiesO))
 
     // event related
     val nodeId: RowDef[Int] =
@@ -181,6 +189,7 @@ object EventStorageBackendTemplate {
         commandId(stringInterning, allQueryingPartiesO),
         traceContext,
         recordTime,
+        trafficCost(stringInterning, allQueryingPartiesO),
       )(CommonUpdateProperties.apply)
 
     def transactionPropertiesParser(
@@ -380,18 +389,35 @@ object EventStorageBackendTemplate {
       )
       .toSet
 
+  private def submittersInQueryingParties(
+      allQueryingPartiesO: Option[Set[Party]],
+      submitters: Option[Seq[Party]],
+  ): Boolean = allQueryingPartiesO match {
+    case Some(allQueryingParties) =>
+      submitters.getOrElse(Seq.empty).exists(allQueryingParties)
+    case None => submitters.nonEmpty
+  }
+
   private def filteredCommandId(
       commandId: Option[String],
       submitters: Option[Seq[Party]],
       allQueryingPartiesO: Option[Set[Party]],
-  ): Option[String] = {
-    def submittersInQueryingParties: Boolean = allQueryingPartiesO match {
-      case Some(allQueryingParties) =>
-        submitters.getOrElse(Seq.empty).exists(allQueryingParties)
-      case None => submitters.nonEmpty
-    }
-    commandId.filter(_ != "" && submittersInQueryingParties)
-  }
+  ): Option[String] =
+    commandId
+      .filter(_ != "")
+      .filter(_ => submittersInQueryingParties(allQueryingPartiesO, submitters))
+
+  /** Filter the traffic cost value according to the submitting party: If the value is None, the
+    * cost is unknown, so we stick with that If the value is Some(cost) and the querying party is a
+    * submitting party, keep the cost Otherwise, set the cost to Some(0L)
+    */
+  private def filteredTrafficCost(
+      trafficCost: Option[Long],
+      submitters: Option[Seq[Party]],
+      allQueryingPartiesO: Option[Set[Party]],
+  ): Option[Long] =
+    trafficCost
+      .filter(_ => submittersInQueryingParties(allQueryingPartiesO, submitters))
 
   private def synchronizerOffsetParser(
       offsetColumnName: String,

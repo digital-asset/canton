@@ -119,6 +119,7 @@ object JsSchema {
       traceContext: Option[TraceContext],
       recordTime: com.google.protobuf.timestamp.Timestamp,
       externalTransactionHash: Option[String],
+      paidTrafficCost: Option[Long],
   )
 
   final case class JsTransactionTree(
@@ -164,6 +165,7 @@ object JsSchema {
       traceContext: Option[com.daml.ledger.api.v2.trace_context.TraceContext],
       recordTime: com.google.protobuf.timestamp.Timestamp,
       synchronizerId: String,
+      paidTrafficCost: Option[Long],
   )
 
   object JsServicesCommonCodecs {

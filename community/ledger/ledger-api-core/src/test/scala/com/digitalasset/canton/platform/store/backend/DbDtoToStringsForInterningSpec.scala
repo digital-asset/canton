@@ -120,6 +120,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       synchronizer_id = SynchronizerId.tryFromString("x::synchronizer1"),
       trace_context = serializableTraceContext,
       external_transaction_hash = Some(externalTransactionHash),
+      traffic_cost = Some(5843L),
       event_type = 5,
       event_sequential_id = 1,
       node_id = 1,
@@ -142,6 +143,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       synchronizer_id = SynchronizerId.tryFromString("x::synchronizer1c"),
       trace_context = serializableTraceContext,
       external_transaction_hash = Some(externalTransactionHash),
+      traffic_cost = Some(5843L),
       event_type = 5,
       event_sequential_id = 1,
       node_id = 1,
@@ -195,6 +197,7 @@ class DbDtoToStringsForInterningSpec extends AnyFlatSpec with Matchers {
       template_id = Some("09"),
       package_id = Some("11.4"),
       ledger_effective_time = None,
+      traffic_cost = Some(186L),
     ),
     DbDto.CommandCompletion(
       completion_offset = 64,

@@ -152,7 +152,7 @@ class StoreBasedTopologySnapshot(
       for {
         storedTx <- collectLatestTransaction(
           TopologyMapping.Code.SynchronizerParametersState,
-          transactions
+          transactions.asSnapshotAtMaxEffectiveTime
             .collectOfMapping[SynchronizerParametersState]
             .result,
         ).toRight(s"Unable to fetch synchronizer parameters at $timestamp")
@@ -179,7 +179,7 @@ class StoreBasedTopologySnapshot(
       for {
         storedTx <- collectLatestTransaction(
           TopologyMapping.Code.SequencingDynamicParametersState,
-          transactions
+          transactions.asSnapshotAtMaxEffectiveTime
             .collectOfMapping[DynamicSequencingParametersState]
             .result,
         ).toRight(s"Unable to fetch sequencing parameters at $timestamp")
@@ -199,7 +199,7 @@ class StoreBasedTopologySnapshot(
   ): FutureUnlessShutdown[Seq[DynamicSynchronizerParametersWithValidity]] = store
     .inspect(
       proposals = false,
-      timeQuery = TimeQuery.Range(None, Some(timestamp)),
+      timeQuery = TimeQuery.Range(None, Some(timestamp)), // validFrom <= timestamp
       asOfExclusiveO = None,
       op = Some(TopologyChangeOp.Replace),
       types = Seq(TopologyMapping.Code.SynchronizerParametersState),
@@ -207,7 +207,7 @@ class StoreBasedTopologySnapshot(
       namespaceFilter = None,
     )
     .map {
-      _.collectOfMapping[SynchronizerParametersState].result
+      _.collectOfMapping[SynchronizerParametersState].asSnapshotAtMaxEffectiveTime.result
         .map { storedTx =>
           val dps = storedTx.mapping
           DynamicSynchronizerParametersWithValidity(
