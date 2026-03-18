@@ -238,7 +238,9 @@ private[events] object TransactionLogUpdatesConversions {
   )(implicit
       loggingContext: LoggingContextWithTrace,
       executionContext: ExecutionContext,
-  ): Future[FlatTransaction] =
+  ): Future[FlatTransaction] = {
+    val requestingParties: Option[Set[Party]] =
+      internalTransactionFormat.internalEventFormat.templatePartiesFilter.allFilterParties
     Future.delegate {
       MonadUtil
         .sequentialTraverse(transactionAccepted.events)(event =>
@@ -260,9 +262,11 @@ private[events] object TransactionLogUpdatesConversions {
             traceContext = SerializableTraceContext(traceContext).toDamlProtoOpt,
             recordTime = Some(TimestampConversion.fromLf(transactionAccepted.recordTime)),
             externalTransactionHash = transactionAccepted.externalTransactionHash.map(_.unwrap),
+            paidTrafficCost = transactionAccepted.paidTrafficCost(requestingParties),
           )
         )
     }
+  }
 
   private def transactionPredicate(
       transactionFormat: InternalTransactionFormat
@@ -626,7 +630,7 @@ private[events] object TransactionLogUpdatesConversions {
       .map(events =>
         ApiReassignment(
           updateId = reassignmentAccepted.updateId,
-          commandId = reassignmentAccepted.completionStreamResponse
+          commandId = reassignmentAccepted.completionStreamResponseO
             .flatMap(_.completionResponse.completion)
             .filter(completion => stringRequestingParties.fold(true)(completion.actAs.exists))
             .map(_.commandId)
@@ -637,6 +641,7 @@ private[events] object TransactionLogUpdatesConversions {
           traceContext = SerializableTraceContext(traceContext).toDamlProtoOpt,
           recordTime = Some(TimestampConversion.fromLf(reassignmentAccepted.recordTime)),
           synchronizerId = reassignmentAccepted.synchronizerId,
+          paidTrafficCost = reassignmentAccepted.paidTrafficCost(requestingParties),
         )
       )
   }

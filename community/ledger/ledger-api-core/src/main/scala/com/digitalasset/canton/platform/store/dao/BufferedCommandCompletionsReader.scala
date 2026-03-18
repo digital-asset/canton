@@ -43,10 +43,10 @@ class BufferedCommandCompletionsReader(
       parties: Set[Party],
       userId: String,
   ): Option[CompletionStreamResponse] = (transactionLogUpdate match {
-    case accepted: TransactionLogUpdate.TransactionAccepted => accepted.completionStreamResponse
+    case accepted: TransactionLogUpdate.TransactionAccepted => accepted.completionStreamResponseO
     case rejected: TransactionLogUpdate.TransactionRejected =>
       Some(rejected.completionStreamResponse)
-    case u: TransactionLogUpdate.ReassignmentAccepted => u.completionStreamResponse
+    case u: TransactionLogUpdate.ReassignmentAccepted => u.completionStreamResponseO
     case _: TransactionLogUpdate.TopologyTransactionEffective => None
   }).flatMap(toApiCompletion(_, parties, userId))
 

@@ -101,11 +101,40 @@ object ConfigTransforms {
       _.focus(_.ledgerApi.rateLimit).replace(Some(RateLimitingConfig.Default))
     )
 
+  val useFeaturesWithFeatureFlags =
+    Seq(
+      ConfigTransforms.updateAllMediatorConfigs_(
+        _.focus(_.topology.useNewProcessor)
+          .replace(true)
+          .focus(_.topology.useNewClient)
+          .replace(true)
+          .focus(_.sequencerClient.useNewConnectionPool)
+          .replace(true)
+      ),
+      ConfigTransforms.updateAllSequencerConfigs_(
+        _.focus(_.topology.useNewProcessor)
+          .replace(true)
+          .focus(_.topology.useNewClient)
+          .replace(true)
+          .focus(_.sequencerClient.useNewConnectionPool)
+          .replace(true)
+      ),
+      ConfigTransforms.updateAllParticipantConfigs_(
+        _.focus(_.topology.useNewProcessor)
+          .replace(true)
+          .focus(_.topology.useNewClient)
+          .replace(true)
+          .focus(_.sequencerClient.useNewConnectionPool)
+          .replace(true)
+      ),
+    )
+
   /** Config transforms to apply to heavy-weight tests using an [[EnvironmentDefinition]]. For
     * example, these transforms should be applied to toxiproxy tests.
     */
   val heavyTestDefaults: Seq[ConfigTransform] = optSetProtocolVersion ++
     setBetaSupport(BaseTest.testedProtocolVersion.isBeta) ++
+    useFeaturesWithFeatureFlags ++
     Seq(
       ConfigTransforms.uniqueH2DatabaseNames,
       ConfigTransforms.globallyUniquePorts,

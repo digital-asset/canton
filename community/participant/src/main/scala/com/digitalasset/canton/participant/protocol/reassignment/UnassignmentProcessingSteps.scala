@@ -7,6 +7,7 @@ import cats.data.*
 import cats.syntax.either.*
 import cats.syntax.functor.*
 import com.daml.nonempty.{NonEmpty, NonEmptyUtil}
+import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.crypto.{
   HashOps,
   Signature,
@@ -467,6 +468,7 @@ private[reassignment] class UnassignmentProcessingSteps(
         engineController.abort,
         engineAbortStatusF = engineAbortStatusF,
         decisionTimeTickRequest,
+        parsedRequest.trafficCost,
       )
 
       StorePendingDataAndSendResponseAndCreateTimeout(
@@ -506,6 +508,7 @@ private[reassignment] class UnassignmentProcessingSteps(
       _engineController,
       _abortedF,
       _decisionTimeTickRequest,
+      trafficCost,
     ) = pendingRequestData
 
     val isReassigningParticipant = unassignmentValidationResult.assignmentExclusivity.isDefined
@@ -601,6 +604,7 @@ private[reassignment] class UnassignmentProcessingSteps(
               unassignmentValidationResult.createReassignmentAccepted(
                 participantId,
                 requestId.unwrap,
+                trafficCost,
               )
           } yield CommitAndStoreContractsAndPublishEvent(
             commitSetFO,
@@ -729,6 +733,7 @@ object UnassignmentProcessingSteps {
       override val abortEngine: String => Unit,
       override val engineAbortStatusF: FutureUnlessShutdown[EngineAbortStatus],
       decisionTimeTickRequest: SynchronizerTimeTracker.TickRequest,
+      trafficCost: NonNegativeLong,
   ) extends PendingReassignment {
 
     def isReassigningParticipant: Boolean =

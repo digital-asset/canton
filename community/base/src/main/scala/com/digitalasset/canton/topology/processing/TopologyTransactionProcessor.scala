@@ -407,8 +407,10 @@ class TopologyTransactionProcessor(
     }
   }
 
-  override def onClosed(): Unit =
+  override def onClosed(): Unit = {
     LifeCycle.close(serializer)(logger)
+    cache.foreach(LifeCycle.close(_)(logger))
+  }
 
   private val maxSequencedTimeAtInitializationF =
     TraceContext.withNewTraceContext("max_sequenced_time")(implicit traceContext =>
@@ -590,6 +592,7 @@ object TopologyTransactionProcessor {
         synchronizerUpgradeTime = synchronizerPredecessor.map(_.upgradeTime),
         StoreBasedSynchronizerTopologyClient.NoPackageDependencies,
         parameters.cachingConfigs,
+        parameters.enableAdditionalConsistencyChecks,
         topologyConfig,
         parameters.processingTimeouts,
         futureSupervisor,

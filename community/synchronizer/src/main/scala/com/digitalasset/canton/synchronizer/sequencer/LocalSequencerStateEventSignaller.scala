@@ -3,26 +3,28 @@
 
 package com.digitalasset.canton.synchronizer.sequencer
 
-import com.daml.nameof.NameOf.functionFullName
 import com.digitalasset.canton.config.ProcessingTimeout
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.lifecycle.{
-  AsyncCloseable,
   AsyncOrSyncCloseable,
   FlagCloseableAsync,
   SyncCloseable,
+  UnlessShutdown,
 }
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerMemberId
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
-import com.digitalasset.canton.util.{LoggerUtil, PekkoUtil}
+import com.digitalasset.canton.util.TryUtil.*
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.*
-import org.apache.pekko.stream.scaladsl.{BroadcastHub, Keep, Sink, Source, SourceQueueWithComplete}
-import org.slf4j.event.Level
+import org.apache.pekko.stream.scaladsl.Source
 
-import scala.concurrent.{ExecutionContext, Future}
-import scala.util.{Failure, Success}
+import java.util.concurrent.ConcurrentHashMap
+import scala.collection.concurrent.TrieMap
+import scala.collection.mutable
+import scala.jdk.CollectionConverters.*
+import scala.util.{Failure, Success, Try}
 
 /** If all Sequencer writes are occurring locally we pipe write notifications to read subscriptions
   * allowing the [[SequencerReader]] to immediately read from the backing store rather than polling.
@@ -38,101 +40,105 @@ import scala.util.{Failure, Success}
 class LocalSequencerStateEventSignaller(
     protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
-)(implicit materializer: Materializer, executionContext: ExecutionContext)
+)(implicit materializer: Materializer)
     extends EventSignaller
     with FlagCloseableAsync
     with NamedLogging {
 
-  private val (queue, notificationsHubSource) = {
-    implicit val traceContext: TraceContext = TraceContext.empty
-    PekkoUtil.runSupervised(
-      Source
-        .queue[Traced[WriteNotification]](1, OverflowStrategy.backpressure)
-        // this conflate kicks in, when there is no downstream consumer, to not exert backpressure to the upstream producer
-        .conflate((left, right) =>
-          Traced(left.value.union(right.value))(right.traceContext)
-        ) // keep the trace context of the latest notification
-        .async
-        .toMat(
-          BroadcastHub
-            .sink(1)
-            // the default input buffer is 16, but due to the conflation, we don't actually
-            // want to buffer many stream elements here
-            .addAttributes(Attributes.inputBuffer(1, 1))
-        )(Keep.both),
-      errorLogMessagePrefix = "LocalStateEventSignaller flow failed",
-    )
-  }
+  private val memberQueues =
+    new TrieMap[
+      SequencerMemberId,
+      // support multiple subscriptions for members. This shouldn't be the normal case, but during token expiry or crash recovery
+      // a member could subscribe again, while the old queue might still be active.
+      // The actual set behind this mutable.Set interface is threadsafe.
+      // The TraceContext carried along is from the readSignalsForMember call, to correlate later errors with the initial request.
+      mutable.Set[Traced[BoundedSourceQueue[ReadSignal]]],
+    ]()
 
   override def notifyOfLocalWrite(
       notification: WriteNotification
-  )(implicit traceContext: TraceContext): Future[Unit] =
-    synchronizeWithClosingF(functionFullName) {
-      queueWithLogging("latest-head-state-queue", queue)(notification)
-    }.onShutdown {
-      logger.info("Dropping local write signal due to shutdown")
-      // Readers/subscriptions should be shut down separately
+  ): Unit = {
+    val membersToNotify =
+      if (notification.isBroadcast) memberQueues.iterator
+      else
+        notification.memberIds.iterator.flatMap(member => memberQueues.get(member).map(member -> _))
+
+    membersToNotify.foreach { case (member, queues) =>
+      queues.foreach { tracedQueue =>
+        tracedQueue.value.offer(ReadSignal) match {
+          case QueueOfferResult.Enqueued =>
+          // happy case
+          case QueueOfferResult.Dropped =>
+          // nothing to do, the queue is just full and therefore a notification is already buffered
+          case QueueOfferResult.QueueClosed =>
+            // the queue was closed, so let's remove the entry
+            queues.remove(tracedQueue).discard
+          case QueueOfferResult.Failure(ex) =>
+            logger.info(
+              s"Unable to queue signal for member $member, because the queue failed with an error.",
+              ex,
+            )(tracedQueue.traceContext)
+            queues.remove(tracedQueue).discard
+        }
+      }
+      if (queues.isEmpty) {
+        // if a queue was added between the if above and the updateWith call,
+        // then the member doesn't get removed and we don't "lose" queue entries.
+        memberQueues.updateWith(member)(_.filter(queues => queues.nonEmpty)).discard
+      }
     }
+  }
 
   override def readSignalsForMember(
       member: Member,
       memberId: SequencerMemberId,
-  )(implicit traceContext: TraceContext): Source[Traced[ReadSignal], NotUsed] =
-    notificationsHubSource
-      .filter(_.value.isBroadcastOrIncludes(memberId))
-      .map(notification => notification.map(_ => ReadSignal))
-      // this conflate ensures that a slow consumer doesn't cause backpressure and therefore
-      // block the stream of signals for other consumers
-      .conflate((_, right) => right)
+  )(implicit traceContext: TraceContext): Source[ReadSignal, NotUsed] = {
+    logger.info(s"Creating signal source for $member")
+    val (queue, source) = Source.queue[ReadSignal](1).preMaterialize()
+    val registeredUS = synchronizeWithClosingSync(s"readSignalsForMember($member)")(
+      memberQueues
+        .updateWith(memberId)(
+          // create a concurrent set based on ConcurrentHashMap, but use the scala api for it
+          _.orElse(
+            Some(ConcurrentHashMap.newKeySet[Traced[BoundedSourceQueue[ReadSignal]]]().asScala)
+          )
+            .map(_.addOne(Traced(queue)(traceContext)))
+        )
+        .discard
+    )
 
-  private def queueWithLogging(
-      name: String,
-      queue: SourceQueueWithComplete[Traced[WriteNotification]],
-  )(
-      item: WriteNotification
-  )(implicit traceContext: TraceContext): Future[Unit] = {
-    val logLevel = item match {
-      case WriteNotification.None => Level.TRACE
-      case _: WriteNotification.Members => Level.DEBUG
+    UnlessShutdown.failOnShutdownToAbortException(
+      Success(registeredUS),
+      s"readSignalsForMember($member)",
+    ) match {
+      case Success(_) =>
+        // if registration was successful, just return the Source the corresponds to the queue
+        source
+      case Failure(shutdown) =>
+        // registration happened during shutdown: fail the queue and return a failed Source
+        logger.info(s"Could not register queue for member=$member due to an ongoing shutdown.")
+        queue.fail(shutdown)
+        Source.failed(shutdown)
     }
-    LoggerUtil.logAtLevel(logLevel, s"Pushing item to $name: $item")
-    queue
-      .offer(Traced(item)(traceContext))
-      .transform {
-        case Success(result: QueueCompletionResult) =>
-          logger.warn(s"Failed to queue item on $name: $result")
-          Success(())
-        case Success(QueueOfferResult.Enqueued) =>
-          logger.trace("Push successful.")
-          Success(())
-        case Success(QueueOfferResult.Dropped) =>
-          logger.warn(s"Dropped item while trying to queue on $name")
-          Success(())
-        case Failure(ex) =>
-          logger.warn(s"Pushing item failed with an exception", ex)
-          Failure(ex)
-      }
   }
 
   protected override def closeAsync(): Seq[AsyncOrSyncCloseable] = {
-    import TraceContext.Implicits.Empty.*
+    val closables = memberQueues.flatMap { case (member, queues) =>
+      queues
+        .filter(!_.value.isCompleted)
+        .map(q =>
+          SyncCloseable(
+            s"queues.complete(memberId=$member)",
+            Try(q.value.complete()).forFailed(ex =>
+              logger.info(s"Error while completing the queue for seqMemberId=$member", ex)(
+                q.traceContext
+              )
+            ),
+          )
+        )
+    }.toSeq
+    memberQueues.clear()
+    closables
 
-    Seq(
-      SyncCloseable("queue.complete", queue.complete()),
-      AsyncCloseable(
-        "queue.watchCompletion",
-        queue.watchCompletion(),
-        timeouts.shutdownShort,
-      ),
-      // `watchCompletion` completes when the queue's contents have been consumed by the `conflate`,
-      // but `conflate` need not yet have passed the conflated element to the BroadcastHub.
-      // So we create a new subscription and wait until the completion signal has propagated.
-      AsyncCloseable(
-        "queue.completion",
-        notificationsHubSource.runWith(Sink.ignore),
-        timeouts.shutdownShort,
-      ),
-      // Other readers of the broadcast hub should be shut down separately
-    )
   }
 }

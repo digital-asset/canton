@@ -398,7 +398,7 @@ messages:
           traffic cost on the Ledger API, this field will be set to zero.
           Additionally, the total cost incurred by the submitting node for the submission of the transaction may be greater
           than the reported cost, for example if retries were issued due to failed submissions to the synchronizer.
-          The cost reported here is the one linked to the successfully ordered confirmation request.
+          The cost reported here is the one paid for ordering the confirmation request.
 
           Optional
         deduplication_duration: |-
@@ -2689,6 +2689,16 @@ messages:
           Must be a valid LedgerString (as described in ``value.proto``).
 
           Optional
+        paid_traffic_cost: |-
+          The traffic cost that this participant node paid for the corresponding (un)assignment request.
+
+          Not set for transactions that were
+          - initiated by another participant
+          - initiated offline via the repair service
+          - processed before the participant started serving traffic cost on the Ledger API
+          - returned as part of a query filtering for a non submitting party
+
+          Optional: can be empty
         trace_context: |-
           Ledger API trace context
 
@@ -3118,6 +3128,17 @@ messages:
         external_transaction_hash: |-
           For transaction externally signed, contains the external transaction hash
           signed by the external party. Can be used to correlate an external submission with a committed transaction.
+
+          Optional: can be empty
+        paid_traffic_cost: |-
+          The traffic cost that this participant node paid for the confirmation
+          request for this transaction.
+
+          Not set for transactions that were
+          - initiated by another participant
+          - initiated offline via the repair service
+          - processed before the participant started serving traffic cost on the Ledger API
+          - returned as part of a query filtering for a non submitting party
 
           Optional: can be empty
         trace_context: |-

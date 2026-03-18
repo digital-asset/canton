@@ -4,7 +4,6 @@
 package com.digitalasset.canton.platform.store.dao
 
 import com.daml.ledger.api.testing.utils.PekkoBeforeAndAfterAll
-import com.digitalasset.canton.config.RequireTypes.NonNegativeLong
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
@@ -483,11 +482,10 @@ object BufferedStreamsReaderSpec {
       effectiveAt = Timestamp.Epoch,
       offset = offset(i),
       events = Vector(null),
-      completionStreamResponse = None,
+      completionStreamResponseO = None,
       synchronizerId = someSynchronizerId.toProtoPrimitive,
       recordTime = Timestamp.Epoch,
       externalTransactionHash = None,
-      paidTrafficCost = NonNegativeLong.zero,
     )(TraceContext.empty)
 
   private def offset(idx: Long): Offset = {

@@ -47,6 +47,7 @@ import org.scalatest.Inside.inside
 import java.math.BigDecimal
 import java.util.List as JList
 import java.util.regex.Pattern
+import scala.collection.immutable.Seq
 import scala.concurrent.{ExecutionContext, Future}
 import scala.jdk.CollectionConverters.*
 
@@ -84,6 +85,11 @@ final class CommandServiceIT extends LedgerTestSuite with CommandSubmissionTestU
       assert(
         transactions.head.externalTransactionHash.isEmpty,
         "Expected empty external transaction hash for a local party transaction",
+      )
+
+      assert(
+        transactions.head.paidTrafficCost.exists(_ > 0),
+        "Expected a non empty traffic cost",
       )
 
       assert(
@@ -162,6 +168,10 @@ final class CommandServiceIT extends LedgerTestSuite with CommandSubmissionTestU
         event1.getCreated.getTemplateId == Dummy.TEMPLATE_ID_WITH_PACKAGE_ID.toV1,
         s"The template ID of the created event should be ${Dummy.TEMPLATE_ID_WITH_PACKAGE_ID.toV1}, but was ${event1.getCreated.getTemplateId}",
       )
+      assert(
+        transaction.paidTrafficCost.exists(_ > 0L),
+        "Expected a non empty traffic cost",
+      )
     }
   })
 
@@ -235,11 +245,21 @@ final class CommandServiceIT extends LedgerTestSuite with CommandSubmissionTestU
         0,
         transactionResponseAcsDelta.transaction.toList.flatMap(_.events),
       )
+      // TODO(i31269): The paidTrafficCost is currently > 0, uncomment when this is fixed
+//      assert(
+//        transactionResponseAcsDelta.transaction.flatMap(_.paidTrafficCost).isEmpty,
+//        "Expected a 0 traffic cost",
+//      )
       assertLength(
         "No events should have been into the transaction",
         0,
         transactionResponseLedgerEffects.transaction.toList.flatMap(_.events),
       )
+      // TODO(i31269): The paidTrafficCost is currently > 0, uncomment when this is fixed
+//      assert(
+//        transactionResponseLedgerEffects.transaction.flatMap(_.paidTrafficCost).isEmpty,
+//        "Expected a 0 traffic cost",
+//      )
     }
   })
 
@@ -263,6 +283,7 @@ final class CommandServiceIT extends LedgerTestSuite with CommandSubmissionTestU
       )
     } yield {
       assertLength("Two create events should have been into the transaction", 2, transaction.events)
+      assert(transaction.paidTrafficCost.exists(_ > 0L), "Expected a non empty traffic cost")
     }
   })
 
@@ -285,12 +306,13 @@ final class CommandServiceIT extends LedgerTestSuite with CommandSubmissionTestU
         transactionResponse.transaction,
         "The transaction should be defined",
       )
-      event = assertSingleton(
+      _ = assertSingleton(
         "One create event should have been into the transaction",
         transaction.events,
       )
     } yield {
       assertOnTransactionResponse(transactionResponse.getTransaction)
+      assert(transaction.paidTrafficCost.exists(_ > 0L), "Expected a non empty traffic cost")
     }
   })
 
@@ -890,6 +912,7 @@ final class CommandServiceIT extends LedgerTestSuite with CommandSubmissionTestU
         traceContext = transactionLedgerEffects.traceContext,
         recordTime = transactionLedgerEffects.recordTime,
         externalTransactionHash = transactionLedgerEffects.externalTransactionHash,
+        paidTrafficCost = transactionLedgerEffects.paidTrafficCost,
       ),
     )
 

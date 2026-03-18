@@ -313,6 +313,7 @@ private[dao] object UpdateReader {
             recordTime = Some(TimestampConversion.fromLf(first.recordTime)),
             traceContext = Some(DamlTraceContext.parseFrom(first.traceContext)),
             synchronizerId = first.synchronizerId,
+            paidTrafficCost = first.trafficCost,
           )
         }
       )
@@ -405,6 +406,7 @@ private[dao] object UpdateReader {
             traceContext = Some(DamlTraceContext.parseFrom(first.traceContext)),
             recordTime = Some(TimestampConversion.fromLf(first.recordTime)),
             externalTransactionHash = first.externalTransactionHash.map(ByteString.copyFrom),
+            paidTrafficCost = first.trafficCost,
           )
         }
       )

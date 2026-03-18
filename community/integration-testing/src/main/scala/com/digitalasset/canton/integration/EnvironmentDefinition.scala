@@ -21,12 +21,7 @@ import com.digitalasset.canton.config.{
   MonitoringConfig,
   TestingConfigInternal,
 }
-import com.digitalasset.canton.console.{
-  ConsoleEnvironment,
-  InstanceReference,
-  SequencerReference,
-  TestConsoleOutput,
-}
+import com.digitalasset.canton.console.{ConsoleEnvironment, InstanceReference, TestConsoleOutput}
 import com.digitalasset.canton.environment.Environment
 import com.digitalasset.canton.integration.bootstrap.{
   InitializedSynchronizer,
@@ -87,7 +82,7 @@ final case class EnvironmentDefinition(
     */
   def withTrafficControl(
       trafficControlParameters: TrafficControlParameters =
-        // Give max base traffic by default which is virtually equivalent to unlimited traffic
+        // By default, give max base traffic which is virtually equivalent to unlimited traffic
         // This works better than topping up members because it works for members not yet connected to the network
         // as it is not possible to top up unknown members
         TrafficControlParameters.default.copy(maxBaseTrafficAmount = NonNegativeLong.maxValue),
@@ -95,43 +90,76 @@ final case class EnvironmentDefinition(
       disableCommitments: Boolean = false,
   ): EnvironmentDefinition =
     withSetup { implicit env =>
-      env.initializedSynchronizers.values.foreach {
-        case InitializedSynchronizer(
-              physicalSynchronizerId,
-              _staticSynchronizerParameters,
-              synchronizerOwners,
-            ) =>
-          val allSequencersOfDomain = synchronizerOwners.collect { case seq: SequencerReference =>
-            seq
-          }
-          import env.*
-          allSequencersOfDomain.foreach {
-            _.topology.synchronizer_parameters.propose_update(
-              synchronizerId = physicalSynchronizerId.logical,
-              original =>
-                original.update(
-                  trafficControl = Some(trafficControlParameters),
-                  reconciliationInterval =
-                    if (disableCommitments) config.PositiveDurationSeconds.ofDays(365)
-                    else original.reconciliationInterval,
-                ),
-              synchronize = Some(environmentTimeouts.default),
-            )
-          }
+      import env.*
 
-          if (topUpAllMembers) {
-            (participants.all ++ mediators.all).foreach { node =>
-              allSequencersOfDomain.foreach {
-                _.traffic_control.set_traffic_balance(
-                  node.id.member,
-                  PositiveInt.one,
-                  NonNegativeLong.maxValue,
-                )
-              }
+      // We first do all updates async
+      runOnEachInitializedSynchronizer { sync =>
+        sync.synchronizerOwners.foreach {
+          _.topology.synchronizer_parameters.propose_update(
+            synchronizerId = sync.synchronizerId,
+            original =>
+              original.update(
+                trafficControl = Some(trafficControlParameters),
+                reconciliationInterval =
+                  if (disableCommitments) config.PositiveDurationSeconds.ofDays(365)
+                  else original.reconciliationInterval,
+              ),
+            // Don't synchronize here to run the updates in parallel to speed it up
+            synchronize = None,
+          )
+        }
+      }
+
+      // And then check on all synchronizers that traffic is enabled, to speed things up
+      utils.retry_until_true {
+        runOnEachInitializedSynchronizer { sync =>
+          sync.allSequencerOwners.forall(
+            _.topology.synchronizer_parameters
+              .latest(sync.physicalSynchronizerId)
+              .trafficControl
+              .isDefined
+          )
+        }.forall(_ == true)
+      }
+
+      // Top up members if requested, in the same way (first send all top up requests async,
+      // then wait for all of them to be effective)
+      if (topUpAllMembers) {
+        runOnEachInitializedSynchronizer { sync =>
+          val allPayingMembers =
+            sync.allActiveMediators.map(_.member) ++ sync.allParticipants.map(_.member)
+
+          allPayingMembers.foreach { member =>
+            sync.allSequencerOwners.foreach {
+              _.traffic_control.set_traffic_balance(
+                member,
+                PositiveInt.one,
+                NonNegativeLong.maxValue,
+              )
             }
           }
+        }
+
+        utils.retry_until_true {
+          runOnEachInitializedSynchronizer { sync =>
+            val allPayingMembers =
+              sync.allActiveMediators.map(_.member) ++ sync.allParticipants.map(_.member)
+
+            val traffic = sync.allSequencerOwners.head.traffic_control
+              .traffic_state_of_members_approximate(allPayingMembers)
+              .trafficStates
+            traffic.sizeIs == allPayingMembers.size && traffic.values.forall(
+              _.extraTrafficPurchased == NonNegativeLong.maxValue
+            )
+          }.forall(_ == true)
+        }
       }
     }
+
+  private def runOnEachInitializedSynchronizer[T](f: InitializedSynchronizer => T)(implicit
+      env: TestConsoleEnvironment
+  ): List[T] =
+    env.initializedSynchronizers.values.toList.map(f)
 
   def withSetup(setup: TestConsoleEnvironment => Unit): EnvironmentDefinition =
     copy(setups = setups :+ setup)

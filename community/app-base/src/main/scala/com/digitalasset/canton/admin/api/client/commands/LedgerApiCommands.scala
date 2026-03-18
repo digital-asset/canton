@@ -1759,6 +1759,7 @@ object LedgerApiCommands {
         hashingSchemeVersion: HashingSchemeVersion,
         transactionShape: Option[TransactionShape],
         includeCreatedEventBlob: Boolean,
+        customEventFormat: Option[EventFormat],
     ) extends BaseCommand[
           ExecuteSubmissionAndWaitForTransactionRequest,
           ExecuteSubmissionAndWaitForTransactionResponse,
@@ -1770,21 +1771,23 @@ object LedgerApiCommands {
 
         val transactionFormat = transactionShape.map(transactionShape =>
           TransactionFormat(
-            eventFormat = Some(
-              EventFormat(
-                filtersByParty = Map.empty,
-                filtersForAnyParty = Some(
-                  Filters(
-                    Seq(
-                      CumulativeFilter(
-                        CumulativeFilter.IdentifierFilter.WildcardFilter(
-                          WildcardFilter(includeCreatedEventBlob = includeCreatedEventBlob)
+            eventFormat = customEventFormat.orElse(
+              Some(
+                EventFormat(
+                  filtersByParty = Map.empty,
+                  filtersForAnyParty = Some(
+                    Filters(
+                      Seq(
+                        CumulativeFilter(
+                          CumulativeFilter.IdentifierFilter.WildcardFilter(
+                            WildcardFilter(includeCreatedEventBlob = includeCreatedEventBlob)
+                          )
                         )
                       )
                     )
-                  )
-                ),
-                verbose = true,
+                  ),
+                  verbose = true,
+                )
               )
             ),
             transactionShape = transactionShape,
@@ -1909,6 +1912,7 @@ object LedgerApiCommands {
         override val packageIdSelectionPreference: Seq[LfPackageId],
         transactionShape: TransactionShape,
         includeCreatedEventBlob: Boolean,
+        customEventFormat: Option[EventFormat],
     ) extends SubmitCommand
         with BaseCommand[
           SubmitAndWaitForTransactionRequest,
@@ -1923,23 +1927,27 @@ object LedgerApiCommands {
               commands = Some(mkCommand),
               transactionFormat = Some(
                 TransactionFormat(
-                  eventFormat = Some(
-                    EventFormat(
-                      filtersByParty = actAs
-                        .map(
-                          _ -> Filters(
-                            Seq(
-                              CumulativeFilter(
-                                IdentifierFilter.WildcardFilter(
-                                  WildcardFilter(includeCreatedEventBlob = includeCreatedEventBlob)
+                  eventFormat = customEventFormat.orElse(
+                    Some(
+                      EventFormat(
+                        filtersByParty = actAs
+                          .map(
+                            _ -> Filters(
+                              Seq(
+                                CumulativeFilter(
+                                  IdentifierFilter.WildcardFilter(
+                                    WildcardFilter(includeCreatedEventBlob =
+                                      includeCreatedEventBlob
+                                    )
+                                  )
                                 )
                               )
                             )
                           )
-                        )
-                        .toMap,
-                      filtersForAnyParty = None,
-                      verbose = true,
+                          .toMap,
+                        filtersForAnyParty = None,
+                        verbose = true,
+                      )
                     )
                   ),
                   transactionShape = transactionShape,

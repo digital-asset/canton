@@ -445,8 +445,11 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
         create.witnessParties.loneElement shouldBe alice
         create.templateId.value shouldBe LfEngineToApi.toApiIdentifier(otherTemplateId)
       }
-      // clear out commandId since submitter is not in the querying parties for flat transactions in the non-wildcard query
-      resultPartyWildcard.loneElement.copy(commandId = "") shouldBe result.loneElement
+      // clear out commandId and paidTrafficCost since submitter is not in the querying parties for flat transactions in the non-wildcard query
+      resultPartyWildcard.loneElement.copy(
+        commandId = "",
+        paidTrafficCost = None,
+      ) shouldBe result.loneElement
     }
   }
 
@@ -579,8 +582,11 @@ private[dao] trait JdbcLedgerDaoTransactionsSpec extends OptionValues with Insid
         create.witnessParties.loneElement shouldBe alice
         create.templateId.value shouldBe LfEngineToApi.toApiIdentifier(otherTemplateId)
       }
-      // clear out commandId since submitter is not in the querying parties for flat transactions in the non-wildcard query
-      resultPartyWildcard.loneElement.copy(commandId = "") shouldBe result.loneElement
+      // clear out commandId and paidTrafficCost since submitter is not in the querying parties for flat transactions in the non-wildcard query
+      resultPartyWildcard.loneElement.copy(
+        commandId = "",
+        paidTrafficCost = None,
+      ) shouldBe result.loneElement
     }
   }
 

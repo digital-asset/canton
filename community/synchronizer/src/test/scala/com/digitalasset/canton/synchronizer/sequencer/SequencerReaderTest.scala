@@ -32,7 +32,7 @@ import com.digitalasset.canton.topology.{
   SequencerId,
   TestingTopology,
 }
-import com.digitalasset.canton.tracing.{TraceContext, Traced}
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.MonadUtil
 import com.digitalasset.canton.{
   BaseTest,
@@ -51,8 +51,8 @@ import org.scalatest.wordspec.FixtureAsyncWordSpec
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.immutable.SortedSet
+import scala.concurrent.Promise
 import scala.concurrent.duration.*
-import scala.concurrent.{Future, Promise}
 
 class SequencerReaderTest
     extends FixtureAsyncWordSpec
@@ -90,18 +90,18 @@ class SequencerReaderTest
       extends EventSignaller
       with FlagCloseableAsync {
     private val (queue, source) = Source
-      .queue[Traced[ReadSignal]](1)
+      .queue[ReadSignal](1)
       .buffer(1, OverflowStrategy.dropHead)
       .preMaterialize()
 
     override protected def timeouts: ProcessingTimeout = SequencerReaderTest.this.timeouts
 
-    def signalRead(): Unit = queue.offer(Traced(ReadSignal)).discard[QueueOfferResult]
+    def signalRead(): Unit = queue.offer(ReadSignal).discard[QueueOfferResult]
 
     override def readSignalsForMember(
         member: Member,
         memberId: SequencerMemberId,
-    )(implicit traceContext: TraceContext): Source[Traced[ReadSignal], NotUsed] =
+    )(implicit traceContext: TraceContext): Source[ReadSignal, NotUsed] =
       source
 
     override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = Seq(
@@ -110,9 +110,7 @@ class SequencerReaderTest
 
     override protected def logger: TracedLogger = SequencerReaderTest.this.logger
 
-    override def notifyOfLocalWrite(notification: WriteNotification)(implicit
-        traceContext: TraceContext
-    ): Future[Unit] = Future.unit
+    override def notifyOfLocalWrite(notification: WriteNotification): Unit = ()
   }
 
   class Env extends FlagCloseableAsync {
