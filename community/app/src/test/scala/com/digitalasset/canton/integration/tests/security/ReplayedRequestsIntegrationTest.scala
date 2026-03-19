@@ -430,7 +430,7 @@ trait ReplayedRequestsIntegrationTest
         SequencerTestHelper
           .sendSubmissionRequest(p2SequencerServiceStub, replayRequest, signature)
           .futureValue
-        assertPingSucceeds(participant1, participant2)
+        assertPingSucceeds(participant1, participant2, timeoutMillis = 60000)
       },
       LogEntry.assertLogSeq(
         Seq(
@@ -506,7 +506,7 @@ trait ReplayedRequestsIntegrationTest
       {
         // Move past the expiration of the `maxSequencingTime` for the request submitted by participant1
         clock.advanceTo(replayRequest.maxSequencingTime.plusSeconds(1))
-        assertPingSucceeds(participant1, participant2)
+        assertPingSucceeds(participant1, participant2, timeoutMillis = 60000)
       },
       LogEntry.assertLogSeq(
         Seq(

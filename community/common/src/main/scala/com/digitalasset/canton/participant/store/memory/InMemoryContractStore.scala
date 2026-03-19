@@ -171,6 +171,7 @@ class InMemoryContractStore(
     EitherT.cond(res.sizeCompare(ids) == 0, res.toMap, UnknownContracts(ids -- res.keySet))
   }
 
+  @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
   override def contractCount()(implicit traceContext: TraceContext): FutureUnlessShutdown[Int] =
     FutureUnlessShutdown.pure(contracts.size)
 

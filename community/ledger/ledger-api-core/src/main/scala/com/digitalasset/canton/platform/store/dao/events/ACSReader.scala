@@ -167,14 +167,14 @@ class ACSReader(
           activeAtEventSeqId = activeAtEventSeqId,
         )
       )(
-        executeLastIdQuery = f =>
+        executeFetchBounds = f =>
           activeIdQueriesLimiter.execute(
             globalIdQueriesLimiter.execute(
               dispatcher.executeSql(metrics.index.db.getActiveContractIdRanges)(f)
             )
           ),
         idFilterQueryParallelism = config.idFilterQueryParallelism,
-        executeIdFilterQuery = f =>
+        executeFetchPage = f =>
           activeIdQueriesLimiter.execute(
             globalIdQueriesLimiter.execute(
               dispatcher.executeSql(

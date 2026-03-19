@@ -49,10 +49,7 @@ class GrpcAuthInterceptor(
 
     implicit val tc = W3CTraceContext.fromGrpcMetadata(headers)
 
-    val attrs = call.getAttributes()
-    val remoteAddr = attrs.get(Grpc.TRANSPORT_ATTR_REMOTE_ADDR)
-
-    val (transport, clientAddr) = GrpcAddressHelper.extractTransport(remoteAddr)
+    val (transport, clientAddr) = GrpcAddressHelper.extractTransportFromHeaders(call, headers)
     val callMetadata = CallMetadata(
       apiEndpoint =
         show"${call.getMethodDescriptor.getFullMethodName().readableLoggerName(apiLoggingConfig.maxMethodLength)}",

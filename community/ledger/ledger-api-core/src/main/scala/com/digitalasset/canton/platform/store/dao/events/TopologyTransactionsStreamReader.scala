@@ -17,10 +17,9 @@ import com.digitalasset.canton.platform.store.backend.EventStorageBackend.{
   RawParticipantAuthorization,
   SequentialIdBatch,
 }
-import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.PaginationInput
+import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.IdPageQuery
 import com.digitalasset.canton.platform.store.dao.events.EventsTable.TransactionConversions
 import com.digitalasset.canton.platform.store.dao.events.TopologyTransactionsStreamReader.{
-  IdDbQuery,
   PayloadDbQuery,
   TopologyTransactionsStreamQueryParams,
 }
@@ -67,7 +66,7 @@ class TopologyTransactionsStreamReader(
         maxParallelIdQueriesLimiter: QueueBasedConcurrencyLimiter,
         maxOutputBatchCount: Int,
         metric: DatabaseMetrics,
-        idDbQuery: IdDbQuery,
+        idPageQuery: Option[Party] => IdPageQuery,
     )(implicit
         loggingContext: LoggingContextWithTrace
     ): Source[Iterable[Long], NotUsed] = {
@@ -84,12 +83,8 @@ class TopologyTransactionsStreamReader(
             idPageBufferSize = maxPagesPerIdPagesBuffer,
             initialFromIdExclusive = queryRange.startInclusiveEventSeqId,
             initialEndInclusive = queryRange.endInclusiveEventSeqId,
-            descendingOrder = false,
-          )(
-            idDbQuery.fetchIds(
-              stakeholder = partyO
-            )
-          )(
+            descendingOrder = descendingOrder,
+          )(idPageQuery(partyO))(
             executeIdQuery = f =>
               maxParallelIdQueriesLimiter.execute {
                 globalIdQueriesLimiter.execute {
@@ -98,7 +93,7 @@ class TopologyTransactionsStreamReader(
               }
           )
         }
-        .pipe(EventIdsUtils.sortAndDeduplicateIds(descendingOrder = false))
+        .pipe(EventIdsUtils.sortAndDeduplicateIds(descendingOrder = descendingOrder))
         .batchN(
           maxBatchSize = maxPayloadsPerPayloadsPage,
           maxBatchCount = maxOutputBatchCount,
@@ -143,7 +138,7 @@ class TopologyTransactionsStreamReader(
         maxParallelIdQueriesLimiter = assignedEventIdQueriesLimiter,
         maxOutputBatchCount = maxParallelPayloadQueries + 1,
         metric = dbMetrics.topologyTransactionsStream.fetchTopologyPartyEventIds,
-        idDbQuery = eventStorageBackend.fetchTopologyPartyEventIds,
+        idPageQuery = eventStorageBackend.fetchTopologyPartyEventIds,
       )
     val payloads =
       fetchPayloads(
@@ -163,6 +158,7 @@ class TopologyTransactionsStreamReader(
 object TopologyTransactionsStreamReader {
   final case class TopologyTransactionsStreamQueryParams(
       queryRange: EventsRange,
+      descendingOrder: Boolean,
       payloadQueriesLimiter: ConcurrencyLimiter,
       idPageSizing: IdPageSizing,
       participantAuthorizationFormat: ParticipantAuthorizationFormat,
@@ -171,13 +167,6 @@ object TopologyTransactionsStreamReader {
       maxPayloadsPerPayloadsPage: Int,
       maxParallelPayloadQueries: Int,
   )
-
-  @FunctionalInterface
-  trait IdDbQuery {
-    def fetchIds(
-        stakeholder: Option[Party]
-    ): Connection => PaginationInput => Vector[Long]
-  }
 
   @FunctionalInterface
   trait PayloadDbQuery {

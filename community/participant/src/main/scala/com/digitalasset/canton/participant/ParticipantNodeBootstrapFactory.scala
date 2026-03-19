@@ -44,12 +44,11 @@ trait ParticipantNodeBootstrapFactory {
     enableLfDev = arguments.parameterConfig.alphaVersionSupport,
     enableLfBeta = arguments.parameterConfig.betaVersionSupport,
     enableStackTraces = arguments.parameterConfig.engine.enableEngineStackTraces,
-    profileDir = arguments.config.features.profileDir,
-    snapshotDir = arguments.config.features.snapshotDir,
+    profileDir = arguments.config.parameters.engine.profileDir,
+    snapshotDir = arguments.config.parameters.engine.snapshotDir,
     iterationsBetweenInterruptions =
       arguments.parameterConfig.engine.iterationsBetweenInterruptions,
     paranoidMode = arguments.parameterConfig.engine.enableAdditionalConsistencyChecks,
-    contractStateMode = arguments.parameterConfig.engine.contractStateMode,
   )
 
   protected def createResourceService(

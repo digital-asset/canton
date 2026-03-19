@@ -185,6 +185,7 @@ private[mediator] class InMemoryFinalizedResponseStore(
         .foreach(finalizedRequests.remove(_).discard[Option[FinalizedResponse]])
     }
 
+  @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
   override def count()(implicit
       traceContext: TraceContext,
       callerCloseContext: CloseContext,

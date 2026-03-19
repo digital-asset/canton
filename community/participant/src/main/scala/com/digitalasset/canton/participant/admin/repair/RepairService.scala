@@ -651,7 +651,7 @@ final class RepairService(
       repair: RepairRequest,
       repairIndexer: FutureQueue[RepairUpdate],
   )(implicit traceContext: TraceContext): Future[Unit] = {
-    val nodeIds = LazyList.from(0).map(LfNodeId)
+    val nodeIds = LazyList.from(0).map(LfNodeId.apply)
     val txNodes = nodeIds.zip(contracts.map(toArchive)).toMap
     val update = Update.RepairTransactionAccepted(
       transactionMeta = TransactionMeta(

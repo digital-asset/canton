@@ -4,6 +4,7 @@
 package com.digitalasset.canton.participant.topology
 
 import cats.data.EitherT
+import cats.implicits.catsSyntaxSemigroup
 import cats.syntax.either.*
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.LfPackageId
@@ -13,7 +14,11 @@ import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLogging}
 import com.digitalasset.canton.participant.protocol.reassignment.IncompleteReassignmentData
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
-import com.digitalasset.canton.participant.store.{AcsInspection, ReassignmentStore}
+import com.digitalasset.canton.participant.store.{
+  AcsInspection,
+  DamlPackageStore,
+  ReassignmentStore,
+}
 import com.digitalasset.canton.platform.store.backend.ParameterStorageBackend
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.TopologyManagerError.ParticipantTopologyManagerError.*
@@ -31,12 +36,14 @@ import com.digitalasset.canton.util.ShowUtil.*
 
 import scala.concurrent.ExecutionContext
 
+import PackageMetadata.Implicits.packageMetadataSemigroup
+
 trait ParticipantTopologyValidation extends NamedLogging {
   def validatePackageVetting(
       currentlyVettedPackages: Set[LfPackageId],
       nextPackageIds: Set[LfPackageId],
       packageMetadataView: PackageMetadataView,
-      dryRunSnapshot: Option[PackageMetadata],
+      dryRunSnapshot: PackageMetadata,
       forceFlags: ForceFlags,
       disableUpgradeValidation: Boolean,
   )(implicit
@@ -45,17 +52,18 @@ trait ParticipantTopologyValidation extends NamedLogging {
   ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] = {
     val toBeAdded = nextPackageIds -- currentlyVettedPackages
     val toBeDeleted = currentlyVettedPackages -- nextPackageIds
-    val packageMetadataSnapshot = dryRunSnapshot.getOrElse(packageMetadataView.getSnapshot)
+    val packageMetadataSnapshot = packageMetadataView.getSnapshot |+| dryRunSnapshot
     for {
-      _ <- EitherT.fromEither[FutureUnlessShutdown](
+      _ <-
         checkPackageDependencies(
           nextPackageIds,
           toBeAdded,
           toBeDeleted,
+          packageMetadataView.packageStore,
           packageMetadataSnapshot,
+          dryRunSnapshot,
           forceFlags,
         )
-      )
       _ <- EitherT.fromEither[FutureUnlessShutdown] {
         if (
           disableUpgradeValidation || forceFlags.permits(ForceFlag.AllowVetIncompatibleUpgrades)
@@ -232,15 +240,26 @@ trait ParticipantTopologyValidation extends NamedLogging {
         )
     }
 
+  /** @param packageStore
+    *   used for security relevant validations, as packageMetadataSnapshot gets stale when packages
+    *   are deleted
+    * @param packageMetadataSnapshot
+    *   used for non-security relevant validation, for better performance
+    * @param dryRunSnapshot
+    *   additional packages that should also be considered available
+    */
   private def checkPackageDependencies(
       vettedPackagesTarget: Set[LfPackageId],
       toBeAdded: Set[LfPackageId],
       toBeRemoved: Set[LfPackageId],
+      packageStore: DamlPackageStore,
       packageMetadataSnapshot: PackageMetadata,
+      dryRunSnapshot: PackageMetadata,
       forceFlags: ForceFlags,
   )(implicit
-      traceContext: TraceContext
-  ): Either[TopologyManagerError, Unit] = {
+      traceContext: TraceContext,
+      ec: ExecutionContext,
+  ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] = {
     def getDependencies(packageId: LfPackageId): Set[LfPackageId] =
       packageMetadataSnapshot.packages.get(packageId) match {
         case Some(pkg) => pkg.directDeps
@@ -252,17 +271,29 @@ trait ParticipantTopologyValidation extends NamedLogging {
           )
           Set.empty
       }
-    val (knownToBeAdded, unknownToBeAdded) =
-      toBeAdded.partition(packageMetadataSnapshot.packages.contains)
-    val dependenciesOfAdded = packageMetadataSnapshot.allDependenciesRecursively(knownToBeAdded)
-    val removedDeps =
-      if (toBeRemoved.nonEmpty) vettedPackagesTarget.flatMap(getDependencies).intersect(toBeRemoved)
-      else Set.empty
-    val unvettedDeps = (dependenciesOfAdded -- vettedPackagesTarget) ++ removedDeps
-    if (unknownToBeAdded.nonEmpty && !forceFlags.permits(ForceFlag.AllowUnknownPackage))
-      Left(CannotVetDueToMissingPackages.Missing(unknownToBeAdded))
-    else if (unvettedDeps.nonEmpty && !forceFlags.permits(ForceFlag.AllowUnvettedDependencies))
-      Left(DependenciesNotVetted.Reject(unvettedDeps))
-    else Right(())
+
+    EitherT(for {
+      // Using the package store instead of packageMetadataSnapshot,
+      // as packageMetadataSnapshot could become stale at time of writing.
+      tooBeAddedInPackageStore <- packageStore.filterExisting(toBeAdded)
+    } yield {
+      val toBeAddedInDryRunSnapshot = toBeAdded.filter(dryRunSnapshot.packages.contains)
+      val knownToBeAdded = tooBeAddedInPackageStore ++ toBeAddedInDryRunSnapshot
+
+      val unknownToBeAdded = toBeAdded -- knownToBeAdded
+      // Using packageMetadataSnapshot even though it may become stale,
+      // as (1) there is no good alternative and (2) the validation based on this is just for UX and not for security.
+      val dependenciesOfAdded = packageMetadataSnapshot.allDependenciesRecursively(knownToBeAdded)
+      val removedDeps =
+        if (toBeRemoved.nonEmpty)
+          vettedPackagesTarget.flatMap(getDependencies).intersect(toBeRemoved)
+        else Set.empty
+      val unvettedDeps = (dependenciesOfAdded -- vettedPackagesTarget) ++ removedDeps
+      if (unknownToBeAdded.nonEmpty && !forceFlags.permits(ForceFlag.AllowUnknownPackage))
+        Left(CannotVetDueToMissingPackages.Missing(unknownToBeAdded))
+      else if (unvettedDeps.nonEmpty && !forceFlags.permits(ForceFlag.AllowUnvettedDependencies))
+        Left(DependenciesNotVetted.Reject(unvettedDeps))
+      else Right(())
+    })
   }
 }

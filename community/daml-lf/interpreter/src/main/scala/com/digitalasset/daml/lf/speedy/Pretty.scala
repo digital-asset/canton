@@ -357,9 +357,9 @@ private[lf] object Pretty {
       case ns: FailedAuthorization.NoSignatories =>
         s"node $id (${ns.templateId}) has no signatories"
       case nlbk: FailedAuthorization.LookupByKeyMissingAuthorization =>
-        s"node $id (${nlbk.templateId}) requires authorizers ${nlbk.maintainers} for lookup by key, but it only has ${nlbk.authorizingParties}"
+        s"node $id (${nlbk.templateId}) requires authorizers ${nlbk.maintainers.mkString(",")} for lookup by key, but it only has ${nlbk.authorizingParties.mkString(",")}"
       case mns: FailedAuthorization.MaintainersNotSubsetOfSignatories =>
-        s"node $id (${mns.templateId}) has maintainers ${mns.maintainers} which are not a subset of the signatories ${mns.signatories}"
+        s"node $id (${mns.templateId}) has maintainers ${mns.maintainers.mkString(",")} which are not a subset of the signatories ${mns.signatories}"
     }
   }
 

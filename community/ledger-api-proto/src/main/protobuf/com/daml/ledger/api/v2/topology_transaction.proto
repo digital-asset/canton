@@ -16,29 +16,35 @@ option java_package = "com.daml.ledger.api.v2";
 message TopologyTransaction {
   // Assigned by the server. Useful for correlating logs.
   // Must be a valid LedgerString (as described in ``value.proto``).
+  //
   // Required
   string update_id = 1;
 
   // The absolute offset. The details of this field are described in ``community/ledger-api/README.md``.
-  // Required, it is a valid absolute offset (positive integer).
+  // It is a valid absolute offset (positive integer).
+  //
+  // Required
   int64 offset = 2;
 
   // A valid synchronizer id.
   // Identifies the synchronizer that synchronized the topology transaction.
+  //
   // Required
   string synchronizer_id = 3;
 
   // The time at which the changes in the topology transaction become effective. There is a small delay between a
   // topology transaction being sequenced and the changes it contains becoming effective. Topology transactions appear
   // in order relative to a synchronizer based on their effective time rather than their sequencing time.
+  //
   // Required
   google.protobuf.Timestamp record_time = 4;
 
   // A non-empty list of topology events.
-  // Required
+  //
+  // Required: must be non-empty
   repeated TopologyEvent events = 5;
 
-  // Optional; ledger API trace context
+  // Ledger API trace context
   //
   // The trace context transported in this message corresponds to the trace context supplied
   // by the client application in a HTTP2 header of the original command submission.
@@ -47,10 +53,13 @@ message TopologyTransaction {
   // This field will be populated with the trace context contained in the original submission.
   // If that was not provided, a unique ledger-api-server generated trace context will be used
   // instead.
+  //
+  // Optional
   com.daml.ledger.api.v2.TraceContext trace_context = 6;
 }
 
 message TopologyEvent {
+  // Required
   oneof event {
     ParticipantAuthorizationChanged participant_authorization_changed = 1;
     ParticipantAuthorizationRevoked participant_authorization_revoked = 2;

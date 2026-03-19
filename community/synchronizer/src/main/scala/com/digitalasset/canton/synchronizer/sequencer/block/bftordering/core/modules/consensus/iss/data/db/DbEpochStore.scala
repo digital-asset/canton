@@ -51,6 +51,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
   PbftViewChangeMessage,
   PrePrepare,
 }
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.updateBulk
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30.ConsensusMessage as ProtoConsensusMessage
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
@@ -351,23 +352,21 @@ class DbEpochStore(
                 """
       }
 
-    storage
-      .runWrite(
-        // Sorting should prevent deadlocks in Postgres when using concurrent clashing batched inserts
-        //  with idempotency "on conflict do nothing" clauses.
-        DbStorage
-          .bulkOperation_(insertSql, messages.sortBy(key), storage.profile) { pp => msg =>
-            pp >> msg.message.blockMetadata.blockNumber
-            pp >> msg.message.blockMetadata.epochNumber
-            pp >> msg.message.viewNumber
-            pp >> msg
-            pp >> getDiscriminator(msg.message)
-            pp >> msg.from
-          },
-        functionFullName,
-        maxRetries = 1,
-      )
-      .map(_ => ())
+    updateBulk(
+      storage,
+      // Sorting should prevent deadlocks in Postgres when using concurrent clashing batched inserts
+      //  with idempotency "on conflict do nothing" clauses.
+      DbStorage
+        .bulkOperation_(insertSql, messages.sortBy(key), storage.profile) { pp => msg =>
+          pp >> msg.message.blockMetadata.blockNumber
+          pp >> msg.message.blockMetadata.epochNumber
+          pp >> msg.message.viewNumber
+          pp >> msg
+          pp >> getDiscriminator(msg.message)
+          pp >> msg.from
+        },
+      functionFullName,
+    ).map(_ => ())
   }
 
   private def runInsertFinalPbftMessages[M <: PbftNetworkMessage](
@@ -395,22 +394,20 @@ class DbEpochStore(
                    values (?1, ?2, ?3, ?4, ?5)
               """
       }
-    storage
-      .runWrite(
-        // Sorting should prevent deadlocks in Postgres when using concurrent clashing batched inserts
-        //  with idempotency "on conflict do nothing" clauses.
-        DbStorage
-          .bulkOperation_(insertSql, messages.sortBy(key), storage.profile) { pp => msg =>
-            pp >> msg.message.blockMetadata.blockNumber
-            pp >> msg.message.blockMetadata.epochNumber
-            pp >> msg
-            pp >> getDiscriminator(msg.message)
-            pp >> msg.from
-          },
-        functionFullName,
-        maxRetries = 1,
-      )
-      .map(_ => ())
+    updateBulk(
+      storage,
+      // Sorting should prevent deadlocks in Postgres when using concurrent clashing batched inserts
+      //  with idempotency "on conflict do nothing" clauses.
+      DbStorage
+        .bulkOperation_(insertSql, messages.sortBy(key), storage.profile) { pp => msg =>
+          pp >> msg.message.blockMetadata.blockNumber
+          pp >> msg.message.blockMetadata.epochNumber
+          pp >> msg
+          pp >> getDiscriminator(msg.message)
+          pp >> msg.from
+        },
+      functionFullName,
+    ).map(_ => ())
   }
 
   @SuppressWarnings(Array("org.wartremover.warts.AsInstanceOf"))

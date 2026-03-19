@@ -5,11 +5,11 @@ package com.digitalasset.daml.lf
 package script
 
 import com.daml.logging.LoggingContext
-import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.{Engine, Result, ResultDone, Enricher => LfEnricher}
+import com.digitalasset.daml.lf.interpretation.NeedKeyContinuationToken
 import com.digitalasset.daml.lf.language.{Ast, LookupError}
 import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SExpr}
 import com.digitalasset.daml.lf.speedy.SResult._
@@ -68,9 +68,11 @@ private[lf] object IdeLedgerRunner {
     ): Either[Error, Unit]
     def lookupKey(
         gk: GlobalKey,
+        limit: Int,
+        tokenOpt: Option[NeedKeyContinuationToken],
         actAs: Set[Party],
         readAs: Set[Party],
-        canContinue: Option[ContractId] => Boolean,
+        continue: (Vector[FatContractInstance], Option[NeedKeyContinuationToken]) => Unit,
     ): Either[Error, Unit]
     def currentTime: Time.Timestamp
     def commit(
@@ -129,34 +131,33 @@ private[lf] object IdeLedgerRunner {
 
     override def lookupKey(
         gk: GlobalKey,
+        limit: Int,
+        tokenOpt: Option[NeedKeyContinuationToken],
         actAs: Set[Party],
         readAs: Set[Party],
-        callback: Option[ContractId] => Boolean,
+        callback: (Vector[FatContractInstance], Option[NeedKeyContinuationToken]) => Unit,
     ): Either[Error, Unit] =
-      handleUnsafe(lookupKeyUnsafe(gk, actAs, readAs, callback))
+      handleUnsafe(lookupKeyUnsafe(gk, limit, tokenOpt, actAs, readAs, callback))
 
     private def lookupKeyUnsafe(
         gk: GlobalKey,
+        limit: Int,
+        token: Option[NeedKeyContinuationToken],
         actAs: Set[Party],
         readAs: Set[Party],
-        callback: Option[ContractId] => Boolean,
+        callback: (Vector[FatContractInstance], Option[NeedKeyContinuationToken]) => Unit,
     ): Unit = {
+
+      // TODO(#30398) generzlize this implementation to NUCK
+      assert(limit <= 1)
+      assert(token.isEmpty)
 
       val effectiveAt = ledger.currentTime
       val readers = actAs union readAs
 
-      def missingWith(err: Error) =
-        if (!callback(None)) {
-          throw err
-        }
-
       ledger.ledgerData.activeKeys.get(gk) match {
         case None =>
-          missingWith(
-            Error.RunnerException(
-              SError.SErrorDamlException(interpretation.Error.ContractKeyNotFound(gk))
-            )
-          )
+          callback(Vector.empty, None)
         case Some(acoid) =>
           ledger.lookupGlobalContract(
             actAs,
@@ -165,29 +166,16 @@ private[lf] object IdeLedgerRunner {
             acoid,
           ) match {
             case IdeLedger.LookupOk(contract) =>
-              if (!readers.intersect(contract.stakeholders).isEmpty)
-                // Note that even with a successful global lookup
-                // the callback can return false. This happens for a fetch-by-key
-                // if the contract got archived in the meantime.
-                // We discard the result here and rely on fetch-by-key
-                // setting up the state such that continuing interpretation fails.
-                discard(callback(Some(acoid)))
+              if (readers.intersect(contract.stakeholders).nonEmpty)
+                callback(Vector(contract), None)
               else
                 throw Error.ContractKeyNotVisible(acoid, gk, actAs, readAs, contract.stakeholders)
-            case IdeLedger.LookupContractNotFound(coid) =>
-              missingWith(
-                Error.Internal(s"contract ${coid.coid} not found, but we found its key!")
-              )
+            case IdeLedger.LookupContractNotFound(_) =>
+              callback(Vector.empty, None)
             case IdeLedger.LookupContractNotEffective(_, _, _) =>
-              missingWith(
-                Error.Internal(
-                  s"contract ${acoid.coid} not effective, but we found its key!"
-                )
-              )
+              callback(Vector.empty, None)
             case IdeLedger.LookupContractNotActive(_, _, _) =>
-              missingWith(
-                Error.Internal(s"contract ${acoid.coid} not active, but we found its key!")
-              )
+              callback(Vector.empty, None)
             case IdeLedger.LookupContractNotVisible(
                   coid,
                   tid @ _,
@@ -333,7 +321,7 @@ private[lf] object IdeLedgerRunner {
     val disclosuresByCoid = disclosures.view.map(fci => fci.contractId -> fci).toMap
     val disclosuresByKey = disclosures.view.collect {
       case fci if fci.contractKeyWithMaintainers.isDefined =>
-        fci.contractKeyWithMaintainers.get.globalKey -> fci.contractId
+        fci.contractKeyWithMaintainers.get.globalKey -> fci
     }.toMap
 
     val ledgerMachine = Speedy.UpdateMachine(
@@ -398,14 +386,17 @@ private[lf] object IdeLedgerRunner {
                     case Right(_) => go()
                   }
               }
-            case Question.Update.NeedKey(keyWithMaintainers, committers, callback) =>
+            case Question.Update.NeedKey(keyWithMaintainers, _, _, committers, callback) =>
               disclosuresByKey.get(keyWithMaintainers.globalKey) match {
                 case Some(fcoinst) =>
-                  discard[Boolean](callback(Some(fcoinst)))
+                  callback(Vector(fcoinst), None)
                   go()
                 case None =>
+                  // TODO(#30398) review this implementation
                   ledger.lookupKey(
                     keyWithMaintainers.globalKey,
+                    1,
+                    None,
                     committers,
                     readAs,
                     callback,

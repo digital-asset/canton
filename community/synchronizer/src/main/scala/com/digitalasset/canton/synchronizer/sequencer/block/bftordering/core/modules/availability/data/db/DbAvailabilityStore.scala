@@ -24,6 +24,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.core.mod
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.BftOrderingIdentifiers.EpochNumber
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.OrderingRequestBatch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.data.availability.BatchId
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.utils.Miscellaneous.updateBulk
 import com.digitalasset.canton.synchronizer.sequencing.sequencer.bftordering.v30
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.BatchAggregator
@@ -185,17 +186,18 @@ class DbAvailabilityStore(
                        values (?1, ?2, ?3)"""
         }
 
-      storage
-        .runWrite(
-          DbStorage
-            .bulkOperation(insertSql, batches, storage.profile) { pp => msg =>
-              pp >> msg._1
-              pp >> msg._2
-              pp >> msg._2.epochNumber
-            },
-          functionFullName,
-          maxRetries = 1,
-        )
+      updateBulk(
+        storage,
+        // Sorting should prevent deadlocks in Postgres when using concurrent clashing batched inserts
+        //  with idempotency "on conflict do nothing" clauses.
+        DbStorage
+          .bulkOperation(insertSql, batches.sortBy(_._1), storage.profile) { pp => msg =>
+            pp >> msg._1
+            pp >> msg._2
+            pp >> msg._2.epochNumber
+          },
+        functionFullName,
+      )
         .map { results =>
           batches.view
             .zip(results)

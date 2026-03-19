@@ -98,11 +98,7 @@ class StateTransferManager[E <: Env[E]](
       )
       initStateTransfer(startEpoch)(abort)
 
-      val blockTransferRequest =
-        StateTransferMessage.BlockTransferRequest.create(startEpoch, membership.myId)
-      messageSender.signMessage(cryptoProvider, blockTransferRequest) { signedMessage =>
-        sendBlockTransferRequest(signedMessage, membership)(abort)
-      }
+      initiateSendBlockTransferRequest(startEpoch, membership, cryptoProvider, abort)
     }
 
   def stateTransferNewEpoch(
@@ -118,11 +114,21 @@ class StateTransferManager[E <: Env[E]](
       logger.info(s"Starting onboarding state transfer from epoch $newEpochNumber")
       initStateTransfer(newEpochNumber)(abort)
     }
-    val blockTransferRequest =
-      StateTransferMessage.BlockTransferRequest.create(newEpochNumber, membership.myId)
-    messageSender.signMessage(cryptoProvider, blockTransferRequest) { signedMessage =>
-      sendBlockTransferRequest(signedMessage, membership)(abort)
-    }
+    initiateSendBlockTransferRequest(newEpochNumber, membership, cryptoProvider, abort)
+  }
+
+  private def initiateSendBlockTransferRequest(
+      newEpochNumber: EpochNumber,
+      membership: Membership,
+      cryptoProvider: CryptoProvider[E],
+      abort: String => Nothing,
+  )(implicit context: E#ActorContextT[Consensus.Message[E]]): Unit = context.withNewTraceContext {
+    implicit traceContext =>
+      val blockTransferRequest =
+        StateTransferMessage.BlockTransferRequest.create(newEpochNumber, membership.myId)
+      messageSender.signMessage(cryptoProvider, blockTransferRequest) { signedMessage =>
+        sendBlockTransferRequest(signedMessage, membership)(abort)
+      }
   }
 
   private def initStateTransfer(startEpoch: EpochNumber)(abort: String => Nothing): Unit =

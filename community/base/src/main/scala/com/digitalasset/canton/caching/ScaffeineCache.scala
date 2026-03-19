@@ -212,6 +212,7 @@ object ScaffeineCache {
       },
     )(tracedLogger, context)
 
+    @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
     private def updateMetrics(): Unit =
       sizeMetric.updateValue(auxCache.size)
 

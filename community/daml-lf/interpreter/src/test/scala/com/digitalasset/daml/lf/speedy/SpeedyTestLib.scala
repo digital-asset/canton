@@ -10,6 +10,7 @@ import com.daml.scalautil.Statement.discard
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.PackageId
 import com.digitalasset.daml.lf.data.Time
+import com.digitalasset.daml.lf.interpretation.NeedKeyContinuationToken
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion, PackageInterface}
 import com.digitalasset.daml.lf.speedy.SResult._
 import com.digitalasset.daml.lf.speedy.Speedy.UpdateMachine
@@ -17,7 +18,6 @@ import com.digitalasset.daml.lf.stablepackages.StablePackages
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
 import com.digitalasset.daml.lf.transaction.{
   FatContractInstance,
-  GlobalKey,
   GlobalKeyWithMaintainers,
   SubmittedTransaction,
 }
@@ -43,12 +43,15 @@ private[speedy] object SpeedyTestLib {
 
   implicit def loggingContext: LoggingContext = LoggingContext.ForTesting
 
+  case class ContinuationToken(cids: Vector[FatContractInstance]) extends NeedKeyContinuationToken
+
   @throws[SError.SErrorCrash]
   def run(
       machine: Speedy.Machine[Question.Update],
       getPkg: PartialFunction[PackageId, CompiledPackages] = PartialFunction.empty,
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
-      getKey: PartialFunction[GlobalKeyWithMaintainers, Value.ContractId] = PartialFunction.empty,
+      getKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] =
+        PartialFunction.empty,
       getTime: PartialFunction[Unit, Time.Timestamp] = PartialFunction.empty,
       hashingMethod: ContractId => Hash.HashingMethod = _ => Hash.HashingMethod.TypedNormalForm,
   ): Either[SError.SError, SValue] = {
@@ -79,8 +82,17 @@ private[speedy] object SpeedyTestLib {
           case None =>
             throw UnknownPackage(pkg)
         }
-      case Question.Update.NeedKey(key, _, callback) =>
-        discard(callback(getKey.lift(key)))
+      case Question.Update.NeedKey(key, n, mbToken, _, callback) =>
+        val cids = mbToken match {
+          case Some(ContinuationToken(rest)) =>
+            rest
+          case None =>
+            getKeys.lift(key).getOrElse(Vector.empty)
+        }
+        val (returned, kept) = cids.splitAt(n)
+        discard(
+          callback(returned, Option.when(kept.nonEmpty)(ContinuationToken(kept)))
+        )
     }
     runTxQ(onQuestion, machine) match {
       case Left(e) => Left(e)
@@ -93,10 +105,11 @@ private[speedy] object SpeedyTestLib {
       machine: Speedy.UpdateMachine,
       getPkg: PartialFunction[PackageId, CompiledPackages] = PartialFunction.empty,
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
-      getKey: PartialFunction[GlobalKeyWithMaintainers, Value.ContractId] = PartialFunction.empty,
+      getKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] =
+        PartialFunction.empty,
       getTime: PartialFunction[Unit, Time.Timestamp] = PartialFunction.empty,
   ): Either[SError.SError, SubmittedTransaction] =
-    run(machine, getPkg, getContract, getKey, getTime) match {
+    run(machine, getPkg, getContract, getKeys, getTime) match {
       case Right(_) => machine.finish.map(_.tx)
       case Left(err) => Left(err)
     }
@@ -106,10 +119,11 @@ private[speedy] object SpeedyTestLib {
       machine: Speedy.UpdateMachine,
       getPkg: PartialFunction[PackageId, CompiledPackages] = PartialFunction.empty,
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
-      getKey: PartialFunction[GlobalKeyWithMaintainers, Value.ContractId] = PartialFunction.empty,
+      getKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] =
+        PartialFunction.empty,
       getTime: PartialFunction[Unit, Time.Timestamp] = PartialFunction.empty,
   ): Either[SError.SError, SubmittedTransaction] =
-    run(machine, getPkg, getContract, getKey, getTime) match {
+    run(machine, getPkg, getContract, getKeys, getTime) match {
       case Right(_) => machine.finish.map(_.tx)
       case Left(err) => Left(err)
     }
@@ -199,15 +213,6 @@ private[speedy] object SpeedyTestLib {
           metricPlugins = Seq.empty,
         )
 
-      private[speedy] def withLocalContractKey(
-          contractId: ContractId,
-          key: GlobalKey,
-      ): UpdateMachine = {
-        machine.ptx = machine.ptx.copy(
-          contractState = machine.ptx.contractState.withLocalContractKey(contractId, key)
-        )
-        machine
-      }
     }
   }
 }

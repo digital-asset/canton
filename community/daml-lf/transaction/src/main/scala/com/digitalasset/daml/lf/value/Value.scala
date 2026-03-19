@@ -383,7 +383,7 @@ object Value {
   }
 
   object ContractId {
-    final case class V1 private (discriminator: crypto.Hash, suffix: Bytes)
+    final case class V1 private[digitalasset] (discriminator: crypto.Hash, suffix: Bytes)
         extends ContractId
         with data.NoCopy {
       override lazy val toBytes: Bytes = V1.prefix ++ discriminator.bytes ++ suffix
@@ -437,7 +437,7 @@ object Value {
       }
     }
 
-    final case class V2 private (local: Bytes, suffix: Bytes) extends ContractId with data.NoCopy {
+    final case class V2 private[digitalasset] (local: Bytes, suffix: Bytes) extends ContractId with data.NoCopy {
       override lazy val toBytes: Bytes = V2.prefix ++ local ++ suffix
       lazy val coid: Ref.HexString = toBytes.toHexString
       override def toString: String = s"ContractId($coid)"

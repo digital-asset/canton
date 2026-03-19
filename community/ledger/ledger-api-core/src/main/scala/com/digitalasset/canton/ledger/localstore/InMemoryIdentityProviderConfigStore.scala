@@ -114,6 +114,7 @@ class InMemoryIdentityProviderConfigStore(
       IdentityProviderConfigExists(id),
     )
 
+  @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
   private def tooManyIdentityProviderConfigs(): Result[Unit] =
     Either.cond(
       state.size + 1 <= maxIdentityProviderConfigs,

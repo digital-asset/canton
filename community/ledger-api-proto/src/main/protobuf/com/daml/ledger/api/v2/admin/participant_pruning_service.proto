@@ -35,14 +35,20 @@ message PruneRequest {
   // 2. All transaction events and completions before `prune_up_to`
   // 3. All immediately divulged contracts created before `prune_up_to` independent of whether
   //    they were archived before `prune_up_to`.
+  //
+  // Required
   int64 prune_up_to = 1;
 
   // Unique submission identifier.
-  // Optional, defaults to a random identifier, used for logging.
+  // If not populated, defaults to a random identifier, used for logging.
+  //
+  // Optional
   string submission_id = 2;
 
   // Deprecated flag used to prune all immediately and retroactively divulged contracts.
   // It is a no-op since the divulged contracts are pruned along with the deactivated contracts.
+  //
+  // Optional
   bool prune_all_divulged_contracts = 3;
 }
 

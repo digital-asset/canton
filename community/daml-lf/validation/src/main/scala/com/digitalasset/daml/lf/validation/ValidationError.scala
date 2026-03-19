@@ -32,11 +32,11 @@ object Context {
       apply(Identifier(pkgId, QualifiedName(module, name)))
   }
 
-  val DefDataType = new ReferenceBuilder(language.Reference.DataType)
+  val DefDataType = new ReferenceBuilder(language.Reference.DataType.apply)
   val Template = new ReferenceBuilder(x => language.Reference.Template(x.toRef))
-  val DefException = new ReferenceBuilder(language.Reference.Exception)
-  val DefInterface = new ReferenceBuilder(language.Reference.Interface)
-  val DefValue = new ReferenceBuilder(language.Reference.Value)
+  val DefException = new ReferenceBuilder(language.Reference.Exception.apply)
+  val DefInterface = new ReferenceBuilder(language.Reference.Interface.apply)
+  val DefValue = new ReferenceBuilder(language.Reference.Value.apply)
 
 }
 

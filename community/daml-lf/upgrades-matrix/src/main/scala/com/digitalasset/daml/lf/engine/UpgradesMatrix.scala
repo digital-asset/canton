@@ -71,7 +71,9 @@ trait UpgradesMatrix[Err, Res, AdditionalSetup] {
       creationPackageStatus: UpgradesMatrixCases.CreationPackageStatus,
   )(implicit ec: ExecutionContext): Future[Either[Err, Res]]
 
-  def setup(testHelper: UpgradesMatrixCases#TestHelper)(implicit ec: ExecutionContext): Future[UpgradesMatrixCases.SetupData[AdditionalSetup]]
+  def setup(testHelper: UpgradesMatrixCases#TestHelper)(implicit
+      ec: ExecutionContext
+  ): Future[UpgradesMatrixCases.SetupData[AdditionalSetup]]
 
   def assertResultMatchesExpectedOutcome(
       result: Either[Err, Res],
@@ -118,22 +120,25 @@ trait UpgradesMatrix[Err, Res, AdditionalSetup] {
                           testCase.expectedOutcome.description,
                           testIdx.toString,
                         ).mkString("/")
-                      createTestCase(title, { implicit ec: ExecutionContext =>
-                        for {
-                          setupData <- setup(testHelper)
-                          apiCommands = getApiCommands(setupData)
-                          outcome <- execute(
-                            setupData,
-                            testHelper,
-                            apiCommands,
-                            contractOrigin,
-                            creationPackageStatus,
+                      createTestCase(
+                        title,
+                        { implicit ec: ExecutionContext =>
+                          for {
+                            setupData <- setup(testHelper)
+                            apiCommands = getApiCommands(setupData)
+                            outcome <- execute(
+                              setupData,
+                              testHelper,
+                              apiCommands,
+                              contractOrigin,
+                              creationPackageStatus,
+                            )
+                          } yield assertResultMatchesExpectedOutcome(
+                            outcome,
+                            testCase.expectedOutcome,
                           )
-                        } yield assertResultMatchesExpectedOutcome(
-                          outcome,
-                          testCase.expectedOutcome,
-                        )
-                      })
+                        },
+                      )
                     }
                     testIdx += 1
                   }
@@ -147,9 +152,16 @@ trait UpgradesMatrix[Err, Res, AdditionalSetup] {
 
 // Instances of UpgradesMatrixCases which provide cases built with LF 2.dev or the
 // highest stable 2.x version, respectively
-object UpgradesMatrixCasesV2Dev extends UpgradesMatrixCases(LanguageVersion.v2_dev)
+object UpgradesMatrixCasesV2Dev
+    extends UpgradesMatrixCases(
+      LanguageVersion.v2_dev,
+      ContractStateMachine.Mode.UCKWithRollback,
+    )
 object UpgradesMatrixCasesV2MaxStable
-    extends UpgradesMatrixCases(LanguageVersion.latestStableLfVersion)
+    extends UpgradesMatrixCases(
+      LanguageVersion.latestStableLfVersion,
+      ContractStateMachine.Mode.UCKWithRollback,
+    )
 
 /** Pairs of v1/v2 templates are called [[TestCase]]s and are listed in [[testCases]]. A test case is defined by
   * subclassing [[TestCase]] and overriding one definition. For instance, [[ChangedObservers]] overrides
@@ -172,14 +184,15 @@ object UpgradesMatrixCasesV2MaxStable
   * the latter doesn't, allowing us to test cases where the creation package of the contract being upgraded is not
   * vetted.
   * They define a large number of choices: one per combination of operation, catch behavior, entry point and test case.
-  * These choices are defined in [[TestCase.clientChoicesLocal]] and [[TestCase.clientChoicesGlobal()]]. These methods
+  * These choices are defined in [[TestCase.clientChoicesLocal]] and [[TestCase.clientChoicesGlobal]]. These methods
   * are pretty boilerplate-y and constitute the bulk of this test suite.
   *
   * Finally, some definitions need to be shared between v1 and v2 templates: key and interface definitions, gobal
   * parties. These are defined in [[commonDefsPkg]].
   */
 class UpgradesMatrixCases(
-    val langVersion: LanguageVersion
+    val langVersion: LanguageVersion,
+    val contractStateMode: ContractStateMachine.Mode,
 ) {
   import UpgradesMatrixCases._
 
@@ -252,7 +265,7 @@ class UpgradesMatrixCases(
     )
 
   /** Represents an LF value specified both as some string we can splice into the textual representation of LF, and as a
-    * scala value we can splice into an [[ApiCommand]].
+    * scala value we can splice into an [[com.digitalasset.daml.lf.command.ApiCommand]].
     */
   case class TestCaseValue[A](inChoiceBodyLfCode: String, inApiCommand: A)
 
@@ -898,11 +911,17 @@ class UpgradesMatrixCases(
     override def v2Key = v1Key
 
     // Used for creating disclosures of v1 contracts and the "lookup contract by key" map passed to the engine.
-    override def additionalv1KeyArgsSValue[AdditionalSetup](pkgId: PackageId, setupData: SetupData[AdditionalSetup]) =
+    override def additionalv1KeyArgsSValue[AdditionalSetup](
+        pkgId: PackageId,
+        setupData: SetupData[AdditionalSetup],
+    ) =
       List(("maintainers2": Name) -> SValue.SList(FrontStack(SValue.SParty(setupData.bob))))
 
     // Used for creating *ByKey commands
-    override def additionalv2KeyArgsSValue[AdditionalSetup](pkgId: PackageId, setupData: SetupData[AdditionalSetup]) =
+    override def additionalv2KeyArgsSValue[AdditionalSetup](
+        pkgId: PackageId,
+        setupData: SetupData[AdditionalSetup],
+    ) =
       additionalv1KeyArgsSValue(pkgId, setupData)
     // Used for looking up contracts by key in choice bodies
     override def additionalv2KeyArgsLf(v2PkgId: PackageId) =
@@ -1636,7 +1655,10 @@ class UpgradesMatrixCases(
 
     override def additionalv2KeyArgsLf(v2PkgId: PackageId) =
       s", extra = None @Unit"
-    override def additionalv2KeyArgsSValue[AdditionalSetup](v2PkgId: PackageId, setupData: SetupData[AdditionalSetup]) =
+    override def additionalv2KeyArgsSValue[AdditionalSetup](
+        v2PkgId: PackageId,
+        setupData: SetupData[AdditionalSetup],
+    ) =
       List(("extra": Name) -> SValue.SOptional(None))
 
     override def v1Key = s"""
@@ -1660,7 +1682,10 @@ class UpgradesMatrixCases(
 
     override def additionalv2KeyArgsLf(v2PkgId: PackageId) =
       s", extra = None @Unit"
-    override def additionalv2KeyArgsSValue[AdditionalSetup](v2PkgId: PackageId, setupData: SetupData[AdditionalSetup]) =
+    override def additionalv2KeyArgsSValue[AdditionalSetup](
+        v2PkgId: PackageId,
+        setupData: SetupData[AdditionalSetup],
+    ) =
       List(("extra": Name) -> SValue.SOptional(None))
 
     override def v1Key = s"""
@@ -1702,7 +1727,10 @@ class UpgradesMatrixCases(
     override def v2AdditionalKeyFields: String = ""
 
     // Used for creating disclosures of v1 contracts and the "lookup contract by key" map passed to the engine.
-    override def additionalv1KeyArgsSValue[AdditionalSetup](v1PkgId: PackageId, setupData: SetupData[AdditionalSetup]) =
+    override def additionalv1KeyArgsSValue[AdditionalSetup](
+        v1PkgId: PackageId,
+        setupData: SetupData[AdditionalSetup],
+    ) =
       List(("extra": Name) -> SValue.SOptional(Some(SValue.SUnit)))
 
     override def v1Key = s"""
@@ -1885,8 +1913,7 @@ class UpgradesMatrixCases(
 
   val engineConfig: EngineConfig =
     EngineConfig(
-      allowedLanguageVersions = language.LanguageVersion.allUpToVersion(langVersion),
-      contractStateMode = ContractStateMachine.Mode.UCKWithRollback
+      allowedLanguageVersions = language.LanguageVersion.allUpToVersion(langVersion)
     )
 
   val contractIdVersion: ContractIdVersion = ContractIdVersion.V1
@@ -1935,10 +1962,8 @@ class UpgradesMatrixCases(
     List(CreationPackageVetted, CreationPackageUnvetted)
 
   /** A class that defines all the "global" variables shared by tests for a given template name: the template ID of the
-    * v1 template, the template ID of the v2 template, the ID of the v1 contract, etc. It exposes two methods:
-    * - [[makeApiCommands]], which generates an API command for a given operation, catch behavior, entry point,
-    *   and contract origin.
-    * - [[execute]], which executes a command against a fresh engine seeded with the v1 contract.
+    * v1 template, the template ID of the v2 template, the ID of the v1 contract, etc. It exposes [[makeApiCommands]],
+    * which generates an API command for a given operation, catch behavior, entry point, and contract origin.
     */
   class TestHelper(testCase: TestCase) {
     val templateName = testCase.templateName
@@ -1969,7 +1994,9 @@ class UpgradesMatrixCases(
       ).slowAppend(testCase.additionalCreateArgsValue(templateDefsV1PkgId)),
     )
 
-    def globalContractv1KeySValue[AdditionalSetup](setupData: SetupData[AdditionalSetup]): SValue = {
+    def globalContractv1KeySValue[AdditionalSetup](
+        setupData: SetupData[AdditionalSetup]
+    ): SValue = {
       val (additionalFields, additionalValues) =
         testCase.additionalv1KeyArgsSValue(templateDefsV1PkgId, setupData).unzip
       SValue.SRecord(
@@ -1982,7 +2009,9 @@ class UpgradesMatrixCases(
       )
     }
 
-    def globalContractv2KeySValue[AdditionalSetup](setupData: SetupData[AdditionalSetup]): SValue = {
+    def globalContractv2KeySValue[AdditionalSetup](
+        setupData: SetupData[AdditionalSetup]
+    ): SValue = {
       val (additionalFields, additionalValues) =
         testCase.additionalv2KeyArgsSValue(templateDefsV2PkgId, setupData).unzip
       SValue.SRecord(
@@ -1995,7 +2024,9 @@ class UpgradesMatrixCases(
       )
     }
 
-    def globalContractKeyWithMaintainers[AdditionalSetup](setupData: SetupData[AdditionalSetup]): Option[GlobalKeyWithMaintainers] =
+    def globalContractKeyWithMaintainers[AdditionalSetup](
+        setupData: SetupData[AdditionalSetup]
+    ): Option[GlobalKeyWithMaintainers] =
       whenKeysOtherwiseNone {
         val keySValue = globalContractv1KeySValue(setupData)
         GlobalKeyWithMaintainers.assertBuild(

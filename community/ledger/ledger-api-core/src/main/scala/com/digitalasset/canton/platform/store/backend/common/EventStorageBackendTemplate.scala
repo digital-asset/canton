@@ -34,7 +34,7 @@ import com.digitalasset.canton.platform.store.backend.{
   RowDef,
 }
 import com.digitalasset.canton.platform.store.cache.LedgerEndCache
-import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.PaginationInput
+import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.IdPageQuery
 import com.digitalasset.canton.platform.store.interning.StringInterning
 import com.digitalasset.canton.platform.{ContractId, Party}
 import com.digitalasset.canton.protocol.ReassignmentId
@@ -1091,15 +1091,14 @@ abstract class EventStorageBackendTemplate(
 
   override def fetchTopologyPartyEventIds(
       party: Option[Party]
-  )(connection: Connection): PaginationInput => Vector[Long] =
+  ): IdPageQuery =
     UpdateStreamingQueries.fetchEventIds(
       tableName = "lapi_events_party_to_participant",
       witnessO = party,
       templateIdO = None,
-      idFilter = None,
       stringInterning = stringInterning,
       hasFirstPerSequentialId = false,
-    )(connection)
+    )
 
   override def topologyPartyEventBatch(
       eventSequentialIds: SequentialIdBatch

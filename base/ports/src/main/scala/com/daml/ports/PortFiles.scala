@@ -23,7 +23,7 @@ object PortFiles {
   }
 
   /** Creates a port file and requests that the created file be deleted when the virtual machine
-    * terminates. See [[java.io.File#deleteOnExit()]].
+    * terminates. See [[java.io.File.deleteOnExit]].
     */
   def write(path: Path, port: Port): Error \/ Unit =
     \/.attempt(writeUnsafe(path, port))(identity)

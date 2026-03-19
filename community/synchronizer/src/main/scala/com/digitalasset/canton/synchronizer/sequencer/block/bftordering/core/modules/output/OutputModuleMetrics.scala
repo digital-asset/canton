@@ -20,6 +20,7 @@ private[output] object OutputModuleMetrics {
       orderedBlockBftTime: CantonTimestamp,
   )(implicit mc: MetricsContext): Unit = {
     val orderingCompletionInstant = Instant.now
+    val blockNumber = orderedBlockData.orderedBlockForOutput.orderedBlock.metadata.blockNumber
     val requests = orderedBlockData.batches.flatMap(_._2.requests.map(_.value))
     val bytesOrdered = requests.map(_.payload.size().toLong).sum
     val requestsOrdered = requests.length.toLong
@@ -40,7 +41,7 @@ private[output] object OutputModuleMetrics {
       metrics.output.blockDelay,
       Duration.between(orderedBlockBftTime.toInstant, orderingCompletionInstant),
     )(outputMc)
-    metrics.global.blocksOrdered.mark(1L)(
+    metrics.global.blockNumber.updateValue(blockNumber)(
       mc.withExtraLabels(
         metrics.global.labels.IsBlockEmpty -> orderedBlockData.batches.isEmpty.toString
       )

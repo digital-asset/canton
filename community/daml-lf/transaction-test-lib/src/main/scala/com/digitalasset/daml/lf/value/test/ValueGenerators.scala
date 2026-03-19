@@ -244,14 +244,14 @@ object ValueGenerators {
   )
 
   private def flatGen = Gen.oneOf(
-    dateGen.map(ValueDate),
-    Gen.alphaStr.map(ValueText),
-    unscaledNumGen.map(ValueNumeric),
-    arbitrary[Long].map(ValueInt64),
-    Gen.alphaStr.map(ValueText),
-    timestampGen.map(ValueTimestamp),
+    dateGen.map(ValueDate.apply),
+    Gen.alphaStr.map(ValueText.apply),
+    unscaledNumGen.map(ValueNumeric.apply),
+    arbitrary[Long].map(ValueInt64.apply),
+    Gen.alphaStr.map(ValueText.apply),
+    timestampGen.map(ValueTimestamp.apply),
     coidValueGen,
-    party.map(ValueParty),
+    party.map(ValueParty.apply),
     Gen.oneOf(ValueTrue, ValueFalse),
     Gen.const(ValueUnit),
   )
@@ -316,7 +316,7 @@ object ValueGenerators {
           templateId,
           packageName,
           key,
-          // This hash ensures non-collision but does not ensure that two keys that are equal modulo 
+          // This hash ensures non-collision but does not ensure that two keys that are equal modulo
           // smart contract upgrade have the same hash.
           crypto.Hash.hashPrivateKey(s"$packageName:${templateId.qualifiedName}:${key.toString}"),
         )

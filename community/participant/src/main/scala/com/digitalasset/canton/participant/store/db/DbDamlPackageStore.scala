@@ -21,8 +21,8 @@ import com.digitalasset.canton.participant.admin.PackageService.{
 }
 import com.digitalasset.canton.participant.store.db.DbDamlPackageStore.DamlPackage
 import com.digitalasset.canton.participant.store.{DamlPackageStore, PackageInfo}
-import com.digitalasset.canton.resource.DbStorage.DbAction
 import com.digitalasset.canton.resource.DbStorage.DbAction.WriteOnly
+import com.digitalasset.canton.resource.DbStorage.{DbAction, toInClause}
 import com.digitalasset.canton.resource.{DbStorage, DbStore}
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.SimpleExecutionQueue
@@ -141,6 +141,26 @@ class DbDamlPackageStore(
       packageId: PackageId
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Option[DamlLf.Archive]] =
     storage.querySingle(exists(packageId), functionFullName).value
+
+  override def filterExisting(
+      packageIds: Set[PackageId]
+  )(implicit traceContext: TraceContext): FutureUnlessShutdown[Set[PackageId]] = {
+    import DbStorage.Implicits.BuilderChain.*
+
+    NonEmpty.from(packageIds) match {
+      case Some(packageIdsNE) =>
+        storage
+          .query(
+            (sql"select package_id from par_daml_packages where " ++
+              toInClause("package_id", packageIdsNE, PackageId))
+              .as[PackageId],
+            functionFullName,
+          )
+          .map(_.toSet)
+
+      case None => FutureUnlessShutdown.pure(Set.empty)
+    }
+  }
 
   override def getPackageDescription(packageId: PackageId)(implicit
       traceContext: TraceContext

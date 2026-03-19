@@ -43,6 +43,8 @@ object Availability {
 
   final case object Start extends Message[Nothing]
 
+  final case object DelayedProposalResponse extends Message[Nothing]
+
   sealed trait RemoteProtocolMessage
       extends Message[Nothing]
       with HasRepresentativeProtocolVersion

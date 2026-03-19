@@ -69,6 +69,11 @@ class InMemoryDamlPackageStore(override protected val loggerFactory: NamedLogger
   ): FutureUnlessShutdown[Option[DamlLf.Archive]] =
     FutureUnlessShutdown.pure(pkgData.get(packageId).map(_._1))
 
+  override def filterExisting(packageIds: Set[LfPackageId])(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Set[PackageId]] =
+    FutureUnlessShutdown.pure(pkgData.view.filterKeys(packageIds).keySet.toSet)
+
   override def getPackageDescription(
       packageId: LfPackageId
   )(implicit traceContext: TraceContext): OptionT[FutureUnlessShutdown, PackageDescription] =

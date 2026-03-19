@@ -4,14 +4,14 @@
 package com.digitalasset.daml.lf
 
 /** [[VersionRange]] represents a range of versions any type but usually of
-  * [[com.digitalasset.daml.lf.LanguageVersion]] or
-  * [[com.digitalasset.daml.lf.SerializationVersion]].
+  * [[com.digitalasset.daml.lf.language.LanguageVersion]] or
+  * [[com.digitalasset.daml.lf.transaction.SerializationVersion]].
   *
   * This can represent an empty range, a one-sided range (from/until), or
   * an inclusive two-sided range.
   *
-  * @tparam V either [[com.digitalasset.daml.lf.LanguageVersion]] or
-  * [[com.digitalasset.daml.lf.SerializationVersion]].
+  * @tparam V either [[com.digitalasset.daml.lf.language.LanguageVersion]] or
+  * [[com.digitalasset.daml.lf.transaction.SerializationVersion]].
   */
 sealed abstract class VersionRange[V](implicit val ordering: Ordering[V])
     extends Product
@@ -26,14 +26,14 @@ sealed abstract class VersionRange[V](implicit val ordering: Ordering[V])
   def maxOption: Option[V]
 
   /** The minimum version of this range.
-    * @throws NoSuchElementException if the range is empty or unbounded below.
+    * @throws java.util.NoSuchElementException if the range is empty or unbounded below.
     */
   def min: V = minOption.getOrElse(
     throw new NoSuchElementException(s"Cannot get .min from $pretty (empty or unbounded below)")
   )
 
   /** The maximum version of this range.
-    * @throws NoSuchElementException if the range is empty or unbounded above.
+    * @throws java.util.NoSuchElementException if the range is empty or unbounded above.
     */
   def max: V = maxOption.getOrElse(
     throw new NoSuchElementException(s"Cannot get .max from $pretty (empty or unbounded above)")

@@ -82,8 +82,9 @@ object NonEmpty {
   ): NonEmpty[C[A]] =
     apply(into, hd, tl*)
 
-  /** In pattern matching, think of [[NonEmpty]] as a sub-case-class of every [[imm.Iterable]];
-    * matching `case NonEmpty(ne)` ''adds'' the non-empty type to `ne` if the pattern matches.
+  /** In pattern matching, think of [[NonEmpty]] as a sub-case-class of every
+    * [[scala.collection.immutable.Iterable]]; matching `case NonEmpty(ne)` ''adds'' the non-empty
+    * type to `ne` if the pattern matches.
     *
     * You will get an unchecked warning if the selector is not statically of an immutable type. So
     * [[scala.collection.Seq]] will not work.

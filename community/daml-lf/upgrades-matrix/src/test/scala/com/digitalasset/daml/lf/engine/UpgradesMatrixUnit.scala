@@ -38,20 +38,27 @@ class UpgradesMatrixUnit3 extends UpgradesMatrixUnit(UpgradesMatrixCasesV2Dev, 2
   * sanity checking before running UpgradesMatrixIT.
   */
 class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: Int)
-    extends AsyncWordSpec with ParallelTestExecution with Matchers
+    extends AsyncWordSpec
+    with ParallelTestExecution
+    with Matchers
     with UpgradesMatrix[Error, (SubmittedTransaction, Transaction.Metadata), Unit] {
   override val cases = upgradesMatrixCases
   defineTestCases()
 
   override def nk = Some((n, k))
-  override def createTestCase(name: String, assertion: ExecutionContext => Future[Assertion]): Unit = {
+  override def createTestCase(
+      name: String,
+      assertion: ExecutionContext => Future[Assertion],
+  ): Unit = {
     name in assertion(executionContext)
   }
 
   def toContractId(s: String): ContractId =
     ContractId.V1.assertBuild(crypto.Hash.hashPrivateKey(s), Bytes.assertFromString("00"))
 
-  override def setup(testHelper: UpgradesMatrixCases#TestHelper)(implicit ec: ExecutionContext): Future[UpgradesMatrixCases.SetupData[Unit]] =
+  override def setup(testHelper: UpgradesMatrixCases#TestHelper)(implicit
+      ec: ExecutionContext
+  ): Future[UpgradesMatrixCases.SetupData[Unit]] =
     Future.successful(
       UpgradesMatrixCases.SetupData(
         alice = Party.assertFromString("Alice"),
@@ -83,7 +90,9 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
       apiCommands: ImmArray[ApiCommand],
       contractOrigin: UpgradesMatrixCases.ContractOrigin,
       creationPackageStatus: UpgradesMatrixCases.CreationPackageStatus,
-  )(implicit ec: ExecutionContext): Future[Either[Error, (SubmittedTransaction, Transaction.Metadata)]] =
+  )(implicit
+      ec: ExecutionContext
+  ): Future[Either[Error, (SubmittedTransaction, Transaction.Metadata)]] =
     // We can drop the implicit ec here, since it will be the same as the one
     // provided by AsyncWordSpec
     executeWithoutEC(setupData, testHelper, apiCommands, contractOrigin, creationPackageStatus)
@@ -154,7 +163,7 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
               testHelper
                 .globalContractKeyWithMaintainers(setupData)
                 .flatMap(helperKey =>
-                  Option.when(helperKey.globalKey == kwm.globalKey)(setupData.globalContractId)
+                  Option.when(helperKey.globalKey == kwm.globalKey)(Vector(globalContract))
                 )
         ).unlift
       case _ => PartialFunction.empty
@@ -187,6 +196,7 @@ class UpgradesMatrixUnit(upgradesMatrixCases: UpgradesMatrixCases, n: Int, k: In
         participantId = participant,
         submissionSeed = submissionSeed,
         contractIdVersion = cases.contractIdVersion,
+        contractStateMode = cases.contractStateMode,
         prefetchKeys = Seq.empty,
       )
       .consume(

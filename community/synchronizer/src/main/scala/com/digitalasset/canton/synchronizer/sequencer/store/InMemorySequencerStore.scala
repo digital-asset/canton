@@ -108,6 +108,18 @@ class InMemorySequencerStore(
       }.toMap
     )
 
+  override def allRegisteredMembers(registeredAtBeforeInclusive: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Set[Member]] =
+    FutureUnlessShutdown.pure(
+      memberMap
+        .filter { case (_, registeredMember) =>
+          registeredMember.registeredFrom <= registeredAtBeforeInclusive
+        }
+        .map { case (member, _) => member }
+        .toSet
+    )
+
   override def savePayloads(
       payloadsToInsert: NonEmpty[Seq[BytesPayload]],
       instanceDiscriminator: UUID,

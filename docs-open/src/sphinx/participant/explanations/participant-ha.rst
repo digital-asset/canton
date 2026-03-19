@@ -93,3 +93,20 @@ The active node has a grace period in which it may rebuild the connection and re
 The passive node continuously attempts to acquire the lock within a configurable interval. Once the lock is acquired, the participant node's replication manager sets the state of the successful node to active.
 
 When a passive node becomes active, it connects to previously connected synchronizers to resume event processing. The new active node accepts incoming requests, e.g. on the gRPC Ledger API which starts when the node becomes active. The former active node, which is now passive, shuts down its Ledger API to stop accepting incoming requests.
+
+
+Tuning Postgres Connection Timeouts for Failover
+"""""""""""""""""""""""""""""""""""""""""""""""""
+
+The speed at which a lost database connection is detected depends on the PostgreSQL connection parameters configured for the indexer. The Postgres connection tuning of the indexer happens via the configuration section:
+
+.. code-block::
+
+    canton.participants.<participant>.parameters.ledger-api-server.indexer.postgres-data-source {
+        network-timeout = 20s
+        client-connection-check-interval = 5s
+      }
+
+Lowering the indexer's ``network-timeout`` triggers HA failovers faster when the database becomes unreachable. However, transient network hiccups or brief database slowdowns that would otherwise resolve on their own may be misinterpreted as connection losses, causing unnecessary failovers.
+
+Note that this configuration section is separate from the Ledger API server's Postgres connection tuning (``canton.participants.<participant>.ledger-api.postgres-data-source``). The Ledger API server's configuration defaults to a higher ``network-timeout`` since it serves read queries that may require more time to complete and is not involved in HA lock management.

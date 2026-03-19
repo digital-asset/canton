@@ -752,7 +752,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
             assertSingletonIfSupportsFlatArchive(params, "params")
             Work.bind(decodeKind(kArrow.getResult)) { base =>
               Work.sequence(params.view.map(decodeKind)) { kinds =>
-                Ret((kinds foldRight base)(KArrow))
+                Ret((kinds foldRight base)(KArrow.apply))
               }
             }
           case PLF.Kind.SumCase.INTERNED_KIND =>
@@ -804,7 +804,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           val args = tvar.getArgsList.asScala
           assertNullIfSupportsFlatArchive(args, "tvar.getArgsList")
           Work.sequence(args.view.map(uncheckedDecodeType)) { types =>
-            Ret(types.foldLeft[Type](TVar(varName))(TApp))
+            Ret(types.foldLeft[Type](TVar(varName))(TApp.apply))
           }
         case PLF.Type.SumCase.NAT =>
           Ret(
@@ -823,7 +823,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           val args = tcon.getArgsList.asScala
           assertNullIfSupportsFlatArchive(args, "tcon.getArgsList")
           Work.sequence(args.view.map(uncheckedDecodeType)) { types =>
-            Ret(types.foldLeft[Type](TTyCon(decodeTypeConId(tcon.getTycon)))(TApp))
+            Ret(types.foldLeft[Type](TTyCon(decodeTypeConId(tcon.getTycon)))(TApp.apply))
           }
         case PLF.Type.SumCase.SYN =>
           val tsyn = lfType.getSyn
@@ -838,7 +838,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           val args = builtin.getArgsList.asScala
           assertNullIfSupportsFlatArchive(args, "builtin.getArgsList")
           Work.sequence(args.view.map(uncheckedDecodeType)) { types =>
-            Ret(types.foldLeft(baseType)(TApp))
+            Ret(types.foldLeft(baseType)(TApp.apply))
           }
         case PLF.Type.SumCase.FORALL =>
           val tForall = lfType.getForall
@@ -847,7 +847,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           assertSingletonIfSupportsFlatArchive(vars, "builtin.getArgsList")
           Work.bind(uncheckedDecodeType(tForall.getBody)) { base =>
             Work.sequence(vars.view.map(decodeTypeVarWithKind)) { binders =>
-              Ret((binders foldRight base)(TForall))
+              Ret((binders foldRight base)(TForall.apply))
             }
           }
         case PLF.Type.SumCase.STRUCT =>
@@ -1061,7 +1061,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           assertNonEmpty(args, "args")
           decodeExpr(app.getFun, definition) { base =>
             Work.sequence(args.view.map(decodeExpr(_, definition)(Ret(_)))) { args =>
-              Ret((args foldLeft base)(EApp))
+              Ret((args foldLeft base)(EApp.apply))
             }
           }
 
@@ -1083,7 +1083,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           assertNonEmpty(args, "args")
           decodeExpr(tyapp.getExpr, definition) { base =>
             Work.sequence(args.view.map(decodeType(_)(Ret(_)))) { types =>
-              Ret((types foldLeft base)(ETyApp))
+              Ret((types foldLeft base)(ETyApp.apply))
             }
           }
 
@@ -1094,7 +1094,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           assertSingletonIfSupportsFlatArchive(params, "params")
           decodeExpr(lfTyAbs.getBody, definition) { base =>
             Work.sequence(params.view.map(decodeTypeVarWithKind)) { binders =>
-              Ret((binders foldRight base)(ETyAbs))
+              Ret((binders foldRight base)(ETyAbs.apply))
             }
           }
 
@@ -1602,10 +1602,10 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           BLInt64(lfBuiltinLit.getInt64)
         case PLF.BuiltinLit.SumCase.TIMESTAMP =>
           val t = Time.Timestamp.fromLong(lfBuiltinLit.getTimestamp)
-          t.fold(e => throw Error.Parsing("error decoding timestamp: " + e), BLTimestamp)
+          t.fold(e => throw Error.Parsing("error decoding timestamp: " + e), BLTimestamp.apply)
         case PLF.BuiltinLit.SumCase.DATE =>
           val d = Time.Date.fromDaysSinceEpoch(lfBuiltinLit.getDate)
-          d.fold(e => throw Error.Parsing("error decoding date: " + e), BLDate)
+          d.fold(e => throw Error.Parsing("error decoding date: " + e), BLDate.apply)
         case PLF.BuiltinLit.SumCase.TEXT_INTERNED_STR =>
           BLText(getInternedStr(lfBuiltinLit.getTextInternedStr))
         case PLF.BuiltinLit.SumCase.NUMERIC_INTERNED_STR =>
@@ -1763,7 +1763,7 @@ private[lf] object DecodeV2 {
       versionRange: Option[VersionRange[LV]] = None,
       implicitParameters: List[Type] = List.empty,
   ) {
-    val expr: Expr = implicitParameters.foldLeft[Expr](EBuiltinFun(builtin))(ETyApp)
+    val expr: Expr = implicitParameters.foldLeft[Expr](EBuiltinFun(builtin))(ETyApp.apply)
   }
 
   val builtinFunctionInfos: List[BuiltinFunctionInfo] = {

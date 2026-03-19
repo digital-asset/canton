@@ -69,7 +69,7 @@ class ValueCoder(allowNullCharacters: Boolean) {
   def encodeIdentifier(id: Identifier): proto.Identifier =
     internal.encodeIdentifier(id)
 
-  /** Serializes [[VersionedValue]] to protobuf.
+  /** Serializes [[com.digitalasset.daml.lf.value.Value.VersionedValue]] to protobuf.
     *
     * @param versionedValue value to be written
     * @tparam Cid ContractId type
@@ -242,17 +242,17 @@ class ValueCoder(allowNullCharacters: Boolean) {
               ValueInt64(protoValue.getInt64)
             case proto.Value.SumCase.DATE =>
               val d = Time.Date.fromDaysSinceEpoch(protoValue.getDate)
-              d.fold(e => throw Err("error decoding date: " + e), ValueDate)
+              d.fold(e => throw Err("error decoding date: " + e), ValueDate.apply)
             case proto.Value.SumCase.TIMESTAMP =>
               val t = Time.Timestamp.fromLong(protoValue.getTimestamp)
-              t.fold(e => throw Err("error decoding timestamp: " + e), ValueTimestamp)
+              t.fold(e => throw Err("error decoding timestamp: " + e), ValueTimestamp.apply)
             case proto.Value.SumCase.NUMERIC =>
               Numeric
                 .fromString(protoValue.getNumeric)
-                .fold(e => throw Err("error decoding numeric: " + e), ValueNumeric)
+                .fold(e => throw Err("error decoding numeric: " + e), ValueNumeric.apply)
             case proto.Value.SumCase.PARTY =>
               val party = Party.fromString(protoValue.getParty)
-              party.fold(e => throw Err("error decoding party: " + e), ValueParty)
+              party.fold(e => throw Err("error decoding party: " + e), ValueParty.apply)
             case proto.Value.SumCase.TEXT =>
               ValueText(ensuresNoNullCharacters(protoValue.getText))
             case proto.Value.SumCase.CONTRACT_ID =>

@@ -9,12 +9,10 @@ import com.digitalasset.canton.logging.SuppressingLogger
 import com.digitalasset.canton.platform.store.backend.EventStorageBackend.SequentialIdBatch.IdRange
 import com.digitalasset.canton.platform.store.backend.common.UpdatePointwiseQueries.LookupKey
 import com.digitalasset.canton.platform.store.backend.common.{
-  EventIdSource,
   EventPayloadSourceForUpdatesAcsDelta,
   EventPayloadSourceForUpdatesLedgerEffects,
 }
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
-  IdFilterInput,
   PaginationFromTo,
   PaginationInput,
 }
@@ -358,120 +356,116 @@ private[backend] trait StorageBackendTestsInitializeIngestion
 
   private def fetchIdsNonConsuming(): Vector[Long] =
     executeSql(
-      backend.event.updateStreamingQueries.fetchEventIds(
-        EventIdSource.VariousWitnesses
-      )(
-        witnessO = Some(someParty),
-        templateIdO = None,
-        eventTypes = Set(PersistentEventType.NonConsumingExercise),
-      )
-    )(
-      IdFilterInput(
-        PaginationFromTo.ascending(
-          startExclusive = 0,
-          endInclusive = 1000,
+      backend.event.updateStreamingQueries
+        .variousWitnessIds(
+          witnessO = Some(someParty),
+          templateIdO = None,
         )
-      )
+        .filteredForEventTypes(Set(PersistentEventType.NonConsumingExercise))
+        .fetchPage(_)(
+          PaginationFromTo.ascending(
+            startExclusive = 0,
+            endInclusive = 1000,
+          )
+        )
     )
 
   private def fetchIdsConsumingNonStakeholder(): Vector[Long] =
     executeSql(
       backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.DeactivateWitnesses)(
+        .deactivateWitnessesIds(
           witnessO = Some(someParty),
           templateIdO = None,
-          eventTypes = Set(PersistentEventType.ConsumingExercise),
         )
-    )(
-      IdFilterInput(
-        PaginationFromTo.ascending(
-          startExclusive = 0,
-          endInclusive = 1000,
+        .filteredForEventTypes(Set(PersistentEventType.ConsumingExercise))
+        .fetchPage(_)(
+          PaginationFromTo.ascending(
+            startExclusive = 0,
+            endInclusive = 1000,
+          )
         )
-      )
     )
 
   private def fetchIdsConsumingStakeholder(): Vector[Long] =
     executeSql(
       backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.DeactivateStakeholder)(
+        .deactivateStakeholderIds(
           witnessO = Some(someParty),
           templateIdO = None,
-          eventTypes = Set(PersistentEventType.ConsumingExercise),
         )
-    )(
-      IdFilterInput(
-        PaginationFromTo.ascending(
-          startExclusive = 0,
-          endInclusive = 1000,
+        .filteredForEventTypes(Set(PersistentEventType.ConsumingExercise))
+        .fetchPage(_)(
+          PaginationFromTo.ascending(
+            startExclusive = 0,
+            endInclusive = 1000,
+          )
         )
-      )
     )
 
   private def fetchIdsCreateNonStakeholder(): Vector[Long] =
     executeSql(
       backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateWitnesses)(
+        .activateWitnessesIds(
           witnessO = Some(someParty),
           templateIdO = None,
-          eventTypes = Set(PersistentEventType.Create),
         )
-    )(
-      IdFilterInput(
-        PaginationFromTo.ascending(
-          startExclusive = 0,
-          endInclusive = 1000,
+        .filteredForEventTypes(Set(PersistentEventType.Create))
+        .fetchPage(_)(
+          PaginationFromTo.ascending(
+            startExclusive = 0,
+            endInclusive = 1000,
+          )
         )
-      )
     )
 
   private def fetchIdsCreateStakeholder(): Vector[Long] =
     executeSql(
       backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(someParty),
           templateIdO = None,
-          eventTypes = Set(PersistentEventType.Create),
         )
-    )(
-      IdFilterInput(
-        PaginationFromTo.ascending(
-          startExclusive = 0,
-          endInclusive = 1000,
+        .filteredForEventTypes(Set(PersistentEventType.Create))
+        .fetchPage(_)(
+          PaginationFromTo.ascending(
+            startExclusive = 0,
+            endInclusive = 1000,
+          )
         )
-      )
     )
 
   private def fetchIdsAssignStakeholder(): Vector[Long] =
     executeSql(
       backend.event.updateStreamingQueries
-        .fetchEventIds(EventIdSource.ActivateStakeholder)(
+        .activateStakeholderIds(
           witnessO = Some(someParty),
           templateIdO = None,
-          eventTypes = Set(PersistentEventType.Assign),
         )
-    )(
-      IdFilterInput(
-        PaginationFromTo.ascending(
-          startExclusive = 0,
-          endInclusive = 1000,
+        .filteredForEventTypes(Set(PersistentEventType.Assign))
+        .fetchPage(_)(
+          PaginationFromTo.ascending(
+            startExclusive = 0,
+            endInclusive = 1000,
+          )
         )
-      )
     )
 
   private def fetchTopologyParty(): Vector[Long] =
     executeSql(
-      backend.event.fetchTopologyPartyEventIds(
-        party = Some(someParty)
-      )(_)(
-        PaginationInput(
-          PaginationFromTo.ascending(
-            startExclusive = 0,
-            endInclusive = 1000,
-          ),
-          limit = 1000,
+      backend.event
+        .fetchTopologyPartyEventIds(
+          party = Some(someParty)
         )
-      )
+        .fetchPage(_)(
+          PaginationInput(
+            fromTo = PaginationFromTo.ascending(
+              startExclusive = 0,
+              endInclusive = 1000,
+            ),
+            limit = 1000,
+          )
+        )
+        .ids
     )
 
   private def fetchIdsFromTransactionMetaUpdateIds(

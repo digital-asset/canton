@@ -33,6 +33,7 @@ import scala.concurrent.{ExecutionContext, Future}
   * current participant.
   */
 trait PackageMetadataView extends AutoCloseable {
+  def packageStore: DamlPackageStore
   def getSnapshot(implicit errorLoggingContext: ErrorLoggingContext): PackageMetadata
   val packageUpgradeValidator: PackageUpgradeValidator
 }

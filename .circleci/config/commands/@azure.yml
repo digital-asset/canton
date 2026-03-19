@@ -18,7 +18,7 @@ restore_from_azure:
         environment:
           ORB_KEY: << parameters.key >>
           ORB_CONTAINER: <<parameters.CONTAINER>>
-        command: ./scripts/ci/azure/restore-from-azure.sh
+        command: .ci/nix-exec scripts/ci/azure/restore-from-azure.sh
 
 save_to_azure:
   description: >
@@ -44,5 +44,4 @@ save_to_azure:
           ORB_PATH: << parameters.path >>
           ORB_KEY: << parameters.key >>
           ORB_CONTAINER: <<parameters.CONTAINER>>
-        command: ./scripts/ci/azure/save-to-azure.sh
-
+        command: .ci/nix-exec scripts/ci/azure/save-to-azure.sh

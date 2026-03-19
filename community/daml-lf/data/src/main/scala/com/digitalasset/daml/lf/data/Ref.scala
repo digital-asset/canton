@@ -187,7 +187,7 @@ object Ref {
     }
   }
 
-  final case class QualifiedName private (module: ModuleName, name: DottedName)
+  final case class QualifiedName private[digitalasset] (module: ModuleName, name: DottedName)
       extends Ordered[QualifiedName] {
     override def toString: String = module.toString + ":" + name.toString
     def qualifiedName: String = toString
@@ -314,9 +314,9 @@ object Ref {
 
     def fromString(s: String): Either[String, PackageRef] =
       if (s.startsWith("#"))
-        PackageName.fromString(s.drop(1)).map(Name)
+        PackageName.fromString(s.drop(1)).map(Name.apply)
       else
-        PackageId.fromString(s).map(Id)
+        PackageId.fromString(s).map(Id.apply)
 
     def assertFromString(s: String): PackageRef =
       assertRight(fromString(s))

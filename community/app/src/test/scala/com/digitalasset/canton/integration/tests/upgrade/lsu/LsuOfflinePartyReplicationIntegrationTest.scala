@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.admin.api.client.data.FlagSet
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.console.{InstanceReference, ParticipantReference}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
@@ -138,7 +137,7 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
     )
 
   protected def performLsu(
-      participant: ParticipantReference,
+      connectedParticipants: Seq[ParticipantReference],
       fixture: Fixture,
       upgradeTime: CantonTimestamp,
       stopOldSynchronizerNodes: Boolean = true,
@@ -154,7 +153,7 @@ abstract class LsuOfflinePartyReplicationIntegrationTest extends LsuBase with Ha
     )
     eventually() {
       environment.simClock.value.advance(Duration.ofSeconds(1))
-      participant.synchronizers.is_connected(fixture.newPSId) shouldBe true
+      connectedParticipants.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
     }
     if (stopOldSynchronizerNodes) fixture.oldSynchronizerNodes.all.stop()
     waitForTargetTimeOnSequencer(
@@ -186,7 +185,7 @@ final class LsuOffPRFirstLsuThenOffPR extends LsuOfflinePartyReplicationIntegrat
       val fixture = makeFixture1
       val iou = IouSyntax.createIou(participant1)(alice, bob)
 
-      performLsu(participant1, fixture, upgradeTime1)
+      performLsu(participants.all, fixture, upgradeTime1)
 
       withClue("perform offline party replication") {
         val offsetBeforePartyUpdate = participant1.ledger_api.state.end()
@@ -249,7 +248,6 @@ final class LsuOffPRFirstLsuThenOffPR extends LsuOfflinePartyReplicationIntegrat
  *   f. Target reconnects and performs the LSU
  *   g. Perform another LSU
  */
-@UnstableTest // TODO(#31090)
 final class LsuOffPRInterleavedLsuBeforeSourceAuthorizesOffPR
     extends LsuOfflinePartyReplicationIntegrationTest {
   "Logical synchronizer upgrade" should {
@@ -272,7 +270,7 @@ final class LsuOffPRInterleavedLsuBeforeSourceAuthorizesOffPR
           participant2.synchronizers.disconnect_all()
         }
 
-        performLsu(participant1, fixture, upgradeTime1, stopOldSynchronizerNodes = false)
+        performLsu(Seq(participant1), fixture, upgradeTime1, stopOldSynchronizerNodes = false)
 
         val offsetBeforeSetSourceOnboarding = withClue("Source authorizes") {
           val offset = participant1.ledger_api.state.end()
@@ -316,7 +314,7 @@ final class LsuOffPRInterleavedLsuBeforeSourceAuthorizesOffPR
         }
 
         withClue("Perform another LSU") {
-          performLsu(participant2, makeFixture2(fixture), upgradeTime2)
+          performLsu(participants.all, makeFixture2(fixture), upgradeTime2)
         }
     }
   }
@@ -366,7 +364,7 @@ final class LsuOffPRInterleavedLsuAfterSourceAuthorizesOffPR
       }
 
       withClue("perform LSU") {
-        performLsu(participant1, fixture, upgradeTime1, stopOldSynchronizerNodes = false)
+        performLsu(Seq(participant1), fixture, upgradeTime1, stopOldSynchronizerNodes = false)
       }
 
       withClue("ACS snapshot taken on source") {
@@ -400,7 +398,7 @@ final class LsuOffPRInterleavedLsuAfterSourceAuthorizesOffPR
       }
 
       withClue("Perform another LSU") {
-        performLsu(participant2, makeFixture2(fixture), upgradeTime2)
+        performLsu(participants.all, makeFixture2(fixture), upgradeTime2)
       }
     }
   }

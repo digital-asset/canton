@@ -181,7 +181,7 @@ final case class ReceiptStoreEvent(
     override val traceContext: TraceContext,
     override val trafficReceiptO: Option[TrafficReceipt],
 ) extends StoreEvent[Nothing] {
-  override val notifies: WriteNotification = WriteNotification.Members(SortedSet(sender))
+  override val notifies: WriteNotification = WriteNotification.Members(Set(sender))
 
   override val description: String = show"receipt[message-id:$messageId]"
 
@@ -256,7 +256,7 @@ final case class DeliverErrorStoreEvent(
     override val traceContext: TraceContext,
     override val trafficReceiptO: Option[TrafficReceipt],
 ) extends StoreEvent[Nothing] {
-  override val notifies: WriteNotification = WriteNotification.Members(SortedSet(sender))
+  override val notifies: WriteNotification = WriteNotification.Members(Set(sender))
   override val description: String = show"deliver-error[message-id:$messageId]"
   override val members: NonEmpty[Set[SequencerMemberId]] = NonEmpty(Set, sender)
   override def map[P](f: Nothing => P): StoreEvent[P] = this
@@ -567,6 +567,13 @@ trait SequencerStore
         .mapValues(_.exists(_.registeredFrom <= time))
         .toMap
     )
+
+  /** Lists all known sequencer members. This method is uncached, so don't use this method in
+    * performance sensitive contexts like events processing.
+    */
+  def allRegisteredMembers(registeredAtBeforeInclusive: CantonTimestamp)(implicit
+      traceContext: TraceContext
+  ): FutureUnlessShutdown[Set[Member]]
 
   /** Save a series of payloads to the store. Is up to the caller to determine a reasonable batch
     * size and no batching is done within the store.

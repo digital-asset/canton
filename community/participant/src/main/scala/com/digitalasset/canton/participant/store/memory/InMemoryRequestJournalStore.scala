@@ -112,6 +112,7 @@ class InMemoryRequestJournalStore(protected val loggerFactory: NamedLoggerFactor
   }
 
   @VisibleForTesting
+  @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
   private[store] override def pruneInternal(
       beforeInclusive: CantonTimestamp
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[Unit] = {

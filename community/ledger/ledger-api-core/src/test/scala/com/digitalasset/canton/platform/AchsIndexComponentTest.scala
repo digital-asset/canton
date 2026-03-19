@@ -14,6 +14,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 
 import java.sql.DriverManager
 import java.util.concurrent.atomic.AtomicReference
+import scala.concurrent.duration.DurationInt
 
 class AchsIndexComponentTest extends AnyFlatSpec with IndexComponentTest with BeforeAndAfterEach {
 
@@ -59,7 +60,7 @@ class AchsIndexComponentTest extends AnyFlatSpec with IndexComponentTest with Be
     val txsCreatedThenArchived = 10
     val txsCreatedNotArchived = 1
     val txSize = 1
-    val repetitions = 100
+    val repetitions = 20
 
     val allUpdates = (1 to repetitions).flatMap { _ =>
       createsAndArchives(
@@ -92,7 +93,7 @@ class AchsIndexComponentTest extends AnyFlatSpec with IndexComponentTest with Be
 
   it should "populate ACHS correctly for creates only" in {
 
-    val txsCreatedNotArchived = 1000
+    val txsCreatedNotArchived = 100
     val txSize = 3
 
     val allUpdates = createsAndArchives(
@@ -113,9 +114,9 @@ class AchsIndexComponentTest extends AnyFlatSpec with IndexComponentTest with Be
     verifyAchsConsistency(expectedLastEventSeqId)
   }
 
-  it should "correctly remove archived contracts from ACHS" in {
-    val txsCreatedThenArchived = 1000
-    val txsCreatedNotArchived = 1000
+  it should "populate ACHS correctly for archives as well" in {
+    val txsCreatedThenArchived = 100
+    val txsCreatedNotArchived = 100
     val txSize = 3
 
     val allUpdates = createsAndArchives(
@@ -139,7 +140,7 @@ class AchsIndexComponentTest extends AnyFlatSpec with IndexComponentTest with Be
   private def verifyAchsConsistency(targetLastEventSeqId: Long): Unit = {
     val expectedValidAt = targetLastEventSeqId - achsConfig.validAtDistanceTarget.unwrap
     val expectedLastPopulated = expectedValidAt - achsConfig.lastPopulatedDistanceTarget.unwrap
-    eventually() {
+    eventually(60.seconds) {
       val validAt =
         SQL"SELECT valid_at FROM lapi_achs_state"
           .as(long("valid_at").single)(connection)

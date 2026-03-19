@@ -10,9 +10,9 @@ import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.metrics.ActiveRequestsMetrics
-import com.digitalasset.canton.networking.grpc.CantonGrpcUtil
 import com.digitalasset.canton.networking.grpc.ratelimiting.ActiveRequestCounterInterceptor.Limited
 import com.digitalasset.canton.networking.grpc.ratelimiting.LimitResult.FullMethodName
+import com.digitalasset.canton.networking.grpc.{CantonGrpcUtil, GrpcAddressHelper}
 import com.digitalasset.canton.tracing.{TraceContext, TraceContextGrpc}
 import com.digitalasset.canton.util.TryUtil
 import com.digitalasset.canton.util.TryUtil.ForFailedOps
@@ -100,8 +100,8 @@ class ActiveRequestCounterInterceptor(
         }
       // reject if over limit
       case Some((false, limit)) =>
-        val ip = call.getAttributes.get(Grpc.TRANSPORT_ATTR_REMOTE_ADDR)
-        val error = errorFactory(fullMethodName, ip.toString)(
+        val ip = GrpcAddressHelper.extractClientIP(call, headers)
+        val error = errorFactory(fullMethodName, ip)(
           TraceContextGrpc.fromGrpcContextOrNew("ActiveRequestCounterInterceptor")
         )
         metrics.rejections.inc()(limit.metricsContext)

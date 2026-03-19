@@ -18,7 +18,7 @@ must go through the KMS.
 
 To enable external key storage and usage, apply the configuration below before the initial bootstrap of a new
 Participant node. **If you're updating an existing Participant, you must instead follow the migration guide:**
-:ref:`Migrate to external key storage with a KMS <external_key_storage_migration>`.
+:ref:`Migrate to external key storage with a KMS <kms_migration>`.
 
 .. literalinclude:: CANTON/community/app/src/test/resources/aws-kms-provider-tagged.conf
    :language: none

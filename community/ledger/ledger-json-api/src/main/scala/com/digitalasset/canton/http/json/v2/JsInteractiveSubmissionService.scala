@@ -198,7 +198,7 @@ final case class JsPrepareSubmissionRequest(
 )
 
 final case class JsPrepareSubmissionResponse(
-    preparedTransaction: Option[protobuf.ByteString],
+    preparedTransaction: protobuf.ByteString,
     preparedTransactionHash: protobuf.ByteString,
     hashingSchemeVersion: interactive_submission_service.HashingSchemeVersion,
     hashingDetails: Option[String],

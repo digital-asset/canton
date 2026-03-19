@@ -23,7 +23,7 @@ import com.digitalasset.canton.logging.{
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
 import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
-import com.digitalasset.canton.platform.apiserver.execution.StoreBackedCommandInterpreter.StoreNKeyContinuationToken
+import com.digitalasset.canton.platform.apiserver.execution.StoreBackedCommandInterpreter.StoreNeedKeyContinuationToken
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.protocol.{CantonContractIdVersion, LfFatContractInst}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
@@ -36,7 +36,9 @@ import com.digitalasset.daml.lf.crypto
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.*
 import com.digitalasset.daml.lf.engine.ResultNeedContract.Response
+import com.digitalasset.daml.lf.interpretation.NeedKeyContinuationToken
 import com.digitalasset.daml.lf.transaction.{
+  ContractStateMachine,
   GlobalKeyWithMaintainers,
   Node,
   SubmittedTransaction,
@@ -68,6 +70,7 @@ private[apiserver] trait CommandInterpreter {
   */
 final class StoreBackedCommandInterpreter(
     engine: Engine,
+    contractStateMode: ContractStateMachine.Mode,
     participant: Ref.ParticipantId,
     packageResolver: PackageResolver,
     contractStore: ContractStore,
@@ -217,6 +220,7 @@ final class StoreBackedCommandInterpreter(
           prefetchKeys = commands.prefetchKeys,
           engineLogger = config.toEngineLogger(loggerFactory.append("phase", "submission")),
           contractIdVersion = ContractIdVersion.V1,
+          contractStateMode = contractStateMode,
         )
       })),
     )
@@ -308,41 +312,33 @@ final class StoreBackedCommandInterpreter(
         }
     }
 
-    def disclosedOrStoreKeyLookup(
-        key: GlobalKeyWithMaintainers
-    ): FutureUnlessShutdown[Option[ContractId]] =
-      disclosedContractsByKey.get(key).flatMap(_.headOption) match {
-        case Some(c) => FutureUnlessShutdown.pure(Some(c.contractId))
-        case None => timedKeyLookup(key)
-      }
-
     def disclosedOrStoreNKeyLookup(
         key: GlobalKeyWithMaintainers,
         limit: Int,
-        continuationToken: Option[NKeyContinuationToken],
-    ): FutureUnlessShutdown[(Vector[LfFatContractInst], Option[NKeyContinuationToken])] = {
+        continuationToken: Option[NeedKeyContinuationToken],
+    ): FutureUnlessShutdown[(Vector[LfFatContractInst], Option[NeedKeyContinuationToken])] = {
       val disclosedContracts = disclosedContractsByKey.getOrElse(key, Vector.empty)
       continuationToken
         .map {
-          case validToken: StoreNKeyContinuationToken => validToken
+          case validToken: StoreNeedKeyContinuationToken => validToken
           case invalidToken =>
             throw new IllegalArgumentException(s"Invalid token provided $invalidToken")
         }
-        .getOrElse(StoreNKeyContinuationToken.ContinueDisclosed(0)) match {
-        case StoreNKeyContinuationToken.ContinueDisclosed(usedFromDisclosed) =>
+        .getOrElse(StoreNeedKeyContinuationToken.ContinueDisclosed(0)) match {
+        case StoreNeedKeyContinuationToken.ContinueDisclosed(usedFromDisclosed) =>
           val (fromDisclosed, remainingFromDisclosed) =
             disclosedContracts.drop(usedFromDisclosed).splitAt(limit)
           if (remainingFromDisclosed.nonEmpty) {
             FutureUnlessShutdown.pure(
               fromDisclosed -> Some(
-                StoreNKeyContinuationToken.ContinueDisclosed(usedFromDisclosed + limit)
+                StoreNeedKeyContinuationToken.ContinueDisclosed(usedFromDisclosed + limit)
               )
             )
           } else {
             timedNKeyLookup(
               key = key,
               limit = limit - fromDisclosed.size,
-              continuationToken = StoreNKeyContinuationToken.ContinueFromStore(None),
+              continuationToken = StoreNeedKeyContinuationToken.ContinueFromStore(None),
             ).map { case (contracts, token) =>
               val contractsNotDisclosed = contracts.filterNot(contract =>
                 disclosedContractsById.contains(contract.contractId)
@@ -351,7 +347,7 @@ final class StoreBackedCommandInterpreter(
             }
           }
 
-        case token: StoreNKeyContinuationToken.ContinueFromStore =>
+        case token: StoreNeedKeyContinuationToken.ContinueFromStore =>
           timedNKeyLookup(
             key = key,
             limit = limit,
@@ -360,29 +356,14 @@ final class StoreBackedCommandInterpreter(
       }
     }
 
-    def timedKeyLookup(key: GlobalKeyWithMaintainers): FutureUnlessShutdown[Option[ContractId]] = {
-      val start = System.nanoTime
-      Timed
-        .futureUS(
-          metrics.execution.lookupContractKey,
-          FutureUnlessShutdown.outcomeF(contractStore.lookupContractKey(readers, key.globalKey)),
-        )
-        .map {
-          _.tap { _ =>
-            lookupContractKeyTime.addAndGet(System.nanoTime() - start)
-            lookupContractKeyCount.incrementAndGet()
-          }
-        }
-    }
-
     def timedNKeyLookup(
         key: GlobalKeyWithMaintainers,
         limit: Int,
-        continuationToken: StoreNKeyContinuationToken.ContinueFromStore,
-    ): FutureUnlessShutdown[(Vector[LfFatContractInst], Option[NKeyContinuationToken])] =
+        continuationToken: StoreNeedKeyContinuationToken.ContinueFromStore,
+    ): FutureUnlessShutdown[(Vector[LfFatContractInst], Option[NeedKeyContinuationToken])] =
       if (limit <= 0)
         FutureUnlessShutdown.pure(
-          Vector.empty -> Some(StoreNKeyContinuationToken.ContinueFromStore(None))
+          Vector.empty -> Some(StoreNeedKeyContinuationToken.ContinueFromStore(None))
         )
       else {
         val start = System.nanoTime
@@ -401,7 +382,7 @@ final class StoreBackedCommandInterpreter(
                   (
                     contractKeyPage.contracts,
                     contractKeyPage.nextPageToken
-                      .map(token => StoreNKeyContinuationToken.ContinueFromStore(Some(token))),
+                      .map(token => StoreNeedKeyContinuationToken.ContinueFromStore(Some(token))),
                   )
                 )
             ),
@@ -445,18 +426,7 @@ final class StoreBackedCommandInterpreter(
             )
           )
 
-        case ResultNeedKey(key, resume) =>
-          disclosedOrStoreKeyLookup(key)
-            .flatMap(response =>
-              resolveStep(
-                Tracked.value(
-                  metrics.execution.engineRunning,
-                  trackSyncExecution(interpretationTimeNanos)(resume(response)),
-                )
-              )
-            )
-
-        case ResultNeedNKey(key, limit, continuationToken, resume) =>
+        case ResultNeedKey(key, limit, continuationToken, resume) =>
           disclosedOrStoreNKeyLookup(key, limit, continuationToken)
             .flatMap { case (cids, token) =>
               resolveStep(
@@ -593,10 +563,10 @@ final class StoreBackedCommandInterpreter(
 
 object StoreBackedCommandInterpreter {
 
-  sealed trait StoreNKeyContinuationToken extends NKeyContinuationToken
-  object StoreNKeyContinuationToken {
-    final case class ContinueDisclosed(usedFromDisclosed: Int) extends StoreNKeyContinuationToken
-    final case class ContinueFromStore(token: Option[Long]) extends StoreNKeyContinuationToken
+  sealed trait StoreNeedKeyContinuationToken extends NeedKeyContinuationToken
+  object StoreNeedKeyContinuationToken {
+    final case class ContinueDisclosed(usedFromDisclosed: Int) extends StoreNeedKeyContinuationToken
+    final case class ContinueFromStore(token: Option[Long]) extends StoreNeedKeyContinuationToken
   }
 
   def considerDisclosedContractsSynchronizerId(

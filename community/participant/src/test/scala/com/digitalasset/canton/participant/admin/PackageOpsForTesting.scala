@@ -4,8 +4,8 @@
 package com.digitalasset.canton.participant.admin
 
 import cats.data.EitherT
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.base.error.RpcError
-import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.ledger.api.{
   ListVettedPackagesOpts,
   ParticipantVettedPackages,
@@ -20,6 +20,7 @@ import com.digitalasset.canton.participant.topology.{PackageOps, ParticipantTopo
 import com.digitalasset.canton.store.packagemeta.PackageMetadata
 import com.digitalasset.canton.topology.{ForceFlags, ParticipantId, PhysicalSynchronizerId}
 import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.{LfPackageId, config}
 import com.digitalasset.daml.lf.data.Ref.PackageId
 
 import scala.concurrent.ExecutionContext
@@ -31,10 +32,12 @@ class PackageOpsForTesting(
     ec: ExecutionContext
 ) extends PackageOps {
 
-  override def hasVettedPackageEntry(packageId: PackageId)(implicit
+  override def synchronizersWithVettedPackageEntry(packageIds: Set[PackageId])(implicit
       tc: TraceContext
-  ): EitherT[FutureUnlessShutdown, RpcError, Boolean] =
-    EitherT.rightT(false)
+  ): EitherT[FutureUnlessShutdown, RpcError, Map[PackageId, NonEmpty[
+    Set[PhysicalSynchronizerId]
+  ]]] =
+    EitherT.rightT(Map.empty)
 
   override def checkPackageUnused(packageId: PackageId)(implicit
       tc: TraceContext
@@ -42,17 +45,18 @@ class PackageOpsForTesting(
     EitherT.rightT(())
 
   override def revokeVettingForPackages(
-      mainPkg: LfPackageId,
       packages: List[LfPackageId],
       darDescriptor: PackageService.DarDescription,
       psid: PhysicalSynchronizerId,
       forceFlags: ForceFlags,
+      waitToBecomeEffective: Option[config.NonNegativeFiniteDuration],
   )(implicit tc: TraceContext): EitherT[FutureUnlessShutdown, RpcError, Unit] =
     EitherT.rightT(())
 
   override def vetPackages(
       packages: Seq[PackageId],
       synchronizeVetting: PackageVettingSynchronization,
+      waitToBecomeEffective: Option[config.NonNegativeFiniteDuration],
       psid: PhysicalSynchronizerId,
   )(implicit
       traceContext: TraceContext
@@ -70,6 +74,7 @@ class PackageOpsForTesting(
       targetStates: Seq[SinglePackageTargetVetting[PackageId]],
       psid: PhysicalSynchronizerId,
       synchronizeVetting: PackageVettingSynchronization,
+      waitToBecomeEffective: Option[config.NonNegativeFiniteDuration],
       dryRunSnapshot: Option[PackageMetadata],
       expectedTopologySerial: Option[PriorTopologySerial],
       updateForceFlags: Option[UpdateVettedPackagesForceFlags] = None,

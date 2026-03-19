@@ -26,33 +26,33 @@ final case class NamedLoggingContext(
 ) {
 
   /** Log something using the captured trace context */
-  def trace(message: String)(implicit loggerNameFromClass: LoggerNameFromClass): Unit =
+  def trace(message: => String)(implicit loggerNameFromClass: LoggerNameFromClass): Unit =
     tracedLogger.trace(message)(traceContext)
-  def trace(message: String, throwable: Throwable)(implicit
+  def trace(message: => String, throwable: Throwable)(implicit
       loggerNameFromClass: LoggerNameFromClass
   ): Unit =
     tracedLogger.trace(message, throwable)(traceContext)
-  def debug(message: String)(implicit loggerNameFromClass: LoggerNameFromClass): Unit =
+  def debug(message: => String)(implicit loggerNameFromClass: LoggerNameFromClass): Unit =
     tracedLogger.debug(message)(traceContext)
-  def debug(message: String, throwable: Throwable)(implicit
+  def debug(message: => String, throwable: Throwable)(implicit
       loggerNameFromClass: LoggerNameFromClass
   ): Unit =
     tracedLogger.debug(message, throwable)(traceContext)
-  def info(message: String)(implicit loggerNameFromClass: LoggerNameFromClass): Unit =
+  def info(message: => String)(implicit loggerNameFromClass: LoggerNameFromClass): Unit =
     tracedLogger.info(message)(traceContext)
-  def info(message: String, throwable: Throwable)(implicit
+  def info(message: => String, throwable: Throwable)(implicit
       loggerNameFromClass: LoggerNameFromClass
   ): Unit =
     tracedLogger.info(message, throwable)(traceContext)
-  def warn(message: String)(implicit loggerNameFromClass: LoggerNameFromClass): Unit =
+  def warn(message: => String)(implicit loggerNameFromClass: LoggerNameFromClass): Unit =
     tracedLogger.warn(message)(traceContext)
-  def warn(message: String, throwable: Throwable)(implicit
+  def warn(message: => String, throwable: Throwable)(implicit
       loggerNameFromClass: LoggerNameFromClass
   ): Unit =
     tracedLogger.warn(message, throwable)(traceContext)
-  def error(message: String)(implicit loggerNameFromClass: LoggerNameFromClass): Unit =
+  def error(message: => String)(implicit loggerNameFromClass: LoggerNameFromClass): Unit =
     tracedLogger.error(message)(traceContext)
-  def error(message: String, throwable: Throwable)(implicit
+  def error(message: => String, throwable: Throwable)(implicit
       loggerNameFromClass: LoggerNameFromClass
   ): Unit =
     tracedLogger.error(message, throwable)(traceContext)

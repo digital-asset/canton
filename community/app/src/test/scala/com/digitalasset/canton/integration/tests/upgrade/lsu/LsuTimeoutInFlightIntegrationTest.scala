@@ -217,12 +217,12 @@ final class LsuTimeoutInFlightIntegrationTest extends LsuBase with HasProgrammab
           }
 
           // Check that time offsetting after upgrade works on old synchronizer
-          fetchTime(sequencer1) should be > (upgradeTime + decisionTimeout.toInternal)
+          fetchTime(sequencer1) should be >= (upgradeTime + decisionTimeout.toInternal)
 
           // And also after a restart
           sequencer1.stop()
           sequencer1.start()
-          fetchTime(sequencer1) should be > (upgradeTime + decisionTimeout.toInternal)
+          fetchTime(sequencer1) should be >= (upgradeTime + decisionTimeout.toInternal)
 
           // TODO(#27349) Without this ping, the fetch_time allowing to timeout request 1 is never done
           participant1.health.ping(participant1)

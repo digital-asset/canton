@@ -108,7 +108,8 @@ subtrees:
                                   titlesonly: True
                                   entries:
                                     - file: howtos/secure/kms/migration/encrypted_key_storage_migration
-                                    - file: howtos/secure/kms/migration/external_key_storage_migration
+                                    - file: howtos/secure/kms/migration/external_key_storage_migration_export_keys
+                                    - file: howtos/secure/kms/migration/external_key_storage_migration_transfer_assets
                         - hidden: False
                           titlesonly: True
                           entries:

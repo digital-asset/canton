@@ -10,7 +10,7 @@ import com.digitalasset.daml.lf.engine.Engine
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
-import com.digitalasset.daml.lf.transaction.{Node, NodeId}
+import com.digitalasset.daml.lf.transaction.{ContractStateMachine, Node, NodeId}
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
@@ -31,6 +31,7 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWord
 
   val engine = Engine.DevEngine
   val contractIdVersion = ContractIdVersion.V1
+  val contractStateMode = ContractStateMachine.Mode.devDefault
 
   val operator = Ref.Party.assertFromString("operator")
   val investor = Ref.Party.assertFromString("investor")
@@ -89,6 +90,7 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWord
         participantId = Ref.ParticipantId.assertFromString("participant"),
         submissionSeed = crypto.Hash.hashPrivateKey(getClass.getName + time.toString),
         contractIdVersion = contractIdVersion,
+        contractStateMode = contractStateMode,
         prefetchKeys = Seq.empty,
       )
       .consume(pcs = contracts, pkgs = packages)
@@ -161,6 +163,7 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWord
           time,
           time,
           contractIdVersion = contractIdVersion,
+          contractStateMode = contractStateMode,
         )(LoggingContext.empty)
         .consume(pcs = contracts, pkgs = packages)
     rTx.nodes.values.collect { case create: Node.Create => create }.toSet

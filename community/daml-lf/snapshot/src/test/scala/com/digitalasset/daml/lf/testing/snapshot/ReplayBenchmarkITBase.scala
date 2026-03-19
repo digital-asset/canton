@@ -26,7 +26,7 @@ import java.nio.file.{FileSystems, Files, Path}
 // Integration tests need to live in the package com.digitalasset.canton.integration.tests, so we
 // make the test base an abstract class
 abstract class ReplayBenchmarkITBase(
-    contractIdVersion: ContractIdVersion,
+    contractIdVersion: ContractIdVersion
 ) extends CommunityIntegrationTest
     with SharedEnvironment
     with EntitySyntax
@@ -52,43 +52,43 @@ abstract class ReplayBenchmarkITBase(
       .addConfigTransforms(
         ConfigTransforms.enableNonStandardConfig,
         ConfigTransforms.updateAllParticipantConfigs_(
-          _.focus(_.features.snapshotDir).replace(Some(snapshotDir))
+          _.focus(_.parameters.engine.snapshotDir).replace(Some(snapshotDir))
         ),
       )
       .withSetup { implicit env =>
-      import env.*
+        import env.*
 
-      participants.local.foreach { participant =>
-        participant.synchronizers.connect_local(sequencer1, alias = daName)
-      }
+        participants.local.foreach { participant =>
+          participant.synchronizers.connect_local(sequencer1, alias = daName)
+        }
 
-      // Allocate parties
-      PartiesAllocator(Set(participant1))(
-        newParties = Seq("alice" -> participant1),
-        targetTopology = Map(
-          "alice" -> Map(
-            daId -> (PositiveInt.one, Set(participant1.id -> ParticipantPermission.Submission))
-          ),
-        ),
-      )
-      alice = "alice".toPartyId(participant1)
-
-      // Upload the test DAR and vet its packages
-      SetupPackageVetting(
-        Set(darPath.toFile.getAbsolutePath),
-        targetTopology = Map(
-          daId -> participants.all
-            .map(
-              _ -> VettedPackage
-                .unbounded(
-                  Seq(ReplayBenchmarkPkgId)
-                )
-                .toSet
+        // Allocate parties
+        PartiesAllocator(Set(participant1))(
+          newParties = Seq("alice" -> participant1),
+          targetTopology = Map(
+            "alice" -> Map(
+              daId -> (PositiveInt.one, Set(participant1.id -> ParticipantPermission.Submission))
             )
-            .toMap
-        ),
-      )
-    }
+          ),
+        )
+        alice = "alice".toPartyId(participant1)
+
+        // Upload the test DAR and vet its packages
+        SetupPackageVetting(
+          Set(darPath.toFile.getAbsolutePath),
+          targetTopology = Map(
+            daId -> participants.all
+              .map(
+                _ -> VettedPackage
+                  .unbounded(
+                    Seq(ReplayBenchmarkPkgId)
+                  )
+                  .toSet
+              )
+              .toMap
+          ),
+        )
+      }
 
   override def afterEach(): Unit = {
     Files.newDirectoryStream(snapshotDir).forEach(Files.delete)
@@ -127,8 +127,10 @@ abstract class ReplayBenchmarkITBase(
       "generate a replayable snapshot file when contract is global" in { implicit env =>
         import env.*
 
-        val cid = getContractId(participant1.ledger_api.commands
-          .submit(Seq(alice), createT(alice, 13)))
+        val cid = getContractId(
+          participant1.ledger_api.commands
+            .submit(Seq(alice), createT(alice, 13))
+        )
         participant1.ledger_api.commands
           .submit(Seq(alice), exerciseAdd(cid, 7))
 
@@ -180,7 +182,9 @@ abstract class ReplayBenchmarkITBase(
         assertThrowsAndLogsCommandFailures(
           participant1.ledger_api.commands
             .submit(Seq(alice), createAndExerciseExplode(alice, 7)),
-          _.commandFailureMessage should include("UNHANDLED_EXCEPTION/DA.Exception.AssertionFailed:AssertionFailed")
+          _.commandFailureMessage should include(
+            "UNHANDLED_EXCEPTION/DA.Exception.AssertionFailed:AssertionFailed"
+          ),
         )
 
         val snapshotFiles = Files.list(snapshotDir).filter(snapshotFileMatcher.matches).toList
@@ -195,7 +199,9 @@ abstract class ReplayBenchmarkITBase(
         assertThrowsAndLogsCommandFailures(
           participant1.ledger_api.commands
             .submit(Seq(alice), createAndExerciseExplode(alice, 17)),
-          _.commandFailureMessage should include("UNHANDLED_EXCEPTION/DA.Exception.AssertionFailed:AssertionFailed")
+          _.commandFailureMessage should include(
+            "UNHANDLED_EXCEPTION/DA.Exception.AssertionFailed:AssertionFailed"
+          ),
         )
 
         val snapshotFiles = Files.list(snapshotDir).filter(snapshotFileMatcher.matches).toList
@@ -223,7 +229,9 @@ abstract class ReplayBenchmarkITBase(
   private def getContractId(tx: Transaction): ContractId =
     ContractId.assertFromString(tx.events.map(_.getCreated.contractId).loneElement)
 
-  private def createT(party: Party, value: Int)(implicit env: TestConsoleEnvironment): Seq[Command] = {
+  private def createT(party: Party, value: Int)(implicit
+      env: TestConsoleEnvironment
+  ): Seq[Command] = {
     import env.*
 
     Seq(
@@ -237,10 +245,10 @@ abstract class ReplayBenchmarkITBase(
   }
 
   private def exerciseAdd(
-    cid: ContractId,
-    value: Int,
+      cid: ContractId,
+      value: Int,
   )(implicit
-    env: TestConsoleEnvironment
+      env: TestConsoleEnvironment
   ): Seq[Command] = {
     import env.*
 
@@ -257,29 +265,53 @@ abstract class ReplayBenchmarkITBase(
   }
 
   private def createAndExerciseAdd(party: Party, value1: Int, value2: Int): Seq[Command] = {
-    val createArgs = Record(None, Seq(RecordField("p", Some(Value(Value.Sum.Party(party.toLf)))), RecordField("v", Some(Value(Value.Sum.Int64(value1.toLong))))))
-    val choiceArg = Value(Value.Sum.Record(Record(None, Seq(RecordField("n", Some(Value(Value.Sum.Int64(value2.toLong))))))))
+    val createArgs = Record(
+      None,
+      Seq(
+        RecordField("p", Some(Value(Value.Sum.Party(party.toLf)))),
+        RecordField("v", Some(Value(Value.Sum.Int64(value1.toLong)))),
+      ),
+    )
+    val choiceArg = Value(
+      Value.Sum.Record(
+        Record(None, Seq(RecordField("n", Some(Value(Value.Sum.Int64(value2.toLong))))))
+      )
+    )
 
     Seq(
-      Command(Command.Command.CreateAndExercise(CreateAndExerciseCommand(
-        templateId = Some(Identifier(ReplayBenchmarkPkgId, "ReplayBenchmark", "T")),
-        createArguments = Some(createArgs),
-        choice = "Add",
-        choiceArgument = Some(choiceArg),
-      )))
+      Command(
+        Command.Command.CreateAndExercise(
+          CreateAndExerciseCommand(
+            templateId = Some(Identifier(ReplayBenchmarkPkgId, "ReplayBenchmark", "T")),
+            createArguments = Some(createArgs),
+            choice = "Add",
+            choiceArgument = Some(choiceArg),
+          )
+        )
+      )
     )
   }
   private def createAndExerciseExplode(party: Party, value: Int): Seq[Command] = {
-    val createArgs = Record(None, Seq(RecordField("p", Some(Value(Value.Sum.Party(party.toLf)))), RecordField("v", Some(Value(Value.Sum.Int64(value.toLong))))))
+    val createArgs = Record(
+      None,
+      Seq(
+        RecordField("p", Some(Value(Value.Sum.Party(party.toLf)))),
+        RecordField("v", Some(Value(Value.Sum.Int64(value.toLong)))),
+      ),
+    )
     val choiceArg = Value(Value.Sum.Record(Record(None, Seq.empty)))
 
     Seq(
-      Command(Command.Command.CreateAndExercise(CreateAndExerciseCommand(
-        templateId = Some(Identifier(ReplayBenchmarkPkgId, "ReplayBenchmark", "T")),
-        createArguments = Some(createArgs),
-        choice = "Explode",
-        choiceArgument = Some(choiceArg),
-      )))
+      Command(
+        Command.Command.CreateAndExercise(
+          CreateAndExerciseCommand(
+            templateId = Some(Identifier(ReplayBenchmarkPkgId, "ReplayBenchmark", "T")),
+            createArguments = Some(createArgs),
+            choice = "Explode",
+            choiceArgument = Some(choiceArg),
+          )
+        )
+      )
     )
   }
 }

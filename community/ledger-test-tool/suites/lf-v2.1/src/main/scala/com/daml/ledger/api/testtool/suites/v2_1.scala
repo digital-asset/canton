@@ -15,7 +15,6 @@ package object v2_1 {
     Vector(
       new ActiveContractsServiceIT,
       new CheckpointInTailingStreamsIT,
-      new ClosedWorldIT,
       new CommandDeduplicationIT(timeoutScaleFactor),
       new CommandDeduplicationParallelIT,
       new CommandDeduplicationPeriodValidationIT,

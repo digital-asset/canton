@@ -52,8 +52,8 @@ import org.scalatest.wordspec.FixtureAsyncWordSpec
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.collection.immutable.SortedSet
+import scala.concurrent.Promise
 import scala.concurrent.duration.*
-import scala.concurrent.{Future, Promise}
 
 class SequencerReaderTest
     extends FixtureAsyncWordSpec
@@ -111,9 +111,7 @@ class SequencerReaderTest
 
     override protected def logger: TracedLogger = SequencerReaderTest.this.logger
 
-    override def notifyOfLocalWrite(notification: WriteNotification)(implicit
-        traceContext: TraceContext
-    ): Future[Unit] = Future.unit
+    override def notifyOfLocalWrite(notification: WriteNotification): Unit = ()
   }
 
   class Env extends FlagCloseableAsync {

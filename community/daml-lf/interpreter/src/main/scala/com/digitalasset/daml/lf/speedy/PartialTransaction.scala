@@ -312,15 +312,7 @@ private[speedy] case class PartialTransaction(
       case _: RootContextInfo =>
         val roots = context.children.toImmArray
         val tx0 = Tx(nodes, roots)
-        val (tx, seeds) = NormalizeRollbacks.normalizeTx(
-          tx0,
-          shouldDropRollbacks = contractState.mode match {
-            case ContractStateMachine.Mode.UCKWithoutRollback => true
-            case ContractStateMachine.Mode.NoContractKey => false
-            case ContractStateMachine.Mode.LegacyNUCK => false
-            case ContractStateMachine.Mode.UCKWithRollback => false
-          }
-        )
+        val (tx, seeds) = NormalizeRollbacks.normalizeTx(tx0)
         val txResult = SubmittedTx(SerializationVersion.asVersionedTransaction(tx))
         Right((txResult, seeds))
 
@@ -433,7 +425,7 @@ private[speedy] case class PartialTransaction(
           coid,
           contract.gkeyOpt,
           byKey,
-        )
+        ),
       )
       authorizationChecker.authorizeFetch(optLocation, node)(auth) match {
         case fa :: _ =>
@@ -463,7 +455,10 @@ private[speedy] case class PartialTransaction(
       // so the current state's global key inputs must resolve the key.
       val keyInput = contractState.globalKeyInputs(key.globalKey)
       val newContractState =
-        assertRightKey("Lookup", contractState.visitQueryByKey(key.globalKey, keyInput.toKeyMapping, result.asCidVector))
+        assertRightKey(
+          "Lookup",
+          contractState.visitQueryByKey(key.globalKey, keyInput.toKeyMapping, result.asCidVector),
+        )
       authorizationChecker.authorizeLookupByKey(optLocation, node)(auth) match {
         case fa :: _ =>
           Left(IErr.FailedAuthorization(nid, fa))
@@ -526,7 +521,7 @@ private[speedy] case class PartialTransaction(
           contract.gkeyOpt,
           byKey,
           consuming,
-        )
+        ),
       )
       authorizationChecker.authorizeExercise(optLocation, makeExNode(ec))(auth) match {
         case fa :: _ =>

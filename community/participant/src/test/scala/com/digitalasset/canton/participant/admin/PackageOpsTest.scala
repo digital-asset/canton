@@ -62,7 +62,10 @@ trait PackageOpsTestBase extends AsyncWordSpec with BaseTest with ArgumentMatche
       "one synchronizer topology snapshot has the package vetted" in withTestSetup { env =>
         import env.*
         unvettedPackagesForSnapshots(Set.empty)
-        packageOps.hasVettedPackageEntry(pkgId1).failOnShutdown.map(_ shouldBe true)
+        packageOps
+          .synchronizersWithVettedPackageEntry(Set(pkgId1))
+          .failOnShutdown
+          .map(_ shouldBe Map(pkgId1 -> Set(synchronizerId1)))
       }
     }
 
@@ -70,7 +73,10 @@ trait PackageOpsTestBase extends AsyncWordSpec with BaseTest with ArgumentMatche
       "one synchronizer topology snapshot has the package unvetted" in withTestSetup { env =>
         import env.*
         unvettedPackagesForSnapshots(Set(pkgId1))
-        packageOps.hasVettedPackageEntry(pkgId1).failOnShutdown.map(_ shouldBe false)
+        packageOps
+          .synchronizersWithVettedPackageEntry(Set(pkgId1))
+          .failOnShutdown
+          .map(_ shouldBe empty)
       }
     }
   }
@@ -224,7 +230,12 @@ class PackageOpsTest extends PackageOpsTestBase {
         arrangeCurrentlyVetted(List(pkgId1))
         expectNewVettingState(List(pkgId1, pkgId2))
         packageOps
-          .vetPackages(Seq(pkgId1, pkgId2), PackageVettingSynchronization.NoSync, synchronizerId1)
+          .vetPackages(
+            Seq(pkgId1, pkgId2),
+            PackageVettingSynchronization.NoSync,
+            None,
+            synchronizerId1,
+          )
           .value
           .unwrap
           .map(inside(_) { case UnlessShutdown.Outcome(Right(_)) => succeed })
@@ -238,7 +249,12 @@ class PackageOpsTest extends PackageOpsTestBase {
         // Not ordered to prove that we check set-equality not ordered
         arrangeCurrentlyVetted(List(pkgId2, pkgId1))
         packageOps
-          .vetPackages(Seq(pkgId1, pkgId2), PackageVettingSynchronization.NoSync, synchronizerId1)
+          .vetPackages(
+            Seq(pkgId1, pkgId2),
+            PackageVettingSynchronization.NoSync,
+            None,
+            synchronizerId1,
+          )
           .value
           .unwrap
           .map(inside(_) { case UnlessShutdown.Outcome(Right(_)) =>
@@ -269,11 +285,11 @@ class PackageOpsTest extends PackageOpsTestBase {
         val str = String255.tryCreate("DAR descriptor")
         packageOps
           .revokeVettingForPackages(
-            pkgId1,
             List(pkgId1, pkgId2),
             DarDescription(mainPackageId, str, str, str),
             synchronizerId1,
             ForceFlags.none,
+            None,
           )
           .value
           .unwrap
@@ -290,11 +306,11 @@ class PackageOpsTest extends PackageOpsTestBase {
         val str = String255.tryCreate("DAR descriptor")
         packageOps
           .revokeVettingForPackages(
-            pkgId3,
             List(pkgId3),
             DarDescription(mainPackageId, str, str, str),
             synchronizerId1,
             ForceFlags.none,
+            None,
           )
           .value
           .unwrap

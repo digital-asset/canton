@@ -30,7 +30,11 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.store.SequencerMemberValidator
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerRateLimitManager
-import com.digitalasset.canton.synchronizer.sequencer.{InFlightAggregations, SubmissionOutcome}
+import com.digitalasset.canton.synchronizer.sequencer.{
+  AnnouncedLsu,
+  InFlightAggregations,
+  SubmissionOutcome,
+}
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.tracing.{Spanning, TraceContext, Traced}
 import com.digitalasset.canton.util.MaxBytesToDecompress
@@ -108,6 +112,7 @@ class BlockUpdateGeneratorImpl(
     rateLimitManager: SequencerRateLimitManager,
     orderingTimeFixMode: OrderingTimeFixMode,
     sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
+    getAnnouncedLsu: => Option[AnnouncedLsu],
     producePostOrderingTopologyTicks: Boolean,
     metrics: SequencerMetrics,
     batchingConfig: BatchingConfig,
@@ -276,31 +281,56 @@ class BlockUpdateGeneratorImpl(
           state.lastBlockTs < latestTopologyTransactionEffectiveTime && latestTopologyTransactionEffectiveTime < blockEnd
         }
 
-        // Starting with protocol version 35, topology ticks can be deterministically injected post-ordering
-        // by sequencers, making time proofs unnecessary for observing topology transactions becoming effective.
-        if (
-          protocolVersion >= ProtocolVersion.v35 && producePostOrderingTopologyTicks && createTick
-        ) {
-          blockChunkProcessor.emitTick(
-            state.copy(
-              // important to do this update from here instead of from inside emitTick,
-              // because if a tick is created using other currently supported methods such as time proof requests,
-              // we would lose track of this timestamp prematurely.
-              latestPendingTopologyTransactionTimestamp = None
-            ),
-            blockHeight,
-            state.lastChunkTs.max(baseBlockSequencingTime),
-            Left(AllMembersOfSynchronizer),
-          )
-        } else {
-          tickTopology match {
-            // The pre-protocol version 35 topology ticks is also still supported and
-            // only the BFT sequencer can request to inject these topology ticks
-            case Some(TickTopology(tickAtLeastAt, groupRecipient)) =>
-              blockChunkProcessor.emitTick(state, blockHeight, tickAtLeastAt, groupRecipient)
-            case None =>
-              FutureUnlessShutdown.pure((state, ChunkUpdate.noop))
-          }
+        getAnnouncedLsu.map(_.successor) match {
+          case Some(upgrade)
+              if upgrade.upgradeTime <= baseBlockSequencingTime && upgrade.upgradeTime > state.lastBlockTs =>
+            logger.info(
+              s"Emitting an LSU tick for the upgrade $upgrade at block $blockHeight with base sequencing time $baseBlockSequencingTime"
+            )
+            blockChunkProcessor.emitTick(
+              state.copy(
+                // There shouldn't be topology changes activated after the LSU upgrade time
+                latestPendingTopologyTransactionTimestamp = None
+              ),
+              blockHeight,
+              upgrade.upgradeTime,
+              Left(AllMembersOfSynchronizer),
+            )
+          case _ =>
+            // Starting with protocol version 35, topology ticks can be deterministically injected post-ordering
+            // by sequencers, making time proofs unnecessary for observing topology transactions becoming effective.
+            if (
+              protocolVersion >= ProtocolVersion.v35 && producePostOrderingTopologyTicks && createTick
+            ) {
+              blockChunkProcessor.emitTick(
+                state.copy(
+                  // important to do this update from here instead of from inside emitTick,
+                  // because if a tick is created using other currently supported methods such as time proof requests,
+                  // we would lose track of this timestamp prematurely.
+                  latestPendingTopologyTransactionTimestamp = None
+                ),
+                blockHeight,
+                // DABFT assigns monotonically increasing timestamps to all ordered requests, including acks,
+                //  but the sequencer does not (because acks are not events), so if an epoch ends with an ack and
+                //  DABFT expects a tick at a certain timestamp to be able to query a topology snapshot and
+                //  establish the ordering topology fot the next epoch, we must make sure that sequencing time advances
+                //  at least until that timestamp, else the topology snapshot query could get stuck and the system
+                //  could deadlock.
+                tickAtLeastAt = state.lastChunkTs
+                  .max(baseBlockSequencingTime)
+                  .max(tickTopology.map(_.atLeastAt).getOrElse(CantonTimestamp.MinValue)),
+                groupRecipient = Left(AllMembersOfSynchronizer),
+              )
+            } else {
+              tickTopology match {
+                // The pre-protocol version 35 topology ticks is also still supported and
+                // only the BFT sequencer can request to inject these topology ticks
+                case Some(TickTopology(tickAtLeastAt, groupRecipient)) =>
+                  blockChunkProcessor.emitTick(state, blockHeight, tickAtLeastAt, groupRecipient)
+                case None =>
+                  FutureUnlessShutdown.pure((state, ChunkUpdate.noop))
+              }
+            }
         }
     }
 }

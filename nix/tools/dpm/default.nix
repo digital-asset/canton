@@ -11,7 +11,7 @@ let
     "x86_64-darwin" = "sha256-SDdNgrw/E+jFSSoOHt5Sm2ZNo/X97BbISHhRtfNtdUw=";
     "aarch64-darwin" = "sha256-q2DthxO0qHzwSlc7G39je5nfe2x3+yh2freSZrMmMAE=";
   };
-  dpmHash = dpmHashes.${pkgs.system} or (throw "Unsupported system: ${pkgs.system}");
+  dpmHash = dpmHashes.${pkgs.stdenv.hostPlatform.system} or (throw "Unsupported system: $pkgs.stdenv.hostPlatform.system}");
 
   ociPlatforms = {
     "x86_64-linux" = "linux/amd64";
@@ -19,7 +19,7 @@ let
     "x86_64-darwin" = "darwin/amd64";
     "aarch64-darwin" = "darwin/arm64";
   };
-  ociPlatform = ociPlatforms.${pkgs.system} or (throw "Unsupported system: ${pkgs.system}");
+  ociPlatform = ociPlatforms.${pkgs.stdenv.hostPlatform.system} or (throw "Unsupported system: ${pkgs.stdenv.hostPlatform.system}");
 in
 pkgs.stdenv.mkDerivation {
   pname = "dpm";

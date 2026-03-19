@@ -108,7 +108,6 @@ class TestEngine(
     EngineConfig(
       allowedLanguageVersions = LanguageVersion.allLfVersionsRange,
       iterationsBetweenInterruptions = iterationsBetweenInterruptions,
-      contractStateMode = contractStateMode,
     )
   )
 
@@ -208,6 +207,7 @@ class TestEngine(
       readAs = Set.empty,
       prefetchKeys = Seq.empty,
       contractIdVersion = ContractIdVersion.V1,
+      contractStateMode = contractStateMode,
     )
 
     val contractMap = contracts.map(c => c.contractId -> c).toMap
@@ -281,6 +281,7 @@ class TestEngine(
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       preparationTime: Time.Timestamp = testTimestamp,
       ledgerEffectiveTime: Time.Timestamp = testTimestamp,
+      contractStateMode: ContractStateMachine.Mode,
   ): TxAndMeta = {
 
     val result = engine.reinterpret(
@@ -291,6 +292,7 @@ class TestEngine(
       ledgerEffectiveTime = ledgerEffectiveTime,
       packageResolution = packageResolution,
       contractIdVersion = ContractIdVersion.V1,
+      contractStateMode = contractStateMode,
     )
     consume(result, contracts)
   }
@@ -301,6 +303,7 @@ class TestEngine(
       meta: Transaction.Metadata,
       contracts: Map[ContractId, FatContractInstance] = Map.empty,
       ledgerTime: Time.Timestamp = testTimestamp,
+      contractStateMode: ContractStateMachine.Mode,
   ): (SubmittedTransaction, Transaction.Metadata) = {
 
     val nodeSeeds = Map.from(meta.nodeSeeds.toList)
@@ -325,6 +328,7 @@ class TestEngine(
       packageResolution = packageResolution,
       preparationTime = meta.preparationTime,
       ledgerEffectiveTime = ledgerTime,
+      contractStateMode = contractStateMode,
     )
   }
 

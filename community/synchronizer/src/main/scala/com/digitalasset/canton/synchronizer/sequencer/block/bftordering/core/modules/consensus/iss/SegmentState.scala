@@ -126,6 +126,18 @@ class SegmentState(
       )
     }
 
+  private def highestNewViewWeKnow: Option[SignedMessage[NewView]] =
+    viewChangeState.toIndexedSeq
+      .sortBy(_._1)
+      .view
+      .reverse
+      .flatMap {
+        case (_, vcState) =>
+          vcState.newViewMessage
+        case _ => IndexedSeq.empty
+      }
+      .headOption
+
   @VisibleForTesting
   private[iss] def getViewChangeState =
     viewChangeState.toMap
@@ -158,9 +170,7 @@ class SegmentState(
         processCommitCertificate(msg)
     }
 
-  private def processMessagesStored(pbftMessagesStored: PbftMessagesStored)(implicit
-      traceContext: TraceContext
-  ): Seq[ProcessResult] =
+  private def processMessagesStored(pbftMessagesStored: PbftMessagesStored): Seq[ProcessResult] =
     pbftMessagesStored match {
       case _: PrePrepareStored | _: PreparesStored =>
         val blockIndex = segment.relativeBlockIndex(pbftMessagesStored.blockMetadata.blockNumber)
@@ -280,8 +290,11 @@ class SegmentState(
       val vcState = viewChangeState(currentViewNumber)
       val msgsToRetransmit = remoteStatus match {
         case status if status.viewNumber < currentViewNumber =>
+          val newView = highestNewViewWeKnow.filter(_.message.viewNumber >= status.viewNumber)
           // if remote node is in an earlier view change, retransmit all view change messages we have
-          vcState.viewChangeMessagesToRetransmit(Seq.empty)
+          (vcState.viewChangeMessagesToRetransmit(Seq.empty): Seq[
+            SignedMessage[PbftViewChangeMessage]
+          ]) ++ newView.toList
         case ConsensusStatus.SegmentStatus.InViewChange(_, remoteVcMsgs, _) =>
           // if remote node is in the same view change, retransmit view change messages we have that they don't
           vcState.viewChangeMessagesToRetransmit(remoteVcMsgs)
@@ -599,7 +612,7 @@ class SegmentState(
   private val sendViewChangeAction = viewChangeActionOpt { case (_, viewState) =>
     Option.when(viewState.newViewMessage.isEmpty)(()).flatMap(_ => viewState.viewChangeFromSelf)
   } { case (_, vc, viewState) =>
-    _ =>
+    traceContext =>
       Seq(
         SendPbftMessage(
           vc,
@@ -608,6 +621,7 @@ class SegmentState(
           } else {
             Some(StoreViewChangeMessage(vc))
           },
+          traceContext,
         )
       )
   }
@@ -657,7 +671,10 @@ class SegmentState(
   private val sendNewViewAction = viewChangeActionOpt { case (_, viewState) =>
     Option.when(viewState.shouldSendNewView)(viewState.newViewMessage).flatten
   } { case (_, newViewMessage, _) =>
-    _ => Seq(SendPbftMessage(newViewMessage, Some(StoreViewChangeMessage(newViewMessage))))
+    traceContext =>
+      Seq(
+        SendPbftMessage(newViewMessage, Some(StoreViewChangeMessage(newViewMessage)), traceContext)
+      )
   }
 
   private val completeViewChangeAction = viewChangeActionOpt { case (viewNumber, viewState) =>

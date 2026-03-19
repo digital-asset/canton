@@ -12,22 +12,24 @@ import com.digitalasset.canton.admin.api.client.data.{
   SubmissionRequestAmplification,
   SynchronizerConnectionConfig,
 }
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
-import com.digitalasset.canton.integration.EnvironmentDefinition
 import com.digitalasset.canton.integration.bootstrap.{
   NetworkBootstrapper,
   NetworkTopologyDescription,
 }
 import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.integration.tests.performance.BasePerformanceIntegrationTest.toConnectivity
+import com.digitalasset.canton.integration.{EnvironmentDefinition, TestConsoleEnvironment}
 import com.digitalasset.canton.performance.PartyRole.{
   DvpIssuer,
   DvpTrader,
   Master,
   MasterDynamicConfig,
 }
+import com.digitalasset.canton.performance.elements.DriverStatus
 import com.digitalasset.canton.performance.elements.dvp.TraderDriver
 import com.digitalasset.canton.performance.model.java.orchestration.runtype
 import com.digitalasset.canton.performance.{
@@ -43,12 +45,18 @@ import monocle.macros.syntax.lens.*
 import scala.concurrent.Future
 import scala.concurrent.duration.*
 
+/** Put sequencer aggregation under stress
+  *
+  * This test originally started to test sequencer aggregation performance with 5 mediators and
+  * threshold 5
+  */
 class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceIntegrationTest {
   setupPlugins(new UsePostgres(loggerFactory))
 
   private val masterName = "SAMaster"
-  private val issuersPerNode: Int = 2
-  private val tradersPerNode: Int = 4
+  private val issuersPerNode: Int = 1
+  private val tradersPerNode: Int = 2
+  private val racyTopologyStateCrashRecovery = true
 
   private def runnerConfigs(
       activeNodes: Seq[LocalParticipantReference]
@@ -59,7 +67,7 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
         totalCycles = 100, // Change this to increase the number of test iterations
         reportFrequency = 2,
         runType = new runtype.DvpRun(
-          1000L, // change this to increase the number of assets per issuer,
+          500L, // change this to increase the number of assets per issuer,
           0,
           0,
           TraderDriver.toPartyGrowth(0),
@@ -112,7 +120,7 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
             daName,
             sequencers = env.sequencers.local,
             mediators = env.mediators.all,
-            synchronizerOwners = Seq(sequencer1, sequencer2),
+            synchronizerOwners = Seq(sequencer1, sequencer2, sequencer3),
             synchronizerThreshold = PositiveInt.two,
             mediatorThreshold = env.mediators.all.size,
           )
@@ -181,6 +189,24 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
 
   }
 
+  private def adjustMediatorThreshold(threshold: PositiveInt, latencyAt3: Long = 2000)(implicit
+      env: TestConsoleEnvironment
+  ): Unit = {
+    import env.*
+    Seq(sequencer1, sequencer2, sequencer3).zipWithIndex.foreach { case (node, idx) =>
+      logger.debug(s"Setting mediator thresholds on ${node.name} -> $threshold")
+      node.topology.mediators.propose_delta(
+        sequencer1.synchronizer_id,
+        NonNegativeInt.zero,
+        updateThreshold = Some(threshold),
+        synchronize = None,
+      )
+      if (idx == 2) {
+        Threading.sleep(latencyAt3)
+      }
+    }
+  }
+
   "start performance runners on p1 and p2" in { implicit env =>
     import env.*
 
@@ -195,12 +221,45 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
       env.environment.addUserCloseable(runner)
       runner
     }
+    val runnerF = Future.sequence(runners.map(r => r.startup()))
+
+    // wait until the system really started up
+    eventually(timeUntilSuccess = 2.minutes) {
+      val mode = runners.headOption.value.status().collectFirst {
+        case DriverStatus.MasterStatus(_, mode, _, _, _, _) => mode
+      }
+      mode should contain("THROUGHPUT")
+    }
 
     loggerFactory.assertLoggedWarningsAndErrorsSeq(
       {
+        if (racyTopologyStateCrashRecovery) {
+          (1 to 3).foreach { idx =>
+            val threshold = if (idx % 2 == 0) 2 else 4
+            adjustMediatorThreshold(PositiveInt.tryCreate(threshold))
+            val p1Runner = runners.headOption.value
+            p1Runner.setActive(false)
+            participant1.synchronizers.disconnect_all()
+            participant1.synchronizers.reconnect_all()
+            p1Runner.setActive(true)
+            eventually() {
+              Seq(sequencer1, sequencer2, sequencer3).foreach { seq =>
+                val trs = seq.topology.mediators
+                  .list(sequencer1.synchronizer_id, group = Some(NonNegativeInt.zero))
+                  .loneElement
+                logger.info(
+                  s"Checking for ${seq.name} THRESHOLD=${trs.item.threshold} vs $threshold"
+                )
+                trs.item.threshold.value shouldBe threshold
+              }
+            }
+            Threading.sleep(2000) // let it progress a bit
+
+          }
+        }
         val res = waitTimeout
           .await("waiting for per runners to complete")(
-            Future.sequence(runners.map(r => r.startup()))
+            runnerF
           )
           .sequence_
         res shouldBe Right(())
@@ -213,7 +272,12 @@ class SequencerAggregationPerformanceIntegrationTest extends BasePerformanceInte
         // close runners
         Future.sequence(runners.map(_.closeF())).map(_ => ()).futureValue
       },
-      forEvery(_)(acceptableLogMessage),
+      forEvery(_)(
+        acceptableLogMessageExt(
+          Seq("SUBMISSION_SYNCHRONIZER_NOT_READY", "No connection available"),
+          Seq(),
+        )
+      ),
     )
 
   }

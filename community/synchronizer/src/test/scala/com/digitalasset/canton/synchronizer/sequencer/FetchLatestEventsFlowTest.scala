@@ -112,24 +112,6 @@ class FetchLatestEventsFlowTest
     } lastly (env.close())
   }
 
-  "immediately fetches to latest regardless of being updated" in { env =>
-    import env.*
-    val calls @ Seq(call1, call2, call3) = mockLookups(3)
-    // find one event on the first call
-    call1.returnsSingleEvent(ts(5))
-    call2.returnsNoEvents()
-
-    val (_, eventQueue) = create(Source.empty[ReadSignal])
-
-    for {
-      _ <- call1.calledF
-      _ <- call2.calledF
-      event <- pullEvent(eventQueue)
-      _ = event shouldBe (Event(ts(5)))
-      finalCallState <- call2.calledF
-    } yield finalCallState shouldBe State(ts(5))
-  }
-
   "keeps fetching until we've reached the latest timestamp" in { env =>
     import env.*
 
@@ -138,7 +120,7 @@ class FetchLatestEventsFlowTest
     lookup2.returnsSingleEvent(ts(8))
     lookup3.returnsNoEvents()
 
-    create(Source.empty[ReadSignal]).discard
+    create(Source.single(ReadSignal)).discard
 
     for {
       _ <- waitForAll(lookups*)

@@ -49,6 +49,9 @@ static_tests:
         name: Check SQL table definitions
         command: scripts/ci/check_sql_definitions.sh
     - run:
+        command: scripts/ci/check-protobuf-required-optional.sh
+        name: Check Protobuf Required/Optional requirements
+    - run:
         name: Check that Nix definitions are up to date
         command: |
           echo "checking that the containers shell.nix matches the one in the repository".

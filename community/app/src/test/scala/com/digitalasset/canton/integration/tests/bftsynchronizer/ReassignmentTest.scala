@@ -6,6 +6,7 @@ package com.digitalasset.canton.integration.tests.bftsynchronizer
 import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.BigDecimalImplicits.*
 import com.digitalasset.canton.admin.api.client.data.SequencerConnections
+import com.digitalasset.canton.annotations.RollbackTest
 import com.digitalasset.canton.config.CantonRequireTypes.InstanceName
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.InstanceReference
@@ -275,6 +276,7 @@ trait ReassignmentTest extends CommunityIntegrationTest with SharedEnvironment {
 //  )
 //}
 
+@RollbackTest
 class ReassignmentTestBFTOrderingPostgres extends ReassignmentTest {
   registerPlugin(new UsePostgres(loggerFactory))
   registerPlugin(new UseBftSequencer(loggerFactory))

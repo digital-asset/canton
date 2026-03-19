@@ -121,6 +121,28 @@ class OriginalLeaderSegmentState(
         segment.slotNumbers(nextRelativeBlockToPropose - 1)
       )) // we finished processing the current slot
 
+  def reasonForNoProposal: Option[String] =
+    if (!segmentIsInProgress)
+      Some(
+        s"End of segment reached: nextRelativeBlockToPropose $nextRelativeBlockToPropose is beyond segment size ${segment.slotNumbers.sizeIs}"
+      )
+    else if (viewChangeOccurred)
+      Some(s"ViewChangeOccurred! view = ${state.currentView}")
+    else if (observedOrderedBlockWithNonZeroView)
+      Some(
+        s"Observed ordered block with view > 0, indicating that a view change occurred at a quorum of peers"
+      )
+    else if (
+      nextRelativeBlockToPropose > 0 && !state.isBlockComplete(
+        segment.slotNumbers(nextRelativeBlockToPropose - 1)
+      )
+    )
+      Some(
+        s"Previous relative block ${segment.slotNumbers(nextRelativeBlockToPropose - 1)} is still in progress"
+      )
+    else
+      None
+
   private def viewChangeOccurred: Boolean = state.currentView > 0
 
   def assignToSlot(

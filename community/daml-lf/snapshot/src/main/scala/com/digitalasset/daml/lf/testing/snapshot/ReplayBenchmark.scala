@@ -7,7 +7,7 @@ package testing.snapshot
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.speedy.metrics.{StepCount, TxNodeCount}
 import com.digitalasset.daml.lf.value.ContractIdVersion
-import org.openjdk.jmh.annotations._
+import org.openjdk.jmh.annotations.*
 
 import java.nio.file.Paths
 import java.util.concurrent.TimeUnit

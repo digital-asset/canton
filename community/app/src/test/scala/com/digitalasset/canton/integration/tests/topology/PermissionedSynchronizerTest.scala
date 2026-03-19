@@ -7,6 +7,7 @@ import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.*
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authorization
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
 import com.digitalasset.canton.admin.api.client.data.OnboardingRestriction
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
@@ -276,6 +277,7 @@ sealed trait PermissionedSynchronizerTest
 //  registerPlugin(new UseBftSequencer(loggerFactory))
 //}
 
+@UnstableTest // TODO(#24337)
 final class PermissionedSynchronizerTestPostgres extends PermissionedSynchronizerTest {
   registerPlugin(new UseBftSequencer(loggerFactory))
   registerPlugin(new UsePostgres(loggerFactory))

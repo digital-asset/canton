@@ -151,7 +151,7 @@ object SValue {
   /** A closure consisting of an expression together with the values the
     * expression is closing over.
     * The [[label]] field is only used during profiling. During non-profiling
-    * runs it is always set to [[null]].
+    * runs it is always set to `null`.
     * During profiling, whenever a closure whose [[label]] has been set is
     * entered, we write an "open event" with the label and when the closure is
     * left, we write a "close event" with the same label.

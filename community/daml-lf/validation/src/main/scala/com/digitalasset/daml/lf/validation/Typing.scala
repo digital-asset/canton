@@ -35,7 +35,7 @@ private[validation] object Typing {
       works match {
         case Nil => k(acc.reverse)
         case work :: works =>
-          Bind(work, { x: T => loop(x :: acc, works) })
+          Bind(work, { (x: T) => loop(x :: acc, works) })
       }
     }
     loop(Nil, works)
@@ -890,7 +890,7 @@ private[validation] object Typing {
           Ret(f -> ty)
         }
       }.toList) { xs =>
-        Ret(Struct.fromSeq(xs).fold(name => throw EDuplicateField(ctx, name), TStruct))
+        Ret(Struct.fromSeq(xs).fold(name => throw EDuplicateField(ctx, name), TStruct.apply))
       }
     }
 
@@ -1603,7 +1603,7 @@ private[validation] object Typing {
   }
 
   private def typeConAppToType(app: TypeConApp): Type = app match {
-    case TypeConApp(tcon, targs) => targs.foldLeft[Type](TTyCon(tcon))(TApp)
+    case TypeConApp(tcon, targs) => targs.foldLeft[Type](TTyCon(tcon))(TApp.apply)
   }
 
   private[this] class ExpectedPatterns(val number: Int, patterns: => Iterator[CasePat]) {

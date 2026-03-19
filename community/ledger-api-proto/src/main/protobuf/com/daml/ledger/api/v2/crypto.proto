@@ -53,24 +53,36 @@ enum CryptoKeyFormat {
 
 message SigningPublicKey {
   // The serialization format of the public key
+  //
+  // Required
   CryptoKeyFormat format = 1;
 
   // Serialized public key in the format specified above
+  //
+  // Required: must be non-empty
   bytes key_data = 2;
 
   // The key specification
+  //
+  // Required
   SigningKeySpec key_spec = 3;
 }
 
 message Signature {
+  // Required
   SignatureFormat format = 1;
 
+  // Required: must be non-empty
   bytes signature = 2;
 
   // The fingerprint/id of the keypair used to create this signature and needed to verify.
+  //
+  // Required
   string signed_by = 3;
 
   // The signing algorithm specification used to produce this signature
+  //
+  // Required
   SigningAlgorithmSpec signing_algorithm_spec = 4;
 }
 

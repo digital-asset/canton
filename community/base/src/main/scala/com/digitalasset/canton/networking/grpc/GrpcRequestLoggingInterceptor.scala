@@ -42,10 +42,9 @@ class GrpcRequestLoggingInterceptor(
       next: ServerCallHandler[ReqT, RespT],
   ): ServerCall.Listener[ReqT] = {
     val requestTraceContext: TraceContext = TraceContextGrpc.fromGrpcContextOrNew("logger")
-    val remoteAddr = call.getAttributes.get(Grpc.TRANSPORT_ATTR_REMOTE_ADDR)
     val method = call.getMethodDescriptor.getFullMethodName
 
-    val (transport, clientAddr) = GrpcAddressHelper.extractTransport(remoteAddr)
+    val (transport, clientAddr) = GrpcAddressHelper.extractTransportFromHeaders(call, headers)
     val callMetadata = CallMetadata(
       apiEndpoint = show"${method.readableLoggerName(config.maxMethodLength)}",
       transport = transport,
@@ -306,7 +305,52 @@ class ApiRequestLoggerBase(
   }
 }
 object GrpcAddressHelper {
-  def extractTransport(
+
+  // Standard header set by reverse proxies and load balancers to convey the original client IP.
+  // Contains a comma-separated list of IPs when multiple proxies are involved; the first entry
+  // is the original client IP. See https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/X-Forwarded-For
+  private val X_FORWARDED_FOR_KEY: Metadata.Key[String] =
+    Metadata.Key.of("x-forwarded-for", Metadata.ASCII_STRING_MARSHALLER)
+
+  // Set by Envoy proxy to a single trusted client IP, derived from x-forwarded-for after
+  // stripping untrusted hops based on Envoy's trusted-hop configuration.
+  // Preferred over x-forwarded-for when present as it is already sanitised by Envoy.
+  // See https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/headers#x-envoy-external-address
+  private val X_ENVOY_EXTERNAL_ADDRESS_KEY: Metadata.Key[String] =
+    Metadata.Key.of("x-envoy-external-address", Metadata.ASCII_STRING_MARSHALLER)
+
+  def extractClientIP[ReqT, RespT](
+      call: ServerCall[ReqT, RespT],
+      headers: Metadata,
+  ): String =
+    extractProxyAddress(headers)
+      .getOrElse {
+        val remoteAddr = call.getAttributes.get(Grpc.TRANSPORT_ATTR_REMOTE_ADDR)
+        if (remoteAddr != null) remoteAddr.toString else "unknown"
+      }
+
+  def extractTransportFromHeaders[ReqT, RespT](
+      call: ServerCall[ReqT, RespT],
+      headers: Metadata,
+  ): (TransportType, Either[String, InetSocketAddress]) = {
+    val proxyClientAddr: Option[String] = extractProxyAddress(headers)
+    proxyClientAddr match {
+      case Some(addr) =>
+        (TransportType.Grpc, Left(addr))
+      case None =>
+        val remoteAddr = call.getAttributes.get(Grpc.TRANSPORT_ATTR_REMOTE_ADDR)
+        extractTransport(remoteAddr)
+    }
+  }
+
+  private def extractProxyAddress(headers: Metadata) = {
+    val envoyAddr = Option(headers.get(X_ENVOY_EXTERNAL_ADDRESS_KEY))
+    val forwardedFor = Option(headers.get(X_FORWARDED_FOR_KEY)).map(_.split(",").head.trim)
+    val proxyClientAddr = envoyAddr.orElse(forwardedFor)
+    proxyClientAddr
+  }
+
+  private def extractTransport(
       remoteAddr: SocketAddress
   ): (TransportType, Either[String, InetSocketAddress]) =
     remoteAddr match {
@@ -317,6 +361,7 @@ object GrpcAddressHelper {
       case other =>
         (TransportType.Grpc, Left(s"unknown: $other"))
     }
+
 }
 
 /** Metadata collected about an Api call for logging purposes. apiEndpoint: The API endpoint being

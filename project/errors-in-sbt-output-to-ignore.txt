@@ -34,7 +34,7 @@ project/base/errors
 protobuf/lib/google/rpc/error_details\.proto
 
 # Name of the sbt command
-^"testOnly .*"
+^".*testOnly .*"
 ^checkErrors$
 
 # Sometimes SBT can't auth at Azure and re-try it

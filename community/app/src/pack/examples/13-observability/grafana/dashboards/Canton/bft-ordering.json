@@ -353,7 +353,7 @@
         "type": "prometheus",
         "uid": "$DS"
       },
-      "description": "Total number of blocks ordered and output to the read path. When there is no traffic, a block can be empty.",
+      "description": "Latest block number ordered and available for the read path. When there is no traffic, a block can be empty.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -406,7 +406,7 @@
             "uid": "$DS"
           },
           "editorMode": "code",
-          "expr": "sum(daml_sequencer_bftordering_global_ordered_blocks_total{reporting_sequencer=\"$reporting_sequencer\"})",
+          "expr": "daml_sequencer_bftordering_global_block_number{reporting_sequencer=\"$reporting_sequencer\"}",
           "format": "time_series",
           "hide": false,
           "instant": true,
@@ -415,7 +415,7 @@
           "refId": "A"
         }
       ],
-      "title": "Total Output Blocks",
+      "title": "Latest Block Number",
       "type": "stat"
     },
     {
@@ -1403,7 +1403,7 @@
           "disableTextWrap": false,
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(irate(daml_sequencer_bftordering_global_ordered_blocks_total{reporting_sequencer=\"$reporting_sequencer\"}[$__rate_interval]))",
+          "expr": "sum(irate(daml_sequencer_bftordering_global_block_number{reporting_sequencer=\"$reporting_sequencer\"}[$__rate_interval]))",
           "format": "time_series",
           "fullMetaSearch": false,
           "hide": false,
@@ -1422,7 +1422,7 @@
             "uid": "$DS"
           },
           "editorMode": "code",
-          "expr": "irate(daml_sequencer_bftordering_global_ordered_blocks_total{reporting_sequencer=\"$reporting_sequencer\", is_block_empty=\"true\"}[$__rate_interval])",
+          "expr": "irate(daml_sequencer_bftordering_global_block_number{reporting_sequencer=\"$reporting_sequencer\", is_block_empty=\"true\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Empty blocks -",
           "range": true,

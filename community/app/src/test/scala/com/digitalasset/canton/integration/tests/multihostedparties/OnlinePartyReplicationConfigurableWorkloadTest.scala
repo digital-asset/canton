@@ -4,6 +4,7 @@
 package com.digitalasset.canton.integration.tests.multihostedparties
 
 import com.digitalasset.canton.BaseTest.CantonLfV21
+import com.digitalasset.canton.annotations.RollbackTest
 import com.digitalasset.canton.config.PositiveFiniteDuration
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.console.{LocalParticipantReference, ParticipantReference}
@@ -268,6 +269,7 @@ trait OnlinePartyReplicationConfigurableWorkloadTest
   }
 }
 
+@RollbackTest
 class OnlinePartyReplicationWithIndexerPausingAndArbitraryWorkloadTestH2
     extends OnlinePartyReplicationConfigurableWorkloadTest {
   registerPlugin(new UseH2(loggerFactory))
@@ -275,6 +277,7 @@ class OnlinePartyReplicationWithIndexerPausingAndArbitraryWorkloadTestH2
   override protected def pauseIndexer: Boolean = true
 }
 
+@RollbackTest
 class OnlinePartyReplicationWithOnlineIndexingAndLimitedWorkloadTestPostgres
     extends OnlinePartyReplicationConfigurableWorkloadTest {
   registerPlugin(new UsePostgres(loggerFactory))

@@ -452,6 +452,7 @@ class SyncPersistentStateManager(
         parameters.processingTimeouts,
         futureSupervisor,
         parameters.cachingConfigs,
+        parameters.enableAdditionalConsistencyChecks,
         parameters.batchingConfig,
         topologyConfig,
         participantId,

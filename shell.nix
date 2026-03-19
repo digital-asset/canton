@@ -11,7 +11,7 @@ in
 pkgs.mkShell {
   packages = with pkgs; [
     (ammonite_2_13.override { inherit jre; })
-    awscli
+    awscli2
     azure-storage-azcopy
     bashInteractive
     buf
@@ -19,8 +19,8 @@ pkgs.mkShell {
     curl
     dpm
     (flyway.override { jre_headless = jre; })
-    gitAndTools.gh
-    gitAndTools.hub
+    gh
+    hub
     gitMinimal
     glibcLocales
     gnugrep
@@ -38,7 +38,7 @@ pkgs.mkShell {
     oras
     pigz
     postgresql_17
-    (python3.withPackages (pkgs: [ pkgs.datadog pkgs.sphinx pkgs.sphinx_rtd_theme pkgs.sphinx-togglebutton pkgs.sphinx-copybutton pkgs.sphinx-tabs pkgs.pip pkgs.setuptools pkgs.cryptography pkgs.grpcio-tools pkgs.protobuf pkgs.pandas pkgs.dash pkgs.plotly ]))
+    (python3.withPackages (pkgs: [ pkgs.datadog pkgs.sphinx pkgs.sphinx-rtd-theme pkgs.sphinx-togglebutton pkgs.sphinx-copybutton pkgs.sphinx-tabs pkgs.sphinxcontrib-mermaid pkgs.pip pkgs.setuptools pkgs.cryptography pkgs.grpcio-tools pkgs.protobuf pkgs.pandas pkgs.dash pkgs.plotly pkgs.roman ]))
     ripgrep
     toxiproxy
     unzip

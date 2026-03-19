@@ -50,6 +50,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.ConsensusMessage.SegmentCompletedEpoch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.Consensus.SegmentCancelledEpoch
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.*
+import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.Start
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.{
   Availability,
   Consensus,
@@ -2124,6 +2125,66 @@ class IssSegmentModuleTest
               ) if pp.block.proofs.isEmpty =>
         }
         succeed
+      }
+    }
+
+    "receiving commit certificate during view-change" should {
+      "not create a PbftTimeout" in {
+        implicit val context: ProgrammableUnitTestContext[ConsensusSegment.Message] =
+          new ProgrammableUnitTestContext
+        val consensusBuffer =
+          new ArrayBuffer[Consensus.Message[ProgrammableUnitTestEnv]](defaultBufferSize)
+        val segmentModule = createIssSegmentModule[ProgrammableUnitTestEnv](
+          otherNodes = otherIds.toSet,
+          leader = otherIds(0),
+          parentModuleRef = fakeRecordingModule(consensusBuffer),
+          cryptoProvider = ProgrammableUnitTestEnv.noSignatureCryptoProvider,
+        )()
+
+        val blockMetadata =
+          BlockMetadata(EpochNumber.First, segmentModule.getSegmentState.segment.firstBlockNumber)
+        segmentModule.receive(Start)
+        context.runPipedMessagesUntilNoMorePiped(segmentModule)
+        context.lastDelayedMessage shouldBe Some(
+          1 -> PbftNormalTimeout(blockMetadata, ViewNumber.First)
+        )
+
+        context.runOneDelayedMessage(segmentModule)
+        context.runPipedMessagesUntilNoMorePiped(segmentModule)
+
+        segmentModule.getSegmentState.isViewChangeInProgress shouldBe true // we are in view-change
+        context.delayedMessages shouldBe empty // and don't have any time-out scheduled
+
+        val prePrepare = PrePrepare.create(
+          blockMetadata,
+          ViewNumber.First,
+          oneRequestOrderingBlock3Ack,
+          CanonicalCommitSet(Set.empty),
+          myId,
+        )
+        val commitCertificate = CommitCertificate(
+          prePrepare.fakeSign,
+          Seq(
+            commitFromPrePrepare(prePrepare)(from = myId),
+            commitFromPrePrepare(prePrepare)(from = otherIds(0)),
+            commitFromPrePrepare(prePrepare)(from = otherIds(1)),
+          ),
+        )
+
+        segmentModule.receive(RetransmittedCommitCertificate(otherIds(0), commitCertificate))
+        context.runPipedMessagesUntilNoMorePiped(segmentModule)
+
+        // the block got ordered
+        consensusBuffer should contain(
+          Consensus.ConsensusMessage.BlockOrdered(
+            orderedBlockFromPrePrepare(prePrepare),
+            commitCertificate,
+            hasCompletedLedSegment = false,
+          )
+        )
+
+        // but we still don't have any timeout scheduled
+        context.delayedMessages shouldBe empty
       }
     }
   }

@@ -90,6 +90,7 @@ private[dao] final class UpdateReader(
           updatesStreamReader.streamUpdates(
             queryRange = queryRange,
             internalUpdateFormat = internalUpdateFormat,
+            descendingOrder = false,
           )
         )
     Source

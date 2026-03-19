@@ -3,6 +3,7 @@
 
 package com.digitalasset.canton.integration.tests.performance
 
+import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.integration.plugins.UsePostgres
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
@@ -14,6 +15,7 @@ import com.digitalasset.canton.performance.scenarios.LongRunning
 import scala.concurrent.Await
 import scala.concurrent.duration.DurationInt
 
+@UnstableTest // TODO(#31287)
 final class LongRunningSingleSynchronizerIntegrationTest
     extends CommunityIntegrationTest
     with SharedEnvironment {
@@ -70,6 +72,7 @@ sealed trait LongRunningMultiSynchronizerIntegrationTest
   }
 }
 
+@UnstableTest // TODO(#30669)
 class LongRunningMultiSynchronizerIntegrationTestPostgres
     extends LongRunningMultiSynchronizerIntegrationTest {
   registerPlugin(new UsePostgres(loggerFactory))

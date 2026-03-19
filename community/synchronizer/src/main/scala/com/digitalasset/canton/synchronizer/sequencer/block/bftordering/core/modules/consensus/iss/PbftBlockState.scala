@@ -24,7 +24,7 @@ import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framewor
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusSegment.ConsensusMessage.*
 import com.digitalasset.canton.synchronizer.sequencer.block.bftordering.framework.modules.ConsensusStatus
 import com.digitalasset.canton.time.Clock
-import com.digitalasset.canton.tracing.TraceContext
+import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.version.ProtocolVersion
 
 import scala.collection.mutable
@@ -57,7 +57,7 @@ final class PbftBlockState(
   private val isInitialView: Boolean = view == ViewNumber.First
 
   // In-memory storage for block's PBFT votes in this view
-  private var prePrepare: Option[SignedMessage[PrePrepare]] = None
+  private var prePrepare: Option[Traced[SignedMessage[PrePrepare]]] = None
   private val prepareMap = mutable.HashMap[BftNodeId, SignedMessage[Prepare]]()
   private val commitMap = mutable.HashMap[BftNodeId, SignedMessage[Commit]]()
 
@@ -87,12 +87,13 @@ final class PbftBlockState(
 
   private val prePrepareAction =
     pbftAction(_ => isInitialView && isLeaderOfThisView && prePrepare.isDefined) { case (_, pp) =>
-      _ =>
+      traceContext =>
         Seq(
           SendPbftMessage(
             pp,
             // on views other than the original one, the pre-prepares are stored in new-view messages
             store = Some(StorePrePrepare(pp)),
+            traceContext,
           )
         )
     }
@@ -126,17 +127,18 @@ final class PbftBlockState(
       else
         None
     } { case (prepare, _, pp) =>
-      _ =>
+      traceContext =>
         Seq(
           SendPbftMessage(
             prepare,
             store = Option.when(!isLeaderOfThisView && isInitialView)(StorePrePrepare(pp)),
+            traceContext,
           )
         )
     }
 
   private val createCommitAction = pbftAction(implicit traceContext =>
-    prePrepare.fold(false) { pp =>
+    prePrepare.fold(false) { case Traced(pp) =>
       val hasReachedQuorumOfPrepares = {
         val hash = pp.message.hash
         val (matchingHash, nonMatchingHash) = prepareMap.values.partition(_.message.hash == hash)
@@ -164,17 +166,18 @@ final class PbftBlockState(
   }
 
   private val sendCommitAction = pbftActionOpt(_ => commitMap.get(membership.myId)) {
-    (commit, _, _) => _ =>
+    (commit, _, _) => traceContext =>
       Seq(
         SendPbftMessage(
           commit,
           store = Some(StorePrepares(prepareMap.values.toSeq.sortBy(_.from))),
+          traceContext,
         )
       )
   }
 
   private val completeAction = pbftAction(implicit traceContext =>
-    prePrepare.fold(false) { pp =>
+    prePrepare.fold(false) { case Traced(pp) =>
       val hasReachedQuorumOfCommits = {
         val hash = pp.message.hash
         val (matchingHash, nonMatchingHash) = commitMap.values.partition(_.message.hash == hash)
@@ -221,9 +224,9 @@ final class PbftBlockState(
     *   a sequence of actions to be taken as a result of the state change; the order of such actions
     *   only depends on the state.
     */
-  def advance()(implicit traceContext: TraceContext): Seq[ProcessResult] =
+  def advance(): Seq[ProcessResult] =
     prePrepare
-      .map { pp =>
+      .map(_.withTraceContext({ implicit traceContext => pp =>
         val hash = pp.message.hash
 
         Seq(
@@ -233,11 +236,10 @@ final class PbftBlockState(
           createCommitAction,
           sendCommitAction,
           completeAction,
-        )
-          .flatMap { action =>
-            action.run(hash, pp)
-          }
-      }
+        ).flatMap { action =>
+          action.run(hash, pp)
+        }
+      }))
       .getOrElse(Seq.empty)
 
   def prepareVoters: Iterable[BftNodeId] = prepareMap.keys
@@ -275,7 +277,7 @@ final class PbftBlockState(
             false
           },
           { _ =>
-            prePrepare = Some(pp)
+            prePrepare = Some(Traced(pp))
             true
           },
         )
@@ -353,6 +355,7 @@ final class PbftBlockState(
     val hash =
       prePrepare
         .getOrElse(abort("The block is not complete (there is no PrePrepare)"))
+        .value
         .message
         .hash
     val commitsMatchingHash = commitMap.view.values.filter(_.message.hash == hash)
@@ -364,12 +367,14 @@ final class PbftBlockState(
   /** @return
     *   Commit certificate is defined if the block has completed consensus
     */
-  def commitCertificate: Option[CommitCertificate] =
+  def commitCertificate: Option[Traced[CommitCertificate]] =
     if (completeAction.isFired) {
-      prePrepare.map(pp =>
-        CommitCertificate(
-          pp,
-          commitMessageQuorum,
+      prePrepare.map(
+        _.map(pp =>
+          CommitCertificate(
+            pp,
+            commitMessageQuorum,
+          )
         )
       )
     } else
@@ -381,14 +386,17 @@ final class PbftBlockState(
     */
   def prepareCertificate: Option[ConsensusCertificate] =
     if (preparesStored)
-      prePrepare.map(pp =>
-        PrepareCertificate(
-          pp,
-          prepareMap.values
-            .filter(_.message.hash == pp.message.hash)
-            .toSeq
-            .sortBy(_.message.from)
-            .take(membership.orderingTopology.strongQuorum),
+      prePrepare.map(
+        _.withTraceContext(_ =>
+          pp =>
+            PrepareCertificate(
+              pp,
+              prepareMap.values
+                .filter(_.message.hash == pp.message.hash)
+                .toSeq
+                .sortBy(_.message.from)
+                .take(membership.orderingTopology.strongQuorum),
+            )
         )
       )
     else
@@ -419,7 +427,7 @@ final class PbftBlockState(
         && isInitialView // for views later than the first, the pre-prepare will be included in the new-view message
         && (prePrepareStored || !isLeaderOfThisView) // if we're the leader, we only retransmit if we've stored the pre-prepare (the initial send also follows this rule)
       )
-        prePrepare.toList
+        prePrepare.toList.map(_.value)
       else Seq.empty[SignedMessage[PbftNetworkMessage]]
 
     def missingMessages[M <: PbftNetworkMessage](
@@ -461,9 +469,11 @@ object PbftBlockState {
   final case class SendPbftMessage[MessageT <: PbftNetworkMessage](
       pbftMessage: SignedMessage[MessageT],
       store: Option[StoreResult],
+      traceContext: TraceContext,
   ) extends ProcessResult
   final case class CompletedBlock(
-      commitCertificate: CommitCertificate
+      commitCertificate: CommitCertificate,
+      traceContext: TraceContext,
   ) extends ProcessResult
   final case class ViewChangeStartNestedTimer(blockMetadata: BlockMetadata, viewNumber: ViewNumber)
       extends ProcessResult

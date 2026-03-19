@@ -546,6 +546,30 @@ trait DamlPackageStoreTest extends AsyncWordSpec with BaseTest with HasExecution
       }
     }
 
+    "batch query for a set of package ids" inUS {
+      val store = mk()
+      for {
+        res1 <- store.filterExisting(Set(packageId, packageId2))
+        res2 <- store.filterExisting(Set.empty)
+        _ <- store.append(
+          List((packageInfo, damlPackage), (packageInfo2, damlPackage2)),
+          uploadedAt,
+          dar,
+        )
+        res3 <- store.filterExisting(Set(packageId, packageId2))
+        res4 <- store.filterExisting(Set.empty)
+        res5 <- store.filterExisting(Set(packageId))
+        _ <- store.removePackage(packageId2)
+        res6 <- store.filterExisting(Set(packageId, packageId2))
+      } yield {
+        res1 shouldBe empty
+        res2 shouldBe empty
+        res3 shouldBe Set(packageId, packageId2)
+        res4 shouldBe empty
+        res5 shouldBe Set(packageId)
+        res6 shouldBe Set(packageId)
+      }
+    }
   }
 
 }

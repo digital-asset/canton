@@ -147,16 +147,15 @@ class SBuiltinInterfaceUpgradeImplementationTest extends AnyFreeSpec with Matche
     val cid = Value.ContractId.V1(crypto.Hash.hashPrivateKey("test"))
     val Ast.TTyCon(tplId) = t"Mod:T" (implemParserParams(contractVersion))
     val tplPayload = Value.ValueRecord(None, ImmArray(None -> Value.ValueParty(alice)))
-    val contracts = Map[Value.ContractId, FatContractInstance](
-      cid ->
-        TransactionBuilder.fatContractInstanceWithDummyDefaults(
-          version = SerializationVersion.StableVersions.max,
-          packageName = implemPkgName,
-          template = tplId,
-          arg = tplPayload,
-          signatories = List(alice),
-        )
+    val contract = TransactionBuilder.fatContractInstanceWithDummyDefaults(
+      version = SerializationVersion.StableVersions.max,
+      packageName = implemPkgName,
+      template = tplId,
+      arg = tplPayload,
+      signatories = List(alice),
+      contractId = cid,
     )
+    val contracts = Map[Value.ContractId, FatContractInstance](contract.contractId -> contract)
 
     evalApp(
       e"\(cid: ContractId Mod:IfaceB) -> exercise_interface @Mod:IfaceB MyChoiceB cid ()" (
@@ -329,15 +328,15 @@ class SBuiltinInterfaceUpgradeViewTest extends AnyFreeSpec with Matchers with In
   val cid = Value.ContractId.V1(crypto.Hash.hashPrivateKey("test"))
   val Ast.TTyCon(tplV1Id) = t"Mod:T" (implemParserParams(1))
   val tplV1Payload = Value.ValueRecord(None, ImmArray(None -> Value.ValueParty(alice)))
-  val contracts = Map[Value.ContractId, FatContractInstance](
-    cid -> TransactionBuilder.fatContractInstanceWithDummyDefaults(
-      version = SerializationVersion.StableVersions.max,
-      packageName = implemPkgName,
-      template = tplV1Id,
-      arg = tplV1Payload,
-      signatories = List(alice),
-    )
+  val contract = TransactionBuilder.fatContractInstanceWithDummyDefaults(
+    version = SerializationVersion.StableVersions.max,
+    packageName = implemPkgName,
+    template = tplV1Id,
+    arg = tplV1Payload,
+    signatories = List(alice),
+    contractId = cid,
   )
+  val contracts = Map[Value.ContractId, FatContractInstance](contract.contractId -> contract)
 
   "fetch_interface" - {
     "should not reject inconsistent view upgrades" in {
@@ -470,21 +469,21 @@ class SBuiltinInterfaceTest(languageVersion: LanguageVersion, compilerConfig: Co
         val cid = Value.ContractId.V1(crypto.Hash.hashPrivateKey("test"))
         val Ast.TTyCon(tplId) = t"ViewErrorTest:T"
         val tplPayload = Value.ValueRecord(None, ImmArray(None -> Value.ValueParty(alice)))
+        val contract = TransactionBuilder.fatContractInstanceWithDummyDefaults(
+          version = SerializationVersion.StableVersions.max,
+          packageName = basePkg.pkgName,
+          template = tplId,
+          arg = tplPayload,
+          signatories = List(alice),
+          contractId = cid,
+        )
 
         inside(
           evalApp(
             e"\(cid: ContractId I0:I0) -> ViewErrorTest:exercise_interface_with_view_error cid",
             ArraySeq(SContractId(cid), SToken),
             packageResolution = pkgNameMap,
-            getContract = Map(
-              cid -> TransactionBuilder.fatContractInstanceWithDummyDefaults(
-                version = SerializationVersion.StableVersions.max,
-                packageName = basePkg.pkgName,
-                template = tplId,
-                arg = tplPayload,
-                signatories = List(alice),
-              )
-            ),
+            getContract = Map(contract.contractId -> contract),
             getPkg = PartialFunction.empty,
             compiledPackages = compiledBasePkgs,
             committers = Set(alice),
@@ -500,21 +499,21 @@ class SBuiltinInterfaceTest(languageVersion: LanguageVersion, compilerConfig: Co
         val cid = Value.ContractId.V1(crypto.Hash.hashPrivateKey("test"))
         val Ast.TTyCon(tplId) = t"ViewErrorTest:T"
         val tplPayload = Value.ValueRecord(None, ImmArray(None -> Value.ValueParty(alice)))
+        val contract = TransactionBuilder.fatContractInstanceWithDummyDefaults(
+          version = SerializationVersion.StableVersions.max,
+          packageName = basePkg.pkgName,
+          template = tplId,
+          arg = tplPayload,
+          signatories = List(alice),
+          contractId = cid,
+        )
 
         inside(
           evalApp(
             e"\(cid: ContractId I0:I0) -> ViewErrorTest:fetch_interface_with_view_error cid",
             ArraySeq(SContractId(cid), SToken),
             packageResolution = pkgNameMap,
-            getContract = Map(
-              cid -> TransactionBuilder.fatContractInstanceWithDummyDefaults(
-                version = SerializationVersion.StableVersions.max,
-                packageName = basePkg.pkgName,
-                template = tplId,
-                arg = tplPayload,
-                signatories = List(alice),
-              )
-            ),
+            getContract = Map(contract.contractId -> contract),
             getPkg = PartialFunction.empty,
             compiledPackages = compiledBasePkgs,
             committers = Set(alice),
@@ -528,21 +527,32 @@ class SBuiltinInterfaceTest(languageVersion: LanguageVersion, compilerConfig: Co
 
         val cid = Value.ContractId.V1(crypto.Hash.hashPrivateKey("test"))
 
+        val baseContract = TransactionBuilder.fatContractInstanceWithDummyDefaults(
+          version = SerializationVersion.StableVersions.max,
+          packageName = basePkg.pkgName,
+          template = iouId,
+          arg = iouPayload,
+          signatories = List(alice),
+          observers = List(bob),
+          contractId = cid,
+        )
+
+        val extraContract = TransactionBuilder.fatContractInstanceWithDummyDefaults(
+          version = SerializationVersion.StableVersions.max,
+          packageName = extraPkg.pkgName,
+          template = extraIouId,
+          arg = iouPayload,
+          signatories = List(alice),
+          observers = List(bob),
+          contractId = cid,
+        )
+
         inside(
           evalApp(
             e"\(cid: ContractId Mod:Iface) -> fetch_interface @Mod:Iface cid",
             ArraySeq(SContractId(cid), SToken),
             packageResolution = pkgNameMap,
-            getContract = Map(
-              cid -> TransactionBuilder.fatContractInstanceWithDummyDefaults(
-                version = SerializationVersion.StableVersions.max,
-                packageName = basePkg.pkgName,
-                template = iouId,
-                arg = iouPayload,
-                signatories = List(alice),
-                observers = List(bob),
-              )
-            ),
+            getContract = Map(baseContract.contractId -> baseContract),
             getPkg = PartialFunction.empty,
             compiledPackages = compiledBasePkgs,
             committers = Set(alice),
@@ -556,16 +566,7 @@ class SBuiltinInterfaceTest(languageVersion: LanguageVersion, compilerConfig: Co
             e"\(cid: ContractId Mod:Iface) -> fetch_interface @Mod:Iface cid",
             ArraySeq(SContractId(cid), SToken),
             packageResolution = pkgNameMap,
-            getContract = Map(
-              cid -> TransactionBuilder.fatContractInstanceWithDummyDefaults(
-                version = SerializationVersion.StableVersions.max,
-                packageName = extraPkg.pkgName,
-                template = extraIouId,
-                arg = iouPayload,
-                signatories = List(alice),
-                observers = List(bob),
-              )
-            ),
+            getContract = Map(extraContract.contractId -> extraContract),
             getPkg = PartialFunction.empty,
             compiledPackages = compiledBasePkgs,
             committers = Set(alice),
@@ -579,16 +580,7 @@ class SBuiltinInterfaceTest(languageVersion: LanguageVersion, compilerConfig: Co
             e"\(cid: ContractId Mod:Iface) -> fetch_interface @Mod:Iface cid",
             ArraySeq(SContractId(cid), SToken),
             packageResolution = pkgNameMap,
-            getContract = Map(
-              cid -> TransactionBuilder.fatContractInstanceWithDummyDefaults(
-                version = SerializationVersion.StableVersions.max,
-                packageName = extraPkg.pkgName,
-                template = extraIouId,
-                arg = iouPayload,
-                signatories = List(alice),
-                observers = List(bob),
-              )
-            ),
+            getContract = Map(extraContract.contractId -> extraContract),
             getPkg = { case `extraPkgId` =>
               compiledExtendedPkgs
             },
@@ -764,7 +756,8 @@ object EvalHelpers {
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       getPkg: PartialFunction[Ref.PackageId, CompiledPackages] = PartialFunction.empty,
       getContract: PartialFunction[Value.ContractId, FatContractInstance] = PartialFunction.empty,
-      getKey: PartialFunction[GlobalKeyWithMaintainers, Value.ContractId] = PartialFunction.empty,
+      getKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] =
+        PartialFunction.empty,
       compiledPackages: PureCompiledPackages,
       committers: Set[Ref.Party],
   ): Try[Either[SError, SValue]] =
@@ -773,7 +766,7 @@ object EvalHelpers {
       packageResolution,
       getPkg,
       getContract,
-      getKey,
+      getKeys,
       compiledPackages,
       committers,
     )
@@ -783,7 +776,7 @@ object EvalHelpers {
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       getPkg: PartialFunction[Ref.PackageId, CompiledPackages] = PartialFunction.empty,
       getContract: PartialFunction[Value.ContractId, FatContractInstance],
-      getKey: PartialFunction[GlobalKeyWithMaintainers, Value.ContractId],
+      getKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]],
       compiledPackages: PureCompiledPackages,
       committers: Set[Ref.Party],
   ): Try[Either[SError, SValue]] = {
@@ -795,7 +788,7 @@ object EvalHelpers {
         updateSE = SELet1(e, SEMakeClo(ArraySeq(SELocS(1)), 1, SELocF(0))),
         committers = committers,
       )
-    Try(SpeedyTestLib.run(machine, getPkg, getContract, getKey))
+    Try(SpeedyTestLib.run(machine, getPkg, getContract, getKeys))
   }
 
 }

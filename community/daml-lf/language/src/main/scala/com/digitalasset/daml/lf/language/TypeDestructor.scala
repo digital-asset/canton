@@ -109,7 +109,7 @@ final class TypeDestructor(pkgInterface: PackageInterface) {
       args: List[Ast.Type],
       shouldCheckDataSerializable: Boolean,
   ): Either[TypeDestructor.Error, SerializableTypeF[Ast.Type]] = {
-    def prettyType = args.foldLeft(typ0)(Ast.TApp).pretty
+    def prettyType = args.foldLeft(typ0)(Ast.TApp.apply).pretty
 
     def unserializableType = TypeDestructor.Error.TypeError(s"unserializableType type $prettyType")
 
@@ -118,7 +118,7 @@ final class TypeDestructor(pkgInterface: PackageInterface) {
     typ0 match {
       case Ast.TSynApp(tysyn, synArgs) =>
         for {
-          synDef <- pkgInterface.lookupTypeSyn(tysyn).left.map(TypeDestructor.Error.LookupError)
+          synDef <- pkgInterface.lookupTypeSyn(tysyn).left.map(TypeDestructor.Error.LookupError.apply)
           params = synDef.params
           subst <- Either.cond(
             params.length == synArgs.length,
@@ -133,9 +133,9 @@ final class TypeDestructor(pkgInterface: PackageInterface) {
           pkg <- pkgInterface
             .lookupPackage(tycon.packageId)
             .left
-            .map(TypeDestructor.Error.LookupError)
+            .map(TypeDestructor.Error.LookupError.apply)
           pkgName = pkg.metadata.name
-          dataDef <- pkgInterface.lookupDataType(tycon).left.map(TypeDestructor.Error.LookupError)
+          dataDef <- pkgInterface.lookupDataType(tycon).left.map(TypeDestructor.Error.LookupError.apply)
           _ <- Either.cond(
             dataDef.serializable || !shouldCheckDataSerializable,
             (),

@@ -10,30 +10,28 @@ import com.digitalasset.canton.tracing.TraceContext
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 
-import scala.collection.SortedSet
-import scala.concurrent.Future
-
 /** Who gets notified that a event has been written */
 sealed trait WriteNotification {
   def union(notification: WriteNotification): WriteNotification
-  def isBroadcastOrIncludes(memberId: SequencerMemberId): Boolean
+  def memberIds: Set[SequencerMemberId]
+  def isBroadcast: Boolean
 }
 
 object WriteNotification {
 
   case object None extends WriteNotification {
     override def union(notification: WriteNotification): WriteNotification = notification
-    override def isBroadcastOrIncludes(memberId: SequencerMemberId): Boolean = false
+    override def memberIds: Set[SequencerMemberId] = Set.empty
+    override def isBroadcast: Boolean = false
   }
-  final case class Members(memberIds: SortedSet[SequencerMemberId]) extends WriteNotification {
+  final case class Members(memberIds: Set[SequencerMemberId]) extends WriteNotification {
     override def union(notification: WriteNotification): WriteNotification =
       notification match {
         case Members(newMemberIds) => Members(memberIds ++ newMemberIds)
         case None => this
       }
 
-    override def isBroadcastOrIncludes(memberId: SequencerMemberId): Boolean =
-      memberIds.contains(memberId) || memberIds.contains(SequencerMemberId.Broadcast)
+    override def isBroadcast: Boolean = memberIds.contains(SequencerMemberId.Broadcast)
 
     override def toString: String = s"Members(${memberIds.map(_.unwrap).mkString(",")})"
   }
@@ -52,9 +50,7 @@ case object ReadSignal extends ReadSignal
   * attempt fetching events from its store.
   */
 trait EventSignaller extends AutoCloseable {
-  def notifyOfLocalWrite(notification: WriteNotification)(implicit
-      traceContext: TraceContext
-  ): Future[Unit]
+  def notifyOfLocalWrite(notification: WriteNotification): Unit
   def readSignalsForMember(member: Member, memberId: SequencerMemberId)(implicit
       traceContext: TraceContext
   ): Source[ReadSignal, NotUsed]

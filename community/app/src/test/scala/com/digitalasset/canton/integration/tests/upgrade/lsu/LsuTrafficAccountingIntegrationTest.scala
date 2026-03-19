@@ -25,6 +25,7 @@ import com.digitalasset.canton.integration.tests.examples.IouSyntax
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.sequencing.traffic.TrafficControlErrors
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
+import com.digitalasset.canton.synchronizer.sequencer.traffic.LsuTrafficState
 import com.digitalasset.canton.topology.{Party, SynchronizerId}
 import org.scalatest.time.SpanSugar.convertIntToGrainOfTime
 
@@ -231,6 +232,27 @@ abstract class LsuTrafficAccountingIntegrationTest extends LsuBase with TrafficB
         loggerFactory.assertThrowsAndLogs[CommandFailure](
           sequencer3.traffic_control.traffic_state_of_all_members(),
           _.shouldBeCantonErrorCode(TrafficControlErrors.LsuTrafficNotInitialized),
+        )
+      }
+
+      clue("test the check for all members to be present") {
+        val oldTrafficStateSeq1Parsed = LsuTrafficState
+          .fromByteString(testedProtocolVersion, oldTrafficStateSeq1)
+          .valueOrFail("Failed to parse traffic state from sequencer1")
+
+        val missingParticipant1 = LsuTrafficState(oldTrafficStateSeq1Parsed.membersTraffic.filter {
+          case (member, _) =>
+            member != participant1.id.member
+        })(LsuTrafficState.protocolVersionRepresentativeFor(testedProtocolVersion)).toByteString
+
+        loggerFactory.assertThrowsAndLogs[CommandFailure](
+          sequencer3.traffic_control.set_lsu_state(missingParticipant1),
+          log => {
+            log.shouldBeCantonErrorCode(SequencerError.InvalidTrafficState)
+            log.errorMessage should (include(
+              "The provided traffic states must contain traffic state for all members"
+            ) and include(participant1.id.toString))
+          },
         )
       }
 

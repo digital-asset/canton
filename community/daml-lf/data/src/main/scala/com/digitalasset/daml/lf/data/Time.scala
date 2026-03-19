@@ -86,7 +86,7 @@ object Time {
 
   }
 
-  case class Timestamp private (micros: Long) extends Ordered[Timestamp] {
+  case class Timestamp private[digitalasset] (micros: Long) extends Ordered[Timestamp] {
 
     override def toString: String =
       Timestamp.formatter.format(toInstant)

@@ -42,6 +42,14 @@ object PromiseUnlessShutdown {
     wrap(supervisedPromise)
   }
 
+  /** Creates a promise that is already completed with the given value as a
+    * [[UnlessShutdown.Outcome]].
+    */
+  def successful[A](value: A): PromiseUnlessShutdown[A] =
+    wrap(Promise.successful(UnlessShutdown.Outcome(value)))
+
+  val unit: PromiseUnlessShutdown[Unit] = successful(())
+
   /** Creates a supervised promise that will be completed with
     * [[UnlessShutdown.AbortedDueToShutdown]] when the `hasRunOnClosing` is closed, unless the
     * promise had been completed before.

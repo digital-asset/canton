@@ -8,7 +8,7 @@ import org.scalatest.matchers.should.Matchers
 import org.scalatest.matchers.{MatchResult, Matcher}
 import scalaz.Equal
 
-/** Provides the `equalz` [[Matcher]].
+/** Provides the `equalz` [[org.scalatest.matchers.Matcher]].
   *
   * {{{
   *   Some(42) should equalz (some(42))
@@ -43,7 +43,9 @@ trait Equalz extends Matchers {
           )
     }
 
-  /** An improved design for [[MatcherFactory1]]; see [[XMatcherFactory1]]. */
+  /** An improved design for [[org.scalatest.matchers.dsl.MatcherFactory1]]; see
+    * [[com.daml.scalatest.Equalz.XMatcherFactory1]].
+    */
   implicit final class XAnyShouldWrapper[L](private val leftHandSide: L) {
     def shouldx(mf: XMatcherFactory1[L])(implicit ev: mf.TC[L]) =
       (leftHandSide: AnyShouldWrapper[L]) should mf.matcher[L]

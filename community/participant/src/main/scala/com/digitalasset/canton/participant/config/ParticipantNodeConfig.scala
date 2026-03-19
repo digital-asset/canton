@@ -38,7 +38,6 @@ import com.digitalasset.canton.version.{ParticipantProtocolVersion, ProtocolVers
 import io.grpc.netty.shaded.io.netty.handler.ssl.SslContext
 import monocle.macros.syntax.lens.*
 
-import java.nio.file.Path
 import scala.concurrent.duration.DurationInt
 
 /** Base for all participant configs - both local and remote */
@@ -132,7 +131,17 @@ object ParticipantNodeConfig {
           "http-ledger-api.server",
           since = "3.4.0",
           to = Seq("http-ledger-api"),
-        )
+        ),
+        DeprecatedConfigUtils.MovedConfigPath(
+          "features.profileDir",
+          since = "3.5.0",
+          to = Seq("parameters.engine"),
+        ),
+        DeprecatedConfigUtils.MovedConfigPath(
+          "features.snapshotDir",
+          since = "3.5.0",
+          to = Seq("parameters.engine"),
+        ),
       )
     }
   }
@@ -140,17 +149,8 @@ object ParticipantNodeConfig {
   object DeprecatedImplicits extends ParticipantNodeConfigDeprecationsImplicits
 }
 
-/** Participant features configuration
-  *
-  * @param profileDir
-  *   path to the directory used for Daml profiling
-  * @param snapshotDir
-  *   path to the directory used for saving transaction tree snapshots
-  */
-final case class ParticipantFeaturesConfig(
-    profileDir: Option[Path] = None,
-    snapshotDir: Option[Path] = None,
-)
+/** Participant features configuration */
+final case class ParticipantFeaturesConfig()
 
 /** Configuration to connect the console to a participant running remotely.
   *

@@ -9,14 +9,7 @@ import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data._
 import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.transaction.{
-  FatContractInstance,
-  Node,
-  NodeId,
-  SerializationVersion,
-  SubmittedTransaction,
-  Transaction,
-}
+import com.digitalasset.daml.lf.transaction.{ContractStateMachine, FatContractInstance, Node, NodeId, SerializationVersion, SubmittedTransaction, Transaction}
 import com.digitalasset.daml.lf.value.Value._
 import com.digitalasset.daml.lf.command.ReplayCommand
 import com.daml.logging.LoggingContext
@@ -78,6 +71,8 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
     )
   )
 
+  private val contractStateMode = ContractStateMachine.Mode.default
+
   private val engine = freshEngine
 
   def Top(xs: Shape*) = Shape.Top(xs.toList)
@@ -99,6 +94,7 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
         time,
         time,
         contractIdVersion,
+        contractStateMode,
       )
       .consume(pcs = defaultContracts, pkgs = allPackages)
     res match {
@@ -221,6 +217,7 @@ class ReinterpretTest(majorLanguageVersion: LanguageVersion.Major)
           time,
           time,
           contractIdVersion,
+          contractStateMode,
         )
         .consume(pkgs = trackPackageQueries)
       pkgIds.toSet shouldBe queriedPackageIds

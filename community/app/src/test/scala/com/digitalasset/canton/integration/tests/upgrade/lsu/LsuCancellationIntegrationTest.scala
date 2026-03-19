@@ -211,6 +211,10 @@ final class LsuCancellationIntegrationTest extends LsuBase {
         _.shouldBeCantonErrorCode(SequencerError.NoOngoingLsu),
       )
 
+      // With a cancelled LSU there's no LSU tick, so we need to create some traffic
+      // for participant to observe time moving past the upgrade time
+      participant1.health.ping(participant1)
+
       // Call should fail if no upgrade is ongoing
       eventually() {
         participant1.underlying.value.sync

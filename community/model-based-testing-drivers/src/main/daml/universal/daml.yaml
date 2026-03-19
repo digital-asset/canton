@@ -1,0 +1,20 @@
+# Copyright (c) 2026 Digital Asset (Switzerland) GmbH and/or its affiliates. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+override-components:
+  damlc:
+    version: $DAML_VERSION
+  daml-script:
+    version: $DAML_VERSION
+  codegen:
+    version: $DAML_VERSION
+build-options:
+- --target=2.dev
+name: universal
+source: .
+version: 1.0.0
+data-dependencies:
+- ../../../target/scala-2.13/resource_managed/main/rollback-exception.dar
+dependencies:
+- daml-prim
+- daml-stdlib

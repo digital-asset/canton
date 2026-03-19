@@ -247,11 +247,11 @@ template NodeSeeds
         cid : ContractId K
       controller p
       do _ <- fetch cid
-         Some _ <- lookupByKey @K (p, 0)
+         Some _ <- lookupByKey @K (p, 777)
          create (K p 1 "")
          try do
            _ <- fetch cid
-           Some _ <- lookupByKey @K (p, 0)
+           Some _ <- lookupByKey @K (p, 777)
            create (K p 2 "")
            throw E
          catch

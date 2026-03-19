@@ -194,6 +194,8 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
           synchronizerUpgradeTime = None,
           NoPackageDependencies,
           CachingConfigs(),
+          // turn off consistency checks for performance tests
+          enableConsistencyChecks = false,
           TopologyConfig(),
           timeouts,
           futureSupervisor,

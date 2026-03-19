@@ -68,12 +68,25 @@ class ReferenceSequencerDriver(
     with NamedLogging
     with FlagCloseableAsync {
 
-  private lazy val (sendQueue, done) = {
+  private lazy val ((sendQueue, tickKillSwitch), done) = {
     implicit val errorLoggingCtx: ErrorLoggingContext = errorLoggingContext(TraceContext.empty)
+
+    val tickSource =
+      (config.emptyBlockIntervalMillis match {
+        case Some(interval) =>
+          Source.tick(
+            interval.millis,
+            interval.millis,
+            TimestampedRequest.Tick,
+          )
+        case None =>
+          Source.empty[Traced[TimestampedRequest]]
+      }).viaMat(KillSwitches.single)(Keep.right)
 
     PekkoUtil.runSupervised(
       Source
         .queue[Traced[TimestampedRequest]](bufferSize = config.bufferSize)
+        .mergeMat(tickSource)(Keep.both)
         .groupedWithin(n = config.maxBlockSize, d = config.maxBlockCutMillis.millis)
         .map { requests =>
           implicit val traceContext: TraceContext =
@@ -142,6 +155,7 @@ class ReferenceSequencerDriver(
   override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     import TraceContext.Implicits.Empty.*
     Seq[AsyncOrSyncCloseable](
+      SyncCloseable("tickKillSwitch", tickKillSwitch.shutdown()),
       SyncCloseable("sendQueue", sendQueue.complete()),
       AsyncCloseable("done", done, timeouts.closing),
       SyncCloseable("store", store.close()),
@@ -196,6 +210,9 @@ object ReferenceSequencerDriver {
     *   storage configuration for requests storage
     * @param pollInterval
     *   how often to poll for new blocks in blocks subscription
+    * @param emptyBlockIntervalMillis
+    *   if defined, the driver will emit empty blocks at least every emptyBlockIntervalMillis should
+    *   there be no incoming requests
     */
   final case class Config[StorageConfigT <: StorageConfig](
       storage: StorageConfigT,
@@ -206,9 +223,14 @@ object ReferenceSequencerDriver {
       maxBlockSize: Int = 500,
       maxBlockCutMillis: Int = 1,
       maxQueryBlockCount: Int = 100,
+      emptyBlockIntervalMillis: Option[Int] = Some(500),
   )
 
   final case class TimestampedRequest(tag: String, body: ByteString, microsecondsSinceEpoch: Long)
+  private object TimestampedRequest {
+    val Tick: Traced[TimestampedRequest] =
+      Traced(TimestampedRequest("tick", ByteString.EMPTY, 0L))(TraceContext.empty)
+  }
 
   private def batchRequests(
       sequencerId: String,
@@ -222,7 +244,7 @@ object ReferenceSequencerDriver {
       TracedBatchedBlockOrderingRequests
         .of(
           batchTraceparent,
-          requests.map { case traced @ Traced(request) =>
+          requests.filterNot(_ == TimestampedRequest.Tick).map { case traced @ Traced(request) =>
             val requestTraceparent =
               traced.traceContext.asW3CTraceContext.map(_.parent).getOrElse("")
             TracedBlockOrderingRequest(

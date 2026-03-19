@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.util
 
-import cats.data.Nested
+import cats.data.{Nested, State}
 import cats.{Applicative, Eval, Id, Traverse}
 import com.digitalasset.canton.util.ReassignmentTag.{Source, Target}
 import org.apache.pekko.stream.scaladsl.Keep
@@ -42,6 +42,12 @@ trait SingletonTraverse[F[_]] extends Traverse[F] { self =>
       this,
       G,
     )
+
+  /** Akin to map, but allows to keep track of a state value when calling the function. Copied from
+    * https://github.com/typelevel/cats/blob/main/core/src/main/scala/cats/Traverse.scala
+    */
+  def mapAccumulateLegacy[S, A, B](init: S, fa: F[A])(f: (S, A) => (S, B)): (S, F[B]) =
+    traverse(fa)(a => State(s => f(s, a))).run(init).value
 }
 
 object SingletonTraverse {
@@ -111,7 +117,7 @@ object SingletonTraverse {
       F.traverse(fga)(ga => G.traverse(ga)(f))
 
     override def mapAccumulate[S, A, B](init: S, fga: F[G[A]])(f: (S, A) => (S, B)): (S, F[G[B]]) =
-      F.mapAccumulate(init, fga)((s, ga) => G.mapAccumulate(s, ga)(f))
+      F.mapAccumulateLegacy(init, fga)((s, ga) => G.mapAccumulateLegacy(s, ga)(f))
   }
 
   // Instances

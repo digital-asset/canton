@@ -4,7 +4,6 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.TestPredicateFiltersFixtureAnyWordSpec
-import com.digitalasset.canton.annotations.UnstableTest
 import com.digitalasset.canton.config.NonNegativeDuration
 import com.digitalasset.canton.console.LocalParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
@@ -40,7 +39,6 @@ import scala.concurrent.ExecutionContext
   *     - Have P1 and P3 share the DB
   *     - Ensure P1 and P3 do not run at the same
   */
-@UnstableTest // TODO(#31156)
 final class LsuPersistentHandshakeSuccessorIntegrationTest
     extends LsuBase
     with TestPredicateFiltersFixtureAnyWordSpec {

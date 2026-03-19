@@ -6,6 +6,8 @@ package com.digitalasset.canton.platform.store.dao.events
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream
 import com.digitalasset.canton.platform.store.dao.PaginatingAsyncStream.{
+  IdPage,
+  IdPageQuery,
   PaginationFromTo,
   PaginationInput,
 }
@@ -312,15 +314,19 @@ class ACSReaderSpec extends AsyncFlatSpec with BaseTest with BeforeAndAfterAll {
         initialFromIdExclusive = 0L,
         initialEndInclusive = ids.lastOption.getOrElse(0),
         descendingOrder = false,
-      )(_ =>
-        input => {
-          assert(!input.paginationFromTo.descending)
+      )(new IdPageQuery {
+        override def fetchPage(connection: Connection)(input: PaginationInput): IdPage = {
+          assert(!input.fromTo.descending)
           queries.addOne(input)
-          ids
-            .dropWhile(_ <= input.paginationFromTo.fromExclusive)
-            .take(input.limit)
+          val idsPlusOne = ids
+            .dropWhile(_ <= input.fromTo.fromExclusive)
+            .take(input.limit + 1)
+          IdPage(
+            ids = idsPlusOne.take(input.limit),
+            lastPage = idsPlusOne.sizeIs < input.limit + 1,
+          )
         }
-      )(f => Future.successful(f(mock[Connection])))
+      })(f => Future.successful(f(mock[Connection])))
       .runWith(Sink.seq[Long])
       .map { result =>
         result shouldBe ids

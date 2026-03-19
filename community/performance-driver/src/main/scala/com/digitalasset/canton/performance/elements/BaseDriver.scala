@@ -373,6 +373,7 @@ abstract class BaseDriver(
     *   duration to wait before submitting the same command (with an extended command-id) twice to
     *   simulate contention.
     */
+  @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
   protected def submitCommand(
       baseDescription: String,
       commandJava: Seq[javaapi.data.Command],

@@ -76,7 +76,7 @@ class PekkoBlockSubscription[E <: Env[E]](
           val blockHeight = block.value.blockHeight
           logger.debug(
             s"Inserting block $blockHeight into subscription Peano queue (head=${blocksPeanoQueue.head})"
-          )(TraceContext.empty)
+          )(block.traceContext)
           blocksPeanoQueue.insert(BlockNumber(blockHeight), block)
           blocksPeanoQueue.pollAvailable()
         }
@@ -129,14 +129,14 @@ class PekkoBlockSubscription[E <: Env[E]](
         }
     })
 
-  override protected def closeAsync(): Seq[AsyncOrSyncCloseable] = {
+  override def closeAsync(): Seq[AsyncOrSyncCloseable] = {
     import TraceContext.Implicits.Empty.*
     Seq[AsyncOrSyncCloseable](
-      SyncCloseable("queue.complete()", queue.complete()),
+      SyncCloseable("dabft-output-queue.complete()", queue.complete()),
       AsyncCloseable(
-        "queue.watchCompletion",
+        "dabft-output-queue.watchCompletion",
         queue.watchCompletion(),
-        timeouts.shutdownProcessing,
+        timeouts.closing,
       ),
     )
   }

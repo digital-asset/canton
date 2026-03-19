@@ -95,6 +95,10 @@ object SegmentInProgress {
         }
       val highestView =
         segmentInProgressMessages.map(_.message.viewNumber).maxOption.getOrElse(ViewNumber.First)
+      val highestViewWeHaveNewViewIn =
+        segmentInProgressMessages.collect { case SignedMessage(nv: NewView, _) =>
+          nv.viewNumber
+        }.maxOption
 
       // for each block, we only care about the quorum of prepares for the highest view
       // since it will either be the one currently being worked on or
@@ -139,7 +143,8 @@ object SegmentInProgress {
         segmentInProgressMessages
           .collect {
             case s @ SignedMessage(nv: NewView, _)
-                if (nv.viewNumber == highestView) || preparesPerView.contains(nv.viewNumber) =>
+                if highestViewWeHaveNewViewIn
+                  .contains(nv.viewNumber) || preparesPerView.contains(nv.viewNumber) =>
               s.asInstanceOf[SignedMessage[NewView]]
           }
           .sortBy(_.message.viewNumber)

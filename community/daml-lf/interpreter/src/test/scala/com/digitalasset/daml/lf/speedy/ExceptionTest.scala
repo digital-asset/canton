@@ -59,14 +59,14 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
   private def runUpdateExpr(
       compiledPackages: PureCompiledPackages,
       expr: Expr,
-      getKey: PartialFunction[GlobalKeyWithMaintainers, Value.ContractId] = Map.empty,
+      getKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]] = Map.empty,
   ): Either[SError, SValue] = {
     runUpdateExpr(
       compiledPackages,
       Map.empty,
       compiledPackages.compiler.unsafeCompile(expr),
       PartialFunction.empty,
-      getKey,
+      getKeys,
     )
   }
 
@@ -76,14 +76,14 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
       expr: Expr,
       args: ArraySeq[SValue],
       getContract: PartialFunction[Value.ContractId, FatContractInstance],
-      getKey: PartialFunction[GlobalKeyWithMaintainers, Value.ContractId],
+      getKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]],
   ) = {
     runUpdateExpr(
       compiledPackages,
       packageResolution,
       SEApp(compiledPackages.compiler.unsafeCompile(expr), args),
       getContract,
-      getKey,
+      getKeys,
     )
   }
 
@@ -92,7 +92,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
       packageResolution: Map[PackageName, PackageId],
       sexpr: SExpr,
       getContract: PartialFunction[Value.ContractId, FatContractInstance],
-      getKey: PartialFunction[GlobalKeyWithMaintainers, Value.ContractId],
+      getKeys: PartialFunction[GlobalKeyWithMaintainers, Vector[FatContractInstance]],
   ) = {
     val machine = Speedy.Machine
       .fromUpdateSExpr(
@@ -106,7 +106,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
         mode = ContractStateMachine.Mode.UCKWithRollback,
       )
     SpeedyTestLib
-      .run(machine, getContract = getContract, getKey = getKey)
+      .run(machine, getContract = getContract, getKeys = getKeys)
   }
 
   "unhandled throw" - {
@@ -1327,6 +1327,7 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
                 signatories = List(alice),
                 observers = List.empty,
                 contractKeyWithMaintainers = Some(globalKey),
+                contractId = cid,
               )
               for (origin <- contractOrigins) {
                 origin.description in {
@@ -1339,10 +1340,10 @@ class ExceptionTest extends AnyFreeSpec with Inside with Matchers with TableDriv
                       ),
                       ArraySeq(argProvider(cid, key)),
                       getContract = origin match {
-                        case Global => Map(cid -> globalContract)
+                        case Global => Map(globalContract.contractId -> globalContract)
                         case Local => Map.empty
                       },
-                      getKey = Map(globalKey -> cid),
+                      getKeys = Map(globalKey -> Vector(globalContract)),
                     )
                   } {
                     case Left(

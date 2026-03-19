@@ -62,7 +62,6 @@ import com.digitalasset.daml.lf.engine.{
   ResultInterruption,
   ResultNeedContract,
   ResultNeedKey,
-  ResultNeedNKey,
   ResultNeedPackage,
   ResultPrefetch,
 }
@@ -82,12 +81,13 @@ import scala.util.{Failure, Success}
 class TestSubmissionService(
     participantId: ParticipantId,
     maxDeduplicationDuration: NonNegativeFiniteDuration,
-    damle: Engine,
+    engine: Engine,
     contractResolver: LfContractId => TraceContext => Future[Option[FatContractInstance]],
     keyResolver: TestKeyResolver,
     packageResolver: PackageResolver,
     syncService: SyncService,
     mkPackageMap: TraceContext => Future[Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)]],
+    contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.default,
     override protected val loggerFactory: NamedLoggerFactory,
 )(implicit executionContext: ExecutionContext)
     extends NamedLogging {
@@ -316,7 +316,7 @@ class TestSubmissionService(
       .toSet
 
     result =
-      damle.submit(
+      engine.submit(
         packageMap = packageMap,
         packagePreference = packagePreference,
         submitters = actAs.map(_.toLf).toSet,
@@ -326,6 +326,7 @@ class TestSubmissionService(
         prefetchKeys = Seq.empty,
         submissionSeed = submissionSeed,
         contractIdVersion = ContractIdVersion.V1,
+        contractStateMode = contractStateMode,
       )
 
     txOrErr <- resolve(result)
@@ -371,16 +372,15 @@ class TestSubmissionService(
           r <- resolve(resume(pckgO))
         } yield r
 
-      case ResultNeedKey(key, resume) =>
+      case ResultNeedKey(key, _, _, resume) =>
+        // TODO(#30398) review this code once engine really support NUCK
+
         val gk = key.globalKey
         for {
           cidO <- keyResolver.resolveKey(gk)(traceContext)
-          r <- resolve(resume(cidO))
+          contracts <- cidO.toList.parTraverse(contractResolver(_)(traceContext))
+          r <- resolve(resume(contracts.flatten.toVector, None))
         } yield r
-
-      case ResultNeedNKey(_, _, _, _) =>
-        // TODO(#30398): add support if needed
-        throw new IllegalStateException("not supported yet")
 
       case ResultInterruption(continue, _) =>
         resolve(iterateOverInterrupts(continue))
@@ -416,12 +416,13 @@ object TestSubmissionService {
       customKeyResolver: Option[TestKeyResolver] = None,
       checkAuthorization: Boolean = true,
       enableLfDev: Boolean = false,
+      contractStateMode: ContractStateMachine.Mode = ContractStateMachine.Mode.devDefault,
   )(implicit env: TestConsoleEnvironment): TestSubmissionService = {
     import env.*
 
     val participantNode = participant.underlying.value
 
-    val damle = new Engine(
+    val engine = new Engine(
       EngineConfig(
         allowedLanguageVersions =
           if (enableLfDev)
@@ -429,11 +430,6 @@ object TestSubmissionService {
           else
             LanguageVersion.stableLfVersionsRange,
         checkAuthorization = checkAuthorization,
-        contractStateMode =
-          if (enableLfDev)
-            ContractStateMachine.Mode.devDefault
-          else
-            ContractStateMachine.Mode.default,
       )
     )
 
@@ -454,12 +450,13 @@ object TestSubmissionService {
     new TestSubmissionService(
       participant.id,
       participantNode.sync.maxDeduplicationDuration,
-      damle,
+      engine,
       resolveContract,
       keyResolver,
       packageResolver,
       participantNode.sync,
       mkPackageMap(participantNode)(_),
+      contractStateMode,
       loggerFactory,
     )
   }

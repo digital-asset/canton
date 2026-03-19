@@ -25,25 +25,33 @@ message PackageReference {
 // modelled after ``VettedPackage`` in `topology.proto <https://github.com/digital-asset/canton/blob/main/community/base/src/main/protobuf/com/digitalasset/canton/protocol/v30/topology.proto#L206>`_,
 // enriched with the package name and version.
 message VettedPackage {
-  // Package ID of this package. Always present.
+  // Package ID of this package
+  //
+  // Required
   string package_id = 1;
 
   // The time from which this package is vetted. Empty if vetting time has no
   // lower bound.
+  //
+  // Optional
   google.protobuf.Timestamp valid_from_inclusive = 2;
 
   // The time until which this package is vetted. Empty if vetting time has no
   // upper bound.
+  //
+  // Optional
   google.protobuf.Timestamp valid_until_exclusive = 3;
 
   // Name of this package.
   // Only available if the package has been uploaded to the current participant.
-  // If unavailable, is empty string.
+  //
+  // Optional
   string package_name = 4;
 
   // Version of this package.
   // Only available if the package has been uploaded to the current participant.
-  // If unavailable, is empty string.
+  //
+  // Optional
   string package_version = 5;
 }
 
@@ -54,22 +62,31 @@ message VettedPackage {
 message VettedPackages {
   // Sorted by package_name and package_version where known, and package_id as a
   // last resort.
+  //
+  // Required: must be non-empty
   repeated VettedPackage packages = 1;
 
-  // Participant on which these packages are vetted. Always present.
+  // Participant on which these packages are vetted.
+  //
+  // Required
   string participant_id = 2;
 
-  // Synchronizer on which these packages are vetted. Always present.
+  // Synchronizer on which these packages are vetted.
+  //
+  // Required
   string synchronizer_id = 3;
 
   // Serial of last ``VettedPackages`` topology transaction of this participant
-  // and on this synchronizer. Always present.
+  // and on this synchronizer.
+  //
+  // Required
   uint32 topology_serial = 4;
 }
 
 // The serial of last ``VettedPackages`` topology transaction on a given
 // participant and synchronizer.
 message PriorTopologySerial {
+  // Optional
   oneof serial {
     // Previous transaction's serial.
     uint32 prior = 1;

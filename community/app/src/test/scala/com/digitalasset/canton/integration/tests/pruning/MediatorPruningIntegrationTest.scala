@@ -9,6 +9,7 @@ import com.digitalasset.canton.integration.plugins.{
   UsePostgres,
   UseReferenceBlockSequencer,
 }
+import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.integration.{
   CommunityIntegrationTest,
   ConfigTransforms,
@@ -50,7 +51,10 @@ trait MediatorPruningIntegrationTest extends CommunityIntegrationTest with Share
     val responseTimeout = confirmationResponseTimeout
     val prunedBeforeDuration = defaultRetention.asJava.plus(responseTimeout.unwrap)
 
-    environment.simClock.value.advance(prunedBeforeDuration)
+    val simClock = environment.simClock.value
+    simClock.advance(prunedBeforeDuration)
+    // The BFT sequencer doesn't advance record time until the next block
+    waitForTargetTimeOnSequencer(sequencer1, simClock.now, logger)
 
     // do something to kick everything to working at this advanced time
     participant1.health.ping(participant2)

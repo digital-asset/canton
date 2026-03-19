@@ -13,11 +13,7 @@ import com.digitalasset.daml.lf.interpretation.{Error => IE}
 import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
-import com.digitalasset.daml.lf.transaction.{
-  SerializationVersion,
-  SubmittedTransaction,
-  Transaction,
-}
+import com.digitalasset.daml.lf.transaction.{ContractStateMachine, SerializationVersion, SubmittedTransaction, Transaction}
 import com.digitalasset.daml.lf.value.ContractIdVersion
 import com.digitalasset.daml.lf.value.Value._
 import org.scalatest.EitherValues
@@ -47,6 +43,7 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
   import InterfacesTest._
 
   private[this] val engine = Engine.DevEngine
+  private[this] val contractStateMode = ContractStateMachine.Mode.devDefault
   private[this] val compiledPackages = ConcurrentCompiledPackages(engine.config.getCompilerConfig)
   private[this] val preprocessor = preprocessing.Preprocessor.forTesting(compiledPackages)
 
@@ -110,6 +107,7 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
             preparationTime = let,
             seeding = seeding,
             contractIdVersion = contractIdVersion,
+            contractStateMode = contractStateMode,
             packageResolution = packageNameMap,
           )
         (tx, meta, _) = result

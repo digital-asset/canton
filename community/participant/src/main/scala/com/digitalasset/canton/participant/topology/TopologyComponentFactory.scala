@@ -26,7 +26,6 @@ import com.digitalasset.canton.participant.ledger.api.LedgerApiStore
 import com.digitalasset.canton.participant.protocol.ParticipantTopologyTerminateProcessing
 import com.digitalasset.canton.participant.store.SyncPersistentState
 import com.digitalasset.canton.participant.store.memory.PackageMetadataView
-import com.digitalasset.canton.participant.sync.LsuCallback
 import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
 import com.digitalasset.canton.participant.topology.client.MissingKeysAlerter
 import com.digitalasset.canton.store.SequencedEventStore
@@ -67,6 +66,7 @@ class TopologyComponentFactory(
     timeouts: ProcessingTimeout,
     futureSupervisor: FutureSupervisor,
     caching: CachingConfigs,
+    enableConsistencyChecks: Boolean,
     batching: BatchingConfig,
     topology: TopologyConfig,
     participantId: ParticipantId,
@@ -95,7 +95,6 @@ class TopologyComponentFactory(
       onboardingClearanceScheduler: OnboardingClearanceScheduler,
       topologyClient: SynchronizerTopologyClientWithInit,
       recordOrderPublisher: RecordOrderPublisher,
-      lsuCallback: LsuCallback,
       pendingHandshakesWithSuccessorsStore: PendingHandshakesWithSuccessorsStore,
       retrieveAndStoreMissingSequencerIds: TraceContext => EitherT[
         FutureUnlessShutdown,
@@ -122,7 +121,6 @@ class TopologyComponentFactory(
           _.pauseSynchronizerIndexingDuringPartyReplication
         ),
         synchronizerPredecessor = synchronizerPredecessor,
-        lsuCallback = lsuCallback,
         pendingHandshakesWithSuccessorsStore = pendingHandshakesWithSuccessorsStore,
         retrieveAndStoreMissingSequencerIds = retrieveAndStoreMissingSequencerIds,
         loggerFactory,
@@ -209,7 +207,7 @@ class TopologyComponentFactory(
           currentlyVettedPackages,
           nextPackageIds,
           packageMetadataView,
-          dryRunSnapshot,
+          dryRunSnapshot.getOrElse(PackageMetadata()),
           forceFlags,
           disableUpgradeValidation,
         )
@@ -289,6 +287,7 @@ class TopologyComponentFactory(
       synchronizerUpgradeTime = synchronizerPredecessor.map(_.upgradeTime),
       packageDependencyResolver,
       caching,
+      enableConsistencyChecks,
       topology,
       timeouts,
       futureSupervisor,

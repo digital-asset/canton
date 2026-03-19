@@ -43,7 +43,6 @@ object DiscardedFuture extends WartTraverser {
   val message = "Statements must not discard a Future"
 
   override def apply(u: WartUniverse): u.Traverser =
-    // val verifyMethodName: TermName = TermName("verify")
 
     new u.Traverser(this) {
       import q.reflect.*

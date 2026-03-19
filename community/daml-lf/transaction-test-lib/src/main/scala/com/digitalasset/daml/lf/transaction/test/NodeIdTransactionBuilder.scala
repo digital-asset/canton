@@ -12,7 +12,7 @@ import scala.collection.immutable.HashMap
 
 class NodeIdTransactionBuilder extends TestIdFactory {
 
-  private val ids: Iterator[NodeId] = Iterator.from(0).map(NodeId)
+  private val ids: Iterator[NodeId] = Iterator.from(0).map(NodeId.apply)
   private var nodes: Map[NodeId, Node] = HashMap.empty
   private var children: Map[NodeId, BackStack[NodeId]] =
     HashMap.empty.withDefaultValue(BackStack.empty)

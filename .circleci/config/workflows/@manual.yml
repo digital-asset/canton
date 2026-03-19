@@ -731,6 +731,30 @@ manual_nightly_test_bftordering:
         requires:
           - print_tests
 
+manual_model_based_test:
+  when:
+    and:
+      - equal: [ model-based-test, << pipeline.parameters.manual_job >> ]
+      - not:
+          equal: [ main, << pipeline.git.branch >> ]
+  jobs:
+    - compile:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+    - model_based_test:
+        context:
+          - datadog
+          - artifactory
+          - azure-self-cache
+          - maven-mirror
+          - da-images
+        requires:
+          - compile
+
 manual_docs_replication_test:
   when:
     equal: [ docs-replication-test, << pipeline.parameters.manual_job >> ]

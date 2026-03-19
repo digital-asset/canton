@@ -344,6 +344,7 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
         .map(_.sortBy(_.orderedBlock.metadata.blockNumber))
     }
 
+  @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
   override def loadNumberOfRecords(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[EpochStore.NumberOfRecords] =
@@ -357,6 +358,7 @@ abstract class GenericInMemoryEpochStore[E <: Env[E]]
       )
     }
 
+  @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
   override def prune(epochNumberExclusive: EpochNumber)(implicit
       traceContext: TraceContext
   ): E#FutureUnlessShutdownT[EpochStore.NumberOfRecords] =

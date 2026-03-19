@@ -7,13 +7,13 @@ import scala.collection.immutable as imm
 
 import NonEmptyCollCompat.*
 
-/** Total version of [[+:]]. */
+/** Total version of [[scala.collection.+:]]. */
 object +-: {
   def unapply[A, CC[_], C](t: NonEmpty[SeqOps[A, CC, C]]): Some[(A, C)] =
     Some((t.head, t.tail))
 }
 
-/** Total version of [[:+]]. */
+/** Total version of [[scala.collection.:+]]. */
 object :-+ {
   def unapply[A, CC[_], C](t: NonEmpty[SeqOps[A, CC, C]]): Some[(C, A)] =
     Some((t.init, t.last))

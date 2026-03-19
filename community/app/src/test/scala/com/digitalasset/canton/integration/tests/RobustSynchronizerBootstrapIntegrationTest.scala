@@ -80,7 +80,7 @@ sealed trait RobustSynchronizerBootstrapIntegrationTest
       )
       .addConfigTransform(ConfigTransforms.globallyUniquePorts)
       // Apply protocol version updates to the `second` nodes defined above
-      .addConfigTransforms(ConfigTransforms.optSetProtocolVersion*)
+      .addConfigTransforms(ConfigTransforms.protocolVersionTransforms*)
 
   private def mediatorThatFailsFirstInit(
       mediatorReference: LocalMediatorReference,

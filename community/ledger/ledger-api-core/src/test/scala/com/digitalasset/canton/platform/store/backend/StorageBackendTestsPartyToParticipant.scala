@@ -99,34 +99,38 @@ private[backend] trait StorageBackendTestsPartyToParticipant
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(singleDto, _))
     val eventsForAll = executeSql(
-      backend.event.fetchTopologyPartyEventIds(
-        party = None
-      )(_)(
-        PaginationInput(
-          PaginationFromTo.ascending(
-            startExclusive = 0L,
-            endInclusive = 10L,
-          ),
-          limit = 10,
+      backend.event
+        .fetchTopologyPartyEventIds(
+          party = None
         )
-      )
-    )
+        .fetchPage(_)(
+          PaginationInput(
+            PaginationFromTo.ascending(
+              startExclusive = 0L,
+              endInclusive = 10L,
+            ),
+            limit = 10,
+          )
+        )
+    ).ids
     executeSql(
       updateLedgerEnd(offset(1), ledgerEndSequentialId = 1L)
     )
     val eventsForSomeParty = executeSql(
-      backend.event.fetchTopologyPartyEventIds(
-        party = Some(someParty)
-      )(_)(
-        PaginationInput(
-          PaginationFromTo.ascending(
-            startExclusive = 0L,
-            endInclusive = 10L,
-          ),
-          limit = 10,
+      backend.event
+        .fetchTopologyPartyEventIds(
+          party = Some(someParty)
         )
-      )
-    )
+        .fetchPage(_)(
+          PaginationInput(
+            PaginationFromTo.ascending(
+              startExclusive = 0L,
+              endInclusive = 10L,
+            ),
+            limit = 10,
+          )
+        )
+    ).ids
 
     eventsForAll should not be empty
     eventsForSomeParty should not be empty
@@ -136,34 +140,38 @@ private[backend] trait StorageBackendTestsPartyToParticipant
     executeSql(backend.parameter.initializeParameters(someIdentityParams, loggerFactory))
     executeSql(ingest(multipleDtos, _))
     val eventsForAll = executeSql(
-      backend.event.fetchTopologyPartyEventIds(
-        party = None
-      )(_)(
-        PaginationInput(
-          PaginationFromTo.ascending(
-            startExclusive = 0L,
-            endInclusive = 10L,
-          ),
-          limit = 10,
+      backend.event
+        .fetchTopologyPartyEventIds(
+          party = None
         )
-      )
-    )
+        .fetchPage(_)(
+          PaginationInput(
+            PaginationFromTo.ascending(
+              startExclusive = 0L,
+              endInclusive = 10L,
+            ),
+            limit = 10,
+          )
+        )
+    ).ids
     executeSql(
       updateLedgerEnd(offset(4), ledgerEndSequentialId = 4L)
     )
     val eventsForSomeParty = executeSql(
-      backend.event.fetchTopologyPartyEventIds(
-        party = Some(someParty)
-      )(_)(
-        PaginationInput(
-          PaginationFromTo.ascending(
-            startExclusive = 0L,
-            endInclusive = 10L,
-          ),
-          limit = 10,
+      backend.event
+        .fetchTopologyPartyEventIds(
+          party = Some(someParty)
         )
-      )
-    )
+        .fetchPage(_)(
+          PaginationInput(
+            PaginationFromTo.ascending(
+              startExclusive = 0L,
+              endInclusive = 10L,
+            ),
+            limit = 10,
+          )
+        )
+    ).ids
 
     eventsForAll should contain theSameElementsAs Vector(1L, 2L, 3L, 4L)
     eventsForSomeParty should contain theSameElementsAs Vector(1L, 3L, 4L)

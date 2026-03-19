@@ -116,14 +116,15 @@ trait IndexComponentTest
 
   protected def ingestUpdates(updates: (Update, Vector[ContractInstance])*): Offset = {
     val ledgerEndLongBefore = ledgerEndOffset.map(_.positive).getOrElse(0L)
+    val ingestionTimeout = 60.minutes
     // contracts should be stored in participant contract store before ingesting the updates to get the internal contract ids mapping
     MonadUtil
       .sequentialTraverse_(updates) { case (update, contracts) =>
         storeContracts(update, contracts).flatMap(testServices.indexer.offer)
       }
-      .futureValue(timeout = PatienceConfiguration.Timeout(60.seconds))
+      .futureValue(timeout = PatienceConfiguration.Timeout(ingestionTimeout))
     val expectedOffset = Offset.tryFromLong(updates.size + ledgerEndLongBefore)
-    eventually() {
+    eventually(timeUntilSuccess = ingestionTimeout) {
       ledgerEndOffset shouldBe Some(expectedOffset)
       expectedOffset
     }

@@ -46,12 +46,12 @@ import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.*
 import com.digitalasset.canton.synchronizer.sequencer.PruningError.UnsafePruningPoint
 import com.digitalasset.canton.synchronizer.sequencer.Sequencer.SignedSubmissionRequest
-import com.digitalasset.canton.synchronizer.sequencer.SequencerReader.AnnouncedLsu
 import com.digitalasset.canton.synchronizer.sequencer.admin.data.SequencerHealthStatus
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   BlockNotFound,
   ExceededMaxSequencingTime,
+  InvalidTrafficState,
   LsuSequencerError,
   LsuTrafficAlreadyInitialized,
   MissingSynchronizerPredecessor,
@@ -246,6 +246,9 @@ class BlockSequencer(
       loggerFactory,
     )
 
+  private[sequencer] val announcedLsu: AtomicReference[Option[AnnouncedLsu]] =
+    new AtomicReference(None)
+
   private val (killSwitchF, done) = {
     val headState = stateManager.getHeadState
     noTracingLogger.info(s"Subscribing to block source from ${headState.block.height + 1}")
@@ -257,6 +260,7 @@ class BlockSequencer(
       blockRateLimitManager,
       orderingTimeFixMode,
       sequencingTimeLowerBoundExclusive = sequencingTimeLowerBoundExclusive,
+      announcedLsu.get(),
       producePostOrderingTopologyTicks,
       metrics,
       batchingConfig,
@@ -1051,24 +1055,20 @@ class BlockSequencer(
 
   override private[canton] def orderer: Some[BlockOrderer] = Some(blockOrderer)
 
-  private val ongoingSynchronizerUpgrade: AtomicReference[Option[AnnouncedLsu]] =
-    new AtomicReference(None)
-
   override private[sequencer] def updateLsuSuccessor(
       successorO: Option[SynchronizerSuccessor],
       announcementEffectiveTime: EffectiveTime,
   )(implicit traceContext: TraceContext): Unit = {
     successorO match {
       case Some(successor) =>
-        ongoingSynchronizerUpgrade.set(
+        announcedLsu.set(
           Some(AnnouncedLsu(successor, announcementEffectiveTime, loggerFactory))
         )
-      case None => ongoingSynchronizerUpgrade.set(None)
+      case None => announcedLsu.set(None)
     }
     super.updateLsuSuccessor(successorO, announcementEffectiveTime)
   }
 
-  @nowarn("cat=deprecation")
   override def getLsuTrafficControlState(implicit
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CantonBaseError, LsuTrafficState] =
@@ -1076,7 +1076,7 @@ class BlockSequencer(
       // - Check that LSU is ongoing
       upgrade <- EitherT
         .fromOption[FutureUnlessShutdown](
-          ongoingSynchronizerUpgrade.get(),
+          announcedLsu.get(),
           SequencerError.NoOngoingLsu.Error(cryptoApi.psid, cryptoApi.topologyKnownUntilTimestamp),
         )
         .leftWiden[CantonBaseError]
@@ -1119,17 +1119,22 @@ class BlockSequencer(
           latestPersistedBlockTimeO,
         ),
       )
-      // - All checks passed
-      topologySnapshot <- EitherT.right[LsuSequencerError](
+      // We use the topology snapshot at upgrade time to await the processing of member registrations,
+      // so that traffic state doesn't miss any members.
+      // Technically this should not be necessary due to the topology freeze around LSU.
+      _ <- EitherT.right[LsuSequencerError](
         SyncCryptoClient.getSnapshotForTimestamp(
           cryptoApi,
           upgrade.successor.upgradeTime,
           latestSequencerEventTimestamp,
         )
       )
+      // - All checks passed
       // - Get all members known at the upgrade time
       allMembers <- EitherT.right[LsuSequencerError](
-        topologySnapshot.ipsSnapshot.knownMembers()
+        dbSequencerStore.allRegisteredMembers(registeredAtBeforeInclusive =
+          upgrade.successor.upgradeTime
+        )
       )
       // - Get traffic states at the upgrade time for all members
       consumedRecordsPerMember <- EitherT.right[LsuSequencerError](
@@ -1177,82 +1182,112 @@ class BlockSequencer(
       )
     }
 
+  private val runningSetLsuTraffic =
+    new AtomicReference[Option[PromiseUnlessShutdown[Either[CantonBaseError, Unit]]]](None)
   override def setLsuTrafficControlState(
       state: LsuTrafficState
-  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
-    for {
-      // - Check that there's an LSU predecessor
-      upgradeTime <- EitherT
-        .fromOption[FutureUnlessShutdown](
-          sequencingTimeLowerBoundExclusive,
-          MissingSynchronizerPredecessor.Error(cryptoApi.psid, sequencerId),
-        )
-        .leftWiden[CantonBaseError]
-      _ <- EitherT(
-        cryptoApi.ips.currentSnapshotApproximation
-          .flatMap(
-            _.trafficControlParameters(protocolVersion)
-          )
-          .map(_.toRight(TrafficControlDisabled.Error()))
-      )
-      // Check if the initialization has already been completed
-      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-        !lsuTrafficInitialized.futureUS.isCompleted,
-        LsuTrafficAlreadyInitialized.Error(cryptoApi.psid),
-      )
-      // - Check that the node has not progressed beyond the upgrade time
-      _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
-        stateManager.getHeadState.block.lastTs <= upgradeTime,
-        SequencerPastUpgradeTime.Error(
-          cryptoApi.psid,
-          stateManager.getHeadState.block.lastTs,
-          upgradeTime,
-        ),
-      )
-      // - Clean up the stores
-      _ = logger.debug(s"Clearing existing LSU traffic control state")
-      _ <- EitherT.right(blockRateLimitManager.trafficConsumedStore.truncate())
-      _ <- EitherT.right(trafficPurchasedStore.truncate())
-
-      // - Set the traffic states for all members provided in 'state'
-      _ = logger.debug(s"Setting LSU traffic consumed")
-      membersTraffic = state.membersTraffic.toList.sortBy { case (_, state) => state.timestamp }
-      _ <- EitherT.right(
-        blockRateLimitManager.trafficConsumedStore.store(
-          membersTraffic.map { case (member, trafficState) =>
-            val trafficConsumed = trafficState.toTrafficConsumed(member)
-            logger.debug(
-              s"Setting LSU traffic consumed for member $member to $trafficConsumed"
+  )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] = {
+    val promise = PromiseUnlessShutdown.unsupervised[Either[CantonBaseError, Unit]]()
+    val currentPromiseO = runningSetLsuTraffic.compareAndExchange(None, Some(promise))
+    currentPromiseO match {
+      case Some(otherPromise) => EitherT(otherPromise.futureUS)
+      case None =>
+        val resultET: EitherT[FutureUnlessShutdown, CantonBaseError, Unit] = for {
+          // - Check that there's an LSU predecessor
+          upgradeTime <- EitherT
+            .fromOption[FutureUnlessShutdown](
+              sequencingTimeLowerBoundExclusive,
+              MissingSynchronizerPredecessor.Error(cryptoApi.psid, sequencerId),
             )
-            trafficConsumed
-          }
-        )
-      )
-      _ <- EitherT.right(
-        MonadUtil.parTraverseWithLimit_(batchingConfig.parallelism)(
-          membersTraffic.flatMap { case (member, trafficState) =>
-            trafficState.toTrafficPurchased(member).toList
-          }
-        ) { trafficPurchasedRecord =>
-          logger.debug(
-            s"Setting LSU traffic purchased for member ${trafficPurchasedRecord.member} to $trafficPurchasedRecord"
+            .leftWiden[CantonBaseError]
+          _ <- EitherT(
+            cryptoApi.ips.currentSnapshotApproximation
+              .flatMap(
+                _.trafficControlParameters(protocolVersion)
+              )
+              .map(_.toRight(TrafficControlDisabled.Error()))
           )
-          val updateTrafficPurchasedRecord =
-            trafficPurchasedRecord.copy(sequencingTimestamp = upgradeTime.immediatePredecessor)
-          blockRateLimitManager.trafficPurchasedManager.addTrafficPurchased(
-            updateTrafficPurchasedRecord
+          // Check if the initialization has already been completed
+          _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+            !lsuTrafficInitialized.futureUS.isCompleted,
+            LsuTrafficAlreadyInitialized.Error(cryptoApi.psid),
           )
+          // - Check that the node has not progressed beyond the upgrade time
+          _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+            stateManager.getHeadState.block.lastTs <= upgradeTime,
+            SequencerPastUpgradeTime.Error(
+              cryptoApi.psid,
+              stateManager.getHeadState.block.lastTs,
+              upgradeTime,
+            ),
+          )
+
+          // Check that all members registered via topology are present in the provided traffic state
+          allMembers <- EitherT.right[LsuSequencerError](
+            dbSequencerStore.allRegisteredMembers(registeredAtBeforeInclusive = upgradeTime)
+          )
+          missingMembers = allMembers.diff(state.membersTraffic.keySet)
+          _ <- EitherTUtil.condUnitET[FutureUnlessShutdown](
+            // We expect all members mentioned in topology to have a traffic record.
+            // Some may have been offboarded or disabled, so the provided state may contain more members.
+            missingMembers.isEmpty,
+            InvalidTrafficState.Error(
+              s"The provided traffic states must contain traffic state for all members known in topology at the upgrade time $upgradeTime, missing members: $missingMembers"
+            ),
+          )
+
+          // - Clean up the stores
+          _ = logger.debug(s"Clearing existing LSU traffic control state")
+          _ <- EitherT.right(blockRateLimitManager.trafficConsumedStore.truncate())
+          _ <- EitherT.right(trafficPurchasedStore.truncate())
+
+          // - Set the traffic states for all members provided in 'state'
+          _ = logger.debug(s"Setting LSU traffic consumed")
+          membersTraffic = state.membersTraffic.toList.sortBy { case (_, state) => state.timestamp }
+          _ <- EitherT.right(
+            blockRateLimitManager.trafficConsumedStore.store(
+              membersTraffic.map { case (member, trafficState) =>
+                val trafficConsumed = trafficState.toTrafficConsumed(member)
+                logger.debug(
+                  s"Setting LSU traffic consumed for member $member to $trafficConsumed"
+                )
+                trafficConsumed
+              }
+            )
+          )
+          _ <- EitherT.right(
+            MonadUtil.parTraverseWithLimit_(batchingConfig.parallelism)(
+              membersTraffic.flatMap { case (member, trafficState) =>
+                trafficState.toTrafficPurchased(member).toList
+              }
+            ) { trafficPurchasedRecord =>
+              logger.debug(
+                s"Setting LSU traffic purchased for member ${trafficPurchasedRecord.member} to $trafficPurchasedRecord"
+              )
+              val updateTrafficPurchasedRecord =
+                trafficPurchasedRecord.copy(sequencingTimestamp = upgradeTime.immediatePredecessor)
+              blockRateLimitManager.trafficPurchasedManager.addTrafficPurchased(
+                updateTrafficPurchasedRecord
+              )
+            }
+          )
+          // The method below normally deletes the data > the passed argument for crash recovery purposes.
+          // With CantonTimestamp.MaxValue this will only reset the TrafficConsumedManager's cache.
+          _ <- EitherT.right(blockRateLimitManager.resetStateTo(CantonTimestamp.MaxValue))
+          _ <- EitherT.right(trafficPurchasedStore.setInitialTimestamp(upgradeTime))
+        } yield {
+          blockRateLimitManager.trafficPurchasedManager.tick(upgradeTime)
+          logger.info(s"LSU traffic control state has been initialized")
+          lsuTrafficInitialized.success(UnlessShutdown.unit)
+          ()
         }
-      )
-      // The method below normally deletes the data > the passed argument for crash recovery purposes.
-      // With CantonTimestamp.MaxValue this will only reset the TrafficConsumedManager's cache.
-      _ <- EitherT.right(blockRateLimitManager.resetStateTo(CantonTimestamp.MaxValue))
-      _ <- EitherT.right(trafficPurchasedStore.setInitialTimestamp(upgradeTime))
-    } yield {
-      blockRateLimitManager.trafficPurchasedManager.tick(upgradeTime)
-      logger.info(s"LSU traffic control state has been initialized")
-      lsuTrafficInitialized.success(UnlessShutdown.unit)
+        resultET.value.onComplete { result =>
+          runningSetLsuTraffic.set(None)
+          promise.complete(result)
+        }
+        resultET
     }
+  }
 
   override def getThroughputCap(
       requestType: SubmissionRequestType

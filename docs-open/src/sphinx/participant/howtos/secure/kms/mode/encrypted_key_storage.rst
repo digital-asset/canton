@@ -10,20 +10,20 @@ Enable encrypted private key storage with a KMS
 
 Canton can use a KMS to encrypt private keys at rest (envelope encryption):
 
-#. Private keys are stored encrypted in the node's database.
+#. Private keys are stored encrypted in the node's **database**.
 #. On startup, the KMS decrypts them for in-memory use.
 
 This improves security with no runtime performance impact. See :ref:`Protect private keys with envelope encryption and a Key Management Service <kms_envelope_architecture>` for details.
 
 .. note::
-   This assumes the KMS provider has already been configured.
+   This assumes that the KMS provider is already configured and that Canton is using a database to persist its keys.
    See :ref:`Configure a KMS <kms_configuration>`.
 
 Enable envelope encryption
 --------------------------
 
 Envelope encryption is a common approach chosen by KMS vendors that uses a symmetric encryption key,
-called the **wrapper key**, to encrypt and decrypt the stored, private keys.
+called the **wrapper key**, to encrypt and decrypt the database-stored, private keys.
 
 To enable encrypted private key storage with a KMS using envelope encryption,
 we must add the following configuration and restart the node.

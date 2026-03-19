@@ -6,18 +6,23 @@ package transaction
 
 import com.digitalasset.daml.lf.value.Value.ContractId
 
-/** Errors raised when building transactions with [[com.digitalasset.daml.lf.speedy.PartialTransaction]]:
- *   - [[DuplicateContractId]]
- *   - [[DuplicateContractKey]]
+/** Errors raised when building transactions with PartialTransaction:
+ *   - [[TransactionError.DuplicateContractId]]
+ *   - [[TransactionError.DuplicateContractKey]]
  */
 sealed trait TransactionError extends Serializable with Product
 
 /** Defines the errors raised by [[ContractStateMachine]] and its clients:
-  *  - [[DuplicateContractId]]
-  *  - [[DuplicateContractKey]]
-  *  - [[InconsistentContractKey]]
+  *  - [[TransactionError.DuplicateContractId]]
+  *  - [[TransactionError.DuplicateContractKey]]
+  *  - [[TransactionError.InconsistentContractKey]]
   */
 object TransactionError {
+
+  final case class AlreadyConsumed[Nid](
+      cid: ContractId,
+      nid: Nid
+  ) extends TransactionError
 
   /** Signals that the transaction tried to create two contracts with the same
     * contract ID or tried to create a contract whose contract ID has been
@@ -26,6 +31,7 @@ object TransactionError {
   final case class DuplicateContractId(
       contractId: ContractId
   ) extends TransactionError
+
 
   /** Signals that within the transaction we got to a point where
     * two contracts with the same key were active.
@@ -54,4 +60,8 @@ object TransactionError {
     */
   final case class InconsistentContractKey(key: GlobalKey) extends TransactionError
 
+  /** Signals that a rollback scope containing effectful nodes (e.g., creates or exercises)
+    * was encountered in a context where rollback is not supported.
+    */
+  final case object EffectfulRollbackNotSupported extends TransactionError
 }

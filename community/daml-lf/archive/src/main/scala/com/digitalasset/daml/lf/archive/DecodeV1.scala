@@ -791,7 +791,7 @@ private[archive] class DecodeV1(minor: LV.Minor) {
             assertNonEmpty(params, "params")
             Work.bind(decodeKind(kArrow.getResult)) { base =>
               Work.sequence(params.view.map(decodeKind)) { kinds =>
-                Ret((kinds foldRight base)(KArrow))
+                Ret((kinds foldRight base)(KArrow.apply))
               }
             }
           case PLF.Kind.SumCase.SUM_NOT_SET =>
@@ -836,7 +836,7 @@ private[archive] class DecodeV1(minor: LV.Minor) {
             "Type.var.var",
           )
           Work.sequence(tvar.getArgsList.asScala.view.map(uncheckedDecodeType)) { types =>
-            Ret(types.foldLeft[Type](TVar(varName))(TApp))
+            Ret(types.foldLeft[Type](TVar(varName))(TApp.apply))
           }
         case PLF.Type.SumCase.NAT =>
           assertSince(Features.numeric, "Type.NAT")
@@ -854,7 +854,7 @@ private[archive] class DecodeV1(minor: LV.Minor) {
         case PLF.Type.SumCase.CON =>
           val tcon = lfType.getCon
           Work.sequence(tcon.getArgsList.asScala.view.map(uncheckedDecodeType)) { types =>
-            Ret(types.foldLeft[Type](TTyCon(decodeTypeConId(tcon.getTycon)))(TApp))
+            Ret(types.foldLeft[Type](TTyCon(decodeTypeConId(tcon.getTycon)))(TApp.apply))
           }
         case PLF.Type.SumCase.SYN =>
           val tsyn = lfType.getSyn
@@ -873,7 +873,7 @@ private[archive] class DecodeV1(minor: LV.Minor) {
               info.typ
             }
           Work.sequence(prim.getArgsList.asScala.view.map(uncheckedDecodeType)) { types =>
-            Ret(types.foldLeft(baseType)(TApp))
+            Ret(types.foldLeft(baseType)(TApp.apply))
           }
         case PLF.Type.SumCase.FORALL =>
           val tForall = lfType.getForall
@@ -881,7 +881,7 @@ private[archive] class DecodeV1(minor: LV.Minor) {
           assertNonEmpty(vars, "vars")
           Work.bind(uncheckedDecodeType(tForall.getBody)) { base =>
             Work.sequence(vars.view.map(decodeTypeVarWithKind)) { binders =>
-              Ret((binders foldRight base)(TForall))
+              Ret((binders foldRight base)(TForall.apply))
             }
           }
         case PLF.Type.SumCase.STRUCT =>

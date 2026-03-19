@@ -85,6 +85,7 @@ class ContractStore[TC <: Contract[TCid, T], TCid <: ContractId[T], T, L](
   def allAvailable: Iterable[Contract[TCid, T]] = store.values.filterNot(_._1).map(_._2)
 
   /** return total number of contracts in store, pending and non-pending */
+  @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
   def totalNum: Int = store.size
 
   def setPending(cid: ContractId[T], isPending: Boolean): Boolean = (lock.exclusive {

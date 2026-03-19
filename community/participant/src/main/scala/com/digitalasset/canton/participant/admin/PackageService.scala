@@ -11,15 +11,7 @@ import cats.syntax.parallel.*
 import com.digitalasset.base.error.RpcError
 import com.digitalasset.canton.config.CantonRequireTypes.String255
 import com.digitalasset.canton.config.ProcessingTimeout
-import com.digitalasset.canton.ledger.api.{
-  EnrichedVettedPackage,
-  EnrichedVettedPackages,
-  ListVettedPackagesOpts,
-  ParticipantVettedPackages,
-  SinglePackageTargetVetting,
-  UpdateVettedPackagesOpts,
-  VettedPackagesRef,
-}
+import com.digitalasset.canton.ledger.api.*
 import com.digitalasset.canton.ledger.error.PackageServiceErrors
 import com.digitalasset.canton.ledger.participant.state.PackageDescription
 import com.digitalasset.canton.lifecycle.{FlagCloseable, FutureUnlessShutdown, LifeCycle}
@@ -30,7 +22,6 @@ import com.digitalasset.canton.participant.admin.CantonPackageServiceError.Packa
   CannotRemoveOnlyDarForPackage,
   MainPackageInUse,
   PackageRemovalError,
-  PackageVetted,
 }
 import com.digitalasset.canton.participant.admin.CantonPackageServiceError.Vetting.{
   VettingReferenceEmpty,
@@ -53,7 +44,7 @@ import com.digitalasset.canton.topology.{ForceFlag, ForceFlags, PhysicalSynchron
 import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.canton.util.PackageConsumer.PackageResolver
 import com.digitalasset.canton.util.{EitherTUtil, MonadUtil}
-import com.digitalasset.canton.{LedgerSubmissionId, LfPackageId, ProtoDeserializationError}
+import com.digitalasset.canton.{LedgerSubmissionId, LfPackageId, ProtoDeserializationError, config}
 import com.digitalasset.daml.lf.archive
 import com.digitalasset.daml.lf.archive.{DamlLf, DarParser, Error as LfArchiveError}
 import com.digitalasset.daml.lf.data.Ref.PackageId
@@ -158,13 +149,7 @@ class PackageService(
       val checkUnused =
         packageOps.checkPackageUnused(packageId)
 
-      val checkNotVetted =
-        packageOps
-          .hasVettedPackageEntry(packageId)
-          .flatMap[RpcError, Unit] {
-            case true => EitherT.leftT(new PackageVetted(packageId))
-            case false => EitherT.rightT(())
-          }
+      val checkNotVetted = packageOps.checkNoVettedPackageEntry(Set(packageId))
 
       for {
         _ <- neededForAdminWorkflow(packageId)
@@ -175,11 +160,14 @@ class PackageService(
       } yield ()
     }
 
-  def removeDar(mainPackageId: DarMainPackageId, psids: Set[PhysicalSynchronizerId])(implicit
+  def removeDar(
+      mainPackageId: DarMainPackageId,
+      connectedSynchronizers: Set[PhysicalSynchronizerId],
+  )(implicit
       tc: TraceContext
   ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
-    ifDarExists(mainPackageId)(removeDarLf(_, _, psids))(ifNotExistsOperationFailed =
-      "DAR archive removal"
+    ifDarExists(mainPackageId)(removeDarLf(_, _, connectedSynchronizers))(
+      ifNotExistsOperationFailed = "DAR archive removal"
     )
 
   def vetDar(
@@ -191,7 +179,13 @@ class PackageService(
   ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
     ifDarExists(mainPackageId) { (_, darLf) =>
       packageOps
-        .vetPackages(darLf.all.map(readPackageId), synchronizeVetting, psid)
+        .vetPackages(
+          darLf.all.map(readPackageId),
+          synchronizeVetting,
+          waitToBecomeEffective =
+            None, // Hardcoded for simplicity. Can be exposed to the operator at some point
+          psid,
+        )
         .leftWiden[RpcError]
     }(ifNotExistsOperationFailed = "DAR archive vetting")
 
@@ -201,7 +195,14 @@ class PackageService(
     ifDarExists(mainPackageId) { (descriptor, lfArchive) =>
       val packages = lfArchive.all.map(readPackageId)
       val mainPkg = readPackageId(lfArchive.main)
-      revokeVettingForDar(mainPkg, packages, descriptor, psid)
+      revokeVettingForDar(
+        mainPkg,
+        packages,
+        descriptor,
+        psid,
+        waitToBecomeEffective =
+          None, // Hardcoded for simplicity. Can be exposed to the operator at some point
+      )
     }(ifNotExistsOperationFailed = "DAR archive unvetting")
 
   def resolveTargetVettingReferences(
@@ -259,7 +260,7 @@ class PackageService(
   ] = {
     val snapshot = getPackageMetadataView.getSnapshot
     val targetStates = opts.toTargetStates
-    val dryRunSnapshot = Option.when(opts.dryRun)(snapshot)
+    val dryRunSnapshot = Option.when(opts.dryRun)(PackageMetadata())
     for {
       resolvedTargetStates <- targetStates.parTraverse(resolveTargetVettingReferences(_, snapshot))
       preAndPost <- packageOps
@@ -267,6 +268,8 @@ class PackageService(
           resolvedTargetStates.flatten,
           synchronizerId,
           synchronizeVetting,
+          waitToBecomeEffective =
+            None, // Hardcoded for simplicity. Can be exposed to the operator at some point
           dryRunSnapshot,
           opts.expectedTopologySerial,
           updateForceFlags = Some(opts.forceFlags),
@@ -367,7 +370,7 @@ class PackageService(
   private def removeDarLf(
       darDescriptor: DarDescription,
       dar: archive.Dar[DamlLf.Archive],
-      psids: Set[PhysicalSynchronizerId],
+      connectedSynchronizers: Set[PhysicalSynchronizerId],
   )(implicit
       tc: TraceContext
   ): EitherT[FutureUnlessShutdown, RpcError, Unit] = {
@@ -416,14 +419,19 @@ class PackageService(
 
       packagesThatCanBeRemoved = packagesThatCanBeRemoved_.toList
 
-      _ <- MonadUtil.sequentialTraverse(psids.toSeq)(psid =>
+      _ <- MonadUtil.sequentialTraverse(connectedSynchronizers.toSeq)(psid =>
         revokeVettingForDar(
           mainPkg,
           packagesThatCanBeRemoved,
           darDescriptor,
           psid,
+          Some(timeouts.network.asNonNegativeFiniteApproximation),
         )
       )
+
+      // Bail out if a package is still vetted somewhere.
+      // This can happen if a package is vetted on a disconnected synchronizer.
+      _ <- packageOps.checkNoVettedPackageEntry(packagesThatCanBeRemoved.toSet)
 
       // TODO(#26078): update documentation to reflect main package dependency removal changes
       _unit <- EitherT.liftF(
@@ -445,13 +453,14 @@ class PackageService(
       packages: List[PackageId],
       darDescriptor: DarDescription,
       psid: PhysicalSynchronizerId,
+      waitToBecomeEffective: Option[config.NonNegativeFiniteDuration],
   )(implicit
       tc: TraceContext
   ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
     packageOps
-      .hasVettedPackageEntry(mainPkg)
-      .flatMap { isVetted =>
-        if (!isVetted)
+      .synchronizersWithVettedPackageEntry(packages.toSet)
+      .flatMap { psIds =>
+        if (psIds.isEmpty)
           EitherT.pure[FutureUnlessShutdown, RpcError](
             logger.info(
               s"Package with id $mainPkg is already unvetted. Doing nothing for the unvet operation"
@@ -460,7 +469,6 @@ class PackageService(
         else
           packageOps
             .revokeVettingForPackages(
-              mainPkg,
               packages,
               darDescriptor,
               psid,
@@ -468,6 +476,7 @@ class PackageService(
               // packages from the DAR, even the utility packages. UnvetDar is an experimental
               // operation that requires expert-level knowledge.
               ForceFlags(ForceFlag.AllowUnvettedDependencies),
+              waitToBecomeEffective,
             )
             .leftWiden
       }
@@ -598,13 +607,14 @@ class PackageService(
       dryRunSnapshot =
         allPackages
           .map { case (packageId, packageAst) => PackageMetadata.from(packageId, packageAst) }
-          .foldLeft(getPackageMetadataView.getSnapshot)(_ |+| _)
+          .foldLeft(PackageMetadata())(_ |+| _)
 
       _ <- packageOps
         .updateVettedPackages(
           targetVettingState,
           synchronizerId,
           PackageVettingSynchronization.NoSync,
+          waitToBecomeEffective = None,
           Some(dryRunSnapshot),
           expectedTopologySerial = None,
         )
@@ -635,7 +645,13 @@ class PackageService(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, RpcError, Unit] =
     packageOps
-      .vetPackages(packages, synchronizeVetting, psid)
+      .vetPackages(
+        packages,
+        synchronizeVetting,
+        waitToBecomeEffective =
+          None, // Hardcoded for simplicity. Can be exposed to the operator at some point
+        psid,
+      )
       .leftMap { err =>
         implicit val code = err.code
         CantonPackageServiceError.IdentityManagerParentError(err)

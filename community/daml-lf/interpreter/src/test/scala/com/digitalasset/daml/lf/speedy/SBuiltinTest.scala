@@ -1664,17 +1664,17 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
     "cannot be caught when exercising a choice" in {
       inside {
         val cid = ContractId.V1(Hash.hashPrivateKey("abc"))
+        val contract = TransactionBuilder.fatContractInstanceWithDummyDefaults(
+          version = txVersion,
+          packageName = pkg.pkgName,
+          template = t"Mod:FailingPrecondition".asInstanceOf[Ast.TTyCon].tycon,
+          arg = Value.ValueRecord(None, ImmArray(None -> Value.ValueParty(alice))),
+          contractId = cid,
+        )
         evalUpdateAppOnLedger(
           e"Mod:exerciseFailingPreconditionAndCatchError",
           ArraySeq(SContractId(cid)),
-          getContract = Map(
-            cid -> TransactionBuilder.fatContractInstanceWithDummyDefaults(
-              version = txVersion,
-              packageName = pkg.pkgName,
-              template = t"Mod:FailingPrecondition".asInstanceOf[Ast.TTyCon].tycon,
-              arg = Value.ValueRecord(None, ImmArray(None -> Value.ValueParty(alice))),
-            )
-          ),
+          getContract = Map(contract.contractId -> contract),
         )
       } {
         case Left(

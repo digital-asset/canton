@@ -11,8 +11,6 @@ import com.digitalasset.canton.tracing.TraceContext
 import org.apache.pekko.NotUsed
 import org.apache.pekko.stream.scaladsl.Source
 
-import scala.concurrent.Future
-
 /** Ignore local writes and simply trigger reads periodically based on a static polling interval.
   * Suitable for horizontally scaled sequencers where the local process will not have in-process
   * visibility of all writes.
@@ -22,10 +20,8 @@ class PollingEventSignaller(
     val loggerFactory: NamedLoggerFactory,
 ) extends EventSignaller
     with NamedLogging {
-  override def notifyOfLocalWrite(notification: WriteNotification)(implicit
-      traceContext: TraceContext
-  ): Future[Unit] =
-    Future.unit
+  override def notifyOfLocalWrite(notification: WriteNotification): Unit =
+    ()
 
   override def readSignalsForMember(
       member: Member,

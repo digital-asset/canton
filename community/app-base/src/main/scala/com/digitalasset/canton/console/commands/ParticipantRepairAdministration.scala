@@ -651,7 +651,7 @@ class ParticipantRepairAdministration(
     }
 
   // TODO(#28972) Remove preview flag
-  @Help.Summary("Perform a logical synchronizer upgrade")
+  @Help.Summary("Perform a late logical synchronizer upgrade")
   @Help.Description(
     """This command allows to perform an offline logical synchronizer upgrade.
        |It should only be used if the node was offline at the time of the upgrade and the
@@ -665,7 +665,7 @@ class ParticipantRepairAdministration(
        |- validation: The validations which need to be done to the connection.
       """
   )
-  def perform_manual_lsu(
+  def perform_late_lsu(
       currentPhysicalSynchronizerId: PhysicalSynchronizerId,
       successorPhysicalSynchronizerId: PhysicalSynchronizerId,
       announcedUpgradeTime: CantonTimestamp,
@@ -676,7 +676,7 @@ class ParticipantRepairAdministration(
       consoleEnvironment.run {
         runner.adminCommand(
           ParticipantAdminCommands.ParticipantRepairManagement
-            .PerformManualLsu(
+            .PerformLateLsu(
               currentPSId = currentPhysicalSynchronizerId,
               successorPSId = successorPhysicalSynchronizerId,
               upgradeTime = announcedUpgradeTime,

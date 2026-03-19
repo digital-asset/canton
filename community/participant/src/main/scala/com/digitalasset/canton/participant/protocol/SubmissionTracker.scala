@@ -177,6 +177,7 @@ class SubmissionTrackerImpl private[protocol] (
   private val pendingRequests = TrieMap[RootHash, RequestList]()
 
   @VisibleForTesting
+  @SuppressWarnings(Array("com.digitalasset.canton.ConcurrentMapSize"))
   private[protocol] def internalSize: Int = pendingRequests.size
 
   //   -----------------      -----------------      -----------------

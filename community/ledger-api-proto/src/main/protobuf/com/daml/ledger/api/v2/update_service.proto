@@ -48,15 +48,19 @@ service UpdateService {
 message GetUpdatesRequest {
   // Beginning of the requested ledger section (non-negative integer).
   // The response will only contain transactions whose offset is strictly greater than this.
-  // If zero, the stream will start from the beginning of the ledger.
+  // If not populated or set to zero, the stream will start from the beginning of the ledger.
   // If positive, the streaming will start after this absolute offset.
   // If the ledger has been pruned, this parameter must be specified and be greater than the pruning offset.
+  //
+  // Optional
   int64 begin_exclusive = 1;
 
   // End of the requested ledger section.
   // The response will only contain transactions whose offset is less than or equal to this.
-  // Optional, if empty, the stream will not terminate.
+  // If empty, the stream will not terminate.
   // If specified, the stream will terminate after this absolute offset (positive integer) is reached.
+  //
+  // Optional
   optional int64 end_inclusive = 2;
 
   reserved 3;
@@ -65,12 +69,16 @@ message GetUpdatesRequest {
   reserved 4;
   reserved "verbose";
 
+  // The update format for this request
+  //
   // Required
   UpdateFormat update_format = 5;
 }
 
 message GetUpdatesResponse {
   // The update that matches the filter in the request.
+  //
+  // Required
   oneof update {
     Transaction transaction = 1;
     Reassignment reassignment = 2;
@@ -82,10 +90,12 @@ message GetUpdatesResponse {
 message GetUpdateByOffsetRequest {
   // The offset of the update being looked up.
   // Must be a valid absolute offset (positive integer).
+  //
   // Required
   int64 offset = 1;
 
   // The format for the update.
+  //
   // Required
   UpdateFormat update_format = 2;
 }
@@ -93,16 +103,20 @@ message GetUpdateByOffsetRequest {
 message GetUpdateByIdRequest {
   // The ID of a particular update.
   // Must be a valid LedgerString (as described in ``value.proto``).
+  //
   // Required
   string update_id = 1;
 
   // The format for the update.
+  //
   // Required
   UpdateFormat update_format = 2;
 }
 
 message GetUpdateResponse {
   // The update that matches the filter in the request.
+  //
+  // Required
   oneof update {
     Transaction transaction = 1;
     Reassignment reassignment = 2;

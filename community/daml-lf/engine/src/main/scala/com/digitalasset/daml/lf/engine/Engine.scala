@@ -8,7 +8,7 @@ import com.digitalasset.daml.lf.archive.Dar
 import com.digitalasset.daml.lf.command._
 import com.digitalasset.daml.lf.data.Ref.{Identifier, PackageId, ParticipantId, Party, TypeConId}
 import com.digitalasset.daml.lf.data._
-import com.digitalasset.daml.lf.interpretation.{Error => IError}
+import com.digitalasset.daml.lf.interpretation.{NeedKeyContinuationToken, Error => IError}
 import com.digitalasset.daml.lf.language.Ast._
 import com.digitalasset.daml.lf.language._
 import com.digitalasset.daml.lf.speedy.metrics.MetricPlugin
@@ -72,7 +72,7 @@ object EngineLogger {
   }
 }
 
-/** Allows for evaluating [[Commands]] and validating [[Transaction]]s.
+/** Allows for evaluating [[com.digitalasset.daml.lf.command.ApiCommands]] and validating [[com.digitalasset.daml.lf.transaction.Transaction]]s.
   * <p>
   *
   * This class does not dereference contract ids or package ids on its own.
@@ -106,7 +106,7 @@ class Engine(val config: EngineConfig) {
   config.profileDir.foreach(Files.createDirectories(_))
   config.snapshotDir.foreach(Files.createDirectories(_))
 
-  private[this] val compiledPackages = ConcurrentCompiledPackages(config.getCompilerConfig)
+  private[engine] val compiledPackages = ConcurrentCompiledPackages(config.getCompilerConfig)
 
   private[this] val stablePackageIds = StablePackages.ids(config.allowedLanguageVersions)
 
@@ -152,6 +152,7 @@ class Engine(val config: EngineConfig) {
       participantId: ParticipantId,
       submissionSeed: crypto.Hash,
       contractIdVersion: ContractIdVersion,
+      contractStateMode: ContractStateMachine.Mode,
       prefetchKeys: Seq[ApiContractKey],
       engineLogger: Option[EngineLogger] = None,
   )(implicit loggingContext: LoggingContext): Result[(SubmittedTransaction, Tx.Metadata)] = {
@@ -179,6 +180,7 @@ class Engine(val config: EngineConfig) {
           preparationTime = preparationTime,
           seeding = Engine.initialSeeding(submissionSeed, participantId, preparationTime),
           contractIdVersion = contractIdVersion,
+          contractStateMode = contractStateMode,
           packageResolution = pkgResolution,
           engineLogger = engineLogger,
           submissionInfo = Some(Engine.SubmissionInfo(participantId, submissionSeed, submitters)),
@@ -208,6 +210,7 @@ class Engine(val config: EngineConfig) {
       preparationTime: Time.Timestamp,
       ledgerEffectiveTime: Time.Timestamp,
       contractIdVersion: ContractIdVersion,
+      contractStateMode: ContractStateMachine.Mode,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       engineLogger: Option[EngineLogger] = None,
   )(implicit loggingContext: LoggingContext): Result[(SubmittedTransaction, Tx.Metadata)] =
@@ -227,6 +230,7 @@ class Engine(val config: EngineConfig) {
         preparationTime = preparationTime,
         seeding = InitialSeeding.RootNodeSeeds(ImmArray(nodeSeed)),
         contractIdVersion: ContractIdVersion,
+        contractStateMode = contractStateMode,
         packageResolution = packageResolution,
         engineLogger = engineLogger,
         submissionInfo = None,
@@ -242,6 +246,7 @@ class Engine(val config: EngineConfig) {
       preparationTime: Time.Timestamp,
       submissionSeed: crypto.Hash,
       contractIdVersion: ContractIdVersion,
+      contractStateMode: ContractStateMachine.Mode,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       engineLogger: Option[EngineLogger] = None,
   )(implicit loggingContext: LoggingContext): Result[(SubmittedTransaction, Tx.Metadata)] =
@@ -253,6 +258,7 @@ class Engine(val config: EngineConfig) {
       preparationTime,
       submissionSeed,
       contractIdVersion,
+      contractStateMode,
       packageResolution,
       engineLogger,
     ).map { case (tx, meta, _) => (tx, meta) }
@@ -265,6 +271,7 @@ class Engine(val config: EngineConfig) {
       preparationTime: Time.Timestamp,
       submissionSeed: crypto.Hash,
       contractIdVersion: ContractIdVersion,
+      contractStateMode: ContractStateMachine.Mode,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       engineLogger: Option[EngineLogger] = None,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
@@ -282,6 +289,7 @@ class Engine(val config: EngineConfig) {
         preparationTime = preparationTime,
         seeding = Engine.initialSeeding(submissionSeed, participantId, preparationTime),
         contractIdVersion = contractIdVersion,
+        contractStateMode = contractStateMode,
         packageResolution = packageResolution,
         engineLogger = engineLogger,
         submissionInfo = None,
@@ -311,6 +319,7 @@ class Engine(val config: EngineConfig) {
       preparationTime: Time.Timestamp,
       submissionSeed: crypto.Hash,
       contractIdVersion: ContractIdVersion,
+      contractStateMode: ContractStateMachine.Mode,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
   )(implicit loggingContext: LoggingContext): Result[Unit] = {
     validateAndCollectMetrics(
@@ -321,6 +330,7 @@ class Engine(val config: EngineConfig) {
       preparationTime,
       submissionSeed,
       contractIdVersion,
+      contractStateMode,
       metricPlugins,
     ).map(_ => ())
   }
@@ -333,6 +343,7 @@ class Engine(val config: EngineConfig) {
       preparationTime: Time.Timestamp,
       submissionSeed: crypto.Hash,
       contractIdVersion: ContractIdVersion,
+      contractStateMode: ContractStateMachine.Mode,
       metricPlugins: Seq[MetricPlugin] = Seq.empty,
   )(implicit loggingContext: LoggingContext): Result[Speedy.Metrics] = {
     // reinterpret
@@ -345,6 +356,7 @@ class Engine(val config: EngineConfig) {
         preparationTime,
         submissionSeed,
         contractIdVersion,
+        contractStateMode,
         metricPlugins = metricPlugins,
       )
       (rtx, _, metrics) = result
@@ -410,6 +422,7 @@ class Engine(val config: EngineConfig) {
       preparationTime: Time.Timestamp,
       seeding: speedy.InitialSeeding,
       contractIdVersion: ContractIdVersion,
+      contractStateMode: ContractStateMachine.Mode,
       packageResolution: Map[Ref.PackageName, Ref.PackageId] = Map.empty,
       engineLogger: Option[EngineLogger] = None,
       submissionInfo: Option[Engine.SubmissionInfo] = None,
@@ -431,6 +444,7 @@ class Engine(val config: EngineConfig) {
         preparationTime,
         seeding,
         contractIdVersion,
+        contractStateMode,
         packageResolution,
         engineLogger,
         submissionInfo,
@@ -455,6 +469,7 @@ class Engine(val config: EngineConfig) {
       preparationTime: Time.Timestamp,
       seeding: speedy.InitialSeeding,
       contractIdVersion: ContractIdVersion,
+      contractStateMode: ContractStateMachine.Mode,
       packageResolution: Map[Ref.PackageName, Ref.PackageId],
       engineLogger: Option[EngineLogger] = None,
       submissionInfo: Option[Engine.SubmissionInfo] = None,
@@ -473,7 +488,7 @@ class Engine(val config: EngineConfig) {
       authorizationChecker = config.authorizationChecker,
       validating = validating,
       traceLog = EngineLogger.toTraceLog(engineLogger),
-      contractStateMode = config.contractStateMode,
+      contractStateMode = contractStateMode,
       contractIdVersion = contractIdVersion,
       packageResolution = packageResolution,
       limits = config.limits,
@@ -656,7 +671,7 @@ class Engine(val config: EngineConfig) {
               Result.needPackage(
                 pkgId,
                 context,
-                { pkg: Package =>
+                { (pkg: Package) =>
                   compiledPackages.addPackage(pkgId, pkg).flatMap { _ =>
                     callback(compiledPackages)
                     interpretLoop(machine, time, submissionInfo)
@@ -673,12 +688,18 @@ class Engine(val config: EngineConfig) {
                 },
               )
 
-            case Question.Update.NeedKey(gk, _, callback) =>
+            case Question.Update.NeedKey(gk, n, tokenOpt, _, callback) =>
               ResultNeedKey(
                 gk,
-                { coid: Option[ContractId] =>
-                  discard[Boolean](callback(coid))
-                  interpretLoop(machine, time, submissionInfo)
+                n,
+                tokenOpt,
+                {
+                  (
+                      contracts: Vector[FatContractInstance],
+                      continuationToken: Option[NeedKeyContinuationToken],
+                  ) =>
+                    callback(contracts, continuationToken)
+                    interpretLoop(machine, time, submissionInfo)
                 },
               )
           }
@@ -699,12 +720,6 @@ class Engine(val config: EngineConfig) {
 
   def clearPackages(): Unit = compiledPackages.clear()
 
-  /** Note: it's important we return a [[com.digitalasset.daml.lf.CompiledPackages]],
-    * and not a [[ConcurrentCompiledPackages]], otherwise people would be able
-    * to modify them.
-    */
-  def compiledPackages(): CompiledPackages = compiledPackages
-
   /** This function can be used to give a package to the engine pre-emptively,
     * rather than having the engine to ask about it through
     * [[ResultNeedPackage]].
@@ -720,8 +735,8 @@ class Engine(val config: EngineConfig) {
     * packages (See Daml-LF spec for more details) and uses only the
     * allowed language versions (as described by the engine
     * config).
-    * This is not affected by [[config.packageValidation]] flag.
-    * Package in [[pkgIds]] but not in [[pkgs]] are assumed to be
+    * This is not affected by [[com.digitalasset.daml.lf.engine.EngineConfig.packageValidation]] flag in [config].
+    * Package in [pkgIds] but not in [pkgs] are assumed to be
     * preloaded.
     */
   def validateDar(dar: Dar[(PackageId, Package)]): Either[Error.Package.Error, Unit] = {
@@ -816,8 +831,8 @@ class Engine(val config: EngineConfig) {
     *                               before hashing
     * @param hashingMethod the hashing method to use
     * @return a Result containing the computed hash. When [hashingMethod] is
-    *         [[HashingMethod.TypedNormalForm]], returns a [[ResultError]]
-    *         if [[create]] is ill-typed or if its package is unavailable.
+    *         [[com.digitalasset.daml.lf.crypto.Hash.HashingMethod.TypedNormalForm]], returns a [[ResultError]]
+    *         if [create] is ill-typed or if its package is unavailable.
     */
   def hashCreateNode(
       create: Node.Create,
@@ -934,7 +949,7 @@ class Engine(val config: EngineConfig) {
               Result.needPackage(
                 pkgId,
                 context,
-                { pkg: Package =>
+                { (pkg: Package) =>
                   compiledPackages.addPackage(pkgId, pkg).flatMap { _ =>
                     callback(compiledPackages)
                     interpret(machine, abort)
@@ -1012,8 +1027,7 @@ object Engine {
 
   def DevEngine: Engine = new Engine(
     EngineConfig(
-      allowedLanguageVersions = LanguageVersion.allLfVersionsRange,
-      contractStateMode = ContractStateMachine.Mode.devDefault,
+      allowedLanguageVersions = LanguageVersion.allLfVersionsRange
     )
   )
 

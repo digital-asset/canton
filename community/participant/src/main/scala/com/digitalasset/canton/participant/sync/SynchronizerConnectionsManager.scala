@@ -30,10 +30,15 @@ import com.digitalasset.canton.ledger.participant.state
 import com.digitalasset.canton.ledger.participant.state.*
 import com.digitalasset.canton.ledger.participant.state.SyncService.ConnectedSynchronizerResponse
 import com.digitalasset.canton.lifecycle.*
-import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{
+  ErrorLoggingContext,
+  NamedLoggerFactory,
+  NamedLogging,
+  TracedLogger,
+}
 import com.digitalasset.canton.participant.*
 import com.digitalasset.canton.participant.admin.*
-import com.digitalasset.canton.participant.admin.data.ManualLsuRequest
+import com.digitalasset.canton.participant.admin.data.LateLsuRequest
 import com.digitalasset.canton.participant.admin.party.{
   OnboardingClearanceScheduler,
   PartyReplicationTopologyWorkflow,
@@ -57,6 +62,8 @@ import com.digitalasset.canton.participant.sync.SynchronizerConnectionsManager.{
   ConnectSynchronizer,
   ConnectedSynchronizers,
   ConnectionListener,
+  NoAutomaticLsuHandler,
+  PerformLsuHandler,
 }
 import com.digitalasset.canton.participant.synchronizer.*
 import com.digitalasset.canton.participant.synchronizer.PendingHandshakeWithLsuSuccessor.PendingHandshakesWithSuccessorsStore
@@ -86,7 +93,7 @@ import org.slf4j.event.Level
 import java.util.concurrent.atomic.AtomicReference
 import scala.collection.concurrent.TrieMap
 import scala.concurrent.duration.Duration
-import scala.concurrent.{ExecutionContextExecutor, Future}
+import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.jdk.CollectionConverters.*
 import scala.util.chaining.*
 import scala.util.{Failure, Right, Success, Try}
@@ -140,6 +147,7 @@ private[sync] class SynchronizerConnectionsManager(
     extends FlagCloseable
     with Spanning
     with NamedLogging
+    with PerformLsuHandler
     with HasCloseContext {
 
   import ShowUtil.*
@@ -1004,6 +1012,13 @@ private[sync] class SynchronizerConnectionsManager(
             ),
           )
 
+          lsuHandler =
+            if (parameters.automaticallyPerformLsu) {
+              this
+            } else {
+              NoAutomaticLsuHandler(logger)
+            }
+
           ephemeral <- EitherT.right[SyncServiceError](
             syncEphemeralStateFactory
               .createFromPersistent(
@@ -1030,6 +1045,7 @@ private[sync] class SynchronizerConnectionsManager(
                 onboardingClearanceScheduler,
                 participantId,
                 synchronizerLoggerFactory,
+                lsuHandler,
               )
           )
 
@@ -1056,16 +1072,6 @@ private[sync] class SynchronizerConnectionsManager(
             loggerFactory,
           )
 
-          lsuCallback =
-            if (parameters.automaticallyPerformLsu)
-              new LsuCallbackImpl(
-                psid,
-                ephemeral.timeTracker,
-                this,
-                loggerFactory,
-              )
-            else LsuCallback.NoOp
-
           connectedSynchronizer <- EitherT.right(
             connectedSynchronizerFactory.create(
               synchronizerHandle,
@@ -1085,7 +1091,6 @@ private[sync] class SynchronizerConnectionsManager(
                   onboardingClearanceScheduler,
                   synchronizerHandle.topologyClient,
                   ephemeral.recordOrderPublisher,
-                  lsuCallback = lsuCallback,
                   pendingHandshakesWithSuccessorsStore = pendingHandshakesWithSuccessorsStore,
                   retrieveAndStoreMissingSequencerIds = traceContext =>
                     retrieveAndStoreMissingSequencerIds(psid)(traceContext).leftMap(_.toString),
@@ -1300,7 +1305,7 @@ private[sync] class SynchronizerConnectionsManager(
     * Note: The upgrade involve operations that are retried, so the method can take some time to
     * complete.
     */
-  def performLsu(
+  override def performLsu(
       currentPSId: PhysicalSynchronizerId,
       synchronizerSuccessor: SynchronizerSuccessor,
   )(implicit
@@ -1344,7 +1349,7 @@ private[sync] class SynchronizerConnectionsManager(
     * synchronizer.
     */
   def manuallyUpgradeSynchronizerTo(
-      request: ManualLsuRequest
+      request: LateLsuRequest
   )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] =
     for {
       _ <- validateSequencerConnection(
@@ -1352,7 +1357,7 @@ private[sync] class SynchronizerConnectionsManager(
         request.successorConnectionValidation,
       ).leftMap(_.toString)
       _ <-
-        new ManualLogicalSynchronizerUpgrade(
+        new LateLogicalSynchronizerUpgrade(
           synchronizerConnectionConfigStore,
           connectQueue,
           connectedSynchronizers,
@@ -1584,5 +1589,27 @@ object SynchronizerConnectionsManager {
         lsidToPSId.remove(psid.logical)
         connected.remove(psid)
       }
+  }
+
+  sealed trait PerformLsuHandler {
+    def performLsu(
+        psid: PhysicalSynchronizerId,
+        successor: SynchronizerSuccessor,
+    )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit]
+  }
+
+  final case class NoAutomaticLsuHandler(logger: TracedLogger)(implicit ec: ExecutionContext)
+      extends PerformLsuHandler {
+    override def performLsu(
+        psid: PhysicalSynchronizerId,
+        successor: SynchronizerSuccessor,
+    )(implicit traceContext: TraceContext): EitherT[FutureUnlessShutdown, String, Unit] = {
+      logger.info(
+        """Automatic logical synchronizer upgrade is disabled, so the upgrade will not be performed automatically.
+          |Adjust `<node>.parameters.automatically-perform-lsu = true` and restart the node
+          |or consult the documentation to perform manual upgrade.""".stripMargin
+      )
+      EitherT.pure[FutureUnlessShutdown, String](())
+    }
   }
 }
