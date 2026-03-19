@@ -68,7 +68,7 @@ _postgres_non_standard_environment: &postgres_non_standard_environment
   <<: *postgres_environment
   NON_STANDARD_POSTGRES: yes
 _canton_docker_executor: &canton_docker_executor
-  image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-1bf294a74dcb
+  image: digitalasset/canton-build:5950b99b5f66-adbfe542cf31-d251d6050d50
   auth:
     username: $DOCKERHUB_USERNAME
     password: $DOCKERHUB_PASSWORD
