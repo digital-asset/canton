@@ -3,13 +3,17 @@
 
 package com.digitalasset.canton.platform.config
 
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
+
 /** Ledger API topology-aware package selection specific configurations
   *
   * @param enabled
   *   whether to enable topology-aware package selection in command interpretation
   */
 final case class TopologyAwarePackageSelectionConfig(
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    maxPassesDefault: PositiveInt = PositiveInt.three,
+    maxPassesLimit: PositiveInt = PositiveInt.four,
 )
 
 object TopologyAwarePackageSelectionConfig {

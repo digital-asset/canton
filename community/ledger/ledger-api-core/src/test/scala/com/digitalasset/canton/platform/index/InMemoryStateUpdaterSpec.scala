@@ -1283,6 +1283,7 @@ object InMemoryStateUpdaterSpec {
       reasonTemplate = FinalReason(new Status()),
       synchronizerId = synchronizerId,
       recordTime = CantonTimestamp.assertFromLong(t),
+      isTransaction = true,
     )
 
   private def sequencerIndexMoved(

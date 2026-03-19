@@ -23,7 +23,7 @@ import com.digitalasset.canton.console.{
   Helpful,
 }
 import com.digitalasset.canton.data.CantonTimestamp
-import com.digitalasset.canton.grpc.FileStreamObserver
+import com.digitalasset.canton.grpc.OutputFileStreamObserver
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.participant.admin.data.{
   ActiveContractOld,
@@ -218,7 +218,7 @@ class ParticipantRepairAdministration(
     check(FeatureFlag.Repair) {
       consoleEnvironment.run {
         val file = File(outputFile)
-        val responseObserver = new FileStreamObserver[ExportAcsOldResponse](file, _.chunk)
+        val responseObserver = new OutputFileStreamObserver[ExportAcsOldResponse](file, _.chunk)
 
         def call: ConsoleCommandResult[Context.CancellableContext] =
           runner.adminCommand(
@@ -307,7 +307,7 @@ class ParticipantRepairAdministration(
   ): Unit =
     consoleEnvironment.run {
       val file = File(exportFilePath)
-      val responseObserver = new FileStreamObserver[ExportAcsResponse](file, _.chunk)
+      val responseObserver = new OutputFileStreamObserver[ExportAcsResponse](file, _.chunk)
 
       def call: ConsoleCommandResult[Context.CancellableContext] =
         runner.adminCommand(

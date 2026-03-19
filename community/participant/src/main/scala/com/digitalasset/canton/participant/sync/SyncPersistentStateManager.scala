@@ -208,17 +208,17 @@ class SyncPersistentStateManager(
     }
   }
 
-  def getSynchronizerIdx(
+  private def getSynchronizerIdx(
       synchronizerId: SynchronizerId
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[IndexedSynchronizer] =
     IndexedSynchronizer.indexed(this.indexedStringStore)(synchronizerId)
 
-  def getPhysicalSynchronizerIdx(
+  private def getPhysicalSynchronizerIdx(
       synchronizerId: PhysicalSynchronizerId
   )(implicit traceContext: TraceContext): FutureUnlessShutdown[IndexedPhysicalSynchronizer] =
     IndexedPhysicalSynchronizer.indexed(this.indexedStringStore)(synchronizerId)
 
-  def getSynchronizerTopologyStoreId(synchronizerId: PhysicalSynchronizerId)(implicit
+  private def getSynchronizerTopologyStoreId(synchronizerId: PhysicalSynchronizerId)(implicit
       traceContext: TraceContext
   ): FutureUnlessShutdown[IndexedTopologyStoreId] =
     IndexedTopologyStoreId.indexed(indexedStringStore)(
@@ -374,7 +374,7 @@ class SyncPersistentStateManager(
       val psidToState = for {
         lsid <- logicalPersistentStates.keys
         state <- getAllFor(lsid)
-      } yield (state.psid -> state)
+      } yield state.psid -> state
       psidToState.toMap
     }
 

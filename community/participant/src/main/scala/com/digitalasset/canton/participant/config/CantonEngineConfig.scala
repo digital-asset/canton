@@ -3,7 +3,7 @@
 
 package com.digitalasset.canton.participant.config
 
-import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
+import com.digitalasset.daml.lf.engine.EngineLoggingConfig
 import com.digitalasset.daml.lf.transaction.ContractStateMachine
 
 import java.nio.file.Path

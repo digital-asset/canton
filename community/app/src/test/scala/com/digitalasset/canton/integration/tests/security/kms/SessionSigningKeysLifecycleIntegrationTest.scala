@@ -3,8 +3,9 @@
 
 package com.digitalasset.canton.integration.tests.security.kms
 
+import com.digitalasset.canton.concurrent.Threading
 import com.digitalasset.canton.config.DbConfig.Postgres
-import com.digitalasset.canton.config.{KmsConfig, PositiveFiniteDuration, SessionSigningKeysConfig}
+import com.digitalasset.canton.config.{KmsConfig, SessionSigningKeysConfig}
 import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
 import com.digitalasset.canton.integration.tests.security.kms.mock.MockKmsDriverCryptoIntegrationTestBase
 import com.digitalasset.canton.integration.tests.security.kms.mock.MockKmsDriverCryptoIntegrationTestBase.mockKmsDriverConfig
@@ -14,6 +15,7 @@ import com.digitalasset.canton.integration.{
   ConfigTransforms,
   SharedEnvironment,
 }
+import com.digitalasset.canton.version.ProtocolVersion
 
 /** TODO(#27529): In some scenarios clock advances still fails due to the current snapshot
   * approximation problems. For example, since participants rely on the current snapshot
@@ -28,40 +30,31 @@ trait SessionSigningKeysLifecycleIntegrationTest
     with SharedEnvironment
     with KmsCryptoIntegrationTestBase {
 
-  protected val keyValidityDuration: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(5)
-  protected val advanceBy: PositiveFiniteDuration = PositiveFiniteDuration.ofMinutes(3)
-
-  private lazy val sessionSigningKeysConfigTest =
-    SessionSigningKeysConfig.default.copy(keyValidityDuration = keyValidityDuration)
-
   override protected def otherConfigTransforms: Seq[ConfigTransform] = Seq(
-    ConfigTransforms.useStaticTime,
-    ConfigTransforms.setSessionSigningKeys(sessionSigningKeysConfigTest),
+    ConfigTransforms.setSessionSigningKeys(SessionSigningKeysConfig.short)
   )
 
-  "verify correct session key lifecycle with clock advances" in { implicit env =>
-    import env.*
+  "verify correct session key lifecycle with clock advances" onlyRunWhen
+    testedProtocolVersion >= ProtocolVersion.v35 in { implicit env =>
+      import env.*
 
-    val simClock = env.environment.simClock.value
+      env.nodes.local.foreach { node =>
+        node.config.crypto.sessionSigningKeys shouldBe SessionSigningKeysConfig.short
+      }
 
-    // check that all nodes are using session signing keys
-    env.nodes.local.foreach { node =>
-      node.config.crypto.sessionSigningKeys shouldBe sessionSigningKeysConfigTest
+      assertPingSucceeds(participant1, participant2)
+
+      // session signing keys created are still valid
+      Threading.sleep(SessionSigningKeysConfig.short.cutOffDuration.duration.div(2.0).toMillis)
+
+      assertPingSucceeds(participant1, participant2)
+
+      // session signing keys have expired; new keys will be generated
+      Threading.sleep(SessionSigningKeysConfig.short.keyValidityDuration.duration.toMillis)
+
+      assertPingSucceeds(participant1, participant2)
+
     }
-
-    assertPingSucceeds(participant1, participant2)
-
-    // session signing keys created are still valid
-    simClock.advance(advanceBy.asJava)
-
-    assertPingSucceeds(participant1, participant2)
-
-    // session signing keys have expired; new keys will be generated
-    simClock.advance(advanceBy.asJava)
-
-    assertPingSucceeds(participant1, participant2)
-
-  }
 
 }
 

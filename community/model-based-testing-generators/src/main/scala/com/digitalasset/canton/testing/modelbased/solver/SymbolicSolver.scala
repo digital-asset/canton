@@ -794,10 +794,15 @@ private class SymbolicSolver(
                 })
                 (cid, ctx.mkAnd(exists, active, hasKey, notSeenBefore))
               }
-            listRelationshipConstraint(
-              activeCandidatesWithKey,
-              contractIds,
-              if (exhaustive) ListEquality else StrictPrefix,
+            ctx.mkAnd(
+              listRelationshipConstraint(
+                activeCandidatesWithKey,
+                contractIds,
+                if (exhaustive) ListEquality else StrictPrefix,
+              ),
+              // Asking for 0 contracts is not allowed, so we should never end up with a QueryByKey node in which
+              // no contracts were returned but the answer is not exhaustive.
+              if (exhaustive) ctx.mkTrue() else ctx.mkGt(contractIds.length, ctx.mkInt(0)),
             )
           }
         case Rollback(subTransaction) =>

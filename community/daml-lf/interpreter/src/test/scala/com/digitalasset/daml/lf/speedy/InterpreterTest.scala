@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
 import com.digitalasset.daml.lf.language.Ast._
@@ -14,14 +15,11 @@ import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
-import com.daml.logging.ContextualizedLogger
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 
 import scala.language.implicitConversions
 
-class InterpreterTest extends AnyWordSpec with Inside with Matchers with TableDrivenPropertyChecks {
-
-  import SpeedyTestLib.loggingContext
+class InterpreterTest extends AnyWordSpec with Inside with Matchers with TableDrivenPropertyChecks with SuppressingLogging {
 
   private implicit def id(s: String): Ref.Name = Name.assertFromString(s)
 
@@ -118,34 +116,6 @@ class InterpreterTest extends AnyWordSpec with Inside with Matchers with TableDr
         case v => sys.error(s"unexpected resulting value $v")
 
       }
-    }
-  }
-
-  "tracelog" should {
-    val logger = ContextualizedLogger.get(getClass)
-    "empty size" in {
-      val log = new RingBufferTraceLog(logger, 10)
-      log.iterator.hasNext shouldBe false
-    }
-    "half full" in {
-      val log = new RingBufferTraceLog(logger, 2)
-      log.add("test", None)
-      val iter = log.iterator
-      iter.hasNext shouldBe true
-      iter.next() shouldBe (("test", None))
-      iter.hasNext shouldBe false
-    }
-    "overflow" in {
-      val log = new RingBufferTraceLog(logger, 2)
-      log.add("test1", None)
-      log.add("test2", None)
-      log.add("test3", None) // should replace "test1"
-      val iter = log.iterator
-      iter.hasNext shouldBe true
-      iter.next() shouldBe (("test2", None))
-      iter.hasNext shouldBe true
-      iter.next() shouldBe (("test3", None))
-      iter.hasNext shouldBe false
     }
   }
 

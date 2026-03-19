@@ -158,6 +158,7 @@ final case class CommandSubmitter(
         packageIdSelectionPreference = Nil,
         prefetchContractKeys = Nil,
         deduplicationPeriod = Empty,
+        tapsMaxPasses = None,
       )
 
     (if (useSubmitAndWait) {

@@ -17,7 +17,7 @@ package_community:
     - run:
         name: "Package performance runner"
         command: |
-          performance/bundle-performance.sh
+          performance/pack-performance.sh -s
     - run:
         name: "Remember version info"
         command: |

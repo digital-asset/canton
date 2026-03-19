@@ -69,7 +69,7 @@ final class LsuAnnouncementTopologyIntegrationTest
 
   private def allocateSuccessorPSId(): PhysicalSynchronizerId =
     latestSuccessorPSId.updateAndGet { existing =>
-      Some(existing.value.copy(serial = existing.value.serial.increment.toNonNegative))
+      Some(existing.value.incrementSerial)
     }.value
 
   private lazy val upgradeTime = CantonTimestamp.now().plusSeconds(3600)

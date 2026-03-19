@@ -10,12 +10,12 @@ import com.daml.ledger.api.v2.reassignment.{
   ReassignmentEvent,
   UnassignedEvent,
 }
-import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.trace_context.TraceContext as DamlTraceContext
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesResponse}
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.ledger.api.util.{LfEngineToApi, TimestampConversion}
+import com.digitalasset.canton.ledger.api.{AcsContinuationToken, GetActiveContractsResponseFactory}
 import com.digitalasset.canton.logging.{ErrorLoggingContext, LoggingContextWithTrace}
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.store.LedgerApiContractStore
@@ -111,9 +111,10 @@ private[dao] final class UpdateReader(
       activeAt: Option[Offset],
       filter: TemplatePartiesFilter,
       eventProjectionProperties: EventProjectionProperties,
+      continuationToken: Option[AcsContinuationToken],
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[GetActiveContractsResponse, NotUsed] =
+  ): Source[GetActiveContractsResponseFactory, NotUsed] =
     activeAt match {
       case None => Source.empty
       case Some(offset) =>
@@ -123,6 +124,7 @@ private[dao] final class UpdateReader(
               filteringConstraints = filter,
               activeAt = offset -> maxSeqId,
               eventProjectionProperties = eventProjectionProperties,
+              continuationToken = continuationToken,
             )
           )
         Source

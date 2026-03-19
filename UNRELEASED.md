@@ -129,6 +129,13 @@ For parties with signing keys both in `PartyToParticipant` and `PartyToKeyMappin
 - `PrepareSubmissionRequest.hashing_scheme_version` can now be populated with the desired hashing version to be
    used for the transaction. The default hashing scheme is `HASHING_SCHEME_VERSION_V2` but integrators are encouraged to move to `HASHING_SCHEME_VERSION_V3` for
   synchronizers using protocol version 35.
+- Topology-Aware Package Selection (TAPS) refinement for handling inconsistent vetting states:
+  - The algorithm now considers a party's package vetting state only for packages required by that party in the interpreted transaction. 
+    It starts with a minimal set of restrictions derived from the command's root nodes and progressively accumulates more restrictions over a configurable number of passes.
+    This iterative process increases the likelihood of finding a valid package selection set for the routing of the transaction.
+  - The maximum number of TAPS passes can be set at the request-level via the optional `taps_max_passes` field in `Commands` or `PrepareSubmissionRequest` messages.
+    If not specified, the default value is taken from the participant configuration via `participants.participant.ledger-api.topology-aware-package-selection.max-passes-default` (defaults to `3`).
+    A hard limit is enforced by `participants.participant.ledger-api.topology-aware-package-selection.max-passes-limit` (defaults to `4`).
 - Deprecated: removed the feature flag `canton.sequencers.<node>.parameters.async-writer.enabled`, as async writing is now
   the only supported mode.
 
@@ -248,6 +255,13 @@ visible on the Ledger API.
 The original party replication, which relied on a silent synchronizer, has been superseded by the offline party
 replication process. As a result, the obsolete repair console macros associated with the old approach have
 been removed.
+
+### ACS stream continuation
+
+The `GetActiveContracts` stream request has been extended with an optional `stream_continuation_token` field that allows
+clients to continue an interrupted ACS stream from the last element which made through. The field can be populated with
+the `stream_continuation_token` field of the last response element received before the interruption, and the stream will
+continue from the next element after that.
 
 ### update to GRPC 1.77.0
 

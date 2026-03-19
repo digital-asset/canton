@@ -4126,6 +4126,22 @@ components:
             - filters_by_party is the filter.filters_by_party from this request
             - filters_for_any_party is the filter.filters_for_any_party from this request
             - verbose is the verbose field from this request
+        streamContinuationToken:
+          description: |-
+            Opaque representation of a continuation token defining a position in the active contracts snapshot.
+            The prefix of the active contracts snapshot will be omitted up to and including the element from which
+            the continuation token was read.
+            To reuse the continuation token from a `GetActiveContractsPageResponse`:
+
+            - subsequent request must be executed on the same participant with the same version of canton,
+            - subsequent request must have the same active_at_offset,
+            - subsequent request must have the same event_format
+            - and the participant must not have been pruned after the active_at_offset.
+
+            If not specified, the whole active contracts snapshot will be returned.
+
+            Optional: can be empty
+          type: string
     GetConnectedSynchronizersResponse:
       title: GetConnectedSynchronizersResponse
       type: object
@@ -5036,6 +5052,16 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PrefetchContractKey'
+        tapsMaxPasses:
+          description: |-
+            The maximum number of passes for the Topology-Aware Package Selection (TAPS).
+            Higher values can increase the chance of successful package selection for routing of interpreted transactions.
+            If unset, this defaults to the value defined in the participant configuration.
+            The provided value must not exceed the limit specified in the participant configuration.
+
+            Optional
+          type: integer
+          format: int32
     JsContractEntry:
       title: JsContractEntry
       description: |-
@@ -5312,6 +5338,14 @@ components:
           type: string
         contractEntry:
           $ref: '#/components/schemas/JsContractEntry'
+        streamContinuationToken:
+          description: |-
+            Opaque representation of a continuation token which can be used in the request to bypass the already processed part
+            of the active contracts snapshot.
+            Only populated for the streaming ``GetActiveContracts`` rpc call.
+
+            Optional: can be empty
+          type: string
     JsGetEventsByContractIdResponse:
       title: JsGetEventsByContractIdResponse
       type: object
@@ -5576,6 +5610,16 @@ components:
             To turn off cost estimation, set the CostEstimationHints#disabled field to true
 
             Optional
+        tapsMaxPasses:
+          description: |-
+            The maximum number of passes for the Topology-Aware Package Selection (TAPS).
+            Higher values can increase the chance of successful package selection for routing of interpreted transactions.
+            If unset, this defaults to the value defined in the participant configuration.
+            The provided value must not exceed the limit specified in the participant configuration.
+
+            Optional
+          type: integer
+          format: int32
         hashingSchemeVersion:
           description: |-
             The hashing scheme version to be used when building the hash.

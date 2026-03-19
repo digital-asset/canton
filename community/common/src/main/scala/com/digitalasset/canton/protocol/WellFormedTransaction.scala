@@ -15,7 +15,7 @@ import com.digitalasset.canton.protocol.WellFormedTransaction.Stage
 import com.digitalasset.canton.topology.PartyId
 import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.{Checked, ErrorUtil, LfTransactionUtil}
-import com.digitalasset.canton.{checked, protocol}
+import com.digitalasset.canton.{LfPartyId, checked, protocol}
 import com.digitalasset.daml.lf.data.ImmArray
 import monocle.macros.syntax.lens.*
 
@@ -427,11 +427,12 @@ object WellFormedTransaction {
     }
 
   private def checkPartyNames(tx: LfVersionedTransaction): Checked[Nothing, String, Unit] = {
-    val lfPartyIds =
-      tx.nodes.values
-        .collect { case node: LfActionNode => node.informeesOfNode }
-        .toSet
-        .flatten
+    val lfPartyIds = mutable.HashSet.empty[LfPartyId]
+    tx.nodes.values
+      .foreach {
+        case node: LfActionNode => lfPartyIds.addAll(node.informeesOfNode)
+        case _ =>
+      }
     lfPartyIds.to(LazyList).traverse_ { lfPartyId =>
       Checked.fromEitherNonabort(())(
         PartyId

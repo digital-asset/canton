@@ -62,9 +62,7 @@ final class LsuRestartIntegrationTest extends LsuBase {
         participants.all.foreach(
           _.synchronizers.modify(
             daName,
-            _.focus(_.timeTracker.observationLatency)
-              .replace(config.NonNegativeFiniteDuration.ofMillis(0))
-              .focus(_.timeTracker.patienceDuration)
+            _.focus(_.timeTracker.patienceDuration)
               .replace(config.NonNegativeFiniteDuration.ofMillis(0)),
           )
         )

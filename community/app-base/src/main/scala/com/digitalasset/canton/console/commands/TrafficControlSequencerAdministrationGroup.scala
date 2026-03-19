@@ -256,5 +256,4 @@ class TrafficControlSequencerAdministrationGroup(
           .toEither
       } yield ()
     }
-
 }

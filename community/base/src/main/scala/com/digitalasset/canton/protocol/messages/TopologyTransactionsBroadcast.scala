@@ -88,9 +88,9 @@ object TopologyTransactionsBroadcast
       expectedProtocolVersion: ProtocolVersion,
       message: v30.TopologyTransactionsBroadcast,
   ): ParsingResult[TopologyTransactionsBroadcast] = {
-    val v30.TopologyTransactionsBroadcast(synchronizerP, signedTopologyTransactionsP) = message
+    val v30.TopologyTransactionsBroadcast(psidP, signedTopologyTransactionsP) = message
     for {
-      synchronizerId <- PhysicalSynchronizerId.fromProtoPrimitive(synchronizerP, "synchronizer_id")
+      synchronizerId <- PhysicalSynchronizerId.fromProtoPrimitive(psidP, "physical_synchronizer_id")
 
       signedTopologyTransactions <- ProtoConverter.parseRequired(
         SignedTopologyTransactions

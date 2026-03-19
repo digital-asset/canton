@@ -5,7 +5,6 @@ package com.digitalasset.canton.synchronizer.sequencer
 
 import cats.data.EitherT
 import com.daml.grpc.adapter.ExecutionSequencerFactory
-import com.daml.nonempty.NonEmpty
 import com.digitalasset.canton.admin.sequencer.v30.SequencerStatusServiceGrpc
 import com.digitalasset.canton.auth.CantonAdminTokenDispenser
 import com.digitalasset.canton.concurrent.ExecutionContextIdlenessExecutorService
@@ -70,6 +69,7 @@ import com.digitalasset.canton.synchronizer.sequencer.store.{
   SequencerSynchronizerConfiguration,
   SequencerSynchronizerConfigurationStore,
 }
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.synchronizer.sequencing.authentication.grpc.SequencerAuthenticationServerInterceptor
 import com.digitalasset.canton.synchronizer.sequencing.authentication.{
   MemberAuthenticationServiceFactory,
@@ -101,11 +101,9 @@ import com.digitalasset.canton.topology.store.{
   TopologyStore,
 }
 import com.digitalasset.canton.topology.transaction.{
-  LsuAnnouncement,
   MediatorSynchronizerState,
   SequencerSynchronizerState,
   SynchronizerTrustCertificate,
-  TopologyMapping,
 }
 import com.digitalasset.canton.tracing.{TraceContext, Traced}
 import com.digitalasset.canton.util.{EitherTUtil, ErrorUtil, SingleUseCell}
@@ -382,7 +380,9 @@ class SequencerNodeBootstrap(
         logger.info(
           "Received a request to initialize an already initialized sequencer. Skipping initialization!"
         )
-        EitherT.pure(InitializeSequencerResponse(replicated = config.sequencer.supportsReplicas))
+        EitherT.pure(
+          InitializeSequencerResponse(replicated = config.replication.exists(_.isEnabled))
+        )
       } else {
         completeWithExternalUS {
           logger.info(
@@ -413,7 +413,7 @@ class SequencerNodeBootstrap(
             Some(request.topologySnapshot -> request.sequencerSnapshot),
           )
         }.map { _ =>
-          InitializeSequencerResponse(replicated = config.sequencer.supportsReplicas)
+          InitializeSequencerResponse(replicated = config.replication.exists(_.isEnabled))
         }
       }
   }
@@ -552,40 +552,10 @@ class SequencerNodeBootstrap(
             }
           }
 
-          sequencingTimeLowerBoundExclusive <-
-            EitherT.right[String] {
-              // We use the store since at this point the topology client has not been initialized yet
-              synchronizerTopologyStore
-                .findPositiveTransactions(
-                  CantonTimestamp.MaxValue,
-                  asOfInclusive = false,
-                  isProposal = false,
-                  types = Seq(
-                    TopologyMapping.Code.LsuAnnouncement
-                  ),
-                  filterUid = Some(NonEmpty(Seq, psid.uid)),
-                  filterNamespace = None,
-                )
-                .map(
-                  _.collectOfMapping[LsuAnnouncement].result
-                    .filter(_.mapping.successorSynchronizerId == psid)
-                    .toList match {
-                    case Nil =>
-                      logger.info(s"Sequencer will not use any sequencing lower bound")
-                      None
-                    case one :: Nil =>
-                      val priorUpgradeTime = one.mapping.upgradeTime
-                      logger.info(
-                        s"Sequencer will use prior upgrade time $priorUpgradeTime as sequencing lower bound"
-                      )
-
-                      Some(priorUpgradeTime)
-                    case _moreThanOne =>
-                      ErrorUtil
-                        .invalidState("Found more than one LsuAnnouncement mapping")
-                  }
-                )
-            }
+          lsuSequencingBounds <- EitherT.right[String](
+            LsuSequencingBounds.create(synchronizerTopologyStore)
+          )
+          _ = logger.info(s"Computed lsu sequencing bounds: $lsuSequencingBounds")
 
           sequencerSnapshotTimestamp = topologyAndSequencerSnapshot
             .flatMap(_._2)
@@ -595,7 +565,7 @@ class SequencerNodeBootstrap(
               TopologyTransactionProcessor
                 .createProcessorAndClientForSynchronizer(
                   synchronizerTopologyStore,
-                  synchronizerUpgradeTime = sequencingTimeLowerBoundExclusive,
+                  upgradeTimeFromPredecessor = lsuSequencingBounds.map(_.upgradeTime),
                   crypto.pureCrypto,
                   parameters,
                   arguments.config.topology,
@@ -708,7 +678,8 @@ class SequencerNodeBootstrap(
           topologyStateForInitializationService =
             new StoreBasedTopologyStateForInitializationService(
               synchronizerTopologyStore,
-              sequencingTimeLowerBoundExclusive,
+              sequencingTimeLowerBoundExclusive =
+                lsuSequencingBounds.map(_.lowerBoundSequencingTimeExclusive),
               synchronizerLoggerFactory,
             )
 
@@ -783,7 +754,7 @@ class SequencerNodeBootstrap(
                 syncCryptoWithOptionalSessionKeys,
                 futureSupervisor,
                 config.trafficConfig,
-                sequencingTimeLowerBoundExclusive,
+                lsuSequencingBounds,
                 runtimeReadyPromise.futureUS,
                 topologyAndSequencerSnapshot.flatMap { case (_, sequencerSnapshot) =>
                   sequencerSnapshot
@@ -842,11 +813,7 @@ class SequencerNodeBootstrap(
             // Since the sequencer runtime trusts itself, there is no point in validating the events.
             SequencedEventValidatorFactory.noValidation(psid, warn = false),
             clock,
-            RequestSigner(
-              syncCryptoWithOptionalSessionKeys,
-              staticSynchronizerParameters.protocolVersion,
-              loggerFactory,
-            ),
+            RequestSigner(syncCryptoWithOptionalSessionKeys, loggerFactory),
             sequencedEventStore,
             new SendTracker(
               Map(),
@@ -923,7 +890,7 @@ class SequencerNodeBootstrap(
             sequencerClient,
             staticSynchronizerParameters,
             parameters,
-            sequencingTimeLowerBoundExclusive,
+            lsuSequencingBounds,
             timeTracker,
             arguments.metrics,
             physicalSynchronizerIdx,

@@ -224,7 +224,7 @@ abstract class ActiveContractsIntegrationTestBase(alphaMultiSynchronizerSupport:
       viewPosition = ViewPosition(List.empty),
     )
 
-    val contractHasher = TestEngine.syncContractHasher(BaseTest.CantonExamplesPath)
+    val contractHasher = TestEngine.syncContractHasher(loggerFactory, BaseTest.CantonExamplesPath)
     val contractHash =
       contractHasher.hash(unsuffixedCreateNode, contractIdSuffixer.contractHashingMethod)
 

@@ -425,7 +425,7 @@ class SignatureReaderSpec extends AnyWordSpec with Matchers with Inside {
     field -> Ast.TVar(var_)
 
   private def primField(field: Ref.Name, primType: Ast.BuiltinType, args: Ast.Type*) =
-    field -> (args foldLeft (Ast.TBuiltin(primType): Ast.Type))(Ast.TApp)
+    field -> (args foldLeft (Ast.TBuiltin(primType): Ast.Type))(Ast.TApp.apply)
 
   private def typeConstructorField(field: Ast.FieldName, segments: List[String]) =
     field -> typeConId(segments)

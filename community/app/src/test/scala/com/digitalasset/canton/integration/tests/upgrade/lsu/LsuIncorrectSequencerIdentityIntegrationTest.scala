@@ -4,9 +4,7 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.admin.api.client.data.SynchronizerConnectionConfig
-import com.digitalasset.canton.config
 import com.digitalasset.canton.config.RequireTypes.PositiveInt
-import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.ParticipantReference
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
@@ -175,18 +173,12 @@ final class LsuSuccessorSequencerIsPredecessorIntegrationTest extends LsuBase {
           SynchronizerConnectionConfig(
             synchronizerAlias = daName,
             sequencerConnections = sequencer1,
-            timeTracker = SynchronizerTimeTrackerConfig(observationLatency =
-              config.NonNegativeFiniteDuration.Zero
-            ),
           )
         )
         participant2.synchronizers.connect_by_config(
           SynchronizerConnectionConfig(
             synchronizerAlias = daName,
             sequencerConnections = sequencer2,
-            timeTracker = SynchronizerTimeTrackerConfig(observationLatency =
-              config.NonNegativeFiniteDuration.Zero
-            ),
           )
         )
       }

@@ -462,10 +462,10 @@ private[update] final class SubmissionRequestValidator(
               .areMembersRegisteredAt(submissionRequest.batch.allMembers.toSeq, sequencingTimestamp)
               .map(_.flatMap {
                 case (_, true) => None
-                case (member, false) =>
-                  Some(member)
+                case (member, false) => Some(member)
               }.toSeq)
           )
+
       res <- EitherT.cond[FutureUnlessShutdown](
         unknownRecipients.isEmpty,
         (),

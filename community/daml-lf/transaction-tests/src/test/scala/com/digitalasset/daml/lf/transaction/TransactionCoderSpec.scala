@@ -651,18 +651,18 @@ class TransactionCoderSpec
 
   def withoutExerciseResult(gn: Node): Node =
     gn match {
-      case ne: Node.Exercise => ne copy (exerciseResult = None)
+      case ne: Node.Exercise => ne.copy(exerciseResult = None)
       case _ => gn
     }
   def withoutContractKeyInExercise(gn: Node): Node =
     gn match {
-      case ne: Node.Exercise => ne copy (keyOpt = None)
+      case ne: Node.Exercise => ne.copy(keyOpt = None)
       case _ => gn
     }
   def withoutMaintainersInExercise(gn: Node): Node =
     gn match {
       case ne: Node.Exercise =>
-        ne copy (keyOpt = ne.keyOpt.map(_.copy(maintainers = Set.empty)))
+        ne.copy(keyOpt = ne.keyOpt.map(_.copy(maintainers = Set.empty)))
       case _ => gn
     }
 

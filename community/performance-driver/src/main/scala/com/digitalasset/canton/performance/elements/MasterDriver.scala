@@ -146,7 +146,7 @@ class MasterDriver(
       testParticipants,
       testProbes,
       new ContractObserver() {
-        override def processCreate(create: CreatedEvent): Boolean = {
+        override def processCreate(create: CreatedEvent, synchronizerId: String): Boolean = {
           if (
             create.templateId.fold(false)(
               templateMatches(M.orchestration.TestProbe.TEMPLATE_ID_WITH_PACKAGE_ID)(_)
@@ -158,6 +158,12 @@ class MasterDriver(
           }
           false
         }
+
+        override def processReassign(
+            create: CreatedEvent,
+            synchronizerId: String,
+            reassignmentCounter: Long,
+        ): Boolean = false
         override def processArchive(archive: ArchivedEvent): Boolean = false
         override def reset(): Unit = {}
       },
@@ -205,7 +211,7 @@ class MasterDriver(
   private def updateTestRunConfigIfNecessary(): Unit =
     (for {
       newConfigChecker <- amendedConfig.get().headOption
-      master <- masterContract.one(())
+      master <- masterContract.one(()).map(_._2)
       stats <- currentStatus.get().collect { case x: MasterStatus => x }
       updated <- newConfigChecker.check(stats, master.data)
     } yield {
@@ -236,26 +242,25 @@ class MasterDriver(
     }).discard
 
   override def flush(): Boolean = {
-    requests.allAvailable.headOption // can only process one at the time
-      .flatMap(request =>
-        // process participation requests
-        masterContract.one(()).map { master =>
-          val acceptParticipation =
-            request.id
-              .exerciseAccept(master.id)
-              .commands
-              .asScala
-              .toSeq
-          val submissionF = submitCommand(
-            "accept-participation",
-            acceptParticipation,
-            s"registering participant ${request.data.party}",
-          )
-          setPending(masterContract, master.id, submissionF)
-          setPending(requests, request.id, submissionF)
-        }
-      )
-      .discard
+    if (requests.allAvailable.nonEmpty) {
+      // process participation requests
+      masterContract.one(()).foreach { case (_, master) =>
+        val allRequests = requests.allAvailable.take(100).toList
+        val acceptRegistration =
+          master.id.exerciseBulkAddParticipant(allRequests.map(_.id).asJava).commands.asScala.toSeq
+        logger.info(
+          s"Accepting participation requests of\n  ${allRequests.map(_.data.party).mkString("\n  ")}"
+        )
+        val submissionF = submitCommand(
+          "accept-participation",
+          acceptRegistration,
+          s"registering participants",
+        )
+        setPending(masterContract, master.id, submissionF)
+        allRequests.foreach(request => setPending(requests, request.id, submissionF))
+      }
+    }
+
     updateTestRunConfigIfNecessary()
     if (statsUpdateNeeded.getAndSet(false)) {
       updateStatus()
@@ -281,12 +286,12 @@ class MasterDriver(
     }
 
   private def calculateStatistics(): Option[(Double, Double, Long, Long)] =
-    masterContract.one(()).map { master =>
+    masterContract.one(()).map { case (_, master) =>
       val stats: Seq[(String, ProbeType, Long, Double)] =
-        master.data.traders.asScala.toSeq.flatMap { trader =>
+        master.data.traders.asScala.toSeq.flatMap { case trader =>
           Seq(M.orchestration.ProbeType.ACCEPTANCE, M.orchestration.ProbeType.PROPOSAL).map { typ =>
             // reverse sort by epoch milli (Ordering.by(_.data.timestamp).reverse fails due to diverging implicit expansion
-            testProbes.find((new Party(trader), typ)).sortBy(-_.data.count) match {
+            testProbes.find((new Party(trader), typ)).map(_._2).sortBy(-_.data.count) match {
               case last :: prev :: rest =>
                 import scala.Ordered.orderingToOrdered
                 cleanupTestProbes(rest)
@@ -328,7 +333,7 @@ class MasterDriver(
 
   private def updateStatus(): Unit =
     calculateStatistics().foreach { case (accPs, proPs, accTot, proTot) =>
-      masterContract.one(()).map { master =>
+      masterContract.one(()).map { case (_, master) =>
         val newStatus = MasterStatus(
           timestamp = Instant.now,
           mode = master.data.mode.toString,
@@ -391,7 +396,7 @@ class MasterDriver(
   }
 
   private def adjustState(mode: M.orchestration.Mode): Unit =
-    masterContract.one(()).foreach { master =>
+    masterContract.one(()).foreach { case (_, master) =>
       if (master.data.mode != mode && master.data.mode != M.orchestration.Mode.DONE) {
         logger.info(s"Change mode from ${master.data.mode} to $mode")
         val command = master.id

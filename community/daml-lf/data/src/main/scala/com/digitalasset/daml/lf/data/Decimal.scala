@@ -5,8 +5,7 @@ package com.digitalasset.daml.lf
 package data
 
 import java.math.BigDecimal
-
-import scala.math.{BigDecimal => BigDec}
+import scala.math.BigDecimal as BigDec
 
 // Our legacy Numerics are fix scale 10, aka Decimals
 // This object provides some legacy utility functions for Decimal

@@ -3,13 +3,11 @@
 
 package com.digitalasset.canton.integration.tests.upgrading
 
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.damltests.upgrade.v2.java.upgrade.Upgrading
 import com.digitalasset.canton.ledger.api.util.TimeProvider
 import com.digitalasset.canton.ledger.participant.state.index.ContractStore
 import com.digitalasset.canton.logging.LoggingContextWithTrace
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
-import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
 import com.digitalasset.canton.platform.apiserver.execution.{
   StoreBackedCommandInterpreter,
   TestDynamicSynchronizerParameterGetter,
@@ -43,13 +41,14 @@ class DisclosedContractNormalizationTest
     with BaseTest {
 
   private val ec: ExecutionContext = executorService
-  private implicit val loggingContext: LoggingContext = LoggingContextWithTrace(loggerFactory)
 
   val engine = new Engine(
-    EngineConfig(allowedLanguageVersions = LanguageVersion.allLfVersionsRange)
+    EngineConfig(allowedLanguageVersions = LanguageVersion.allLfVersionsRange),
+    loggerFactory,
   )
 
-  private val testEngine = new TestEngine(packagePaths = Seq(UpgradingBaseTest.UpgradeV2))
+  private val testEngine =
+    new TestEngine(packagePaths = Seq(UpgradingBaseTest.UpgradeV2), loggerFactory = loggerFactory)
 
   private def buildUpgrading(
       alice: String,
@@ -122,7 +121,6 @@ class DisclosedContractNormalizationTest
         contractStore = mock[ContractStore],
         metrics = LedgerApiServerMetrics.ForTesting,
         contractAuthenticator = validator.authenticateHash,
-        config = EngineLoggingConfig(),
         prefetchingRecursionLevel = CommandServiceConfig.DefaultContractPrefetchingDepth,
         loggerFactory = loggerFactory,
         dynParamGetter =

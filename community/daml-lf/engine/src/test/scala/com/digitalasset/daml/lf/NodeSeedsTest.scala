@@ -3,7 +3,7 @@
 
 package com.digitalasset.daml.lf
 
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
 import com.digitalasset.daml.lf.engine.Engine
@@ -19,7 +19,7 @@ import java.util.zip.ZipInputStream
 
 class NodeSeedsTestV2 extends NodeSeedsTest(LanguageVersion.Major.V2)
 
-class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWordSpec with Matchers {
+class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWordSpec with Matchers with SuppressingLogging {
 
   // Test for https://github.com/DACH-NY/canton/issues/14712
 
@@ -29,7 +29,7 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWord
     (packages.main._1, packages.main._2, packages.all.toMap)
   }
 
-  val engine = Engine.DevEngine
+  val engine = Engine.DevEngine(loggerFactory)
   val contractIdVersion = ContractIdVersion.V1
   val contractStateMode = ContractStateMachine.Mode.devDefault
 
@@ -67,8 +67,6 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWord
     signatories = List(operator),
   )
   val contracts = Map(requestCid -> requestContract, roleCid -> roleContract)
-
-  implicit val loggingContext: LoggingContext = LoggingContext.empty
 
   val Right((tx, metaData)) =
     engine
@@ -164,7 +162,7 @@ class NodeSeedsTest(majorLanguageVersion: LanguageVersion.Major) extends AnyWord
           time,
           contractIdVersion = contractIdVersion,
           contractStateMode = contractStateMode,
-        )(LoggingContext.empty)
+        )
         .consume(pcs = contracts, pkgs = packages)
     rTx.nodes.values.collect { case create: Node.Create => create }.toSet
   }

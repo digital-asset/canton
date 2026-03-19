@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.integration.tests.modelbased
 
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.annotations.NuckTest
 import com.digitalasset.canton.integration.util.PartiesAllocator
 import com.digitalasset.canton.integration.{
@@ -12,6 +11,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.logging.NamedLoggingContext
 import com.digitalasset.canton.testing.modelbased.ast.Concrete
 import com.digitalasset.canton.testing.modelbased.generators.{ConcreteGenerators, Shrinker}
 import com.digitalasset.canton.testing.modelbased.projections.Projections
@@ -79,7 +79,7 @@ final class CantonInterpreterIntegrationTest
               Shrinker.shrinkToFailure(
                 scenario,
                 error,
-                runAndCompare(cantonInterpreter, _),
+                (scenario: Concrete.Scenario) => runAndCompare(cantonInterpreter, scenario),
                 timeout = 3.minutes,
               )(Shrinker.shrinkScenario)
             logger.error(shrinkResult.summary)
@@ -93,18 +93,15 @@ final class CantonInterpreterIntegrationTest
 
 object CantonInterpreterIntegrationTest {
 
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
-
-  private val referenceInterpreter: ReferenceInterpreter = ReferenceInterpreter()
-
   /** Runs a scenario against both interpreters and checks that all projections agree. Returns
     * Right(()) on success, Left(errorMessage) on failure.
     */
   private def runAndCompare(
       cantonInterpreter: CantonInterpreter,
       scenario: Concrete.Scenario,
-  ): Either[String, Unit] = {
-    val referenceResult = referenceInterpreter.runAndProject(scenario)
+  )(implicit loggingContext: NamedLoggingContext): Either[String, Unit] = {
+    val referenceResult = ReferenceInterpreter(loggingContext.loggerFactory)
+      .runAndProject(scenario)(loggingContext.traceContext)
     val cantonResult = cantonInterpreter.runAndProject(scenario)
 
     for {

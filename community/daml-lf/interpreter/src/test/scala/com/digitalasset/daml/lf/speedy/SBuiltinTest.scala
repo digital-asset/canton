@@ -4,6 +4,8 @@
 package com.digitalasset.daml.lf
 package speedy
 
+import com.digitalasset.canton.logging.NamedLoggingContext
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.daml.crypto.MessageSignaturePrototypeUtil
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data._
@@ -30,7 +32,7 @@ import scala.collection.immutable.ArraySeq
 import scala.language.implicitConversions
 import scala.util.{Failure, Try}
 
-class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks with Inside {
+class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChecks with Inside with SuppressingLogging {
 
   val helpers = new SBuiltinTestHelpers
   import helpers.{parserParameters => _, _}
@@ -2027,8 +2029,6 @@ class SBuiltinTest extends AnyFreeSpec with Matchers with TableDrivenPropertyChe
 
 final class SBuiltinTestHelpers {
 
-  import SpeedyTestLib.loggingContext
-
   implicit val parserParameters: ParserParameters[this.type] =
     ParserParameters.default
 
@@ -2144,38 +2144,38 @@ final class SBuiltinTestHelpers {
 
   val stablePackages = StablePackages.stablePackages
 
-  def eval(e: Ast.Expr): Either[SError, SValue] =
+  def eval(e: Ast.Expr)(implicit loggingContext: NamedLoggingContext): Either[SError, SValue] =
     Machine.runPureExpr(e, compiledPackages)
 
   def evalApp(
       e: Ast.Expr,
       args: ArraySeq[SValue],
-  ): Either[SError, SValue] =
+  )(implicit loggingContext: NamedLoggingContext): Either[SError, SValue] =
     eval(SEApp(compiledPackages.compiler.unsafeCompile(e), args))
 
   val alice: Ref.Party = Ref.Party.assertFromString("Alice")
   val committers: Set[Ref.Party] = Set(alice)
 
-  def eval(sexpr: SExpr): Either[SError, SValue] =
+  def eval(sexpr: SExpr)(implicit loggingContext: NamedLoggingContext): Either[SError, SValue] =
     Machine.runPureSExpr(sexpr, compiledPackages)
 
   def evalAppOnLedger(
       e: Ast.Expr,
       args: ArraySeq[SValue],
       getContract: PartialFunction[ContractId, FatContractInstance] = Map.empty,
-  ): Either[SError, SValue] =
+  )(implicit loggingContext: NamedLoggingContext): Either[SError, SValue] =
     evalOnLedger(SEApp(compiledPackages.compiler.unsafeCompile(e), args), getContract)
 
   def evalOnLedger(
       e: Ast.Expr,
       getContract: PartialFunction[ContractId, FatContractInstance] = Map.empty,
-  ): Either[SError, SValue] =
+  )(implicit loggingContext: NamedLoggingContext): Either[SError, SValue] =
     evalOnLedger(compiledPackages.compiler.unsafeCompile(e), getContract)
 
   def evalOnLedger(
       sexpr: SExpr,
       getContract: PartialFunction[ContractId, FatContractInstance],
-  ): Either[
+  )(implicit loggingContext: NamedLoggingContext): Either[
     SError,
     SValue,
   ] = evalUpdateOnLedger(SELet1(sexpr, SEMakeClo(ArraySeq(SELocS(1)), 1, SELocF(0))), getContract)
@@ -2183,20 +2183,20 @@ final class SBuiltinTestHelpers {
   def evalUpdateOnLedger(
       e: Ast.Expr,
       getContract: PartialFunction[ContractId, FatContractInstance] = Map.empty,
-  ): Either[SError, SValue] =
+  )(implicit loggingContext: NamedLoggingContext): Either[SError, SValue] =
     evalUpdateOnLedger(compiledPackages.compiler.unsafeCompile(e), getContract)
 
   def evalUpdateAppOnLedger(
       e: Ast.Expr,
       args: ArraySeq[SValue],
       getContract: PartialFunction[ContractId, FatContractInstance] = Map.empty,
-  ): Either[SError, SValue] =
+  )(implicit loggingContext: NamedLoggingContext): Either[SError, SValue] =
     evalUpdateOnLedger(SEApp(compiledPackages.compiler.unsafeCompile(e), args), getContract)
 
   def evalUpdateOnLedger(
       sexpr: SExpr,
       getContract: PartialFunction[ContractId, FatContractInstance],
-  ): Either[
+  )(implicit loggingContext: NamedLoggingContext): Either[
     SError,
     SValue,
   ] = {
@@ -2206,6 +2206,7 @@ final class SBuiltinTestHelpers {
         transactionSeed = crypto.Hash.hashPrivateKey("SBuiltinTest"),
         updateSE = sexpr,
         committers = committers,
+        logger = MachineLogger()
       )
     SpeedyTestLib.run(machine, getContract = getContract)
   }

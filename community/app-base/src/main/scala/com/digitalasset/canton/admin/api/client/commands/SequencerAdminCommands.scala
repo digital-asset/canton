@@ -32,6 +32,7 @@ import com.digitalasset.canton.synchronizer.sequencer.traffic.{
 }
 import com.digitalasset.canton.synchronizer.sequencer.{SequencerPruningStatus, SequencerSnapshot}
 import com.digitalasset.canton.time.NonNegativeFiniteDuration
+import com.digitalasset.canton.topology.MediatorGroup.MediatorGroupIndex
 import com.digitalasset.canton.topology.{Member, SequencerId}
 import com.digitalasset.canton.util.GrpcStreamingUtils
 import com.google.protobuf.ByteString
@@ -39,6 +40,7 @@ import io.grpc.Context.CancellableContext
 import io.grpc.stub.StreamObserver
 import io.grpc.{Context, ManagedChannel}
 
+import java.io.InputStream
 import scala.concurrent.Future
 
 object SequencerAdminCommands {
@@ -367,7 +369,7 @@ object SequencerAdminCommands {
   }
 
   final case class InitializeFromLsuPredecessor(
-      topologySnapshot: ByteString,
+      topologySnapshotStream: InputStream,
       synchronizerParameters: com.digitalasset.canton.protocol.StaticSynchronizerParameters,
   ) extends GrpcAdminCommand[
         proto.InitializeSequencerFromLsuPredecessorRequest,
@@ -388,20 +390,26 @@ object SequencerAdminCommands {
     ): Future[proto.InitializeSequencerFromLsuPredecessorResponse] =
       GrpcStreamingUtils.streamToServer(
         service.initializeSequencerFromLsuPredecessor,
-        (topologySnapshot: Array[Byte]) =>
-          proto.InitializeSequencerFromLsuPredecessorRequest(
-            topologySnapshot = ByteString.copyFrom(topologySnapshot),
-            synchronizerParameters = Some(synchronizerParameters.toProtoV30),
-          ),
-        request.topologySnapshot,
+        _ => {
+          GrpcStreamingUtils.readChunkBytes(topologySnapshotStream) match {
+            case Array() => None
+            case bytes =>
+              val request = proto.InitializeSequencerFromLsuPredecessorRequest(
+                topologySnapshot = ByteString.copyFrom(bytes),
+                synchronizerParameters = Some(synchronizerParameters.toProtoV30),
+              )
+              Some(Right(request))
+          }
+        },
       )
 
     override protected def createRequest()
         : Either[String, proto.InitializeSequencerFromLsuPredecessorRequest] =
       Right(
+        // Unused, since we construct requests when streaming
         proto.InitializeSequencerFromLsuPredecessorRequest(
-          topologySnapshot = topologySnapshot,
-          synchronizerParameters = Some(synchronizerParameters.toProtoV30),
+          topologySnapshot = ByteString.EMPTY,
+          synchronizerParameters = None,
         )
       )
 
@@ -726,6 +734,26 @@ object SequencerAdminCommands {
 
     override protected def handleResponse(
         response: proto.SetLsuTrafficControlStateResponse
+    ): Either[String, Unit] = Either.unit
+  }
+
+  final case class PerformLsuSequencingTest(recipientMediatorGroup: MediatorGroupIndex)
+      extends BaseSequencerAdministrationCommand[
+        proto.PerformLsuSequencingTestRequest,
+        proto.PerformLsuSequencingTestResponse,
+        Unit,
+      ] {
+    override protected def createRequest(): Either[String, proto.PerformLsuSequencingTestRequest] =
+      Right(proto.PerformLsuSequencingTestRequest(recipientMediatorGroup.unwrap))
+
+    override protected def submitRequest(
+        service: proto.SequencerAdministrationServiceGrpc.SequencerAdministrationServiceStub,
+        request: proto.PerformLsuSequencingTestRequest,
+    ): Future[proto.PerformLsuSequencingTestResponse] =
+      service.performLsuSequencingTest(request)
+
+    override protected def handleResponse(
+        response: proto.PerformLsuSequencingTestResponse
     ): Either[String, Unit] = Either.unit
   }
 }

@@ -10,8 +10,8 @@ import com.daml.ledger.api.v2.commands.Command
 import com.daml.metrics.api.{MetricName, MetricsContext}
 import com.daml.nonempty.NonEmpty
 import com.daml.tls.TlsClientConfig
-import com.digitalasset.canton.config.ProcessingTimeout
 import com.digitalasset.canton.config.RequireTypes.{Port, PositiveInt}
+import com.digitalasset.canton.config.{ClientConfig, ProcessingTimeout}
 import com.digitalasset.canton.console.{ConsoleMacros, ParticipantReference}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
@@ -19,10 +19,11 @@ import com.digitalasset.canton.ledger.client.configuration.CommandClientConfigur
 import com.digitalasset.canton.lifecycle.LifeCycle
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.MetricsFactoryProvider
-import com.digitalasset.canton.performance.PartyRole.{DvpIssuer, DvpTrader, Master}
+import com.digitalasset.canton.performance.PartyRole.{DvpIssuer, DvpTrader, Master, Transfer}
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings.TargetLatency
 import com.digitalasset.canton.performance.elements.*
+import com.digitalasset.canton.performance.elements.transfer.TransferDriver
 import com.digitalasset.canton.performance.model.java as M
 import com.digitalasset.canton.time.{NonNegativeFiniteDuration, WallClock}
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
@@ -137,6 +138,15 @@ object PartyRole {
       RateSettings.defaultCommandClientConfiguration
   }
 
+  final case class Transfer(
+      name: String,
+      override val settings: RateSettings,
+  ) extends ActivePartyRole {
+    override def role: M.orchestration.Role = M.orchestration.Role.TRADER
+    override def commandClientConfiguration: CommandClientConfiguration =
+      RateSettings.defaultCommandClientConfiguration
+  }
+
   /** amendable master configuration
     *
     * @param totalCycles:
@@ -195,6 +205,11 @@ object PartyRole {
           quorumParticipants > 1,
           s"quorumParticipants must be more than one: $quorumParticipants.",
         )
+      case _: M.orchestration.runtype.TransferRun =>
+        require(
+          quorumParticipants > 1,
+          s"quorumParticipants must be more than one: $quorumParticipants.",
+        )
       case _: M.orchestration.runtype.NoRun =>
         throw new IllegalArgumentException("Not supported run type NoRun")
     }
@@ -226,6 +241,16 @@ final case class Connectivity(
     reprocessAcs: Boolean = true,
 )
 
+object Connectivity {
+  def apply(name: String, config: ClientConfig): Connectivity =
+    Connectivity(
+      name = name,
+      host = config.address,
+      port = config.port,
+      tls = config.tlsConfig,
+    )
+}
+
 /** configure the performance runner
   *
   * @param master
@@ -251,6 +276,7 @@ final case class PerformanceRunnerConfig(
     otherSynchronizers: Seq[SynchronizerId] = Nil,
     otherSynchronizersRatio: Double = 0.0,
     darPath: Option[String] = None,
+    maxRetries: PositiveInt = PositiveInt.tryCreate(40),
 ) {
   def masterConfig: Option[Master] = localRoles.collectFirst { case x: Master =>
     x
@@ -280,6 +306,7 @@ class PerformanceRunner(
     loggerFactory,
     config.darPath,
     config.baseSynchronizerId +: config.otherSynchronizers,
+    config.maxRetries.value,
   )
   private val drivers = ListBuffer[BaseDriver]()
   private val active_ = new AtomicBoolean(true)
@@ -372,6 +399,19 @@ class PerformanceRunner(
                   loggerFactory = lf,
                   control = this,
                   baseSynchronizerId = config.baseSynchronizerId,
+                )
+              case trf: Transfer =>
+                new TransferDriver(
+                  config.ledger,
+                  party,
+                  masterParty,
+                  trf,
+                  PerformanceRunner.prefix,
+                  labeledMetricsFactory,
+                  loggerFactory = lf,
+                  control = this,
+                  baseSynchronizerId = config.baseSynchronizerId,
+                  otherSynchronizers = config.otherSynchronizers,
                 )
             }
             drivers.append(driver)

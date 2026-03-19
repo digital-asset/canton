@@ -5,13 +5,15 @@ package com.digitalasset.daml.lf
 package typesig
 
 import com.digitalasset.daml.lf.archive.Dar
-import data.Ref, Ref.{Identifier, PackageId}
+import scalaz.Semigroup
+import scalaz.std.tuple.*
+import scalaz.syntax.functor.*
+import scalaz.syntax.std.map.*
 
 import scala.collection.immutable.Map
-import scalaz.std.tuple._
-import scalaz.syntax.functor._
-import scalaz.syntax.std.map._
-import scalaz.Semigroup
+
+import data.Ref
+import Ref.{Identifier, PackageId}
 
 /** The combination of multiple [[PackageSignature]]s, such as from a dar. */
 final case class EnvironmentSignature(
@@ -21,12 +23,12 @@ final case class EnvironmentSignature(
 ) {
   import PackageSignature.TypeDecl
 
-  /** Replace all resolvable `inheritedChoices` in `typeDecls` with concrete
-    * choices copied from `astInterfaces`.  If a template has any missing choices,
-    * none of its inherited choices are resolved.  Idempotent.
+  /** Replace all resolvable `inheritedChoices` in `typeDecls` with concrete choices copied from
+    * `astInterfaces`. If a template has any missing choices, none of its inherited choices are
+    * resolved. Idempotent.
     *
-    * This is not distributive because we delay resolution, because successful
-    * lookup can require the presence of another DAR.  In other words,
+    * This is not distributive because we delay resolution, because successful lookup can require
+    * the presence of another DAR. In other words,
     *
     * {{{
     *  l.resolveChoices |+| r.resolveChoices
@@ -34,8 +36,8 @@ final case class EnvironmentSignature(
     *  (l |+| r).resolveChoices
     * }}}
     *
-    * Therefore there is no reason to bother with `resolveChoices` until you've
-    * accumulated an `EnvironmentSignature` representing the whole environment.
+    * Therefore there is no reason to bother with `resolveChoices` until you've accumulated an
+    * `EnvironmentSignature` representing the whole environment.
     */
   def resolveChoices: EnvironmentSignature =
     copy(typeDecls = typeDecls.transform { (_, it) =>
@@ -71,7 +73,7 @@ object EnvironmentSignature {
     fromPackageSignatures(i +: o)
 
   def fromPackageSignatures(dar: Dar[PackageSignature]): EnvironmentSignature =
-    fromPackageSignatures(dar.main, dar.dependencies: _*)
+    fromPackageSignatures(dar.main, dar.dependencies*)
 
   def fromPackageSignatures(all: Iterable[PackageSignature]): EnvironmentSignature = {
     val typeDecls = all.iterator.flatMap { case PackageSignature(packageId, _, typeDecls, _) =>

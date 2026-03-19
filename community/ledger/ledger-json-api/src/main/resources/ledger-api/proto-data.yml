@@ -1562,6 +1562,13 @@ fileComments:
               In that case, the token's user-id will be used for the request's user_id.
 
               Optional
+            taps_max_passes: |-
+              The maximum number of passes for the Topology-Aware Package Selection (TAPS).
+              Higher values can increase the chance of successful package selection for routing of interpreted transactions.
+              If unset, this defaults to the value defined in the participant configuration.
+              The provided value must not exceed the limit specified in the participant configuration.
+
+              Optional
             prefetch_contract_keys: |-
               Fetches the contract keys into the caches to speed up the command processing.
               Should only contain contract keys that are expected to be resolved during interpretation of the commands.
@@ -2846,6 +2853,13 @@ fileComments:
               Defaults to false
 
               Optional
+            taps_max_passes: |-
+              The maximum number of passes for the Topology-Aware Package Selection (TAPS).
+              Higher values can increase the chance of successful package selection for routing of interpreted transactions.
+              If unset, this defaults to the value defined in the participant configuration.
+              The provided value must not exceed the limit specified in the participant configuration.
+
+              Optional
             prefetch_contract_keys: |-
               Fetches the contract keys into the caches to speed up the command processing.
               Should only contain contract keys that are expected to be resolved during interpretation of the commands.
@@ -3855,6 +3869,12 @@ fileComments:
             incomplete_unassigned: |-
               Included iff the unassigned event was before or at the active_at_offset, but there was no corresponding
               assigned event before or at the active_at_offset.
+            stream_continuation_token: |-
+              Opaque representation of a continuation token which can be used in the request to bypass the already processed part
+              of the active contracts snapshot.
+              Only populated for the streaming ``GetActiveContracts`` rpc call.
+
+              Optional: can be empty
             incomplete_assigned: |-
               Important: this message is not indicating that the contract is active on the target synchronizer!
               Included iff the assigned event was before or at the active_at_offset, but there was no corresponding

@@ -320,6 +320,7 @@ object SequencerMetrics {
       case SubmissionRequestType.ConfirmationRequest => "send-confirmation-request"
       case SubmissionRequestType.Verdict => "send-verdict"
       case SubmissionRequestType.Commitment => "send-commitment"
+      case SubmissionRequestType.LsuSequencingTest => "send-test-lsu-sequencing"
       case SubmissionRequestType.TopUp => "send-topup"
       case SubmissionRequestType.TopUpMed => "send-topup-med"
       case SubmissionRequestType.TopologyTransaction => "send-topology"
@@ -339,12 +340,11 @@ object SequencerMetrics {
 class MediatorHistograms(val parent: MetricName)(implicit
     inventory: HistogramInventory
 ) {
-
   private[metrics] val prefix = parent :+ "mediator"
   private[metrics] val sequencerClient = new SequencerClientHistograms(parent)
   private[metrics] val dbStorage = new DbStorageHistograms(parent)
-
 }
+
 class MediatorMetrics(
     histograms: MediatorHistograms,
     val openTelemetryMetricsFactory: LabeledMetricsFactory,
@@ -421,6 +421,20 @@ class MediatorMetrics(
     )(
       MetricsContext.Empty
     )
+
+  lazy val receivedTestingLsuSequencingMessages: Meter =
+    openTelemetryMetricsFactory.meter(
+      MetricInfo(
+        name = histograms.parent :+ "received-lsu-sequencing-test-messages",
+        summary = "Received testing lsu sequencing messages by sender (sequencer)",
+        description =
+          """The number of received testing lsu sequencing messages by sender (sequencer)""".stripMargin,
+        qualification = MetricQualification.Debug,
+        labelsWithDescription = Map(
+          "sender" -> "The sequencer who sent the message"
+        ),
+      )
+    )(MetricsContext.Empty)
 }
 
 object MediatorMetrics {

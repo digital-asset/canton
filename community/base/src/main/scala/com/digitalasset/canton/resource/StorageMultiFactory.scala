@@ -13,7 +13,7 @@ import com.digitalasset.canton.lifecycle.{
   FutureUnlessShutdown,
   UnlessShutdown,
 }
-import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging, TracedLogger}
 import com.digitalasset.canton.metrics.DbStorageMetrics
 import com.digitalasset.canton.time.Clock
 import com.digitalasset.canton.tracing.TraceContext
@@ -25,8 +25,9 @@ class StorageMultiFactory(
     val config: StorageConfig,
     exitOnFatalFailures: Boolean,
     replicationConfig: Option[ReplicationConfig],
-    onActive: () => FutureUnlessShutdown[Unit],
-    onPassive: () => FutureUnlessShutdown[Unit],
+    onActive: TracedLogger => FutureUnlessShutdown[Unit],
+    onPassive: TracedLogger => FutureUnlessShutdown[Unit],
+    mustStayActive: Boolean,
     mainLockCounter: DbLockCounter,
     poolLockCounter: DbLockCounter,
     futureSupervisor: FutureSupervisor,
@@ -81,6 +82,7 @@ class StorageMultiFactory(
                 poolLockCounter,
                 onActive,
                 onPassive,
+                mustStayActive,
                 metrics,
                 logQueryCost,
                 None,

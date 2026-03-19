@@ -4,25 +4,25 @@
 package com.digitalasset.daml.lf
 package archive
 
-import java.util
-import com.digitalasset.daml.lf.archive.{DamlLf2 => PLF}
-import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data.{ImmArray, Numeric, Struct, Time}
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.language.Util._
-import com.digitalasset.daml.lf.language.{LanguageVersion => LV}
 import com.daml.nameof.NameOf
 import com.daml.scalautil.Statement.discard
+import com.digitalasset.daml.lf.archive.DamlLf2 as PLF
+import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.data.{ImmArray, Numeric, Struct, Time}
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.language.LanguageVersion as LV
+import com.digitalasset.daml.lf.language.Util.*
 
+import java.util
 import scala.annotation.nowarn
 import scala.collection.mutable
-import scala.jdk.CollectionConverters._
+import scala.jdk.CollectionConverters.*
 
 /** Decodes LF2 packages and modules. */
 private[archive] class DecodeV2(minor: LV.Minor) {
 
-  import DecodeV2._
+  import DecodeV2.*
   import Work.Ret
 
   private val languageVersion: LV = LV(LV.Major.V2, minor)
@@ -164,7 +164,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
   private[this] def decodeInternedDottedNames(
       internedList: collection.Seq[PLF.InternedDottedName],
       internedStrings: ImmArraySeq[String],
-  ): ImmArraySeq[DottedName] = {
+  ): ImmArraySeq[DottedName] =
     internedList.view
       .map(idn =>
         decodeSegments(
@@ -177,7 +177,6 @@ private[archive] class DecodeV2(minor: LV.Minor) {
         )
       )
       .to(ImmArraySeq)
-  }
 
   private[this] def decodeSegments(segments: collection.Seq[String]): DottedName =
     DottedName.fromSegments(segments) match {
@@ -215,7 +214,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
 
   private[archive] def decodePackageImports(
       lfPackage: PLF.Package
-  ): Either[String, collection.IndexedSeq[String]] = {
+  ): Either[String, collection.IndexedSeq[String]] =
     lfPackage.getImportsSumCase match {
       case PLF.Package.ImportsSumCase.IMPORTSSUM_NOT_SET =>
         Left("PLF.Package.ImportsSumCase.IMPORTSSUM_NOT_SET")
@@ -223,7 +222,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
         val imports = lfPackage.getPackageImports.getImportedPackagesList.asScala.toIndexedSeq
         if (!versionSupports(LV.featurePackageImports))
           throw Error.Parsing(
-            s"Explicit pkg imports set on unsupported lf version (version ${languageVersion}), case set PACKAGE_IMPORTS, to ${imports}"
+            s"Explicit pkg imports set on unsupported lf version (version $languageVersion), case set PACKAGE_IMPORTS, to $imports"
           )
         else
           Right(imports)
@@ -231,12 +230,11 @@ private[archive] class DecodeV2(minor: LV.Minor) {
         val reason = lfPackage.getNoImportedPackagesReason
         if (!versionSupports(LV.featurePackageImports))
           throw Error.Parsing(
-            s"Explicit pkg imports set on unsupported lf version (version ${languageVersion}), case NO_IMPORTED_PACKAGES_REASON, set to ${reason}"
+            s"Explicit pkg imports set on unsupported lf version (version $languageVersion), case NO_IMPORTED_PACKAGES_REASON, set to $reason"
           )
         else
           Left(reason)
     }
-  }
 
   private[archive] class PackageDependencyTracker(self: PackageId) {
     private val deps = mutable.Set.empty[PackageId]
@@ -269,18 +267,16 @@ private[archive] class DecodeV2(minor: LV.Minor) {
     private[archive] def decodeChoiceForTest(
         tpl: DottedName,
         lfChoice: PLF.TemplateChoice,
-    ): TemplateChoice = {
+    ): TemplateChoice =
       Work.run(decodeChoice(tpl, lfChoice))
-    }
 
     private[archive] def decodeDefInterfaceForTest(
         id: DottedName,
         lfInterface: PLF.DefInterface,
-    ): DefInterface = {
+    ): DefInterface =
       Work.run(decodeDefInterface(id, lfInterface))
-    }
 
-    private[archive] def decodeKindsTableEntry(lfKind: PLF.Kind): Kind = {
+    private[archive] def decodeKindsTableEntry(lfKind: PLF.Kind): Kind =
       Work.run(
         lfKind.getSumCase match {
           case PLF.Kind.SumCase.INTERNED_KIND =>
@@ -293,18 +289,15 @@ private[archive] class DecodeV2(minor: LV.Minor) {
             decodeKind(lfKind)
         }
       )
-    }
 
     /** Roger: unfortunate postfix ForTest since NOT only used for testing */
-    private[archive] def decodeKindForTest(lfKind: PLF.Kind): Kind = {
+    private[archive] def decodeKindForTest(lfKind: PLF.Kind): Kind =
       Work.run(decodeKind(lfKind))
-    }
 
-    private[archive] def decodeTypeForTest(lfType: PLF.Type): Type = {
+    private[archive] def decodeTypeForTest(lfType: PLF.Type): Type =
       Work.run(decodeType(lfType)(Ret(_)))
-    }
 
-    private[archive] def decodeTypesTableEntry(lfType: PLF.Type): Type = {
+    private[archive] def decodeTypesTableEntry(lfType: PLF.Type): Type =
       Work.run(
         lfType.getSumCase match {
           case PLF.Type.SumCase.INTERNED_TYPE =>
@@ -315,16 +308,13 @@ private[archive] class DecodeV2(minor: LV.Minor) {
             uncheckedDecodeType(lfType)
         }
       )
-    }
 
     /** Roger: unfortunate postfix ForTest since NOT only used for testing */
-    private[archive] def uncheckedDecodeTypeForTest(lfType: PLF.Type): Type = {
+    private[archive] def uncheckedDecodeTypeForTest(lfType: PLF.Type): Type =
       Work.run(uncheckedDecodeType(lfType))
-    }
 
-    private[archive] def decodeExprForTest(lfExpr: PLF.Expr, definition: String): Expr = {
+    private[archive] def decodeExprForTest(lfExpr: PLF.Expr, definition: String): Expr =
       Work.run(decodeExpr(lfExpr, definition)(Ret(_)))
-    }
 
     def decodeModule(lfModule: PLF.Module): Module = {
       val moduleName = getInternedDottedName(lfModule.getNameInternedDname)
@@ -418,9 +408,8 @@ private[archive] class DecodeV2(minor: LV.Minor) {
     private[this] def getImportedPackageId(id: Int): PackageId =
       eitherToParseError(PackageId.fromString(getImportedPackage(id)))
 
-    private def getInternedName(id: Int) = {
+    private def getInternedName(id: Int) =
       eitherToParseError(Name.fromString(getInternedStr(id)))
-    }
 
     private[this] def getInternedDottedName(id: Int) =
       internedDottedNames.lift(id).getOrElse {
@@ -485,7 +474,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
 
     private[this] def decodeFields(
         lfFields: collection.Seq[PLF.FieldWithType]
-    ): Work[ImmArray[(Name, Type)]] = {
+    ): Work[ImmArray[(Name, Type)]] =
       Work.sequence(lfFields.view.map { lfFieldWithType =>
         decodeType(lfFieldWithType.getType) { typ =>
           Ret(decodeFieldName(lfFieldWithType) -> typ)
@@ -493,7 +482,6 @@ private[archive] class DecodeV2(minor: LV.Minor) {
       }) { xs =>
         Ret(xs.to(ImmArray))
       }
-    }
 
     private[this] def decodeFieldWithExpr(
         lfFieldWithExpr: PLF.FieldWithExpr,
@@ -510,9 +498,8 @@ private[archive] class DecodeV2(minor: LV.Minor) {
     ): ImmArray[EnumConName] =
       internedNames(enumCon.getConstructorsInternedStrList)
 
-    private[archive] def decodeDefValueForTest(lfValue: PLF.DefValue): DValue = {
+    private[archive] def decodeDefValueForTest(lfValue: PLF.DefValue): DValue =
       Work.run(decodeDefValue(lfValue))
-    }
 
     private def decodeDefValue(lfValue: PLF.DefValue): Work[DValue] = {
       val name = getInternedDottedName(lfValue.getNameWithType.getNameInternedDname)
@@ -555,9 +542,9 @@ private[archive] class DecodeV2(minor: LV.Minor) {
         key: PLF.DefTemplate.DefKey,
     ): Work[TemplateKey] = {
       assertVersionSupports(LV.featureContractKeys)
-      decodeExpr(key.getKeyExpr, s"${tpl}:key") { keyExpr =>
+      decodeExpr(key.getKeyExpr, s"$tpl:key") { keyExpr =>
         decodeType(key.getType) { typ =>
-          decodeExpr(key.getMaintainers, s"${tpl}:maintainer") { maintainers =>
+          decodeExpr(key.getMaintainers, s"$tpl:maintainer") { maintainers =>
             Ret(
               TemplateKey(
                 typ,
@@ -610,7 +597,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
 
     private[this] def decodeTemplateImplements(
         lfImpl: PLF.DefTemplate.Implements
-    ): Work[TemplateImplements] = {
+    ): Work[TemplateImplements] =
       Work.bind(decodeInterfaceInstanceBody(lfImpl.getBody)) { body =>
         Ret(
           TemplateImplements.build(
@@ -619,22 +606,20 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           )
         )
       }
-    }
 
     private[this] def decodeInterfaceInstanceBody(
         lfBody: PLF.InterfaceInstanceBody
-    ): Work[InterfaceInstanceBody] = {
+    ): Work[InterfaceInstanceBody] =
       decodeExpr(lfBody.getView, "InterfaceInstanceBody.view") { view =>
         Work.sequence(lfBody.getMethodsList.asScala.view.map(decodeInterfaceInstanceMethod(_))) {
           methods =>
             Ret(InterfaceInstanceBody.build(methods, view))
         }
       }
-    }
 
     private[this] def decodeInterfaceInstanceMethod(
         lfMethod: PLF.InterfaceInstanceBody.InterfaceInstanceMethod
-    ): Work[InterfaceInstanceMethod] = {
+    ): Work[InterfaceInstanceMethod] =
       decodeExpr(lfMethod.getValue, "InterfaceInstanceMethod.value") { value =>
         Ret(
           InterfaceInstanceMethod(
@@ -643,12 +628,11 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           )
         )
       }
-    }
 
     private def decodeChoice(
         tpl: DottedName,
         lfChoice: PLF.TemplateChoice,
-    ): Work[TemplateChoice] = {
+    ): Work[TemplateChoice] =
       Work.bind(decodeBinder(lfChoice.getArgBinder)) { case (v, t) =>
         val chName = internedName(lfChoice.getNameInternedStr)
         val selfBinder = internedName(lfChoice.getSelfBinderInternedStr)
@@ -689,7 +673,6 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           }
         }
       }
-    }
 
     private def decodeException(
         exceptionName: DottedName,
@@ -702,7 +685,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
     private def decodeDefInterface(
         id: DottedName,
         lfInterface: PLF.DefInterface,
-    ): Work[DefInterface] = {
+    ): Work[DefInterface] =
       Work.sequence(lfInterface.getMethodsList.asScala.view.map(decodeInterfaceMethod(_))) {
         methods =>
           Work.sequence(lfInterface.getChoicesList.asScala.view.map(decodeChoice(id, _))) {
@@ -724,11 +707,10 @@ private[archive] class DecodeV2(minor: LV.Minor) {
               }
           }
       }
-    }
 
     private[this] def decodeInterfaceMethod(
         lfMethod: PLF.InterfaceMethod
-    ): Work[InterfaceMethod] = {
+    ): Work[InterfaceMethod] =
       decodeType(lfMethod.getType) { returnType =>
         Ret(
           InterfaceMethod(
@@ -737,9 +719,8 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           )
         )
       }
-    }
 
-    private def decodeKind(lfKind: PLF.Kind): Work[Kind] = {
+    private def decodeKind(lfKind: PLF.Kind): Work[Kind] =
       Work.Delay { () =>
         lfKind.getSumCase match {
           case PLF.Kind.SumCase.STAR => Ret(KStar)
@@ -767,36 +748,31 @@ private[archive] class DecodeV2(minor: LV.Minor) {
             throw Error.Parsing("Kind.SUM_NOT_SET")
         }
       }
-    }
 
-    /** [decodeType()]] is the checked version of [[uncheckedDecodeType()]] in the
-      * sense that [[decodeType()]] allows only references to interned kinds,
-      * meant to be used to parse the ast (after the interning table was
-      * parsed). It is meant to disallow any concrete types (any
+    /** [decodeType()]] is the checked version of [[uncheckedDecodeType()]] in the sense that
+      * [[decodeType()]] allows only references to interned kinds, meant to be used to parse the ast
+      * (after the interning table was parsed). It is meant to disallow any concrete types (any
       * non-interned-referencing) types. depth n _in the interning table only_.
       */
-    private def decodeType[T](lfType: PLF.Type)(k: Type => Work[T]): Work[T] = {
+    private def decodeType[T](lfType: PLF.Type)(k: Type => Work[T]): Work[T] =
       Work.Bind(
         Work.Delay { () =>
-          {
-            lfType.getSumCase match {
-              case PLF.Type.SumCase.INTERNED_TYPE =>
-                Ret(
-                  internedTypes.applyOrElse(
-                    lfType.getInternedType,
-                    (index: Int) => throw Error.Parsing(s"invalid internedTypes table index $index"),
-                  )
+          lfType.getSumCase match {
+            case PLF.Type.SumCase.INTERNED_TYPE =>
+              Ret(
+                internedTypes.applyOrElse(
+                  lfType.getInternedType,
+                  (index: Int) => throw Error.Parsing(s"invalid internedTypes table index $index"),
                 )
-              case otherwise =>
-                throw Error.Parsing(s"$otherwise is not supported outside type interning table")
-            }
+              )
+            case otherwise =>
+              throw Error.Parsing(s"$otherwise is not supported outside type interning table")
           }
         },
         k,
       )
-    }
 
-    private def uncheckedDecodeType(lfType: PLF.Type): Work[Type] = {
+    private def uncheckedDecodeType(lfType: PLF.Type): Work[Type] =
       lfType.getSumCase match {
         case PLF.Type.SumCase.VAR =>
           val tvar = lfType.getVar
@@ -877,7 +853,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
         case PLF.Type.SumCase.TAPP =>
           if (!versionSupports(LV.featureFlatArchive))
             throw Error.Parsing(
-              s"Illegal case: TApp not supported in version ${languageVersion}, since this version has local flattening"
+              s"Illegal case: TApp not supported in version $languageVersion, since this version has local flattening"
             )
           val tapp = lfType.getTapp
           Work.bind(uncheckedDecodeType(tapp.getLhs())) { lhs =>
@@ -888,11 +864,10 @@ private[archive] class DecodeV2(minor: LV.Minor) {
         case PLF.Type.SumCase.SUM_NOT_SET =>
           throw Error.Parsing("Type.SUM_NOT_SET")
       }
-    }
 
     private[this] def decodeModuleRef(lfId: PLF.ModuleId): (PackageId, ModuleName) = {
       val modName = getInternedDottedName(lfId.getModuleNameInternedDname)
-      import PLF.SelfOrImportedPackageId.{SumCase => SC}
+      import PLF.SelfOrImportedPackageId.SumCase as SC
 
       val pkgId = lfId.getPackageId.getSumCase match {
         case SC.SELF_PACKAGE_ID =>
@@ -901,7 +876,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           val id = getInternedPackageId(lfId.getPackageId.getImportedPackageIdInternedStr)
           if (!stableIds.contains(id) && versionSupports(LV.featurePackageImports))
             throw Error.Parsing(
-              s"Got explicit non-stable package id (${id}) on lf version (${languageVersion}) that supports explicit package imports, imports: (${imports})"
+              s"Got explicit non-stable package id ($id) on lf version ($languageVersion) that supports explicit package imports, imports: ($imports)"
             )
           id
         case SC.PACKAGE_IMPORT_ID =>
@@ -931,15 +906,14 @@ private[archive] class DecodeV2(minor: LV.Minor) {
       Identifier(packageId, QualifiedName(module, name))
     }
 
-    private[this] def decodeTypeConApp(lfTyConApp: PLF.Type.Con): Work[TypeConApp] = {
+    private[this] def decodeTypeConApp(lfTyConApp: PLF.Type.Con): Work[TypeConApp] =
       Work.sequence(lfTyConApp.getArgsList.asScala.view.map(decodeType(_)(Ret(_)))) { types =>
         Ret(TypeConApp(decodeTypeConId(lfTyConApp.getTycon), types.to(ImmArray)))
       }
-    }
 
     private def decodeExprsTableEntry[T](lfExpr: PLF.Expr, definition: String)(
         k: Expr => Work[T]
-    ): Work[T] = {
+    ): Work[T] =
       lfExpr.getSumCase match {
         case PLF.Expr.SumCase.INTERNED_EXPR =>
           throw Error.IllegalInterning(
@@ -949,7 +923,6 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           // For any other case, we mirror the behavior of decodeExpr.
           Work.Bind(Work.Delay(() => decodeExpr1(lfExpr, definition)), k)
       }
-    }
 
     private def decodeExpr[T](lfExpr: PLF.Expr, definition: String)(k: Expr => Work[T]): Work[T] =
       if (schemaMode)
@@ -1037,7 +1010,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
           val structCon = lfExpr.getStructCon
           Work.sequence(
             structCon.getFieldsList.asScala.view.map(x => decodeFieldWithExpr(x, definition))
-          ) { xs => Ret(EStructCon(xs.to(ImmArray))) }
+          )(xs => Ret(EStructCon(xs.to(ImmArray))))
 
         case PLF.Expr.SumCase.STRUCT_PROJ =>
           val structProj = lfExpr.getStructProj
@@ -1527,7 +1500,6 @@ private[archive] class DecodeV2(minor: LV.Minor) {
             Ret(UpdateLookupByKey(tmplId))
           }
 
-
         case PLF.Update.SumCase.QUERY_N_BY_KEY =>
           assertVersionSupports(LV.featureNUCK)
           val queryNByKey = lfUpdate.getQueryNByKey
@@ -1569,21 +1541,19 @@ private[archive] class DecodeV2(minor: LV.Minor) {
       }
     }
 
-    private[this] def decodeBinding(lfBinding: PLF.Binding, definition: String): Work[Binding] = {
+    private[this] def decodeBinding(lfBinding: PLF.Binding, definition: String): Work[Binding] =
       Work.bind(decodeBinder(lfBinding.getBinder)) { case (binder, typ) =>
         decodeExpr(lfBinding.getBound, definition) { expr =>
           Ret(Binding(Some(binder), typ, expr))
         }
       }
-    }
 
-    private[this] def decodeBinder(lfBinder: PLF.VarWithType): Work[(ExprVarName, Type)] = {
+    private[this] def decodeBinder(lfBinder: PLF.VarWithType): Work[(ExprVarName, Type)] =
       decodeType(lfBinder.getType) { typ =>
         Ret(
           internedName(lfBinder.getVarInternedStr) -> typ
         )
       }
-    }
 
     private[this] def decodeBuiltinCon(lfBuiltinCon: PLF.BuiltinCon): CPBuiltinCon =
       lfBuiltinCon match {
@@ -1634,7 +1604,7 @@ private[archive] class DecodeV2(minor: LV.Minor) {
     if (!versionSupports(ft)) throw notSupportedError(ft.name)
 
   def assertVersionSupports(ft: LV.Feature, caseDescription: String): Unit =
-    if (!versionSupports(ft)) throw notSupportedError(s"${ft.name} (case ${caseDescription})")
+    if (!versionSupports(ft)) throw notSupportedError(s"${ft.name} (case $caseDescription)")
 
   private def versionIsOlderThan(minVersion: LV): Boolean =
     languageVersion < minVersion
@@ -1642,13 +1612,11 @@ private[archive] class DecodeV2(minor: LV.Minor) {
   private[this] def toName(s: String): Name =
     eitherToParseError(Name.fromString(s))
 
-  private def toPackageName(s: String): PackageName = {
+  private def toPackageName(s: String): PackageName =
     eitherToParseError(PackageName.fromString(s))
-  }
 
-  private def toPackageVersion(s: String) = {
+  private def toPackageVersion(s: String) =
     eitherToParseError(PackageVersion.fromString(s))
-  }
 
   private[this] def toBLNumeric(s: String) =
     BLNumeric(eitherToParseError(Numeric.fromString(s)))
@@ -1666,32 +1634,32 @@ private[archive] class DecodeV2(minor: LV.Minor) {
     if (versionIsOlderThan(minVersion))
       throw notSupportedError(description)
 
-  private def assertNonEmpty(s: collection.Seq[_], description: => String): Unit =
+  private def assertNonEmpty(s: collection.Seq[?], description: => String): Unit =
     if (s.isEmpty) throw Error.Parsing(s"Unexpected empty $description")
 
   private def assertSingletonIfSupportsFlatArchive(
-      s: collection.Seq[_],
+      s: collection.Seq[?],
       description: => String,
   ): Unit =
     if (versionSupports(LV.featureFlatArchive) && s.length != 1)
       throw Error.Parsing(
-        s"Illegal local flattening: since lf flattening is supported, expected a single element for $description, but found ${s.length}, version ${languageVersion}"
+        s"Illegal local flattening: since lf flattening is supported, expected a single element for $description, but found ${s.length}, version $languageVersion"
       )
 
   private def assertNullIfSupportsFlatArchive(
-      s: collection.Seq[_],
+      s: collection.Seq[?],
       description: => String,
   ): Unit =
     if (versionSupports(LV.featureFlatArchive) && s.length != 0)
       throw Error.Parsing(
-        s"Illegal local flattening: Since lf flattening is supported, expected a null list $description, but found ${s.length}, version ${languageVersion}"
+        s"Illegal local flattening: Since lf flattening is supported, expected a null list $description, but found ${s.length}, version $languageVersion"
       )
 
-  private[this] def assertEmpty(s: collection.Seq[_], description: => String): Unit =
+  private[this] def assertEmpty(s: collection.Seq[?], description: => String): Unit =
     if (s.nonEmpty) throw Error.Parsing(s"Unexpected non-empty $description")
 
   @nowarn("cat=unused")
-  private[this] def assertEmpty(s: util.List[_], description: => String): Unit =
+  private[this] def assertEmpty(s: util.List[?], description: => String): Unit =
     if (!s.isEmpty) throw Error.Parsing(s"Unexpected non-empty $description")
 }
 
@@ -1712,7 +1680,7 @@ private[lf] object DecodeV2 {
   }
 
   val builtinTypeInfos: List[BuiltinTypeInfo] = {
-    import PLF.BuiltinType._
+    import PLF.BuiltinType.*
     List(
       BuiltinTypeInfo(UNIT, BTUnit),
       BuiltinTypeInfo(BOOL, BTBool),
@@ -1767,7 +1735,7 @@ private[lf] object DecodeV2 {
   }
 
   val builtinFunctionInfos: List[BuiltinFunctionInfo] = {
-    import PLF.BuiltinFunction._
+    import PLF.BuiltinFunction.*
     List(
       BuiltinFunctionInfo(ADD_NUMERIC, BAddNumeric),
       BuiltinFunctionInfo(SUB_NUMERIC, BSubNumeric),
@@ -1915,7 +1883,7 @@ private[lf] object DecodeV2 {
       .map(info => info.proto -> info)
       .toMap
       .withDefault(protoValue =>
-        throw Error.Parsing(s"BuiltinFunction.UNRECOGNIZED, value looked up was ${protoValue}")
+        throw Error.Parsing(s"BuiltinFunction.UNRECOGNIZED, value looked up was $protoValue")
       )
 
   // need to put at central place

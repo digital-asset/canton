@@ -54,7 +54,7 @@ abstract class DatabaseSequencerApiTest extends SequencerApiTest {
       DefaultProcessingTimeouts.testing,
       storage,
       sequencerStore,
-      sequencingTimeLowerBoundExclusive = None,
+      lsuSequencingBounds = None,
       clock,
       sequencerId,
       crypto,

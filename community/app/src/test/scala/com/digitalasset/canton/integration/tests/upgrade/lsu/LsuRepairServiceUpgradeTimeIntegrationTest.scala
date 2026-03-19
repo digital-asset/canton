@@ -14,6 +14,7 @@ import com.digitalasset.canton.integration.bootstrap.NetworkBootstrapper
 import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.MultiSynchronizer
 import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres}
 import com.digitalasset.canton.integration.tests.examples.IouSyntax
+import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.topology.transaction.ParticipantPermission
 import monocle.macros.syntax.lens.*
 
@@ -125,6 +126,7 @@ final class LsuRepairServiceUpgradeTimeIntegrationTest extends LsuBase {
         environment.simClock.value.advance(Duration.ofSeconds(1))
         participant1.synchronizers.is_connected(fixture.newPSId) shouldBe true
       }
+      waitForTargetTimeOnSequencer(sequencer2, upgradeTime.immediateSuccessor, logger)
 
       participant2.synchronizers.reconnect_all()
       participant2.synchronizers

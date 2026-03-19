@@ -14,7 +14,6 @@ import com.digitalasset.canton.participant.protocol.EngineController.{
   GetEngineAbortStatus,
 }
 import com.digitalasset.canton.participant.store.{ContractAndKeyLookup, ExtendedContractLookup}
-import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
 import com.digitalasset.canton.protocol.*
 import com.digitalasset.canton.topology.DefaultTestIdentities
 import com.digitalasset.canton.topology.client.TopologySnapshot
@@ -32,6 +31,7 @@ import com.digitalasset.canton.{
 }
 import com.digitalasset.daml.lf.data.Ref.{PackageId, Party}
 import com.digitalasset.daml.lf.engine
+import com.digitalasset.daml.lf.engine.EngineLoggingConfig
 import com.digitalasset.daml.lf.language.Ast
 import com.digitalasset.daml.lf.transaction.ContractStateMachine
 import org.scalatest.wordspec.AsyncWordSpec
@@ -48,8 +48,11 @@ class DAMLeTest
 
   "DAMLe" should {
 
-    val testEngine =
-      new TestEngine(packagePaths = Seq(CantonExamplesPath), iterationsBetweenInterruptions = 10)
+    val testEngine = new TestEngine(
+      packagePaths = Seq(CantonExamplesPath),
+      iterationsBetweenInterruptions = 10,
+      loggerFactory = loggerFactory,
+    )
 
     val packageResolver: PackageResolver = new PackageResolver {
       override protected def resolveInternal(packageId: PackageId)(implicit
@@ -67,10 +70,12 @@ class DAMLeTest
         enableStackTraces = false,
         iterationsBetweenInterruptions = 10,
         paranoidMode = false,
+        submissionPhaseLogging = EngineLoggingConfig(),
+        validationPhaseLogging = EngineLoggingConfig(),
+        loggerFactory = loggerFactory,
       ),
       contractStateMode = ContractStateMachine.Mode.default,
-      EngineLoggingConfig(),
-      loggerFactory,
+      loggerFactory = loggerFactory,
     )
 
     val alice = LfPartyId.assertFromString("Alice")

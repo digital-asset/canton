@@ -4,17 +4,20 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.daml.lf.language.LanguageVersion
 import com.digitalasset.daml.lf.testing.parser.*
 import org.openjdk.jmh.annotations.*
 
 @State(Scope.Benchmark)
-class StructProjBench {
+class StructProjBench extends NamedLogging {
 
   import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 
-  private[this] implicit def logContext: LoggingContext = LoggingContext.ForTesting
+  override def loggerFactory: NamedLoggerFactory = NamedLoggerFactory.root
+
+  import com.digitalasset.canton.tracing.TraceContext.Implicits.Empty.emptyTraceContext
+  private[this] val machineLogger = MachineLogger()
 
   // log2 of the number of iterations
   // Above 2^9=512 the validation/compilation can cause the parser to stack overflow
@@ -75,7 +78,7 @@ class StructProjBench {
 
   @Benchmark
   def bench(): SValue = {
-    val machine = Speedy.Machine.fromPureSExpr(compiledPackages, sexpr)
+    val machine = Speedy.Machine.fromPureSExpr(compiledPackages, sexpr, logger = machineLogger)
     machine.run() match {
       case SResult.SResultFinal(v) =>
         v

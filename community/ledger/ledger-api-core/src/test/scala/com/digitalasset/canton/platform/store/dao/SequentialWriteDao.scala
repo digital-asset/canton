@@ -73,8 +73,8 @@ object SequentialWriteDao {
 
 }
 
-private[dao] final case class SequentialWriteDaoImpl[DB_BATCH](
-    ingestionStorageBackend: IngestionStorageBackend[DB_BATCH],
+private[dao] final case class SequentialWriteDaoImpl[DbBatch](
+    ingestionStorageBackend: IngestionStorageBackend[DbBatch],
     parameterStorageBackend: ParameterStorageBackend,
     updateToDbDtos: Offset => Update => Iterator[DbDto],
     ledgerEndCache: MutableLedgerEndCache,

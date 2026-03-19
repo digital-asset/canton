@@ -22,7 +22,6 @@ import com.digitalasset.canton.logging.{
 }
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.*
-import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
 import com.digitalasset.canton.platform.apiserver.execution.StoreBackedCommandInterpreter.StoreNeedKeyContinuationToken
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.canton.protocol.{CantonContractIdVersion, LfFatContractInst}
@@ -76,7 +75,6 @@ final class StoreBackedCommandInterpreter(
     contractStore: ContractStore,
     metrics: LedgerApiServerMetrics,
     contractAuthenticator: ContractAuthenticatorFn,
-    config: EngineLoggingConfig,
     prefetchingRecursionLevel: PositiveInt,
     val loggerFactory: NamedLoggerFactory,
     dynParamGetter: DynamicSynchronizerParameterGetter,
@@ -218,7 +216,6 @@ final class StoreBackedCommandInterpreter(
           participantId = participant,
           submissionSeed = submissionSeed,
           prefetchKeys = commands.prefetchKeys,
-          engineLogger = config.toEngineLogger(loggerFactory.append("phase", "submission")),
           contractIdVersion = ContractIdVersion.V1,
           contractStateMode = contractStateMode,
         )

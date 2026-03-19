@@ -59,4 +59,33 @@ object DriverStatus {
          |""".stripMargin.replaceAll("\n", "")
   }
 
+  final case class TransferStatus(
+      name: String,
+      timestamp: Instant,
+      mode: String,
+      currentRate: Double,
+      maxRate: Double,
+      latencyMs: Double,
+      pending: Int,
+      failed: Int,
+      assets: Int,
+      transfers: StepStatus,
+      counterParties: Seq[(Party, Int, Int)],
+      issuers: Seq[(Party, Int, Int)],
+  ) extends DriverStatus {
+
+    override def toString: String = s"""
+                                       |transfer(
+                                       |name=$name,
+                                       | age=${Instant.now.toEpochMilli - timestamp.toEpochMilli}ms,
+                                       | mode=$mode,
+                                       | rate(c/m)=(${"%1.1f" format currentRate}/${"%1.1f" format maxRate}),
+                                       | latencyMs=${Math.round(latencyMs)},
+                                       | pending=$pending,
+                                       | transfers=$transfers,
+                                       | assets=$assets
+                                       | failed=$failed)
+                                       |""".stripMargin.replaceAll("\n", "")
+  }
+
 }

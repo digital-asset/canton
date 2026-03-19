@@ -67,10 +67,6 @@ trait AuthenticationTokenIntegrationTest
           _.focus(_.publicApi.maxTokenExpirationInterval)
             .replace(config.NonNegativeFiniteDuration.ofHours(1))
         ),
-        // This is to prevent issues with the BFT orderer in tests with a simClock, as described in the Flaky Test Guide
-        ConfigTransforms.updateAllSequencerConfigs_(
-          _.focus(_.timeTracker.observationLatency).replace(config.NonNegativeFiniteDuration.Zero)
-        ),
       )
       .withSetup { implicit env =>
         import env.*

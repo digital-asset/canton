@@ -6,6 +6,7 @@ package com.digitalasset.canton.http.json.v2
 import com.daml.ledger.api.v2.event.Event.Event
 import com.daml.ledger.api.v2.transaction.Transaction
 import com.daml.ledger.api.v2.{offset_checkpoint, reassignment}
+import com.google.protobuf.ByteString
 
 /** Data structures that replicate legacy gRPC messages for backwards compatibility */
 // TODO(#27734) remove when json legacy endpoints are removed
@@ -73,6 +74,7 @@ object LegacyDTOs {
       verbose: Boolean = false,
       activeAtOffset: Long,
       eventFormat: Option[com.daml.ledger.api.v2.transaction_filter.EventFormat],
+      streamContinuationToken: Option[ByteString],
   )
 
   final case class SubmitAndWaitForTransactionTreeResponse(

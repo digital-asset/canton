@@ -15,6 +15,7 @@ import com.digitalasset.canton.integration.plugins.UseReferenceBlockSequencer.Mu
 import com.digitalasset.canton.integration.plugins.{UsePostgres, UseReferenceBlockSequencer}
 import com.digitalasset.canton.integration.tests.TrafficBalanceSupport
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
+import com.digitalasset.canton.integration.util.TestUtils.waitForTargetTimeOnSequencer
 import com.digitalasset.canton.logging.SuppressingLogger.LogEntryOptionality
 import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError
 
@@ -174,6 +175,7 @@ abstract class LsuTrafficTransferRestartIntegrationTest extends LsuBase with Tra
             participants.all.forall(_.synchronizers.is_connected(fixture.newPSId)) shouldBe true
           }
           oldSynchronizerNodes.all.stop()
+          waitForTargetTimeOnSequencer(sequencer3, upgradeTime.immediateSuccessor, logger)
 
           mediator2.start()
           participant1.health.ping(participant2)

@@ -216,14 +216,19 @@ trait IndexComponentTest
 
   protected def sequentialPostProcessor: Update => Unit = _ => ()
 
+  @scala.annotation.unused
+  protected def incompleteOffsets(
+      _o: Offset,
+      _p: Option[Set[Ref.Party]],
+      _tc: TraceContext,
+  ): FutureUnlessShutdown[Vector[Offset]] = FutureUnlessShutdown.pure(Vector.empty)
+
   override protected def beforeAll(): Unit = {
     super.beforeAll()
     // We use the dispatcher here because the default Scalatest execution context is too slow.
     implicit val resourceContext: ResourceContext = ResourceContext(system.dispatcher)
 
-    val engine = new Engine(
-      EngineConfig(LanguageVersion.stableLfVersionsRange)
-    )
+    val engine = new Engine(EngineConfig(LanguageVersion.stableLfVersionsRange), loggerFactory)
     val mutableLedgerEndCache = MutableLedgerEndCache()
     val stringInterningView = new StringInterningView(loggerFactory)
     val participantId = Ref.ParticipantId.assertFromString("index-component-test-participant-id")
@@ -337,7 +342,7 @@ trait IndexComponentTest
           inMemoryState = inMemoryState,
           tracer = NoReportingTracerProvider.tracer,
           loggerFactory = loggerFactory,
-          incompleteOffsets = (_, _, _) => FutureUnlessShutdown.pure(Vector.empty),
+          incompleteOffsets = incompleteOffsets,
           contractLoader = contractLoader,
           getPackageMetadataSnapshot = _ => PackageMetadata(),
           lfValueTranslation = new LfValueTranslation(

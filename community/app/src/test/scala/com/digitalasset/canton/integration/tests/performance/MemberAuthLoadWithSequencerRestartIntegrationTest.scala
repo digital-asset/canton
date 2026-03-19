@@ -112,6 +112,7 @@ abstract class MemberAuthLoadWithSequencerRestartIntegrationTest
           stats.sizeIs >= 4 && stats.forall {
             case c: DriverStatus.TraderStatus =>
               c.mode == "THROUGHPUT"
+            case _: DriverStatus.TransferStatus => true
             case _: DriverStatus.MasterStatus => true
           }
         }

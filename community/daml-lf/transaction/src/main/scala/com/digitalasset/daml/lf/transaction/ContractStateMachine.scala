@@ -295,7 +295,7 @@ object ContractStateMachine {
 
       // We want consistent key lookups within an action in any contract key mode.
       def consistentGlobalKeyInputs: ErrOr[Unit] =
-        substate.locallyCreated.find(locallyCreated.union(inputContractIds).contains) match {
+        substate.locallyCreated.find(c => locallyCreated.contains(c) || inputContractIds.contains(c)) match {
           case Some(contractId) =>
             Left(DuplicateContractId(contractId))
           case None =>
@@ -366,7 +366,7 @@ object ContractStateMachine {
         contractId: ContractId,
         mbKey: Option[GlobalKey],
     ): ErrOr[State[Nid]] =
-      if (locallyCreated.union(inputContractIds).contains(contractId)) {
+      if (locallyCreated.contains(contractId) || inputContractIds.contains(contractId)) {
         Left(DuplicateContractId(contractId))
       } else {
         val me =
@@ -618,10 +618,18 @@ object ContractStateMachine {
       for {
         _ <- consistentGlobalKeyInputs
       } yield {
+        // compute new input contracts
+        val builder = Set.newBuilder[ContractId]
+        builder ++= this.inputContractIds
+        substate.inputContractIds.foreach { id =>
+          if (!this.locallyCreated.contains(id)) {
+            builder += id
+          }
+        }
+        val newInputContractIds = builder.result()
         this.copy(
           locallyCreated = this.locallyCreated union substate.locallyCreated,
-          inputContractIds =
-            this.inputContractIds union (substate.inputContractIds diff this.locallyCreated),
+          inputContractIds = newInputContractIds,
           globalKeyInputs = substate.globalKeyInputs ++ this.globalKeyInputs,
           consumedBy = this.consumedBy ++ substate.consumedBy,
           localKeys = this.localKeys ++ substate.localKeys,
@@ -895,7 +903,7 @@ object ContractStateMachine {
 
       // We want consistent key lookups within an action in any contract key mode.
       def consistentGlobalKeyInputs: ErrOr[Unit] =
-        substate.locallyCreated.find(locallyCreated.union(inputContractIds).contains) match {
+        substate.locallyCreated.find(c => locallyCreated.contains(c)|| inputContractIds.contains(c)) match {
           case Some(contractId) =>
             Left(DuplicateContractId(contractId))
           case None =>
@@ -980,7 +988,7 @@ object ContractStateMachine {
         contractId: ContractId,
         mbKey: Option[GlobalKey],
     ): ErrOr[State[Nid]] =
-      if (locallyCreated.union(inputContractIds).contains(contractId)) {
+      if (locallyCreated.contains(contractId) || inputContractIds.contains(contractId)) {
         Left(DuplicateContractId(contractId))
       } else {
         val me =
@@ -1250,7 +1258,7 @@ object ContractStateMachine {
         mbKey: Option[GlobalKey],
     ): ErrOr[State[Nid]] = {
       mbKey.foreach(_ => keyOperationError)
-      if (locallyCreated.union(inputContractIds).contains(contractId)) {
+      if (locallyCreated.contains(contractId) || inputContractIds.contains(contractId)) {
         Left(DuplicateContractId(contractId))
       } else {
         val me =

@@ -16,18 +16,17 @@ import org.scalatest.Assertion
 import org.scalatest.wordspec.AnyWordSpec
 
 import java.util.Optional
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.Future
 
 class LfEnricherSpec extends AnyWordSpec with HasExecutionContext with BaseTest {
 
-  private implicit val ec: ExecutionContext = executorService
   private implicit val lc: LoggingContextWithTrace = LoggingContextWithTrace.ForTesting
 
   "LfEnricher" should {
 
     "remove trailing None fields when enriching values" in {
 
-      val testEngine = new TestEngine(Seq(CantonExamplesPath))
+      val testEngine = new TestEngine(Seq(CantonExamplesPath), loggerFactory = loggerFactory)
       val underTest = LfEnricher(
         engine = testEngine.engine,
         forbidLocalContractIds = false,
@@ -64,7 +63,7 @@ class LfEnricherSpec extends AnyWordSpec with HasExecutionContext with BaseTest 
 
       // Enrich contract value
       checkNoTrailingNoneFields(
-        underTest.enrichContractValue(inst.templateId, inst.createArg)(using ec, lc).futureValue
+        underTest.enrichContractValue(inst.templateId, inst.createArg).futureValue
       )
 
     }

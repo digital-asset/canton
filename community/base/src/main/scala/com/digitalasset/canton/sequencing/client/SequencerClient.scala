@@ -57,7 +57,6 @@ import com.digitalasset.canton.sequencing.SequencerConnectionXPool.SequencerConn
 import com.digitalasset.canton.sequencing.SequencerSubscriptionPool.SequencerSubscriptionPoolConfig
 import com.digitalasset.canton.sequencing.client.PeriodicAcknowledgements.FetchCleanTimestamp
 import com.digitalasset.canton.sequencing.client.SendAsyncClientError.SendAsyncClientResponseError
-import com.digitalasset.canton.sequencing.client.SendCallback.CallbackFuture
 import com.digitalasset.canton.sequencing.client.SendTracker.{LatestAttempt, LatestAttemptRef}
 import com.digitalasset.canton.sequencing.client.SequencedEventValidationError.PreviousTimestampMismatch
 import com.digitalasset.canton.sequencing.client.SequencerClient.SequencerTransports
@@ -98,7 +97,6 @@ import com.digitalasset.canton.util.ShowUtil.*
 import com.digitalasset.canton.util.Thereafter.syntax.ThereafterAsyncOps
 import com.digitalasset.canton.util.TryUtil.*
 import com.digitalasset.canton.util.collection.IterableUtil
-import com.digitalasset.canton.util.retry.AllExceptionRetryPolicy
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{SequencerAlias, SequencerCounter, lifecycle, time}
 import com.google.common.annotations.VisibleForTesting
@@ -577,10 +575,6 @@ abstract class SequencerClientImpl(
           request.updateAggregationRule(aggregationRule)
         } else request
 
-      // TODO(#22086): We must use a more recent timestamp because there can be delays when sending submission requests
-      // to avoid load spikes on the sequencer (e.g., for ACS commitments). By using a new clock measurement,
-      // we ensure that, when using session signing keys, the key will not expire by the time the submission
-      // request reaches the sequencer.
       val resF = requestSigner
         .signRequest(
           amplifiableRequest,
@@ -1050,16 +1044,16 @@ abstract class SequencerClientImpl(
             ack(request, snapshotToSign, approximateTimestampOverride)
           } else {
             logger.debug(
-              s"Not acknowledging timestamp $timestamp past the upgrade time of the successor " +
-                s"synchronizer ${synchronizerSuccessor.map(_.upgradeTime)}."
+              s"Not acknowledging the timestamp $timestamp past the upgrade time (${synchronizerSuccessor
+                  .map(_.upgradeTime)}) from the current synchronizer to ${synchronizerSuccessor.map(_.psid)}."
             )
             EitherT.rightT[FutureUnlessShutdown, String](true)
           }
       } yield result
     } else {
       logger.debug(
-        s"Not acknowledging timestamp $timestamp which is before the upgrade time of the predecessor " +
-          s"synchronizer ${synchronizerPredecessor.map(_.upgradeTime)}."
+        s"Not acknowledging timestamp the $timestamp that is before the upgrade time (${synchronizerPredecessor
+            .map(_.upgradeTime)}) to the current synchronizer."
       )
       EitherT.pure(true)
     }
@@ -2613,9 +2607,6 @@ object SequencerClient {
       sequencerToTransportMapO.map(_.map { case (_, transport) =>
         transport.sequencerId -> transport
       }.toMap)
-
-    def transportsO: Option[Set[SequencerClientTransport]] =
-      sequencerToTransportMapO.map(_.values.map(_.clientTransport).toSet)
   }
 
   object SequencerTransports {
@@ -2695,44 +2686,6 @@ object SequencerClient {
     case object ClientShutdown extends CloseReason
 
     case object BecamePassive extends CloseReason
-  }
-
-  /** Utility to add retries around sends as an attempt to guarantee the send is eventually
-    * sequenced.
-    */
-  def sendWithRetries(
-      sendBatch: SendCallback => EitherT[Future, SendAsyncClientError, Unit],
-      maxRetries: Int,
-      delay: FiniteDuration,
-      sendDescription: String,
-      errMsg: String,
-      performUnlessClosing: PerformUnlessClosing,
-  )(implicit
-      ec: ExecutionContext,
-      loggingContext: ErrorLoggingContext,
-  ): FutureUnlessShutdown[Unit] = {
-    def doSend(): FutureUnlessShutdown[Unit] = {
-      val callback = new CallbackFuture()
-      for {
-        _ <- FutureUnlessShutdown
-          .outcomeF(
-            EitherTUtil.toFuture(
-              EitherTUtil
-                .logOnError(sendBatch(callback), errMsg)
-                .leftMap(err => new RuntimeException(s"$errMsg: $err"))
-            )
-          )
-        sendResult <- callback.future
-        _ <- SendResult.toFutureUnlessShutdown(sendDescription)(sendResult)
-      } yield ()
-    }
-    retry
-      .Pause(loggingContext.logger, performUnlessClosing, maxRetries, delay, sendDescription)
-      .unlessShutdown(doSend(), AllExceptionRetryPolicy)(
-        retry.Success.always,
-        ec,
-        loggingContext.traceContext,
-      )
   }
 
   def loggerFactoryWithSequencerAlias(

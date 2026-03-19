@@ -421,7 +421,7 @@ abstract class ReferenceSequencerWithTrafficControlApiTestBase
         ),
         FutureSupervisor.Noop,
         SequencerTrafficConfig(),
-        sequencingTimeLowerBoundExclusive = None,
+        lsuSequencingBounds = None,
         runtimeReady = FutureUnlessShutdown.unit,
       )
       .futureValueUS

@@ -75,8 +75,8 @@ final case class SequencerNodeConfig(
 
   override def withDefaults(
       ports: Option[DefaultPorts]
-  ): SequencerNodeConfig = {
-    val withDefaults = ports
+  ): SequencerNodeConfig =
+    ports
       .fold(this)(ports =>
         this
           .focus(_.publicApi.internalPort)
@@ -98,16 +98,11 @@ final case class SequencerNodeConfig(
                 )
             )
         case other => other
-      }
 
-    withDefaults
+      }
       .focus(_.replication)
-      .modify(replication =>
-        // The block sequencer does not support replicas, so we must not enable replication
-        // even if the storage supports it (sse #13844).
-        if (withDefaults.sequencer.supportsReplicas)
-          ReplicationConfig.withDefaultO(storage, replication)
-        else replication.map(_.copy(enabled = Some(false)))
-      )
-  }
+      // Even though the block sequencer does not support replicas, want to turn on replication
+      // to take care of cases when
+      .modify(replication => ReplicationConfig.withDefaultO(storage, replication))
+
 }

@@ -3,7 +3,7 @@
 
 package com.digitalasset.daml.lf.language
 
-import com.digitalasset.daml.lf.data.Ref._
+import com.digitalasset.daml.lf.data.Ref.*
 
 sealed abstract class LookupError {
   def pretty: String

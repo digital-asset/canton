@@ -3,32 +3,30 @@
 
 package com.digitalasset.daml.lf.typesig
 
-import scalaz.std.map._
-import scalaz.std.set._
-import scalaz.std.tuple._
-import scalaz.syntax.traverse._
-import scalaz.syntax.std.map._
-import scalaz.syntax.std.option._
-import scalaz.Semigroup
-import scalaz.Tags.FirstVal
-import java.{util => j}
-
+import com.daml.nonempty.NonEmpty
 import com.digitalasset.daml.lf.data.ImmArray.ImmArraySeq
 import com.digitalasset.daml.lf.data.Ref
-import com.daml.nonempty.NonEmpty
+import scalaz.Semigroup
+import scalaz.Tags.FirstVal
+import scalaz.std.map.*
+import scalaz.std.set.*
+import scalaz.std.tuple.*
+import scalaz.syntax.std.map.*
+import scalaz.syntax.std.option.*
+import scalaz.syntax.traverse.*
 
-import scala.jdk.CollectionConverters._
-import scala.jdk.OptionConverters._
+import java.util as j
+import scala.jdk.CollectionConverters.*
+import scala.jdk.OptionConverters.*
 
 case class DefDataType[+RF, +VF](typeVars: ImmArraySeq[Ref.Name], dataType: DataType[RF, VF]) {
-  def getTypeVars: j.List[_ <: String] = typeVars.asJava
+  def getTypeVars: j.List[? <: String] = typeVars.asJava
 }
 
 object DefDataType {
 
-  /** Alias for application to [[Type]]. Note that FWT stands for "Field with
-    * type", because before we parametrized over both the field and the type,
-    * while now we only parametrize over the type.
+  /** Alias for application to [[Type]]. Note that FWT stands for "Field with type", because before
+    * we parametrized over both the field and the type, while now we only parametrize over the type.
     */
   type FWT = DefDataType[Type, Type]
 }
@@ -44,15 +42,14 @@ sealed trait DataType[+RT, +VT] extends Product with Serializable {
 
 object DataType {
 
-  /** Alias for application to [[Type]]. Note that FWT stands for "Field with
-    * type", because before we parametrized over both the field and the type,
-    * while now we only parametrize over the type.
+  /** Alias for application to [[Type]]. Note that FWT stands for "Field with type", because before
+    * we parametrized over both the field and the type, while now we only parametrize over the type.
     */
   type FWT = DataType[Type, Type]
 
   sealed trait GetFields[+A] {
     def fields: ImmArraySeq[(Ref.Name, A)]
-    final def getFields: j.List[_ <: (String, A)] = fields.asJava
+    final def getFields: j.List[? <: (String, A)] = fields.asJava
   }
 }
 
@@ -98,20 +95,20 @@ final case class DefTemplate[+Ty](
   @deprecated("use tChoices.directChoices or tChoices.resolvedChoices instead", since = "2.3.0")
   private[daml] def choices = tChoices.directChoices
 
-  /** Remove choices from `unresolvedInheritedChoices` and add to `choices`
-    * given the `astInterfaces` from an [[EnvironmentSignature]].  If the result
-    * has any `unresolvedInheritedChoices` left, these choices were not found.
+  /** Remove choices from `unresolvedInheritedChoices` and add to `choices` given the
+    * `astInterfaces` from an [[EnvironmentSignature]]. If the result has any
+    * `unresolvedInheritedChoices` left, these choices were not found.
     */
   def resolveChoices[O >: Ty](
       astInterfaces: PartialFunction[Ref.TypeConId, DefInterface[O]]
   ): Either[TemplateChoices.ResolveError[DefTemplate[O]], DefTemplate[O]] = {
-    import scalaz.std.either._
-    import scalaz.syntax.bifunctor._
+    import scalaz.std.either.*
+    import scalaz.syntax.bifunctor.*
     tChoices resolveChoices astInterfaces bimap (_.map(r => copy(tChoices = r)), r =>
       copy(tChoices = r))
   }
 
-  def getKey: j.Optional[_ <: Ty] = key.toJava
+  def getKey: j.Optional[? <: Ty] = key.toJava
 
   private[typesig] def extendWithInterface[OTy >: Ty](
       ifaceName: Ref.TypeConId,
@@ -151,17 +148,16 @@ sealed abstract class TemplateChoices[+Ty] extends Product with Serializable {
   /** Choices defined directly on the template */
   def directChoices: Map[Ref.ChoiceName, TemplateChoice[Ty]]
 
-  /** Choices defined on the template, or on resolved implemented interfaces if
-    * resolved
+  /** Choices defined on the template, or on resolved implemented interfaces if resolved
     */
   def resolvedChoices: Map[Ref.ChoiceName, NonEmpty[Map[Option[Ref.TypeConId], TemplateChoice[Ty]]]]
 
   def map[B](f: Ty => B): TemplateChoices[B]
 
-  /** A shim function to delay porting a component to overloaded choices.
-    * Discards essential data, so not a substitute for a proper port.
-    * TODO (#13974) delete when there are no more callers
+  /** A shim function to delay porting a component to overloaded choices. Discards essential data,
+    * so not a substitute for a proper port. TODO (#13974) delete when there are no more callers
     */
+  @scala.annotation.nowarn("msg=match may not be exhaustive")
   private[daml] def assumeNoOverloadedChoices(
       githubIssue: Int
   ): Map[Ref.ChoiceName, TemplateChoice[Ty]] = this match {
@@ -187,15 +183,15 @@ sealed abstract class TemplateChoices[+Ty] extends Product with Serializable {
       }
   }
 
-  final def getDirectChoices: j.Map[Ref.ChoiceName, _ <: TemplateChoice[Ty]] =
+  final def getDirectChoices: j.Map[Ref.ChoiceName, ? <: TemplateChoice[Ty]] =
     directChoices.asJava
 
   final def getResolvedChoices
-      : j.Map[Ref.ChoiceName, _ <: j.Map[j.Optional[Ref.TypeConId], _ <: TemplateChoice[Ty]]] =
+      : j.Map[Ref.ChoiceName, ? <: j.Map[j.Optional[Ref.TypeConId], ? <: TemplateChoice[Ty]]] =
     resolvedChoices.transform((_, m) => m.forgetNE.mapKeys(_.toJava).asJava).asJava
 
-  /** Coerce to [[Resolved]] based on the environment `astInterfaces`, or fail
-    * with the choices that could not be resolved.
+  /** Coerce to [[Resolved]] based on the environment `astInterfaces`, or fail with the choices that
+    * could not be resolved.
     */
   private[typesig] def resolveChoices[O >: Ty](
       astInterfaces: PartialFunction[Ref.TypeConId, DefInterface[O]]
@@ -210,10 +206,12 @@ sealed abstract class TemplateChoices[+Ty] extends Product with Serializable {
               getAstInterface(tcn).cata(
                 { astIf =>
                   val tcnResolved = astIf choicesAsResolved tcn
-                  FirstVal.subst[ResolutionResult, TemplateChoice[O]]((
-                    Set.empty[Ref.TypeConId],
-                    tcnResolved,
-                  ))
+                  FirstVal.subst[ResolutionResult, TemplateChoice[O]](
+                    (
+                      Set.empty[Ref.TypeConId],
+                      tcnResolved,
+                    )
+                  )
                 },
                 (Set(tcn), Map.empty): ResolutionResult[Nothing],
               )
@@ -292,9 +290,11 @@ object TemplateChoice {
   type FWT = TemplateChoice[Type]
 }
 
-/** @param choices Choices of this interface, indexed by name
-  * @param retroImplements IDs of templates that implement this interface, upon
-  *                        introduction of this interface into the environment
+/** @param choices
+  *   Choices of this interface, indexed by name
+  * @param retroImplements
+  *   IDs of templates that implement this interface, upon introduction of this interface into the
+  *   environment
   */
 final case class DefInterface[+Ty](
     choices: Map[Ref.ChoiceName, TemplateChoice[Ty]],
@@ -302,7 +302,7 @@ final case class DefInterface[+Ty](
     // retroImplements are used only by LF 1.x
     retroImplements: Set[Ref.TypeConId] = Set.empty,
 ) {
-  def getChoices: j.Map[Ref.ChoiceName, _ <: TemplateChoice[Ty]] =
+  def getChoices: j.Map[Ref.ChoiceName, ? <: TemplateChoice[Ty]] =
     choices.asJava
 
   // Restructure `choices` in the resolved-choices data structure format,
@@ -338,9 +338,8 @@ object DefInterface extends FWTLike[DefInterface] {
 /** Add aliases to companions. */
 sealed abstract class FWTLike[F[+_]] {
 
-  /** Alias for application to [[Type]]. Note that FWT stands for "Field with
-    * type", because before we parametrized over both the field and the type,
-    * while now we only parametrize over the type.
+  /** Alias for application to [[Type]]. Note that FWT stands for "Field with type", because before
+    * we parametrized over both the field and the type, while now we only parametrize over the type.
     */
   type FWT = F[Type]
 }

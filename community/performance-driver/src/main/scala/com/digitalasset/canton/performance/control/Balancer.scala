@@ -5,6 +5,7 @@ package com.digitalasset.canton.performance.control
 
 import com.daml.ledger.javaapi.data.Party
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.performance.control.Balancer.Item
 import com.digitalasset.canton.util.Mutex
 
 import java.util.concurrent.atomic.AtomicInteger
@@ -13,15 +14,6 @@ import scala.collection.mutable
 
 class Balancer {
 
-  class Item(val party: Party) extends Ordered[Item] {
-    val outstanding = new AtomicInteger(0)
-    val counter = new AtomicInteger(0)
-    override def compare(that: Item): Int = this.outstanding.get().compare(that.outstanding.get())
-    def update(change: Int): Int = {
-      counter.incrementAndGet()
-      outstanding.updateAndGet(x => Math.max(0, x + change))
-    }
-  }
   private val ordered = mutable.ArrayBuffer[Item]()
   private val lock = new Mutex()
 
@@ -89,4 +81,16 @@ class Balancer {
     head
   })
 
+}
+
+object Balancer {
+  private class Item(val party: Party) extends Ordered[Item] {
+    val outstanding = new AtomicInteger(0)
+    val counter = new AtomicInteger(0)
+    override def compare(that: Item): Int = this.outstanding.get().compare(that.outstanding.get())
+    def update(change: Int): Int = {
+      counter.incrementAndGet()
+      outstanding.updateAndGet(x => Math.max(0, x + change))
+    }
+  }
 }

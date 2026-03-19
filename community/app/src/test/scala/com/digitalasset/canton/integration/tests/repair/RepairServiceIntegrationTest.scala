@@ -866,7 +866,7 @@ sealed trait RepairServiceIntegrationTestDevLf extends RepairServiceIntegrationT
             )
 
             val contractHash = TestEngine
-              .syncContractHasher(cantonTestsPath)
+              .syncContractHasher(loggerFactory, cantonTestsPath)
               .hash(
                 unsuffixedCreateNode,
                 contractIdSuffixer.contractHashingMethod,

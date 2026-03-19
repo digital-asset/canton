@@ -470,6 +470,11 @@ class ProgrammableSequencer(
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
     baseSequencer.setLsuTrafficControlState(state)
+
+  override def performLsuSequencingTest(mediatorGroupRecipient: MediatorGroupRecipient)(implicit
+      traceContext: TraceContext
+  ): EitherT[FutureUnlessShutdown, CantonBaseError, Unit] =
+    baseSequencer.performLsuSequencingTest(mediatorGroupRecipient)
 }
 
 /** Utilities for using the [[ProgrammableSequencer]] from tests */

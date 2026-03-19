@@ -1,0 +1,13 @@
+module Qux where
+
+template Qux
+  with
+    owner: Party
+    obs: Party
+  where
+    signatory owner
+    observer obs
+
+    choice Qux_Exe: ()
+      controller [owner, obs]
+        do pure ()

@@ -248,6 +248,8 @@ final case class PhysicalSynchronizerId(
       logical.show ++ PhysicalSynchronizerId.primaryDelimiter ++ protocolVersion.show ++
         PhysicalSynchronizerId.secondaryDelimiter ++ serial.show
     )
+
+  def incrementSerial: PhysicalSynchronizerId = this.copy(serial = serial.increment.toNonNegative)
 }
 
 object PhysicalSynchronizerId {

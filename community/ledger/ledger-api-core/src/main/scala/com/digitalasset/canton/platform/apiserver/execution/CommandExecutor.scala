@@ -4,11 +4,13 @@
 package com.digitalasset.canton.platform.apiserver.execution
 
 import cats.data.EitherT
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
 import com.digitalasset.canton.ledger.api.Commands
 import com.digitalasset.canton.ledger.participant.state.{RoutingSynchronizerState, SyncService}
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.logging.LoggingContextWithTrace.implicitExtractTraceContext
 import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFactory, NamedLogging}
+import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.apiserver.services.ErrorCause
 import com.digitalasset.daml.lf.crypto.Hash
 
@@ -46,12 +48,18 @@ object CommandExecutor {
       syncService: SyncService,
       commandInterpreter: CommandInterpreter,
       topologyAwarePackageSelectionEnabled: Boolean,
+      tapsMaxPassesDefault: PositiveInt,
+      tapsMaxPassesLimit: PositiveInt,
+      metrics: LedgerApiServerMetrics,
       loggerFactory: NamedLoggerFactory,
   )(implicit ec: ExecutionContext): CommandExecutor =
     if (topologyAwarePackageSelectionEnabled)
       new TopologyAwareCommandExecutor(
         syncService = syncService,
         commandInterpreter = commandInterpreter,
+        maxPassesDefault = tapsMaxPassesDefault,
+        maxPassesLimit = tapsMaxPassesLimit,
+        metrics = metrics,
         loggerFactory = loggerFactory,
       )
     else
@@ -80,6 +88,11 @@ private[execution] class DefaultCommandExecutor(
       loggingContext: LoggingContextWithTrace
   ): EitherT[FutureUnlessShutdown, ErrorCause, CommandExecutionResult] = {
     logger.debug("Processing command with the default package preference selection algorithm")
+    commands.tapsMaxPasses.foreach { value =>
+      logger.info(
+        s"Ignoring taps_max_passes=$value because Topology-Aware Package Selection is disabled."
+      )
+    }
     for {
       commandInterpretationResult <- EitherT(
         commandInterpreter.interpret(commands, submissionSeed)

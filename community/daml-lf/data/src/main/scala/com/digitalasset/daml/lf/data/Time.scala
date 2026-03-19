@@ -4,15 +4,15 @@
 package com.digitalasset.daml.lf
 package data
 
-import java.math.{RoundingMode, BigDecimal}
+import scalaz.std.anyVal.*
+import scalaz.syntax.order.*
+import scalaz.{Order, Ordering}
+
+import java.math.{BigDecimal, RoundingMode}
 import java.time.format.DateTimeFormatter
 import java.time.temporal.{ChronoField, ChronoUnit}
-import java.time.{ZoneId, Instant, Duration, LocalDate}
+import java.time.{Duration, Instant, LocalDate, ZoneId}
 import java.util.concurrent.TimeUnit
-
-import scalaz.std.anyVal._
-import scalaz.syntax.order._
-import scalaz.{Order, Ordering}
 
 object Time {
 
@@ -40,9 +40,8 @@ object Time {
     private val formatter: DateTimeFormatter =
       DateTimeFormatter.ISO_DATE.withZone(ZoneId.of("Z"))
 
-    private def assertDaysFromString(str: String) = {
+    private def assertDaysFromString(str: String) =
       asInt(formatter.parse(str).getLong(ChronoField.EPOCH_DAY)).fold(sys.error, identity)
-    }
 
     private[lf] def asInt(days: Long): Either[String, Int] = {
       val daysI = days.toInt

@@ -11,7 +11,6 @@ import com.digitalasset.canton.admin.api.client.data.{
   SynchronizerConnectionConfig,
 }
 import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
-import com.digitalasset.canton.config.SynchronizerTimeTrackerConfig
 import com.digitalasset.canton.console.{
   ConsoleEnvironment,
   InstanceReference,
@@ -164,8 +163,6 @@ private[lsu] trait LsuBase
     SynchronizerConnectionConfig(
       synchronizerAlias = daName,
       sequencerConnections = sequencer1,
-      timeTracker =
-        SynchronizerTimeTrackerConfig(observationLatency = config.NonNegativeFiniteDuration.Zero),
     )
   }
 
@@ -177,8 +174,6 @@ private[lsu] trait LsuBase
     SynchronizerConnectionConfig(
       synchronizerAlias = daName,
       sequencerConnections = seq,
-      timeTracker =
-        SynchronizerTimeTrackerConfig(observationLatency = config.NonNegativeFiniteDuration.Zero),
     )
   }
 
@@ -198,8 +193,6 @@ private[lsu] trait LsuBase
         submissionRequestAmplification = SubmissionRequestAmplification.NoAmplification,
         sequencerConnectionPoolDelays = SequencerConnectionPoolDelays.default,
       ),
-      timeTracker =
-        SynchronizerTimeTrackerConfig(observationLatency = config.NonNegativeFiniteDuration.Zero),
     )
   }
 

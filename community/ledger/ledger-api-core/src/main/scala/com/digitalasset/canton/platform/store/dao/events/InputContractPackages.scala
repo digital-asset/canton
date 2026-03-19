@@ -21,14 +21,16 @@ object InputContractPackages {
       case (
             acc,
             (_, Node.Exercise(coid, _, templateId, _, _, _, _, _, _, _, _, _, _, _, _, _, _)),
-          ) =>
+          ) if !tx.localContractIds.contains(coid) =>
         Relation.update(acc, coid, templateId.packageId)
-      case (acc, (_, Node.Fetch(coid, _, templateId, _, _, _, _, _, _, _))) =>
+      case (acc, (_, Node.Fetch(coid, _, templateId, _, _, _, _, _, _, _)))
+          if !tx.localContractIds.contains(coid) =>
         Relation.update(acc, coid, templateId.packageId)
-      case (acc, (_, Node.LookupByKey(_, templateId, _, Some(coid), _))) =>
+      case (acc, (_, Node.LookupByKey(_, templateId, _, Some(coid), _)))
+          if !tx.localContractIds.contains(coid) =>
         Relation.update(acc, coid, templateId.packageId)
       case (acc, _) => acc
-    } -- tx.localContracts.keySet
+    }
 
   /** Merges two maps, returning an error if their key sets differ. */
   private[events] def strictZipByKey[K, V1, V2](

@@ -29,6 +29,7 @@ import scala.concurrent.ExecutionContext
   */
 private[mediator] class MediatorEventsProcessor(
     identityClientEventHandler: UnsignedProtocolEventHandler,
+    lsuSequencingTestMessageHandler: UnsignedProtocolEventHandler,
     handler: MediatorEventHandler,
     deduplicator: MediatorEventDeduplicator,
     protected val loggerFactory: NamedLoggerFactory,
@@ -45,11 +46,11 @@ private[mediator] class MediatorEventsProcessor(
       events: NonEmpty[Seq[TracedProtocolEvent]]
   )(implicit traceContext: TraceContext, callerCloseContext: CloseContext): HandlerResult = {
     val identityF = identityClientEventHandler(Traced(events))
+    val lsuSequencingTestF = lsuSequencingTestMessageHandler(Traced(events))
 
     val envelopesForSynchronizer = filterEnvelopesForSynchronizer(events)
     val determinedMediatorEvents = envelopesForSynchronizer.forgetNE.flatMap {
-      case (event, envelopes) =>
-        determineMediatorEvents(event, envelopes)
+      case (event, envelopes) => determineMediatorEvents(event, envelopes)
     }
     for {
       deduplicatorResult <- MonadUtil
@@ -94,11 +95,13 @@ private[mediator] class MediatorEventsProcessor(
       }
 
       resultIdentity <- identityF
+      lsuSequencingTest <- lsuSequencingTestF
     } yield {
       Seq(
         resultIdentity,
         deduplicatorStoreAsyncResult,
         asyncMediatorHandlerResult,
+        lsuSequencingTest,
       ).combineAll
     }
   }

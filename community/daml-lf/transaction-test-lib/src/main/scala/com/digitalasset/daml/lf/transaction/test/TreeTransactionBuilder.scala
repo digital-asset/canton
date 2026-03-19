@@ -8,10 +8,10 @@ package test
 import com.digitalasset.daml.lf.data.ImmArray
 import com.digitalasset.daml.lf.transaction.{Node, NodeId, Transaction}
 
-import scala.language.implicitConversions
-import TreeTransactionBuilder._
-
 import java.util.concurrent.atomic.AtomicInteger
+import scala.language.implicitConversions
+
+import TreeTransactionBuilder.*
 
 trait TreeTransactionBuilder {
 
@@ -21,7 +21,7 @@ trait TreeTransactionBuilder {
     nodesToTx(roots).toVersionedTransaction
 
   def toCommittedTransaction(roots: NodeWrapper*): CommittedTransaction =
-    CommittedTransaction(toVersionedTransaction(roots: _*))
+    CommittedTransaction(toVersionedTransaction(roots*))
 
   def toTransaction(roots: NodeWrapper*): Transaction = nodesToTx(roots).toTransaction
 

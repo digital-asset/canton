@@ -5,7 +5,7 @@ package com.digitalasset.canton.performance.elements.dvp
 
 import com.daml.grpc.adapter.ExecutionSequencerFactory
 import com.daml.ledger.api.v2.commands.Command
-import com.daml.ledger.javaapi.data.{Identifier, Party}
+import com.daml.ledger.javaapi.data.Party
 import com.daml.metrics.api.MetricHandle.{Gauge, LabeledMetricsFactory}
 import com.daml.metrics.api.{MetricInfo, MetricName, MetricQualification, MetricsContext}
 import com.digitalasset.canton.LfPartyId
@@ -16,7 +16,7 @@ import com.digitalasset.canton.performance.Connectivity
 import com.digitalasset.canton.performance.PartyRole.DvpTrader
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
 import com.digitalasset.canton.performance.acs.ContractStore
-import com.digitalasset.canton.performance.control.Balancer
+import com.digitalasset.canton.performance.elements.DriverStatus.{StepStatus, TraderStatus}
 import com.digitalasset.canton.performance.elements.{
   DriverControl,
   ParticipantDriver,
@@ -31,19 +31,19 @@ import com.digitalasset.canton.performance.model.java.orchestration.partygrowth.
   RemoteGrowth,
 }
 import com.digitalasset.canton.performance.model.java.orchestration.runtype.DvpRun
-import com.digitalasset.canton.performance.model.java.orchestration.{Mode, PartyGrowth, TestRun}
+import com.digitalasset.canton.performance.model.java.orchestration.{Mode, PartyGrowth}
 import com.digitalasset.canton.topology.SynchronizerId
 import com.digitalasset.canton.util.ShowUtil.*
 import com.typesafe.scalalogging.LazyLogging
 import org.apache.pekko.actor.ActorSystem
 
 import java.time.Instant
-import java.util.UUID
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
+import scala.Ordered.orderingToOrdered
 import scala.collection.mutable
 import scala.concurrent.ExecutionContextExecutor
 import scala.jdk.CollectionConverters.*
-import scala.util.{Random, Success}
+import scala.util.Random
 
 class TraderStats(metric: Gauge[Long]) extends LazyLogging {
 
@@ -60,8 +60,17 @@ class TraderStats(metric: Gauge[Long]) extends LazyLogging {
   def submitted: Int = submitted_.get()
   def observed: Int = observed_.get()
 
+  def updateSubmittedCount(count: Int): Int = submitted_.updateAndGet(_ + count)
+
   def incrementSubmitted(): Int = submitted_.incrementAndGet()
   def decrementSubmitted(): Int = submitted_.decrementAndGet()
+
+  def updateObservedCount(count: Int): Unit = {
+    metric.updateValue(_ + count)
+    val current = observed_.updateAndGet(_ + count)
+    // remember timestamps we need to report progress
+    reports.append((current, Instant.now))
+  }
 
   def incrementObserved(): Unit = {
     metric.updateValue(_ + 1)
@@ -113,8 +122,8 @@ class TraderDriver(
     metricsFactory: LabeledMetricsFactory,
     loggerFactory: NamedLoggerFactory,
     control: DriverControl,
-    baseSynchronizerId: SynchronizerId,
-    otherSynchronizers: Seq[SynchronizerId],
+    val baseSynchronizerId: SynchronizerId,
+    val otherSynchronizers: Seq[SynchronizerId],
     otherSynchronizersRatio: Double,
 )(implicit
     val ec: ExecutionContextExecutor,
@@ -132,52 +141,12 @@ class TraderDriver(
       control,
       baseSynchronizerId,
     )
+    with AssetUserDriver
     with StatsUpdater {
 
   require(
     otherSynchronizersRatio >= 0.0 && otherSynchronizersRatio <= 1.0,
     s"otherSynchronizersRation should be in [0, 1]; found $otherSynchronizersRatio",
-  )
-
-  protected val assets = new ContractStore[
-    M.dvp.asset.Asset.Contract,
-    M.dvp.asset.Asset.ContractId,
-    M.dvp.asset.Asset,
-    Party,
-  ](
-    "assets i own",
-    M.dvp.asset.Asset.COMPANION,
-    index = x => new Party(x.data.issuer),
-    filter = x => x.data.owner == party.getValue,
-    loggerFactory,
-  ) {
-    override def update(before: M.dvp.asset.Asset.Contract): M.dvp.asset.Asset.Contract =
-      new M.dvp.asset.Asset.Contract(
-        before.id,
-        new M.dvp.asset.Asset(
-          before.data.registrar,
-          before.data.issuer,
-          before.data.id,
-          // replace payload with payload string length to not run into OOM if we use large payloads
-          before.data.payload.length.toString,
-          before.data.owner,
-          before.data.bystander,
-        ),
-        before.signatories,
-        before.observers,
-      )
-  }
-  private val assetRequests = new ContractStore[
-    M.dvp.asset.AssetRequest.Contract,
-    M.dvp.asset.AssetRequest.ContractId,
-    M.dvp.asset.AssetRequest,
-    Unit,
-  ](
-    "assets i requested",
-    M.dvp.asset.AssetRequest.COMPANION,
-    index = _ => (),
-    filter = x => x.data.requester == party.getValue,
-    loggerFactory,
   )
 
   protected val proposals = new ContractStore[
@@ -250,9 +219,6 @@ class TraderDriver(
   private val proposalStats = new TraderStats(proposalMetric)
   private val acceptanceStats = new TraderStats(proposalMetric)
 
-  private val issuerBalancer = new Balancer()
-  private val traderBalancer = new Balancer()
-
   private val bystanderMetric = metricsFactory.gauge(
     MetricInfo(
       prefix :+ "parties" :+ "allocated",
@@ -294,13 +260,6 @@ class TraderDriver(
         allocator
     }
 
-  override protected def masterCreated(master: TestRun.Contract): Unit = {
-    issuerBalancer.updateMembers(master.data.issuers.asScala.toSeq.map(new Party(_)))
-    traderBalancer.updateMembers(
-      master.data.traders.asScala.toSeq.filter(_ != party.getValue).map(new Party(_))
-    )
-  }
-
   listeners.appendAll(Seq(assets, assetRequests, proposals))
 
   override protected def doInitExisting(): Boolean = {
@@ -317,7 +276,7 @@ class TraderDriver(
       Math.max(0, maxProposed + maxAccepted + numOpen - proposalMetric.getValue)
     )
 
-    proposals.find(true).foreach { myProposal =>
+    proposals.find(true).foreach { case (_, myProposal) =>
       traderBalancer.adjust(new Party(myProposal.data.counterparty), 1)
       issuerBalancer.adjust(new Party(myProposal.data.issuer), 1)
     }
@@ -328,7 +287,7 @@ class TraderDriver(
     if (running.get()) {
       val reflush = masterContract
         .one(())
-        .flatMap { master =>
+        .flatMap { case (_, master) =>
           master.data.runType match {
             case dvp: DvpRun => Some((master, dvp))
             case va =>
@@ -350,13 +309,17 @@ class TraderDriver(
             case Mode.PREPAREISSUER => false
             case Mode.PREPARETRADER =>
               initExisting()
-              acquireAssets(master, params)
-              signalReadyIfWeAre(master, params).discard
+              acquireAssets(master, params.payloadSize, params.numAssetsPerIssuer).discard
+              signalReadyIfWeAre(
+                master,
+                params.numAssetsPerIssuer,
+                proposals.num(item = true),
+              ).discard
               false
             case Mode.THROUGHPUT =>
               initExisting()
-              acquireAssets(master, params)
-              if (signalReadyIfWeAre(master, params))
+              acquireAssets(master, params.payloadSize, params.numAssetsPerIssuer).discard
+              if (signalReadyIfWeAre(master, params.numAssetsPerIssuer, proposals.num(item = true)))
                 checkConsistency(master, params)
               rate.updateRate(CantonTimestamp.now())
               val freeAssets =
@@ -406,11 +369,50 @@ class TraderDriver(
       false
     }
 
+  private def updateTraderStats(
+      mode: M.orchestration.Mode,
+      proposalStats: TraderStats,
+      proposalsOpen: Int,
+      acceptanceStats: TraderStats,
+      acceptsOpen: Int,
+      issuerStats: Seq[(Party, Int, Int)],
+      counterPartyStats: Seq[(Party, Int, Int)],
+  ): Unit = {
+
+    val lastStatsUpdate = currentStatus.get() match {
+      case Some(ts: TraderStatus) => ts.timestamp
+      case _ => Instant.MIN
+    }
+
+    if (lastStatsUpdate < Instant.now.minusMillis(500)) {
+      currentStatus.set(
+        Some(
+          TraderStatus(
+            name = name,
+            timestamp = Instant.now,
+            mode = mode.toString,
+            currentRate = rate.currentRate,
+            maxRate = rate.maxRate,
+            latencyMs = rate.latencyMs,
+            pending = rate.pending,
+            failed = rate.failed,
+            proposals =
+              StepStatus(proposalStats.submitted, proposalStats.observed, open = proposalsOpen),
+            accepts =
+              StepStatus(acceptanceStats.submitted, acceptanceStats.observed, open = acceptsOpen),
+            counterParties = counterPartyStats,
+            issuers = issuerStats,
+          )
+        )
+      )
+    }
+  }
+
   private def acceptProposals(maxAccept: Int, param: DvpRun): Seq[SubCommand] =
     proposals
       .find(false)
       .take(maxAccept)
-      .flatMap { propose =>
+      .flatMap { case (_, propose) =>
         assets.allAvailable.headOption.toList.flatMap { asset =>
           val synchronizerId = {
             val useOtherSynchronizer =
@@ -452,7 +454,6 @@ class TraderDriver(
       }
 
   private val consistencyWarningIssued = new AtomicBoolean(false)
-  private val shouldBeConsistent = new AtomicBoolean(false)
   private def checkConsistency(master: M.orchestration.TestRun.Contract, params: DvpRun): Unit =
     if (assetRequests.entirelyEmpty && proposalStats.observed > 0) {
       // assets can have two forms, just Assets or AssetTransfers. for every proposal
@@ -493,14 +494,14 @@ class TraderDriver(
     }
 
   private def createProposals(maxCreate: Int, numIssuers: Int, params: DvpRun): Seq[SubCommand] =
-    generator.one(()).toList.flatMap { gen =>
+    generator.one(()).toList.flatMap { case (_, gen) =>
       def go(count: Int, exhausted: Seq[Party]): Seq[SubCommand] =
         if (count == maxCreate || (exhausted.nonEmpty && exhausted.toSet.sizeIs == numIssuers)) {
           exhausted.foreach(issuerBalancer.completed) // unmark exhausted issuers
           Seq()
         } else {
           val issuer = issuerBalancer.next()
-          assets.one(issuer) match {
+          assets.one(issuer).map(_._2) match {
             case Some(asset)
                 if asset.data.payload != params.payloadSize.toString => // compare payload by strings (as we don't want to store all the data)
               issuerBalancer.completed(issuer)
@@ -568,51 +569,15 @@ class TraderDriver(
 
   private def updateStats(master: M.orchestration.TestRun.Contract): Unit = {
     // update statistics if necessary
-    testResult.one(()).foreach { res =>
-      sendStatsUpdates(res, master, proposalStats, acceptanceStats)
+    testResult.one(()).foreach { case (_, res) =>
+      sendStatsUpdates(res, master, Some(proposalStats), Some(acceptanceStats))
     }
     myProposalsOpen.updateValue(proposals.num(true).toLong)
     theirProposalsOpen.updateValue(proposals.num(false).toLong)
   }
 
-  private def acquireAssets(master: M.orchestration.TestRun.Contract, params: DvpRun): Unit =
-    generator.one(()).foreach { res =>
-      // if there is a new issuer that we haven't seen before
-      val issuers = master.data.issuers.asScala.toSeq.filterNot(res.data.processedIssuers.contains)
-      if (issuers.nonEmpty) {
-        val ids = issuers.map(_ => UUID.randomUUID().toString)
-        val payload = Random.alphanumeric.take(params.payloadSize.toInt).mkString
-        // the exercise will add the issuer to the generator, ensuring we don't request twice
-        val cmd =
-          res.id
-            .exerciseRequestAssets(
-              params.numAssetsPerIssuer,
-              issuers.asJava,
-              ids.asJava,
-              payload,
-            )
-            .commands
-            .asScala
-            .toSeq
-        val submissionF =
-          submitCommand(
-            "request-assets",
-            cmd,
-            s"acquiring ${params.numAssetsPerIssuer} assets from $issuers",
-          )
-        setPending(generator, res.id, submissionF)
-        shouldBeConsistent.set(false)
-        // unmark if command fails (we will retry)
-        submissionF.onComplete {
-          case Success(true) =>
-          case x =>
-            logger.warn(s"Requesting assets failed with $x, retrying")
-        }
-      }
-    }
-
   private def signalFinishedIfWeAre(master: M.orchestration.TestRun.Contract): Unit =
-    testResult.one(()).foreach { res =>
+    testResult.one(()).foreach { case (_, res) =>
       // we are done if we submitted enough proposals and all proposals we are involved in vanished
       logger.debug(
         s"Current flag=${res.data.flag}, observed=${proposalStats.observed}, proposals-empty=${proposals.entirelyEmpty}"
@@ -623,39 +588,6 @@ class TraderDriver(
         updateFlag(res, M.orchestration.ParticipantFlag.FINISHED)
       }
     }
-
-  private def signalReadyIfWeAre(
-      master: M.orchestration.TestRun.Contract,
-      params: DvpRun,
-  ): Boolean =
-    testResult
-      .one(())
-      .exists { res =>
-        if (res.data.flag == M.orchestration.ParticipantFlag.READY)
-          true
-        else if (res.data.flag == M.orchestration.ParticipantFlag.INITIALISING) {
-          val expected = params.numAssetsPerIssuer * master.data.issuers.size
-          val numInTransfer = proposals.num(item = true)
-          val actual = assets.allAvailable.size + numInTransfer
-          if (actual == expected) {
-            // signal that we are ready if we have enough assets
-            updateFlag(res, M.orchestration.ParticipantFlag.READY)
-          } else {
-            logger.info(
-              s"Trader does not yet have the required number of assets (expected: $expected, actual: $actual)."
-            )
-          }
-          false
-        } else false
-      }
-
-  override protected def subscribeToTemplates: Seq[Identifier] =
-    Seq(
-      M.dvp.trade.Propose.TEMPLATE_ID,
-      M.dvp.asset.Asset.TEMPLATE_ID,
-      M.dvp.asset.AssetTransfer.TEMPLATE_ID,
-      M.dvp.asset.AssetRequest.TEMPLATE_ID,
-    )
 
 }
 

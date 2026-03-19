@@ -65,11 +65,7 @@ final class ParticipantTopologyTerminateProcessingTest
     )
 
   private lazy val psid1 = DefaultTestIdentities.physicalSynchronizerId
-  private lazy val psid2 = PhysicalSynchronizerId(
-    psid1.logical,
-    psid1.serial.increment.toNonNegative,
-    psid1.protocolVersion,
-  )
+  private lazy val psid2 = psid1.incrementSerial
   private def synchronizerPredecessor(upgradeTime: CantonTimestamp) =
     SynchronizerPredecessor(psid1, upgradeTime, isLateUpgrade = false)
 

@@ -3,19 +3,19 @@
 
 package com.digitalasset.daml.lf.testing.parser
 
-import com.digitalasset.daml.lf.data.Ref.{Location, Name}
 import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.testing.parser.Parsers._
-import com.digitalasset.daml.lf.testing.parser.Token._
+import com.digitalasset.daml.lf.data.Ref.{Location, Name}
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.testing.parser.Parsers.*
+import com.digitalasset.daml.lf.testing.parser.Token.*
 
 @SuppressWarnings(Array("org.wartremover.warts.AnyVal"))
 private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
 
-  import ExprParser._
+  import ExprParser.*
 
   private[parser] val typeParser: TypeParser[P] = new TypeParser(parserParameters)
-  import typeParser._
+  import typeParser.*
 
   lazy val expr0: Parser[Expr] =
     // expressions starting with fullIdentifier should come before literals
@@ -63,7 +63,7 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
   lazy val exprs: Parser[List[Expr]] = rep(expr0)
 
   private[this] val roundingModes = {
-    import java.math.RoundingMode._
+    import java.math.RoundingMode.*
     Map(
       "ROUNDING_UP" -> UP,
       "ROUNDING_DOWN" -> DOWN,
@@ -100,7 +100,7 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
     argTyp ^^ EAppTypArg.apply |
       expr0 ^^ EAppExprArg.apply
 
-  lazy val expr: Parser[Expr] = {
+  lazy val expr: Parser[Expr] =
     expr0 ~ rep(eAppAgr) ^^ { case e0 ~ args =>
       (args foldLeft e0) {
         case (acc, EAppExprArg(e)) => EApp(acc, e)
@@ -108,7 +108,6 @@ private[parser] class ExprParser[P](parserParameters: ParserParameters[P]) {
       }
     } |
       eLoc
-  }
 
   private lazy val fieldInit: Parser[(Name, Expr)] = id ~ (`=` ~> expr) ^^ { case fName ~ value =>
     fName -> value

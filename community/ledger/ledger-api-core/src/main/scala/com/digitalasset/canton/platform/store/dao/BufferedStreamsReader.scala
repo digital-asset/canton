@@ -34,14 +34,14 @@ import scala.concurrent.{ExecutionContext, Future}
   *   construction.
   * @param executionContext
   *   The execution context
-  * @tparam PERSISTENCE_FETCH_ARGS
+  * @tparam PersistenceFetchArgs
   *   The Ledger API streams filter type of fetches from persistence.
-  * @tparam API_RESPONSE
+  * @tparam ApiResponse
   *   The API stream response type.
   */
-class BufferedStreamsReader[PERSISTENCE_FETCH_ARGS, API_RESPONSE](
+class BufferedStreamsReader[PersistenceFetchArgs, ApiResponse](
     inMemoryFanoutBuffer: InMemoryFanoutBuffer,
-    fetchFromPersistence: FetchFromPersistence[PERSISTENCE_FETCH_ARGS, API_RESPONSE],
+    fetchFromPersistence: FetchFromPersistence[PersistenceFetchArgs, ApiResponse],
     bufferedStreamEventsProcessingParallelism: Int,
     metrics: LedgerApiServerMetrics,
     streamName: String,
@@ -68,23 +68,23 @@ class BufferedStreamsReader[PERSISTENCE_FETCH_ARGS, API_RESPONSE](
     *   To Ledger API stream response converter.
     * @param loggingContext
     *   The logging context.
-    * @tparam BUFFER_OUT
+    * @tparam BufferOut
     *   The output type of elements retrieved from the buffer.
     * @return
     *   The Ledger API stream source.
     */
-  def stream[BUFFER_OUT](
+  def stream[BufferOut](
       startInclusive: Offset,
       endInclusive: Offset,
-      persistenceFetchArgs: PERSISTENCE_FETCH_ARGS,
-      bufferFilter: TransactionLogUpdate => Option[BUFFER_OUT],
-      toApiResponse: BUFFER_OUT => Future[API_RESPONSE],
+      persistenceFetchArgs: PersistenceFetchArgs,
+      bufferFilter: TransactionLogUpdate => Option[BufferOut],
+      toApiResponse: BufferOut => Future[ApiResponse],
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[(Offset, API_RESPONSE), NotUsed] = {
+  ): Source[(Offset, ApiResponse), NotUsed] = {
     def toApiResponseStream(
-        slice: Vector[(Offset, BUFFER_OUT)]
-    ): Source[(Offset, API_RESPONSE), NotUsed] =
+        slice: Vector[(Offset, BufferOut)]
+    ): Source[(Offset, ApiResponse), NotUsed] =
       if (slice.isEmpty) Source.empty
       else
         Source(slice)
@@ -145,13 +145,13 @@ class BufferedStreamsReader[PERSISTENCE_FETCH_ARGS, API_RESPONSE](
 }
 
 private[platform] object BufferedStreamsReader {
-  trait FetchFromPersistence[FILTER, API_RESPONSE] {
+  trait FetchFromPersistence[FILTER, ApiResponse] {
     def apply(
         startInclusive: Offset,
         endInclusive: Offset,
         filter: FILTER,
     )(implicit
         loggingContext: LoggingContextWithTrace
-    ): Source[(Offset, API_RESPONSE), NotUsed]
+    ): Source[(Offset, ApiResponse), NotUsed]
   }
 }

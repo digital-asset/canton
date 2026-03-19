@@ -34,9 +34,10 @@ import com.digitalasset.canton.synchronizer.metrics.SequencerMetrics
 import com.digitalasset.canton.synchronizer.sequencer.SequencerReader.ReadState
 import com.digitalasset.canton.synchronizer.sequencer.errors.CreateSubscriptionError
 import com.digitalasset.canton.synchronizer.sequencer.store.*
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.topology.client.TopologySnapshot
 import com.digitalasset.canton.topology.processing.EffectiveTime
-import com.digitalasset.canton.topology.{Member, SequencerId}
+import com.digitalasset.canton.topology.{MediatorId, Member, ParticipantId, SequencerId}
 import com.digitalasset.canton.tracing.{Spanning, TraceContext}
 import com.digitalasset.canton.util.PekkoUtil.WithKillSwitch
 import com.digitalasset.canton.util.PekkoUtil.syntax.*
@@ -107,7 +108,7 @@ class SequencerReader(
     syncCryptoApi: SyncCryptoClient[SyncCryptoApi],
     eventSignaller: EventSignaller,
     topologyClientMember: Member,
-    sequencingTimeBoundExclusiveO: Option[CantonTimestamp],
+    lsuSequencingBounds: Option[LsuSequencingBounds],
     metrics: SequencerMetrics,
     override protected val timeouts: ProcessingTimeout,
     protected val loggerFactory: NamedLoggerFactory,
@@ -191,8 +192,9 @@ class SequencerReader(
           } else {
             requestedTimestampInclusive
           }
+
         val predecessorSequencingTimeUpperBoundExclusive =
-          sequencingTimeBoundExclusiveO.map(_.immediateSuccessor)
+          lsuSequencingBounds.map(_.lowerBoundSequencingTimeExclusive.immediateSuccessor)
 
         readFromTimestampInclusive.max(predecessorSequencingTimeUpperBoundExclusive)
       }
@@ -219,14 +221,17 @@ class SequencerReader(
                 lowerBoundTopologyClientAddressedTimestamp
               }
             }
-            if (fromStoreOrLowerBound < sequencingTimeBoundExclusiveO) {
-              logger.debug(
-                s"The latest topology client timesetamp from store or the lower bound $fromStoreOrLowerBound is before the predecessor's upgrade time $sequencingTimeBoundExclusiveO.get. Will commence with the upgrade time."
-              )
-              sequencingTimeBoundExclusiveO
-            } else {
-              fromStoreOrLowerBound
+
+            val lowerBoundSequencingTimeForMember = member match {
+              case _: ParticipantId => lsuSequencingBounds.map(_.upgradeTime)
+              case _: MediatorId | _: SequencerId =>
+                lsuSequencingBounds.map(_.lowerBoundSequencingTimeExclusive)
             }
+
+            logger.debug(
+              s"For the  safeLatestTopologyClientRecipientTimestamp using max($fromStoreOrLowerBound, $lowerBoundSequencingTimeForMember)"
+            )
+            fromStoreOrLowerBound.max(lowerBoundSequencingTimeForMember)
           }
       )
 
@@ -305,7 +310,7 @@ class SequencerReader(
           .map(_.immediatePredecessor)
           .getOrElse(
             safeWatermarkTimestampO
-              .map(_ min memberRegisteredFrom)
+              .map(_.min(memberRegisteredFrom))
               .getOrElse(memberRegisteredFrom)
           ),
         nextPreviousEventTimestamp = previousEventTimestamp,
@@ -686,9 +691,7 @@ class SequencerReader(
             errorOrEvent.foreach { signedEvent =>
               metrics.publicApi
                 .subscriptionLastTimestamp(metricsContext)
-                .updateValue(
-                  signedEvent.timestamp.toMicros
-                )
+                .updateValue(signedEvent.timestamp.toMicros)
             }
             errorOrEvent
           }

@@ -557,7 +557,7 @@ class MediatorNodeBootstrap(
             TopologyTransactionProcessor
               .createProcessorAndClientForSynchronizer(
                 synchronizerTopologyStore,
-                synchronizerUpgradeTime = None,
+                upgradeTimeFromPredecessor = None,
                 crypto.pureCrypto,
                 arguments.parameterConfig,
                 arguments.config.topology,
@@ -652,7 +652,6 @@ class MediatorNodeBootstrap(
           sendTrackerStore,
           RequestSigner(
             syncCryptoWithOptionalSessionKeys,
-            staticSynchronizerParameters.protocolVersion,
             loggerFactory,
           ),
           info.sequencerConnections,
@@ -671,11 +670,7 @@ class MediatorNodeBootstrap(
             Lens[MediatorSynchronizerConfiguration, SequencerConnections](_.sequencerConnections)(
               connection => conf => conf.copy(sequencerConnections = connection)
             ),
-            RequestSigner(
-              syncCryptoWithOptionalSessionKeys,
-              staticSynchronizerParameters.protocolVersion,
-              loggerFactory,
-            ),
+            RequestSigner(syncCryptoWithOptionalSessionKeys, loggerFactory),
             sequencerClientFactory,
             sequencerInfoLoader,
             connectionPoolFactory,

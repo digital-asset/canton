@@ -21,31 +21,31 @@ import scala.concurrent.Future
 object GrpcAdminCommandSupport {
 
   implicit class StubAdminCommandOps[SVC <: AbstractStub[SVC]](stub: Channel => SVC) {
-    def syncCommand[REQ, RESP](
-        syncMethod: SVC => REQ => Future[RESP]
-    ): REQ => GrpcAdminCommand[REQ, RESP, RESP] = { request =>
-      new GrpcAdminCommand[REQ, RESP, RESP] {
+    def syncCommand[Req, Resp](
+        syncMethod: SVC => Req => Future[Resp]
+    ): Req => GrpcAdminCommand[Req, Resp, Resp] = { request =>
+      new GrpcAdminCommand[Req, Resp, Resp] {
         override type Svc = SVC
         override def createService(channel: ManagedChannel): SVC = stub(channel)
-        override protected def submitRequest(service: SVC, request: REQ): Future[RESP] =
+        override protected def submitRequest(service: SVC, request: Req): Future[Resp] =
           syncMethod(service)(request)
-        override protected def createRequest(): Either[String, REQ] = Right(request)
-        override protected def handleResponse(response: RESP): Either[String, RESP] = Right(
+        override protected def createRequest(): Either[String, Req] = Right(request)
+        override protected def handleResponse(response: Resp): Either[String, Resp] = Right(
           response
         )
       }
     }
 
-    def streamingCommand[REQ, RESP](
-        streamMethod: SVC => (REQ, StreamObserver[RESP]) => Unit,
-        filter: RESP => Boolean = (_: RESP) => true,
-    ): REQ => ConsoleEnvironment => Int => GrpcAdminCommand[REQ, Seq[RESP], Seq[RESP]] = {
+    def streamingCommand[Req, Resp](
+        streamMethod: SVC => (Req, StreamObserver[Resp]) => Unit,
+        filter: Resp => Boolean = (_: Resp) => true,
+    ): Req => ConsoleEnvironment => Int => GrpcAdminCommand[Req, Seq[Resp], Seq[Resp]] = {
       request => consoleEnvironment => expected =>
-        new GrpcAdminCommand[REQ, Seq[RESP], Seq[RESP]] {
+        new GrpcAdminCommand[Req, Seq[Resp], Seq[Resp]] {
           override type Svc = SVC
           override def createService(channel: ManagedChannel): SVC = stub(channel)
-          override protected def submitRequest(service: SVC, request: REQ): Future[Seq[RESP]] =
-            GrpcAdminCommand.streamedResponse[REQ, RESP, RESP](
+          override protected def submitRequest(service: SVC, request: Req): Future[Seq[Resp]] =
+            GrpcAdminCommand.streamedResponse[Req, Resp, Resp](
               service = streamMethod(service),
               extract = Seq(_).filter(filter),
               request = request,
@@ -53,8 +53,8 @@ object GrpcAdminCommandSupport {
               timeout = consoleEnvironment.commandTimeouts.ledgerCommand.asFiniteApproximation,
               scheduler = consoleEnvironment.environment.scheduler,
             )
-          override protected def createRequest(): Either[String, REQ] = Right(request)
-          override protected def handleResponse(response: Seq[RESP]): Either[String, Seq[RESP]] =
+          override protected def createRequest(): Either[String, Req] = Right(request)
+          override protected def handleResponse(response: Seq[Resp]): Either[String, Seq[Resp]] =
             Right(
               response
             )
@@ -65,9 +65,9 @@ object GrpcAdminCommandSupport {
   implicit class ParticipantReferenceOps(
       participant: LocalParticipantReference
   ) {
-    def runLapiAdminCommand[REQ, RESP, RESULT](
-        command: GrpcAdminCommand[REQ, RESP, RESULT]
-    ): ConsoleCommandResult[RESULT] =
+    def runLapiAdminCommand[Req, Resp, Result](
+        command: GrpcAdminCommand[Req, Resp, Result]
+    ): ConsoleCommandResult[Result] =
       participant.consoleEnvironment.grpcLedgerCommandRunner.runCommand(
         participant.name,
         command,
@@ -75,10 +75,10 @@ object GrpcAdminCommandSupport {
         participant.adminToken,
       )
 
-    def runStreamingLapiAdminCommand[REQ, RESP, RESULT](
-        command: ConsoleEnvironment => Int => GrpcAdminCommand[REQ, RESP, RESULT],
+    def runStreamingLapiAdminCommand[Req, Resp, Result](
+        command: ConsoleEnvironment => Int => GrpcAdminCommand[Req, Resp, Result],
         expected: Int = Int.MaxValue,
-    ): ConsoleCommandResult[RESULT] =
+    ): ConsoleCommandResult[Result] =
       participant.consoleEnvironment.grpcLedgerCommandRunner.runCommand(
         participant.name,
         command(participant.consoleEnvironment)(expected),

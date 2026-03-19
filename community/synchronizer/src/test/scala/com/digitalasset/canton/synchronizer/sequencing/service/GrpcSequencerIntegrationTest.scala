@@ -229,7 +229,7 @@ class Env(override val loggerFactory: SuppressingLogger)(implicit
     staticSynchronizerParameters = BaseTest.defaultStaticSynchronizerParameters,
     cryptoApi = cryptoApi,
     clock = clock,
-    sequencingTimeLowerBoundExclusive = None,
+    lsuSequencingBounds = None,
     synchronizerTopologyManager = mockSynchronizerTopologyManager,
     loggerFactory = loggerFactory,
   )

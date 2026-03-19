@@ -4,7 +4,6 @@
 package com.digitalasset.canton.util
 
 import cats.syntax.either.*
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.crypto.TestSalt
 import com.digitalasset.canton.crypto.provider.symbolic.SymbolicPureCrypto
 import com.digitalasset.canton.examples.java.cycle.Cycle
@@ -34,8 +33,6 @@ class ContractValidatorTest
     with HasExecutionContext
     with FailOnShutdown {
 
-  implicit private val loggingContext: LoggingContext = LoggingContext.empty
-
   private val alice = LfPartyId.assertFromString("Alice")
 
   private val pureCrypto = new SymbolicPureCrypto()
@@ -47,6 +44,7 @@ class ContractValidatorTest
         packagePaths = Seq(CantonExamplesPath),
         iterationsBetweenInterruptions = 10,
         cantonContractIdVersion = authContractIdVersion,
+        loggerFactory = loggerFactory,
       )
 
     val underTest =

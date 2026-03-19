@@ -135,6 +135,7 @@ sealed trait GracefulRejectsIntegrationTest
             transactionShape = TRANSACTION_SHAPE_ACS_DELTA,
             includeCreatedEventBlob = false,
             optTimeout = None,
+            tapsMaxPasses = None,
           ),
           participant2.config.clientLedgerApi,
           participant2.adminToken,

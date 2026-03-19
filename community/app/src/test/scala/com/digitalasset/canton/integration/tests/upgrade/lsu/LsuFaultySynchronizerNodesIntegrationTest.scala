@@ -205,9 +205,10 @@ final class LsuFaultySynchronizerNodesIntegrationTest extends LsuBase {
           _.synchronizers.is_connected(fixture.currentPSId) shouldBe false
         )
       }
-      for (newSequencer <- newOldSequencers.keys) {
+
+      newOldSequencers.keys.foreach(newSequencer =>
         waitForTargetTimeOnSequencer(ls(newSequencer), environment.clock.now, logger)
-      }
+      )
 
       participant1.underlying.value.sync
         .connectedSynchronizerForAlias(daName)

@@ -49,7 +49,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             eventProjectionProperties = EventProjectionProperties(
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
       activeContractsAfter <- activeContractsOf(
         ledgerDao.updateReader
@@ -59,7 +61,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             eventProjectionProperties = EventProjectionProperties(
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
     } yield {
       val activeContracts = activeContractsAfter.toSet.diff(activeContractsBefore.toSet)
@@ -84,7 +88,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             eventProjectionProperties = EventProjectionProperties(
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
       (_, _) <- store(singleCreate)
       (_, c) <- store(singleCreate)
@@ -100,7 +106,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             eventProjectionProperties = EventProjectionProperties(
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
     } yield {
       activeContractsAfter.toSet.diff(activeContractsBefore.toSet) should have size 0
@@ -135,7 +143,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
               witnessTemplateProjections =
                 Map(Some(party1) -> Map(Some(otherTemplateIdFull.toNameTypeConRef) -> Projection())),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
     } yield {
       val create = result.loneElement
@@ -176,7 +186,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 Some(party2) -> Map(Some(otherTemplateIdFull.toNameTypeConRef) -> Projection()),
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
     } yield {
       val activeContracts = result.toArray
@@ -224,7 +236,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 Some(party2) -> Map(Some(otherTemplateId2Full.toNameTypeConRef) -> Projection()),
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
     } yield {
       val activeContracts = result.toArray
@@ -273,7 +287,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 Some(party2) -> Map(Some(otherTemplateIdFull.toNameTypeConRef) -> Projection()),
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
     } yield {
       val activeContracts = result.toArray
@@ -318,7 +334,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             eventProjectionProperties = EventProjectionProperties(
               verbose = false
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
     } yield {
       val activeContracts = result.toArray
@@ -365,7 +383,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 Some(party1) -> Map(Some(someTemplateIdFull.toNameTypeConRef) -> Projection())
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
     } yield {
       val activeContracts = result.toArray
@@ -412,7 +432,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 Some(party1) -> Map(Some(otherTemplateId5Full.toNameTypeConRef) -> Projection())
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
     } yield {
       val activeContracts = result.toArray
@@ -467,7 +489,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 Some(party1) -> Map(Some(someTemplateIdFull.toNameTypeConRef) -> Projection())
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
       resultUnknownParty <- activeContractsOf(
         ledgerDao.updateReader
@@ -485,7 +509,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 Some(party1) -> Map(Some(someTemplateIdFull.toNameTypeConRef) -> Projection())
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
       resultUnknownTemplate <- activeContractsOf(
         ledgerDao.updateReader
@@ -507,7 +533,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 )
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
       resultUnknownTemplatePartyWildcard <- activeContractsOf(
         ledgerDao.updateReader
@@ -531,7 +559,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 ),
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
       resultUnknownPartyAndTemplate <- activeContractsOf(
         ledgerDao.updateReader
@@ -553,7 +583,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 )
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
       resultUnknownsOnly <- activeContractsOf(
         ledgerDao.updateReader
@@ -573,7 +605,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
                 )
               ),
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
     } yield {
       result should have length 2
@@ -598,7 +632,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
           eventProjectionProperties = EventProjectionProperties(
             verbose = true
           )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+          continuationToken = None,
         )
+        .map(_.withEmptyChecksum)
         .runWith(Sink.seq)
 
     } yield {
@@ -619,7 +655,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             eventProjectionProperties = EventProjectionProperties(
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
       activeContractsAfter <- activeContractsOf(
         ledgerDao.updateReader
@@ -629,7 +667,9 @@ private[dao] trait JdbcLedgerDaoActiveContractsSpec
             eventProjectionProperties = EventProjectionProperties(
               verbose = true
             )(interfaceViewPackageUpgrade = UseOriginalViewPackageId),
+            continuationToken = None,
           )
+          .map(_.withEmptyChecksum)
       )
     } yield {
       val activeContract = activeContractsAfter.toSet.diff(activeContractsBefore.toSet).loneElement

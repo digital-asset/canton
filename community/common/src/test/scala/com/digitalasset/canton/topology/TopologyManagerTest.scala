@@ -33,7 +33,7 @@ class TopologyManagerTest extends AnyWordSpec with BaseTest with HasExecutionCon
     behave like rejectingMissingSigningKeySignatures(
       createSynchronizerTopologyManager()._2
     )
-    behave like ((backpressureOnFullQueue _).tupled) (
+    behave like (backpressureOnFullQueue _).tupled(
       createSynchronizerTopologyManager(maxUnsentQueueSize = NonNegativeInt.one)
     )
   }

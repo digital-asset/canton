@@ -78,14 +78,15 @@ class RawStringInterningSpec extends AnyFlatSpec with Matchers {
 
   it should "handle duplicate unknown strings" in {
     val current = RawStringInterning(Map("one" -> 1), Map(1 -> "one"), 1)
-    val newEntries = RawStringInterning.newEntries(List("two", "two", "two").iterator, current)
+    val newEntries =
+      RawStringInterning.newEntries(List("two", "two", "two").distinct.iterator, current)
     newEntries shouldBe Vector(2 -> "two")
   }
 
   it should "handle mixed input" in {
     val current = RawStringInterning(Map("one" -> 1, "two" -> 2), Map(1 -> "one", 2 -> "two"), 2)
     val newEntries = RawStringInterning.newEntries(
-      List("one", "three", "two", "four", "two", "four").iterator,
+      List("one", "three", "two", "four", "two", "four").distinct.iterator,
       current,
     )
     newEntries shouldBe Vector(3 -> "three", 4 -> "four")

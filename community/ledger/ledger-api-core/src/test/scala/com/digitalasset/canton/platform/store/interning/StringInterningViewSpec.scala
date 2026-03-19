@@ -36,19 +36,22 @@ class StringInterningViewSpec extends AsyncFlatSpec with Matchers with BaseTest 
     choiceNameAbsent(testee, "ChoiceName")
     interfaceIdAbsent(testee, "pkg:inter:face")
 
-    testee.internize(
-      new DomainStringIterators(
-        parties = Iterator("p1", "p2", "22::same:name").map(Ref.Party.assertFromString),
-        templateIds = Iterator("#22:t:a", "#22:t:b").map(Ref.NameTypeConRef.assertFromString),
-        synchronizerIds = List("22::same:name", "x::synchronizer1", "x::synchronizer2").iterator
-          .map(SynchronizerId.tryFromString),
-        packageIds = Iterator("pkg-1", "pkg-2").map(Ref.PackageId.assertFromString),
-        userIds = Iterator("usr1", "usr2").map(Ref.UserId.assertFromString),
-        participantIds = Iterator("pn-1", "pn-2").map(Ref.ParticipantId.assertFromString),
-        choiceNames = Iterator("ChoiceName").map(Ref.ChoiceName.assertFromString),
-        interfaceIds = Iterator("pkg:inter:face").map(Ref.Identifier.assertFromString),
+    testee
+      .internize(
+        new DomainStringIterators(
+          parties = Iterator("p1", "p2", "22::same:name").map(Ref.Party.assertFromString),
+          templateIds = Iterator("#22:t:a", "#22:t:b").map(Ref.NameTypeConRef.assertFromString),
+          synchronizerIds = List("22::same:name", "x::synchronizer1", "x::synchronizer2").iterator
+            .map(SynchronizerId.tryFromString),
+          packageIds = Iterator("pkg-1", "pkg-2").map(Ref.PackageId.assertFromString),
+          userIds = Iterator("usr1", "usr2").map(Ref.UserId.assertFromString),
+          participantIds = Iterator("pn-1", "pn-2").map(Ref.ParticipantId.assertFromString),
+          choiceNames = Iterator("ChoiceName").map(Ref.ChoiceName.assertFromString),
+          interfaceIds = Iterator("pkg:inter:face").map(Ref.Identifier.assertFromString),
+        )
       )
-    ) shouldBe Vector(
+      .toSeq
+      .sortBy(_._1) shouldBe Vector(
       1 -> "p|p1",
       2 -> "p|p2",
       3 -> "p|22::same:name",

@@ -4,16 +4,16 @@
 package com.digitalasset.daml.lf.data
 
 import com.daml.scalatest.{FlatSpecCheckLaws, Unnatural}
-import org.scalatest.matchers.should.Matchers
 import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 import scalaz.scalacheck.ScalazProperties
-import scalaz.std.anyVal._
+import scalaz.std.anyVal.*
 
 import ImmArray.ImmArraySeq
 
 class ImmArrayTest extends AnyFlatSpec with Matchers with FlatSpecCheckLaws {
-  import DataArbitrary._
-  import ImmArraySeq._
+  import DataArbitrary.*
+  import ImmArraySeq.*
 
   behavior of "toString"
 
@@ -113,7 +113,9 @@ class ImmArrayTest extends AnyFlatSpec with Matchers with FlatSpecCheckLaws {
     import scalaz.syntax.traverse.ToTraverseOps
     import scalaz.Writer
     import scalaz.WriterT
+    import scalaz.WriterT.*
     import scalaz.std.vector.vectorMonoid
+    import scalaz.*
 
     type F[A] = Writer[Vector[String], A]
 

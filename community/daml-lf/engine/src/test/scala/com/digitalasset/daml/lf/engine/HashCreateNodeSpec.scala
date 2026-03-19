@@ -4,6 +4,7 @@
 package com.digitalasset.daml.lf
 package engine
 
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.Hash.HashingMethod
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref.Party
@@ -22,7 +23,7 @@ import org.scalatest.wordspec.AnyWordSpec
 import scala.collection.immutable.ArraySeq
 
 /** Tests for [[Engine.hashCreateNode]]. */
-class HashCreateNodeSpec extends AnyWordSpec with EitherValues with Matchers {
+class HashCreateNodeSpec extends AnyWordSpec with EitherValues with Matchers with SuppressingLogging {
 
   implicit val defaultParserParameters: ParserParameters[this.type] =
     ParserParameters.default[this.type]
@@ -45,7 +46,8 @@ class HashCreateNodeSpec extends AnyWordSpec with EitherValues with Matchers {
   val compiledPkgs = PureCompiledPackages.build(Map(pkgId -> pkg), compilerConfig)
 
   private def newEngine = new Engine(
-    EngineConfig(LanguageVersion.stableLfVersionsRange)
+    EngineConfig(LanguageVersion.stableLfVersionsRange),
+    loggerFactory,
   )
 
   val alice = Party.assertFromString("Party")

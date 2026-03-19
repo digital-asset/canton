@@ -3,14 +3,13 @@
 
 package com.digitalasset.daml.lf.data
 
-import java.math.BigDecimal
-
 import org.scalatest
 import org.scalatest.matchers.should.Matchers
 import org.scalatestplus.scalacheck.ScalaCheckPropertyChecks
 
+import java.math.BigDecimal
 import scala.language.implicitConversions
-import scala.math.{BigDecimal => BigDec}
+import scala.math.BigDecimal as BigDec
 import scala.util.Random
 
 class NumericSpec
@@ -65,7 +64,7 @@ class NumericSpec
       )
 
       forEvery(testCases) { (scale, bigDec) =>
-        Numeric.fromBigDecimal(scale, bigDec) shouldBe a[Left[_, _]]
+        Numeric.fromBigDecimal(scale, bigDec) shouldBe a[Left[?, ?]]
       }
     }
 
@@ -81,7 +80,7 @@ class NumericSpec
       )
 
       forEvery(testCases) { (scale, bigDec) =>
-        Numeric.fromBigDecimal(scale, bigDec) shouldBe a[Left[_, _]]
+        Numeric.fromBigDecimal(scale, bigDec) shouldBe a[Left[?, ?]]
       }
     }
   }
@@ -102,10 +101,10 @@ class NumericSpec
         ("5678901234567890.1234567890123456789012", "5678901234567890.1234567890123456789012"),
       )
 
-      add("1.0", "1.0") shouldBe a[Right[_, _]]
+      add("1.0", "1.0") shouldBe a[Right[?, ?]]
 
       forEvery(testCases) { (x, y) =>
-        add(x, y) shouldBe a[Left[_, _]]
+        add(x, y) shouldBe a[Left[?, ?]]
       }
     }
 
@@ -158,10 +157,10 @@ class NumericSpec
         ("567890123456789012345.67890123456789012", "-567890123456789012345.67890123456789012"),
       )
 
-      subtract("1.0", "1.0") shouldBe a[Right[_, _]]
+      subtract("1.0", "1.0") shouldBe a[Right[?, ?]]
 
       forEvery(testCases) { (x, y) =>
-        subtract(x, y) shouldBe a[Left[_, _]]
+        subtract(x, y) shouldBe a[Left[?, ?]]
       }
     }
 
@@ -215,10 +214,10 @@ class NumericSpec
         (14, "5678901234567890.12345678901234", "-5678901234567890.12345678901234"),
       )
 
-      multiply(0, "10000000000000000000.", "1000000000000000000.") shouldBe a[Right[_, _]]
+      multiply(0, "10000000000000000000.", "1000000000000000000.") shouldBe a[Right[?, ?]]
 
       forEvery(testCases) { (scale, x, y) =>
-        multiply(scale, x, y) shouldBe a[Left[_, _]]
+        multiply(scale, x, y) shouldBe a[Left[?, ?]]
       }
     }
 
@@ -307,10 +306,10 @@ class NumericSpec
         (14, "5678901234567890.12345678901234", "-0.00000000001234"),
       )
 
-      divide(10, "100000000000000000.0000000000", "0.0000000001") shouldBe a[Right[_, _]]
+      divide(10, "100000000000000000.0000000000", "0.0000000001") shouldBe a[Right[?, ?]]
 
       forEvery(testCases) { (scale, x, y) =>
-        divide(scale, x, y) shouldBe a[Left[_, _]]
+        divide(scale, x, y) shouldBe a[Left[?, ?]]
       }
     }
 
@@ -394,7 +393,7 @@ class NumericSpec
       round(0, "1.5") shouldBe Right("2.0": Numeric)
 
       forEvery(testCases) { (s, x) =>
-        round(s, x) shouldBe a[Left[_, _]]
+        round(s, x) shouldBe a[Left[?, ?]]
       }
     }
 
@@ -443,7 +442,7 @@ class NumericSpec
       toLong("1.0") shouldBe Right(1)
 
       forEvery(testCases) { x =>
-        toLong(x) shouldBe a[Left[_, _]]
+        toLong(x) shouldBe a[Left[?, ?]]
       }
     }
 
@@ -574,9 +573,9 @@ class NumericSpec
         "2.1.0",
       )
 
-      fromString("1.0") shouldBe a[Right[_, _]]
+      fromString("1.0") shouldBe a[Right[?, ?]]
       forEvery(testCases) { x =>
-        fromString(x) shouldBe a[Left[_, _]]
+        fromString(x) shouldBe a[Left[?, ?]]
       }
     }
 
@@ -624,9 +623,9 @@ class NumericSpec
         "2.1.0",
       )
 
-      fromString(Numeric.Scale.values(1), "1.0") shouldBe a[Right[_, _]]
+      fromString(Numeric.Scale.values(1), "1.0") shouldBe a[Right[?, ?]]
       forEvery(testCases) { x =>
-        Numeric.Scale.values.foreach(s => fromString(s, x) shouldBe a[Left[_, _]])
+        Numeric.Scale.values.foreach(s => fromString(s, x) shouldBe a[Left[?, ?]])
       }
     }
 
@@ -651,7 +650,7 @@ class NumericSpec
             n shouldBe new BigDecimal(x)
             n.scale shouldBe s
           case s =>
-            fromString(s, x) shouldBe a[Left[_, _]]
+            fromString(s, x) shouldBe a[Left[?, ?]]
         }
       }
     }

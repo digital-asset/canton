@@ -5,11 +5,11 @@ package com.digitalasset.daml.lf
 
 import org.scalacheck.Arbitrary.arbitrary
 import org.scalacheck.{Arbitrary, Gen}
-import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec
+import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
 import scalaz.NonEmptyList
-import scalaz.scalacheck.ScalazArbitrary._
+import scalaz.scalacheck.ScalazArbitrary.*
 
 class LfVersionsSpec extends AnyWordSpec with Matchers with ScalaCheckDrivenPropertyChecks {
 
@@ -22,7 +22,7 @@ class LfVersionsSpec extends AnyWordSpec with Matchers with ScalaCheckDrivenProp
 
   case class DummyError(msg: String)
 
-  private def dummyVersionGen: Gen[DummyVersion] = arbitrary[Int].map(DummyVersion)
+  private def dummyVersionGen: Gen[DummyVersion] = arbitrary[Int].map(DummyVersion.apply)
 
   implicit private val dummyVersionArb: Arbitrary[DummyVersion] = Arbitrary(dummyVersionGen)
 

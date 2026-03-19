@@ -5,7 +5,7 @@ package com.digitalasset.daml.lf
 package transaction
 package test
 
-import com.digitalasset.daml.lf.data._
+import com.digitalasset.daml.lf.data.*
 import com.digitalasset.daml.lf.value.Value
 import com.digitalasset.daml.lf.value.Value.ContractId
 
@@ -57,10 +57,10 @@ object TransactionBuilder {
   }
 
   def justSubmitted(node: Node, nodes: Node*): SubmittedTransaction =
-    SubmittedTransaction(just(node, nodes: _*))
+    SubmittedTransaction(just(node, nodes*))
 
   def justCommitted(node: Node, nodes: Node*): CommittedTransaction =
-    CommittedTransaction(just(node, nodes: _*))
+    CommittedTransaction(just(node, nodes*))
 
   // not valid transactions.
   val Empty: VersionedTransaction =
@@ -152,9 +152,9 @@ object TransactionBuilder {
   private[this] val DummyCid = Value.ContractId.V1.assertFromString("00" + "00" * 32)
   private[this] val DummyParties = List(Ref.Party.assertFromString("DummyParty"))
 
-  /** Creates a FatContractInstance with dummy signatories, observers, creation time and authentication
-    * data. The contract ID, signatories and observers may be overridden with non-dummy values if necessary.
-    * For testing purposes only.
+  /** Creates a FatContractInstance with dummy signatories, observers, creation time and
+    * authentication data. The contract ID, signatories and observers may be overridden with
+    * non-dummy values if necessary. For testing purposes only.
     */
   def fatContractInstanceWithDummyDefaults(
       version: SerializationVersion,

@@ -10,6 +10,7 @@ import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.ConsoleMacros.{pruning, utils}
 import com.digitalasset.canton.console.{ConsoleEnvironment, ParticipantReference}
 import com.digitalasset.canton.discard.Implicits.DiscardOps
+import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
 import com.digitalasset.canton.performance.*
 import com.digitalasset.canton.performance.PartyRole.{Master, MasterDynamicConfig}
 import com.digitalasset.canton.performance.RateSettings.SubmissionRateSettings
@@ -20,12 +21,12 @@ import com.digitalasset.canton.performance.model.java.orchestration.partygrowth.
   NoPartyGrowth,
   RemoteGrowth,
 }
-import com.digitalasset.canton.performance.model.java.orchestration.runtype.DvpRun
 import com.digitalasset.canton.performance.util.{
   ParticipantSimulator,
   ParticipantSimulatorController,
 }
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
+import com.digitalasset.canton.tracing.TraceContext
 
 import java.util.concurrent.atomic.AtomicReference
 import scala.concurrent.duration.*
@@ -83,9 +84,8 @@ object LongRunning {
     import ConsoleEnvironment.Implicits.*
     import consoleEnvironment.*
 
-    val loggerFactory = consoleEnvironment.environment.loggerFactory
-    val myLogger = loggerFactory.getLogger(LongRunning.getClass)
-    val onClose = new AtomicReference[Option[java.lang.AutoCloseable]](None)
+    val prepared = (new WithPreparedLogging("longrunning", consoleEnvironment))
+    import prepared.*
 
     // Initial debug information
     myLogger.info(s"Available mediators: ${mediators.all.mkString(", ")}")
@@ -156,14 +156,8 @@ object LongRunning {
       tradersPerNode,
       runTypeConfig,
       runTypeParams,
-      allParticipants,
+      allParticipants.length,
     )
-
-    // find performance dar
-    val dar = os
-      .walk(os.Path(".", base = os.pwd))
-      .find(x => x.ext == "dar" && x.baseName.startsWith("PerformanceTest"))
-      .map(_.toString)
 
     // ---------------------------------------------------------
     // first step: start our nodes and establish connectivity
@@ -189,17 +183,8 @@ object LongRunning {
           sequencerLivenessMargin,
         )
       else participant.synchronizers.reconnect_all()
-
-      for {
-        synchronizer <- participant.synchronizers.list_connected()
-        filename <- dar.toList
-      } {
-        myLogger.info(
-          s"uploading $filename to ${participant.name} for synchronizer ${synchronizer.synchronizerId}"
-        )
-        participant.dars.upload(filename, synchronizerId = synchronizer.synchronizerId).discard
-      }
     }
+    uploadDarToNodes(participants.all, myLogger)
 
     val baseSynchronizerAlias = synchronizersConf.synchronizers.head1
     val participant1 = participants.all.headOption.getOrElse(
@@ -217,12 +202,9 @@ object LongRunning {
     // ---------------------------------------------------------
     // second step: startup our runners
     // ---------------------------------------------------------
-    val participantInfo = (participants.local.active.map(x =>
-      (x.name, x.config.ledgerApi.port, x.config.ledgerApi.tls.map(_.clientConfig))
-    ) ++ participants.remote.active.map(x => (x.name, x.config.ledgerApi.port, None))).map {
-      case (name, port, tls) =>
-        Connectivity(name = name, port = port, tls = tls)
-    }
+    val participantInfo = participants.local.active.map(x =>
+      Connectivity(x.name, x.config.ledgerApi.clientConfig)
+    ) ++ participants.remote.active.map(x => Connectivity(x.name, x.config.ledgerApi))
 
     val participantSimController = if (enableLightweightParticipants && singleSynchronizer) {
       (for {
@@ -303,23 +285,45 @@ object LongRunning {
     (mc, participantSimController)
   }
 
-  private def getMasterSetup(
+  private[scenarios] def uploadDarToNodes(
+      participants: Seq[ParticipantReference],
+      logger: TracedLogger,
+  )(implicit traceContext: TraceContext): Unit = {
+    // find performance dar
+    val dar = os
+      .walk(os.Path(".", base = os.pwd))
+      .find(x => x.ext == "dar" && x.baseName.startsWith("PerformanceTest"))
+      .map(_.toString)
+      .getOrElse(sys.error("unable to find performance dar"))
+
+    participants.filter(_.health.active).foreach { par =>
+      logger.info(
+        s"uploading $dar ${par.name} and vetting on all syncs"
+      )
+      val darId = par.dars.upload(dar, synchronizeVetting = false, vetAllPackages = false)
+      par.synchronizers.list_connected().foreach { sync =>
+        par.dars.vetting.enable(darId, synchronizerId = Some(sync.synchronizerId))
+      }
+    }
+  }
+
+  private[scenarios] def getMasterSetup[T, P <: M.orchestration.RunType](
       masterName: String,
       localMaster: Boolean,
       totalCycles: Int,
       reportFrequency: Int,
       issuersPerNode: Int,
       tradersPerNode: Int,
-      runTypeConfig: C.DvpRun,
-      runTypeParams: DvpRun,
-      allParticipants: List[ParticipantReference],
-  ): Either[Master, C.DvpRun] =
+      runTypeConfig: T,
+      runTypeParams: P,
+      numParticipants: Int,
+  ): Either[Master, T] =
     if (localMaster)
       Left(
         Master(
           masterName,
-          quorumParticipants = (tradersPerNode * allParticipants.length),
-          quorumIssuers = (issuersPerNode * allParticipants.length),
+          quorumParticipants = (tradersPerNode * numParticipants),
+          quorumIssuers = (issuersPerNode * numParticipants),
           runConfig = MasterDynamicConfig(
             totalCycles = totalCycles,
             reportFrequency = Math.min(reportFrequency, totalCycles / 2 + 1),
@@ -379,6 +383,18 @@ object LongRunning {
         )
         .discard
     }
+
+  }
+
+  class WithPreparedLogging(testName: String, consoleEnvironment: ConsoleEnvironment) {
+
+    val loggerFactory = consoleEnvironment.environment.loggerFactory
+    val myLogger = loggerFactory.getTracedLogger(TransferTesting.getClass)
+    implicit val traceContext: TraceContext = TraceContext.createNew(testName)
+    implicit val errorLoggingContext: ErrorLoggingContext =
+      ErrorLoggingContext(myLogger, Map.empty, traceContext)
+    val onClose = new AtomicReference[Option[java.lang.AutoCloseable]](None)
+    utils.auto_close(() => onClose.get().foreach(_.close()))(consoleEnvironment)
 
   }
 

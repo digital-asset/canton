@@ -1,0 +1,143 @@
+services:
+  db-master:
+    image: postgres:16-alpine
+    command: -c 'max_connections=200'
+    restart: always
+    environment:
+      - POSTGRES_USER=${MASTER_POSTGRES_USER}
+      - POSTGRES_PASSWORD=${MASTER_POSTGRES_PASSWORD}
+      - POSTGRES_DB=${MASTER_POSTGRES_DB}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${MASTER_POSTGRES_USER} -d ${MASTER_POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  db-participants1:
+    image: postgres:16-alpine
+    command: -c 'max_connections=200'
+    restart: always
+    environment:
+      - POSTGRES_USER=${PARTICIPANTS1_POSTGRES_USER}
+      - POSTGRES_PASSWORD=${PARTICIPANTS1_POSTGRES_PASSWORD}
+      - POSTGRES_DB=${PARTICIPANTS1_POSTGRES_DB}
+    volumes:
+      - ./initdb/init-participants.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${PARTICIPANTS1_POSTGRES_USER} -d participant1" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+
+  db-participants2:
+    image: postgres:16-alpine
+    command: -c 'max_connections=200'
+    restart: always
+    environment:
+      - POSTGRES_USER=${PARTICIPANTS2_POSTGRES_USER}
+      - POSTGRES_PASSWORD=${PARTICIPANTS2_POSTGRES_PASSWORD}
+    volumes:
+      - ./initdb/init-participants.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${PARTICIPANTS2_POSTGRES_USER} -d participant1" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  db-synchronizer1:
+    image: postgres:16-alpine
+    command: -c 'max_connections=200'
+    restart: always
+    environment:
+      - POSTGRES_USER=${SYNCHRONIZER1_POSTGRES_USER}
+      - POSTGRES_PASSWORD=${SYNCHRONIZER1_POSTGRES_PASSWORD}
+    volumes:
+      - ./initdb/init-synchronizer.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${SYNCHRONIZER1_POSTGRES_USER} -d sequencer" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  db-synchronizer2:
+    image: postgres:16-alpine
+    command: -c 'max_connections=200'
+    restart: always
+    environment:
+      - POSTGRES_USER=${SYNCHRONIZER2_POSTGRES_USER}
+      - POSTGRES_PASSWORD=${SYNCHRONIZER2_POSTGRES_PASSWORD}
+    volumes:
+      - ./initdb/init-synchronizer.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${SYNCHRONIZER1_POSTGRES_USER} -d sequencer" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  master:
+    image: local/da-images/public/docker/canton-perf-master:local
+    depends_on:
+      db-master:
+        condition: service_healthy
+    environment:
+      # Database connection variables
+      - POSTGRES_USER=${MASTER_POSTGRES_USER}
+      - POSTGRES_PASSWORD=${MASTER_POSTGRES_PASSWORD}
+      - POSTGRES_HOST=db-master
+      - POSTGRES_DB=${MASTER_POSTGRES_DB}
+      - POSTGRES_PORT=5432
+      # Other required variables
+      - NUM_PARTICIPANT_PODS=${NUM_PARTICIPANT_PODS:-2}
+      - NUM_PARTICIPANTS_PER_POD=${REMOTE_MEDIATORS:-3}
+      - NUM_SYNCHRONIZERS=${NUM_SYNCHRONIZERS:-2}
+
+
+  participants1:
+    image: local/da-images/public/docker/canton-perf-participants:local
+    depends_on:
+      db-participants1:
+        condition: service_healthy
+    environment:
+      # Database connection variables
+      - POSTGRES_USER=${PARTICIPANTS1_POSTGRES_USER}
+      - POSTGRES_PASSWORD=${PARTICIPANTS1_POSTGRES_PASSWORD}
+      - POSTGRES_HOST=db-participants1
+      - POSTGRES_PORT=5432
+
+  participants2:
+    image: local/da-images/public/docker/canton-perf-participants:local
+    depends_on:
+      db-participants2:
+        condition: service_healthy
+    environment:
+      # Database connection variables
+      - POSTGRES_USER=${PARTICIPANTS2_POSTGRES_USER}
+      - POSTGRES_PASSWORD=${PARTICIPANTS2_POSTGRES_PASSWORD}
+      - POSTGRES_HOST=db-participants2
+      - POSTGRES_PORT=5432
+
+
+  synchronizer1:
+    image: local/da-images/public/docker/canton-perf-synchronizer:local
+    depends_on:
+      db-synchronizer1:
+        condition: service_healthy
+    environment:
+      # Database connection variables
+      - POSTGRES_USER=${SYNCHRONIZER1_POSTGRES_USER}
+      - POSTGRES_PASSWORD=${SYNCHRONIZER1_POSTGRES_PASSWORD}
+      - POSTGRES_HOST=db-synchronizer1
+      - POSTGRES_PORT=5432
+
+  synchronizer2:
+    image: local/da-images/public/docker/canton-perf-synchronizer:local
+    depends_on:
+      db-synchronizer2:
+        condition: service_healthy
+    environment:
+      # Database connection variables
+      - POSTGRES_USER=${SYNCHRONIZER2_POSTGRES_USER}
+      - POSTGRES_PASSWORD=${SYNCHRONIZER2_POSTGRES_PASSWORD}
+      - POSTGRES_HOST=db-synchronizer2
+      - POSTGRES_PORT=5432

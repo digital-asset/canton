@@ -24,6 +24,7 @@ import com.digitalasset.canton.synchronizer.sequencer.errors.SequencerError.{
   SequencedBeforeOrAtLowerBound,
 }
 import com.digitalasset.canton.synchronizer.sequencer.store.*
+import com.digitalasset.canton.synchronizer.sequencer.time.LsuSequencingBounds
 import com.digitalasset.canton.time.{Clock, NonNegativeFiniteDuration}
 import com.digitalasset.canton.topology.Member
 import com.digitalasset.canton.tracing.BatchTracing.withTracedBatch
@@ -203,7 +204,7 @@ object SequencerWriterSource {
       protocolVersion: ProtocolVersion,
       metrics: SequencerMetrics,
       blockSequencerMode: Boolean,
-      sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
+      lsuSequencingBounds: Option[LsuSequencingBounds],
   )(implicit
       executionContext: ExecutionContext,
       traceContext: TraceContext,
@@ -266,15 +267,13 @@ object SequencerWriterSource {
 
     val eventsSequenced = payloadsWrittenWithKeepAlive
       .mapMaterializedValue(new SequencerWriterQueues(eventGenerator, loggerFactory)(_))
-      .via(
-        AssertMonotonicBlockSequencerTimestampsFlow(loggerFactory)
-      )
+      .via(AssertMonotonicBlockSequencerTimestampsFlow(loggerFactory))
       .via(
         SequenceWritesFlow(
           writerConfig,
           store,
           eventTimestampGenerator,
-          sequencingTimeLowerBoundExclusive,
+          lsuSequencingBounds,
           loggerFactory,
           protocolVersion,
           blockSequencerMode,
@@ -522,7 +521,7 @@ object SequenceWritesFlow {
       writerConfig: SequencerWriterConfig,
       store: SequencerWriterStore,
       eventTimestampGenerator: PartitionedTimestampGenerator,
-      sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
+      lsuSequencingBounds: Option[LsuSequencingBounds],
       loggerFactory: NamedLoggerFactory,
       protocolVersion: ProtocolVersion,
       blockSequencerMode: Boolean,
@@ -614,17 +613,22 @@ object SequenceWritesFlow {
       def checkSequencingTimeLowerBound(
           event: Presequenced[StoreEvent[BytesPayload]]
       ): Either[CantonBaseError, Unit] =
-        sequencingTimeLowerBoundExclusive match {
-          case Some(bound) =>
+        lsuSequencingBounds match {
+          case Some(lsuSequencingBounds) =>
             Either.cond(
               LogicalUpgradeTime.canProcessKnowingPastUpgrade(
-                upgradeTime = Some(bound),
+                /*
+                 On the write side, we consider lowerBoundSequencingTimeExclusive and not upgradeTime.
+                 It allows to perform testing of the new synchronizer before upgrade time. Such messages
+                 are filtered out on the read side for participants.
+                 */
+                upgradeTime = Some(lsuSequencingBounds.lowerBoundSequencingTimeExclusive),
                 sequencingTime = timestamp,
               ),
               (),
               SequencedBeforeOrAtLowerBound.Error(
                 timestamp,
-                bound,
+                lsuSequencingBounds.lowerBoundSequencingTimeExclusive,
                 event.event.description,
               ),
             )
@@ -693,8 +697,7 @@ object SequenceWritesFlow {
                   messageId = deliver.messageId,
                 ),
               )
-          case _ =>
-            Right(())
+          case _ => Right(())
         }
 
       val resultE = for {

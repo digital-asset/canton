@@ -18,6 +18,7 @@ import com.digitalasset.canton.integration.{
   EnvironmentDefinition,
   SharedEnvironment,
 }
+import com.digitalasset.canton.ledger.error.groups.RequestValidationErrors
 import com.digitalasset.canton.participant.ledger.api.client.JavaDecodeUtil
 import com.digitalasset.canton.topology.PartyId
 import monocle.macros.syntax.lens.*
@@ -96,6 +97,22 @@ abstract class SimpleTopologyAwarePackageSelectionIntegrationTest
             appInstallRequest.id.exerciseAppInstall_Accept().commands().asScala.toSeq,
           )
         }
+      }
+    }
+
+    "tapsMaxPasses is zero or negative " should {
+      "fail" in { _ =>
+        def testTapsMaxPasses(value: Int) =
+          assertThrowsAndLogsCommandFailures(
+            providerParticipant.ledger_api.javaapi.commands.submit(
+              Seq(provider),
+              appInstallRequest.id.exerciseAppInstall_Accept().commands().asScala.toSeq,
+              tapsMaxPasses = Some(value),
+            ),
+            _.shouldBeCantonErrorCode(RequestValidationErrors.InvalidArgument),
+          )
+        testTapsMaxPasses(0)
+        testTapsMaxPasses(-1)
       }
     }
 

@@ -4,6 +4,7 @@
 package com.digitalasset.canton.platform.store.interning
 
 import com.digitalasset.canton.concurrent.DirectExecutionContext
+import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.logging.{NamedLoggerFactory, NamedLogging}
 import com.digitalasset.canton.platform.Party
 import com.digitalasset.canton.topology.SynchronizerId
@@ -17,6 +18,7 @@ import com.digitalasset.daml.lf.data.Ref.{
   UserId,
 }
 
+import scala.collection.mutable
 import scala.concurrent.Future
 
 class DomainStringIterators(
@@ -185,27 +187,35 @@ class StringInterningView(override protected val loggerFactory: NamedLoggerFacto
 
   override private[platform] def internize(
       domainStringIterators: DomainStringIterators
-  ): Iterable[(Int, String)] =
-    (lock.exclusive {
-      val allPrefixedStrings =
-        domainStringIterators.parties.map(PartyPrefix + _) ++
-          domainStringIterators.templateIds.map(TemplatePrefix + _) ++
-          domainStringIterators.synchronizerIds
-            .map(_.toProtoPrimitive)
-            .map(SynchronizerIdPrefix + _) ++
-          domainStringIterators.packageIds.map(PackageIdPrefix + _) ++
-          domainStringIterators.userIds.map(UserIdPrefix + _) ++
-          domainStringIterators.participantIds.map(ParticipantIdPrefix + _) ++
-          domainStringIterators.choiceNames.map(ChoicePrefix + _) ++
-          domainStringIterators.interfaceIds.map(InterfacePrefix + _)
+  ): Iterable[(Int, String)] = {
 
+    // prefilter duplicate entries before entering sequential part
+    val distinctStr = mutable.LinkedHashSet[String]()
+    def add(it: Iterator[String]) =
+      it.foreach { s =>
+        if (!raw.map.contains(s)) {
+          distinctStr.add(s).discard
+        }
+      }
+
+    add(domainStringIterators.parties.map(PartyPrefix + _))
+    add(domainStringIterators.templateIds.map(TemplatePrefix + _))
+    add(domainStringIterators.synchronizerIds.map(_.toProtoPrimitive).map(SynchronizerIdPrefix + _))
+    add(domainStringIterators.packageIds.map(PackageIdPrefix + _))
+    add(domainStringIterators.userIds.map(UserIdPrefix + _))
+    add(domainStringIterators.participantIds.map(ParticipantIdPrefix + _))
+    add(domainStringIterators.choiceNames.map(ChoicePrefix + _))
+    add(domainStringIterators.interfaceIds.map(InterfacePrefix + _))
+
+    (lock.exclusive {
       val newEntries = RawStringInterning.newEntries(
-        strings = allPrefixedStrings,
+        distinctStrings = distinctStr.iterator,
         rawStringInterning = raw,
       )
       updateView(newEntries)
       newEntries
     })
+  }
 
   override def update(lastStringInterningId: Option[Int])(
       loadStringInterningEntries: LoadStringInterningEntries

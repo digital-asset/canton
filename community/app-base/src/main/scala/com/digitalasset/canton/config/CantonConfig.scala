@@ -64,10 +64,7 @@ import com.digitalasset.canton.participant.config.*
 import com.digitalasset.canton.participant.config.ParticipantInitConfig.ParticipantLedgerApiInitConfig
 import com.digitalasset.canton.participant.sync.CommandProgressTrackerConfig
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
-import com.digitalasset.canton.platform.apiserver.configuration.{
-  EngineLoggingConfig,
-  RateLimitingConfig,
-}
+import com.digitalasset.canton.platform.apiserver.configuration.RateLimitingConfig
 import com.digitalasset.canton.platform.config.{
   InteractiveSubmissionServiceConfig,
   TopologyAwarePackageSelectionConfig,
@@ -110,6 +107,7 @@ import com.digitalasset.canton.synchronizer.sequencer.config.{
 import com.digitalasset.canton.synchronizer.sequencer.traffic.SequencerTrafficConfig
 import com.digitalasset.canton.tracing.{TraceContext, TracingConfig}
 import com.digitalasset.canton.util.BytesUnit
+import com.digitalasset.daml.lf.engine.EngineLoggingConfig
 import com.digitalasset.daml.lf.transaction.ContractStateMachine
 import com.typesafe.config.ConfigException.UnresolvedSubstitution
 import com.typesafe.config.{
@@ -271,6 +269,8 @@ final case class RetentionPeriodDefaults(
   *   Keep alive time for fork-join pool excess threads.
   * @param parallelism
   *   Number of CPU cores to use for the main ec (derived automatically by default)
+  * @param mutexMaxSpins
+  *   Tweak the number of spins we want to run before parking the thread
   */
 final case class ThreadingConfig(
     keepAlive: config.NonNegativeFiniteDuration = ThreadingConfig.defaultKeepAliveMillis,
@@ -279,6 +279,7 @@ final case class ThreadingConfig(
     corePoolSize: Option[PositiveInt] = None,
     maxPoolSize: Option[PositiveInt] = None,
     minRunnable: Option[PositiveInt] = None,
+    mutexMaxSpins: Option[PositiveInt] = None,
 ) {
 
   def keepAliveMillis: PositiveInt =

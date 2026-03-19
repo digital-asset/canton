@@ -5,7 +5,7 @@ package com.digitalasset.canton.ledger.api
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
-import com.daml.ledger.api.v2.state_service.GetActiveContractsRequest
+import com.daml.ledger.api.v2.state_service.{GetActiveContractsRequest, GetActiveContractsResponse}
 import com.daml.ledger.api.v2.transaction_filter.EventFormat as GrpcEventFormat
 import com.daml.platform.v1.acs_continuation.{
   AcsContinuationTokenPayload,
@@ -53,10 +53,18 @@ final case class AcsContinuationTokenIncomplete(
     offset: Long,
 ) extends AcsContinuationToken
 
+trait GetActiveContractsResponseFactory {
+  def apply(checksum: AcsContinuationToken.Checksum): GetActiveContractsResponse
+
+  def withEmptyChecksum: GetActiveContractsResponse = apply(AcsContinuationToken.emptyChecksum)
+}
+
 object AcsContinuationToken {
   private val TokenVersion = 1
 
   final case class Checksum(bytes: ByteString)
+
+  def emptyChecksum: Checksum = Checksum(ByteString.copyFrom(Array.fill(4)(0.toByte)))
 
   @SuppressWarnings(Array("com.digitalasset.canton.ProtobufToByteString"))
   def calcChecksum(
@@ -105,4 +113,32 @@ object AcsContinuationToken {
           }
         )
     }
+
+  def activeContractsFactory(
+      workflowId: String,
+      contractEntry: GetActiveContractsResponse.ContractEntry,
+      sequentialId: Long,
+  ): GetActiveContractsResponseFactory = new GetActiveContractsResponseFactory {
+    override def apply(checksum: AcsContinuationToken.Checksum): GetActiveContractsResponse =
+      GetActiveContractsResponse(
+        workflowId,
+        contractEntry,
+        AcsContinuationTokenActive(checksum, sequentialId).encode,
+      )
+  }
+
+  def incompleteReassignmentsFactory(
+      workflowId: String,
+      contractEntry: GetActiveContractsResponse.ContractEntry,
+      sequentialId: Long,
+      offset: Long,
+  ): GetActiveContractsResponseFactory = new GetActiveContractsResponseFactory {
+    override def apply(checksum: AcsContinuationToken.Checksum): GetActiveContractsResponse =
+      GetActiveContractsResponse(
+        workflowId,
+        contractEntry,
+        AcsContinuationTokenIncomplete(checksum, sequentialId, offset).encode,
+      )
+  }
+
 }

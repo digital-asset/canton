@@ -4,7 +4,6 @@
 package com.digitalasset.canton.util
 
 import cats.data.EitherT
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.LfPackageId
 import com.digitalasset.canton.lifecycle.FutureUnlessShutdown
 import com.digitalasset.canton.tracing.TraceContext
@@ -28,7 +27,6 @@ trait LfContractValidation {
   )(implicit
       ec: ExecutionContext,
       traceContext: TraceContext,
-      loggingContext: LoggingContext,
   ): EitherT[FutureUnlessShutdown, String, Unit]
 
 }
@@ -54,7 +52,6 @@ object LfContractValidation {
     )(implicit
         ec: ExecutionContext,
         traceContext: TraceContext,
-        loggingContext: LoggingContext,
     ): EitherT[FutureUnlessShutdown, String, Unit] =
       consume(
         delegate.validateContractInstance(

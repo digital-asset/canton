@@ -4,7 +4,7 @@
 package com.digitalasset.canton.integration.tests.upgrade.lsu
 
 import com.digitalasset.canton.config.RequireTypes.NonNegativeInt
-import com.digitalasset.canton.console.{CommandFailure, InstanceReference}
+import com.digitalasset.canton.console.{CommandFailure, InstanceReference, LocalInstanceReference}
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.integration.*
 import com.digitalasset.canton.integration.EnvironmentDefinition.S1M1
@@ -14,11 +14,13 @@ import com.digitalasset.canton.integration.plugins.{UseBftSequencer, UsePostgres
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LogicalUpgradeUtils.SynchronizerNodes
 import com.digitalasset.canton.integration.tests.upgrade.lsu.LsuBase.Fixture
 import com.digitalasset.canton.logging.SuppressionRule
+import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId
 import com.digitalasset.canton.topology.store.TimeQuery
 import com.digitalasset.canton.topology.store.db.DbTopologyStore
 import com.digitalasset.canton.topology.transaction.{LsuAnnouncement, TopologyMapping}
 import com.digitalasset.canton.topology.{PhysicalSynchronizerId, TopologyManagerError}
 import com.digitalasset.canton.version.ProtocolVersion
+import com.google.protobuf.ByteString
 import org.slf4j.event.Level
 
 /*
@@ -60,10 +62,21 @@ final class LsuTopologyExportImportIntegrationTest extends LsuBase {
         )
       }
 
+  private def getSequencerLsuStateBytes(
+      node: LocalInstanceReference,
+      topologyStoreId: Option[TopologyStoreId.Synchronizer] = None,
+  ): ByteString = {
+    val tmpFile = better.files.File.newTemporaryFile(s"${node.name}-lsu-state", ".export")
+    tmpFile.deleteOnExit(swallowIOExceptions = true)
+    node.topology.transactions
+      .sequencer_lsu_state(outputFile = tmpFile.pathAsString, topologyStoreId)
+    ByteString.copyFrom(better.files.File(tmpFile.pathAsString).loadBytes)
+  }
+
   "Logical synchronizer upgrade" should {
     "logical upgrade state cannot be queried if no upgrade is ongoing" in { implicit env =>
       assertThrowsAndLogsCommandFailures(
-        env.sequencer1.topology.transactions.sequencer_lsu_state(),
+        getSequencerLsuStateBytes(env.sequencer1),
         _.shouldBeCommandFailure(
           TopologyManagerError.NoLsuAnnounced,
           "The operation cannot be performed because no LSU is announced",
@@ -98,8 +111,8 @@ final class LsuTopologyExportImportIntegrationTest extends LsuBase {
       performSynchronizerNodesLsu(fixture)
 
       // We keep the announcement to check its presence on the new synchronizer
-      val oldSynchronizerAnnouncement = sequencer1.topology.lsu.announcement.list().map(_.item)
-      oldSynchronizerAnnouncement should have size 1
+      val oldSynchronizerAnnouncement =
+        sequencer1.topology.lsu.announcement.list().map(_.item).loneElement
 
       // validate the successor sequencer's topology state
       sequencer2.synchronizer_parameters.static.get() shouldBe newStaticSynchronizerParameters
@@ -121,15 +134,29 @@ final class LsuTopologyExportImportIntegrationTest extends LsuBase {
           timeQuery = TimeQuery.Range(None, None),
         )
         allLsuMappings.result.map(_.mapping.code).toSet shouldBe Set(LsuAnnouncement.code)
-        allLsuMappings.result.map(
-          _.selectMapping[LsuAnnouncement].value.mapping
-        ) shouldBe oldSynchronizerAnnouncement
-        sequencer2.topology.lsu.announcement.list().map(_.item) shouldBe oldSynchronizerAnnouncement
+
+        /*
+        Both `allLsuMappings` and `sequencer2.topology.lsu.announcement.list()` can return two elements, so
+        we deduplicate.
+        Since there are two synchronizer owners and a threshold of one, we can have two transactions returned:
+        - The first one with one signature (with a valid until set).
+        - The second one with two signatures (with empty valid until).
+         */
+
+        allLsuMappings.result
+          .map(_.selectMapping[LsuAnnouncement].value.mapping)
+          .toSet
+          .loneElement shouldBe oldSynchronizerAnnouncement
+
+        sequencer2.topology.lsu.announcement
+          .list()
+          .map(_.item)
+          .toSet
+          .loneElement shouldBe oldSynchronizerAnnouncement
       }
 
       // fetch the upgrade state from the predecessor sequencer
-      val upgradeStateFromPredecessorSequencer =
-        sequencer1.topology.transactions.sequencer_lsu_state()
+      val upgradeStateFromPredecessorSequencer = getSequencerLsuStateBytes(sequencer1)
 
       // fetch the participant's topology export for a later comparison
       def topologyStateThatShouldShouldSurviveTheUpgrade(psid: PhysicalSynchronizerId) =
@@ -145,7 +172,7 @@ final class LsuTopologyExportImportIntegrationTest extends LsuBase {
 
       val firstUpgradeState = topologyStateThatShouldShouldSurviveTheUpgrade(fixture.currentPSId)
       val firstUpgradeStateLsuEndpoint =
-        participant1.topology.transactions.sequencer_lsu_state(synchronizer1Id)
+        getSequencerLsuStateBytes(participant1, topologyStoreId = Some(synchronizer1Id))
 
       // the assertion below verifies that the topology state id indeed locally upon first connect to the successor.
       // unfortunately, the least effort way of doing this is to assert on the log message

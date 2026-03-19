@@ -74,9 +74,9 @@ trying to reconnect if a node goes down.
 
 2. Make sure that Postgres runs on port 5432 (default port): `sudo netstat -plunt | grep postgres` (or `sudo lsof -i -P | grep postgres` if `netstat` doesn't work).
 
-3. If you have already built a bundled Canton binary locally, run `performance/bundle-performance.sh`,
+3. If you have already built a bundled Canton binary locally, run `performance/pack-performance.sh -s`,
    else `performance/pack-performance.sh`.
-   If `bundle-performance.sh` fails, run `sbt clean` and then `pack-performance.sh`.
+   If `pack-performance.sh -s` fails, run `sbt clean` and then `pack-performance.sh`.
 
    Files should be packed in `community/app/target/release/canton/performance`
 

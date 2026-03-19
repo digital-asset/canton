@@ -106,17 +106,15 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
 
   protected def operations: NonEmpty[Seq[TopologyOperations]]
 
-  protected def trafficControlParameters: Option[TrafficControlParameters] =
-    Some(
-      TrafficControlParameters(
-        maxBaseTrafficAmount = NonNegativeNumeric.tryCreate(20_000_000L),
-        maxBaseTrafficAccumulationDuration = config.PositiveFiniteDuration.ofSeconds(1L),
-        setBalanceRequestSubmissionWindowSize = config.PositiveFiniteDuration.ofMinutes(5L),
-        readVsWriteScalingFactor = InternalTrafficControlParameters.DefaultReadVsWriteScalingFactor,
-        enforceRateLimiting = true,
-        baseEventCost = NonNegativeLong.tryCreate(50L),
-        freeConfirmationResponses = true,
-      )
+  protected def trafficControlParameters: TrafficControlParameters =
+    TrafficControlParameters(
+      maxBaseTrafficAmount = NonNegativeNumeric.tryCreate(20_000_000L),
+      maxBaseTrafficAccumulationDuration = config.PositiveFiniteDuration.ofSeconds(1L),
+      setBalanceRequestSubmissionWindowSize = config.PositiveFiniteDuration.ofMinutes(5L),
+      readVsWriteScalingFactor = InternalTrafficControlParameters.DefaultReadVsWriteScalingFactor,
+      enforceRateLimiting = true,
+      baseEventCost = NonNegativeLong.tryCreate(50L),
+      freeConfirmationResponses = true,
     )
 
   /*
@@ -199,7 +197,7 @@ abstract class ChangingTopologyPerformanceIntegrationTest extends BasePerformanc
                   .ofMillis(performanceRunnerTargetLatencyMs.toLong + computationMarginMs),
                 mediatorReactionTimeout = config.NonNegativeFiniteDuration
                   .ofMillis(performanceRunnerTargetLatencyMs.toLong + computationMarginMs),
-                trafficControl = trafficControlParameters,
+                trafficControl = Some(trafficControlParameters),
               ),
               // when there are multiple synchronizer owners, waiting for the update to become effective would only work
               // after the nth synchronizer owner submitted the proposal that would fulfill the synchronizer owner quorum
@@ -803,14 +801,9 @@ class ChangingTopologyLsuTest extends ChangingTopologyPerformanceIntegrationTest
 
   // To test LSU traffic transfer with non-trivial (zeros) extra traffic,
   // we reduce the default base traffic amount to be insufficient
-  override protected val trafficControlParameters: Option[TrafficControlParameters] =
-    super.trafficControlParameters.map(
-      _.copy(maxBaseTrafficAmount = NonNegativeNumeric.tryCreate(20_000L))
-    )
-  require(
-    trafficControlParameters.nonEmpty,
-    "LSU chaos requires traffic control parameters to be set",
-  )
+  override protected val trafficControlParameters: TrafficControlParameters =
+    super.trafficControlParameters
+      .copy(maxBaseTrafficAmount = NonNegativeNumeric.tryCreate(20_000L))
 
   /*
   For LSU we don't want to use the target latency settings.

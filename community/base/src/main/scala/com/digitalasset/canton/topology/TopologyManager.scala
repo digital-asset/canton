@@ -408,9 +408,9 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
       traceContext: TraceContext
   ): EitherT[FutureUnlessShutdown, TopologyManagerError, Unit] =
     EitherTUtil.condUnitET[FutureUnlessShutdown][TopologyManagerError](
-      (numberOfHostingNodes == 0 || threshold.value <= numberOfHostingNodes || forceFlags.permits(
+      numberOfHostingNodes == 0 || threshold.value <= numberOfHostingNodes || forceFlags.permits(
         ForceFlag.AllowConfirmingThresholdCanBeMet
-      )),
+      ),
       TopologyManagerError.ConfirmingThresholdCannotBeReached
         .Reject(threshold, numberOfHostingNodes),
     )
@@ -924,12 +924,12 @@ abstract class TopologyManager[+StoreID <: TopologyStoreId, +CryptoType <: BaseC
         keys,
       )
 
-    case PartyToParticipant(partyId, threshold, participants, signingKeysWithThreholdO) =>
+    case PartyToParticipant(partyId, threshold, participants, signingKeysWithThresholdO) =>
       checkPartyToParticipantIsNotDangerous(
         partyId,
         threshold,
         participants,
-        signingKeysWithThreholdO,
+        signingKeysWithThresholdO,
         forceChanges,
         transaction.transaction.operation,
       )
@@ -1259,7 +1259,7 @@ object TopologyManager {
     }
   }
 
-  def checkBounds(
+  private def checkBounds(
       parameters: DynamicSynchronizerParameters
   )(implicit errorLoggingContext: ErrorLoggingContext): Either[TopologyManagerError, Unit] = {
     def check(

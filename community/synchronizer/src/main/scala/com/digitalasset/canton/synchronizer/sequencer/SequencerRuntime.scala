@@ -9,7 +9,7 @@ import com.digitalasset.canton.config.{ProcessingTimeout, TopologyConfig}
 import com.digitalasset.canton.connection.GrpcApiInfoService
 import com.digitalasset.canton.connection.v30.ApiInfoServiceGrpc
 import com.digitalasset.canton.crypto.{SigningKeyUsage, SynchronizerCryptoClient}
-import com.digitalasset.canton.data.{CantonTimestamp, SynchronizerSuccessor}
+import com.digitalasset.canton.data.SynchronizerSuccessor
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.health.HealthListener
 import com.digitalasset.canton.health.admin.data.TopologyQueueStatus
@@ -40,6 +40,7 @@ import com.digitalasset.canton.synchronizer.sequencer.admin.data.{
 import com.digitalasset.canton.synchronizer.sequencer.config.SequencerNodeParameters
 import com.digitalasset.canton.synchronizer.sequencer.time.{
   BroadcastTimeTrackerImpl,
+  LsuSequencingBounds,
   TimeAdvancingTopologySubscriberV1,
   TimeAdvancingTopologySubscriberV2,
 }
@@ -105,7 +106,7 @@ class SequencerRuntime(
     @VisibleForTesting val client: SequencerClient,
     staticSynchronizerParameters: StaticSynchronizerParameters,
     localNodeParameters: SequencerNodeParameters,
-    sequencingTimeLowerBoundExclusive: Option[CantonTimestamp],
+    lsuSequencingBounds: Option[LsuSequencingBounds],
     val timeTracker: SynchronizerTimeTracker,
     val metrics: SequencerMetrics,
     physicalIndexedSynchronizer: IndexedPhysicalSynchronizer,
@@ -149,7 +150,7 @@ class SequencerRuntime(
           .flatMap { snapshot =>
             val ipsSnapshot = snapshot.ipsSnapshot
             ipsSnapshot
-              .signingKeys(sequencerId, SigningKeyUsage.SequencerAuthenticationOnly)
+              .signingKeys(sequencerId, SigningKeyUsage.ProtocolOnly)
               .map { keys =>
                 Either.cond(
                   keys.nonEmpty,
@@ -287,7 +288,7 @@ class SequencerRuntime(
             synchronizerTopologyManager,
             syncCrypto,
             clock,
-            sequencingTimeLowerBoundExclusive = sequencingTimeLowerBoundExclusive,
+            lsuSequencingBounds,
             loggerFactory,
           )(ec),
           executionContext,

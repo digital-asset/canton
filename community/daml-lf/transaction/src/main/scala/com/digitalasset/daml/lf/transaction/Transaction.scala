@@ -341,12 +341,14 @@ sealed abstract class HasTxNodes[Tx] {
     globalState
   }
 
-  final def localContracts[Cid2 >: ContractId]: Map[Cid2, (NodeId, Node.Create)] =
-    fold(Map.empty[Cid2, (NodeId, Node.Create)]) {
-      case (acc, (nid, create: Node.Create)) =>
-        acc.updated(create.coid, nid -> create)
+  lazy val localContractIds: Set[ContractId] = {
+    fold(Set.empty[ContractId]) {
+      case (acc, (_, create: Node.Create)) =>
+        acc + create.coid
       case (acc, _) => acc
     }
+  }
+
 
   /** Returns the IDs of all the consumed contracts.
     * This includes transient contracts but it does not include contracts
@@ -434,16 +436,18 @@ sealed abstract class HasTxNodes[Tx] {
 
   /** Returns the IDs of all input contracts that are used by this transaction.
     */
-  final def inputContracts[Cid2 >: ContractId]: Set[Cid2] =
+  final def inputContracts[Cid2 >: ContractId]: Set[Cid2] = {
+
     fold(Set.empty[Cid2]) {
-      case (acc, (_, Node.Exercise(coid, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _))) =>
+      case (acc, (_, Node.Exercise(coid, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _))) if !localContractIds.contains(coid)=>
         acc + coid
-      case (acc, (_, Node.Fetch(coid, _, _, _, _, _, _, _, _, _))) =>
+      case (acc, (_, Node.Fetch(coid, _, _, _, _, _, _, _, _, _)))  if !localContractIds.contains(coid)=>
         acc + coid
-      case (acc, (_, Node.LookupByKey(_, _, _, Some(coid), _))) =>
+      case (acc, (_, Node.LookupByKey(_, _, _, Some(coid), _)))  if !localContractIds.contains(coid)=>
         acc + coid
       case (acc, _) => acc
-    } -- localContracts.keySet
+    }
+  }
 
   /** Return all the contract keys referenced by this transaction.
     * This includes the keys created, exercised, fetched, or looked up, even those

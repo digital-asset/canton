@@ -258,7 +258,6 @@ class ConnectedSynchronizer(
       packageResolver,
       engine,
       EngineMode.forProtocolVersion(staticSynchronizerParameters.protocolVersion),
-      parameters.engine.validationPhaseLogging,
       loggerFactory,
     )
 

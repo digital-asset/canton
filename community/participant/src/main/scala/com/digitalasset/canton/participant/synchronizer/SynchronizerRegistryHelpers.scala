@@ -284,11 +284,7 @@ trait SynchronizerRegistryHelpers extends FlagCloseable with NamedLogging with H
           participantId,
           persistentState.sequencedEventStore,
           persistentState.sendTrackerStore,
-          RequestSigner(
-            synchronizerCryptoApi,
-            sequencerAggregatedInfo.staticSynchronizerParameters.protocolVersion,
-            loggerFactory,
-          ),
+          RequestSigner(synchronizerCryptoApi, loggerFactory),
           sequencerAggregatedInfo.sequencerConnections,
           synchronizerPredecessor,
           sequencerAggregatedInfo.expectedSequencersO,

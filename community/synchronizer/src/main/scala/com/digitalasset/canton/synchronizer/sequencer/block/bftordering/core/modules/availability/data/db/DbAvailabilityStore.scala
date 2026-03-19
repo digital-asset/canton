@@ -64,12 +64,12 @@ class DbAvailabilityStore(
         ): FutureUnlessShutdown[immutable.Iterable[Boolean]] =
           // Sorting should prevent deadlocks in Postgres when using concurrent clashing batched inserts
           //  with idempotency "on conflict do nothing" clauses.
-          runAddBatches(items.sortBy(_.value._1).map(_.value))
+          runAddBatches(items.sortBy { case Traced(batchId -> _) => batchId }.map(_.value))
 
         override def prettyItem: Pretty[(BatchId, OrderingRequestBatch)] = {
           import com.digitalasset.canton.logging.pretty.PrettyUtil.*
           prettyOfClass[(BatchId, OrderingRequestBatch)](
-            param("batchId", _._1.hash)
+            param("batchId", { case (batchId, _) => batchId.hash })
           )
         }
       }
@@ -186,15 +186,25 @@ class DbAvailabilityStore(
                        values (?1, ?2, ?3)"""
         }
 
+      // Batch insertion is not strictly idempotent, because it returns whether the batch was actually inserted or
+      //  was already present, but in the worst case (e.g. connection broken after insert successful),
+      //  when retried, it will return that no batch has been updated, which in this case is acceptable,
+      //  as it would only cause the batch quota checks to allow for a bit more batches than they should
+      //  and an attacker doesn't typically control the connection to the database.
       updateBulk(
         storage,
-        // Sorting should prevent deadlocks in Postgres when using concurrent clashing batched inserts
-        //  with idempotency "on conflict do nothing" clauses.
         DbStorage
-          .bulkOperation(insertSql, batches.sortBy(_._1), storage.profile) { pp => msg =>
-            pp >> msg._1
-            pp >> msg._2
-            pp >> msg._2.epochNumber
+          .bulkOperation(
+            insertSql,
+            // Sorting should prevent deadlocks in Postgres when using concurrent clashing batched inserts
+            //  with idempotency "on conflict do nothing" clauses.
+            batches.sortBy { case (batchId, _) => batchId },
+            storage.profile,
+          ) { pp => msg =>
+            val (batchId, orderingRequestBatch) = msg
+            pp >> batchId
+            pp >> orderingRequestBatch
+            pp >> orderingRequestBatch.epochNumber
           },
         functionFullName,
       )

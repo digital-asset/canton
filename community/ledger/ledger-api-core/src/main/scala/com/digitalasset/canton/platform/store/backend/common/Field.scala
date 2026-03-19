@@ -9,28 +9,28 @@ import java.lang
 import java.sql.PreparedStatement
 import scala.reflect.ClassTag
 
-/** @tparam FROM
+/** @tparam From
   *   is an arbitrary type from which we can extract the data of interest for the particular column
-  * @tparam TO
-  *   is the intermediary type of the result of the extraction. FROM => TO functionality is intended
-  *   to be injected at Schema definition time. TO is not nullable, should express a clean Scala
+  * @tparam To
+  *   is the intermediary type of the result of the extraction. From => To functionality is intended
+  *   to be injected at Schema definition time. To is not nullable, should express a clean Scala
   *   type
-  * @tparam CONVERTED
-  *   is the (possibly primitive) type needed by the JDBC API TO => CONVERTED is intended to be
-  *   injected at PGField definition time. CONVERTED might be nullable, primitive, boxed-type,
+  * @tparam Converted
+  *   is the (possibly primitive) type needed by the JDBC API To => Converted is intended to be
+  *   injected at PGField definition time. Converted might be nullable, primitive, boxed-type,
   *   whatever the JDBC API requires
   */
-private[backend] abstract class Field[FROM, TO, CONVERTED](implicit
-    classTag: ClassTag[CONVERTED]
+private[backend] abstract class Field[From, To, Converted](implicit
+    classTag: ClassTag[Converted]
 ) {
-  def extract: StringInterning => FROM => TO
-  def convert: TO => CONVERTED
+  def extract: StringInterning => From => To
+  def convert: To => Converted
   def selectFieldExpression(inputFieldName: String): String = inputFieldName
 
   final def toArray(
-      input: Vector[FROM],
+      input: Vector[From],
       stringInterning: StringInterning,
-  ): Array[CONVERTED] =
+  ): Array[Converted] =
     input.view
       .map(extract(stringInterning) andThen convert)
       .toArray(classTag)
@@ -40,87 +40,87 @@ private[backend] abstract class Field[FROM, TO, CONVERTED](implicit
     prepareDataTemplate(
       preparedStatement,
       index,
-      value.asInstanceOf[CONVERTED],
+      value.asInstanceOf[Converted],
     ) // this cast is safe by design
 
   def prepareDataTemplate(
       preparedStatement: PreparedStatement,
       index: Int,
-      value: CONVERTED,
+      value: Converted,
   ): Unit =
     preparedStatement.setObject(index, value)
 }
 
-private[backend] abstract class TrivialField[FROM, TO](implicit classTag: ClassTag[TO])
-    extends Field[FROM, TO, TO] {
-  override def convert: TO => TO = identity
+private[backend] abstract class TrivialField[From, To](implicit classTag: ClassTag[To])
+    extends Field[From, To, To] {
+  override def convert: To => To = identity
 }
 
-private[backend] trait TrivialOptionalField[FROM, TO >: Null <: AnyRef]
-    extends Field[FROM, Option[TO], TO] {
+private[backend] trait TrivialOptionalField[From, To >: Null <: AnyRef]
+    extends Field[From, Option[To], To] {
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
-  override def convert: Option[TO] => TO = _.orNull
+  override def convert: Option[To] => To = _.orNull
 }
 
-private[backend] final case class StringField[FROM](extract: StringInterning => FROM => String)
-    extends TrivialField[FROM, String]
+private[backend] final case class StringField[From](extract: StringInterning => From => String)
+    extends TrivialField[From, String]
 
-private[backend] final case class StringOptional[FROM](
-    extract: StringInterning => FROM => Option[String]
-) extends TrivialOptionalField[FROM, String]
+private[backend] final case class StringOptional[From](
+    extract: StringInterning => From => Option[String]
+) extends TrivialOptionalField[From, String]
 
-private[backend] final case class Bytea[FROM](extract: StringInterning => FROM => Array[Byte])
-    extends TrivialField[FROM, Array[Byte]]
+private[backend] final case class Bytea[From](extract: StringInterning => From => Array[Byte])
+    extends TrivialField[From, Array[Byte]]
 
-private[backend] final case class ByteaOptional[FROM](
-    extract: StringInterning => FROM => Option[Array[Byte]]
-) extends TrivialOptionalField[FROM, Array[Byte]]
+private[backend] final case class ByteaOptional[From](
+    extract: StringInterning => From => Option[Array[Byte]]
+) extends TrivialOptionalField[From, Array[Byte]]
 
-private[backend] final case class Integer[FROM](extract: StringInterning => FROM => Int)
-    extends TrivialField[FROM, Int]
+private[backend] final case class Integer[From](extract: StringInterning => From => Int)
+    extends TrivialField[From, Int]
 
-private[backend] final case class BooleanField[FROM](extract: StringInterning => FROM => Boolean)
-    extends TrivialField[FROM, Boolean]
+private[backend] final case class BooleanField[From](extract: StringInterning => From => Boolean)
+    extends TrivialField[From, Boolean]
 
-private[backend] final case class IntOptional[FROM](extract: StringInterning => FROM => Option[Int])
-    extends Field[FROM, Option[Int], java.lang.Integer] {
+private[backend] final case class IntOptional[From](extract: StringInterning => From => Option[Int])
+    extends Field[From, Option[Int], java.lang.Integer] {
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[Int] => java.lang.Integer = _.map(Int.box).orNull
 }
 
-private[backend] final case class Bigint[FROM](extract: StringInterning => FROM => Long)
-    extends TrivialField[FROM, Long]
+private[backend] final case class Bigint[From](extract: StringInterning => From => Long)
+    extends TrivialField[From, Long]
 
-private[backend] final case class BigintOptional[FROM](
-    extract: StringInterning => FROM => Option[Long]
-) extends Field[FROM, Option[Long], java.lang.Long] {
+private[backend] final case class BigintOptional[From](
+    extract: StringInterning => From => Option[Long]
+) extends Field[From, Option[Long], java.lang.Long] {
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[Long] => java.lang.Long = _.map(Long.box).orNull
 }
 
-private[backend] final case class Smallint[FROM](extract: StringInterning => FROM => Int)
-    extends TrivialField[FROM, Int]
+private[backend] final case class Smallint[From](extract: StringInterning => From => Int)
+    extends TrivialField[From, Int]
 
-private[backend] final case class SmallintOptional[FROM](
-    extract: StringInterning => FROM => Option[Int]
-) extends Field[FROM, Option[Int], java.lang.Integer] {
+private[backend] final case class SmallintOptional[From](
+    extract: StringInterning => From => Option[Int]
+) extends Field[From, Option[Int], java.lang.Integer] {
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[Int] => java.lang.Integer = _.map(Int.box).orNull
 }
 
-private[backend] final case class BooleanOptional[FROM](
-    extract: StringInterning => FROM => Option[Boolean]
-) extends Field[FROM, Option[Boolean], java.lang.Boolean] {
+private[backend] final case class BooleanOptional[From](
+    extract: StringInterning => From => Option[Boolean]
+) extends Field[From, Option[Boolean], java.lang.Boolean] {
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[Boolean] => lang.Boolean = _.map(Boolean.box).orNull
 }
 
-private[backend] final case class BooleanMandatory[FROM](
-    extract: StringInterning => FROM => Boolean
-) extends TrivialField[FROM, Boolean]
+private[backend] final case class BooleanMandatory[From](
+    extract: StringInterning => From => Boolean
+) extends TrivialField[From, Boolean]
 
-private[backend] final case class StringArray[FROM](
-    extract: StringInterning => FROM => Iterable[String]
-) extends Field[FROM, Iterable[String], Array[String]] {
+private[backend] final case class StringArray[From](
+    extract: StringInterning => From => Iterable[String]
+) extends Field[From, Iterable[String], Array[String]] {
   override def convert: Iterable[String] => Array[String] = _.toArray
 }

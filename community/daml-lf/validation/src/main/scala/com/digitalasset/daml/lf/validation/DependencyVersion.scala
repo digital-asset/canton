@@ -4,8 +4,8 @@
 package com.digitalasset.daml.lf
 package validation
 
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.language.Ast.*
 
 private[validation] object DependencyVersion {
 

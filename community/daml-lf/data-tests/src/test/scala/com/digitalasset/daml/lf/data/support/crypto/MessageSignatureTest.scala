@@ -5,12 +5,12 @@ package com.digitalasset.daml.lf.data
 package support.crypto
 
 import org.bouncycastle.jce.provider.BouncyCastleProvider
+import org.scalatest.freespec.AnyFreeSpec
+import org.scalatest.matchers.should.Matchers
 
 import java.security.interfaces.ECPublicKey
 import java.security.spec.ECGenParameterSpec
 import java.security.{InvalidKeyException, KeyPairGenerator, Security, SignatureException}
-import org.scalatest.freespec.AnyFreeSpec
-import org.scalatest.matchers.should.Matchers
 
 class MessageSignatureTest extends AnyFreeSpec with Matchers {
 

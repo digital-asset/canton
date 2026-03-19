@@ -14,6 +14,10 @@ As of August 2025, it means:
 - Supported: 14 to 17 (Postgres 13 will be EOL in November 2025, roughly when Canton 3.4 will be released)
 - Additional nightly tests: 14, 15 and 16.
 
+**Note:** When using PostgreSQL 14 on macOS, `client_connection_check_interval` must be set to `0` (disabled).
+For PostgreSQL 14, this setting requires the `POLLRDHUP` extension to the `poll` system call, which is only available on Linux.
+See the [PostgreSQL 14 connection settings documentation](https://www.postgresql.org/docs/14/runtime-config-connection.html) for details.
+
 ## Java
 
 [Versioning policies](https://www.oracle.com/java/technologies/java-se-support-roadmap.html)

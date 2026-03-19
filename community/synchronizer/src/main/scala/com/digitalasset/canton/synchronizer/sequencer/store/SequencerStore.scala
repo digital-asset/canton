@@ -429,7 +429,7 @@ private[canton] final case class SequencerStoreRecordCounts(
   )
 }
 
-trait ReadEvents {
+sealed trait ReadEvents {
   def nextTimestamp: Option[CantonTimestamp]
   def events: Seq[Sequenced[IdOrPayload]]
 }
@@ -803,7 +803,7 @@ trait SequencerStore
               // Note that if fromExclusive > cache.lastOption.timestamp, we keep the watermark unchanged
               // not to move it backwards and potentially read events twice
               FutureUnlessShutdown.pure(
-                SafeWatermark(cache.lastOption.map(_.timestamp) max Some(fromExclusive))
+                SafeWatermark(cache.lastOption.map(_.timestamp).max(Some(fromExclusive)))
               )
             }
           case _ =>

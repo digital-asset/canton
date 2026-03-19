@@ -40,6 +40,7 @@ import com.digitalasset.daml.lf.archive.DamlLf.Archive
 import com.digitalasset.daml.lf.archive.testing.Encode
 import com.digitalasset.daml.lf.archive.{DamlLf, Dar as LfDar, DarParser, DarWriter}
 import com.digitalasset.daml.lf.data.Bytes
+import com.digitalasset.daml.lf.engine.EngineLoggingConfig
 import com.digitalasset.daml.lf.language.{Ast, LanguageVersion}
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
@@ -122,6 +123,9 @@ abstract class BasePackageServiceTest(enableStrictDarValidation: Boolean)
         enableLfBeta = false,
         enableStackTraces = false,
         paranoidMode = true,
+        submissionPhaseLogging = EngineLoggingConfig(),
+        validationPhaseLogging = EngineLoggingConfig(),
+        loggerFactory = loggerFactory,
       )
 
     val sut: PackageService = PackageService(

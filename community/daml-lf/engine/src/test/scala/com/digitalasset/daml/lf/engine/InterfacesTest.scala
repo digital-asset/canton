@@ -4,7 +4,7 @@
 package com.digitalasset.daml.lf
 package engine
 
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command.ApiCommand
 import com.digitalasset.daml.lf.data.Ref._
@@ -38,14 +38,15 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
     extends AnyWordSpec
     with Matchers
     with TableDrivenPropertyChecks
-    with EitherValues {
+    with EitherValues
+    with SuppressingLogging {
 
   import InterfacesTest._
 
-  private[this] val engine = Engine.DevEngine
+  private[this] val engine = Engine.DevEngine(loggerFactory)
   private[this] val contractStateMode = ContractStateMachine.Mode.devDefault
   private[this] val compiledPackages = ConcurrentCompiledPackages(engine.config.getCompilerConfig)
-  private[this] val preprocessor = preprocessing.Preprocessor.forTesting(compiledPackages)
+  private[this] val preprocessor = preprocessing.Preprocessor.forTesting(compiledPackages, loggerFactory)
 
   private def loadAndAddPackage(resource: String): (PackageId, Package, Map[PackageId, Package]) = {
     val stream = getClass.getClassLoader.getResourceAsStream(resource)
@@ -196,8 +197,6 @@ class InterfacesTest(majorLanguageVersion: LanguageVersion.Major)
 }
 
 object InterfacesTest {
-
-  private implicit def logContext: LoggingContext = LoggingContext.ForTesting
 
   private def hash(s: String) = crypto.Hash.hashPrivateKey(s)
   private def participant = Ref.ParticipantId.assertFromString("participant")

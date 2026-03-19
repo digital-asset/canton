@@ -88,7 +88,7 @@ class PackageInterfaceSpec
   test(
     description = "DataRecord",
     lookup = pkgInterface.lookupDataRecord,
-    toContext = Reference.DataRecord,
+    toContext = Reference.DataRecord.apply,
   )(
     nonErrorCase =
       ("Mod:Tuple": Identifier) -> { case DataRecordInfo(dataType, DataRecord(variants)) =>
@@ -110,7 +110,7 @@ class PackageInterfaceSpec
   test(
     description = "DataVariant",
     lookup = pkgInterface.lookupDataVariant,
-    toContext = Reference.DataVariant,
+    toContext = Reference.DataVariant.apply,
   )(
     nonErrorCase =
       ("Mod:Either": Identifier) -> { case DataVariantInfo(dataType, DataVariant(fields)) =>
@@ -132,7 +132,7 @@ class PackageInterfaceSpec
   test(
     description = "DataEnum",
     lookup = pkgInterface.lookupDataEnum,
-    toContext = Reference.DataEnum,
+    toContext = Reference.DataEnum.apply,
   )(
     nonErrorCase =
       ("Mod:Color": Identifier) -> { case DataEnumInfo(dataType, DataEnum(constructors)) =>

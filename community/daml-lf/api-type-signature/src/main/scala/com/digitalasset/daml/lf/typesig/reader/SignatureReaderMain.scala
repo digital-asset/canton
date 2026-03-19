@@ -3,10 +3,10 @@
 
 package com.digitalasset.daml.lf.typesig.reader
 
+import com.digitalasset.daml.lf.archive.DamlLf
+
 import java.io.BufferedInputStream
 import java.nio.file.Files
-
-import com.digitalasset.daml.lf.archive.DamlLf
 
 object SignatureReaderMain extends App {
 

@@ -288,27 +288,22 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
       )
 
       // Missing reassigning participant
-      val missingConfirmingReassigningParticipant = Set.empty[ParticipantId]
+      val missingObservingReassigningParticipant = Set(confirmingParticipant)
       unassignmentValidation(
-        reassigningParticipants = missingConfirmingReassigningParticipant
+        reassigningParticipants = missingObservingReassigningParticipant
       ) shouldBe Seq(
         ReassigningParticipantsMismatch(
           ReassignmentRef(contract.contractId),
           expected = reassigningParticipants,
-          declared = missingConfirmingReassigningParticipant,
+          declared = missingObservingReassigningParticipant,
         )
       )
 
-      // Empty set
+      // If the request declares no reassigning participants, the validator treats this participant
+      // as non-reassigning for this check and therefore skips reassigning-participant validation.
       unassignmentValidation(
         reassigningParticipants = Set.empty
-      ) shouldBe Seq(
-        ReassigningParticipantsMismatch(
-          ReassignmentRef(contract.contractId),
-          expected = reassigningParticipants,
-          declared = Set.empty,
-        )
-      )
+      ) shouldBe Seq()
     }
   }
 
@@ -370,8 +365,7 @@ class UnassignmentValidationTest extends AnyWordSpec with BaseTest with HasExecu
 
     }
 
-    val unassignmentValidation = UnassignmentValidation(
-      isReassigningParticipant = true,
+    val unassignmentValidation = new UnassignmentValidation(
       participantId = confirmingParticipant,
       contractValidator = contractValidator,
       getTopologyAtTs = getTopologyAtTs,

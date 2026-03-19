@@ -21,7 +21,6 @@ import com.digitalasset.canton.logging.{ErrorLoggingContext, NamedLoggerFactory,
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactory.*
 import com.digitalasset.canton.participant.protocol.submission.TransactionTreeFactoryImpl.*
 import com.digitalasset.canton.protocol.*
-import com.digitalasset.canton.protocol.ContractIdSyntax.*
 import com.digitalasset.canton.protocol.RollbackContext.RollbackScope
 import com.digitalasset.canton.protocol.WellFormedTransaction.{
   WithAbsoluteSuffixes,
@@ -49,7 +48,6 @@ import io.scalaland.chimney.dsl.*
 
 import java.util.UUID
 import scala.annotation.{nowarn, tailrec}
-import scala.collection.immutable.SortedSet
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 
@@ -763,12 +761,13 @@ class TransactionTreeFactoryImpl(
     } yield createdContract.contract.contractId
 
     val createdInSubviews = createdInSubviewsSeq.toSet
-    val createdInSameViewOrSubviews = createdInSubviewsSeq ++ created.map(_.contract.contractId)
+    val createdInSameViewOrSubviews = createdInSubviews ++ created.map(_.contract.contractId)
 
-    val usedCore = SortedSet.from(coreOtherNodes.flatMap { case (node, _) =>
-      LfTransactionUtil.usedContractId(node)
-    })
-    val coreInputs = usedCore -- createdInSameViewOrSubviews
+    val coreInputs = coreOtherNodes.view
+      .flatMap { case (node, _) =>
+        LfTransactionUtil.usedContractId(node)
+      }
+      .filterNot(createdInSameViewOrSubviews.contains)
     val createdInSubviewArchivedInCore = consumedInCore intersect createdInSubviews
 
     def withInstance(

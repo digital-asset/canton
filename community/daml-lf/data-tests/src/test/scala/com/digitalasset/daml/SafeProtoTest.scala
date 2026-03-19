@@ -3,7 +3,7 @@
 
 package com.digitalasset.daml
 
-import com.google.protobuf._
+import com.google.protobuf.*
 import org.scalatest.Inside
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.wordspec.AnyWordSpec

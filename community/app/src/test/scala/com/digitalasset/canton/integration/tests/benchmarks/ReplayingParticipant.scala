@@ -229,7 +229,7 @@ object ReplayingParticipant extends FutureHelpers with EitherValues with OptionV
         sendsConfig,
         member,
         underlyingTransport,
-        RequestSigner(synchronizerCryptoClient, testedProtocolVersion, extendedLoggerFactory),
+        RequestSigner(synchronizerCryptoClient, extendedLoggerFactory),
         synchronizerCryptoClient.currentSnapshotApproximation.futureValueUS,
         clock,
         SequencerTestMetrics.sequencerClient,

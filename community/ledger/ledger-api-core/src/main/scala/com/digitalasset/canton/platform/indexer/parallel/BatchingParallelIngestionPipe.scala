@@ -10,23 +10,23 @@ import scala.concurrent.Future
 
 object BatchingParallelIngestionPipe {
 
-  def apply[IN, IN_BATCH, DB_BATCH](
-      batchingFlow: Flow[IN, Iterable[IN], NotUsed],
+  def apply[In, InBatch, DbBatch](
+      batchingFlow: Flow[In, Iterable[In], NotUsed],
       inputMappingParallelism: Int,
-      inputMapper: Iterable[IN] => Future[IN_BATCH],
-      seqMapperZero: IN_BATCH,
-      seqMapper: (IN_BATCH, IN_BATCH) => IN_BATCH,
+      inputMapper: Iterable[In] => Future[InBatch],
+      seqMapperZero: InBatch,
+      seqMapper: (InBatch, InBatch) => InBatch,
       dbPrepareParallelism: Int,
-      dbPrepare: IN_BATCH => Future[IN_BATCH],
+      dbPrepare: InBatch => Future[InBatch],
       batchingParallelism: Int,
-      batcher: IN_BATCH => Future[DB_BATCH],
+      batcher: InBatch => Future[DbBatch],
       ingestingParallelism: Int,
-      ingester: DB_BATCH => Future[DB_BATCH],
+      ingester: DbBatch => Future[DbBatch],
       maxTailerBatchSize: Int,
-      ingestTail: Vector[DB_BATCH] => Future[Vector[DB_BATCH]],
-  ): Flow[IN, DB_BATCH, NotUsed] =
+      ingestTail: Vector[DbBatch] => Future[Vector[DbBatch]],
+  ): Flow[In, DbBatch, NotUsed] =
     // The stream coming from ReadService, involves deserialization and translation to Update-s
-    Flow[IN]
+    Flow[In]
       // Batching plus mapping to Database DTOs encapsulates all the CPU intensive computation of the ingestion. Executed in parallel.
       .via(batchingFlow)
       .mapAsync(inputMappingParallelism)(inputMapper)

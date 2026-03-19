@@ -4,7 +4,7 @@
 package com.digitalasset.daml.lf
 package speedy
 
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.crypto.Hash
 import com.digitalasset.daml.lf.data.Ref.{Identifier, TypeConId}
 import com.digitalasset.daml.lf.data.{ImmArray, Ref}
@@ -16,6 +16,7 @@ import com.digitalasset.daml.lf.speedy.SExpr.{SEApp, SExpr}
 import com.digitalasset.daml.lf.speedy.SValue.SContractId
 import com.digitalasset.daml.lf.testing.parser.Implicits._
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
+import com.digitalasset.daml.lf.transaction.ContractStateMachine
 import com.digitalasset.daml.lf.transaction.GlobalKeyWithMaintainers
 import com.digitalasset.daml.lf.transaction.SerializationVersion.VDev
 import com.digitalasset.daml.lf.transaction.test.TransactionBuilder
@@ -28,11 +29,12 @@ import org.scalatest.prop.TableDrivenPropertyChecks
 
 import scala.collection.immutable.ArraySeq
 
-abstract class UpgradeTest
+class UpgradeTest
     extends AnyFreeSpec
     with Matchers
     with TableDrivenPropertyChecks
-    with Inside {
+    with Inside
+    with SuppressingLogging {
 
   implicit val pkgId: Ref.PackageId = Ref.PackageId.assertFromString("-no-pkg-")
 
@@ -472,9 +474,15 @@ abstract class UpgradeTest
     val args = ArraySeq[SValue](SContractId(theCid))
     val sexprToEval: SExpr = SEApp(se, args)
 
-    implicit def logContext: LoggingContext = LoggingContext.ForTesting
     val seed = crypto.Hash.hashPrivateKey("seed")
-    val machine = Speedy.Machine.fromUpdateSExpr(pkgs, seed, sexprToEval, Set(alice, bob))
+    val machine = Speedy.Machine.fromUpdateSExpr(
+      pkgs,
+      seed,
+      sexprToEval,
+      Set(alice, bob),
+      MachineLogger(),
+      mode = ContractStateMachine.Mode.UCKWithRollback
+    )
 
     val contract = TransactionBuilder
       .fatContractInstanceWithDummyDefaults(
@@ -509,14 +517,15 @@ abstract class UpgradeTest
   ): Speedy.UpdateMachine = {
     val pkgs = PureCompiledPackages.assertBuild(availablePackages, compilerConfig)
     val sexprToEval: SExpr = pkgs.compiler.unsafeCompile(e)
-    implicit def logContext: LoggingContext = LoggingContext.ForTesting
     val seed = crypto.Hash.hashPrivateKey("seed")
     Speedy.Machine.fromUpdateSExpr(
       pkgs,
       seed,
       sexprToEval,
       Set(alice, bob),
+      MachineLogger(),
       packageResolution = packageResolution,
+      mode = ContractStateMachine.Mode.UCKWithRollback,
     )
   }
 
@@ -1554,15 +1563,15 @@ abstract class UpgradeTest
         ),
         packageResolution = Map(Ref.PackageName.assertFromString("-upgrade-test-") -> pkgId2),
       )
-      inside(go(machine)) {
-        case Left(SErrorDamlException(IE.WronglyTypedContract(_, expected, actual))) =>
-          expected shouldBe TypeConId.assertFromString("-pkg2-:M:T")
-          actual shouldBe TypeConId.assertFromString("-pkg1-:M:T")
-      }
-      val warnings = machine.warningLog.iterator.toSeq.filter(warning =>
-        warning.message.contains("unsafeFromInterface is deprecated")
+      loggerFactory.assertLogs(
+        inside(go(machine)) {
+          case Left(SErrorDamlException(IE.WronglyTypedContract(_, expected, actual))) =>
+            expected shouldBe TypeConId.assertFromString("-pkg2-:M:T")
+            actual shouldBe TypeConId.assertFromString("-pkg1-:M:T")
+        },
+        logEntry => assert(logEntry.message.contains("unsafeFromInterface is deprecated, use fromInterface instead.")),
+        logEntry => assert(logEntry.message.contains("unsafeFromInterface is deprecated, use fromInterface instead.")),
       )
-      warnings.size shouldBe 2
     }
 
     "do recompute and check immutability of meta data when using different versions" in {

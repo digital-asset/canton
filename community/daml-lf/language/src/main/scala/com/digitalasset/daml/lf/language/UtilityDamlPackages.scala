@@ -3,7 +3,7 @@
 
 package com.digitalasset.daml.lf.language
 
-import com.digitalasset.daml.lf.data.Ref._
+import com.digitalasset.daml.lf.data.Ref.*
 
 // In 3.2.0-snapshot.20240823.13245.0.v94a3b038, we introduced changes from
 // commit 785b0d0b3f, which marks all types in daml-prim:GHC.Stack.Types &&

@@ -3,8 +3,9 @@
 
 package com.digitalasset.canton.integration.tests.manual.topology
 
+import com.daml.metrics.api.MetricQualification
 import com.digitalasset.canton.admin.api.client.data.StaticSynchronizerParameters
-import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.config.RequireTypes.{NonNegativeInt, PositiveInt}
 import com.digitalasset.canton.console.{
   InstanceReference,
   LocalInstanceReference,
@@ -32,9 +33,11 @@ import com.digitalasset.canton.integration.{
   TestConsoleEnvironment,
 }
 import com.digitalasset.canton.logging.{ErrorLoggingContext, TracedLogger}
-import com.digitalasset.canton.topology.PhysicalSynchronizerId
+import com.digitalasset.canton.metrics.{MetricValue, MetricsConfig, MetricsReporterConfig}
+import com.digitalasset.canton.topology.{Member, PhysicalSynchronizerId}
 import com.digitalasset.canton.version.ProtocolVersion
-import com.digitalasset.canton.{BaseTest, config}
+import com.digitalasset.canton.{BaseTest, UniquePortGenerator, config}
+import monocle.macros.syntax.lens.*
 import org.apache.pekko.actor.Scheduler
 import org.scalatest.EitherValues
 import org.scalatest.OptionValues.*
@@ -118,11 +121,25 @@ private[topology] class LsuChaos(
     lastKnownSynchronizer.set(Some(synchronizerData))
   }
 
+  private val enableMetrics: ConfigTransform = _.focus(_.monitoring.metrics)
+    .replace(
+      MetricsConfig(
+        qualifiers = Seq[MetricQualification](MetricQualification.Debug),
+        reporters = Seq(
+          MetricsReporterConfig.Prometheus(port = UniquePortGenerator.next)
+        ),
+      )
+    )
+
   override def additionalConfigTransforms: Seq[ConfigTransform] =
-    // Synchronizer nodes used for LSU should not have auto init
-    ConfigTransforms.disableAutoInit(
-      (2 to maxLsu.unwrap + 1).flatMap(i => Seq(s"sequencer$i", s"mediator$i")).toSet
-    ) +:
+    Seq(
+      // Synchronizer nodes used for LSU should not have auto init
+      ConfigTransforms
+        .disableAutoInit(
+          (2 to maxLsu.unwrap + 1).flatMap(i => Seq(s"sequencer$i", s"mediator$i")).toSet
+        ),
+      enableMetrics,
+    ) ++
       // pv=dev is used
       ConfigTransforms.enableAlphaVersionSupport
 
@@ -247,42 +264,64 @@ private[topology] class LsuChaos(
       )
       .discard
 
-    logger.info(
-      s"[$lsuId] Waiting for the upgrade time $upgradeTime to be reached on the sequencer $currentSequencer"
-    )
+    newSequencer.setup.test_lsu_sequencing(NonNegativeInt.zero)
 
-    scheduler.scheduleOnce(
-      (upgradeTime - CantonTimestamp.now()).toScala
-    ) {
-      logOperationStep(lsuId)("Transferring LSU traffic state")
-      logger.info(s"[$lsuId] Downloading LSU traffic state $currentSequencer")
-      val trafficState = BaseTest.eventually(retryOnTestFailuresOnly = false)(
-        currentSequencer.traffic_control.get_lsu_state()
-      )
+    logger.info(s"[$lsuId] Scheduling operations to run at upgrade time ($upgradeTime)")
+    scheduler.scheduleOnce((upgradeTime - CantonTimestamp.now()).toScala) {
+      transferTraffic(lsuId, upgradeTime, currentSequencer, newSequencer)
 
-      // Note: this command returns approximate traffic state, so we only use it to list the members
-      val members =
-        currentSequencer.traffic_control.traffic_state_of_all_members().trafficStates.keySet
-
-      def getTraffic(sequencer: LocalSequencerReference) =
-        members.map { m =>
-          logger.info(s"[$lsuId] Getting traffic state for $m from $sequencer")
-          m -> sequencer.underlying.value.sequencer.sequencer
-            .getTrafficStateAt(m, upgradeTime.immediateSuccessor)
-            .futureValueUS
-            .value
-        }.toMap
-
-      val trafficStateBeforeLsu = getTraffic(currentSequencer)
-      logger.info(s"[$lsuId] Uploading LSU traffic state $newSequencer")
-      newSequencer.traffic_control.set_lsu_state(trafficState)
-      val trafficStateAfterLsu = getTraffic(newSequencer)
-      trafficStateAfterLsu shouldEqual trafficStateBeforeLsu
-
-      logOperationStep(lsuId)(s"Upgrade to $lsuId is finished")
+      // assert on the outcome of test_lsu_sequencing above: it should bump metrics
+      getLsuSequencingTestMetricValues(newMediator) shouldBe Map(newSequencer.id -> 1)
     }
 
     logger.info(s"[$lsuId] All operations scheduled")
+  }
+
+  // Returns the number of received messages per sender
+  private def getLsuSequencingTestMetricValues(node: LocalInstanceReference): Map[Member, Long] = {
+    val metricName = "daml.received-lsu-sequencing-test-messages"
+    node.metrics
+      .list(metricName)
+      .get(metricName)
+      .value
+      .collect { case metric: MetricValue.LongPoint =>
+        Member.fromProtoPrimitive_(metric.attributes.get("sender").value).value -> metric.value
+      }
+      .toMap
+  }
+
+  private def transferTraffic(
+      lsuId: String,
+      upgradeTime: CantonTimestamp,
+      currentSequencer: LocalSequencerReference,
+      newSequencer: LocalSequencerReference,
+  )(implicit env: TestConsoleEnvironment, errorLoggingContext: ErrorLoggingContext): Unit = {
+    logOperationStep(lsuId)("Transferring LSU traffic state")
+    logger.info(s"[$lsuId] Downloading LSU traffic state $currentSequencer")
+    val trafficState = BaseTest.eventually(retryOnTestFailuresOnly = false)(
+      currentSequencer.traffic_control.get_lsu_state()
+    )
+
+    // Note: this command returns approximate traffic state, so we only use it to list the members
+    val members =
+      currentSequencer.traffic_control.traffic_state_of_all_members().trafficStates.keySet
+
+    def getTraffic(sequencer: LocalSequencerReference) =
+      members.map { m =>
+        logger.info(s"[$lsuId] Getting traffic state for $m from $sequencer")
+        m -> sequencer.underlying.value.sequencer.sequencer
+          .getTrafficStateAt(m, upgradeTime.immediateSuccessor)
+          .futureValueUS
+          .value
+      }.toMap
+
+    val trafficStateBeforeLsu = getTraffic(currentSequencer)
+    logger.info(s"[$lsuId] Uploading LSU traffic state $newSequencer")
+    newSequencer.traffic_control.set_lsu_state(trafficState)
+    val trafficStateAfterLsu = getTraffic(newSequencer)
+    trafficStateAfterLsu shouldEqual trafficStateBeforeLsu
+
+    logOperationStep(lsuId)(s"Upgrade to $lsuId is finished")
   }
 
   override def runTopologyChanges()(implicit

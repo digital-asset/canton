@@ -425,15 +425,17 @@ private[reassignment] class UnassignmentProcessingSteps(
       )
     }
 
-    val unassignmentValidation = UnassignmentValidation(
-      isReassigningParticipant,
+    val unassignmentValidation = new UnassignmentValidation(
       participantId,
       contractValidator,
       reassignmentCoordination,
     )
 
     for {
-      unassignmentValidationResult <- unassignmentValidation.perform(parsedRequest, activenessF)
+      unassignmentValidationResult <- unassignmentValidation.perform(
+        parsedRequest,
+        activenessF,
+      )
     } yield {
       val confirmationResponseF =
         if (

@@ -5,10 +5,9 @@ package com.digitalasset.daml.lf
 package validation
 
 import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.language.Ast._
-import com.digitalasset.daml.lf.language.Reference
-import com.digitalasset.daml.lf.language.LanguageVersion
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.language.Ast.*
+import com.digitalasset.daml.lf.language.{LanguageVersion, Reference}
 
 sealed abstract class Context extends Product with Serializable {
   def pretty: String
@@ -348,7 +347,7 @@ final case class EViewTypeHeadNotCon(context: Context, badHead: Type, typ: Type)
       case _: TTyCon => "EViewTypeHeadNotCon#prettyInternal got TCon: should not happen"
       case _: TApp => "EViewTypeHeadNotCon#prettyInternal got TApp: should not happen"
     }
-    s"expected monomorphic record type in view type, but found ${prettyHead} instead: ${typ.pretty}"
+    s"expected monomorphic record type in view type, but found $prettyHead instead: ${typ.pretty}"
   }
 }
 final case class EViewTypeHasVars(context: Context, typ: Type) extends ValidationError {
@@ -364,7 +363,7 @@ final case class EViewTypeConNotRecord(context: Context, badCons: DataCons, typ:
       case _: DataInterface.type => "a interface type"
       case _: DataRecord => "EViewTypeConNotRecord#prettyInternal got DataRecord: should not happen"
     }
-    s"expected monomorphic record type in view type, but found ${prettyCons} instead: ${typ.pretty}"
+    s"expected monomorphic record type in view type, but found $prettyCons instead: ${typ.pretty}"
   }
 }
 final case class EViewTypeMismatch(

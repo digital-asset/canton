@@ -4,18 +4,18 @@
 package com.digitalasset.daml.lf.validation
 
 import com.digitalasset.daml.lf.language.Ast.Type
-import com.digitalasset.daml.lf.testing.parser.ParserParameters
-import org.scalatest.prop.TableDrivenPropertyChecks
-import org.scalatest.matchers.should.Matchers
-import org.scalatest.wordspec.AnyWordSpec
 import com.digitalasset.daml.lf.testing.parser.Implicits.SyntaxHelper
+import com.digitalasset.daml.lf.testing.parser.ParserParameters
+import org.scalatest.matchers.should.Matchers
+import org.scalatest.prop.TableDrivenPropertyChecks
+import org.scalatest.wordspec.AnyWordSpec
 
 class AlphaEquivSpec extends AnyWordSpec with TableDrivenPropertyChecks with Matchers {
 
   private[this] implicit val parserParameters: ParserParameters[this.type] =
     ParserParameters.default
 
-  import SpecUtil._
+  import SpecUtil.*
 
   "alphaEquiv" should {
 

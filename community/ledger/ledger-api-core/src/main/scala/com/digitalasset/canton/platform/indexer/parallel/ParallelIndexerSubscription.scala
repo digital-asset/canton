@@ -66,8 +66,8 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.math.Ordered.orderingToOrdered
 import scala.util.chaining.*
 
-private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
-    ingestionStorageBackend: IngestionStorageBackend[DB_BATCH],
+private[platform] final case class ParallelIndexerSubscription[DbBatch](
+    ingestionStorageBackend: IngestionStorageBackend[DbBatch],
     parameterStorageBackend: ParameterStorageBackend,
     contractStorageBackend: ContractStorageBackend,
     eventStorageBackend: EventStorageBackend,
@@ -249,11 +249,11 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
           ),
           maxTailerBatchSize = maxTailerBatchSize,
           ingestTail =
-            if (repairMode) { (batchOfBatches: Vector[Batch[DB_BATCH]]) =>
-              aggregateLedgerEndForRepair[DB_BATCH](aggregatedLedgerEndForRepair)(batchOfBatches)
+            if (repairMode) { (batchOfBatches: Vector[Batch[DbBatch]]) =>
+              aggregateLedgerEndForRepair[DbBatch](aggregatedLedgerEndForRepair)(batchOfBatches)
               Future.successful(batchOfBatches)
             } else
-              ingestTail[DB_BATCH](
+              ingestTail[DbBatch](
                 storeLedgerEnd = storeLedgerEndF,
                 executionContext = executionContext,
                 logger = logger,
@@ -275,7 +275,7 @@ private[platform] final case class ParallelIndexerSubscription[DB_BATCH](
           Flow.apply
         } else {
           Flow.apply.mapAsync(1)(
-            ingestPostProcessEnd[DB_BATCH](
+            ingestPostProcessEnd[DbBatch](
               storePostProcessingEndF,
               executionContext,
               logger,
@@ -830,11 +830,11 @@ object ParallelIndexerSubscription {
     batch.copy(batch = dbDtosWithDeactivationReferences)
   }
 
-  def batcher[DB_BATCH](
-      batchF: Vector[DbDto] => DB_BATCH,
+  def batcher[DbBatch](
+      batchF: Vector[DbDto] => DbBatch,
       logger: TracedLogger,
       metrics: LedgerApiServerMetrics,
-  )(inBatch: Batch[Vector[DbDto]]): Batch[DB_BATCH] = {
+  )(inBatch: Batch[Vector[DbDto]]): Batch[DbBatch] = {
     val dbBatch = inBatch
       .pipe(refillMissingDeactivatedActivations(metrics, logger))
       .batch
@@ -842,15 +842,15 @@ object ParallelIndexerSubscription {
     inBatch.copy(batch = dbBatch)
   }
 
-  def ingester[DB_BATCH](
-      ingestFunction: (Connection, DB_BATCH) => Unit,
+  def ingester[DbBatch](
+      ingestFunction: (Connection, DbBatch) => Unit,
       reassignmentOffsetPersistence: ReassignmentOffsetPersistence,
-      zeroDbBatch: DB_BATCH,
+      zeroDbBatch: DbBatch,
       dbDispatcher: DbDispatcher,
       executionContext: ExecutionContext,
       metrics: LedgerApiServerMetrics,
       logger: TracedLogger,
-  ): Batch[DB_BATCH] => Future[Batch[DB_BATCH]] = { batch =>
+  ): Batch[DbBatch] => Future[Batch[DbBatch]] = { batch =>
     LoggingContextWithTrace.withNewLoggingContext(
       "updateOffsets" -> batch.offsetsUpdates.map(_._1)
     ) { implicit loggingContext =>
@@ -874,13 +874,13 @@ object ParallelIndexerSubscription {
   ): Map[SynchronizerId, SynchronizerIndex] =
     synchronizerIndexes.groupMapReduce(_._1)(_._2)(_ max _)
 
-  def ingestTail[DB_BATCH](
+  def ingestTail[DbBatch](
       storeLedgerEnd: (LedgerEnd, Map[SynchronizerId, SynchronizerIndex]) => Future[Unit],
       executionContext: ExecutionContext,
       logger: TracedLogger,
   )(implicit
       traceContext: TraceContext
-  ): Vector[Batch[DB_BATCH]] => Future[Vector[Batch[DB_BATCH]]] = { batchOfBatches =>
+  ): Vector[Batch[DbBatch]] => Future[Vector[Batch[DbBatch]]] = { batchOfBatches =>
     batchOfBatches.lastOption match {
       case Some(lastBatch) =>
         storeLedgerEnd(
@@ -930,11 +930,11 @@ object ParallelIndexerSubscription {
           }
       }
 
-  def aggregateLedgerEndForRepair[DB_BATCH](
+  def aggregateLedgerEndForRepair[DbBatch](
       aggregatedLedgerEnd: AtomicReference[
         Option[(LedgerEnd, Map[SynchronizerId, SynchronizerIndex])]
       ]
-  ): Vector[Batch[DB_BATCH]] => Unit =
+  ): Vector[Batch[DbBatch]] => Unit =
     batchOfBatches =>
       batchOfBatches.lastOption.foreach(lastBatch =>
         discard(aggregatedLedgerEnd.updateAndGet { aggregated =>
@@ -955,10 +955,10 @@ object ParallelIndexerSubscription {
         })
       )
 
-  def postProcess[DB_BATCH](
+  def postProcess[DbBatch](
       processor: (Vector[PostPublishData], TraceContext) => Future[Unit],
       executionContext: ExecutionContext,
-  ): Batch[DB_BATCH] => Future[Batch[DB_BATCH]] = { batch =>
+  ): Batch[DbBatch] => Future[Batch[DbBatch]] = { batch =>
     val postPublishData = batch.offsetsUpdates.flatMap { case (offset, update) =>
       PostPublishData.from(
         update,
@@ -969,22 +969,22 @@ object ParallelIndexerSubscription {
     processor(postPublishData, batch.batchTraceContext).map(_ => batch)(executionContext)
   }
 
-  def sequentialPostProcess[DB_BATCH](
+  def sequentialPostProcess[DbBatch](
       sequentialPostProcessor: Update => Unit
-  ): Batch[DB_BATCH] => Batch[DB_BATCH] = { batch =>
+  ): Batch[DbBatch] => Batch[DbBatch] = { batch =>
     batch.offsetsUpdates.foreach { case (_, update) =>
       sequentialPostProcessor(update)
     }
     batch
   }
 
-  def ingestPostProcessEnd[DB_BATCH](
+  def ingestPostProcessEnd[DbBatch](
       storePostProcessingEnd: Offset => Future[Unit],
       executionContext: ExecutionContext,
       logger: TracedLogger,
   )(implicit
       traceContext: TraceContext
-  ): Vector[Batch[DB_BATCH]] => Future[Vector[Batch[DB_BATCH]]] = { batchOfBatches =>
+  ): Vector[Batch[DbBatch]] => Future[Vector[Batch[DbBatch]]] = { batchOfBatches =>
     batchOfBatches.lastOption match {
       case Some(lastBatch) =>
         storePostProcessingEnd(lastBatch.ledgerEnd.lastOffset)
@@ -1057,9 +1057,9 @@ object ParallelIndexerSubscription {
     }
   }
 
-  private def cleanUnusedBatch[DB_BATCH](
-      zeroDbBatch: DB_BATCH
-  ): Batch[DB_BATCH] => Batch[DB_BATCH] =
+  private def cleanUnusedBatch[DbBatch](
+      zeroDbBatch: DbBatch
+  ): Batch[DbBatch] => Batch[DbBatch] =
     _.copy(
       batch = zeroDbBatch, // not used anymore
       batchSize = 0, // not used anymore

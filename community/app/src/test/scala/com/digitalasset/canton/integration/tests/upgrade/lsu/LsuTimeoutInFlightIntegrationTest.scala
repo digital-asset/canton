@@ -97,8 +97,8 @@ final class LsuTimeoutInFlightIntegrationTest extends LsuBase with HasProgrammab
       val alice = participant1.parties.enable("alice")
       val bob = participant2.parties.enable("bob")
 
-      val iou1 = IouSyntax.createIou(participant1)(alice, bob)
-      val iou2 = IouSyntax.createIou(participant2)(bob, alice)
+      val iou1 = IouSyntax.createIou(participant1)(alice, bob, 1.0)
+      val iou2 = IouSyntax.createIou(participant2)(bob, alice, 2.0)
 
       getProgrammableSequencer(sequencer1.name).setPolicy_("drop some messages") {
         submissionRequest =>
@@ -184,11 +184,15 @@ final class LsuTimeoutInFlightIntegrationTest extends LsuBase with HasProgrammab
           performSynchronizerNodesLsu(fixture)
 
           fetchTime(sequencer1) should be < upgradeTime
+
+          /*
+           To prevent the old mediator from sending a verdict (participants should do local timeout), we stop it.
+           We stop it before ugprade time is reached (so that it does not infer that the transactions have time out).
+           */
+          mediator1.stop()
+
           environment.simClock.value.advanceTo(upgradeTime.immediateSuccessor)
           transferTraffic(suppressLogs = false)
-
-          // We don't want the old mediator to interact with the sequencer
-          mediator1.stop()
 
           eventually() {
             environment.simClock.value.advance(Duration.ofSeconds(1))

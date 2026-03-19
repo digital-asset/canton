@@ -464,7 +464,7 @@ object IdeLedger {
     def activeContractAndKeyUpdates(ledgerData: LedgerData): LedgerData = {
       ledgerData.copy(
         activeContracts =
-          ledgerData.activeContracts ++ richTr.transaction.localContracts.keySet -- richTr.transaction.inactiveContracts,
+          ledgerData.activeContracts ++ richTr.transaction.localContractIds -- richTr.transaction.inactiveContracts,
         activeKeys = richTr.transaction.updatedContractKeys.foldLeft(ledgerData.activeKeys) {
           case (activeKeys, (key, Some(cid))) =>
             activeKeys + (key -> cid)

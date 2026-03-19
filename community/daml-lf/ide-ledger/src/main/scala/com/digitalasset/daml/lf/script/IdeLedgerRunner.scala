@@ -4,10 +4,12 @@
 package com.digitalasset.daml.lf
 package script
 
-import com.daml.logging.LoggingContext
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.NamedLoggingContext
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.crypto.{Hash, SValueHash}
 import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.data.{ImmArray, Ref, Time}
+import com.digitalasset.daml.lf.data.{Ref, Time}
 import com.digitalasset.daml.lf.engine.{Engine, Result, ResultDone, Enricher => LfEnricher}
 import com.digitalasset.daml.lf.interpretation.NeedKeyContinuationToken
 import com.digitalasset.daml.lf.language.{Ast, LookupError}
@@ -17,7 +19,6 @@ import com.digitalasset.daml.lf.speedy._
 import com.digitalasset.daml.lf.transaction.Transaction.ChildrenRecursion
 import com.digitalasset.daml.lf.transaction._
 import com.digitalasset.daml.lf.value.Value.ContractId
-import com.digitalasset.daml.lf.value.Value
 
 import scala.annotation.tailrec
 import scala.collection.immutable.ArraySeq
@@ -213,17 +214,17 @@ private[lf] object IdeLedgerRunner {
   }
 
   private[this] abstract class Enricher {
-    def enrich(tx: VersionedTransaction): VersionedTransaction
-    def enrich(tx: IncompleteTransaction): IncompleteTransaction
+    def enrich(tx: VersionedTransaction)(implicit traceContext: TraceContext): VersionedTransaction
+    def enrich(tx: IncompleteTransaction)(implicit traceContext: TraceContext): IncompleteTransaction
   }
 
   private[this] object NoEnricher extends Enricher {
-    override def enrich(tx: VersionedTransaction): VersionedTransaction = tx
-    override def enrich(tx: IncompleteTransaction): IncompleteTransaction = tx
+    override def enrich(tx: VersionedTransaction)(implicit traceContext: TraceContext): VersionedTransaction = tx
+    override def enrich(tx: IncompleteTransaction)(implicit traceContext: TraceContext): IncompleteTransaction = tx
   }
 
-  private[this] class EnricherImpl(compiledPackages: CompiledPackages) extends Enricher {
-    val config = Engine.DevEngine.config
+  private[this] class EnricherImpl(compiledPackages: CompiledPackages, loggerFactory: NamedLoggerFactory) extends Enricher {
+    val config = Engine.DevConfig
     def loadPackage(pkgId: PackageId, context: language.Reference): Result[Unit] = {
       crash(LookupError.MissingPackage.pretty(pkgId, context))
     }
@@ -234,6 +235,7 @@ private[lf] object IdeLedgerRunner {
       addFieldNames = true,
       addTrailingNoneFields = true,
       forbidLocalContractIds = true,
+      loggerFactory = loggerFactory,
     )
     val lenientEnricher = new LfEnricher(
       compiledPackages = compiledPackages,
@@ -242,15 +244,16 @@ private[lf] object IdeLedgerRunner {
       addFieldNames = true,
       addTrailingNoneFields = true,
       forbidLocalContractIds = false,
+      loggerFactory = loggerFactory,
     )
     def consume[V](res: Result[V]): V =
       res match {
         case ResultDone(x) => x
         case x => crash(s"unexpected Result when enriching value: $x")
       }
-    override def enrich(tx: VersionedTransaction): VersionedTransaction =
+    override def enrich(tx: VersionedTransaction)(implicit traceContext: TraceContext): VersionedTransaction =
       consume(strictEnricher.enrichVersionedTransaction(tx))
-    override def enrich(tx: IncompleteTransaction): IncompleteTransaction =
+    override def enrich(tx: IncompleteTransaction)(implicit traceContext: TraceContext): IncompleteTransaction =
       consume(lenientEnricher.enrichIncompleteTransaction(tx))
   }
 
@@ -312,11 +315,11 @@ private[lf] object IdeLedgerRunner {
       commands: SExpr,
       location: Option[Location],
       seed: crypto.Hash,
+      machineLogger: MachineLogger,
       packageResolution: Map[PackageName, PackageId] = Map.empty,
-      traceLog: TraceLog = Speedy.Machine.newTraceLog,
-      warningLog: WarningLog = Speedy.Machine.newWarningLog,
       doEnrichment: Boolean = true,
-  )(implicit loggingContext: LoggingContext): SubmissionResult[R] = {
+  )(implicit loggingContext: NamedLoggingContext): SubmissionResult[R] = {
+    implicit val traceContext: TraceContext = loggingContext.traceContext
 
     val disclosuresByCoid = disclosures.view.map(fci => fci.contractId -> fci).toMap
     val disclosuresByKey = disclosures.view.collect {
@@ -332,16 +335,15 @@ private[lf] object IdeLedgerRunner {
       expr = SEApp(commands, ArraySeq(SValue.SToken)),
       committers = committers,
       readAs = readAs,
-      traceLog = traceLog,
-      warningLog = warningLog,
       commitLocation = location,
       limits = interpretation.Limits.Lenient,
       // TODO(i30398): switch mode depending on some criterion, e.g. LF version
       contractStateMode = ContractStateMachine.Mode.UCKWithRollback,
+      logger = machineLogger,
     )
     // TODO (drsk) validate and propagate errors back to submitter
     // https://github.com/digital-asset/daml/issues/14108
-    val enricher = if (doEnrichment) new EnricherImpl(compiledPackages) else NoEnricher
+    val enricher = if (doEnrichment) new EnricherImpl(compiledPackages, loggingContext.loggerFactory) else NoEnricher
     import enricher._
     val suffixer = new CidSuffixer(compiledPackages)
 
@@ -442,33 +444,4 @@ private[lf] object IdeLedgerRunner {
       // to avoid breaking all tests we keep it for now at least.
       Time.Timestamp.MinValue,
     )
-
-  sealed abstract class ScriptResult extends Product with Serializable {
-    def ledger: IdeLedger
-    def traceLog: TraceLog
-    def warningLog: WarningLog
-  }
-
-  final case class CurrentSubmission(
-      commitLocation: Option[Location],
-      ptx: IncompleteTransaction,
-  )
-
-  final case class ScriptSuccess(
-      ledger: IdeLedger,
-      traceLog: TraceLog,
-      warningLog: WarningLog,
-      duration: Double,
-      steps: Int,
-      resultValue: Value,
-  ) extends ScriptResult
-
-  final case class ScriptError(
-      ledger: IdeLedger,
-      traceLog: TraceLog,
-      warningLog: WarningLog,
-      currentSubmission: Option[CurrentSubmission],
-      stackTrace: ImmArray[Location],
-      error: Error,
-  ) extends ScriptResult
 }

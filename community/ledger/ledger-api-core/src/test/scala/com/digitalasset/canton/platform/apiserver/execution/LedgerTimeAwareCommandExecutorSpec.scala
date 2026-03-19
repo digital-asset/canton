@@ -171,6 +171,7 @@ class LedgerTimeAwareCommandExecutorSpec
       disclosedContracts = ImmArray.empty,
       synchronizerId = None,
       prefetchKeys = Seq.empty,
+      tapsMaxPasses = None,
     )
 
     val instance = new LedgerTimeAwareCommandExecutor(

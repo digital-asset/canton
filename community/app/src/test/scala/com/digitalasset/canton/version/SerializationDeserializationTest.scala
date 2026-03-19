@@ -100,6 +100,8 @@ final class SerializationDeserializationTest
         if (version >= ProtocolVersion.v35) {
           testContext(AcsCommitmentProtocolMessage, version, version)
         }
+        testContext(LsuSequencingTestMessage, version, version)
+        test(LsuSequencingTestMessageContent, version)
         test(Verdict, version)
         test(ConfirmationResponses, version)
         testContext(

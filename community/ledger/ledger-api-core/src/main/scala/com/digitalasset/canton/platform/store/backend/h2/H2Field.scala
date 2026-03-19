@@ -8,14 +8,14 @@ import com.digitalasset.canton.platform.store.interning.StringInterning
 
 import java.io.{ByteArrayInputStream, InputStream}
 
-private[h2] final case class H2Bytea[FROM](extract: StringInterning => FROM => Array[Byte])
-    extends Field[FROM, Array[Byte], InputStream] {
+private[h2] final case class H2Bytea[From](extract: StringInterning => From => Array[Byte])
+    extends Field[From, Array[Byte], InputStream] {
   override def convert: Array[Byte] => InputStream = new ByteArrayInputStream(_)
 }
 
-private[h2] final case class H2ByteaOptional[FROM](
-    extract: StringInterning => FROM => Option[Array[Byte]]
-) extends Field[FROM, Option[Array[Byte]], InputStream] {
+private[h2] final case class H2ByteaOptional[From](
+    extract: StringInterning => From => Option[Array[Byte]]
+) extends Field[From, Option[Array[Byte]], InputStream] {
   @SuppressWarnings(Array("org.wartremover.warts.Null"))
   override def convert: Option[Array[Byte]] => InputStream =
     _.map(new ByteArrayInputStream(_)).orNull

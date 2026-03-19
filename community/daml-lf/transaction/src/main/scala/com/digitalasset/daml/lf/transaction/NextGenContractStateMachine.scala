@@ -10,16 +10,35 @@ import com.digitalasset.daml.lf.value.Value.ContractId
 
 import scala.collection.View
 
-trait NKeyContinuationToken
-
 case class NeedContract[X](resume: Option[GlobalKey] => Either[TransactionError, X])
+
+trait NeedKeyContinuationToken
+
+sealed trait NeedKeyProgression
+
+object NeedKeyProgression {
+  // States: Unstarted -> InProgress -> Finished
+  //
+  // CanContinue = { Unstarted, InProgress }  — progression not yet exhausted
+  // HasStarted  = { InProgress, Finished }   — valid resume argument
+
+  /** The progression can yield more results. */
+  sealed trait CanContinue extends NeedKeyProgression
+
+  /** The progression has been started; valid as a resume argument. */
+  sealed trait HasStarted extends NeedKeyProgression
+
+  case object Unstarted extends CanContinue
+  final case class InProgress(token: NeedKeyContinuationToken) extends CanContinue with HasStarted
+  case object Finished extends HasStarted
+}
 
 case class NeedKeys[X](
     n: Int,
-    tokenOpt: Option[NKeyContinuationToken],
+    progression: NeedKeyProgression.CanContinue,
     resume: (
         View[ContractId],
-        Option[NKeyContinuationToken],
+        NeedKeyProgression.HasStarted,
     ) => Either[NeedKeys[X], ErrOr[(KeyMapping, X)]],
 )
 final case class KeyMapping(queue: Vector[ContractId], exhaustive: Boolean)
@@ -30,36 +49,34 @@ object NextGenContractStateMachine {
 
   type KeyResolver = Map[GlobalKey, Vector[ContractId]]
 
-  // TODO(#30398) review if need to sum type
-  // for progression we use the convention
-  //  - Some(None) : Unstarted,
-  //  - Some(Some(token)) : Started,
-  //  - None : Exhausted
-  private[lf] final case class KeyInput(
-      queue: Vector[ContractId],
-      progression: Option[Option[NKeyContinuationToken]],
+  private[transaction] final case class KeyInput(
+      queriedByKey: Vector[ContractId],
+      onlyQueriedById: Set[ContractId],
+      progression: NeedKeyProgression,
   ) {
-    def exhaustive: Boolean = progression.contains(None)
-    def toKeyMapping: KeyMapping = KeyMapping(queue, exhaustive)
+    def exhaustive: Boolean = progression match {
+      case NeedKeyProgression.Finished => true
+      case _ => false
+    }
+    def toKeyMapping: KeyMapping = KeyMapping(queriedByKey.to(Vector), exhaustive)
   }
 
-  object KeyInput {
-    def Unknown: KeyInput = KeyInput(Vector.empty, Some(None))
+  private[transaction] object KeyInput {
+    def Unknown: KeyInput = KeyInput(Vector.empty, Set.empty, NeedKeyProgression.Unstarted)
   }
 
   private final case class KeyMappingBuilder(
       queue: Vector[ContractId],
       missing: Int,
   ) {
-    def enqueue(contractId: ContractId): KeyMappingBuilder =
+    def add(contractId: ContractId): KeyMappingBuilder =
       copy(queue = queue :+ contractId, missing = missing - 1)
 
-    def enqueueWhileNeeded(more: View[ContractId]): KeyMappingBuilder =
-      more.take(missing).foldLeft(this)(_.enqueue(_))
+    def addWhileHasMissing(more: View[ContractId]): KeyMappingBuilder =
+      more.take(missing).foldLeft(this)(_.add(_))
 
     def result: KeyMapping = KeyMapping(queue, missing > 0)
   }
-
 
   private object KeyMappingBuilder {
     def empty(n: Int): KeyMappingBuilder = KeyMappingBuilder(Vector.empty, n)
@@ -81,7 +98,6 @@ object NextGenContractStateMachine {
     private[lf] def endTry: LLState[Nid]
 
     private[lf] def knownContract(cid: ContractId): Boolean
-
 
     // TODO(#30398) review the interface of LLState
     //  - check if we really need those methods
@@ -124,9 +140,10 @@ object NextGenContractStateMachine {
         entry <-
           llState.queryNByKey(gk, if (exhaustive) result.length + 1 else result.length) match {
             case Left(NeedKeys(_, _, resume)) =>
-              resume(result.view.filterNot(llState.knownContract), None).getOrElse(
-                crash("unexpected NeedKeys without token")
-              )
+              resume(result.view.filterNot(llState.knownContract), NeedKeyProgression.Finished)
+                .getOrElse(
+                  crash("unexpected NeedKeys with finished progression")
+                )
             case Right(errOrTuple) =>
               errOrTuple
           }
@@ -211,11 +228,11 @@ object NextGenContractStateMachine {
       llState.rollbackTry
   }
 
-  case class State[Nid](
+  private[transaction] case class State[Nid](
       authorizeRollback: Boolean,
       localContracts: Map[ContractId, Option[GlobalKey]],
       override val inputContracts: Set[ContractId],
-      internalKeyInputs: Map[GlobalKey, KeyInput],
+      val internalKeyInputs: Map[GlobalKey, KeyInput],
       activeLedgerState: ActiveLedgerState[Nid],
       rollbackStack: List[ActiveLedgerState[Nid]],
   ) extends LLState[Nid] {
@@ -260,8 +277,7 @@ object NextGenContractStateMachine {
     private def continueQueryById(
         cid: Value.ContractId
     ): Option[GlobalKey] => ErrOr[State[Nid]] = (
-        (_: Option[GlobalKey]) =>
-          Right(copy(inputContracts = inputContracts + cid))
+        (_: Option[GlobalKey]) => Right(copy(inputContracts = inputContracts + cid))
     )
 
     def queryById(
@@ -273,47 +289,64 @@ object NextGenContractStateMachine {
         NeedContract(continueQueryById(cid)),
       )
 
+    private case class ContinueQueryNByKeyAcc(
+        inputContracts: Set[ContractId],
+        queriedByKey: Vector[ContractId],
+        onlyQueriedById: Set[ContractId],
+        mapping: KeyMappingBuilder,
+    ) {
+      def add(cid: ContractId): ErrOr[ContinueQueryNByKeyAcc] =
+        // Defensive: because local contract IDs are structurally distinct from input contract IDs,
+        // this branch should be unreachable.
+        if (localContracts.contains(cid))
+          Left(TransactionError.DuplicateContractId(cid))
+        else if (inputContracts.contains(cid) && !onlyQueriedById.contains(cid))
+          Right(this)
+        else
+          Right(
+            copy(
+              inputContracts = inputContracts + cid,
+              queriedByKey = queriedByKey :+ cid,
+              onlyQueriedById = onlyQueriedById - cid,
+              mapping = mapping.add(cid),
+            )
+          )
+    }
+
     private def continueQueryNByKey(
         key: GlobalKey,
         n: Int,
-        acc0: (Set[ContractId], Vector[ContractId], KeyMappingBuilder),
+        acc0: ContinueQueryNByKeyAcc,
     ): (
         View[ContractId],
-        Option[NKeyContinuationToken],
+        NeedKeyProgression.HasStarted,
     ) => Either[NeedKeys[State[Nid]], ErrOr[(KeyMapping, State[Nid])]] = {
-      (contracts: View[ContractId], mbToken: Option[NKeyContinuationToken]) =>
-        val acc = contracts.toList
-          .foldM[ErrOr, (Set[ContractId], Vector[ContractId], KeyMappingBuilder)](acc0) {
-            // Defensive: because local contract IDs are structurally distinct from input contract IDs,
-            // this branch should be unreachable.
-            case (_, cid) if localContracts.contains(cid) =>
-              Left(TransactionError.DuplicateContractId(cid))
-            case ((inputContracts, keyInput, mapping), cid) if !inputContracts.contains(cid) =>
-              Right((inputContracts + cid, keyInput :+ cid, mapping.enqueue(cid)))
-            case (acc, _) =>
-              Right(acc)
-          }
-        acc match {
-          case Left(err) =>
-            Right(Left(err))
-          case Right(acc @ (updatedInputContracts, updateKeyInput, updatedMapping)) =>
-            mbToken match {
-              case Some(_) if updatedMapping.missing > 0 =>
+      (contracts: View[ContractId], progression: NeedKeyProgression.HasStarted) =>
+        contracts.toList.foldM[ErrOr, ContinueQueryNByKeyAcc](acc0)(_.add(_)) match {
+          case Right(acc) =>
+            progression match {
+              case progression: NeedKeyProgression.InProgress if acc.mapping.missing > 0 =>
                 Left(
-                  NeedKeys(updatedMapping.missing, mbToken, continueQueryNByKey(key, n, acc))
+                  NeedKeys(acc.mapping.missing, progression, continueQueryNByKey(key, n, acc))
                 )
+              case NeedKeyProgression.Finished if acc.onlyQueriedById.nonEmpty =>
+                Right(Left(TransactionError.InconsistentContractKey(key)))
               case _ =>
                 Right(
                   Right(
-                    updatedMapping.result ->
+                    acc.mapping.result ->
                       copy(
-                        inputContracts = updatedInputContracts,
-                        internalKeyInputs =
-                          internalKeyInputs.updated(key, KeyInput(updateKeyInput, Some(mbToken))),
+                        inputContracts = acc.inputContracts,
+                        internalKeyInputs = internalKeyInputs.updated(
+                          key,
+                          KeyInput(acc.queriedByKey, acc.onlyQueriedById, progression),
+                        ),
                       )
                   )
                 )
             }
+          case Left(err) =>
+            Right(Left(err))
         }
     }
 
@@ -323,8 +356,8 @@ object NextGenContractStateMachine {
     private def activeKeyMapping(key: GlobalKey, n: Int): KeyMappingBuilder = {
       val localKey = localKeys.getOrElse(key, Nil).view
       val keyInput = internalKeyInputs.getOrElse(key, KeyInput.Unknown)
-      val cids = (localKey ++ keyInput.queue).filterNot(consumedBy.contains)
-      KeyMappingBuilder.empty(n).enqueueWhileNeeded(cids)
+      val cids = (localKey ++ keyInput.queriedByKey).filterNot(consumedBy.contains)
+      KeyMappingBuilder.empty(n).addWhileHasMissing(cids)
     }
 
     def activeKeyMapping(key: GlobalKey): KeyMapping = activeKeyMapping(key, Int.MaxValue).result
@@ -333,15 +366,26 @@ object NextGenContractStateMachine {
         key: GlobalKey,
         n: Int,
     ): Either[NeedKeys[State[Nid]], ErrOr[(KeyMapping, LLState[Nid])]] = {
+      if (n <= 0)
+        throw new IllegalArgumentException(s"queryNByKey: n must be strictly positive, got $n")
       val mapping = activeKeyMapping(key, n)
       val keyInput = internalKeyInputs.getOrElse(key, KeyInput.Unknown)
       keyInput.progression match {
-        case Some(tokenOpt) if mapping.missing > 0 =>
+        case progression: NeedKeyProgression.CanContinue if mapping.missing > 0 =>
           Left(
             NeedKeys(
               mapping.missing,
-              tokenOpt,
-              continueQueryNByKey(key, n, (inputContracts, keyInput.queue, mapping)),
+              progression,
+              continueQueryNByKey(
+                key,
+                n,
+                ContinueQueryNByKeyAcc(
+                  inputContracts,
+                  keyInput.queriedByKey,
+                  keyInput.onlyQueriedById,
+                  mapping,
+                ),
+              ),
             )
           )
         case _ =>
@@ -385,32 +429,6 @@ object NextGenContractStateMachine {
     private[lf] def endTry: State[Nid] = rollbackStack match {
       case Nil => throw new IllegalStateException("Not inside a rollback scope")
       case _ :: tailStack => this.copy(rollbackStack = tailStack)
-    }
-
-    // TODO(#30398) review in detail advance and write tests for it
-    def advance(substate: State[Nid]): ErrOr[LLState[Nid]] = {
-      for {
-        state <- substate.internalKeyInputs.toList.foldM[ErrOr, LLState[Nid]](this) {
-          case (state, (key, KeyInput(queue, progression))) =>
-            state.visitQueryByKey(key, queue, exhaustive = progression.contains(None))
-        }
-        state <- substate.inputContracts.toList.foldM[ErrOr, LLState[Nid]](state)((state, cid) =>
-          if (state.knownContract(cid)) Right(state) else state.visitFetchById(cid, None)
-        )
-        state <- substate.createdInThisTimeline.toList.foldM[ErrOr, LLState[Nid]](state)(
-          (state, cid) => state.visitCreate(cid, localContracts.getOrElse(cid, None))
-        )
-        state1 <- substate.consumedBy.toList.foldM[ErrOr, LLState[Nid]](state) {
-          case (state, (cid, nid)) =>
-            state.visitExercise(
-              nid,
-              cid,
-              localContracts.getOrElse(cid, None),
-              byKey = false,
-              consuming = true,
-            )
-        }
-      } yield state1
     }
   }
 

@@ -5,9 +5,9 @@ package com.digitalasset.daml.lf
 package typesig
 package reader
 
+import com.digitalasset.daml.lf.archive.DamlLf
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.language.Ast
-import com.digitalasset.daml.lf.archive.DamlLf
 import scalaz.\/
 
 object DamlLfArchiveReader {

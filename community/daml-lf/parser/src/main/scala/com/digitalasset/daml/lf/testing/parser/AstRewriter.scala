@@ -4,10 +4,10 @@
 package com.digitalasset.daml.lf.testing.parser
 
 import com.digitalasset.daml.lf.data.ImmArray
-import com.digitalasset.daml.lf.data.Ref._
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.data.Ref.*
+import com.digitalasset.daml.lf.language.Ast.*
 
-import scala.{PartialFunction => PF}
+import scala.PartialFunction as PF
 
 private[daml] class AstRewriter(
     typeRule: PF[Type, Type] = PF.empty,
@@ -16,7 +16,7 @@ private[daml] class AstRewriter(
     packageIdRule: PF[PackageId, PackageId] = PF.empty,
 ) {
 
-  import AstRewriter._
+  import AstRewriter.*
 
   def apply(pkg: Package): Package =
     pkg.copy(modules = pkg.modules.transform((_, x) => apply(x)))

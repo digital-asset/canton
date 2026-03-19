@@ -6,6 +6,9 @@ package engine
 package preprocessing
 
 import com.daml.nameof.NameOf
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.NamedLogging
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf.command.{ApiContractKey, ReplayCommand}
 import com.digitalasset.daml.lf.data.{CostModel, ImmArray, Ref}
 import com.digitalasset.daml.lf.language.{Ast, LookupError}
@@ -45,7 +48,8 @@ private[engine] final class Preprocessor(
     costModel: CostModel.CostModelImplicits = CostModel.EmptyCostModelImplicits,
     initialInputCost: CostModel.Cost = 0L,
     maxInputCost: CostModel.Cost = Long.MaxValue,
-) {
+    override val loggerFactory: NamedLoggerFactory,
+) extends NamedLogging {
 
   import Preprocessor._
   import compiledPackages.pkgInterface
@@ -57,7 +61,7 @@ private[engine] final class Preprocessor(
     inputCost += cost(value)
   }
 
-  def getInputCost: Result[CostModel.Cost] = {
+  def getInputCost(implicit traceContext: TraceContext): Result[CostModel.Cost] = {
     if (inputCost <= maxInputCost) {
       ResultDone(inputCost)
     } else {
@@ -83,7 +87,7 @@ private[engine] final class Preprocessor(
   private[this] def collectNewPackagesFromTypes(
       types: List[Ast.Type],
       acc: Map[Ref.PackageId, language.Reference] = Map.empty,
-  ): Result[List[(Ref.PackageId, language.Reference)]] =
+  )(implicit traceContext: TraceContext): Result[List[(Ref.PackageId, language.Reference)]] =
     types match {
       case typ :: rest =>
         typ match {
@@ -161,7 +165,7 @@ private[engine] final class Preprocessor(
         ResultDone.Unit
     }
 
-  private[this] def pullTypePackages(typ: Ast.Type): Result[Unit] =
+  private[this] def pullTypePackages(typ: Ast.Type)(implicit traceContext: TraceContext): Result[Unit] =
     collectNewPackagesFromTypes(List(typ)).flatMap(pullPackages)
 
   private[this] def pullPackage(
@@ -177,7 +181,7 @@ private[engine] final class Preprocessor(
     * Fails if the nesting is too deep or if v0 does not match the type `ty0`.
     * Assumes ty0 is a well-formed serializable typ.
     */
-  def translateValue(ty0: Ast.Type, v0: Value): Result[SValue] =
+  def translateValue(ty0: Ast.Type, v0: Value)(implicit traceContext: TraceContext): Result[SValue] =
     safelyRun(pullTypePackages(ty0)) {
       // this is used only by the value enricher, strict translation is the way to go
       commandPreprocessor.unsafeTranslateValue(
@@ -202,7 +206,7 @@ private[engine] final class Preprocessor(
   def buildPackageResolution(
       packageMap: Map[Ref.PackageId, (Ref.PackageName, Ref.PackageVersion)] = Map.empty,
       packagePreference: Set[Ref.PackageId] = Set.empty,
-  ): Result[Map[Ref.PackageName, Ref.PackageId]] = {
+  )(implicit traceContext: TraceContext): Result[Map[Ref.PackageName, Ref.PackageId]] = {
     updateInputCost(packageMap)
     updateInputCost(packagePreference)
 
@@ -313,7 +317,7 @@ private[engine] final class Preprocessor(
       commands: ImmArray[speedy.ApiCommand],
       prefetchKeys: Seq[GlobalKey],
       unprocessedCommands: Option[ImmArray[command.ApiCommand]] = None,
-  ): Result[Unit] = {
+  )(implicit traceContext: TraceContext): Result[Unit] = {
     // TODO: https://github.com/digital-asset/daml/issues/21953: implement size cost model for speedy.ApiCommand and speedy.SValue
     unprocessedCommands.foreach { cmds =>
       updateInputCost(cmds)
@@ -376,10 +380,10 @@ private[engine] final class Preprocessor(
 
 private[lf] object Preprocessor {
 
-  def forTesting(compilerConfig: speedy.Compiler.Config): Preprocessor =
-    forTesting(new ConcurrentCompiledPackages(compilerConfig))
+  def forTesting(compilerConfig: speedy.Compiler.Config, loggerFactory: NamedLoggerFactory): Preprocessor =
+    forTesting(new ConcurrentCompiledPackages(compilerConfig), loggerFactory)
 
-  def forTesting(pkgs: MutableCompiledPackages): Preprocessor =
+  def forTesting(pkgs: MutableCompiledPackages, loggerFactory: NamedLoggerFactory): Preprocessor =
     new Preprocessor(
       pkgs,
       (pkgId, _) =>
@@ -395,6 +399,7 @@ private[lf] object Preprocessor {
               )
           },
         ),
+      loggerFactory = loggerFactory,
     )
 
   @throws[Error.Preprocessing.Error]

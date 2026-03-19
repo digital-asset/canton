@@ -3,7 +3,6 @@
 
 package com.digitalasset.canton.testing.modelbased
 
-import com.daml.logging.LoggingContext
 import com.digitalasset.canton.BaseTest
 import com.digitalasset.canton.testing.modelbased.ast.Concrete
 import com.digitalasset.canton.testing.modelbased.generators.{ConcreteGenerators, Shrinker}
@@ -14,8 +13,6 @@ import com.digitalasset.daml.lf.language.LanguageVersion
 import org.scalatest.wordspec.AnyWordSpec
 
 class ReferenceInterpreterTest extends AnyWordSpec with BaseTest {
-
-  private implicit val loggingContext: LoggingContext = LoggingContext.ForTesting
 
   "The reference interpreter" should {
     "run a scenario with two toplevel create commands" in {
@@ -30,7 +27,7 @@ class ReferenceInterpreterTest extends AnyWordSpec with BaseTest {
         |      Create 1 sigs={1} obs={}
         |""".stripMargin)
 
-      ReferenceInterpreter().runAndProject(scenario) match {
+      ReferenceInterpreter(loggerFactory).runAndProject(scenario) match {
         case Left(error) =>
           fail(error)
         case Right(projections) =>
@@ -54,7 +51,7 @@ class ReferenceInterpreterTest extends AnyWordSpec with BaseTest {
         |        ExerciseByKey NonConsuming 1 ctl={1} cobs={}
         |""".stripMargin)
 
-      ReferenceInterpreter().runAndProject(scenario) match {
+      ReferenceInterpreter(loggerFactory).runAndProject(scenario) match {
         case Left(error) =>
           fail(error)
         case Right(projections) =>
@@ -77,7 +74,7 @@ class ReferenceInterpreterTest extends AnyWordSpec with BaseTest {
         |        LookupByKey Failure key=(0, {1})
         |""".stripMargin)
 
-      ReferenceInterpreter().runAndProject(scenario) match {
+      ReferenceInterpreter(loggerFactory).runAndProject(scenario) match {
         case Left(error) =>
           fail(error)
         case Right(projections) =>
@@ -89,7 +86,7 @@ class ReferenceInterpreterTest extends AnyWordSpec with BaseTest {
       List((LanguageVersion.v2_dev, true), (LanguageVersion.v2_2, false)).foreach {
         case (languageVersion, readOnlyRollbacks) =>
           s"with LF version $languageVersion and readOnlyRollbacks=$readOnlyRollbacks" in {
-            val interpreter = ReferenceInterpreter()
+            val interpreter = ReferenceInterpreter(loggerFactory)
             val generators = new ConcreteGenerators(
               languageVersion = languageVersion,
               readOnlyRollbacks = readOnlyRollbacks,

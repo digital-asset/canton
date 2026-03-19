@@ -19,6 +19,7 @@ import com.digitalasset.canton.error.CantonBaseError
 import com.digitalasset.canton.error.CantonErrorGroups.SequencerErrorGroup
 import com.digitalasset.canton.logging.ErrorLoggingContext
 import com.digitalasset.canton.protocol.SynchronizerParameters.MaxRequestSize
+import com.digitalasset.canton.protocol.messages.LsuSequencingTestMessage
 import com.digitalasset.canton.sequencing.protocol.{
   AcknowledgeRequest,
   MessageId,
@@ -68,6 +69,23 @@ object SequencerError extends SequencerErrorGroup {
           val ack = signedAcknowledgeRequest.content
           s"Member ${ack.member} has acknowledged the timestamp ${ack.timestamp} but signature from ${signedAcknowledgeRequest.timestampOfSigningKey} failed to be verified at $latestValidTimestamp: $error"
         })
+        with LogOnCreation {
+      def logError(): Unit = logWithContext()(logger)
+    }
+  }
+
+  @Explanation("""
+                 |This error indicates that the node has detected an invalid signature on a LsuSequencingTestMessage.
+                 |This most likely indicates that the request is bogus and has been created by a malicious sequencer.
+                 |So it will not get processed.
+                 |""")
+  object InvalidLsuSequencingTestSignature
+      extends AlarmErrorCode("INVALID_LSU_SEQUENCING_TEST_MESSAGE_SIGNATURE") {
+    final case class Error(
+        lsuSequencingTestMessage: LsuSequencingTestMessage,
+        error: SignatureCheckError,
+    )(implicit logger: ErrorLoggingContext)
+        extends Alarm(s"Message $lsuSequencingTestMessage failed signature verification: $error")
         with LogOnCreation {
       def logError(): Unit = logWithContext()(logger)
     }

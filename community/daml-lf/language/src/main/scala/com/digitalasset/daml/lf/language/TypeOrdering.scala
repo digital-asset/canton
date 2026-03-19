@@ -4,8 +4,9 @@
 package com.digitalasset.daml.lf
 package language
 
-import Ast._
 import com.daml.nameof.NameOf
+
+import Ast.*
 import data.Ref
 
 object TypeOrdering extends Ordering[Type] {

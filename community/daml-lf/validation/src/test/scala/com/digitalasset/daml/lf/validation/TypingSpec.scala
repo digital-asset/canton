@@ -4,19 +4,19 @@
 package com.digitalasset.daml.lf.validation
 
 import com.digitalasset.daml.lf.data.Ref.{DottedName, PackageName, PackageVersion}
-import com.digitalasset.daml.lf.language.Ast._
+import com.digitalasset.daml.lf.language.Ast.*
 import com.digitalasset.daml.lf.language.{
   Ast,
+  LanguageVersion as LV,
   LookupError,
   PackageInterface,
   Reference,
-  LanguageVersion => LV,
 }
 import com.digitalasset.daml.lf.stablepackages.StablePackages
-import com.digitalasset.daml.lf.testing.parser.Implicits._
+import com.digitalasset.daml.lf.testing.parser.Implicits.*
 import com.digitalasset.daml.lf.testing.parser.ParserParameters
-import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.matchers.should.Matchers
+import org.scalatest.prop.TableDrivenPropertyChecks
 import org.scalatest.wordspec.AnyWordSpec
 
 final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with Matchers {
@@ -38,7 +38,7 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
     s"'${Tuple2.pkg}':${Tuple2.qualifiedName}"
   }
 
-  import SpecUtil._
+  import SpecUtil.*
 
   "checkKind" should {
     // TEST_EVIDENCE: Integrity: ill-formed kinds are rejected
@@ -456,7 +456,7 @@ final class TypingSpec extends AnyWordSpec with TableDrivenPropertyChecks with M
       // Expressions of type τ, where τ has kind ⋆ → ⋆, are examples of
       // such expressions that cannot be constructed.
 
-      val testCases = Table[Expr, PartialFunction[ValidationError, _]](
+      val testCases = Table[Expr, PartialFunction[ValidationError, ?]](
         "non-well formed expression" -> "error",
         // ExpDefVar
         E"⸨ x ⸩" -> //

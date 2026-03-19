@@ -6,7 +6,7 @@ package com.digitalasset.daml.lf.language
 import com.digitalasset.daml.lf.data
 import com.digitalasset.daml.lf.data.Ref
 import com.digitalasset.daml.lf.language.Ast.PackageSignature
-import com.digitalasset.daml.lf.language.TypeSig._
+import com.digitalasset.daml.lf.language.TypeSig.*
 
 import scala.collection.immutable.VectorMap
 
@@ -211,7 +211,7 @@ object TypeSig {
       }
     }
 
-    def toChoiceSig(choiceDef: Ast.GenTemplateChoice[_]): ChoiceSig =
+    def toChoiceSig(choiceDef: Ast.GenTemplateChoice[?]): ChoiceSig =
       ChoiceSig(
         consuming = choiceDef.consuming,
         argType = toSerializableType(choiceDef.argBinder._2, List.empty),

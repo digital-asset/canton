@@ -3,19 +3,21 @@
 
 package com.digitalasset.daml.lf.data
 
-import ScalazEqual.{equalBy, orderBy, toIterableForScalazInstances}
 import scalaz.{Applicative, Equal, Order, Traverse}
 
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.util.hashing.MurmurHash3
 
-/** A stack which allows to cons, prepend, and pop in constant time, and generate an ImmArray in linear time.
-  * Very useful when needing to traverse stuff in topological order or similar situations.
+import ScalazEqual.{equalBy, orderBy, toIterableForScalazInstances}
+
+/** A stack which allows to cons, prepend, and pop in constant time, and generate an ImmArray in
+  * linear time. Very useful when needing to traverse stuff in topological order or similar
+  * situations.
   */
 final class FrontStack[+A] private (fq: FrontStack.FQ[A], val length: Int) {
 
-  import FrontStack._
+  import FrontStack.*
 
   /** O(n) */
   @throws[IndexOutOfBoundsException]
@@ -65,7 +67,7 @@ final class FrontStack[+A] private (fq: FrontStack.FQ[A], val length: Int) {
   }
 
   /** O(1) */
-  def pop: Option[(A, FrontStack[A])] = {
+  def pop: Option[(A, FrontStack[A])] =
     if (length > 0) {
       fq match {
         case FQEmpty => throw new RuntimeException(s"FrontStack has length $length but FQEmpty.")
@@ -81,7 +83,6 @@ final class FrontStack[+A] private (fq: FrontStack.FQ[A], val length: Int) {
     } else {
       None
     }
-  }
 
   /** O(n) */
   def map[B](f: A => B): FrontStack[B] = from(toImmArray.map(f))
@@ -126,11 +127,11 @@ final class FrontStack[+A] private (fq: FrontStack.FQ[A], val length: Int) {
   def foreach(f: A => Unit): Unit = this.iterator.foreach(f)
 
   /** O(1) */
-  def canEqual(that: Any) = that.isInstanceOf[FrontStack[_]]
+  def canEqual(that: Any) = that.isInstanceOf[FrontStack[?]]
 
   /** O(n) */
   override def equals(that: Any) = that match {
-    case thatQueue: FrontStack[_] =>
+    case thatQueue: FrontStack[?] =>
       this.length == thatQueue.length && this.iterator.sameElements[Any](thatQueue.iterator)
     case _ => false
   }
@@ -158,7 +159,7 @@ object FrontStack extends scala.collection.IterableFactory[FrontStack] {
   override def newBuilder[A]: mutable.Builder[A, FrontStack[A]] =
     ImmArray.newBuilder.mapResult(arr => FrontStack.from(arr))
   implicit def equalInstance[A: Equal]: Equal[FrontStack[A]] = {
-    import scalaz.std.iterable._
+    import scalaz.std.iterable.*
     equalBy(fs => toIterableForScalazInstances(fs.iterator), true)
   }
 
@@ -166,7 +167,7 @@ object FrontStack extends scala.collection.IterableFactory[FrontStack] {
     override def traverseImpl[G[_]: Applicative, A, B](
         fa: FrontStack[A]
     )(f: A => G[B]): G[FrontStack[B]] = {
-      import scalaz.syntax.applicative._, scalaz.syntax.traverse._
+      import scalaz.syntax.applicative.*, scalaz.syntax.traverse.*
       fa.toBackStack.bqFoldRight(FrontStack.empty[B].pure[G])(
         (a, z) => ^(f(a), z)(_ +: _),
         (iaa, z) => ^(iaa traverse f, z)(_ ++: _),
@@ -188,7 +189,7 @@ object FrontStack extends scala.collection.IterableFactory[FrontStack] {
   }
 
   implicit def `FrontStack Order`[A: Order]: Order[FrontStack[A]] = {
-    import scalaz.std.iterable._
+    import scalaz.std.iterable.*
     orderBy(fs => toIterableForScalazInstances(fs.iterator), true)
   }
 

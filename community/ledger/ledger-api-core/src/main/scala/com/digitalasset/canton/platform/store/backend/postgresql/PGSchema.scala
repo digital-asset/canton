@@ -15,24 +15,24 @@ import com.digitalasset.canton.platform.store.interning.StringInterning
 
 private[postgresql] object PGSchema {
   private val PGFieldStrategy = new FieldStrategy {
-    override def stringArray[FROM](
-        extractor: StringInterning => FROM => Iterable[String]
-    ): Field[FROM, Iterable[String], ?] =
+    override def stringArray[From](
+        extractor: StringInterning => From => Iterable[String]
+    ): Field[From, Iterable[String], ?] =
       PGStringArray(extractor)
 
-    override def smallint[FROM](
-        extractor: StringInterning => FROM => Int
-    ): Field[FROM, Int, ?] =
+    override def smallint[From](
+        extractor: StringInterning => From => Int
+    ): Field[From, Int, ?] =
       PGSmallint(extractor)
 
-    override def smallintOptional[FROM](
-        extractor: StringInterning => FROM => Option[Int]
-    ): Field[FROM, Option[Int], ?] =
+    override def smallintOptional[From](
+        extractor: StringInterning => From => Option[Int]
+    ): Field[From, Option[Int], ?] =
       PGSmallintOptional(extractor)
 
-    override def insert[FROM](tableName: String)(
-        fields: (String, Field[FROM, ?, ?])*
-    ): Table[FROM] =
+    override def insert[From](tableName: String)(
+        fields: (String, Field[From, ?, ?])*
+    ): Table[From] =
       PGTable.transposedInsert(tableName)(fields*)
   }
 

@@ -8,6 +8,9 @@ import com.daml.logging.LoggingContext
 import com.daml.test.evidence.scalatest.ScalaTestSupport.Implicits.tagToContainer
 import com.daml.test.evidence.tag.Security.SecurityTest.Property.Authorization
 import com.daml.test.evidence.tag.Security.{Attack, SecurityTest, SecurityTestSuite}
+import com.digitalasset.canton.logging.NamedLoggerFactory
+import com.digitalasset.canton.logging.SuppressingLogging
+import com.digitalasset.canton.tracing.TraceContext
 import com.digitalasset.daml.lf
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.command._
@@ -70,9 +73,10 @@ class EngineTest(majorLanguageVersion: LanguageVersion.Major, contractIdVersion:
     with Matchers
     with TableDrivenPropertyChecks
     with EitherValues
-    with SecurityTestSuite {
+    with SecurityTestSuite
+    with SuppressingLogging {
 
-  val helpers = new EngineTestHelpers(majorLanguageVersion, contractIdVersion)
+  val helpers = new EngineTestHelpers(majorLanguageVersion, contractIdVersion, loggerFactory)
   import helpers._
 
   "minimal create command" should {
@@ -2469,12 +2473,13 @@ class EngineTest(majorLanguageVersion: LanguageVersion.Major, contractIdVersion:
         EngineConfig(
           allowedLanguageVersions = VersionRange(min, max),
           forbidLocalContractIds = true,
-        )
+        ),
+        loggerFactory,
       )
 
     val devVersion = LanguageVersion.devLfVersion
     val (_, _, allPackagesDev) =
-      new EngineTestHelpers(majorLanguageVersion, contractIdVersion).loadAndAddPackage(
+      new EngineTestHelpers(majorLanguageVersion, contractIdVersion, loggerFactory).loadAndAddPackage(
         s"BasicTests-v${majorLanguageVersion.pretty}dev.dar"
       )
     val compatibleLanguageVersions = LanguageVersion.allLfVersions
@@ -3020,7 +3025,7 @@ class EngineTest(majorLanguageVersion: LanguageVersion.Major, contractIdVersion:
   }
 }
 
-class EngineTestAllVersions extends AnyWordSpec with Matchers with TableDrivenPropertyChecks {
+class EngineTestAllVersions extends AnyWordSpec with Matchers with TableDrivenPropertyChecks with SuppressingLogging {
 
   "Engine.preloadPackage" should {
 
@@ -3031,7 +3036,8 @@ class EngineTestAllVersions extends AnyWordSpec with Matchers with TableDrivenPr
         EngineConfig(
           allowedLanguageVersions = VersionRange(min, max),
           forbidLocalContractIds = true,
-        )
+        ),
+        loggerFactory,
       )
 
     val pkgId = Ref.PackageId.assertFromString("-pkg-")
@@ -3069,8 +3075,8 @@ class EngineTestAllVersions extends AnyWordSpec with Matchers with TableDrivenPr
 class EngineTestHelpers(
     majorLanguageVersion: LanguageVersion.Major,
     contractIdVersion: ContractIdVersion,
+    loggerFactory: NamedLoggerFactory,
 ) {
-
   val defaultSerializationVersion =
     SerializationVersion.assign(LanguageVersion.latestStableLfVersion)
 
@@ -3104,7 +3110,7 @@ class EngineTestHelpers(
   val contractKeyEngine: Engine = newEngine()
 
   val compiledPackages = ConcurrentCompiledPackages(suffixLenientEngine.config.getCompilerConfig)
-  val preprocessor = preprocessing.Preprocessor.forTesting(compiledPackages)
+  val preprocessor = preprocessing.Preprocessor.forTesting(compiledPackages, loggerFactory)
 
   def loadAndAddPackage(resource: String): (PackageId, Package, Map[PackageId, Package]) = {
     val stream = getClass.getClassLoader.getResourceAsStream(resource)
@@ -3218,7 +3224,8 @@ class EngineTestHelpers(
       EngineConfig(
         allowedLanguageVersions = language.LanguageVersion.allLfVersionsRange,
         forbidLocalContractIds = requireCidSuffixes,
-      )
+      ),
+      loggerFactory,
     )
 
   def toContractId(s: String): ContractId =
@@ -3257,7 +3264,7 @@ class EngineTestHelpers(
       lookupPackages: PartialFunction[PackageId, Package],
       contracts: Map[ContractId, FatContractInstance] = Map.empty,
       keys: Map[GlobalKeyWithMaintainers, Vector[FatContractInstance]] = Map.empty,
-  ): Either[Error, (VersionedTransaction, Tx.Metadata)] = {
+  )(implicit traceContext: TraceContext): Either[Error, (VersionedTransaction, Tx.Metadata)] = {
 
     val nodeSeedMap = txMeta.nodeSeeds.toSeq.toMap
 

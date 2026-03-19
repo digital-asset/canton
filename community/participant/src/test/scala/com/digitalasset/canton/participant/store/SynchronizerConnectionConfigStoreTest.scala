@@ -201,11 +201,7 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
     "when storing connection configs" should {
 
       "be able to store and retrieve a config successfully" in {
-        val synchronizerId2 = PhysicalSynchronizerId(
-          psid.logical,
-          psid.serial.increment.toNonNegative,
-          psid.protocolVersion,
-        )
+        val psid2 = psid.incrementSerial
 
         val predecessor = SynchronizerPredecessor(
           psid = psid,
@@ -216,24 +212,24 @@ trait SynchronizerConnectionConfigStoreTest extends FailOnShutdown {
         for {
           sut <- mk
           _ <- valueOrFail(
-            sut.put(config, Active, KnownPhysicalSynchronizerId(synchronizerId2), Some(predecessor))
+            sut.put(config, Active, KnownPhysicalSynchronizerId(psid2), Some(predecessor))
           )(
             "failed to add config to synchronizer config store"
           )
 
           _ = sut
-            .get(daAlias, KnownPhysicalSynchronizerId(synchronizerId2))
+            .get(daAlias, KnownPhysicalSynchronizerId(psid2))
             .value
             .config shouldBe config
 
           expectedResult = StoredSynchronizerConnectionConfig(
             config,
             Active,
-            KnownPhysicalSynchronizerId(synchronizerId2),
+            KnownPhysicalSynchronizerId(psid2),
             Some(predecessor),
           )
 
-        } yield sut.get(synchronizerId2).value shouldBe expectedResult
+        } yield sut.get(psid2).value shouldBe expectedResult
       }
 
       "store the same config twice for idempotency" in {

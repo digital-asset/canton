@@ -5,6 +5,7 @@ package com.digitalasset.daml.lf
 package engine
 
 import java.util.zip.ZipInputStream
+import com.digitalasset.canton.logging.SuppressingLogging
 import com.digitalasset.daml.lf.archive.DarDecoder
 import com.digitalasset.daml.lf.data.Ref._
 import com.digitalasset.daml.lf.data.{Bytes, FrontStack, ImmArray, Ref, Time}
@@ -14,7 +15,6 @@ import com.digitalasset.daml.lf.transaction.{CommittedTransaction, ContractState
 import com.digitalasset.daml.lf.value.{ContractIdVersion, Value}
 import com.digitalasset.daml.lf.value.Value._
 import com.digitalasset.daml.lf.command._
-import com.daml.logging.LoggingContext
 import org.scalameter
 import org.scalameter.Quantity
 import org.scalatest.Assertion
@@ -32,11 +32,10 @@ class LargeTransactionTest(
     majorLanguageVersion: LanguageVersion.Major,
     contractIdVersion: ContractIdVersion,
 ) extends AnyWordSpec
-    with Matchers {
+    with Matchers
+    with SuppressingLogging {
 
   private val verbose = false
-
-  private[this] implicit def logContext: LoggingContext = LoggingContext.ForTesting
 
   /** Tiny wrapper around IdeLedger that provides
     * a mutable API for ease of use in tests.
@@ -116,7 +115,7 @@ class LargeTransactionTest(
     if (verbose) println(s"$name: $quantity")
 
 
-  private val engine = Engine.DevEngine
+  private val engine = Engine.DevEngine(loggerFactory)
 
   List(5000, 50000, 500000)
     .foreach { txSize =>
@@ -362,7 +361,7 @@ class LargeTransactionTest(
   ): ApiCommand.Exercise = {
     val choice = "Size"
     val choiceDefRef = Identifier(templateId.packageId, qn(s"LargeTransaction:$choice"))
-    val damlList = ValueList(List.range(0L, size.toLong).map(ValueInt64).to(FrontStack))
+    val damlList = ValueList(List.range(0L, size.toLong).map(ValueInt64.apply).to(FrontStack))
     val choiceArgs = ValueRecord(Some(choiceDefRef), ImmArray((None, damlList)))
     ApiCommand.Exercise(templateId.toRef, contractId, choice, choiceArgs)
   }

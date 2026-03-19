@@ -29,7 +29,12 @@ import com.digitalasset.canton.topology.transaction.{
   TopologyChangeOp,
   TopologyMapping,
 }
-import com.digitalasset.canton.topology.{GeneratorsTopology, ParticipantId, PhysicalSynchronizerId}
+import com.digitalasset.canton.topology.{
+  GeneratorsTopology,
+  Member,
+  ParticipantId,
+  PhysicalSynchronizerId,
+}
 import com.digitalasset.canton.version.ProtocolVersion
 import com.digitalasset.canton.{Generators, GeneratorsLf, LfPartyId}
 import magnolify.scalacheck.auto.*
@@ -259,6 +264,21 @@ final class GeneratorsMessages(
     } yield TopologyTransactionsBroadcast(psid, transactions)
   )
 
+  implicit val lsuSequencingTestMessageContentArb: Arbitrary[LsuSequencingTestMessageContent] =
+    Arbitrary(
+      for {
+        psid <- Arbitrary.arbitrary[PhysicalSynchronizerId]
+        sender <- Arbitrary.arbitrary[Member]
+      } yield LsuSequencingTestMessageContent.create(psid, sender)
+    )
+
+  implicit val lsuSequencingTestMessageArb: Arbitrary[LsuSequencingTestMessage] = Arbitrary(
+    for {
+      content <- Arbitrary.arbitrary[LsuSequencingTestMessageContent]
+      signature <- Arbitrary.arbitrary[Signature]
+    } yield LsuSequencingTestMessage(content, signature)
+  )
+
   implicit val unsignedProtocolMessageArb: Arbitrary[UnsignedProtocolMessage] =
     arbitraryForAllSubclasses(classOf[UnsignedProtocolMessage])(
       GeneratorForClass(
@@ -275,6 +295,10 @@ final class GeneratorsMessages(
       GeneratorForClass(
         topologyTransactionsBroadcast.arbitrary,
         classOf[TopologyTransactionsBroadcast],
+      ),
+      GeneratorForClass(
+        lsuSequencingTestMessageArb.arbitrary,
+        classOf[LsuSequencingTestMessage],
       ),
       GeneratorForClass(
         // Serializing an ACS commitment using protocol version v30 is not supported.

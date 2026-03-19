@@ -27,7 +27,6 @@ import com.digitalasset.canton.logging.{LoggingContextWithTrace, NamedLoggerFact
 import com.digitalasset.canton.metrics.LedgerApiServerMetrics
 import com.digitalasset.canton.platform.PackagePreferenceBackend
 import com.digitalasset.canton.platform.apiserver.SeedService.Seeding
-import com.digitalasset.canton.platform.apiserver.configuration.EngineLoggingConfig
 import com.digitalasset.canton.platform.apiserver.execution.{
   CommandProgressTracker,
   DynamicSynchronizerParameterGetter,
@@ -104,7 +103,6 @@ object ApiServiceOwner {
       partyManagementServiceConfig: PartyManagementServiceConfig =
         ApiServiceOwner.DefaultPartyManagementServiceConfig,
       packageServiceConfig: PackageServiceConfig = ApiServiceOwner.DefaultPackageServiceConfig,
-      engineLoggingConfig: EngineLoggingConfig,
       telemetry: Telemetry,
       loggerFactory: NamedLoggerFactory,
       contractAuthenticator: ContractAuthenticatorFn,
@@ -202,7 +200,6 @@ object ApiServiceOwner {
         userManagementServiceConfig = userManagement,
         partyManagementServiceConfig = partyManagementServiceConfig,
         packageServiceConfig = packageServiceConfig,
-        engineLoggingConfig = engineLoggingConfig,
         telemetry = telemetry,
         loggerFactory = loggerFactory,
         contractAuthenticator = contractAuthenticator,

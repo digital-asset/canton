@@ -526,6 +526,12 @@ object EnvironmentDefinition extends LazyLogging {
     numMediators = 4,
   )
 
+  lazy val P2S5M5_Config: EnvironmentDefinition = buildBaseEnvironmentDefinition(
+    numParticipants = 2,
+    numSequencers = 5,
+    numMediators = 5,
+  )
+
   /**   - 2 participants
     *   - 3 sequencers
     *   - 3 mediators

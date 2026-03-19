@@ -188,7 +188,7 @@ class BlockSequencerTest
         clock = new SimClock(loggerFactory = loggerFactory),
         blockRateLimitManager = defaultRateLimiter,
         orderingTimeFixMode = OrderingTimeFixMode.MakeStrictlyIncreasing,
-        sequencingTimeLowerBoundExclusive = None,
+        lsuSequencingBounds = None,
         processingTimeouts = BlockSequencerTest.this.timeouts,
         logEventDetails = true,
         prettyPrinter = new CantonPrettyPrinter(

@@ -105,13 +105,10 @@ trait LogicalUpgradeUtils extends FutureHelpers {
       )
     }
 
-    def writeSequencerGenesisState(sequencer: SequencerReference): Unit = {
-      val genesisState = sequencer.topology.transactions.sequencer_lsu_state()
-      BinaryFileUtil.writeByteStringToFile(
-        s"${exportDirectory / sequencer.name}-genesis-state",
-        genesisState,
+    def writeSequencerGenesisState(sequencer: SequencerReference): Unit =
+      sequencer.topology.transactions.sequencer_lsu_state(
+        outputFile = s"${exportDirectory / sequencer.name}-genesis-state"
       )
-    }
 
     exportDirectory
   }
@@ -180,7 +177,7 @@ trait LogicalUpgradeUtils extends FutureHelpers {
     val files = UpgradeDataFiles.from(oldNodeName, exportDirectory)
     initializeSequencer(
       migratedSequencer,
-      files.genesisState,
+      files.genesisStateFile.pathAsString,
       newStaticSynchronizerParameters,
     )
   }
@@ -243,13 +240,13 @@ trait LogicalUpgradeUtils extends FutureHelpers {
 
   private def initializeSequencer(
       migrated: SequencerReference,
-      genesisState: ByteString,
+      genesisStateFile: String,
       staticSynchronizerParameters: StaticSynchronizerParameters,
   ): Unit = {
     migrated.health.wait_for_ready_for_initialization()
     migrated.setup.initialize_from_lsu_predecessor(
-      genesisState,
-      staticSynchronizerParameters,
+      inputFile = genesisStateFile,
+      synchronizerParameters = staticSynchronizerParameters,
     )
   }
 }
@@ -280,9 +277,6 @@ object LogicalUpgradeUtils {
 
     def authorizedStore: ByteString =
       BinaryFileUtil.tryReadByteStringFromFile(authorizedStoreFile.canonicalPath)
-
-    def genesisState: ByteString =
-      BinaryFileUtil.tryReadByteStringFromFile(genesisStateFile.canonicalPath)
   }
 
   object UpgradeDataFiles {

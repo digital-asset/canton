@@ -5,7 +5,6 @@ package com.digitalasset.canton.platform.index
 
 import com.daml.ledger.api.v2.command_completion_service.CompletionStreamResponse
 import com.daml.ledger.api.v2.event_query_service.GetEventsByContractIdResponse
-import com.daml.ledger.api.v2.state_service.GetActiveContractsResponse
 import com.daml.ledger.api.v2.update_service.{GetUpdateResponse, GetUpdatesResponse}
 import com.daml.metrics.InstrumentedGraph.*
 import com.daml.tracing.{Event, SpanAttribute, Spans}
@@ -18,8 +17,10 @@ import com.digitalasset.canton.config.NonNegativeFiniteDuration
 import com.digitalasset.canton.data.Offset
 import com.digitalasset.canton.health.HealthStatus
 import com.digitalasset.canton.ledger.api.{
+  AcsContinuationToken,
   CumulativeFilter,
   EventFormat,
+  GetActiveContractsResponseFactory,
   TraceIdentifiers,
   UpdateFormat,
 }
@@ -261,9 +262,10 @@ private[index] class IndexServiceImpl(
   override def getActiveContracts(
       eventFormat: EventFormat,
       activeAt: Option[Offset],
+      continuationToken: Option[AcsContinuationToken],
   )(implicit
       loggingContext: LoggingContextWithTrace
-  ): Source[GetActiveContractsResponse, NotUsed] = {
+  ): Source[GetActiveContractsResponseFactory, NotUsed] = {
     val interfaceViewPackageUpgrade = createViewUpgradeMemoized
     implicit val errorLoggingContext = ErrorLoggingContext(logger, loggingContext)
     foldToSource {
@@ -290,6 +292,7 @@ private[index] class IndexServiceImpl(
                 activeAt = activeAt,
                 filter = templateFilter,
                 eventProjectionProperties = eventProjectionProperties,
+                continuationToken = continuationToken,
               )
           }
         activeContractsSource

@@ -1888,9 +1888,7 @@ trait TopologyStoreTest
 
       "copy the topology state from a predecessor store" in {
         val sourceStore = mk(synchronizer1_p1p2_physicalSynchronizerId, "case12")
-        val successor = synchronizer1_p1p2_physicalSynchronizerId.copy(serial =
-          synchronizer1_p1p2_physicalSynchronizerId.serial.increment.toNonNegative
-        )
+        val successor = synchronizer1_p1p2_physicalSynchronizerId.incrementSerial
         val targetStore = mk(successor, "case12")
 
         val storeWithUnrelatedLSId = mk(da_vp123_physicalSynchronizerId, "case12")

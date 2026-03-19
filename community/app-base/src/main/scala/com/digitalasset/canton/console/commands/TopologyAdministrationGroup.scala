@@ -38,7 +38,7 @@ import com.digitalasset.canton.crypto.*
 import com.digitalasset.canton.data.CantonTimestamp
 import com.digitalasset.canton.discard.Implicits.DiscardOps
 import com.digitalasset.canton.error.CantonError
-import com.digitalasset.canton.grpc.ByteStringStreamObserver
+import com.digitalasset.canton.grpc.{ByteStringStreamObserver, OutputFileStreamObserver}
 import com.digitalasset.canton.logging.NamedLoggerFactory
 import com.digitalasset.canton.topology.*
 import com.digitalasset.canton.topology.admin.grpc.TopologyStoreId.Authorized
@@ -772,7 +772,7 @@ class TopologyAdministrationGroup(
       }
 
     @Help.Summary(
-      "Download the topology upgrade state for a sequencer (intended for logical synchronizer upgrade)"
+      "Stream the topology upgrade state for a sequencer (intended for logical synchronizer upgrade) to a file"
     )
     @Help.Description(
       """Download the topology snapshot which includes the entire history of topology transactions
@@ -787,22 +787,26 @@ class TopologyAdministrationGroup(
         """
     )
     def sequencer_lsu_state(
+        outputFile: String,
         topologyStore: Option[TopologyStoreId.Synchronizer] = None,
         timeout: NonNegativeDuration = timeouts.unbounded,
-    ): ByteString =
+    ): Unit =
       consoleEnvironment.run {
-        val responseObserver = new ByteStringStreamObserver[SequencerLsuStateResponse](_.chunk)
+        val fileStreamObserver = new OutputFileStreamObserver[SequencerLsuStateResponse](
+          better.files.File(outputFile),
+          _.chunk,
+        )
 
         def call: ConsoleCommandResult[Context.CancellableContext] =
           adminCommand(
-            TopologyAdminCommands.Read.SequencerLsuState(topologyStore, responseObserver)
+            TopologyAdminCommands.Read.SequencerLsuState(topologyStore, fileStreamObserver)
           )
 
         processResult(
           call,
-          responseObserver.resultBytes,
+          fileStreamObserver.result,
           timeout,
-          "Downloading the genesis state for logical upgrade",
+          "Downloading the genesis state for logical upgrade to a file",
         )
       }
 
